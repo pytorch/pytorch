@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import operator
 from collections import deque
 from typing import Dict, List, Set, NamedTuple, Tuple, Deque
@@ -259,7 +260,7 @@ def get_device_to_partitions_mapping(
     # Find devices for all the partitions without a device
     found_device = True
     for partition in no_device_partitions:
-        device_to_left_mem_bytes = dict(sorted(device_to_left_mem_bytes.items(), key=lambda item: item[1]))
+        device_to_left_mem_bytes = dict(sorted(device_to_left_mem_bytes.items(), key=operator.itemgetter(1)))
         found_device = find_device_for(partition)
         if not found_device:
             break
@@ -339,7 +340,7 @@ class Partitioner:
             self.find_single_partition(
                 total_size_of_graph, logical_device_id=device_with_max_mem.logical_id
             )
-        elif total_size_of_graph > sum([d.available_mem_bytes for d in self.devices]):
+        elif total_size_of_graph > sum(d.available_mem_bytes for d in self.devices):
             raise RuntimeError("Devices have no enough memory for the module")
         else:
             # Sparse nn based partition

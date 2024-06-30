@@ -31,12 +31,12 @@ struct CollectiveFingerPrint {
   std::vector<int8_t> tensor_device_types_;
   // input tensor sizes
   std::vector<std::vector<int64_t>> tensor_sizes_;
-  int sequence_number_;
+  uint64_t sequence_number_;
 
   CollectiveFingerPrint(
       OpType op_type,
       const std::vector<at::Tensor>& input_tensors,
-      int sequence_number)
+      uint64_t sequence_number)
       : op_type_(op_type),
         num_tensors_(input_tensors.size()),
         sequence_number_(sequence_number) {
@@ -57,7 +57,7 @@ struct CollectiveFingerPrint {
       std::vector<int8_t> tensor_dtypes,
       std::vector<int8_t> tensor_device_types,
       std::vector<std::vector<int64_t>> tensor_sizes,
-      int sequence_number)
+      uint64_t sequence_number)
       : op_type_(op_type),
         num_tensors_(num_tensors),
         tensor_dtypes_(std::move(tensor_dtypes)),
@@ -89,15 +89,15 @@ struct CollectiveFingerPrint {
   // Takes a serialized fingerprint from
   // CollectiveFingerPrint::serialize_fingerprint and deserializes it back to a
   // CollectiveFingerPrint struct
-  CollectiveFingerPrint deserialize_fingerprint(at::Tensor serialized_tensor) {
-    OpType optype;
+  CollectiveFingerPrint deserialize_fingerprint(
+      const at::Tensor& serialized_tensor) {
     auto dtypes = std::vector<int8_t>();
     auto device_types = std::vector<int8_t>();
     auto sizes = std::vector<std::vector<int64_t>>();
     int index = 0;
-    int seq = 0;
+    int64_t seq = 0;
     // 1. OpType
-    optype = OpType(serialized_tensor[index].item<int>());
+    auto optype = OpType(serialized_tensor[index].item<int>());
     index++;
     int num_tensors = 0;
     if (index < serialized_tensor.size(0)) {
@@ -296,7 +296,7 @@ struct CollectiveFingerPrint {
     // 1. OpType
     data->push_back(static_cast<int64_t>(op_type_));
     // sequence number
-    data->push_back(sequence_number_);
+    data->push_back(static_cast<int64_t>(sequence_number_));
     // 2. Num tensors
     data->push_back(static_cast<int64_t>(num_tensors_));
     // 3. Tensor dtypes
@@ -309,13 +309,13 @@ struct CollectiveFingerPrint {
     }
     // 5. Shapes
     for (const auto& sizes : tensor_sizes_) {
-      data->push_back(sizes.size());
+      data->push_back(static_cast<int64_t>(sizes.size()));
       for (const auto& s : sizes) {
         data->push_back(s);
       }
     }
     // Serialize data into tensor
-    int64_t data_size = data->size();
+    int64_t data_size = static_cast<int64_t>(data->size());
     // Need to release here and get the ptr due to C++ parameter evaluation
     // order.
     auto d = data.release();
@@ -383,7 +383,7 @@ bool check_same_size(const std::vector<at::Tensor>& input_tensors) {
 } // namespace
 
 ProcessGroupWrapper::ProcessGroupWrapper(
-    c10::intrusive_ptr<Backend> backend,
+    const c10::intrusive_ptr<Backend>& backend,
     c10::intrusive_ptr<Backend> glooBackend)
     : Backend(backend->getRank(), backend->getSize()),
       backend_(backend),

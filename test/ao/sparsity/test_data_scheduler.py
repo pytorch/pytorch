@@ -1,17 +1,20 @@
 # Owner(s): ["module: unknown"]
 
+import copy
 import logging
 import warnings
-from torch.testing._internal.common_utils import TestCase
-from torch import nn
-import torch
 from typing import Tuple
-import copy
 
-from torch.ao.pruning._experimental.data_sparsifier import DataNormSparsifier
+import torch
+from torch import nn
 from torch.ao.pruning._experimental.data_scheduler import BaseDataScheduler
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+from torch.ao.pruning._experimental.data_sparsifier import DataNormSparsifier
+from torch.testing._internal.common_utils import TestCase
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
 
 class ImplementedDataScheduler(BaseDataScheduler):
@@ -20,27 +23,32 @@ class ImplementedDataScheduler(BaseDataScheduler):
 
     def get_schedule_param(self):
         if self.last_epoch > 0:
-            return {name: config['sparsity_level'] * 0.5
-                    for name, config in self.data_sparsifier.data_groups.items()}
+            return {
+                name: config["sparsity_level"] * 0.5
+                for name, config in self.data_sparsifier.data_groups.items()
+            }
         else:
             return self.base_param
 
 
 class TestBaseDataScheduler(TestCase):
     def _get_data(self):
-        tensor1, param1, emb1 = torch.randn(5, 5), nn.Parameter(torch.randn(10, 10)), nn.Embedding(50, 5)
-        data_list = [
-            ('tensor1', tensor1), ('param1', param1), ('emb1', emb1)
-        ]
+        tensor1, param1, emb1 = (
+            torch.randn(5, 5),
+            nn.Parameter(torch.randn(10, 10)),
+            nn.Embedding(50, 5),
+        )
+        data_list = [("tensor1", tensor1), ("param1", param1), ("emb1", emb1)]
         defaults = {
-            'sparsity_level': 0.7,
-            'sparse_block_shape': (1, 4),
-            'zeros_per_block': 2
+            "sparsity_level": 0.7,
+            "sparse_block_shape": (1, 4),
+            "zeros_per_block": 2,
         }
         data_with_config = [
             {
-                'name': 'tensor2', 'data': torch.randn(4, 4),
-                'config': {'sparsity_level': 0.3}
+                "name": "tensor2",
+                "data": torch.randn(4, 4),
+                "config": {"sparsity_level": 0.3},
             }
         ]
         return data_list, data_with_config, defaults
@@ -48,7 +56,11 @@ class TestBaseDataScheduler(TestCase):
     def _get_sparsifier(self, data_list, data_with_config, defaults):
         sparsifier = DataNormSparsifier(data_list, **defaults)
         for data_config_dict in data_with_config:
-            name, data, config = data_config_dict['name'], data_config_dict['data'], data_config_dict['config']
+            name, data, config = (
+                data_config_dict["name"],
+                data_config_dict["data"],
+                data_config_dict["config"],
+            )
             sparsifier.add_data(name=name, data=data, **config)
         return sparsifier
 
@@ -57,7 +69,7 @@ class TestBaseDataScheduler(TestCase):
         return scheduler
 
     def _get_schedule_param(self):
-        return 'sparsity_level'
+        return "sparsity_level"
 
     def _get_name_data_config(self, some_data, defaults):
         config = copy.deepcopy(defaults)
@@ -66,7 +78,11 @@ class TestBaseDataScheduler(TestCase):
             name, data = some_data
         else:
             # dealing with data_with_config
-            name, data, new_config = some_data['name'], some_data['data'], some_data['config']
+            name, data, new_config = (
+                some_data["name"],
+                some_data["data"],
+                some_data["config"],
+            )
             config.update(new_config)
         return name, data, config
 
@@ -102,8 +118,11 @@ class TestBaseDataScheduler(TestCase):
             # Make sure there is no warning related to the base_data_scheduler
             for warning in w:
                 fname = warning.filename
-                fname = '/'.join(fname.split('/')[-5:])
-                assert fname != 'torch/ao/sparsity/experimental/scheduler/data_scheduler/base_data_scheduler.py'
+                fname = "/".join(fname.split("/")[-5:])
+                assert (
+                    fname
+                    != "torch/ao/sparsity/experimental/scheduler/data_scheduler/base_data_scheduler.py"
+                )
 
     def test_step(self):
         data_list, data_with_config, defaults = self._get_data()
@@ -115,14 +134,19 @@ class TestBaseDataScheduler(TestCase):
 
         for some_data in all_data:
             name, _, config = self._get_name_data_config(some_data, defaults)
-            assert sparsifier.data_groups[name][schedule_param] == config[schedule_param]
+            assert (
+                sparsifier.data_groups[name][schedule_param] == config[schedule_param]
+            )
 
         sparsifier.step()
         scheduler.step()
 
         for some_data in all_data:
             name, _, config = self._get_name_data_config(some_data, defaults)
-            assert sparsifier.data_groups[name][schedule_param] == config[schedule_param] * 0.5
+            assert (
+                sparsifier.data_groups[name][schedule_param]
+                == config[schedule_param] * 0.5
+            )
 
         # checking step count
         step_cnt = 5
@@ -130,7 +154,9 @@ class TestBaseDataScheduler(TestCase):
             sparsifier.step()
             scheduler.step()
 
-        assert scheduler._step_count == step_cnt + 2  # step_cnt + step above + 1 step in constructor
+        assert (
+            scheduler._step_count == step_cnt + 2
+        )  # step_cnt + step above + 1 step in constructor
 
     def test_state_dict(self):
         data_list, data_with_config, defaults = self._get_data()

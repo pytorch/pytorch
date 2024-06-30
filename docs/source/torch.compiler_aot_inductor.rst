@@ -37,7 +37,9 @@ For more details on ``torch.export``, you can refer to the :ref:`torch.export do
 
    If you have a CUDA-enabled device on your machine and you installed PyTorch with CUDA support,
    the following code will compile the model into a shared library for CUDA execution.
-   Otherwise, the compiled artifact will run on CPU.
+   Otherwise, the compiled artifact will run on CPU. For better performance during CPU inference,
+   it is suggested to enable freezing by setting `export TORCHINDUCTOR_FREEZING=1`
+   before running the Python script below.
 
 .. code-block:: python
 
@@ -75,7 +77,7 @@ For more details on ``torch.export``, you can refer to the :ref:`torch.export do
 
 In this illustrative example, the ``Dim`` parameter is employed to designate the first dimension of
 the input variable "x" as dynamic. Notably, the path and name of the compiled library remain unspecified,
-resulting in the shared library being stored in a temporay directory.
+resulting in the shared library being stored in a temporary directory.
 To access this path from the C++ side, we save it to a file for later retrieval within the C++ code.
 
 
@@ -114,7 +116,8 @@ previous step, enabling us to conduct model predictions directly within a C++ en
         // The second inference uses a different batch size and it works because we
         // specified that dimension as dynamic when compiling model.so.
         std::cout << "Result from the second inference:"<< std::endl;
-        std::cout << runner.run({torch::randn({2, 10}, at::kCUDA)})[0] << std::endl;
+        std::vector<torch::Tensor> inputs2 = {torch::randn({2, 10}, at::kCUDA)};
+        std::cout << runner.run(inputs2)[0] << std::endl;
 
         return 0;
     }

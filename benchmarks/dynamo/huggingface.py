@@ -7,13 +7,21 @@ import subprocess
 import sys
 import warnings
 
+try:
+    from .common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+except ImportError:
+    from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+
 import torch
-from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
 
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs
 
 log = logging.getLogger(__name__)
+
+# Enable FX graph caching
+if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
+    torch._inductor.config.fx_graph_cache = True
 
 
 def pip_install(package):
@@ -53,6 +61,12 @@ imports = [
     "ViTForMaskedImageModeling",
     "ViTModel",
 ]
+
+
+def process_hf_reformer_output(out):
+    assert isinstance(out, list)
+    # second output is unstable
+    return [elem for i, elem in enumerate(out) if i != 1]
 
 
 try:
@@ -172,6 +186,7 @@ REQUIRE_HIGHER_TOLERANCE_TRAINING = {
     "AlbertForQuestionAnswering",
 }
 REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
+    "GPT2ForSequenceClassification",
     "RobertaForQuestionAnswering",
 }
 
@@ -530,6 +545,10 @@ class HuggingfaceRunner(BenchmarkRunner):
         if self.args.dashboard or self.args.accuracy:
             return SKIP_ACCURACY_CHECK_MODELS
         return set()
+
+    @property
+    def get_output_amp_train_process_func(self):
+        return {}
 
     def pick_grad(self, name, is_training):
         if is_training:

@@ -240,7 +240,6 @@ class TORCH_API StaticRuntimeMetadata : public torch::CustomClassHolder {
 ///
 class MemoryPlanner;
 class StaticNodeInfo;
-class ProcessedFunction;
 class ProcessedNode;
 class StaticRuntime;
 
@@ -258,6 +257,42 @@ struct TORCH_API SROperatorObserver {
   static void onEnd(const Node* name);
 };
 #endif
+
+class TORCH_API ProcessedFunction {
+ public:
+  ProcessedFunction(
+      Node* node,
+      bool enable_out_variant,
+      bool check_memory_overlap);
+
+  enum class Kind : uint8_t {
+    kOutVariant,
+    kNativeFunction,
+    kInterpreterFallback,
+  };
+
+  void run(ProcessedNode* pnode) const {
+    return f_(pnode);
+  }
+
+  Kind kind() const {
+    return kind_;
+  }
+
+  bool checkMemoryOverlap() const {
+    return check_memory_overlap_;
+  }
+
+  size_t num_outputs() const {
+    return num_outputs_;
+  }
+
+ private:
+  SROperator f_;
+  Kind kind_{ProcessedFunction::Kind::kOutVariant};
+  bool check_memory_overlap_{false};
+  size_t num_outputs_{0};
+};
 
 // A `BlockInfo` instance stores all of the shared state that each
 // `BlockRunner` will need to access. Most of this information is
@@ -382,7 +417,7 @@ class TORCH_API StaticModule {
 
  private:
   explicit StaticModule(
-      std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
+      std::pair<std::shared_ptr<torch::jit::Graph>, std::optional<Module>>
           graph_and_module,
       const StaticModuleOptions& opts);
 
@@ -455,7 +490,7 @@ class TORCH_API StaticModule {
 
   C10_NODISCARD Node* findNodeWithKindForTesting(const std::string& kind) const;
 
-  const c10::optional<c10::FunctionSchema>& schema() const {
+  const std::optional<c10::FunctionSchema>& schema() const {
     return schema_;
   }
 
@@ -504,8 +539,8 @@ class TORCH_API StaticModule {
   // metadata that is stored in IR nodes as attribute
   at::intrusive_ptr<jit::StaticRuntimeMetadata> sr_metadata_;
   std::shared_ptr<torch::jit::Graph> graph_;
-  c10::optional<torch::jit::Module> module_;
-  c10::optional<c10::FunctionSchema> schema_;
+  std::optional<torch::jit::Module> module_;
+  std::optional<c10::FunctionSchema> schema_;
   std::unique_ptr<StaticRuntime> cached_runtime_;
 
   // Bookkeeping for creating new StaticRuntime instances
@@ -778,42 +813,6 @@ class TORCH_API BlockRunner {
   std::vector<ProcessedNode> nodes_;
 };
 
-class TORCH_API ProcessedFunction {
- public:
-  ProcessedFunction(
-      Node* node,
-      bool enable_out_variant,
-      bool check_memory_overlap);
-
-  enum class Kind : uint8_t {
-    kOutVariant,
-    kNativeFunction,
-    kInterpreterFallback,
-  };
-
-  void run(ProcessedNode* pnode) const {
-    return f_(pnode);
-  }
-
-  Kind kind() const {
-    return kind_;
-  }
-
-  bool checkMemoryOverlap() const {
-    return check_memory_overlap_;
-  }
-
-  size_t num_outputs() const {
-    return num_outputs_;
-  }
-
- private:
-  SROperator f_;
-  Kind kind_{ProcessedFunction::Kind::kOutVariant};
-  bool check_memory_overlap_{false};
-  size_t num_outputs_{0};
-};
-
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_API StaticNodeInfo {
  public:
@@ -939,9 +938,9 @@ class TORCH_API ProcessedNode {
     return values_[outputs_offset_ + i];
   }
 
-  size_t num_outputs() const {
+  uint32_t num_outputs() const {
     DCHECK(fn_ != nullptr);
-    return fn_->num_outputs();
+    return static_cast<uint32_t>(fn_->num_outputs());
   }
 
   C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {

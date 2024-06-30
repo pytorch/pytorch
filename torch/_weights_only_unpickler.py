@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Unpickler restricted to loading only state dicts
 # Restrict constructing types to a list defined in _get_allowed_globals()
 # Restrict BUILD operation to `Tensor`, `Parameter` and `OrderedDict` types only
@@ -7,7 +8,12 @@
 # - torch types (Storage, dtypes, Tensor, `torch.Size`),
 # - `torch._utils._rebuild` functions.
 # - `torch.nn.Parameter`
+# - `collections.Counter`
 # - `collections.OrderedDict`
+# Additionally, users can use an allowlist for adding classes they have deemed as safe using
+# `_add_safe_globals()` (`torch.serialization.add_safe_globals`)
+# `_clear_safe_globals()` (`torch.serialization.clear_safe_globals`)
+# `_get_safe_globals()` (`torch.serialization.get_safe_globals`)
 
 # Based of https://github.com/python/cpython/blob/main/Lib/pickle.py
 # Expected to be useful for loading PyTorch model weights
@@ -17,7 +23,8 @@
 # weights = torch.load(buf, weights_only = True)
 
 import functools as _functools
-from collections import OrderedDict
+import warnings
+from collections import Counter, OrderedDict
 from pickle import (
     APPEND,
     APPENDS,
@@ -62,6 +69,55 @@ from sys import maxsize
 from typing import Any, Dict, List
 
 import torch
+from torch._utils import IMPORT_MAPPING, NAME_MAPPING
+
+
+_marked_safe_globals_list: List[Any] = []
+
+
+def _add_safe_globals(safe_globals: List[Any]):
+    global _marked_safe_globals_list
+    _marked_safe_globals_list += safe_globals
+
+
+def _get_safe_globals() -> List[Any]:
+    global _marked_safe_globals_list
+    return _marked_safe_globals_list
+
+
+def _clear_safe_globals():
+    global _marked_safe_globals_list
+    _marked_safe_globals_list = []
+
+
+# Separate from _get_allowed_globals because of the lru_cache on _get_allowed_globals
+# For example if user had a script like
+#   torch.load(file_a)
+#   torch.serialization._add_safe_globals([torch.foo])
+#   torch.load(file_b)
+# the dynamic additions to safe_globals would not be picked up by
+# _get_allowed_globals due to the lru_cache
+def _get_user_allowed_globals():
+    rc: Dict[str, Any] = {}
+    for f in _marked_safe_globals_list:
+        module, name = f.__module__, f.__name__
+        rc[f"{module}.{name}"] = f
+    return rc
+
+
+def _tensor_rebuild_functions():
+    return {
+        torch._utils._rebuild_parameter,
+        torch._utils._rebuild_parameter_with_state,
+        torch._utils._rebuild_qtensor,
+        torch._utils._rebuild_tensor,
+        torch._utils._rebuild_tensor_v2,
+        torch._utils._rebuild_tensor_v3,
+        torch._utils._rebuild_sparse_tensor,
+        torch._utils._rebuild_meta_tensor_no_storage,
+        torch._utils._rebuild_nested_tensor,
+        torch._utils._rebuild_wrapper_subclass,
+    }
 
 
 # Unpickling machinery
@@ -69,28 +125,17 @@ import torch
 def _get_allowed_globals():
     rc: Dict[str, Any] = {
         "collections.OrderedDict": OrderedDict,
+        "collections.Counter": Counter,
         "torch.nn.parameter.Parameter": torch.nn.Parameter,
         "torch.serialization._get_layout": torch.serialization._get_layout,
         "torch.Size": torch.Size,
         "torch.Tensor": torch.Tensor,
+        "torch.device": torch.device,
     }
     # dtype
-    for t in [
-        torch.complex32,
-        torch.complex64,
-        torch.complex128,
-        torch.float8_e5m2,
-        torch.float8_e4m3fn,
-        torch.float8_e5m2fnuz,
-        torch.float8_e4m3fnuz,
-        torch.float16,
-        torch.float32,
-        torch.float64,
-        torch.int8,
-        torch.int16,
-        torch.int32,
-        torch.int64,
-    ]:
+    for t in torch.storage._dtype_to_storage_type_map().keys():
+        rc[str(t)] = t
+    for t in torch.storage._new_dtypes():
         rc[str(t)] = t
     # Tensor classes
     for tt in torch._tensor_classes:
@@ -104,16 +149,17 @@ def _get_allowed_globals():
             )
         else:
             rc[f"{ts.__module__}.{ts.__name__}"] = ts
-    # Rebuild functions
-    for f in [
-        torch._utils._rebuild_parameter,
-        torch._utils._rebuild_tensor,
-        torch._utils._rebuild_tensor_v2,
-        torch._utils._rebuild_tensor_v3,
-        torch._utils._rebuild_sparse_tensor,
-        torch._utils._rebuild_meta_tensor_no_storage,
-        torch._utils._rebuild_nested_tensor,
+    # Quantization specific
+    for qt in [
+        torch.per_tensor_affine,
+        torch.per_tensor_symmetric,
+        torch.per_channel_affine,
+        torch.per_channel_symmetric,
+        torch.per_channel_affine_float_qparams,
     ]:
+        rc[str(qt)] = qt
+    # Rebuild functions
+    for f in _tensor_rebuild_functions():
         rc[f"torch._utils.{f.__name__}"] = f
 
     # Handles Tensor Subclasses, Tensor's with attributes.
@@ -128,6 +174,7 @@ class Unpickler:
         self.readline = file.readline
         self.read = file.read
         self.memo: Dict[int, Any] = {}
+        self.proto: int = -1
 
     def load(self):
         """Read a pickled object representation from the open file.
@@ -148,21 +195,40 @@ class Unpickler:
             if key[0] == GLOBAL[0]:
                 module = readline()[:-1].decode("utf-8")
                 name = readline()[:-1].decode("utf-8")
+                # Patch since torch.save default protocol is 2
+                # users will be running this code in python > 3
+                if self.proto == 2:
+                    if (module, name) in NAME_MAPPING:
+                        module, name = NAME_MAPPING[(module, name)]
+                    elif module in IMPORT_MAPPING:
+                        module = IMPORT_MAPPING[module]
                 full_path = f"{module}.{name}"
                 if full_path in _get_allowed_globals():
                     self.append(_get_allowed_globals()[full_path])
+                elif full_path in _get_user_allowed_globals():
+                    self.append(_get_user_allowed_globals()[full_path])
                 else:
-                    raise RuntimeError(f"Unsupported class {full_path}")
+                    raise RuntimeError(
+                        f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
+                        f"Please use `torch.serialization.add_safe_globals([{name}])` to allowlist "
+                        "this global if you trust this class/function."
+                    )
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()
                 cls = self.stack.pop()
-                if cls is not torch.nn.Parameter:
+                if cls is torch.nn.Parameter:
+                    self.append(torch.nn.Parameter(*args))
+                elif cls in _get_user_allowed_globals().values():
+                    self.append(cls.__new__(cls, *args))
+                else:
                     raise RuntimeError(f"Trying to instantiate unsupported class {cls}")
-                self.append(torch.nn.Parameter(*args))
             elif key[0] == REDUCE[0]:
                 args = self.stack.pop()
                 func = self.stack[-1]
-                if func not in _get_allowed_globals().values():
+                if (
+                    func not in _get_allowed_globals().values()
+                    and func not in _get_user_allowed_globals().values()
+                ):
                     raise RuntimeError(
                         f"Trying to call reduce for unrecognized function {func}"
                     )
@@ -177,9 +243,14 @@ class Unpickler:
                     inst.__setstate__(state)
                 elif type(inst) is OrderedDict:
                     inst.__dict__.update(state)
+                elif type(inst) in _get_user_allowed_globals().values():
+                    if hasattr(inst, "__setstate__"):
+                        inst.__setstate__(state)
+                    else:
+                        inst.__dict__.update(state)
                 else:
                     raise RuntimeError(
-                        f"Can only build Tensor, parameter or dict objects, but got {type(inst)}"
+                        f"Can only build Tensor, parameter or OrderedDict objects, but got {type(inst)}"
                     )
             # Stack manipulation
             elif key[0] == APPEND[0]:
@@ -283,8 +354,14 @@ class Unpickler:
                 self.append(decode_long(data))
             # First and last deserializer ops
             elif key[0] == PROTO[0]:
-                # Read and ignore proto version
-                read(1)[0]
+                self.proto = read(1)[0]
+                if self.proto != 2:
+                    warnings.warn(
+                        f"Detected pickle protocol {self.proto} in the checkpoint, which was "
+                        "not the default pickle protocol used by `torch.load` (2). The weights_only "
+                        "Unpickler might not support all instructions implemented by this protocol, "
+                        "please file an issue for adding support if you encounter this."
+                    )
             elif key[0] == STOP[0]:
                 rc = self.stack.pop()
                 return rc

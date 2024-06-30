@@ -11,7 +11,12 @@ from unittest import skipIf
 
 from torch.package import is_from_package, PackageExporter, PackageImporter
 from torch.package.package_exporter import PackagingError
-from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    IS_SANDCASTLE,
+    run_tests,
+    skipIfTorchDynamo,
+)
 
 try:
     from .common import PackageTestCase
@@ -33,46 +38,46 @@ class TestMisc(PackageTestCase):
 
         export_plain = dedent(
             """\
-                ├── .data
-                │   ├── extern_modules
-                │   ├── python_version
-                │   ├── serialization_id
-                │   └── version
-                ├── main
-                │   └── main
-                ├── obj
-                │   └── obj.pkl
-                ├── package_a
-                │   ├── __init__.py
-                │   └── subpackage.py
-                ├── byteorder
-                └── module_a.py
+                \u251c\u2500\u2500 .data
+                \u2502   \u251c\u2500\u2500 extern_modules
+                \u2502   \u251c\u2500\u2500 python_version
+                \u2502   \u251c\u2500\u2500 serialization_id
+                \u2502   \u2514\u2500\u2500 version
+                \u251c\u2500\u2500 main
+                \u2502   \u2514\u2500\u2500 main
+                \u251c\u2500\u2500 obj
+                \u2502   \u2514\u2500\u2500 obj.pkl
+                \u251c\u2500\u2500 package_a
+                \u2502   \u251c\u2500\u2500 __init__.py
+                \u2502   \u2514\u2500\u2500 subpackage.py
+                \u251c\u2500\u2500 byteorder
+                \u2514\u2500\u2500 module_a.py
             """
         )
         export_include = dedent(
             """\
-                ├── obj
-                │   └── obj.pkl
-                └── package_a
-                    └── subpackage.py
+                \u251c\u2500\u2500 obj
+                \u2502   \u2514\u2500\u2500 obj.pkl
+                \u2514\u2500\u2500 package_a
+                    \u2514\u2500\u2500 subpackage.py
             """
         )
         import_exclude = dedent(
             """\
-                ├── .data
-                │   ├── extern_modules
-                │   ├── python_version
-                │   ├── serialization_id
-                │   └── version
-                ├── main
-                │   └── main
-                ├── obj
-                │   └── obj.pkl
-                ├── package_a
-                │   ├── __init__.py
-                │   └── subpackage.py
-                ├── byteorder
-                └── module_a.py
+                \u251c\u2500\u2500 .data
+                \u2502   \u251c\u2500\u2500 extern_modules
+                \u2502   \u251c\u2500\u2500 python_version
+                \u2502   \u251c\u2500\u2500 serialization_id
+                \u2502   \u2514\u2500\u2500 version
+                \u251c\u2500\u2500 main
+                \u2502   \u2514\u2500\u2500 main
+                \u251c\u2500\u2500 obj
+                \u2502   \u2514\u2500\u2500 obj.pkl
+                \u251c\u2500\u2500 package_a
+                \u2502   \u251c\u2500\u2500 __init__.py
+                \u2502   \u2514\u2500\u2500 subpackage.py
+                \u251c\u2500\u2500 byteorder
+                \u2514\u2500\u2500 module_a.py
             """
         )
 
@@ -118,7 +123,9 @@ class TestMisc(PackageTestCase):
             def get_filename(self, name):
                 result = super().get_filename(name)
                 if name == "module_a":
-                    return os.path.join(os.path.dirname(result), "module_a_remapped_path.py")
+                    return os.path.join(
+                        os.path.dirname(result), "module_a_remapped_path.py"
+                    )
                 else:
                     return result
 
@@ -139,7 +146,9 @@ class TestMisc(PackageTestCase):
                     if spec is not None:
                         break
                 assert spec is not None and isinstance(spec.loader, SourceFileLoader)
-                spec.loader = LoaderThatRemapsModuleA(spec.loader.name, spec.loader.path)
+                spec.loader = LoaderThatRemapsModuleA(
+                    spec.loader.name, spec.loader.path
+                )
                 return spec
 
         sys.meta_path.insert(0, FinderThatRemapsModuleA())
@@ -153,7 +162,6 @@ class TestMisc(PackageTestCase):
 
                 he.intern("**")
                 he.save_module(module_a.__name__)
-
 
             buffer.seek(0)
             hi = PackageImporter(buffer)

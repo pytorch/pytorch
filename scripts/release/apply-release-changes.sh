@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 #
+# Step 2 after branch cut is complete.
+#
+# Creates PR with release only changes.
+#
+# Prerequisite: Must be  successfully authenticated in aws fbossci account.
+#
 # Usage (run from root of project):
-#  DRY_RUN=disabled RELEASE_VERSION=2.2 ./scripts/release/apply-release-changes.sh
+#  DRY_RUN=disabled ./scripts/release/apply-release-changes.sh
 #
 # RELEASE_VERSION: Version of this current release
 
 set -eou pipefail
 
-# Create and Check out to Release Branch
-# git checkout -b "${RELEASE_BRANCH}"
-
+GIT_TOP_DIR=$(git rev-parse --show-toplevel)
+RELEASE_VERSION=${RELEASE_VERSION:-$(cut -d'.' -f1-2 "${GIT_TOP_DIR}/version.txt")}
 DRY_RUN=${DRY_RUN:-enabled}
-python3 .github/scripts/tag_docker_images_for_release.py --version ${RELEASE_VERSION} --dry-run ${DRY_RUN}
 
 # Change all GitHub Actions to reference the test-infra release branch
 # as opposed to main.
@@ -46,8 +50,9 @@ SLOW_VER=$(aws s3api list-object-versions --bucket ossci-metrics --prefix slow-t
 DISABLED_TESTS_VER=$(aws s3api list-object-versions --bucket ossci-metrics --prefix disabled-tests-condensed.json --query 'Versions[?IsLatest].[VersionId]' --output text)
 sed -i -e s#unstable-jobs.json#"unstable-jobs.json?versionId=${UNSTABLE_VER}"# .github/scripts/filter_test_configs.py
 sed -i -e s#disabled-jobs.json#"disabled-jobs.json?versionId=${DISABLED_VER}"# .github/scripts/filter_test_configs.py
-sed -i -e s#slow-tests.json#"slow-tests.json?versionId=${SLOW_VER}"#  tools/stats/import_test_stats.py
+# please note we want to match slow-tests.json not .pytorch-slow-tests.json hence "/" is needed here
+sed -i -e s#/slow-tests.json#"/slow-tests.json?versionId=${SLOW_VER}"#  tools/stats/import_test_stats.py
 sed -i -e s#disabled-tests-condensed.json#"disabled-tests-condensed.json?versionId=${DISABLED_TESTS_VER}"# tools/stats/import_test_stats.py
 # Optional
-# git commit -m "[RELEASE-ONLY CHANGES] Branch Cut for Release {RELEASE_VERSION}"
-# git push origin "${RELEASE_BRANCH}"
+git commit -m "[RELEASE-ONLY CHANGES] Branch Cut for Release {RELEASE_VERSION}"
+git push origin "${RELEASE_BRANCH}"

@@ -15,10 +15,12 @@ runs:
           category=$1
           # If it is GCP runner (runner name contains gcp), do not run this
           runner_name_str=${{ runner.name }}
-          if [[ $runner_name_str != *"gcp"* ]]; then
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          else
+          if [[ -f /.inarc ]]; then
+            echo "ARC Runner, no info on ec2 metadata"
+          elif [[ $runner_name_str == *"gcp"* ]]; then
             echo "Runner is from Google Cloud Platform, No info on ec2 metadata"
+          else
+            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           fi
         }
         echo "ami-id: $(get_ec2_metadata ami-id)"
@@ -26,8 +28,14 @@ runs:
         echo "instance-type: $(get_ec2_metadata instance-type)"
         echo "system info $(uname -a)"
 
+    - name: Check if in a ARC runner
+      shell: bash
+      id: check_arc_runner
+      run: echo "IN_ARC_RUNNER=$([ -f /.inarc ] && echo true || echo false)"  >> $GITHUB_OUTPUT
+
     - name: Start docker if docker deamon is not running
       shell: bash
+      if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
       run: |
         if systemctl is-active --quiet docker; then
             echo "Docker daemon is running...";
@@ -58,6 +66,7 @@ runs:
         env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
 
     - name: Kill any existing containers, clean up images
+      if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
       shell: bash
       run: |
         # ignore expansion of "docker ps -q" since it could be empty
@@ -96,3 +105,28 @@ runs:
 
         echo "${RESOLVED_IP} ${PT_DOMAIN}" | sudo tee -a /etc/hosts
         cat /etc/hosts
+
+    - name: Check that the docker daemon is running
+      shell: bash
+      continue-on-error: true
+      if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'true' }}
+      run: |
+        set +x
+
+        max_attempts=30
+        delay=10
+        attempt=1
+
+        for attempt in $(seq 1 $max_attempts); do
+          echo "Attempt $attempt of $max_attempts: Checking if Docker daemon is running..."
+          if docker info > /dev/null 2>&1; then
+            echo "Docker is running. Proceeding with the next steps"
+            exit 0
+          else
+            echo "Docker is not running yet."
+            echo "Retrying in $delay seconds..."
+            sleep $delay
+          fi
+        done
+        echo "Reached maximum attempts to connect to Docker. Exiting."
+        exit 1

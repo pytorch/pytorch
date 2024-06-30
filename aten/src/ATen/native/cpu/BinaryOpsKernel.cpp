@@ -32,8 +32,8 @@ inline Vectorized<scalar_t> binary_op_scalar(
     const Vectorized<scalar_t>& a,
     opmath_t b,
     const Op& op) {
-  Vectorized<opmath_t> a0, a1, vec_b(b);
-  std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+  Vectorized<opmath_t> vec_b(b);
+  auto [a0, a1] = convert_to_float<scalar_t>(a);
   return convert_from_float<scalar_t>(op(a0, vec_b), op(a1, vec_b));
 }
 
@@ -248,8 +248,12 @@ inline Vectorized<scalar_t> div_floor_floating_vec(
     const Vectorized<scalar_t>& a,
     const Vectorized<scalar_t>& b) {
   using vec_t = Vectorized<scalar_t>;
+  const auto basic_div = a / b;
+  vec_t inf(std::numeric_limits<scalar_t>::infinity());
   auto mod = a.fmod(b);
-  auto div = (a - mod) / b;
+  // Fixup for a case that isn't properly handled by Sleef_fmod
+  auto floor = vec_t::blendv(a - mod, a, (basic_div.abs() == inf) & (a.abs() != inf));
+  auto div = floor / b;
   const auto zero = vec_t(0);
   auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
   const auto one = vec_t(1);
@@ -257,7 +261,6 @@ inline Vectorized<scalar_t> div_floor_floating_vec(
   auto floordiv = div.floor();
   mask = (div - floordiv) > vec_t(0.5);
   floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
-  const auto basic_div = a / b;
   floordiv = vec_t::blendv(floordiv, zero.copysign(basic_div), div == zero);
   floordiv = vec_t::blendv(floordiv, basic_div, b == zero);
   return floordiv;
@@ -342,9 +345,8 @@ void remainder_kernel(TensorIteratorBase& iter) {
               return mod0;
             },
         [=](Vectorized<BFloat16> a, Vectorized<BFloat16> b) {
-          Vectorized<float> a0, a1, b0, b1;
-          std::tie(a0, a1) = convert_bfloat16_float(a);
-          std::tie(b0, b1) = convert_bfloat16_float(b);
+          auto [a0, a1] = convert_bfloat16_float(a);
+          auto [b0, b1] = convert_bfloat16_float(b);
           auto mod0 = a0.fmod(b0);
           auto mod1 = a1.fmod(b1);
           const auto zero = Vectorized<float>(0);
@@ -743,9 +745,8 @@ void smooth_l1_kernel(TensorIteratorBase& iter, double beta) {
         },
         [&beta_val_vec, &point_five_vec](
             Vectorized<BFloat16> a, Vectorized<BFloat16> b) {
-          Vectorized<float> a0, a1, b0, b1;
-          std::tie(a0, a1) = convert_bfloat16_float(a);
-          std::tie(b0, b1) = convert_bfloat16_float(b);
+          auto [a0, a1] = convert_bfloat16_float(a);
+          auto [b0, b1] = convert_bfloat16_float(b);
           auto z = (a0 - b0).abs();
           a0 = Vectorized<float>::blendv(
               point_five_vec * z * z / beta_val_vec,
@@ -830,9 +831,8 @@ void sigmoid_backward_kernel(TensorIteratorBase& iter) {
           return a0 * (float(1) - b0) * b0;
         },
         [=](Vectorized<BFloat16> a, Vectorized<BFloat16> b) {
-          Vectorized<float> a0, a1, b0, b1;
-          std::tie(a0, a1) = convert_bfloat16_float(a);
-          std::tie(b0, b1) = convert_bfloat16_float(b);
+          auto [a0, a1] = convert_bfloat16_float(a);
+          auto [b0, b1] = convert_bfloat16_float(b);
           a0 = a0 * (one_vec - b0) * b0;
           a1 = a1 * (one_vec - b1) * b1;
           return convert_float_bfloat16(a0, a1);
@@ -928,9 +928,8 @@ void tanh_backward_kernel(TensorIteratorBase& iter) {
                 return a0 * (float{1} - b0 * b0);
               },
               [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-                Vectorized<float> a0, a1, b0, b1;
-                std::tie(a0, a1) = convert_to_float<scalar_t>(a);
-                std::tie(b0, b1) = convert_to_float<scalar_t>(b);
+                auto [a0, a1] = convert_to_float<scalar_t>(a);
+                auto [b0, b1] = convert_to_float<scalar_t>(b);
                 a0 = a0 * (one_vec - b0 * b0);
                 a1 = a1 * (one_vec - b1 * b1);
                 return convert_from_float<scalar_t>(a0, a1);
@@ -1012,9 +1011,8 @@ void logaddexp_kernel(TensorIteratorBase& iter) {
             }
           },
           [=](Vec a, Vec b) -> Vec {
-            Vectorized<float> a0, a1, b0, b1;
-            std::tie(a0, a1) = convert_to_float<scalar_t>(a);
-            std::tie(b0, b1) = convert_to_float<scalar_t>(b);
+            auto [a0, a1] = convert_to_float<scalar_t>(a);
+            auto [b0, b1] = convert_to_float<scalar_t>(b);
             Vectorized<float> inf(std::numeric_limits<float>::infinity());
             Vectorized<float> m0 = maximum(a0, b0);
             Vectorized<float> m1 = maximum(a1, b1);
@@ -1077,9 +1075,8 @@ void logaddexp2_kernel(TensorIteratorBase& iter) {
             }
           },
           [=](Vec a, Vec b) -> Vec {
-            Vectorized<float> a0, a1, b0, b1;
-            std::tie(a0, a1) = convert_to_float<scalar_t>(a);
-            std::tie(b0, b1) = convert_to_float<scalar_t>(b);
+            auto [a0, a1] = convert_to_float<scalar_t>(a);
+            auto [b0, b1] = convert_to_float<scalar_t>(b);
             Vectorized<float> inf(std::numeric_limits<float>::infinity());
             Vectorized<float> inv_log_2_vec(inv_log_2);
             Vectorized<float> m0 = maximum(a0, b0);

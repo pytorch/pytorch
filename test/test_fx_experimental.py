@@ -1,5 +1,6 @@
 # Owner(s): ["module: fx"]
 
+import functools
 import math
 import numbers
 import operator
@@ -51,6 +52,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, new_module_tests
 from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
+import torch.utils._pytree as pytree
 
 try:
     import torchvision.models
@@ -1564,7 +1566,7 @@ class TestNormalizeOperators(JitTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
-        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot", "_upsample_bilinear2d_aa"}
+        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot", "_upsample_bilinear2d_aa", "_chunk_cat"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         if isinstance(op.op, torch._ops.OpOverload):
             self.skipTest("normalize operator doesn't work on torch.ops")
@@ -1623,21 +1625,40 @@ class TestNormalizeOperators(JitTestCase):
             param_names = []
             param_values = []
             fx_args = []
-            for idx, v in enumerate(arg_values):
-                if isinstance(v, torch.Tensor):
-                    param_names.append(f"arg_{idx}")
-                    param_values.append(v)
-                    fx_args.append(param_names[-1])
+
+            idx = 0
+
+            def process_arg(arg, name):
+                if isinstance(arg, torch.Tensor):
+                    param_names.append(name)
+                    param_values.append(arg)
+                    return name
                 else:
-                    fx_args.append(f"{repr(v)}")
+                    return f"{repr(arg)}"
+
+            def process_arg_with_idx(arg):
+                nonlocal idx
+                res = process_arg(arg, f"arg_{idx}")
+                idx = idx + 1
+                return res
+
+            def str_arg(arg):
+                if isinstance(arg, tuple):
+                    args = [f"{str_arg(v)}, " for v in arg]
+                    return f"({' '.join(args)})"
+                elif isinstance(arg, list):
+                    args = [f"{str_arg(v)}" for v in arg]
+                    return f"[{', '.join(args)}]"
+                else:
+                    return arg
+
+            for v in arg_values:
+                arg = pytree.tree_map(process_arg_with_idx, v)
+                fx_args.append(str_arg(arg))
 
             for k, v in kwarg_values.items():
-                if isinstance(v, torch.Tensor):
-                    param_names.append(k)
-                    param_values.append(v)
-                    fx_args.append(f"{k} = {k}")
-                else:
-                    fx_args.append(f"{k} = {repr(v)}")
+                arg = pytree.tree_map(functools.partial(process_arg, name=k), v)
+                fx_args.append(f"{k} = {str_arg(arg)}")
 
             code = f"""
 class TestModule(torch.nn.Module):

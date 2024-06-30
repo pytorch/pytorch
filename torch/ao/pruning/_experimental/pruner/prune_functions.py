@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 Collection of conversion functions for linear / conv2d structured pruning
 Also contains utilities for bias propagation
@@ -84,7 +85,7 @@ def _prune_module_bias(module: nn.Module, mask: Tensor) -> None:
         delattr(module, "_bias")
 
 
-def _propogate_module_bias(module: nn.Module, mask: Tensor) -> Optional[Tensor]:
+def _propagate_module_bias(module: nn.Module, mask: Tensor) -> Optional[Tensor]:
     r"""
     In the case that we need to propagate biases, this function will return the biases we need
     """
@@ -143,7 +144,7 @@ def prune_linear_activation_linear(
     if getattr(linear1, "prune_bias", False):
         _prune_module_bias(linear1, mask)
     else:
-        pruned_biases = _propogate_module_bias(linear1, mask)
+        pruned_biases = _propagate_module_bias(linear1, mask)
         if pruned_biases is not None:
             if activation:
                 pruned_biases = activation(pruned_biases)
@@ -251,7 +252,7 @@ def prune_conv2d_activation_conv2d(
         if prune_bias:
             _prune_module_bias(conv2d_1, mask)
         else:
-            pruned_biases = _propogate_module_bias(conv2d_1, mask)
+            pruned_biases = _propagate_module_bias(conv2d_1, mask)
             if pruned_biases is not None:
                 if activation:
                     pruned_biases = activation(pruned_biases)
@@ -335,7 +336,7 @@ def prune_conv2d_pool_flatten_linear(
     if getattr(conv2d, "prune_bias", False):
         _prune_module_bias(conv2d, mask)
     else:
-        pruned_biases = cast(Tensor, _propogate_module_bias(conv2d, mask))
+        pruned_biases = cast(Tensor, _propagate_module_bias(conv2d, mask))
         flattened_pruned_biases = torch.tensor(
             [[bias] * flatten_scale for bias in pruned_biases], device=mask.device
         ).flatten()

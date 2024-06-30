@@ -4,17 +4,21 @@ import torch
 import re
 import unittest
 import functools
+import os
 from subprocess import CalledProcessError
-
+import sys
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._inductor.codecache import CppCodeCache
 from torch.utils._triton import has_triton
 from torch.testing._internal.common_utils import (
     LazyVal,
     IS_FBCODE,
 )
-from torch._dynamo.backends.registry import register_backend
-from torch._inductor.compile_fx import compile_fx, count_bytes_inner
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import (
+    TestCase,
+    IS_CI,
+    IS_WINDOWS,
+)
 
 def test_cpu():
     try:
@@ -32,9 +36,11 @@ HAS_CPU = LazyVal(test_cpu)
 
 HAS_CUDA = torch.cuda.is_available() and has_triton()
 
-HAS_GPU = HAS_CUDA
+HAS_XPU = torch.xpu.is_available() and has_triton()
 
-GPUS = ["cuda"]
+HAS_GPU = HAS_CUDA or HAS_XPU
+
+GPUS = ["cuda", "xpu"]
 
 HAS_MULTIGPU = any(
     getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
@@ -45,10 +51,6 @@ tmp_gpus = [x for x in GPUS if getattr(torch, x).is_available()]
 assert len(tmp_gpus) <= 1
 GPU_TYPE = "cuda" if len(tmp_gpus) == 0 else tmp_gpus.pop()
 del tmp_gpus
-
-@register_backend
-def count_bytes_inductor(gm, example_inputs):
-    return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
 
 def _check_has_dynamic_shape(
     self: TestCase,
@@ -83,5 +85,18 @@ def skipDeviceIf(cond, msg, *, device):
 
     return decorate_fn
 
+def skip_windows_ci(name: str, file: str) -> None:
+    if IS_WINDOWS and IS_CI:
+        module = os.path.basename(file).strip(".py")
+        sys.stderr.write(
+            f"Windows CI does not have necessary dependencies for {module} tests yet\n"
+        )
+        if name == "__main__":
+            sys.exit(0)
+        raise unittest.SkipTest("requires sympy/functorch/filelock")
+
+requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
+
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
+skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
 skipCPUIf = functools.partial(skipDeviceIf, device="cpu")

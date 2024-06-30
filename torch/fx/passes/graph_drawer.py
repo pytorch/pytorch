@@ -1,20 +1,27 @@
+# mypy: allow-untyped-defs
 
 import hashlib
+from itertools import chain
+from typing import Any, Dict, Optional, TYPE_CHECKING
+
 import torch
 import torch.fx
-from typing import Any, Dict, Optional, TYPE_CHECKING
-from torch.fx.node import _get_qualified_name, _format_arg
-from torch.fx.graph import _parse_stack_trace
-from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx._compatibility import compatibility
-from itertools import chain
+from torch.fx.graph import _parse_stack_trace
+from torch.fx.node import _format_arg, _get_qualified_name
+from torch.fx.passes.shape_prop import TensorMetadata
 
-__all__ = ['FxGraphDrawer']
+
 try:
     import pydot
+
     HAS_PYDOT = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_PYDOT = False
+    pydot = None
+
+
+__all__ = ["FxGraphDrawer"]
 
 _COLOR_MAP = {
     "placeholder": '"AliceBlue"',
@@ -105,6 +112,7 @@ if HAS_PYDOT:
             Visualize a torch.fx.Graph with graphviz
             Example:
                 >>> # xdoctest: +REQUIRES(module:pydot)
+                >>> # xdoctest: +REQUIRES(module:ubelt)
                 >>> # define module
                 >>> class MyModule(torch.nn.Module):
                 >>>     def __init__(self):
@@ -412,7 +420,10 @@ else:
                 graph_module: torch.fx.GraphModule,
                 name: str,
                 ignore_getattr: bool = False,
+                ignore_parameters_and_buffers: bool = False,
+                skip_node_names_in_args: bool = True,
                 parse_stack_trace: bool = False,
+                dot_graph_shape: Optional[str] = None,
             ):
                 raise RuntimeError('FXGraphDrawer requires the pydot package to be installed. Please install '
                                    'pydot through your favorite Python package manager.')

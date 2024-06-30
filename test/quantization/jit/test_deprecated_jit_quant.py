@@ -1,9 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
-from torch.testing._internal.common_quantization import (
-    skipIfNoFBGEMM
-)
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.jit_utils import JitTestCase
 
 
@@ -35,23 +33,28 @@ class TestDeprecatedJitQuantized(JitTestCase):
             # product that overflows the int16 range, e.g.
             # (255*127+255*127) = 64770. So, we hardcode the test values
             # here and ensure a mix of signedness.
-            vals = [[100, -155],
-                    [100, -155],
-                    [-155, 100],
-                    [-155, 100],
-                    [100, -155],
-                    [-155, 100],
-                    [-155, 100],
-                    [100, -155]]
-            vals = vals[:d_hid * num_chunks]
+            vals = [
+                [100, -155],
+                [100, -155],
+                [-155, 100],
+                [-155, 100],
+                [100, -155],
+                [-155, 100],
+                [-155, 100],
+                [100, -155],
+            ]
+            vals = vals[: d_hid * num_chunks]
             cell.weight_ih = torch.nn.Parameter(
-                torch.tensor(vals, dtype=torch.float),
-                requires_grad=False)
+                torch.tensor(vals, dtype=torch.float), requires_grad=False
+            )
             cell.weight_hh = torch.nn.Parameter(
-                torch.tensor(vals, dtype=torch.float),
-                requires_grad=False)
+                torch.tensor(vals, dtype=torch.float), requires_grad=False
+            )
 
-            with self.assertRaisesRegex(RuntimeError, "quantize_rnn_cell_modules function is no longer supported"):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "quantize_rnn_cell_modules function is no longer supported",
+            ):
                 cell = torch.jit.quantized.quantize_rnn_cell_modules(cell)
 
     @skipIfNoFBGEMM
@@ -62,7 +65,6 @@ class TestDeprecatedJitQuantized(JitTestCase):
             torch.nn.LSTM(d_in, d_hid).float(),
             torch.nn.GRU(d_in, d_hid).float(),
         ]:
-
             # Replace parameter values s.t. the range of values is exactly
             # 255, thus we will have 0 quantization error in the quantized
             # GEMM call. This i s for testing purposes.
@@ -74,34 +76,44 @@ class TestDeprecatedJitQuantized(JitTestCase):
             # product that overflows the int16 range, e.g.
             # (255*127+255*127) = 64770. So, we hardcode the test values
             # here and ensure a mix of signedness.
-            vals = [[100, -155],
-                    [100, -155],
-                    [-155, 100],
-                    [-155, 100],
-                    [100, -155],
-                    [-155, 100],
-                    [-155, 100],
-                    [100, -155]]
+            vals = [
+                [100, -155],
+                [100, -155],
+                [-155, 100],
+                [-155, 100],
+                [100, -155],
+                [-155, 100],
+                [-155, 100],
+                [100, -155],
+            ]
             if isinstance(cell, torch.nn.LSTM):
                 num_chunks = 4
             elif isinstance(cell, torch.nn.GRU):
                 num_chunks = 3
-            vals = vals[:d_hid * num_chunks]
+            vals = vals[: d_hid * num_chunks]
             cell.weight_ih_l0 = torch.nn.Parameter(
-                torch.tensor(vals, dtype=torch.float),
-                requires_grad=False)
+                torch.tensor(vals, dtype=torch.float), requires_grad=False
+            )
             cell.weight_hh_l0 = torch.nn.Parameter(
-                torch.tensor(vals, dtype=torch.float),
-                requires_grad=False)
+                torch.tensor(vals, dtype=torch.float), requires_grad=False
+            )
 
-            with self.assertRaisesRegex(RuntimeError, "quantize_rnn_modules function is no longer supported"):
-                cell_int8 = torch.jit.quantized.quantize_rnn_modules(cell, dtype=torch.int8)
+            with self.assertRaisesRegex(
+                RuntimeError, "quantize_rnn_modules function is no longer supported"
+            ):
+                cell_int8 = torch.jit.quantized.quantize_rnn_modules(
+                    cell, dtype=torch.int8
+                )
 
-            with self.assertRaisesRegex(RuntimeError, "quantize_rnn_modules function is no longer supported"):
-                cell_fp16 = torch.jit.quantized.quantize_rnn_modules(cell, dtype=torch.float16)
+            with self.assertRaisesRegex(
+                RuntimeError, "quantize_rnn_modules function is no longer supported"
+            ):
+                cell_fp16 = torch.jit.quantized.quantize_rnn_modules(
+                    cell, dtype=torch.float16
+                )
 
+    if "fbgemm" in torch.backends.quantized.supported_engines:
 
-    if 'fbgemm' in torch.backends.quantized.supported_engines:
         def test_quantization_modules(self):
             K1, N1 = 2, 2
 
@@ -116,18 +128,26 @@ class TestDeprecatedJitQuantized(JitTestCase):
 
             fb = FooBar()
             fb.linear1.weight = torch.nn.Parameter(
-                torch.tensor([[-150, 100], [100, -150]], dtype=torch.float), requires_grad=False)
-            fb.linear1.bias = torch.nn.Parameter(torch.zeros_like(fb.linear1.bias), requires_grad=False)
+                torch.tensor([[-150, 100], [100, -150]], dtype=torch.float),
+                requires_grad=False,
+            )
+            fb.linear1.bias = torch.nn.Parameter(
+                torch.zeros_like(fb.linear1.bias), requires_grad=False
+            )
 
             x = (torch.rand(1, K1).float() - 0.5) / 10.0
             value = torch.tensor([[100, -150]], dtype=torch.float)
 
             y_ref = fb(value)
 
-            with self.assertRaisesRegex(RuntimeError, "quantize_linear_modules function is no longer supported"):
+            with self.assertRaisesRegex(
+                RuntimeError, "quantize_linear_modules function is no longer supported"
+            ):
                 fb_int8 = torch.jit.quantized.quantize_linear_modules(fb)
 
-            with self.assertRaisesRegex(RuntimeError, "quantize_linear_modules function is no longer supported"):
+            with self.assertRaisesRegex(
+                RuntimeError, "quantize_linear_modules function is no longer supported"
+            ):
                 fb_fp16 = torch.jit.quantized.quantize_linear_modules(fb, torch.float16)
 
     @skipIfNoFBGEMM
@@ -136,13 +156,19 @@ class TestDeprecatedJitQuantized(JitTestCase):
             def __init__(self, in_features, out_features):
                 super().__init__()
                 qweight = torch._empty_affine_quantized(
-                    [out_features, in_features], scale=1, zero_point=0,
-                    dtype=torch.qint8)
+                    [out_features, in_features],
+                    scale=1,
+                    zero_point=0,
+                    dtype=torch.qint8,
+                )
                 self._packed_weight = torch.ops.quantized.linear_prepack(qweight)
 
             @torch.jit.export
             def __getstate__(self):
-                return (torch.ops.quantized.linear_unpack(self._packed_weight)[0], self.training)
+                return (
+                    torch.ops.quantized.linear_unpack(self._packed_weight)[0],
+                    self.training,
+                )
 
             def forward(self):
                 return self._packed_weight
@@ -165,7 +191,9 @@ class TestDeprecatedJitQuantized(JitTestCase):
             torch._C._jit_pass_erase_shape_information(x.graph)
 
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_quantization.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_quantization.py TESTNAME\n\n"
+        "instead."
+    )

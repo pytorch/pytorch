@@ -7,8 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace at {
-namespace jit {
+namespace at::jit {
 
 // A template environment is a mapping from template variable names, e.g.,
 // identifier (corresponding to $identifier) to their expansions.
@@ -32,7 +31,7 @@ struct TemplateEnv {
   // Add a number 'v' to the map at key 'k'
   template <typename T>
   void d(const std::string& k, const T& v) {
-    strings_[k] = c10::to_string(v);
+    strings_[k] = std::to_string(v);
     lists_.erase(k);
   }
 
@@ -241,5 +240,4 @@ static inline std::string format(const std::string& fmt, TemplateEnv& env) {
   return CodeTemplate(fmt).format(env);
 }
 
-} // namespace jit
-} // namespace at
+} // namespace at::jit

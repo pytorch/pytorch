@@ -33,8 +33,6 @@ def generate_example_rst(example_case: ExportCase):
     )
     with open(source_file) as file:
         source_code = file.read()
-    source_code = re.sub(r"from torch\._export\.db\.case import .*\n", "", source_code)
-    source_code = re.sub(r"@export_case\((.|\n)*?\)\n", "", source_code)
     source_code = source_code.replace("\n", "\n    ")
     splitted_source_code = re.split(r"@export_rewrite_case.*\n", source_code)
 
@@ -44,6 +42,7 @@ def generate_example_rst(example_case: ExportCase):
     }, f"more than one @export_rewrite_case decorator in {source_code}"
 
     # Generate contents of the .rst file
+    # TODO(zhxchen17) Update template when we switch to example_args and example_kwargs.
     title = f"{example_case.name}"
     doc_contents = f"""{title}
 {'^' * (len(title))}

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Utilities for converting and operating on ONNX, JIT and torch types."""
 from __future__ import annotations
 
@@ -156,6 +157,26 @@ class JitScalarType(enum.IntEnum):
         if dtype not in _DTYPE_TO_SCALAR_TYPE:
             raise errors.OnnxExporterError(f"Unknown dtype: {dtype}")
         return _DTYPE_TO_SCALAR_TYPE[dtype]
+
+    @classmethod
+    @_beartype.beartype
+    def from_onnx_type(
+        cls, onnx_type: Optional[Union[int, _C_onnx.TensorProtoDataType]]
+    ) -> JitScalarType:
+        """Convert a ONNX data type to JitScalarType.
+
+        Args:
+            onnx_type: A torch._C._onnx.TensorProtoDataType to create a JitScalarType from
+
+        Returns:
+            JitScalarType
+
+        Raises:
+            OnnxExporterError: if dtype is not a valid torch.dtype or if it is None.
+        """
+        if onnx_type not in _ONNX_TO_SCALAR_TYPE:
+            raise errors.OnnxExporterError(f"Unknown onnx_type: {onnx_type}")
+        return _ONNX_TO_SCALAR_TYPE[typing.cast(_C_onnx.TensorProtoDataType, onnx_type)]
 
     @classmethod
     @_beartype.beartype
@@ -351,6 +372,8 @@ _SCALAR_TYPE_TO_ONNX = {
     JitScalarType.FLOAT8E5M2FNUZ: _C_onnx.TensorProtoDataType.FLOAT8E5M2FNUZ,
     JitScalarType.FLOAT8E4M3FNUZ: _C_onnx.TensorProtoDataType.FLOAT8E4M3FNUZ,
 }
+
+_ONNX_TO_SCALAR_TYPE = {v: k for k, v in _SCALAR_TYPE_TO_ONNX.items()}
 
 # source of truth is
 # https://github.com/pytorch/pytorch/blob/master/torch/csrc/utils/tensor_dtypes.cpp

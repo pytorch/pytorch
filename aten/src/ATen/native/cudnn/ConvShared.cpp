@@ -30,7 +30,7 @@
 // ConvPlaceholders.cpp contains placeholder implementation of cudnn
 // convolution when cudnn is not enabled. These operators only raises
 // errors, and do no real computation. These operators are implemented
-// using currnet operators.
+// using current operators.
 //
 // cuDNN v7 and v8 have different API. ConvShared.{cpp, h} contains
 // code shared by v7 and v8. Conv_v7.cpp contains implementation of
@@ -54,7 +54,7 @@
 //      Function that has different implementation on Conv_v7.cpp
 //      and Conv_v8.cpp
 //
-// The raw API directly invokes CuDNN and are implemeted differently
+// The raw API directly invokes CuDNN and are implemented differently
 // on cuDNN v7 and cuDNN v8
 //
 // There are a few reasons this should never be directly exposed
@@ -705,7 +705,7 @@ std::tuple<at::Tensor, at::Tensor> cudnn_convolution_transpose_backward(
 Tensor cudnn_convolution_relu(
     const Tensor& input_t,
     const Tensor& weight_t,
-    const c10::optional<Tensor>& bias_t,
+    const std::optional<Tensor>& bias_t,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
@@ -735,23 +735,6 @@ Tensor cudnn_convolution_relu(
             output_t.options().device_opt(),
             output_t.options().pinned_memory_opt());
 
-#ifdef AT_CUDNN_CONV_BIAS_RELU_FALLBACK
-  raw_cudnn_convolution_add_relu_fallback_out(
-      output_t,
-      input,
-      weight,
-      output_t, // use output_t as z to satisfy CUDNN API
-      0, // alpha
-      _bias,
-      stride,
-      padding,
-      dilation,
-      groups,
-      benchmark, // benchmark
-      false, // deterministic
-      allow_tf32 // allow_tf32
-  );
-#else // AT_CUDNN_CONV_BIAS_RELU_FALLBACK
   raw_cudnn_convolution_add_relu_out(
       output_t,
       input,
@@ -767,7 +750,6 @@ Tensor cudnn_convolution_relu(
       false, // deterministic
       allow_tf32 // allow_tf32
   );
-#endif
 
   return output_t;
 }
@@ -776,8 +758,8 @@ Tensor cudnn_convolution_add_relu(
     const Tensor& input_t,
     const Tensor& weight_t,
     const Tensor& z_t,
-    const c10::optional<Scalar>& alpha,
-    const c10::optional<Tensor>& bias_t,
+    const std::optional<Scalar>& alpha,
+    const std::optional<Tensor>& bias_t,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
@@ -813,23 +795,6 @@ Tensor cudnn_convolution_add_relu(
             output_t.options().device_opt(),
             output_t.options().pinned_memory_opt());
 
-#ifdef AT_CUDNN_CONV_BIAS_RELU_FALLBACK
-  raw_cudnn_convolution_add_relu_fallback_out(
-      output_t,
-      input,
-      weight,
-      z,
-      _alpha,
-      _bias,
-      stride,
-      padding,
-      dilation,
-      groups,
-      benchmark,
-      false, // deterministic
-      allow_tf32 // allow_tf32
-  );
-#else // AT_CUDNN_CONV_BIAS_RELU_FALLBACK
   raw_cudnn_convolution_add_relu_out(
       output_t,
       input,
@@ -845,7 +810,6 @@ Tensor cudnn_convolution_add_relu(
       false, // deterministic
       allow_tf32 // allow_tf32
   );
-#endif // AT_CUDNN_CONV_BIAS_RELU_FALLBACK
 
   return output_t;
 }

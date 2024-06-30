@@ -117,10 +117,9 @@ static void smooth_l1_backward_cpu_kernel(TensorIterator& iter, const Scalar& no
         // 1        if  x >= beta
         // -1       if x <= -beta
         // x / beta if |x| < beta
-        Vectorized<float> input0, input1, target0, target1, grad_output0, grad_output1;
-        std::tie(input0, input1) = convert_bfloat16_float(input);
-        std::tie(target0, target1) = convert_bfloat16_float(target);
-        std::tie(grad_output0, grad_output1) = convert_bfloat16_float(grad_output);
+        auto [input0, input1] = convert_bfloat16_float(input);
+        auto [target0, target1] = convert_bfloat16_float(target);
+        auto [grad_output0, grad_output1] = convert_bfloat16_float(grad_output);
         auto x = input0 - target0;
         auto pos_or_neg_1_vec = Vectorized<float>::blendv(
             neg_1_vec, pos_1_vec, x > zero_vec);

@@ -13,8 +13,7 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct TORCH_API CompilationOptions {
   bool incl_interface_call = false;
@@ -42,5 +41,4 @@ TORCH_API IValue convertMobileFunctionToCodeTable(
     const mobile::Function& func,
     const CompilationOptions& compilation_options);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

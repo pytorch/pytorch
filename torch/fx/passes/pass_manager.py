@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from functools import wraps
 from inspect import unwrap
 from typing import Callable, List, Optional
@@ -218,7 +219,7 @@ class PassManager:
         self.constraints.append(constraint)
         self._validated = False
 
-    def remove_pass(self, _passes: List[Callable]):
+    def remove_pass(self, _passes: List[str]):
         if _passes is None:
             return
         passes_left = []

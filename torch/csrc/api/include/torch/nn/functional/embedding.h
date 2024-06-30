@@ -24,8 +24,8 @@ inline void _no_grad_embedding_renorm_(
 inline Tensor embedding(
     const Tensor& input,
     const Tensor& weight,
-    c10::optional<int64_t> padding_idx,
-    c10::optional<double> max_norm,
+    std::optional<int64_t> padding_idx,
+    std::optional<double> max_norm,
     double norm_type,
     bool scale_grad_by_freq,
     bool sparse) {
@@ -58,7 +58,7 @@ inline Tensor embedding(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.embedding
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.embedding
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::EmbeddingFuncOptions`
@@ -90,14 +90,14 @@ inline Tensor embedding_bag(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& offsets,
-    c10::optional<double> max_norm,
+    std::optional<double> max_norm,
     double norm_type,
     bool scale_grad_by_freq,
     EmbeddingBagMode mode,
     bool sparse,
     const Tensor& per_sample_weights,
     bool include_last_offset,
-    c10::optional<int64_t> padding_idx) {
+    std::optional<int64_t> padding_idx) {
   auto input_ = input;
   auto offsets_ = offsets;
   auto per_sample_weights_ = per_sample_weights;
@@ -176,7 +176,7 @@ inline Tensor embedding_bag(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.embedding_bag
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.embedding_bag
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::EmbeddingBagFuncOptions`

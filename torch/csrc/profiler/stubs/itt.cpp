@@ -10,8 +10,10 @@ namespace impl {
 namespace {
 
 struct ITTMethods : public ProfilerStubs {
-  void record(int* device, ProfilerVoidEventStub* event, int64_t* cpu_ns)
-      const override {}
+  void record(
+      c10::DeviceIndex* device,
+      ProfilerVoidEventStub* event,
+      int64_t* cpu_ns) const override {}
 
   float elapsed(
       const ProfilerVoidEventStub* event,

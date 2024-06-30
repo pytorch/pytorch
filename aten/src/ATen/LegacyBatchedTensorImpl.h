@@ -1,7 +1,6 @@
 #pragma once
 
 #include <bitset>
-#include <utility>
 
 #include <ATen/ArrayRef.h>
 #include <ATen/SmallVector.h>

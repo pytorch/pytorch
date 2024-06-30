@@ -14,7 +14,7 @@ layout(set = 0, binding = 2)         uniform PRECISION restrict           Block 
 
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
-// This implementation is suboptimal and should be revisted.
+// This implementation is suboptimal and should be revisited.
 
 void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);

@@ -7,8 +7,8 @@ from typing import List
 
 import torch
 import torch.cuda._sanitizer as csan
-from torch.cuda._sanitizer import StreamId, DataPtr, EventId
-from torch.testing._internal.common_utils import TestCase, run_tests, NoTest, TEST_CUDA
+from torch.cuda._sanitizer import DataPtr, EventId, StreamId
+from torch.testing._internal.common_utils import NoTest, run_tests, TEST_CUDA, TestCase
 
 
 if not TEST_CUDA:

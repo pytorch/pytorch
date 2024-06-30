@@ -28,14 +28,11 @@
 #include <c10/util/irange.h>
 
 #include <c10/core/Layout.h>
-#include <tuple>
-#include <vector>
 
 using namespace at;
 using namespace torch::autograd::utils;
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 Py_ssize_t THPVariable_length(PyObject* self) {
   HANDLE_TH_ERRORS
@@ -71,7 +68,7 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
   for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(
         index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
-    if (!THPVariable_CheckExact(obj) && check_has_torch_function(obj))
+    if (check_has_torch_function(obj))
       return -1;
     if (THPVariable_Check(obj)) {
       const auto& var = THPVariable_Unpack(obj);
@@ -181,7 +178,7 @@ static inline Variable applySlicing(
     variable_list& outIndices,
     bool is_tracing,
     const at::Device& self_device,
-    const c10::optional<int64_t>& self_ndim,
+    const std::optional<int64_t>& self_ndim,
     int64_t specified_dims) {
   int64_t size =
       PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
@@ -203,9 +200,9 @@ static inline Variable applySlicing(
     // nested tensor does not have a size (yet) so for now we represent its size
     // as null may need to be changed after we reach a better solution for
     // nested tensor size
-    c10::optional<SymIntArrayRef> result_sizes = result.is_nested()
-        ? c10::optional<SymIntArrayRef>(c10::nullopt)
-        : c10::optional<SymIntArrayRef>(result.sym_sizes());
+    std::optional<SymIntArrayRef> result_sizes = result.is_nested()
+        ? std::optional<SymIntArrayRef>(c10::nullopt)
+        : std::optional<SymIntArrayRef>(result.sym_sizes());
     result = at::indexing::handleDimInMultiDimIndexing(
         /*prev_dim_result=*/result,
         /*original_tensor=*/self,
@@ -343,7 +340,7 @@ static inline THPObjectPtr wrapTuple(PyObject* index) {
 // indexing is needed, it calls C++ `at::indexing::dispatch_index`.
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
-  if (!THPVariable_CheckExact(self) && check_has_torch_function(self)) {
+  if (check_has_torch_function(self)) {
     return handle_torch_function_indexing(self, index);
   }
   const auto& self_ = THPVariable_Unpack(self);
@@ -440,9 +437,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   if (py_value == nullptr) {
     throw TypeError("Tensor does not support deleting items");
   }
-  if ((!THPVariable_CheckExact(self) && check_has_torch_function(self)) ||
-      (!THPVariable_CheckExact(py_value) &&
-       check_has_torch_function(py_value))) {
+  if ((check_has_torch_function(self)) ||
+      (check_has_torch_function(py_value))) {
     py::object ret = py::reinterpret_steal<py::object>(
         handle_torch_function_indexing(self, index, py_value));
     return 0;
@@ -555,5 +551,4 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

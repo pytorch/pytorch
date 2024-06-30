@@ -748,7 +748,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     return &Delete;
   }
 
-  DataPtr allocate(const size_t nbytes) const override {
+  DataPtr allocate(const size_t nbytes) override {
     __block id<MTLBuffer> buf = nbytes > 0 ? _getAllocImpl().malloc(nbytes, m_usage) : nullptr;
     return {buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
   }
@@ -793,6 +793,9 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
   size_t getDriverAllocatedMemory() const override {
     return _getAllocImpl().getDriverAllocatedMemory();
+  }
+  size_t getRecommendedMaxMemory() const override {
+    return _getAllocImpl().getRecommendedMaxMemory();
   }
   ssize_t getLowWatermarkValue() const override {
     return _getAllocImpl().getLowWatermarkValue();

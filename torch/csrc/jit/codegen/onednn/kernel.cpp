@@ -275,8 +275,7 @@ void LlgaKernel::run(Stack& stack) {
   GRAPH_DEBUG("Preparing runtime tensors");
 #endif
   TensorArgs outputs;
-  RunArgs runInputs, runOutputs;
-  std::tie(runInputs, runOutputs) = prepareRunArgs(inputs, outputs);
+  auto [runInputs, runOutputs] = prepareRunArgs(inputs, outputs);
 #ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("Executing partition");
 #endif

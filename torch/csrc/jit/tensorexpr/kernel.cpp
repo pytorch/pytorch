@@ -5,7 +5,6 @@
 #include <ATen/TensorGeometry.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/irange.h>
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/mkldnn_rewrite.h>
@@ -128,9 +127,9 @@ bool& getOptConditionals() {
   return opt_conditionals;
 }
 
-c10::optional<at::Device> pickDeviceType(
+std::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs) {
-  c10::optional<at::Device> device = c10::nullopt;
+  std::optional<at::Device> device = c10::nullopt;
   for (auto const& input : inputs) {
     auto tt = input->type()->cast<TensorType>();
     if (tt && tt->device()) {
@@ -143,9 +142,9 @@ c10::optional<at::Device> pickDeviceType(
   return device;
 }
 
-static c10::optional<at::Device> pickDeviceType(
+static std::optional<at::Device> pickDeviceType(
     const std::shared_ptr<Graph>& graph) {
-  c10::optional<at::Device> device = c10::nullopt;
+  std::optional<at::Device> device = c10::nullopt;
   for (auto const& node : graph->nodes()) {
     for (auto const& input : node->inputs()) {
       if (auto tt = input->type()->cast<TensorType>()) {
@@ -179,7 +178,7 @@ static c10::optional<at::Device> pickDeviceType(
 
 // If v is a Tensor with concretely-known sizes and dtype, return them, else
 // nullopt.
-static c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
+static std::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
   auto const& it = v->type()->cast<TensorType>();
 
   c10::ScalarType dtype = c10::ScalarType::Float;
@@ -527,7 +526,7 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
   throw malformed_input(msg);
 }
 
-static c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
+static std::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
   if (v->type()->kind() == TypeKind::TensorType) {
     auto tt = v->type()->cast<TensorType>();
     if (tt->scalarType()) {
@@ -707,7 +706,7 @@ static void fuseAllLoops(StmtPtr st) {
 }
 
 // Compute the trip count of a loop if it is a constant.
-static c10::optional<int64_t> tripCount(ForPtr loop) {
+static std::optional<int64_t> tripCount(ForPtr loop) {
   auto tc = IRSimplifier::simplify(
       cast<int64_t>(ExprHandle(loop->stop()) - ExprHandle(loop->start())));
   if (auto val = to<LongImm>(tc.node())) {
@@ -885,7 +884,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
         inner1->set_gpu_thread_index(0);
       } else {
         throw std::runtime_error(
-            "Invalid loop-level: " + c10::to_string(loopLevels));
+            "Invalid loop-level: " + std::to_string(loopLevels));
       }
     }
   }
@@ -953,12 +952,12 @@ std::string TensorExprKernel::getCodeGenName(BackendType backendType) {
     default:
       throw std::runtime_error(
           "invalid backend type: " +
-          c10::to_string(static_cast<int>(backendType)));
+          std::to_string(static_cast<int>(backendType)));
   }
 }
 
 template <typename T>
-static bool isValidPrimProperty(const c10::optional<T>& a, T b) {
+static bool isValidPrimProperty(const std::optional<T>& a, T b) {
   return !a.has_value() || *a == b;
 }
 
@@ -1190,7 +1189,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
           ToDtype(static_cast<ScalarType>(*tt->scalarType())));
 
       result = Compute(
-          "input" + c10::to_string(bufs_.size() + 1),
+          "input" + std::to_string(bufs_.size() + 1),
           size_handles,
           [&](const std::vector<VarHandle>& axes) {
             ExprHandle idx = 0;

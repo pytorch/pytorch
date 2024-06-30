@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from collections import OrderedDict
 
 __all__ = ["raises", "expand_tuples", "reverse_dict", "groupby", "typename"]

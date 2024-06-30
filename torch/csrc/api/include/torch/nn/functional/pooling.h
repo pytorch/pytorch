@@ -25,7 +25,7 @@ inline Tensor avg_pool1d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.avg_pool1d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.avg_pool1d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::AvgPool1dFuncOptions`
@@ -57,7 +57,7 @@ inline Tensor avg_pool2d(
     ExpandingArray<2> padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   return torch::avg_pool2d(
       input,
       kernel_size,
@@ -71,7 +71,7 @@ inline Tensor avg_pool2d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.avg_pool2d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.avg_pool2d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::AvgPool2dFuncOptions`
@@ -104,7 +104,7 @@ inline Tensor avg_pool3d(
     ExpandingArray<3> padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   return torch::avg_pool3d(
       input,
       kernel_size,
@@ -118,7 +118,7 @@ inline Tensor avg_pool3d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.avg_pool3d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.avg_pool3d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::AvgPool3dFuncOptions`
@@ -160,7 +160,7 @@ inline Tensor max_pool1d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_pool1d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.max_pool1d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::MaxPool1dFuncOptions`
@@ -234,7 +234,7 @@ inline Tensor max_pool2d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_pool2d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.max_pool2d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::MaxPool2dFuncOptions`
@@ -308,7 +308,7 @@ inline Tensor max_pool3d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_pool3d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.max_pool3d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::MaxPool3dFuncOptions`
@@ -402,7 +402,7 @@ inline Tensor adaptive_max_pool1d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_max_pool1d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.adaptive_max_pool1d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -458,7 +458,7 @@ inline Tensor adaptive_max_pool2d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_max_pool2d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.adaptive_max_pool2d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -514,7 +514,7 @@ inline Tensor adaptive_max_pool3d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_max_pool3d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.adaptive_max_pool3d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -545,7 +545,7 @@ inline Tensor adaptive_avg_pool1d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_avg_pool1d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.adaptive_avg_pool1d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -576,7 +576,7 @@ inline Tensor adaptive_avg_pool2d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_avg_pool2d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.adaptive_avg_pool2d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -607,7 +607,7 @@ inline Tensor adaptive_avg_pool3d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_avg_pool3d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.adaptive_avg_pool3d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -632,7 +632,7 @@ inline std::vector<int64_t> _unpool_output_size(
     const IntArrayRef& kernel_size,
     const IntArrayRef& stride,
     const IntArrayRef& padding,
-    const c10::optional<std::vector<int64_t>>& output_size) {
+    const std::optional<std::vector<int64_t>>& output_size) {
   auto input_size = input.sizes();
   std::vector<int64_t> default_size;
   for (const auto d : c10::irange(kernel_size.size())) {
@@ -688,7 +688,7 @@ inline Tensor max_unpool1d(
     ExpandingArray<1> kernel_size,
     ExpandingArray<1> stride,
     ExpandingArray<1> padding,
-    const c10::optional<std::vector<int64_t>>& output_size) {
+    const std::optional<std::vector<int64_t>>& output_size) {
   auto output_size_ =
       _unpool_output_size(input, kernel_size, stride, padding, output_size);
   output_size_.push_back(1);
@@ -700,7 +700,7 @@ inline Tensor max_unpool1d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_unpool1d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.max_unpool1d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::MaxUnpool1dFuncOptions`
@@ -733,7 +733,7 @@ inline Tensor max_unpool2d(
     ExpandingArray<2> kernel_size,
     ExpandingArray<2> stride,
     ExpandingArray<2> padding,
-    const c10::optional<std::vector<int64_t>>& output_size) {
+    const std::optional<std::vector<int64_t>>& output_size) {
   auto output_size_ =
       _unpool_output_size(input, kernel_size, stride, padding, output_size);
 
@@ -743,7 +743,7 @@ inline Tensor max_unpool2d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_unpool2d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.max_unpool2d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::MaxUnpool2dFuncOptions`
@@ -776,7 +776,7 @@ inline Tensor max_unpool3d(
     ExpandingArray<3> kernel_size,
     ExpandingArray<3> stride,
     ExpandingArray<3> padding,
-    const c10::optional<std::vector<int64_t>>& output_size) {
+    const std::optional<std::vector<int64_t>>& output_size) {
   auto output_size_ =
       _unpool_output_size(input, kernel_size, stride, padding, output_size);
 
@@ -786,7 +786,7 @@ inline Tensor max_unpool3d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_unpool3d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.max_unpool3d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::MaxUnpool3dFuncOptions`
@@ -817,8 +817,8 @@ namespace detail {
 inline std::tuple<Tensor, Tensor> fractional_max_pool2d_with_indices(
     const Tensor& input,
     const ExpandingArray<2>& kernel_size,
-    const c10::optional<ExpandingArray<2>>& output_size,
-    const c10::optional<ExpandingArray<2, double>>& output_ratio,
+    const std::optional<ExpandingArray<2>>& output_size,
+    const std::optional<ExpandingArray<2, double>>& output_ratio,
     const Tensor& _random_samples) {
   if (output_size == c10::nullopt && output_ratio == c10::nullopt) {
     TORCH_CHECK(
@@ -826,7 +826,7 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool2d_with_indices(
         "fractional_max_pool2d requires specifying either ",
         "an output_size or an output_ratio");
   }
-  c10::optional<ExpandingArray<2>> output_size_ = output_size;
+  std::optional<ExpandingArray<2>> output_size_ = output_size;
   if (output_size_ == c10::nullopt) {
     TORCH_INTERNAL_ASSERT(output_ratio != c10::nullopt);
     output_size_ = {
@@ -875,8 +875,8 @@ namespace detail {
 inline Tensor fractional_max_pool2d(
     const Tensor& input,
     ExpandingArray<2> kernel_size,
-    c10::optional<ExpandingArray<2>> output_size,
-    c10::optional<ExpandingArray<2, double>> output_ratio,
+    std::optional<ExpandingArray<2>> output_size,
+    std::optional<ExpandingArray<2, double>> output_ratio,
     const Tensor& _random_samples) {
   return std::get<0>(fractional_max_pool2d_with_indices(
       input, kernel_size, output_size, output_ratio, _random_samples));
@@ -910,8 +910,8 @@ namespace detail {
 inline std::tuple<Tensor, Tensor> fractional_max_pool3d_with_indices(
     const Tensor& input,
     const ExpandingArray<3>& kernel_size,
-    const c10::optional<ExpandingArray<3>>& output_size,
-    const c10::optional<ExpandingArray<3, double>>& output_ratio,
+    const std::optional<ExpandingArray<3>>& output_size,
+    const std::optional<ExpandingArray<3, double>>& output_ratio,
     const Tensor& _random_samples) {
   if (output_size == c10::nullopt && output_ratio == c10::nullopt) {
     TORCH_CHECK(
@@ -920,7 +920,7 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool3d_with_indices(
         "an output_size or an output_ratio");
   }
 
-  c10::optional<ExpandingArray<3>> output_size_ = output_size;
+  std::optional<ExpandingArray<3>> output_size_ = output_size;
   if (output_size_ == c10::nullopt) {
     TORCH_INTERNAL_ASSERT(output_ratio != c10::nullopt);
     output_size_ = {
@@ -971,8 +971,8 @@ namespace detail {
 inline Tensor fractional_max_pool3d(
     const Tensor& input,
     ExpandingArray<3> kernel_size,
-    c10::optional<ExpandingArray<3>> output_size,
-    c10::optional<ExpandingArray<3, double>> output_ratio,
+    std::optional<ExpandingArray<3>> output_size,
+    std::optional<ExpandingArray<3, double>> output_ratio,
     const Tensor& _random_samples) {
   return std::get<0>(fractional_max_pool3d_with_indices(
       input, kernel_size, output_size, output_ratio, _random_samples));
@@ -1027,7 +1027,7 @@ inline Tensor lp_pool1d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.lp_pool1d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.lp_pool1d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::LPPool1dFuncOptions` class
@@ -1076,7 +1076,7 @@ inline Tensor lp_pool2d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.lp_pool2d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.lp_pool2d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::LPPool2dFuncOptions` class
@@ -1126,7 +1126,7 @@ inline Tensor lp_pool3d(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.lp_pool3d
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.lp_pool3d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::LPPool3dFuncOptions` class
