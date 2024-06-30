@@ -80,35 +80,14 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
         extra_check=lambda match: match.kwargs["item_idx"] == 0,
     )
     def reinplace_all_gather(match: Match, *args, **kwargs):
-        all_gather_inputs = kwargs["all_gather_inputs"]
-        inp_split_sizes = kwargs["inp_split_sizes"]
-        all_gather_input_numel = kwargs["all_gather_input_numel"]
-        world_size = kwargs["world_size"]
-        rank = kwargs["rank"]
-        dtype = kwargs["dtype"]
-        device = kwargs["device"]
-        group_size = kwargs["group_size"]
-        group_name = kwargs["group_name"]
-
         def repl(
-            all_gather_inputs,
-            inp_split_sizes,
-            all_gather_input_numel,
-            world_size,
-            rank,
-            dtype,
-            device,
-            group_size,
-            group_name,
+            *args,
         ):
+            copy_in_args = args[:-2]
+            group_size = args[-2]
+            group_name = args[-1]
             all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(
-                all_gather_inputs,
-                inp_split_sizes,
-                all_gather_input_numel,
-                world_size,
-                rank,
-                dtype,
-                device,
+                *copy_in_args
             )
             getitem = all_gather_copy_in[0]
             getitem_1 = all_gather_copy_in[1]
@@ -122,19 +101,17 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
         match.replace_by_example(
             repl,
             [
-                all_gather_inputs,
-                inp_split_sizes,
-                all_gather_input_numel,
-                world_size,
-                rank,
-                dtype,
-                device,
-                group_size,
-                group_name,
+                kwargs["all_gather_inputs"],
+                kwargs["inp_split_sizes"],
+                kwargs["all_gather_input_numel"],
+                kwargs["world_size"],
+                kwargs["rank"],
+                kwargs["dtype"],
+                kwargs["device"],
+                kwargs["group_size"],
+                kwargs["group_name"],
             ],
         )
-
-        # TODO: maybe you want to replace downstream usage of AGO with all_gather_copy_in[1]
 
     remove_unused_getitem(graph)
     graph_pass.apply(graph)  # type: ignore[arg-type]
