@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 """This module implements the user facing API for flex_attention in PyTorch."""
 import functools
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 import torch
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
@@ -42,7 +42,7 @@ def _identity(
 _DEFAULT_SPARSE_BLOCK_SIZE = 128
 
 
-class _BlockSparseMask:
+class _BlockMask:
     kv_num_blocks: torch.Tensor
     kv_indices: torch.Tensor
     q_num_blocks: torch.Tensor
@@ -65,6 +65,16 @@ class _BlockSparseMask:
         self.q_indices = q_indices
         self.KV_BLOCK_SIZE = KV_BLOCK_SIZE
         self.Q_BLOCK_SIZE = Q_BLOCK_SIZE
+
+    def as_tuple(self):
+        return (
+            self.kv_num_blocks,
+            self.kv_indices,
+            self.q_num_blocks,
+            self.q_indices,
+            self.KV_BLOCK_SIZE,
+            self.Q_BLOCK_SIZE,
+        )
 
 
 def broadcast_to_dim(x, dim):
@@ -107,11 +117,11 @@ def _convert_block_mask_to_mask(
     return block_mask
 
 
-def _create_block_sparse_mask(
+def _create_block_mask(
     mask: torch.Tensor,
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
-):
+) -> Tuple:
     block_mask = _convert_mask_to_block_mask(
         mask, KV_BLOCK_SIZE=KV_BLOCK_SIZE, Q_BLOCK_SIZE=Q_BLOCK_SIZE
     )
@@ -122,14 +132,14 @@ def _create_block_sparse_mask(
     q_indices = torch.argsort(block_mask, dim=2, descending=True, stable=True).permute(
         0, 1, 3, 2
     )
-    return _BlockSparseMask(
+    return _BlockMask(
         kv_num_blocks=kv_num_blocks.to(torch.int32).to(mask.device).contiguous(),
         kv_indices=kv_indices.to(torch.int32).to(mask.device).contiguous(),
         q_num_blocks=q_num_blocks.to(torch.int32).to(mask.device).contiguous(),
         q_indices=q_indices.to(torch.int32).to(mask.device).contiguous(),
         KV_BLOCK_SIZE=KV_BLOCK_SIZE,
         Q_BLOCK_SIZE=Q_BLOCK_SIZE,
-    )
+    ).as_tuple()
 
 
 """
@@ -140,18 +150,18 @@ def _create_block_sparse_mask(
 """
 
 
-def _create_empty_block_sparse_mask(query, key, value):
+def _create_empty_block_mask(query, key, value) -> Tuple:
     device = query.device
     kv_len = key.size()[-2]
     q_len = query.size()[-2]
-    return _BlockSparseMask(
+    return _BlockMask(
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
         q_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         q_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
         KV_BLOCK_SIZE=kv_len,
         Q_BLOCK_SIZE=q_len,
-    )
+    ).as_tuple()
 
 
 def _flex_attention(
@@ -159,7 +169,7 @@ def _flex_attention(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: _score_mod_signature = _identity,
-    block_sparse_mask: Optional[_BlockSparseMask] = None,
+    block_mask: Optional[Tuple] = None,
 ) -> torch.Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -209,8 +219,8 @@ def _flex_attention(
 
     """
 
-    if block_sparse_mask is None:
-        block_sparse_mask = _create_empty_block_sparse_mask(query, key, value)
+    if block_mask is None:
+        block_mask = _create_empty_block_mask(query, key, value)
     if torch.compiler.is_dynamo_compiling():
         # mark head_dim always to be static
         for x in [query, key, value]:
@@ -220,12 +230,7 @@ def _flex_attention(
             key,
             value,
             score_mod,
-            block_sparse_mask.kv_num_blocks,
-            block_sparse_mask.kv_indices,
-            block_sparse_mask.q_num_blocks,
-            block_sparse_mask.q_indices,
-            block_sparse_mask.KV_BLOCK_SIZE,
-            block_sparse_mask.Q_BLOCK_SIZE,
+            block_mask,
         )
         return out
 
@@ -247,12 +252,7 @@ def _flex_attention(
                     key,
                     value,
                     score_mod,
-                    block_sparse_mask.kv_num_blocks,
-                    block_sparse_mask.kv_indices,
-                    block_sparse_mask.q_num_blocks,
-                    block_sparse_mask.q_indices,
-                    block_sparse_mask.KV_BLOCK_SIZE,
-                    block_sparse_mask.Q_BLOCK_SIZE,
+                    block_mask,
                 )
                 return out
 

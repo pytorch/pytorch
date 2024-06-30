@@ -1480,17 +1480,6 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
 
 
 class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    @staticmethod
-    def normalize_to_args(args, kwargs):
-        # input signature is (query, key, value, score_mod, *other_buffers)
-        # Flatten args and kwargs into lists
-        flat_args = pytree.tree_flatten(args)[0]
-        flat_kwargs = pytree.tree_flatten(kwargs)[0]
-
-        # Combine the flattened lists
-        all_args = flat_args + flat_kwargs
-        return all_args
-
     def create_wrapped_node(
         self, tx, query: "VariableTracker", score_function: "VariableTracker"
     ):
@@ -1563,25 +1552,15 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             key,
             value,
             score_mod,
-            sparse_kv_num_blocks,
-            sparse_kv_indices,
-            sparse_q_num_blocks,
-            sparse_q_indices,
-            SPARSE_KV_BLOCK_SIZE,
-            SPARSE_Q_BLOCK_SIZE,
-        ) = self.normalize_to_args(args, kwargs)
+            block_mask,
+        ) = args
 
         p_args = self.create_wrapped_node(tx, query, score_mod)
         proxied_args = [
             query,
             key,
             value,
-            sparse_kv_num_blocks,
-            sparse_kv_indices,
-            sparse_q_num_blocks,
-            sparse_q_indices,
-            SPARSE_KV_BLOCK_SIZE,
-            SPARSE_Q_BLOCK_SIZE,
+            block_mask,
         ]
 
         # Store the invocation as a call
@@ -1599,8 +1578,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         example_value = (out_meta, lse_meta)
 
         # Compose the ordered HOO args from two parts:
-        # - inp_args: [query, key, value, sparse_kv_num_blocks, sparse_kv_indices,
-        #   sparse_q_num_blocks, sparse_q_indices, SPARSE_KV_BLOCK_SIZE, SPARSE_Q_BLOCK_SIZE]
+        # - inp_args: [query, key, value, block_mask]
         # - p_args: [score_mod, *other_buffers]
         return wrap_fx_proxy(
             tx=tx,
