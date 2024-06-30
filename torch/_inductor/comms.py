@@ -11,13 +11,6 @@ import torch
 
 from . import config, ir
 from .dependencies import WeakDep
-from .pattern_matcher import (
-    CallFunction,
-    KeywordArg,
-    Match,
-    PatternMatcherPass,
-    register_graph_pattern,
-)
 from .utils import is_collective, is_wait, tuple_sorted
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
@@ -27,6 +20,14 @@ if TYPE_CHECKING:
 
 
 def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
+    from .pattern_matcher import (
+        CallFunction,
+        KeywordArg,
+        Match,
+        PatternMatcherPass,
+        register_graph_pattern,
+    )
+
     """
     all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(...);
     getitem = all_gather_copy_in[0];
