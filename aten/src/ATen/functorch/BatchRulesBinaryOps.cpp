@@ -4,21 +4,22 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-#include <ATen/functorch/BatchRulesHelper.h>
-#include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/Operators.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/functorch/BatchRulesHelper.h>
+#include <ATen/functorch/PlumbingHelper.h>
 
 #include <utility>
 
 namespace at::functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor,optional<int64_t>> _binary_pointwise_batch_rule(
-    const Tensor& tensor, optional<int64_t> tensor_batch_dim,
-    const Tensor& other, optional<int64_t> other_batch_dim,
+std::tuple<Tensor, optional<int64_t>> _binary_pointwise_batch_rule(
+    const Tensor& tensor,
+    optional<int64_t> tensor_batch_dim,
+    const Tensor& other,
+    optional<int64_t> other_batch_dim,
     ExtraArgs... extra_args) {
-
   auto tensor_other = _binary_pointwise_helper(
       tensor, tensor_batch_dim, other, other_batch_dim);
   auto tensor_ = std::get<0>(tensor_other);
@@ -33,28 +34,37 @@ struct BinaryPointwiseBatchRuleHelper;
 
 template <typename F, F Func, typename T1, typename T2, typename... T>
 struct BinaryPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
-  static std::tuple<Tensor,optional<int64_t>> apply(
-      const Tensor& tensor, optional<int64_t> tensor_batch_dim,
-      const Tensor& other, optional<int64_t> other_batch_dim,
+  static std::tuple<Tensor, optional<int64_t>> apply(
+      const Tensor& tensor,
+      optional<int64_t> tensor_batch_dim,
+      const Tensor& other,
+      optional<int64_t> other_batch_dim,
       T... extra_args) {
     return _binary_pointwise_batch_rule<F, Func, T...>(
-        tensor, tensor_batch_dim, other, other_batch_dim,
+        tensor,
+        tensor_batch_dim,
+        other,
+        other_batch_dim,
         std::forward<T>(extra_args)...);
   }
 };
 
-#define BINARY_POINTWISE_BATCH_RULE(fn) SINGLE_ARG(\
-    BinaryPointwiseBatchRuleHelper<\
-      decltype(&fn),\
-      &fn,\
-      c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
+#define BINARY_POINTWISE_BATCH_RULE(fn) \
+  SINGLE_ARG(                           \
+      BinaryPointwiseBatchRuleHelper<   \
+          decltype(&fn),                \
+          &fn,                          \
+          c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
 template <typename A, A a, typename C>
 struct BinaryRandomPointwiseBatchRuleHelper;
 
 template <typename F, F Func, typename T1, typename T2, typename... T>
 struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
-  static Tensor apply(const Tensor& tensor, const Tensor& other, T... extra_args) {
+  static Tensor apply(
+      const Tensor& tensor,
+      const Tensor& other,
+      T... extra_args) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
     auto maybe_layer = maybeCurrentDynamicLayer();
     auto cur_level = maybe_layer->layerId();
@@ -65,37 +75,45 @@ struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
     auto [other_value, other_bdim] = unwrapTensorAtLevel(other, cur_level);
 
     check_randomness(randomness, (tensor_bdim || other_bdim));
-    if (randomness == RandomnessType::Different && !tensor_bdim && !other_bdim) {
+    if (randomness == RandomnessType::Different && !tensor_bdim &&
+        !other_bdim) {
       auto shape = tensor_value.sizes();
       VmapSymDimVector shapeVec(1, maybe_layer->batchSize());
       shapeVec.reserve(shape.size() + 1);
       shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
 
-      // not taken care of with binary batch rule, which assumes at least one input is batched
+      // not taken care of with binary batch rule, which assumes at least one
+      // input is batched
       tensor_value = tensor_value.expand_symint(shapeVec);
       tensor_bdim = 0;
-    } else if (randomness == RandomnessType::Same && !tensor_bdim && !other_bdim) {
-
+    } else if (
+        randomness == RandomnessType::Same && !tensor_bdim && !other_bdim) {
       // avoids unnecessary checks and batch rule assuming output is batched
       return Func(tensor_value, other_value, std::forward<T>(extra_args)...);
     }
     auto res = _binary_pointwise_batch_rule<F, Func, T...>(
-      tensor_value, tensor_bdim, other_value, other_bdim,
-      std::forward<T>(extra_args)...);
+        tensor_value,
+        tensor_bdim,
+        other_value,
+        other_bdim,
+        std::forward<T>(extra_args)...);
     return makeBatched(std::get<0>(res), std::get<1>(res), cur_level);
   }
 };
 
-#define BINARY_RANDOM_POINTWISE_BATCH_RULE(fn) SINGLE_ARG(\
-    BinaryRandomPointwiseBatchRuleHelper<\
-      decltype(&fn),\
-      &fn,\
-      c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
+#define BINARY_RANDOM_POINTWISE_BATCH_RULE(fn) \
+  SINGLE_ARG(                                  \
+      BinaryRandomPointwiseBatchRuleHelper<    \
+          decltype(&fn),                       \
+          &fn,                                 \
+          c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
 template <typename M, M Meth, typename... ExtraArgs>
 void binary_pointwise_inplace_batch_rule(
-    Tensor& tensor, optional<int64_t> tensor_batch_dim,
-    const Tensor& other, optional<int64_t> other_batch_dim,
+    Tensor& tensor,
+    optional<int64_t> tensor_batch_dim,
+    const Tensor& other,
+    optional<int64_t> other_batch_dim,
     ExtraArgs... extra_args) {
   if (!tensor_batch_dim && other_batch_dim) {
     vmapIncompatibleInplaceError("inplace arithmetic");
@@ -120,9 +138,11 @@ void binary_pointwise_inplace_batch_rule(
 }
 
 template <typename F, F Func>
-std::tuple<Tensor,optional<int64_t>> comparison_pointwise_batch_rule(
-    const Tensor& tensor, optional<int64_t> tensor_batch_dim,
-    const Tensor& other, optional<int64_t> other_batch_dim) {
+std::tuple<Tensor, optional<int64_t>> comparison_pointwise_batch_rule(
+    const Tensor& tensor,
+    optional<int64_t> tensor_batch_dim,
+    const Tensor& other,
+    optional<int64_t> other_batch_dim) {
   // compute max logical rank
   auto tensor_logical_rank = rankWithoutBatchDim(tensor, tensor_batch_dim);
   auto other_logical_rank = rankWithoutBatchDim(other, other_batch_dim);
@@ -139,48 +159,62 @@ std::tuple<Tensor,optional<int64_t>> comparison_pointwise_batch_rule(
   other_ = maybePadToLogicalRank(other_, other_batch_dim, max_logical_rank);
 
   auto result = Func(tensor_, other_);
-  return std::make_tuple( std::move(result), 0 );
+  return std::make_tuple(std::move(result), 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>> where_self_batch_rule(
-    const Tensor& condition, optional<int64_t> condition_bdim,
-    const Tensor& self, optional<int64_t> self_bdim, const Tensor& other, optional<int64_t> other_bdim) {
+static std::tuple<Tensor, optional<int64_t>> where_self_batch_rule(
+    const Tensor& condition,
+    optional<int64_t> condition_bdim,
+    const Tensor& self,
+    optional<int64_t> self_bdim,
+    const Tensor& other,
+    optional<int64_t> other_bdim) {
   auto condition_logical_rank = rankWithoutBatchDim(condition, condition_bdim);
   auto tensor_logical_rank = rankWithoutBatchDim(self, self_bdim);
   auto other_logical_rank = rankWithoutBatchDim(other, other_bdim);
-  auto max_logical_rank = std::max({tensor_logical_rank, other_logical_rank, condition_logical_rank});
+  auto max_logical_rank = std::max(
+      {tensor_logical_rank, other_logical_rank, condition_logical_rank});
 
   auto condition_ = moveBatchDimToFront(condition, condition_bdim);
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto other_ = moveBatchDimToFront(other, other_bdim);
 
-  condition_ = maybePadToLogicalRank(condition_, condition_bdim, max_logical_rank);
+  condition_ =
+      maybePadToLogicalRank(condition_, condition_bdim, max_logical_rank);
   self_ = maybePadToLogicalRank(self_, self_bdim, max_logical_rank);
   other_ = maybePadToLogicalRank(other_, other_bdim, max_logical_rank);
   return std::make_tuple(at::where(condition_, self_, other_), 0);
 }
 
 static std::tuple<Tensor, optional<int64_t>> gelu_backward_batch_rule(
-    const Tensor& grad_out, optional<int64_t> grad_out_bdim, const Tensor& input, optional<int64_t> input_bdim,
+    const Tensor& grad_out,
+    optional<int64_t> grad_out_bdim,
+    const Tensor& input,
+    optional<int64_t> input_bdim,
     c10::string_view approximate) {
-
   // repeat the preprocessing from _binary_pointwise_batch_rule
-  const auto tensor_other = _binary_pointwise_helper(grad_out, grad_out_bdim, input, input_bdim);
+  const auto tensor_other =
+      _binary_pointwise_helper(grad_out, grad_out_bdim, input, input_bdim);
   auto grad_out_ = std::get<0>(tensor_other);
   auto input_ = std::get<1>(tensor_other);
 
-  // gelu_backward doesn't broadcast well so we need to insist all inputs have a bdim
-  const auto batch_size = get_bdim_size2(grad_out, grad_out_bdim, input, input_bdim);
+  // gelu_backward doesn't broadcast well so we need to insist all inputs have a
+  // bdim
+  const auto batch_size =
+      get_bdim_size2(grad_out, grad_out_bdim, input, input_bdim);
   grad_out_ = ensure_has_bdim(grad_out_, grad_out_bdim.has_value(), batch_size);
   input_ = ensure_has_bdim(input_, input_bdim.has_value(), batch_size);
 
   return std::make_tuple(at::gelu_backward(grad_out_, input_, approximate), 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>> masked_select_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim,
-    const Tensor& mask, optional<int64_t> mask_bdim) {
-  TORCH_CHECK(!mask_bdim.has_value(),
+static std::tuple<Tensor, optional<int64_t>> masked_select_batch_rule(
+    const Tensor& self,
+    optional<int64_t> self_bdim,
+    const Tensor& mask,
+    optional<int64_t> mask_bdim) {
+  TORCH_CHECK(
+      !mask_bdim.has_value(),
       "vmap: Attempted to vmap over `mask` in torch.masked_select(self, mask) ",
       "We cannot support this because for each batch this would return a ",
       "differently shaped Tensor. "
@@ -192,15 +226,19 @@ static std::tuple<Tensor,optional<int64_t>> masked_select_batch_rule(
   self_ = maybePadToLogicalRank(self_, 0, max_logical_rank);
 
   // masked_select returns a 1D tensor, so we have to reshape it into 2D
-  const auto result = at::masked_select(self_, mask).view({ batch_size, -1 });
+  const auto result = at::masked_select(self_, mask).view({batch_size, -1});
   return std::make_tuple(result, 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>> masked_select_backward_batch_rule(
-    const Tensor& grad, optional<int64_t> grad_bdim,
-    const Tensor& self, optional<int64_t> self_bdim,
-    const Tensor& mask, optional<int64_t> mask_bdim) {
-  TORCH_CHECK(!mask_bdim.has_value(),
+static std::tuple<Tensor, optional<int64_t>> masked_select_backward_batch_rule(
+    const Tensor& grad,
+    optional<int64_t> grad_bdim,
+    const Tensor& self,
+    optional<int64_t> self_bdim,
+    const Tensor& mask,
+    optional<int64_t> mask_bdim) {
+  TORCH_CHECK(
+      !mask_bdim.has_value(),
       "vmap: Attempted to vmap over `mask` in torch.masked_select_backward(grad, self, mask) ",
       "We cannot support this because for each batch this would return a ",
       "differently shaped Tensor. "
@@ -217,23 +255,27 @@ static std::tuple<Tensor,optional<int64_t>> masked_select_backward_batch_rule(
   self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
   grad_ = ensure_has_bdim(grad_, grad_bdim.has_value(), batch_size);
 
-  const auto result = at::masked_select_backward(grad_, self_.contiguous(), mask);
+  const auto result =
+      at::masked_select_backward(grad_, self_.contiguous(), mask);
   return std::make_tuple(result, 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
-    const Tensor& grad, optional<int64_t> grad_bdim,
-    const Tensor& x1, optional<int64_t> x1_bdim,
-    const Tensor& x2, optional<int64_t> x2_bdim,
+static std::tuple<Tensor, optional<int64_t>> cdist_backward_batch_rule(
+    const Tensor& grad,
+    optional<int64_t> grad_bdim,
+    const Tensor& x1,
+    optional<int64_t> x1_bdim,
+    const Tensor& x2,
+    optional<int64_t> x2_bdim,
     const double p,
-    const Tensor& cdist, optional<int64_t> cdist_bdim) {
-
+    const Tensor& cdist,
+    optional<int64_t> cdist_bdim) {
   auto x1_ = x1;
   if (cdist_bdim && !x1_bdim) {
     // We need to make sure that x1 has batch dim if cdist has one
     // otherwise, we get
-    // RuntimeError: Function CdistBackward0 returned an invalid gradient at index 1 - got [5]
-    // but expected shape compatible with [4, 5]
+    // RuntimeError: Function CdistBackward0 returned an invalid gradient at
+    // index 1 - got [5] but expected shape compatible with [4, 5]
     auto bs = cdist.size(*cdist_bdim);
     x1_ = ensure_has_bdim(x1, false, bs);
     x1_ = x1_.contiguous();
@@ -281,45 +323,66 @@ static void fill__Tensor_batch_rule(
     vmapIncompatibleInplaceError("fill_");
   }
   auto self_and_other = _binary_pointwise_helper(
-      self, self_bdim, other, other_bdim, /*do_type_promotion*/false);
+      self, self_bdim, other, other_bdim, /*do_type_promotion*/ false);
   std::get<0>(self_and_other).copy_(std::get<1>(self_and_other));
 }
 
 static std::tuple<Tensor, optional<int64_t>> log_sigmoid_backward_batch_rule(
-  Tensor& grad, optional<int64_t> grad_bdim,
-  Tensor& self, optional<int64_t> self_bdim,
-  Tensor& buffer, optional<int64_t> buffer_bdim) {
-  // NB: This emulates handle_pointwise_ops except we ignore the last argument, buffer
-  // when any of the inputs are on cuda.
-  // We do this because on cuda, buffer is a dummy tensor always of logical rank 1 and
-  // it becomes an issue when the rest of the inputs are scalar
-  int64_t out_logical_rank = std::max(rankWithoutBatchDim(grad, grad_bdim), rankWithoutBatchDim(self, self_bdim));
+    Tensor& grad,
+    optional<int64_t> grad_bdim,
+    Tensor& self,
+    optional<int64_t> self_bdim,
+    Tensor& buffer,
+    optional<int64_t> buffer_bdim) {
+  // NB: This emulates handle_pointwise_ops except we ignore the last argument,
+  // buffer when any of the inputs are on cuda. We do this because on cuda,
+  // buffer is a dummy tensor always of logical rank 1 and it becomes an issue
+  // when the rest of the inputs are scalar
+  int64_t out_logical_rank = std::max(
+      rankWithoutBatchDim(grad, grad_bdim),
+      rankWithoutBatchDim(self, self_bdim));
   if (!grad.is_cuda() && !self.is_cuda() && !buffer.is_cuda()) {
-    out_logical_rank = std::max(out_logical_rank, rankWithoutBatchDim(buffer, buffer_bdim));
+    out_logical_rank =
+        std::max(out_logical_rank, rankWithoutBatchDim(buffer, buffer_bdim));
   }
-  Tensor out_grad = maybePadToLogicalRank(moveBatchDimToFront(grad, grad_bdim), grad_bdim, out_logical_rank);
-  Tensor out_self = maybePadToLogicalRank(moveBatchDimToFront(self, self_bdim), self_bdim, out_logical_rank);
-  Tensor out_buffer = maybePadToLogicalRank(moveBatchDimToFront(buffer, buffer_bdim), buffer_bdim, out_logical_rank);
-  return std::make_tuple(at::log_sigmoid_backward(out_grad, out_self, out_buffer), 0);
+  Tensor out_grad = maybePadToLogicalRank(
+      moveBatchDimToFront(grad, grad_bdim), grad_bdim, out_logical_rank);
+  Tensor out_self = maybePadToLogicalRank(
+      moveBatchDimToFront(self, self_bdim), self_bdim, out_logical_rank);
+  Tensor out_buffer = maybePadToLogicalRank(
+      moveBatchDimToFront(buffer, buffer_bdim), buffer_bdim, out_logical_rank);
+  return std::make_tuple(
+      at::log_sigmoid_backward(out_grad, out_self, out_buffer), 0);
 }
 
-static Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, std::optional<Generator> gen) {
-  return at::binomial(count, prob.contiguous(), std::move(gen)); // Bug in PyTorch, prob shouldn't need to be contiguous
+static Tensor binomial_wrapper(
+    const Tensor& count,
+    const Tensor& prob,
+    std::optional<Generator> gen) {
+  return at::binomial(
+      count,
+      prob.contiguous(),
+      std::move(gen)); // Bug in PyTorch, prob shouldn't need to be contiguous
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
-  #define BINARY_RANDOM_POINTWISE(op) \
-    m.impl(#op, BINARY_RANDOM_POINTWISE_BATCH_RULE(ATEN_FN(op)));
-  #define BINARY_RANDOM_POINTWISE2(op, overload) \
-    m.impl(#op"."#overload, BINARY_RANDOM_POINTWISE_BATCH_RULE(ATEN_FN2(op, overload)));
+#define BINARY_RANDOM_POINTWISE(op) \
+  m.impl(#op, BINARY_RANDOM_POINTWISE_BATCH_RULE(ATEN_FN(op)));
+#define BINARY_RANDOM_POINTWISE2(op, overload) \
+  m.impl(                                      \
+      #op "." #overload,                       \
+      BINARY_RANDOM_POINTWISE_BATCH_RULE(ATEN_FN2(op, overload)));
 
   BINARY_RANDOM_POINTWISE2(normal, Tensor_Tensor);
-  m.impl("binomial", BINARY_RANDOM_POINTWISE_BATCH_RULE(at::functorch::binomial_wrapper));
+  m.impl(
+      "binomial",
+      BINARY_RANDOM_POINTWISE_BATCH_RULE(at::functorch::binomial_wrapper));
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 #define BINARY_POINTWISE2(op, overload) \
-  VMAP_SUPPORT2(op, overload, BINARY_POINTWISE_BATCH_RULE(ATEN_FN2(op, overload)));
+  VMAP_SUPPORT2(                        \
+      op, overload, BINARY_POINTWISE_BATCH_RULE(ATEN_FN2(op, overload)));
 #define BINARY_POINTWISE(op) \
   VMAP_SUPPORT(op, BINARY_POINTWISE_BATCH_RULE(ATEN_FN(op)));
 #define UNARY_POINTWISE2(op, overload) \
@@ -330,18 +393,18 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(op, overload, SCALAR_UNARY_BATCH_RULE(ATEN_FN2(op, overload)));
 
 #define BINARY_SCALAR_2(op, tensor_tensor, tensor_scalar) \
-  BINARY_POINTWISE2(op, tensor_tensor);\
+  BINARY_POINTWISE2(op, tensor_tensor);                   \
   UNARY_POINTWISE2(op, tensor_scalar);
 
 // For all 3 combinations of Tensor x Tensor, Tensor x Scalar, Scalar x Tensor
 #define BINARY_SCALAR_3(op, tensor_tensor, tensor_scalar, scalar_tensor) \
-  BINARY_POINTWISE2(op, tensor_tensor);\
-  UNARY_POINTWISE2(op, tensor_scalar);\
+  BINARY_POINTWISE2(op, tensor_tensor);                                  \
+  UNARY_POINTWISE2(op, tensor_scalar);                                   \
   POINTWISE_BOXED(op.scalar_tensor);
 
 #define BINARY_SCALAR_3_Tensor(op, tensor_scalar, scalar_tensor) \
-  BINARY_POINTWISE(op);\
-  UNARY_POINTWISE2(op, tensor_scalar);\
+  BINARY_POINTWISE(op);                                          \
+  UNARY_POINTWISE2(op, tensor_scalar);                           \
   POINTWISE_BOXED(op.scalar_tensor);
 
   // Batching rule registrations start
@@ -386,8 +449,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(complex);
 
   VARIADIC_BDIMS_BOXED(_euclidean_dist);
-  // Implementation note: _binary_pointwise_helper performs a dtype promotion if args are scalars,
-  // but cdist can't work with scalars, at least 2d tensors.
+  // Implementation note: _binary_pointwise_helper performs a dtype promotion if
+  // args are scalars, but cdist can't work with scalars, at least 2d tensors.
   BINARY_POINTWISE(_cdist_forward);
   VMAP_SUPPORT(_cdist_backward, cdist_backward_batch_rule);
 
@@ -454,10 +517,13 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(threshold_backward);
   BINARY_POINTWISE(silu_backward);
 
-  using TensorScalarInplaceT = Tensor& (Tensor::*)(const Tensor&, const Scalar&) const;
-  using ScalarScalarInplaceT = Tensor& (Tensor::*)(const Scalar&, const Scalar&) const;
+  using TensorScalarInplaceT =
+      Tensor& (Tensor::*)(const Tensor&, const Scalar&) const;
+  using ScalarScalarInplaceT =
+      Tensor& (Tensor::*)(const Scalar&, const Scalar&) const;
   using TensorInplaceT = Tensor& (Tensor::*)(const Tensor&) const;
-  using TensorInplaceModeT = Tensor& (Tensor::*)(const Tensor&, std::optional<c10::string_view>) const;
+  using TensorInplaceModeT =
+      Tensor& (Tensor::*)(const Tensor&, std::optional<c10::string_view>) const;
   using ScalarInplaceT = Tensor& (Tensor::*)(const Scalar&) const;
   using CopyT = Tensor& (Tensor::*)(const Tensor&, bool) const;
 
@@ -465,22 +531,91 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   POINTWISE_BOXED(atan2_);
   POINTWISE_BOXED(gcd_);
   POINTWISE_BOXED(lcm_);
-  VMAP_SUPPORT2(add_, Scalar, SINGLE_ARG(unary_inplace_batch_rule<ScalarScalarInplaceT, &Tensor::add_, const Scalar&, const Scalar&>));
-  VMAP_SUPPORT2(sub_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorScalarInplaceT, &Tensor::sub_, const Scalar&>));
-  VMAP_SUPPORT2(sub_, Scalar, SINGLE_ARG(unary_inplace_batch_rule<ScalarScalarInplaceT, &Tensor::sub_, const Scalar&, const Scalar&>));
-  VMAP_SUPPORT2(mul_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::mul_>));
-  VMAP_SUPPORT2(mul_, Scalar, SINGLE_ARG(unary_inplace_batch_rule<ScalarInplaceT, &Tensor::mul_, const Scalar&>));
-  VMAP_SUPPORT2(div_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::div_>));
-  VMAP_SUPPORT2(div_, Tensor_mode, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceModeT, &Tensor::div_, std::optional<c10::string_view>>));
-  VMAP_SUPPORT2(div_, Scalar, SINGLE_ARG(unary_inplace_batch_rule<ScalarInplaceT, &Tensor::div_, const Scalar&>));
-  VMAP_SUPPORT2(clamp_min_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::clamp_min_>));
-  VMAP_SUPPORT2(clamp_max_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::clamp_max_>));
-  VMAP_SUPPORT2(masked_fill_, Scalar, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorScalarInplaceT, &Tensor::masked_fill_, const Scalar&>));
-  VMAP_SUPPORT(copy_, SINGLE_ARG(binary_pointwise_inplace_batch_rule<CopyT, &Tensor::copy_, bool>));
+  VMAP_SUPPORT2(
+      add_,
+      Scalar,
+      SINGLE_ARG(unary_inplace_batch_rule<
+                 ScalarScalarInplaceT,
+                 &Tensor::add_,
+                 const Scalar&,
+                 const Scalar&>));
+  VMAP_SUPPORT2(
+      sub_,
+      Tensor,
+      SINGLE_ARG(binary_pointwise_inplace_batch_rule<
+                 TensorScalarInplaceT,
+                 &Tensor::sub_,
+                 const Scalar&>));
+  VMAP_SUPPORT2(
+      sub_,
+      Scalar,
+      SINGLE_ARG(unary_inplace_batch_rule<
+                 ScalarScalarInplaceT,
+                 &Tensor::sub_,
+                 const Scalar&,
+                 const Scalar&>));
+  VMAP_SUPPORT2(
+      mul_,
+      Tensor,
+      SINGLE_ARG(
+          binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::mul_>));
+  VMAP_SUPPORT2(
+      mul_,
+      Scalar,
+      SINGLE_ARG(unary_inplace_batch_rule<
+                 ScalarInplaceT,
+                 &Tensor::mul_,
+                 const Scalar&>));
+  VMAP_SUPPORT2(
+      div_,
+      Tensor,
+      SINGLE_ARG(
+          binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::div_>));
+  VMAP_SUPPORT2(
+      div_,
+      Tensor_mode,
+      SINGLE_ARG(binary_pointwise_inplace_batch_rule<
+                 TensorInplaceModeT,
+                 &Tensor::div_,
+                 std::optional<c10::string_view>>));
+  VMAP_SUPPORT2(
+      div_,
+      Scalar,
+      SINGLE_ARG(unary_inplace_batch_rule<
+                 ScalarInplaceT,
+                 &Tensor::div_,
+                 const Scalar&>));
+  VMAP_SUPPORT2(
+      clamp_min_,
+      Tensor,
+      SINGLE_ARG(binary_pointwise_inplace_batch_rule<
+                 TensorInplaceT,
+                 &Tensor::clamp_min_>));
+  VMAP_SUPPORT2(
+      clamp_max_,
+      Tensor,
+      SINGLE_ARG(binary_pointwise_inplace_batch_rule<
+                 TensorInplaceT,
+                 &Tensor::clamp_max_>));
+  VMAP_SUPPORT2(
+      masked_fill_,
+      Scalar,
+      SINGLE_ARG(binary_pointwise_inplace_batch_rule<
+                 TensorScalarInplaceT,
+                 &Tensor::masked_fill_,
+                 const Scalar&>));
+  VMAP_SUPPORT(
+      copy_,
+      SINGLE_ARG(
+          binary_pointwise_inplace_batch_rule<CopyT, &Tensor::copy_, bool>));
 
-#define COMPARISON_POINTWISE(op) \
-  VMAP_SUPPORT2(op, Tensor, \
-      SINGLE_ARG(comparison_pointwise_batch_rule<decltype(&ATEN_FN2(op, Tensor)), &at::op>)); \
+#define COMPARISON_POINTWISE(op)                  \
+  VMAP_SUPPORT2(                                  \
+      op,                                         \
+      Tensor,                                     \
+      SINGLE_ARG(comparison_pointwise_batch_rule< \
+                 decltype(&ATEN_FN2(op, Tensor)), \
+                 &at::op>));                      \
   UNARY_POINTWISE2(op, Scalar)
 
   COMPARISON_POINTWISE(eq);
@@ -498,11 +633,17 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 #undef UNARY_SCALAR_POINTWISE2
 #undef BINARY_SCALAR_3
 
-#define LOGICAL_COMPARISON_POINTWISE(op) \
-  VMAP_SUPPORT(op, \
-      SINGLE_ARG(comparison_pointwise_batch_rule<decltype(&ATEN_FN(op)), &ATEN_FN(op)>)); \
-  VMAP_SUPPORT(op ## _, \
-      SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor:: op ## _ >));
+#define LOGICAL_COMPARISON_POINTWISE(op)              \
+  VMAP_SUPPORT(                                       \
+      op,                                             \
+      SINGLE_ARG(comparison_pointwise_batch_rule<     \
+                 decltype(&ATEN_FN(op)),              \
+                 &ATEN_FN(op)>));                     \
+  VMAP_SUPPORT(                                       \
+      op##_,                                          \
+      SINGLE_ARG(binary_pointwise_inplace_batch_rule< \
+                 TensorInplaceT,                      \
+                 &Tensor::op##_>));
 
   LOGICAL_COMPARISON_POINTWISE(logical_and);
   LOGICAL_COMPARISON_POINTWISE(logical_or);

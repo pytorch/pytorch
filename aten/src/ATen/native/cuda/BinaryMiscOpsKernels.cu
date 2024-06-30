@@ -6,6 +6,7 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/NumericUtils.h>
+#include <ATen/Math.h>
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
@@ -65,6 +66,14 @@ void xlog1py_kernel_cuda(TensorIteratorBase& iter) {
         return 0;
       }
       return x * std::log1p(y);
+    });
+  });
+}
+
+void betainc_kernel_cuda(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "betainc_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t x, scalar_t a, scalar_t b) -> scalar_t {
+        return calc_betainc(x, a, b);
     });
   });
 }

@@ -1250,6 +1250,14 @@ void xlog1py_kernel(TensorIteratorBase& iter) {
       });
 }
 
+void betainc_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "betainc_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t x, scalar_t a, scalar_t b) -> scalar_t {
+        return calc_betainc(x, a, b);
+    });
+  });
+}
+
 void zeta_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "zeta_cpu", [&]() {
     cpu_kernel(
@@ -1397,6 +1405,7 @@ REGISTER_DISPATCH(gcd_stub, &gcd_kernel);
 REGISTER_DISPATCH(lcm_stub, &lcm_kernel);
 REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel);
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel);
+REGISTER_DISPATCH(betainc_stub, &betainc_kernel);
 REGISTER_DISPATCH(zeta_stub, &zeta_kernel);
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel);
 REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel);
