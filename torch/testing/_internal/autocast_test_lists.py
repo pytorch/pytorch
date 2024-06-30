@@ -184,6 +184,7 @@ class AutocastTestLists:
             ("cross", (torch.randn(3, dtype=torch.float32, device=dev),
                        torch.randn(3, dtype=torch.float16, device=dev))),
             ("dot", pointwise0_fp16 + pointwise1_fp32),
+            ("vdot", pointwise0_fp16 + pointwise1_fp32),
             ("grid_sampler", (torch.randn((2, 3, 33, 22), dtype=torch.float16, device=dev),
                               torch.randn((2, 22, 11, 2), dtype=torch.float32, device=dev),
                               0, 0, False)),

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This file contains utilities for tracing through __torch_dispatch__ based tensor subclasses and modes.
 AOTAutograd's responsibility is to trace through all pytorch capabilities that live in the pytorch dispatcher,
@@ -9,9 +10,10 @@ from typing import Any, List, Optional, Tuple, Union
 import torch.utils._pytree as pytree
 
 from torch import Tensor
+from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .schemas import SubclassCreationMeta, ViewAndMutationMeta
+from .schemas import MutationType, SubclassCreationMeta, ViewAndMutationMeta
 from .utils import strict_zip
 
 zip = strict_zip
@@ -24,40 +26,68 @@ def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
         for x in args_flattened
         if isinstance(x, Tensor)
     )
+    from torch._functorch._aot_autograd.schemas import SubclassCreationMeta
+
     any_subclass_outputs = any(
-        is_traceable_wrapper_subclass(x)
-        for x in fw_metadata.traced_tangents
-        if isinstance(x, Tensor)
+        type(x) is SubclassCreationMeta for x in fw_metadata.subclass_fw_graph_out_meta
     )
     # This tells us whether or not we need to perform any unwrapping/wrapping of tensor subclasses at runtime.
     return any_subclass_args or any_subclass_outputs
+
+
+def create_subclass_metadata(a, start_idx):
+    if not is_traceable_wrapper_subclass(a):
+        return None, start_idx + 1
+
+    inner_keys, metadata = a.__tensor_flatten__()
+    new_start_idx = start_idx
+    attrs = {}
+    for key in inner_keys:
+        new_subclass_meta, new_start_idx = create_subclass_metadata(
+            getattr(a, key), new_start_idx
+        )
+        attrs[key] = new_subclass_meta
+
+    return (
+        SubclassCreationMeta(
+            flat_tensor_start_idx=start_idx,
+            arg_count=new_start_idx - start_idx,
+            attrs=attrs,
+            meta=metadata,
+            outer_size=a.size(),
+            outer_stride=a.stride(),
+            original_subclass=a,
+        ),
+        new_start_idx,
+    )
+
+
+# Given a real tensor subclass, returns a nested list of Plain tensor types
+def get_types_for_subclass(tensor_subclass):
+    if not is_traceable_wrapper_subclass(tensor_subclass):
+        return ["Tensor"]
+    inner_keys, _ = tensor_subclass.__tensor_flatten__()
+    result = []
+    for key in inner_keys:
+        inner_tensor = getattr(tensor_subclass, key)
+        result.extend(get_types_for_subclass(inner_tensor))
+    return result
 
 
 # Given a flat list of arguments, some of which may be tensor subclasses,
 # computes metadata about "how to reconstruct the current list of subclasses,
 # if we were given their flattened dense tensors instead"
 def create_subclass_meta(
-    curr_args: Union[List[Any], Tuple[Any, ...]],
+    curr_args: Union[List[Any], Tuple[Any, ...]]
 ) -> List[Union[int, SubclassCreationMeta]]:
     idx = 0
     infos: List[Union[int, SubclassCreationMeta]] = []
     for a in curr_args:
         if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a):
-            attrs, meta = a.__tensor_flatten__()  # type: ignore[attr-defined]
             start_idx = idx
-            cnt = len(attrs)
-            curr_cnt = cnt
-            infos.append(
-                SubclassCreationMeta(
-                    flat_tensor_start_idx=start_idx,
-                    arg_count=curr_cnt,
-                    original_subclass=a,
-                    meta=meta,
-                    inner_keys=attrs,
-                    outer_size=a.shape,
-                    outer_stride=a.stride(),
-                )
-            )
+            subclass_meta, _ = create_subclass_metadata(a, start_idx)
+            infos.append(subclass_meta)
+            cnt = subclass_meta.arg_count
         else:
             infos.append(idx)
             cnt = 1
@@ -80,11 +110,10 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
     def concat_inner_tensors_from_subclasses(xs):
         xs_inner = []
         for x in xs:
-            if isinstance(x, Tensor) and is_traceable_wrapper_subclass(x):
-                attrs, _ = x.__tensor_flatten__()  # type: ignore[attr-defined]
-                xs_inner += [getattr(x, attr) for attr in attrs]
+            if is_traceable_wrapper_subclass(x):
+                xs_inner.extend(get_plain_tensors(x))
             else:
-                xs_inner += [x]
+                xs_inner.append(x)
         return xs_inner
 
     if is_joint_structure:
@@ -148,7 +177,11 @@ def wrap_tensor_subclasses(
     # but `subclass_metas` will only correspond to subclass metatadata on `user_fw_outs`.
     # We then need to make sure that we return (*wrapped_user_fw_outs, *activations).
     if num_fw_outs_saved_for_bw is not None:
-        assert len(unwrapped_args) == num_args_tallied + num_fw_outs_saved_for_bw
+        assert len(unwrapped_args) == num_args_tallied + num_fw_outs_saved_for_bw, (
+            f"Expected the number actual unwrapped-subclass outputs {len(unwrapped_args)} to equal "
+            f"the number of args calculated from subclasses ({num_args_tallied}) plus the number of "
+            f"additional activations saved for the backward pass ({num_fw_outs_saved_for_bw})"
+        )
         activations = unwrapped_args[num_args_tallied:]
         if isinstance(wrapped_args, tuple) and isinstance(activations, tuple):
             return wrapped_args + activations
@@ -237,3 +270,55 @@ def create_metadata_for_subclass(meta: ViewAndMutationMeta) -> ViewAndMutationMe
         subclass_tangent_meta=subclass_tangent_meta,  # type: ignore[arg-type]
     )
     return metadata
+
+
+def compute_inner_mutated_inp_indices_from_subclass_meta(
+    fw_metadata: ViewAndMutationMeta,
+    inner_metadata: ViewAndMutationMeta,
+) -> List[int]:
+    # Note: [Recomputing subclass mutation handling]
+    #
+    # Generally, if a subclass requires grad, its components will not require grad.
+    # But for the purposes of tracking returned tensors, we should treat those component
+    # tensors as if they require grad.
+    #
+    # For example, if the subclass tensor requires grad and will be mutated in a way that
+    # requires us to handle the mutation outside of the graph, we need to return it
+    # from the forward graph. The inner_meta data won't consider the component tensors
+    # as if they need to be returned, because they don't require grad; but really, we
+    # should handle those tensors the same way we handle the subclass tensor itself; i.e.
+    # if we'd include the subclass tensor as part of the outputs, then we should also
+    # include the component tensors.
+    #
+    # To do this, we patch num_mutated_inp_runtime_indices below by expanding the inputs
+    # from the outer subclass tensors and propagating
+
+    updated_input_info = []
+    inner_idx = 0
+    if not fw_metadata.subclass_inp_meta:
+        # Sometimes we don't have subclass info, e.g. synthetic_base codepaths
+        return inner_metadata.mutated_inp_runtime_indices
+    assert len(fw_metadata.subclass_inp_meta) == len(fw_metadata.input_info)
+    for outer_idx, inp_meta in enumerate(fw_metadata.subclass_inp_meta):
+        if isinstance(inp_meta, int):
+            assert outer_idx < len(fw_metadata.input_info)
+            if inner_metadata is not None:
+                assert inner_idx < len(inner_metadata.input_info)
+                assert (
+                    inner_metadata.input_info[inner_idx]
+                    == fw_metadata.input_info[outer_idx]
+                )
+            updated_input_info.append(fw_metadata.input_info[outer_idx])
+            inner_idx += 1
+        else:
+            for _ in range(inp_meta.arg_count):
+                updated_input_info.append(fw_metadata.input_info[outer_idx])
+                inner_idx += 1
+    if inner_metadata is not None:
+        assert len(inner_metadata.input_info) == len(updated_input_info)
+
+    return [
+        i
+        for i, inp in enumerate(updated_input_info)
+        if inp.mutation_type == MutationType.MUTATED_OUT_GRAPH
+    ]

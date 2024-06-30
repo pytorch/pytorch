@@ -51,9 +51,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& input_r,
     TensorList weight,
     int64_t weight_stride0,
-    const c10::optional<Tensor>& weight_buf_r_opt,
+    const std::optional<Tensor>& weight_buf_r_opt,
     const Tensor& hx,
-    const c10::optional<Tensor>& cx_opt,
+    const std::optional<Tensor>& cx_opt,
     int64_t fn_mode,
     int64_t fn_hidden_size,
     int64_t fn_proj_size,
@@ -63,7 +63,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     bool fn_train,
     bool fn_bidirectional,
     IntArrayRef fn_batch_sizes,
-    const c10::optional<Tensor>& fn_dropout_state_opt) {
+    const std::optional<Tensor>& fn_dropout_state_opt) {
   AT_ERROR("_cudnn_rnn: ATen not compiled with cuDNN support");
 }
 
@@ -73,11 +73,11 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     int64_t weight_stride0,
     const Tensor& weight_buf,
     const Tensor& hx,
-    const c10::optional<Tensor>& cx_opt,
+    const std::optional<Tensor>& cx_opt,
     const Tensor& output,
-    const c10::optional<Tensor>& grad_output_r_opt,
-    const c10::optional<Tensor>& grad_hy_r_opt,
-    const c10::optional<Tensor>& grad_cy_r_opt,
+    const std::optional<Tensor>& grad_output_r_opt,
+    const std::optional<Tensor>& grad_hy_r_opt,
+    const std::optional<Tensor>& grad_cy_r_opt,
     int64_t mode,
     int64_t hidden_size,
     int64_t proj_size,
@@ -87,7 +87,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     bool train,
     bool bidirectional,
     IntArrayRef batch_sizes,
-    const c10::optional<Tensor>& dropout_state_opt,
+    const std::optional<Tensor>& dropout_state_opt,
     const Tensor& reserve,
     std::array<bool, 4> output_mask) {
   AT_ERROR("_cudnn_rnn_backward: ATen not compiled with cuDNN support");
@@ -97,10 +97,10 @@ Tensor _cudnn_init_dropout_state(
     double dropout,
     bool train,
     int64_t dropout_seed,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
       pin_memory);
@@ -317,7 +317,7 @@ auto rnn_descriptor_sequence(
     uint32_t vector_size) { // packed case
   RNNDataDescriptor r;
   std::vector<int> seqLengthArray(batch_size, 1);
-  // cuDNN wants the sequence lenghts for a packed batch as if they
+  // cuDNN wants the sequence lengths for a packed batch as if they
   // were unpacked, e.g., for the
   // Sequence 1: ABCD
   // Sequence 2: EF
@@ -614,8 +614,6 @@ void add_projection_weights(
       /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
       /*linLayerMat=*/&matrix_pointer));
 #else
-  void* unused_pointer;
-  TensorDescriptor unused_desc;
   TensorDescriptor lin_layer_mat_desc;
   AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
       /*handle=*/handle,
@@ -626,8 +624,8 @@ void add_projection_weights(
       /*linLayerID=*/linear_id,
       /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
       /*linLayerMat=*/&matrix_pointer,
-      unused_desc.mut_desc(),
-      &unused_pointer));
+      nullptr,
+      nullptr));
 #endif
 
   cudnnDataType_t data_type;
@@ -735,8 +733,6 @@ get_parameters(
             lin_layer_mat_desc.mut_desc(),
             &matrix_pointer));
 #else
-        void* unused_pointer = nullptr;
-        TensorDescriptor unused_desc;
         TensorDescriptor lin_layer_mat_desc;
         for (int stateless = 0; stateless < 100; stateless++) {
           if (cudnn_method) { // matrix
@@ -749,8 +745,8 @@ get_parameters(
                 linear_id,
                 lin_layer_mat_desc.mut_desc(),
                 &matrix_pointer,
-                unused_desc.mut_desc(),
-                &unused_pointer));
+                nullptr,
+                nullptr));
           } else { // bias
             AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
                 handle,
@@ -759,8 +755,8 @@ get_parameters(
                 weight_buf.numel() * weight_buf.element_size(),
                 weight_buf.data_ptr(),
                 linear_id,
-                unused_desc.mut_desc(),
-                &unused_pointer,
+                nullptr,
+                nullptr,
                 lin_layer_mat_desc.mut_desc(),
                 &matrix_pointer));
           }
@@ -922,8 +918,6 @@ std::vector<void*> get_expected_data_ptrs(
             lin_layer_mat_desc.mut_desc(),
             &matrix_pointer));
 #else
-        void* unused_pointer = nullptr;
-        TensorDescriptor unused_desc;
         TensorDescriptor lin_layer_mat_desc;
         if (cudnn_method) { // matrix
           AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
@@ -935,8 +929,8 @@ std::vector<void*> get_expected_data_ptrs(
               linear_id,
               lin_layer_mat_desc.mut_desc(),
               &matrix_pointer,
-              unused_desc.mut_desc(),
-              &unused_pointer));
+              nullptr,
+              nullptr));
         } else { // bias
           AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
               handle,
@@ -945,8 +939,8 @@ std::vector<void*> get_expected_data_ptrs(
               weight_buf.numel() * weight_buf.element_size(),
               weight_buf.data_ptr(),
               linear_id,
-              unused_desc.mut_desc(),
-              &unused_pointer,
+              nullptr,
+              nullptr,
               lin_layer_mat_desc.mut_desc(),
               &matrix_pointer));
         }
@@ -972,8 +966,6 @@ std::vector<void*> get_expected_data_ptrs(
           lin_layer_mat_desc.mut_desc(),
           &matrix_pointer));
 #else
-      void* unused_pointer;
-      TensorDescriptor unused_desc;
       TensorDescriptor lin_layer_mat_desc;
 
       AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
@@ -985,8 +977,8 @@ std::vector<void*> get_expected_data_ptrs(
           linear_id,
           lin_layer_mat_desc.mut_desc(),
           &matrix_pointer,
-          unused_desc.mut_desc(),
-          &unused_pointer));
+          nullptr,
+          nullptr));
 #endif
       data_ptrs.push_back(matrix_pointer);
     }
@@ -1315,9 +1307,7 @@ copy_weights_to_flat_buf_views(
 #endif
 
   // Slice off views into weight_buf
-  std::vector<Tensor> params_arr;
-  size_t params_stride0;
-  std::tie(params_arr, params_stride0) = get_parameters(
+  auto [params_arr, params_stride0] = get_parameters(
 #ifndef USE_CUDNN_RNN_V8_API
       handle, rnn, rnn_desc, x_desc, w_desc, weight_buf, include_bias);
 #else
@@ -1398,9 +1388,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& input_r,
     TensorList weight,
     int64_t weight_stride0,
-    const c10::optional<Tensor>& weight_buf_r_opt,
+    const std::optional<Tensor>& weight_buf_r_opt,
     const Tensor& hx,
-    const c10::optional<Tensor>& cx_opt,
+    const std::optional<Tensor>& cx_opt,
     int64_t fn_mode,
     int64_t fn_hidden_size,
     int64_t fn_proj_size,
@@ -1410,7 +1400,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     bool fn_train,
     bool fn_bidirectional,
     IntArrayRef fn_batch_sizes,
-    const c10::optional<Tensor>& fn_dropout_state_opt) {
+    const std::optional<Tensor>& fn_dropout_state_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_buf_r_maybe_owned =
       at::borrow_from_optional_tensor(weight_buf_r_opt);
@@ -1509,13 +1499,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     w_desc.set(weight_buf, 3);
 #endif
     weight_buf.zero_();
-    std::vector<Tensor> params;
-    size_t params_stride0;
 #ifndef USE_CUDNN_RNN_V8_API
-    std::tie(params, params_stride0) = get_parameters(
+    auto [params, params_stride0] = get_parameters(
         handle, fn.rnn, descs.rnn_desc, descs.x_descs[0], w_desc, weight_buf);
 #else
-    std::tie(params, params_stride0) =
+    auto [params, params_stride0] =
         get_parameters(handle, fn.rnn, descs.rnn_desc, weight_buf);
 #endif
     _copyParams(
@@ -2075,13 +2063,11 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
       fn_reserve.data_ptr()));
 #endif
 
-  std::vector<Tensor> grad_params_arr;
-  size_t grad_params_stride0;
 #ifndef USE_CUDNN_RNN_V8_API
-  std::tie(grad_params_arr, grad_params_stride0) = get_parameters(
+  auto [grad_params_arr, grad_params_stride0] = get_parameters(
       handle, fn.rnn, descs.rnn_desc, descs.x_descs[0], w_desc, dw);
 #else
-  std::tie(grad_params_arr, grad_params_stride0) =
+  auto [grad_params_arr, grad_params_stride0] =
       get_parameters(handle, fn.rnn, descs.rnn_desc, dw);
 #endif
   if (grad_params_stride0 == static_cast<size_t>(weight_stride0)) {
@@ -2111,11 +2097,11 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     int64_t weight_stride0,
     const Tensor& weight_buf,
     const Tensor& hx,
-    const c10::optional<Tensor>& cx_opt,
+    const std::optional<Tensor>& cx_opt,
     const Tensor& output,
-    const c10::optional<Tensor>& grad_output_r_opt,
-    const c10::optional<Tensor>& grad_hy_r_opt,
-    const c10::optional<Tensor>& grad_cy_r_opt,
+    const std::optional<Tensor>& grad_output_r_opt,
+    const std::optional<Tensor>& grad_hy_r_opt,
+    const std::optional<Tensor>& grad_cy_r_opt,
     int64_t mode,
     int64_t hidden_size,
     int64_t proj_size,
@@ -2125,7 +2111,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     bool train,
     bool bidirectional,
     IntArrayRef batch_sizes,
-    const c10::optional<Tensor>& dropout_state_opt,
+    const std::optional<Tensor>& dropout_state_opt,
     const Tensor& reserve,
     std::array<bool, 4> output_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -2159,9 +2145,8 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
              : at::zeros_like(cx, LEGACY_CONTIGUOUS_MEMORY_FORMAT))
       : grad_cy_r;
 
-  Tensor dx, dhx, dcx;
   // NB: unconditionally compute this gradient, because it mutates reserve
-  std::tie(dx, dhx, dcx) = at::native::_cudnn_rnn_backward_input(
+  auto [dx, dhx, dcx] = at::native::_cudnn_rnn_backward_input(
       input,
       weight_buf,
       hx,
@@ -2221,10 +2206,10 @@ Tensor _cudnn_init_dropout_state(
     double dropout,
     bool train,
     int64_t dropout_seed,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options =
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
@@ -2311,7 +2296,7 @@ struct DropoutState {
   // needed for the first time. Note that in this case needed != used, as we
   // don't need a buffer to e.g. run RNNs in test mode.
   at::Tensor buffer;
-  c10::optional<cuda::CUDAEvent> event;
+  std::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
 #if !defined(USE_ROCM)
   // cudaStreamGetCaptureInfo will never give back a capture id of 0, so 0 can
@@ -2377,7 +2362,7 @@ DropoutState& get_dropout_state(
   static std::mutex state_cache_mut;
 
   AT_ASSERT(options.device().is_cuda());
-  int device = options.device().index();
+  auto device = options.device().index();
 
   std::unique_lock<std::mutex> lock{state_cache_mut};
   auto& state = dropout_state_cache.at(device);
@@ -2528,8 +2513,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
     double dropout_p,
     bool train,
     bool bidirectional) {
-  Tensor hx, cx;
-  std::tie(hx, cx) = unpack_hidden(hidden);
+  auto [hx, cx] = unpack_hidden(hidden);
   auto hidden_size = hx.sym_size(2);
   SymInt proj_size = 0;
   // For LSTM models with projections hidden size could be different
@@ -2539,8 +2523,8 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   }
 
   // TODO:  try_get_weight_buf returns a Tensor, but _cudnn_rnn below takes a
-  // c10::optional<Tensor> in weight_buf's slot.  Do we want try_get_weight_buf
-  // to return a c10::optional<Tensor> instead of a defined or undefined Tensor?
+  // std::optional<Tensor> in weight_buf's slot.  Do we want try_get_weight_buf
+  // to return a std::optional<Tensor> instead of a defined or undefined Tensor?
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   auto weight_buf = try_get_weight_buf(
       input,
@@ -2603,8 +2587,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
     bool train,
     bool bidirectional,
     bool batch_first) {
-  Tensor hx, cx;
-  std::tie(hx, cx) = unpack_hidden(hidden);
+  auto [hx, cx] = unpack_hidden(hidden);
   auto hidden_size = hx.sym_size(2);
   c10::SymInt proj_size = 0;
   // For LSTM models with projections hidden size could be different

@@ -62,8 +62,7 @@ void TestSort(DeprecatedTypeProperties& type) {
 void TestRandperm(DeprecatedTypeProperties& type) {
   if (type.backend() != Backend::CUDA) {
     Tensor b = randperm(15, type);
-    Tensor rv, ri;
-    std::tie(rv, ri) = sort(b, 0);
+    auto [rv, ri] = sort(b, 0);
     bool isLE = (rv[0].item<float>() <= rv[1].item<float>());
     ASSERT_TRUE(isLE);
   }

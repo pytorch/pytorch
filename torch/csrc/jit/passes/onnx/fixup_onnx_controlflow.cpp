@@ -257,9 +257,7 @@ void FixupONNXLoopBlockInputs(Node* n) {
       Value* input_i = block->inputs().at(i);
       if (input_i->type()->cast<OptionalType>() &&
           !block->outputs().at(i)->type()->cast<OptionalType>()) {
-        TypePtr merged_type;
-        bool inferred = false;
-        std::tie(merged_type, inferred) = MergeInferredType(
+        auto [merged_type, inferred] = MergeInferredType(
             input_i->type()->cast<OptionalType>()->getElementType(),
             block->outputs().at(i)->type());
         if (inferred) {
@@ -336,9 +334,7 @@ void FixupONNXLoopNodeInputs(Node* node, int opset_version) {
     // vice-versa.
     if (!input->type()->cast<OptionalType>() && sub_block_input_optional) {
       if (!input->type()->cast<NoneType>()) {
-        TypePtr merged_type;
-        bool inferred = false;
-        std::tie(merged_type, inferred) = MergeInferredType(
+        auto [merged_type, inferred] = MergeInferredType(
             sub_block_input_optional->getElementType(), input->type());
         if (inferred) {
           sub_block_input_optional = OptionalType::create(merged_type);

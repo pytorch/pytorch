@@ -1,25 +1,26 @@
-from _pytest.junitxml import LogXML, _NodeReporter, bin_xml_escape
-from _pytest.terminal import _get_raw_skip_reason
-from _pytest.stash import StashKey
-from _pytest.reports import TestReport
-from _pytest.config.argparsing import Parser
-from _pytest.config import filename_arg
-from _pytest.config import Config
-from _pytest._code.code import ReprFileLocation
-from _pytest.python import Module
-from typing import Any, List, Union
-from typing import Optional
-from types import MethodType
-import xml.etree.ElementTree as ET
-import functools
-import pytest
-import sys
-import os
 import copy
+import functools
 import json
+import os
 import re
+import sys
+import xml.etree.ElementTree as ET
 from collections import defaultdict
-from pytest_shard_custom import PytestShardPlugin, pytest_addoptions as shard_addoptions
+from types import MethodType
+from typing import Any, List, Optional, TYPE_CHECKING, Union
+
+import pytest
+from _pytest.config import Config, filename_arg
+from _pytest.config.argparsing import Parser
+from _pytest.junitxml import _NodeReporter, bin_xml_escape, LogXML
+from _pytest.python import Module
+from _pytest.reports import TestReport
+from _pytest.stash import StashKey
+from _pytest.terminal import _get_raw_skip_reason
+from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestShardPlugin
+
+if TYPE_CHECKING:
+    from _pytest._code.code import ReprFileLocation
 
 # a lot of this file is copied from _pytest.junitxml and modified to get rerun info
 
@@ -42,7 +43,7 @@ def pytest_addoption(parser: Parser) -> None:
         dest="stepcurrent",
     )
 
-    parser.addoption("--use-main-module", action='store_true')
+    parser.addoption("--use-main-module", action="store_true")
     group = parser.getgroup("terminal reporting")
     group.addoption(
         "--junit-xml-reruns",
@@ -143,10 +144,13 @@ class _NodeReporterReruns(_NodeReporter):
                 skipreason = skipreason[9:]
             details = f"{filename}:{lineno}: {skipreason}"
 
-            skipped = ET.Element("skipped", type="pytest.skip", message=bin_xml_escape(skipreason))
+            skipped = ET.Element(
+                "skipped", type="pytest.skip", message=bin_xml_escape(skipreason)
+            )
             skipped.text = bin_xml_escape(details)
             self.append(skipped)
             self.write_captured_output(report)
+
 
 class LogXMLReruns(LogXML):
     def __init__(self, *args, **kwargs):
@@ -223,7 +227,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 def pytest_pycollect_makemodule(module_path, path, parent) -> Module:
     if parent.config.getoption("--use-main-module"):
         mod = Module.from_parent(parent, path=module_path)
-        mod._getobj = MethodType(lambda x: sys.modules['__main__'], mod)
+        mod._getobj = MethodType(lambda x: sys.modules["__main__"], mod)
         return mod
 
 
@@ -275,7 +279,10 @@ def pytest_collection_modifyitems(items: List[Any]) -> None:
         test_name = item.name
         test_class = item.parent.name
 
-        if test_class not in disabled_tests or test_name not in disabled_tests[test_class]:
+        if (
+            test_class not in disabled_tests
+            or test_name not in disabled_tests[test_class]
+        ):
             continue
 
         cpy = copy.copy(item)

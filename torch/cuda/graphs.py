@@ -1,9 +1,11 @@
+# mypy: allow-untyped-defs
 import gc
-from typing import Optional
+import typing
 
 import torch
-from torch.utils import _pytree
-from ._utils import _dummy_type
+
+from .._utils import _dummy_type
+
 
 if not hasattr(torch._C, "_CudaStreamBase"):
     # Define dummy base classes
@@ -142,7 +144,7 @@ class graph:
         https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
     """  # noqa: B950
 
-    default_capture_stream: Optional["torch.cuda.Stream"] = None
+    default_capture_stream: typing.Optional["torch.cuda.Stream"] = None
 
     def __init__(
         self,
@@ -187,7 +189,7 @@ class graph:
 
 
 def make_graphed_callables(
-    callables, sample_args, num_warmup_iters=3, allow_unused_input=False
+    callables, sample_args, num_warmup_iters=3, allow_unused_input=False, pool=None
 ):
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
@@ -218,7 +220,9 @@ def make_graphed_callables(
             11 iterations for warm up. Default: ``3``.
         allow_unused_input (bool): If False, specifying inputs that were not used when computing outputs
             (and therefore their grad is always zero) is an error. Defaults to False.
-
+        pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or
+            :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory
+            with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
         that's expected for the corresponding real input in the training loop.
@@ -282,7 +286,7 @@ def make_graphed_callables(
                 + ":func:`~make_graphed_callables`, only parameters may be trainable. All buffers must have "
                 + "``requires_grad=False``."
             )
-        flatten_arg = _pytree.arg_tree_leaves(*args)
+        flatten_arg = torch.utils._pytree.arg_tree_leaves(*args)
         flatten_sample_args.append(tuple(flatten_arg))
         assert all(isinstance(arg, torch.Tensor) for arg in flatten_arg), (
             "In the beta API, sample_args "
@@ -304,7 +308,7 @@ def make_graphed_callables(
     fwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
     bwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
 
-    mempool = graph_pool_handle()
+    mempool = graph_pool_handle() if pool is None else pool
 
     # Warmup
     # Hopefully prevents cudnn benchmarking and other lazy-initialization cuda work
@@ -315,7 +319,7 @@ def make_graphed_callables(
             callables, sample_args, per_callable_static_input_surfaces
         ):
             for _ in range(num_warmup_iters):
-                outputs = _pytree.tree_leaves(func(*args))
+                outputs = torch.utils._pytree.tree_leaves(func(*args))
                 grad_inputs = torch.autograd.grad(
                     outputs=tuple(o for o in outputs if o.requires_grad),
                     inputs=tuple(i for i in static_input_surface if i.requires_grad),
@@ -339,7 +343,7 @@ def make_graphed_callables(
         with torch.cuda.graph(fwd_graph, pool=mempool):
             outputs = func(*args)
 
-        flatten_outputs, spec = _pytree.tree_flatten(outputs)
+        flatten_outputs, spec = torch.utils._pytree.tree_flatten(outputs)
         per_callable_static_outputs.append(tuple(flatten_outputs))
         per_callable_output_unflatten_spec.append(spec)
 
@@ -384,8 +388,8 @@ def make_graphed_callables(
         per_callable_static_grad_inputs.append(static_grad_inputs)
 
     # Reverses the most recent two lists
-    per_callable_static_grad_outputs = list(reversed(per_callable_static_grad_outputs))
-    per_callable_static_grad_inputs = list(reversed(per_callable_static_grad_inputs))
+    per_callable_static_grad_outputs.reverse()
+    per_callable_static_grad_inputs.reverse()
     # Now for every per_callable list, per_callable_*[i] holds the stuff for the ith callable.
 
     def make_graphed_autograd_function(
@@ -432,9 +436,9 @@ def make_graphed_callables(
             # Runs the autograd function with inputs == all inputs to the graph that might require grad
             # (explicit user args + module parameters)
             # Assumes module params didn't change since capture.
-            flatten_user_args = _pytree.arg_tree_leaves(*user_args)
+            flatten_user_args = torch.utils._pytree.arg_tree_leaves(*user_args)
             out = Graphed.apply(*(tuple(flatten_user_args) + module_params))
-            return _pytree.tree_unflatten(out, output_unflatten_spec)
+            return torch.utils._pytree.tree_unflatten(out, output_unflatten_spec)
 
         return functionalized
 

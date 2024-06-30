@@ -67,7 +67,7 @@ bool if_container_equal(T lhs, T rhs) {
 }
 
 bool operator==(const LBFGSParamState& lhs, const LBFGSParamState& rhs) {
-  auto isNull = [](const c10::optional<std::vector<Tensor>>& val) {
+  auto isNull = [](const std::optional<std::vector<Tensor>>& val) {
     return val == c10::nullopt;
   };
   return (lhs.func_evals() == rhs.func_evals()) &&
@@ -194,7 +194,7 @@ static double _cubic_interpolate(
     double x2,
     double f2,
     double g2,
-    c10::optional<std::tuple<double, double>> bounds = c10::nullopt) {
+    std::optional<std::tuple<double, double>> bounds = c10::nullopt) {
   // ported from https://github.com/torch/optim/blob/master/polyinterp.lua
   // Compute bounds of interpolation area
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -254,10 +254,7 @@ static std::tuple<double, Tensor, double, int64_t> _strong_wolfe(
   auto d_norm = val(d.abs().max());
   g = g.clone(at::MemoryFormat::Contiguous);
   // evaluate objective and gradient using initial step
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double f_new;
-  Tensor g_new;
-  std::tie(f_new, g_new) = obj_func(x, t, d);
+  auto [f_new, g_new] = obj_func(x, t, d);
   int64_t ls_func_evals = 1;
   auto gtd_new = g_new.dot(d);
 
@@ -330,9 +327,7 @@ static std::tuple<double, Tensor, double, int64_t> _strong_wolfe(
   // exact point satisfying the criteria
   bool insuf_progress = false;
   // find high and low points in bracket
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t low_pos, high_pos;
-  std::tie(low_pos, high_pos) = bracket_f[0] <= bracket_f[1]
+  auto [low_pos, high_pos] = bracket_f[0] <= bracket_f[1]
       ? std::make_tuple(0, 1)
       : std::make_tuple(1, 0);
   while (!done && (ls_iter < max_ls)) {

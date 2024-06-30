@@ -30,7 +30,7 @@ void THCPGraph_init(PyObject* module) {
       .def(
           "capture_begin",
           [](::at::cuda::CUDAGraph& self,
-             c10::optional<c10::cuda::MempoolId_t> pool_opt,
+             std::optional<c10::cuda::MempoolId_t> pool_opt,
              std::string capture_error_mode) {
             cudaStreamCaptureMode capture_mode;
             c10::cuda::MempoolId_t pool = pool_opt.has_value()
@@ -56,6 +56,16 @@ void THCPGraph_init(PyObject* module) {
       .def(
           "capture_end",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::capture_end))
+      .def(
+          "register_generator_state",
+          [](::at::cuda::CUDAGraph& self, py::handle raw_generator) {
+            auto generator = THPGenerator_Unwrap(raw_generator.ptr());
+            // We've unwrapped Python object to C++ object,
+            // so we could release GIL before calling into C++
+            py::gil_scoped_release release;
+            return self.register_generator_state(generator);
+          },
+          py::arg("generator"))
       .def(
           "replay",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::replay))

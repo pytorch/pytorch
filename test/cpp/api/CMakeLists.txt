@@ -10,6 +10,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/functional.cpp
   ${TORCH_API_TEST_DIR}/init.cpp
   ${TORCH_API_TEST_DIR}/integration.cpp
+  ${TORCH_API_TEST_DIR}/ivalue.cpp
   ${TORCH_API_TEST_DIR}/jit.cpp
   ${TORCH_API_TEST_DIR}/memory.cpp
   ${TORCH_API_TEST_DIR}/meta_tensor.cpp
@@ -41,7 +42,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/inference_mode.cpp
   ${TORCH_API_TEST_DIR}/grad_mode.cpp
   ${TORCH_API_TEST_DIR}/operations.cpp
-  ${TORCH_API_TEST_DIR}/singleton_int.cpp
+  ${TORCH_API_TEST_DIR}/nested_int.cpp
 )
 if(USE_CUDA OR USE_ROCM)
   list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/parallel.cpp)
@@ -50,9 +51,6 @@ endif()
 add_executable(test_api ${TORCH_API_TEST_SOURCES})
 target_include_directories(test_api PRIVATE ${ATen_CPU_INCLUDE})
 target_link_libraries(test_api PRIVATE torch gtest)
-if(NOT MSVC)
-  target_compile_options_if_supported(test_api -Wno-unused-variable)
-endif()
 
 if(USE_CUDA)
   target_compile_definitions(test_api PRIVATE "USE_CUDA")

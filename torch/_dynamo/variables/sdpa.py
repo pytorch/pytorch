@@ -48,10 +48,11 @@ class SDPAParamsVariable(VariableTracker):
     def reconstruct(self, codegen):
         assert self.source is None
         assert self.param_vars is not None
-        codegen.load_import_from("torch._C", "_SDPAParams")
-        for var in self.param_vars:
-            codegen(var)
-        return create_call_function(len(self.param_vars), True)
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("torch._C", "_SDPAParams")
+        )
+        codegen.foreach(self.param_vars)
+        codegen.extend_output(create_call_function(len(self.param_vars), False))
 
     def as_proxy(self):
         return self.proxy
@@ -66,9 +67,9 @@ class SDPAParamsVariable(VariableTracker):
             getattr_static(torch._C._SDPAParams, name)
         except AttributeError:
             # Using raise from is too verbose here
-            raise Unsupported(  # noqa: TRY200
+            raise Unsupported(
                 f"Unsupported torch._C._SDPAParams attribute {name}"
-            )
+            ) from None
 
         proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)
         if self.source is not None:

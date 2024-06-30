@@ -47,6 +47,9 @@ jobs:
     timeout-minutes: 240
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
+    defaults:
+      run:
+        shell: bash
     steps:
       # Duplicated in win-test because this MUST go before a checkout
       - name: Enable git symlinks on Windows and disable fsmonitor daemon
@@ -89,6 +92,7 @@ jobs:
 
       - name: Parse ref
         id: parse-ref
+        shell: bash
         run: python3 .github/scripts/parse_ref.py
 
       - name: Get workflow job id
@@ -128,6 +132,7 @@ jobs:
           PYTHON_VERSION: "3.8"
           SCCACHE_BUCKET: "ossci-compiler-cache"
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
+          SCCACHE_REGION: us-east-1
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VC_YEAR: "2019"

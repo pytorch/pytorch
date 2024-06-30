@@ -47,7 +47,7 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
 
     BackendDataPtr handle;
     Value ir_value;
-    c10::optional<at::Tensor> tensor_data;
+    std::optional<at::Tensor> tensor_data;
     const BackendDevice device;
     const int64_t unique_id = 0;
     size_t generation = 1;
@@ -124,7 +124,7 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   void SetIrValue(Value ir_value);
   void SetInPlaceIrValue(Value ir_value);
 
-  c10::optional<at::Tensor> CurrentTensorData() const;
+  std::optional<at::Tensor> CurrentTensorData() const;
 
   std::vector<LazyTensorPtr> MakeOutputTensors(NodePtr node) const;
 
@@ -191,7 +191,7 @@ TORCH_API std::vector<LazyTensorPtr> GetLtcTensors(
 // If tensor is a lazy tensor type, returns the LazyTensor embedded within it,
 // otherwise creates a new lazy tensor type with tensor as data.
 TORCH_API LazyTensorPtr GetOrCreateLtcTensor(
-    const c10::optional<at::Tensor>& tensor,
+    const std::optional<at::Tensor>& tensor,
     const BackendDevice& device);
 
 TORCH_API LazyTensorPtr GetLtcTensorOrCreateForWrappedNumber(

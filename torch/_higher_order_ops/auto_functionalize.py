@@ -1,4 +1,5 @@
-from typing import Any, Dict, List, Tuple, Union
+# mypy: allow-untyped-defs
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -23,7 +24,7 @@ from torch.fx.experimental.proxy_tensor import (
 # op. First, when FakeTensor sees this op:
 # - If the schema says it returns nothing, we can generate a trivial
 #   FakeTensor rule for it (that returns nothing).
-# - Otherwise, the user needs to provide a FakeTensor rule (abstract impl)
+# - Otherwise, the user needs to provide a FakeTensor impl (fake impl)
 #
 # Next, when Python FunctionalTensor sees the op, it will functionalize
 # it by emitting a call to an auto_functionalize(op, ["x"], {"x": ...})
@@ -38,10 +39,10 @@ class AutoFunctionalized(HigherOrderOperator):
 
     This HOP runs a "functional" version of _mutable_op.
 
-    Concretely, it clones kwargs that `_mutable_op` mutates (specified by
-    _mutated_args_names), runs `out = _mutable_op(**kwargs)` with the cloned
-    values, and then returns (out, Tuple of the cloned values that were
-    mutated).
+    Concretely, it looks at all the arguments that are mutable through
+    _mutable_op's operator schema, clones those kwargs, runs
+    `out = _mutable_op(**kwargs)` with the cloned values, and then returns the
+    operator output concatenated with the cloned values that were mutated.
 
     We have some restrictions on `_mutable_op`.
     See `can_auto_functionalize` for the restrictions. We can likely lift
@@ -92,15 +93,25 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
             and type(arg.type.getElementType()) is torch.TensorType
         ):
             continue
+        if (
+            type(arg.type) is torch.ListType
+            and type(arg.type.getElementType()) is torch.TensorType
+        ):
+            continue
         # Not yet supported: other Tensor types. This includes things like
-        # Tensor[], Tensor?[], Tensor[]?.
+        # Tensor?[], Tensor[]?.
         return False
 
+    if len(schema.returns) == 1 and isinstance(schema.returns[0].type, torch.NoneType):
+        # Skip schema returns -> None
+        return True
     # The returns must not alias anything
     for ret in schema.returns:
         if ret.alias_info is None and type(ret.type) is torch.TensorType:
             continue
         # Not yet supported: List[Tensor] return.
+        return False
+    if torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), "Functionalize"):
         return False
     return True
 
@@ -108,6 +119,7 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
     _mutable_op: torch._ops.OpOverload,
+    _only_clone_these_tensors: Optional[Tuple[str, ...]] = None,
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     new_kwargs = dict(**kwargs)
@@ -115,16 +127,26 @@ def auto_functionalized_dense(
 
     _mutable_args_names = get_mutable_arg_names(_mutable_op)
     for name in _mutable_args_names:
-        new_kwargs[name] = (
-            clone_preserve_strides(kwargs[name]) if kwargs[name] is not None else None
-        )
+        if (
+            _only_clone_these_tensors is not None
+            and name not in _only_clone_these_tensors
+        ):
+            new_kwargs[name] = kwargs[name]
+        else:
+            new_kwargs[name] = (
+                [clone_preserve_strides(x) for x in kwargs[name]]
+                if kwargs[name] is not None and isinstance(kwargs[name], list)
+                else clone_preserve_strides(kwargs[name])
+                if kwargs[name] is not None
+                else None
+            )
         result.append(new_kwargs[name])
     out = _mutable_op(**new_kwargs)
 
     if isinstance(out, tuple):
-        return (*out, *result)
+        return (*out, *result)  # type: ignore[return-value]
     else:
-        return (out, *result)
+        return (out, *result)  # type: ignore[return-value]
 
 
 @auto_functionalized.py_impl(FakeTensorMode)
@@ -182,7 +204,7 @@ def do_auto_functionalize(
     op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
 ) -> Any:
     """Functionalizes a call to op(*args, **kwargs) by emitting a call to
-    `outs = auto_functionalized(op, mutated_args_names, normalized_kwargs)`
+    `outs = auto_functionalized(op, normalized_kwargs)`
     and replacing the mutated (args, kwargs) with the corresponding outputs.
 
     The normalized_kwargs are just the (args, kwargs), but all in kwarg form.
@@ -235,10 +257,34 @@ def do_auto_functionalize(
         # Can be None if input was `Tensor(a!)?`
         if unwrapped_out is None:
             continue
-        assert isinstance(unwrapped_out, torch.Tensor)
+
+        # We only handle Tensor or List[Tensor] here for now.
+        def sync_update(o, orig_arg):
+            ctx.replace(orig_arg, o)
+            ctx.commit_update(orig_arg)
+            ctx.sync(orig_arg)
+
         orig_arg = normalized_kwargs[name]
-        ctx.replace(orig_arg, unwrapped_out)
-        ctx.commit_update(orig_arg)
-        ctx.sync(orig_arg)
+
+        if isinstance(unwrapped_out, torch.Tensor):
+            sync_update(unwrapped_out, orig_arg)
+        elif isinstance(unwrapped_out, list) and all(
+            isinstance(o, torch.Tensor) for o in unwrapped_out
+        ):
+            assert len(orig_arg) == len(unwrapped_out)
+            for orig_a, o in zip(orig_arg, unwrapped_out):
+                sync_update(o, orig_a)
+        else:
+            raise RuntimeError(
+                f"unsupported type for auto-functionalization: {unwrapped_out}"
+            )
 
     return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
+
+
+@auto_functionalized.py_functionalize_impl
+def auto_functionalized_func(ctx, _mutable_op, **kwargs):
+    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+    with ctx.redispatch_to_next():
+        result = auto_functionalized(_mutable_op, **unwrapped_kwargs)
+    return ctx.wrap_tensors(result)

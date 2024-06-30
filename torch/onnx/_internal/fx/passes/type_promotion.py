@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
@@ -184,10 +185,9 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
         since there is no way to differentiate between inserted upcasts and model code
         casts. Hence we consolidate the input dtype to the result dtype to avoid this.
         """
-        if (
-            not self._USE_OPMATH
-            and self.promotion_kind
-            == _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        if not self._USE_OPMATH and self.promotion_kind in (
+            _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+            _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         ):
             return result_dtype
         return computed_dtype
@@ -293,9 +293,11 @@ class ReductionTypePromotionRule(TypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert len(args) >= 1 and isinstance(
-            arg := args[0], torch.Tensor
+        assert (
+            len(args) >= 1
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        arg = args[0]
+        assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
         dtype: Optional[torch.dtype] = kwargs.get("dtype", None)
 
         computation_dtype, result_dtype = _prims_common.reduction_dtypes(
@@ -330,9 +332,11 @@ class AllOrAnyReductionTypePromotionRule(ReductionTypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert len(args) >= 1 and isinstance(
-            arg := args[0], torch.Tensor
+        assert (
+            len(args) >= 1
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        arg = args[0]
+        assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
         computation_dtype = torch.bool
         # Preserves uint8 -- probably a legacy mask thing
         result_dtype = torch.uint8 if arg.dtype == torch.uint8 else torch.bool
@@ -353,9 +357,11 @@ class SumLikeReductionTypePromotionRule(ReductionTypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert len(args) >= 1 and isinstance(
-            arg := args[0], torch.Tensor
+        assert (
+            len(args) >= 1
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        arg = args[0]
+        assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
         dtype: Optional[torch.dtype] = kwargs.get("dtype", None)
         # The below logic is copied from `torch/_refs/__init__.py` reduction ops impl.
         if dtype is None:
@@ -1659,7 +1665,7 @@ class InsertTypePromotion(_pass.Transform):
     metadata, specifically the fake tensor stored under node.meta["val"], and ensure it
     reflects the latest changes.
 
-    See [FXE0015: fx_node_insert_type_promotion](https://pytorch.org/docs/master/generated/onnx_dynamo_diagnostics_rules/FXE0015%3Afx-node-insert-type-promotion.html) for more details.  # noqa: B950
+    See [FXE0015: fx_node_insert_type_promotion](https://pytorch.org/docs/main/generated/onnx_dynamo_diagnostics_rules/FXE0015%3Afx-node-insert-type-promotion.html) for more details.  # noqa: B950
     """
 
     def __init__(

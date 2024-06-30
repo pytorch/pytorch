@@ -31,6 +31,18 @@ c10::intrusive_ptr<GeneratorImpl> GeneratorImpl::clone() const {
   return c10::intrusive_ptr<GeneratorImpl>::reclaim(res);
 }
 
+void GeneratorImpl::graphsafe_set_state(
+    const c10::intrusive_ptr<c10::GeneratorImpl>& state) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false, "graphsafe_set_state is not supported in this Generator");
+}
+
+c10::intrusive_ptr<c10::GeneratorImpl> GeneratorImpl::graphsafe_get_state()
+    const {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false, "graphsafe_get_state is not supported in this Generator");
+}
+
 /**
  * Gets the device of a generator.
  */

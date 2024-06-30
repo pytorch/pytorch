@@ -1,4 +1,6 @@
 #pragma once
+#include <c10/core/SymBool.h>
+#include <c10/core/SymInt.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
@@ -11,14 +13,15 @@ namespace c10 {
 template <typename T>
 bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
   bool is_contiguous = true;
-  if (numel == 0)
+  if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(numel, 0))) {
     return is_contiguous;
+  }
   T z = 1;
   // NB: make sure we do signed arithmetic
   for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
     const auto& size_d = sizes[d];
-    if (size_d != 1) {
-      if (strides[d] == z) {
+    if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(size_d, 1))) {
+      if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(strides[d], z))) {
         z *= size_d;
       } else {
         is_contiguous = false;
@@ -40,8 +43,8 @@ bool _compute_channels_last_contiguous_2d(
       T expected = 1;
       for (auto& d : {1, 3, 2, 0}) {
         const auto& size_d = sizes[d];
-        if (size_d != 1) {
-          if (strides[d] != expected) {
+        if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(size_d, 1))) {
+          if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(strides[d], expected))) {
             return false;
           }
           expected *= size_d;
@@ -69,8 +72,8 @@ bool _compute_channels_last_contiguous_3d(
       T expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
         const auto& size_d = sizes[d];
-        if (size_d != 1) {
-          if (strides[d] != expected) {
+        if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(size_d, 1))) {
+          if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(strides[d], expected))) {
             return false;
           }
           expected *= size_d;

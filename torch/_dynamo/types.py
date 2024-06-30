@@ -2,7 +2,6 @@ import dataclasses
 import sys
 import types
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Protocol, Union
-
 from typing_extensions import TypeAlias
 
 
@@ -18,6 +17,8 @@ import torch
 # This class has a `check_fn` field for the guard,
 #  and a `code` field for the code object.
 CacheEntry = torch._C._dynamo.eval_frame._CacheEntry
+
+ExtraState = torch._C._dynamo.eval_frame._ExtraState
 
 # We use a dict to store additional data per frame.
 FrameState = Dict[Any, Any]
@@ -37,6 +38,8 @@ class GuardFn(Protocol):
     verbose_code_parts: List[str]
     global_scope: Dict[str, object]
     guard_fail_fn: Optional[Callable[[GuardFail], None]]
+    cache_entry: Optional[CacheEntry]
+    extra_state: Optional[ExtraState]
 
     # maps locals of user function to bool
     def __call__(self, f_locals: Dict[str, object]) -> bool:

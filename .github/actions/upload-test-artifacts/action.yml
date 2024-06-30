@@ -11,6 +11,10 @@ inputs:
       Suffix to add to the filename of the artifacts. This should include the
       workflow job id, see [Job id in artifacts].
     required: true
+  s3-bucket:
+    description: S3 bucket to download builds
+    required: false
+    default: "gha-artifacts"
 
 runs:
   using: composite
@@ -42,7 +46,7 @@ runs:
       env:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
-        # Remove any previous test reports if they exist
+        # Remove any previous usage logs if they exist
         rm -f logs-*.zip
         # this workflow is also run in bazel build test, but we dont generate usage reports for it
         # so check to see if the file exists first
@@ -51,6 +55,18 @@ runs:
         fi
         if ls test/**/*.log 1> /dev/null 2>&1; then
             zip -r "logs-${FILE_SUFFIX}.zip" test -i '*.log'
+        fi
+
+    - name: Zip debugging artifacts for upload
+      if: runner.os != 'Windows' && !inputs.use-gha
+      shell: bash
+      env:
+        FILE_SUFFIX: ${{ inputs.file-suffix }}
+      run: |
+        # Remove any previous debugging artifacts if they exist
+        rm -f debug-*.zip
+        if [ -d 'test/debug' ]; then
+          zip -r "debug-${FILE_SUFFIX}.zip" test/debug
         fi
 
     # Windows zip
@@ -87,6 +103,7 @@ runs:
       uses: seemethere/upload-artifact-s3@v5
       if: ${{ !inputs.use-gha }}
       with:
+        s3-bucket: ${{ inputs.s3-bucket }}
         s3-prefix: |
           ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14
@@ -97,6 +114,7 @@ runs:
       uses: seemethere/upload-artifact-s3@v5
       if: ${{ !inputs.use-gha }}
       with:
+        s3-bucket: ${{ inputs.s3-bucket }}
         s3-prefix: |
           ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14
@@ -108,11 +126,24 @@ runs:
       if: ${{ !inputs.use-gha }}
       continue-on-error: true
       with:
+        s3-bucket: ${{ inputs.s3-bucket }}
         s3-prefix: |
           ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14
         if-no-files-found: ignore
         path: logs-*.zip
+
+    - name: Store Debug Artifacts on S3
+      uses: seemethere/upload-artifact-s3@v5
+      if: ${{ !inputs.use-gha }}
+      continue-on-error: true
+      with:
+        s3-bucket: ${{ inputs.s3-bucket }}
+        s3-prefix: |
+          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+        retention-days: 14
+        if-no-files-found: ignore
+        path: debug-*.zip
 
     # GHA upload
     - name: Store Test Downloaded JSONs on Github

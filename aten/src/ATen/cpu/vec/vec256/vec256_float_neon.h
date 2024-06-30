@@ -349,6 +349,12 @@ public:
       map(std::acos)
     );
   }
+  Vectorized<float> acosh() const {
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_acoshf4_u10(values.val[0]), Sleef_acoshf4_u10(values.val[1])),
+      map(std::acosh)
+    );
+  }
   Vectorized<float> asin() const {
     return USE_SLEEF(
       Vectorized<float>(Sleef_asinf4_u10(values.val[0]), Sleef_asinf4_u10(values.val[1])),
@@ -817,12 +823,16 @@ inline Vectorized<float> Vectorized<float>::le(const Vectorized<float>& other) c
 template <>
 inline void convert(const float* src, int32_t* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<float>::size()); i += Vectorized<float>::size()) {
     vst1q_s32(dst + i, vcvtq_s32_f32(vld1q_f32(src + i)));
     vst1q_s32(dst + i + 4, vcvtq_s32_f32(vld1q_f32(src + i + 4)));
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = static_cast<int32_t>(src[i]);
   }
@@ -831,12 +841,16 @@ inline void convert(const float* src, int32_t* dst, int64_t n) {
 template <>
 inline void convert(const int32_t* src, float* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<float>::size()); i += Vectorized<float>::size()) {
     vst1q_f32(dst + i, vcvtq_f32_s32(vld1q_s32(src + i)));
     vst1q_f32(dst + i + 4, vcvtq_f32_s32(vld1q_s32(src + i + 4)));
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = static_cast<float>(src[i]);
   }

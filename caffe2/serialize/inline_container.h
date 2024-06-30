@@ -104,6 +104,7 @@ class TORCH_API ChunkRecordIterator {
 
   // Read at most `chunkSize` into `buf`. Return the number of actual bytes read.
   size_t next(void* buf);
+  size_t recordSize() const { return recordSize_; }
 
  private:
  ChunkRecordIterator(

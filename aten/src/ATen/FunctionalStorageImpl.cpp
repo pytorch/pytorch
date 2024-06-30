@@ -10,7 +10,7 @@ namespace at::functionalization {
 
 ViewMeta ViewMeta::to_out_idx(int64_t out_idx) {
   if (out_idx == this->out_index) return *this;
-  return ViewMeta(forward_fn, reverse_fn, is_multi_output, out_idx);
+  return ViewMeta(forward_fn, reverse_fn, has_symbolic_inputs, is_multi_output, is_as_strided, out_idx);
 }
 
 // Note [Functionalization: Alias Removal Part 2]
@@ -94,15 +94,36 @@ FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& base)
       get_nbytes(base),
       DataPtr{nullptr, base.device()},
       GetAllocator(kMeta),
-      /*resizeable=*/true
+      /*resizable=*/true
     ),
     base_(base)
-  {
+{
+  // SparseTensorImpl has no storage, so we cannot query its nbytes.
+  // (original_storage_size is only used for storage resizing in fsdp anyway, which does not apply to sparse)
+  // Same for XLA
+  if (base.unsafeGetTensorImpl()->has_storage() && base.device().type() != c10::DeviceType::XLA) {
+    original_storage_size_ = base.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes();
+  } else {
+    original_storage_size_ = -1;
+  }
+  curr_storage_size_ = original_storage_size_;
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(base_));
 }
 
 void FunctionalStorageImpl::add_update(const Tensor& updated_val, const std::vector<ViewMeta>& metas) {
   TORCH_CHECK(!frozen_, "cannot mutate tensors with frozen storage");
+
+  if (metas.size() > 1) {
+    for (size_t i = 1; i < metas.size(); ++i) {
+      // Skipping this check for XLA. Would be good to add it back, but it is failing XLA CI
+      TORCH_CHECK(updated_val.device().type() == c10::DeviceType::XLA || !metas[i].is_as_strided,
+"During torch.compile, encountered a mutation on a view chain of length ", metas.size(), ", where view ", i,
+" was an as_strided() call. as_strided() is non-compositional, and therefore is not possible to functionalize properly today,"
+"so this behavior is banned in compile. As a workaround, you can either remove the mutation from the model code, or you "
+"can insert a graph break right before the mutation with torch._dynamo.graph_break(). If you would like this behavior to "
+"work properly, please comment on https://github.com/pytorch/pytorch/issues/104505.");
+    }
+  }
   updates_.push_back({updated_val, metas});
   generation_++;
 }

@@ -5,6 +5,7 @@
 #include <type_traits>
 #include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.h>
@@ -234,10 +235,19 @@ static void index_copy_kernel(
 
 static void index_put_kernel(TensorIterator& iter, const IntArrayRef index_size, const IntArrayRef index_stride, const bool accumulate) {
   TORCH_CHECK(!accumulate, "index_put does not support accumulate=true");
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16, iter.dtype(), "index_put", [&] {
-    using dtype = OpaqueType<sizeof(scalar_t)>;
-    index_put_kernel_impl<dtype>(iter, index_size, index_stride);
-  });
+  AT_DISPATCH_V2(
+    iter.dtype(),
+    "index_put",
+    AT_WRAP([&] {
+      using dtype = OpaqueType<sizeof(scalar_t)>;
+      index_put_kernel_impl<dtype>(iter, index_size, index_stride);
+    }),
+    AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+    AT_EXPAND(AT_FLOAT8_TYPES),
+    kComplexHalf,
+    kHalf,
+    kBool,
+    kBFloat16);
 }
 
 void index_put_kernel_quantized_cuda(TensorIterator& iter, const IntArrayRef index_size, const IntArrayRef index_stride, const bool accumulate, const double scale, const int zero_point) {
@@ -333,7 +343,7 @@ void take_kernel(
     // Cannot use `OpaqueType`, as Tensor::data_ptr<OpaqueType<N>> is not implemented
     AT_DISPATCH_INDEX_TYPES(cuda::detail::canUse32BitIndexMath(input) ? ScalarType::Int : ScalarType::Long,
       "take_cuda_index", [&] {
-         const auto* __restrict__ indexed_ptr = input.template data_ptr<scalar_t>();
+         const auto* __restrict__ indexed_ptr = input.template const_data_ptr<scalar_t>();
          cuda_take_put_kernel<scalar_t, index_t>(iter, input,
             [indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
                iterated = indexed_ptr[offset];
@@ -385,7 +395,7 @@ void launch_masked_scatter_kernel(
       .resize_outputs(false)
       .add_output(self)
       .add_input(self)
-      .add_input(mask_cont)
+      .add_const_input(mask_cont)
       .add_input(maskPrefixSum)
       .build();
 

@@ -5,9 +5,10 @@ import random
 
 import torch
 from torch import nn
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import same
 from torch._inductor import config
+from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 USE_DDP_WRAPPER = os.environ.get("USE_DDP_WRAPPER", "1") == "1"
@@ -227,6 +228,7 @@ class TestLayoutOptim(TestCase):
         y = f(x)
         self.assertTrue(torch.equal(y, torch.ones(3, 2).cuda() * 2))
 
+    @tf32_off()
     def test_mutate_base_for_conv_output(self):
         class Model(nn.Module):
             def __init__(self, manual_graph_break=False):
@@ -244,6 +246,7 @@ class TestLayoutOptim(TestCase):
 
         self.verify_accuracy_for_infer(Model)
 
+    @tf32_off()
     def test_mutate_view_for_conv_output(self):
         class Model(nn.Module):
             def __init__(self, manual_graph_break=False):
@@ -282,6 +285,53 @@ class TestLayoutOptim(TestCase):
 
             # Trigger the compiling of the backward graph
             actual.sum().backward()
+
+    def test_nll_loss_backward(self):
+        """
+        Repro for issue https://github.com/pytorch/pytorch/issues/120759
+
+        The CUDA implementation of aten.nll_loss2d_backward.default requires
+        the self tensor (whose layout will be used to create grad_input)
+        to be contiguous. Layout optimization may change the self tensor's layout
+        and cause failure. We fix that by adding layout constaints to the
+        fallback of aten.nll_loss2d_backward.default .
+        """
+
+        class MyModel(torch.nn.Module):
+            def __init__(self, input_dim, num_classes):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, num_classes, 3, 1, padding="same")
+                self.out = torch.nn.Linear(input_dim * num_classes, num_classes)
+
+            def forward(self, x: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+                x = self.conv(x)
+                b, c, t, f = x.size()
+                x = self.out(x.reshape(b, t, c * f))
+                logits = x.reshape(x.size(0), x.size(2), x.size(1))
+                loss = torch.nn.functional.cross_entropy(logits, targets)
+                return loss
+
+        device = "cuda"
+        batch_size = 48
+        seq_len = 144
+        input_dim = 39
+        num_classes = 111
+
+        model = MyModel(input_dim, num_classes)
+        model.to(device)
+
+        opt_model = torch.compile(model)
+
+        x = torch.ones((batch_size, 1, seq_len, input_dim), device=device)
+        targets = torch.randint(
+            0, num_classes - 1, (batch_size, seq_len), device=device, dtype=torch.int64
+        )
+
+        loss = model(x, targets)
+        loss.backward()
+
+        ref = model(x, targets)
+        self.assertTrue(torch.allclose(ref, loss))
 
 
 if __name__ == "__main__":

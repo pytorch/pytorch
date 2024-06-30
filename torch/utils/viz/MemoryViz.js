@@ -762,7 +762,12 @@ function frameFilter({name, filename}) {
 
 function format_frames(frames) {
   if (frames.length === 0) {
-    return `<block was allocated before _record_history was enabled>`;
+    return (
+      `This block has no frames. Potential causes:\n` +
+      `1) This block was allocated before _record_memory_history was enabled.\n` +
+      `2) The context or stacks passed to _record_memory_history does not include this block. Consider changing context to 'state', 'alloc', or 'all', or changing stacks to 'all'.\n` +
+      `3) This event occurred during backward, which has no python frames, and memory history did not include C++ frames. Use stacks='all' to record both C++ and python frames.`
+    );
   }
   const frame_strings = frames
     .filter(frameFilter)
@@ -901,6 +906,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
     current_data.push(e);
     data.push(e);
     total_mem += size;
+    element_obj.max_allocated_mem = total_mem + total_summarized_mem;
   }
 
   for (const elem of initially_allocated) {
@@ -969,9 +975,11 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
     elements_length: elements.length,
     context_for_id: id => {
       const elem = elements[id];
-      let text = `${formatAddr(elem)} ${formatSize(elem.size)} allocation (${
-        elem.size
-      } bytes)`;
+      let text = `Addr: ${formatAddr(elem)}`;
+      text = `${text}, Size: ${formatSize(elem.size)} allocation`;
+      text = `${text}, Total memory used after allocation: ${formatSize(
+        elem.max_allocated_mem,
+      )}`;
       if (elem.stream !== null) {
         text = `${text}, stream ${elem.stream}`;
       }

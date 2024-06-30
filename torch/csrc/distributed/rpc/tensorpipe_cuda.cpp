@@ -74,7 +74,7 @@ C10_REGISTER_CREATOR(
 
 class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
  public:
-  c10::optional<std::vector<char>> prepareTensorForSending(
+  std::optional<std::vector<char>> prepareTensorForSending(
       const c10::Storage& storage,
       const std::vector<c10::Stream>& streams,
       tensorpipe::Message& message) const override {
@@ -98,7 +98,7 @@ class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
   }
 
   at::DataPtr allocateTensorForReceiving(
-      int deviceIndex,
+      c10::DeviceIndex deviceIndex,
       size_t length,
       const std::vector<c10::Stream>& streams,
       tensorpipe::Allocation& allocation) const override {

@@ -167,8 +167,9 @@ private:
   void set(cudnnDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad, bool nhwc);
 
   void set(cudnnDataType_t dataType, int dim, int* size, int* stride, bool nhwc) {
-    fixSizeOneDimStride<int>(dim, size, stride, nhwc);
-    AT_CUDNN_CHECK(cudnnSetTensorNdDescriptor(mut_desc(), dataType, dim, size, stride));
+    std::vector<int> strides_copy(stride, stride + dim);
+    fixSizeOneDimStride<int>(dim, size, strides_copy.data(), nhwc);
+    AT_CUDNN_CHECK(cudnnSetTensorNdDescriptor(mut_desc(), dataType, dim, size, strides_copy.data()));
   }
 };
 
@@ -210,9 +211,7 @@ struct TORCH_CUDA_CPP_API ConvolutionDescriptor
     if(dataType == CUDNN_DATA_HALF) {
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_TENSOR_OP_MATH));
     } else if (dataType == CUDNN_DATA_FLOAT && !allow_tf32) {
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_FMA_MATH));
-#endif
     }
   }
 };
@@ -304,13 +303,9 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
       if (input_type == CUDNN_DATA_HALF) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_TENSOR_OP_MATH);
       }
-#endif
-#if !defined(USE_CUDNN_RNN_V8_API) && defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
       else if (input_type == CUDNN_DATA_FLOAT && !allow_tf32) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_FMA_MATH);
       }
-#endif
-#ifndef USE_CUDNN_RNN_V8_API
       else {
         // Technically, as the default it's not necessary to explicitly
         // set this.
@@ -318,6 +313,15 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
       }
     }
 #else
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    auto math_type = CUDNN_DEFAULT_MATH;
+    if (prop->major >= 7) {
+      if (input_type == CUDNN_DATA_HALF) {
+        math_type = CUDNN_TENSOR_OP_MATH;
+      } else if (!allow_tf32) {
+        math_type = CUDNN_FMA_MATH;
+      }
+    }
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v8(
           mut_desc(),
           algo,
@@ -327,7 +331,7 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
           input_mode,
           input_type,
           datatype,
-          allow_tf32 ? CUDNN_DEFAULT_MATH : CUDNN_FMA_MATH,
+          math_type,
           input_size,
           hidden_size,
           proj_size ? proj_size : hidden_size,
@@ -353,6 +357,24 @@ struct TORCH_CUDA_CPP_API CTCLossDescriptor
     AT_CUDNN_CHECK(
         cudnnSetCTCLossDescriptorEx(mut_desc(), datatype, normMode, gradMode));
   }
+  void set_v8_v9(
+      cudnnDataType_t datatype,
+      cudnnLossNormalizationMode_t normMode,
+      cudnnNanPropagation_t gradMode,
+      int maxLabelLength) {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 90000
+    auto gradModev9 = CUDNN_CTC_ZERO_OOB_GRADIENTS;
+    if (gradMode == cudnnNanPropagation_t::CUDNN_PROPAGATE_NAN) {
+      gradModev9 = CUDNN_CTC_SKIP_OOB_GRADIENTS;
+    }
+    AT_CUDNN_CHECK(
+        cudnnSetCTCLossDescriptor_v9(mut_desc(), datatype, normMode, gradModev9, maxLabelLength));
+#else
+    AT_CUDNN_CHECK(
+        cudnnSetCTCLossDescriptor_v8(mut_desc(), datatype, normMode, gradMode, maxLabelLength));
+#endif
+  }
+
 };
 
 struct TORCH_CUDA_CPP_API ActivationDescriptor

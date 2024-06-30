@@ -1,14 +1,19 @@
 # mypy: ignore-errors
-
 import dataclasses
 import inspect
+import sys
+import warnings
 from typing import Callable, Dict, List, Optional
 
 import torch._C
 from torch._guards import Guard
 
 from .. import variables
-from ..bytecode_transformation import create_call_function, create_instruction
+from ..bytecode_transformation import (
+    create_call_function,
+    create_instruction,
+    create_setup_with,
+)
 from ..device_interface import get_interface_for_device
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder, install_guard
@@ -77,11 +82,18 @@ class ContextWrappingVariable(VariableTracker):
         self.state.cleanup_assert()
         return variables.ConstantVariable.create(None)
 
-    def reconstruct(self, codegen):
-        attr_source = AttrSource(
-            codegen.tx.import_source(self.module_name()), self.fn_name()
+    def reconstruct_type(self, codegen):
+        codegen(
+            AttrSource(codegen.tx.import_source(self.module_name()), self.fn_name())
         )
-        return attr_source.reconstruct(codegen)
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: self.reconstruct_type(codegen))
+        target_values = self.target_values
+        if not target_values:
+            target_values = ()
+        codegen.extend_output([codegen.create_load_const(val) for val in target_values])
+        codegen.extend_output(create_call_function(len(target_values), False))
 
     def module_name(self):
         raise NotImplementedError("module_name called on base")
@@ -121,9 +133,10 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
                 source=source,
             ).call_function(tx, [], {})
         except Unsupported as e:
-            raise unimplemented(
-                f"Unsupported context manager {self.cm_obj}'s __enter__ function"
-            ) from e
+            unimplemented(
+                f"Unsupported context manager {self.cm_obj}'s __enter__ function",
+                from_exc=e,
+            )
 
     def exit(self, tx, *args):
         source = None if self.source is None else AttrSource(self.source, "__exit__")
@@ -142,12 +155,240 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
                 {},
             )
         except Unsupported as e:
-            raise unimplemented(
-                f"Unsupported context manager {self.cm_obj}'s __exit__ function"
-            ) from e
+            unimplemented(
+                f"Unsupported context manager {self.cm_obj}'s __exit__ function",
+                from_exc=e,
+            )
 
         tx.generic_context_manager_depth -= 1
         return x
+
+
+class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
+    """represents torch grad requries grad"""
+
+    @staticmethod
+    def create(tx, target_values, **kwargs):
+        return GradInplaceRequiresGradCtxManagerVariable(
+            target_values=target_values,
+            initial_values=None,
+            **kwargs,
+        )
+
+    def enter(self, tx):
+        [enabled] = self.target_values
+        self.prev_state = torch._C._functorch.get_inplace_requires_grad_allowed()
+        torch._C._functorch.set_inplace_requires_grad_allowed(enabled)
+        self.set_cleanup_hook(
+            tx,
+            lambda: torch._C._functorch.set_inplace_requires_grad_allowed(
+                self.prev_state
+            ),
+        )
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch.set_inplace_requires_grad_allowed,
+            (enabled,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function",
+            torch._C._functorch.set_inplace_requires_grad_allowed,
+            (self.prev_state,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+
+class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
+    """represents torch.func.jvp increment/decrement nesting"""
+
+    # A guard is needed as the grad level is baked into the torch FX graph
+    # This is fine if jvp is only called from within the function
+    # being compiled. But the FX graph may be invalid in the case of a jvp
+    # call from eager that calls the compiled function, as the jvp levels
+    # may be different.
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
+
+    @staticmethod
+    def create(tx, **kwargs):
+        var = JvpIncrementNestingCtxManagerVariable(
+            target_values=None,
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def enter(self, tx):
+        install_guard(self._guards_singleton)
+        jvp_level = torch._functorch.eager_transforms.enter_jvp_nesting()
+        self.set_cleanup_hook(
+            tx, lambda: torch._functorch.eager_transforms.exit_jvp_nesting()
+        )
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch._jvp_increment_nesting,
+            (),
+            {},
+        )
+        return variables.ConstantVariable.create(jvp_level)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function", torch._C._functorch._jvp_decrement_nesting, (), {}
+        )
+        return variables.ConstantVariable.create(None)
+
+
+class SetFwdGradEnabledContextManager(ContextWrappingVariable):
+    """represents torch.autograd.forward_ad._set_fwd_grad_enabled() to enable/disable fwd grad"""
+
+    @staticmethod
+    def create(tx, target_values, **kwargs):
+        return SetFwdGradEnabledContextManager(
+            target_values=target_values,
+            initial_values=None,
+            **kwargs,
+        )
+
+    def enter(self, tx):
+        [mode] = self.target_values
+        self.prev_state = torch._C._is_fwd_grad_enabled()
+        torch._C._set_fwd_grad_enabled(mode)
+        self.set_cleanup_hook(
+            tx,
+            lambda: torch._C._set_fwd_grad_enabled(self.prev_state),
+        )
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._set_fwd_grad_enabled,
+            (mode,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function",
+            torch._C._set_fwd_grad_enabled,
+            (self.prev_state,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+
+class DualLevelContextManager(ContextWrappingVariable):
+    """Represents torch.autograd.forward_ad.dual_level ctx manager"""
+
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.DUAL_LEVEL)
+
+    @staticmethod
+    def create(tx, **kwargs):
+        return DualLevelContextManager(
+            target_values=None,
+            initial_values=None,
+            **kwargs,
+        )
+
+    def enter(self, tx):
+        install_guard(self._guards_singleton)
+        self.new_level = torch.autograd.forward_ad.enter_dual_level()
+        self.set_cleanup_hook(
+            tx, lambda: torch.autograd.forward_ad.exit_dual_level(level=self.new_level)
+        )
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._enter_dual_level,
+            (),
+            {},
+        )
+        return variables.ConstantVariable.create(self.new_level)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function",
+            torch._C._exit_dual_level,
+            (self.new_level,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+
+class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
+    """represents torch.func.grad increment/decrement nesting"""
+
+    # A guard is needed as the grad level is baked into the torch FX graph
+    # This is fine if grad is only called from within the function
+    # being compiled. But the FX graph may be invalid in the case of a grad
+    # call from eager that calls the compiled function, as the grad levels
+    # may be different.
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
+
+    @staticmethod
+    def create(tx, **kwargs):
+        var = GradIncrementNestingCtxManagerVariable(
+            target_values=None,
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def enter(self, tx):
+        install_guard(self._guards_singleton)
+        grad_level = torch._C._functorch._grad_increment_nesting()
+        self.set_cleanup_hook(tx, lambda: torch._C._functorch._grad_decrement_nesting())
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch._grad_increment_nesting,
+            (),
+            {},
+        )
+        return variables.ConstantVariable.create(grad_level)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function", torch._C._functorch._grad_decrement_nesting, (), {}
+        )
+        return variables.ConstantVariable.create(None)
+
+
+class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
+    """Delay a call to warnings.catch_warnings"""
+
+    @staticmethod
+    def create(tx, catch_warnings_args):
+        return CatchWarningsCtxManagerVariable(
+            catch_warnings_args=catch_warnings_args,
+            target_values=None,
+            initial_values=None,
+        )
+
+    def __init__(self, catch_warnings_args, **kwargs):
+        assert isinstance(catch_warnings_args, dict), catch_warnings_args
+        super().__init__(**kwargs)
+        self.catch_warnings_args = catch_warnings_args
+
+    def enter(self, tx):
+        kwargs = {
+            k: v.as_python_constant() for k, v in self.catch_warnings_args.items()
+        }
+        ctx_val = warnings.catch_warnings(**kwargs)
+        self.set_cleanup_hook(tx, lambda: ctx_val.__exit__(None, None, None))
+        return variables.ConstantVariable.create(ctx_val.__enter__())
+
+    def reconstruct(self, cg):
+        cg.add_push_null(lambda: cg.load_import_from("warnings", "catch_warnings"))
+        cg.foreach(self.catch_warnings_args.values())
+        keys = tuple(self.catch_warnings_args.keys())
+        cg.extend_output(cg.create_call_function_kw(len(keys), keys, False))
 
 
 class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
@@ -158,9 +399,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     # being compiled. But the FX graph may be invalid in the case of a vmap
     # call from eager that calls the compiled function, as the vmap levels
     # may be different.
-    _guards_singleton = Guard(
-        GlobalStateSource(), GuardBuilder.FUNCTORCH_CURRENT_LEVEL_MATCH
-    )
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
 
     @staticmethod
     def create(tx, target_values, **kwargs):
@@ -247,9 +486,9 @@ class GradModeVariable(ContextWrappingVariable):
 
 class InferenceModeVariable(ContextWrappingVariable):
     @staticmethod
-    def create(tx, target_values, **kwargs):
+    def create(tx, target_value, **kwargs):
         var = InferenceModeVariable(
-            target_values, initial_values=torch.is_inference_mode_enabled(), **kwargs
+            [target_value], initial_values=torch.is_inference_mode_enabled(), **kwargs
         )
         return var
 
@@ -277,19 +516,19 @@ class InferenceModeVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx):
-        ctx = torch.autograd.grad_mode._enter_inference_mode(self.target_values)
+        ctx = torch.autograd.grad_mode._enter_inference_mode(*self.target_values)
         self.set_cleanup_hook(
             tx, lambda: torch.autograd.grad_mode._exit_inference_mode(ctx)
         )
         self.state.proxy = tx.output.create_node(
             "call_function",
             torch.autograd.grad_mode._enter_inference_mode,
-            (self.target_values,),
+            (*self.target_values,),
             {},
         )
 
     def module_name(self):
-        return "torch.inference_mode"
+        return "torch"
 
     def fn_name(self):
         return "inference_mode"
@@ -566,6 +805,98 @@ class StreamContextVariable(ContextWrappingVariable):
         self.state.cleanup_assert()
 
 
+class PreserveVersionContextVariable(ContextWrappingVariable):
+    """
+    Wraps torch.autograd._unsafe_preserve_version_counter
+    """
+
+    @staticmethod
+    def constructor(tx):
+        return variables.LambdaVariable(
+            lambda tensor: PreserveVersionContextVariable(
+                tensor,
+                tensor.var_getattr(tx, "_version"),
+            )
+        )
+
+    def __init__(self, tensor, prev_version, **kwargs):
+        kwargs.setdefault("target_values", None)
+        super().__init__(**kwargs)
+        self.tensor = tensor
+        self.prev_version = prev_version
+
+    def enter(self, tx):
+        pass
+
+    def exit(self, tx, *args):
+        from ..tensor_version_op import _unsafe_set_version_counter
+
+        return variables.TorchInGraphFunctionVariable(
+            _unsafe_set_version_counter
+        ).call_function(tx, [self.tensor, self.prev_version], {})
+
+    def reconstruct(self, codegen):
+        unimplemented(
+            "torch.autograd._unsafe_preserve_version_counter with graph break"
+        )
+
+
+class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FSDP_TRAINING_STATE)
+
+    @staticmethod
+    def create(tx, param_group_var, target_value, **kwargs):
+        var = FSDPParamGroupUseTrainingStateVariable(
+            param_group_var=param_group_var,
+            target_values=[target_value],
+            initial_values=[param_group_var.value._training_state],
+            **kwargs,
+        )
+        return var
+
+    def __init__(self, param_group_var, target_values, initial_values=None, **kwargs):
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+        self.param_group_var = param_group_var
+        install_guard(self._guards_singleton)
+
+    def enter(self, tx):
+        self._call_func(tx, self.target_values)
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx, *args):
+        self._call_func(tx, self.initial_values)
+        return variables.ConstantVariable.create(None)
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ):
+        self._call_func(tx, self.initial_values)  # undo eager initialization
+        return super().call_function(tx, args, kwargs)
+
+    def _call_func(self, tx, values):
+        assert len(values) == 1
+        value = values[0]
+        if self.param_group_var.value._training_state != value:
+            self.param_group_var.call_method(
+                tx,
+                "__setattr__",
+                (
+                    variables.ConstantVariable.create("_training_state"),
+                    variables.EnumVariable(value),
+                ),
+                {},
+            )
+            self.param_group_var.value._training_state = value
+
+    def module_name(self):
+        return "torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup"
+
+    def fn_name(self):
+        return "use_training_state"
+
+
 class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs):
         if proxy is not None and "example_value" in proxy.node.meta:
@@ -636,8 +967,7 @@ class StreamVariable(VariableTracker):
         # design, to unblock current work, we lift the stream into a global and then codegen bytecode to load it from there.
         prefix = f"_stream_{self.device}"
         name = codegen.tx.output.install_global_by_id(prefix, self.value)
-
-        return [codegen.create_load_global(name, push_null=False, add=True)]
+        codegen.append_output(codegen.create_load_global(name, add=True))
 
 
 class EventVariable(VariableTracker):
@@ -679,6 +1009,11 @@ class EventVariable(VariableTracker):
 
 
 class WithExitFunctionVariable(VariableTracker):
+    _nonvar_fields = {
+        "target",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, ctx: ContextWrappingVariable, target, **kwargs):
         super().__init__(**kwargs)
         assert isinstance(ctx, ContextWrappingVariable)
@@ -695,18 +1030,17 @@ class WithExitFunctionVariable(VariableTracker):
         # Note here we reconstruct the context manager rather than the
         # exit function.  The handler generated by BlockStackEntry
         # will re-enter the context in the resume function.
-        output = AttrSource(
-            codegen.tx.import_source(self.ctx.module_name()), self.ctx.fn_name()
-        ).reconstruct(codegen)
-
+        self.ctx.reconstruct_type(codegen)
         if codegen.tx.output.partial_convert:
-            loads = [codegen.create_load_const(val) for val in self.ctx.target_values]
-            output.extend(loads)
-            output.extend(
-                [
-                    *create_call_function(len(loads), True),
-                    create_instruction("SETUP_WITH", target=self.target),
-                    create_instruction("POP_TOP"),
-                ]
+            if sys.version_info >= (3, 11):
+                codegen.append_output(create_instruction("PUSH_NULL"))
+                if sys.version_info < (3, 13):
+                    codegen.append_output(create_instruction("SWAP", arg=2))
+            codegen.extend_output(
+                [codegen.create_load_const(val) for val in self.ctx.target_values]
             )
-        return output
+            codegen.extend_output(
+                create_call_function(len(self.ctx.target_values), False)
+            )
+            codegen.append_output(create_setup_with(self.target))
+            codegen.append_output(create_instruction("POP_TOP"))

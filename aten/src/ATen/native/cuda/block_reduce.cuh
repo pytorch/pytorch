@@ -16,7 +16,7 @@ constexpr int kCUDABlockReduceNumThreads = 512;
 // NOTE: This is >= the max block size on current hardware anyway (1024).
 constexpr int kCUDABlockReduceMaxThreads = C10_WARP_SIZE * C10_WARP_SIZE;
 
-// Sums `val` accross all threads in a warp.
+// Sums `val` across all threads in a warp.
 //
 // Assumptions:
 //   - The size of each block should be a multiple of `C10_WARP_SIZE`
@@ -29,7 +29,7 @@ __inline__ __device__ T WarpReduceSum(T val) {
   return val;
 }
 
-// Picks the maximum `val` accross all threads in a warp.
+// Picks the maximum `val` across all threads in a warp.
 //
 // Assumptions:
 //   - The size of each block should be a multiple of `C10_WARP_SIZE`
@@ -103,7 +103,7 @@ __inline__ __device__ T BlockReduceMax(T val, T* shared) {
     shared[wid] = val;
   }
   __syncthreads();
-  val = (tid < B::Warps()) ? shared[lid] : T(0);
+  val = (tid < B::Warps()) ? shared[lid] : T(std::numeric_limits<T>::lowest());
   if (wid == 0) {
     val = WarpReduceMax(val);
   }

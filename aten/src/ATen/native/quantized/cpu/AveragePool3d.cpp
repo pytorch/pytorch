@@ -100,12 +100,10 @@ Tensor q_avg_pool3d(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int kD, kW, kH, dD, dW, dH, padD, padW, padH;
-  std::tie(kW, kH, kD) = get_kernel(kernel_size);
-  std::tie(dW, dH, dD) = get_stride(stride, kW, kH, kD);
-  std::tie(padW, padH, padD) = get_padding(padding);
+    std::optional<int64_t> divisor_override) {
+  auto [kW, kH, kD] = get_kernel(kernel_size);
+  auto [dW, dH, dD] = get_stride(stride, kW, kH, kD);
+  auto [padW, padH, padD] = get_padding(padding);
 
   const int64_t nbatch = input.ndimension() == 5 ? input.size(-5) : 1;
   const int64_t nInputPlane = input.size(-4);
@@ -167,7 +165,7 @@ Tensor avg_pool3d_quantized_cpu(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   Tensor output;
   AT_DISPATCH_QINT_TYPES(input.scalar_type(), "avg_pool3d_quantized_cpu", [&]() {
     output = q_avg_pool3d<scalar_t>(

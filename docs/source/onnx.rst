@@ -18,7 +18,7 @@ Microsoft's `ONNX Runtime <https://www.onnxruntime.ai>`_.
 TorchDynamo-based ONNX Exporter
 -------------------------------
 
-*The TorchDynamo-based ONNX exporter is the newest (and Beta) exporter for PyTorch 2.0 and newer*
+*The TorchDynamo-based ONNX exporter is the newest (and Beta) exporter for PyTorch 2.1 and newer*
 
 TorchDynamo engine is leveraged to hook into Python's frame evaluation API and dynamically rewrite its
 bytecode into an FX Graph. The resulting FX Graph is then polished before it is finally translated into an
@@ -77,6 +77,8 @@ also be interested in reading our `development wiki <https://github.com/pytorch/
 .. py:module:: torch.onnx.symbolic_opset16
 .. py:module:: torch.onnx.symbolic_opset17
 .. py:module:: torch.onnx.symbolic_opset18
+.. py:module:: torch.onnx.symbolic_opset19
+.. py:module:: torch.onnx.symbolic_opset20
 .. py:module:: torch.onnx.symbolic_opset7
 .. py:module:: torch.onnx.symbolic_opset8
 .. py:module:: torch.onnx.symbolic_opset9

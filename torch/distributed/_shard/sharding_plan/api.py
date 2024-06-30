@@ -1,11 +1,11 @@
 import abc
-import torch.nn as nn
-
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union
 
+import torch.nn as nn
 from torch.distributed._shard.sharder import Sharder
 from torch.distributed._shard.sharding_spec import ShardingSpec
+
 
 @dataclass
 class ShardingPlan:
@@ -61,6 +61,7 @@ class ShardingPlan:
         >>>    return_local_tensor=["fc2"]
         >>> )
     """
+
     plan: Dict[str, Union[ShardingSpec, Sharder]]
     output_plan: Optional[Dict[str, ShardingSpec]] = None
     return_local_tensor: Optional[List[str]] = None
@@ -71,6 +72,7 @@ class ShardingPlanner(abc.ABC):
     Default ShardingPlanner interface, can be extended and
     implement advanced sharding strategies.
     """
+
     @abc.abstractmethod
     def build_plan(self, module: nn.Module) -> ShardingPlan:
         """

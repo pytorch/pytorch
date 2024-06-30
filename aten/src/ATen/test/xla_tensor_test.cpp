@@ -17,7 +17,7 @@ void* XLAMalloc(ptrdiff_t size) {
 }
 
 struct XLAAllocator final : public at::Allocator {
-  at::DataPtr allocate(size_t size) const override {
+  at::DataPtr allocate(size_t size) override {
     auto* ptr = XLAMalloc(size);
     return {ptr, ptr, &XLAFree, at::DeviceType::XLA};
   }

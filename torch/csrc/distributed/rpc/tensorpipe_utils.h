@@ -27,7 +27,7 @@ class TensorpipeDeviceTypeConverter {
   // cannot include the TensorPipe headers because it's a private dependency.
   // Thus we bend over backwards and entrust this method with appending that
   // object to the `tensors` field of the tensorpipe::Message object we pass.
-  virtual c10::optional<std::vector<char>> prepareTensorForSending(
+  virtual std::optional<std::vector<char>> prepareTensorForSending(
       const c10::Storage& storage,
       const std::vector<c10::Stream>& streams,
       tensorpipe::Message& message) const = 0;
@@ -35,7 +35,7 @@ class TensorpipeDeviceTypeConverter {
   // Same as above: this method cannot return a tensorpipe::Allocation::Tensor,
   // thus it appends it to the `tensors` field of the tensorpipe::Allocation.
   virtual at::DataPtr allocateTensorForReceiving(
-      int deviceIndex,
+      c10::DeviceIndex deviceIndex,
       size_t length,
       const std::vector<c10::Stream>& streams,
       tensorpipe::Allocation& allocation) const = 0;
