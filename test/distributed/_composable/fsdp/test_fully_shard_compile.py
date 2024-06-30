@@ -139,16 +139,11 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(x, ref_x)
 
     def _reinplace_all_gather_with_checks(self, graph):
-        import logging
-
-        torch_log = logging.getLogger("torch")
         if _is_op_in_graph(
             graph,
             torch.ops._c10d_functional.all_gather_into_tensor.default,
         ):
-            torch_log.warning(f"before: graph: {graph}")
             comms.reinplace_fsdp_all_gather(graph)
-            torch_log.warning(f"after: graph: {graph}")
             self.assertFalse(
                 _is_op_in_graph(
                     graph,
@@ -346,9 +341,8 @@ class TestFullyShardCompile(FSDPTest):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_nested_fully_shard_fullgraph_backend_inductor(self):
-        # TODO: This pass causes CUDA IMA, why?
         with torch._inductor.config.patch(
-            post_grad_custom_post_reinplace_pass=self._reinplace_all_gather_with_checks
+            post_grad_custom_post_reinplace_pass=self._reinplace_all_gather_with_checks,
         ):
             self._test_traceable_fsdp(
                 *self._create_nested_fully_shard_factory_fns(),
