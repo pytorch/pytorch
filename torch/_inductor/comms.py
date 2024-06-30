@@ -28,20 +28,19 @@ if TYPE_CHECKING:
 
 def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
     """
-    # File: torch/distributed/_composable/fsdp/_fsdp_collectives.py:152 in foreach_all_gather, code: all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
-    all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default([primals_2, primals_3, primals_4, primals_5], [64, 128, 8, 8], 208, 2, 0, torch.float32, device(type='cuda', index=0));
-    getitem: "f32[208][1]cuda:0" = all_gather_copy_in[0];
+    all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(...);
+    getitem = all_gather_copy_in[0];
+    (getitem_1 = all_gather_copy_in[1];)  # optional
 
-    # File: torch/distributed/_functional_collectives.py:204 in all_gather_tensor, code: tensor = torch.ops._c10d_functional.all_gather_into_tensor(
-    all_gather_into_tensor: "f32[416][1]cuda:0" = torch.ops._c10d_functional.all_gather_into_tensor.default(getitem, 2, '0');
+    all_gather_into_tensor = torch.ops._c10d_functional.all_gather_into_tensor.default(getitem, ...);
 
     ->
 
-    all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default([primals_2, primals_3, primals_4, primals_5], [64, 128, 8, 8], 208, 2, 0, torch.float32, device(type='cuda', index=0));
-    getitem: "f32[208][1]cuda:0" = all_gather_copy_in[0];
-    getitem_1: "f32[416][1]cuda:0" = all_gather_copy_in[1];
+    all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(...);
+    getitem = all_gather_copy_in[0];
+    getitem_1 = all_gather_copy_in[1];
 
-    all_gather_into_tensor: "f32[416][1]cuda:0" = torch.ops._c10d_functional.all_gather_into_tensor_out.default(getitem, 2, '0', out=getitem_1);
+    all_gather_into_tensor = torch.ops._c10d_functional.all_gather_into_tensor_out.default(getitem, ..., out=getitem_1);
     """
 
     def remove_unused_getitem(g):
@@ -139,30 +138,6 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
 
     remove_unused_getitem(graph)
     graph_pass.apply(graph)  # type: ignore[arg-type]
-
-
-"""
-        node_list = list(graph.nodes)
-        for i, n in enumerate(node_list):
-            if n.target == torch.ops.fsdp.all_gather_copy_in.default:
-                all_gather_copy_in_node = n
-                getitem_0_node = node_list[i+1]
-                assert getitem_0_node.target == operator.getitem and getitem_0_node.args[0] == all_gather_copy_in_node
-                all_gather_node_start_index = None
-                for k in range(i+3, len(node_list)):
-                    if node_list[k].target is torch.ops._c10d_functional.all_gather_into_tensor.default and node_list[k].args[0] == getitem_0_node:
-                        all_gather_node_start_index = k
-                        break
-                if all_gather_node_start_index is None:
-                    continue
-                all_gather_node = node_list[all_gather_node_start_index]
-                with graph.inserting_before(all_gather_node):
-                    getitem_1_node = graph.call_function(operator.getitem, (all_gather_copy_in_node, 1))
-                with graph.inserting_before(all_gather_node):
-                    inplace_all_gather_node = graph.call_function(torch.ops._c10d_functional.all_gather_into_tensor_out.default, (getitem_0_node, *all_gather_node.args[1:]), {"out": getitem_1_node})
-                all_gather_node.replace_all_uses_with(inplace_all_gather_node, propagate_meta=True)
-                graph.erase_node(all_gather_node)
-"""
 
 
 def sink_waits(

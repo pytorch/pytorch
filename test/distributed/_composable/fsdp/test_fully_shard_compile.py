@@ -139,23 +139,25 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(x, ref_x)
 
     def _reinplace_all_gather_with_checks(self, graph):
-        if _is_op_in_graph(
-            graph,
-            torch.ops._c10d_functional.all_gather_into_tensor.default,
-        ):
-            comms.reinplace_fsdp_all_gather(graph)
-            self.assertFalse(
-                _is_op_in_graph(
-                    graph,
-                    torch.ops._c10d_functional.all_gather_into_tensor.default,
-                )
+        self.assertTrue(
+            _is_op_in_graph(
+                graph,
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
             )
-            self.assertTrue(
-                _is_op_in_graph(
-                    graph,
-                    torch.ops._c10d_functional.all_gather_into_tensor_out.default,
-                )
+        )
+        comms.reinplace_fsdp_all_gather(graph)
+        self.assertFalse(
+            _is_op_in_graph(
+                graph,
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
             )
+        )
+        self.assertTrue(
+            _is_op_in_graph(
+                graph,
+                torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+            )
+        )
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._functorch.config.patch(recompute_views=True)
@@ -267,12 +269,9 @@ class TestFullyShardCompile(FSDPTest):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_simple_mlp_fullgraph_backend_inductor(self):
-        with torch._inductor.config.patch(
-            post_grad_custom_post_reinplace_pass=self._reinplace_all_gather_with_checks
-        ):
-            self._test_traceable_fsdp(
-                *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
-            )
+        self._test_traceable_fsdp(
+            *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
+        )
 
     def _create_nested_fully_shard_factory_fns(self):
         hidden_dim = 16
