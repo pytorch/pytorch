@@ -87,35 +87,112 @@ def do_bench(fn, fn_args, fn_kwargs, **kwargs):
         return do_bench_gpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
 
 
-def do_bench_gpu(*args, **kwargs):
+def do_bench_gpu(fn_or_fns, estimation_iters=5, memory_warmup_iters=100, benchmark_iters=100, max_benchmark_duration=25, testing=False):
     @functools.lru_cache(None)
-    def load_triton():
-        try:
-            # NB: Lazily load triton, as importing triton is slow
-            # see https://github.com/openai/triton/issues/1599
-            from triton.testing import do_bench as triton_do_bench
-        except ImportError as exc:
-            raise NotImplementedError("requires Triton") from exc
+    def get_cache_size():
+        device = torch.cuda.current_device()
+        properties = torch.cuda.get_device_properties(device)
+        return properties.l2CacheSize
 
-        # triton PR https://github.com/openai/triton/pull/1513 change the
-        # quantile fields name from 'percentiles' to 'quantiles'
-        # and change the default value from (0.5, 0.2, 0.8) to None.
-        # This may break inductor since a caller expects a tuple may get a item.
-        #
-        # Add a wrapper to maintain the same behavior for inductor.
-        # Maybe we should have own implementation of this function?
-        return triton_do_bench, (
-            "quantiles"
-            if inspect.signature(triton_do_bench).parameters.get("quantiles")
-            is not None
-            else "percentiles"
-        )
+    def get_event_pairs(iters):
+        return [
+            (
+                torch.cuda.Event(enable_timing=True),
+                torch.cuda.Event(enable_timing=True),
+            )
+            for _ in range(iters)
+        ]
+    
+    def get_interleaved_event_pairs(fns, iters):
+        return [get_event_pairs(len(fns)) for _ in range(iters)]
+    
+    def get_timing(event_pairs):
+        return min([start_event.elapsed_time(end_event) for start_event, end_event in event_pairs])
+    
+    def get_interleaved_timing(interleaved_event_pairs):
+        return [get_timing(event_pairs) for event_pairs in zip(*interleaved_event_pairs)]
+    
+    def memory_warmup(buffer, iters):
+        for _ in range(iters):
+            buffer.zero_()
+    
+    def benchmark(fn, buffer, iters):
+        event_pairs = get_event_pairs(iters)
+        for start_event, end_event in event_pairs:
+            buffer.zero_()
+            start_event.record()
+            fn()
+            end_event.record()
+        torch.cuda.synchronize()
+        return get_timing(event_pairs)
+    
+    def benchmark_interleaved(fns, buffer, iters):
+        interleaved_event_pairs = [get_event_pairs(len(fns)) for _ in range(iters)]
+        for event_pairs in interleaved_event_pairs:
+            for fn, (start_event, end_event) in zip(fns, event_pairs):
+                buffer.zero_()
+                start_event.record()
+                fn()
+                end_event.record()
+        torch.cuda.synchronize()
+        return get_interleaved_timing(interleaved_event_pairs)
+    
+    def do_noninterleaved(fn, buffer, memory_warmup_iters, benchmark_iters):
+        memory_warmup(buffer, memory_warmup_iters)
+        timing = benchmark(fn, buffer, benchmark_iters)
+        return timing
 
-    triton_do_bench, quantile_field_name = load_triton()
+    def do_interleaved(fns, buffer, memory_warmup_iters, benchmark_iters):
+        memory_warmup(buffer, memory_warmup_iters)
+        timings = benchmark_interleaved(fns, buffer, benchmark_iters)
+        return timings
 
-    if quantile_field_name not in kwargs:
-        kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
-    return triton_do_bench(*args, **kwargs)[0]
+    buffer = torch.empty(int(get_cache_size() // 4), dtype=torch.int, device="cuda")
+
+    interleaved = isinstance(fn_or_fns, list)
+    if interleaved:
+        fns = fn_or_fns
+
+        if len(fns) == 0:
+            return []
+
+        estimation_timings = benchmark_interleaved(fns, buffer, estimation_iters)
+        benchmark_iters = min(benchmark_iters, max(int(max_benchmark_duration / max(estimation_timings)), 1))
+
+        groups = 5
+        iters_per_group = max(benchmark_iters // groups, 1)
+        
+        grouped_timings = []
+        for _ in range(groups):
+            memory_warmup(buffer, memory_warmup_iters)
+            timings = benchmark_interleaved(fns, buffer, iters_per_group)
+            grouped_timings.append(timings)
+        
+        del buffer
+        
+        timings = [min(ungrouped_timings) for ungrouped_timings in zip(*grouped_timings)]
+       
+        return timings
+    else:
+        fn = fn_or_fns
+
+        estimation_timing = benchmark(fn, buffer, estimation_iters)
+        benchmark_iters = min(benchmark_iters, max(int(max_benchmark_duration / estimation_timing), 1))
+
+        groups = 5
+        iters_per_group = max(benchmark_iters // groups, 1)
+
+        grouped_timings = []
+        for _ in range(groups):
+            memory_warmup(buffer, memory_warmup_iters)
+            timings = benchmark(fn, buffer, iters_per_group)
+            grouped_timings.append(timings)
+
+        del buffer
+
+        timing = min(grouped_timings)
+
+        return timing
 
 
 def do_bench_cpu(fn, warmup=5, times=20):

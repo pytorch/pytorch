@@ -983,6 +983,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
           &cudaDeviceProp::name
 #endif // USE_ROCM
           )
+      .def_readonly("l2CacheSize", &cudaDeviceProp::l2CacheSize)
 #ifndef FBCODE_CAFFE2
       .def_readonly("uuid", &cudaDeviceProp::uuid)
 #endif
@@ -995,6 +996,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #endif // USE_ROCM
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
+               << ", l2CacheSize=" << prop.l2CacheSize / (1024ull * 1024)
 #ifndef FBCODE_CAFFE2
                << ", uuid=" << std::string(prop.uuid.bytes, 16)
 #endif
