@@ -336,22 +336,24 @@ bool check_all_tensors_on_device(sdp_params const& params, bool debug) {
 bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   const auto s_q = params.query.sym_size(2);
   const auto s_k = params.key.sym_size(2);
-  const auto head_dim = params.query.sym_size(3);
+  const auto d_qk = params.query.sym_size(3);
+  const auto d_v = params.value.sym_size(3);
   long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
-  if (cudnn_version >= 90000) {
-    if (head_dim % 8 != 0 || head_dim > 256) {
-      if (debug) {
-        TORCH_WARN("head_dim should be a multiple of 8 and no more than 256");
-      }
-      return false;
+  if (d_qk % 8 != 0 || d_v % 8 != 0) {
+    if (debug) {
+      TORCH_WARN("head_dim should be a multiple of 8");
     }
-  } else {
-    if (head_dim % 8 != 0 || head_dim > 128) {
-      if (debug) {
-        TORCH_WARN("head_dim should be a multiple of 8 and no more than 128");
-      }
-      return false;
+    return false;
+  }
+  auto head_dim_limit = 128;
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  auto sm90orabove = dprops->major >= 9;
+  head_dim_limit = cudnn_version >= 90000 && sm90orabove ? 256 : head_dim_limit;
+  if (d_qk > head_dim_limit || d_v > head_dim_limit) {
+    if (debug) {
+      TORCH_WARN("head_dim should be no more than ", head_dim_limit);
     }
+    return false;
   }
   if (cudnn_version < 8903) {
     if (debug) {
