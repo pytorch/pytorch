@@ -1261,10 +1261,8 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("symbolic shape")
                 if arg.constant is not None:
                     raise _BypassDispatchCache("constant attribute")
-                if arg.is_sparse:
-                    raise _BypassDispatchCache("sparse tensor")
-                if is_sparse_compressed(arg):
-                    raise _BypassDispatchCache("sparse compressed tensor")
+                if is_sparse_any(arg):
+                    raise _BypassDispatchCache(f"{arg.layout} tensor")
                 # sparse tensors don't have storage, so check is after
                 if isinstance(arg.untyped_storage().nbytes(), torch.SymInt):
                     raise _BypassDispatchCache("symbolic nbytes")
