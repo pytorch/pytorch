@@ -249,6 +249,32 @@ class TestSelectAlgorithm(TestCase):
         else:
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
+
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_bmm_with_pointwise(self, dtype):
+        bs = 79
+        Md = 384
+        Kd = 16
+        Nd = 96
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.epilogue = torch.nn.ReLU()
+
+            def forward(self, x, other):
+                return self.epilogue((x @ other))
+
+        counters.clear()
+        u = torch.randn(bs, Md, Kd).to(dtype=dtype)
+        v = torch.randn(bs, Kd, Nd).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        self.common(mod, (u,v))
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
@@ -413,6 +439,35 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     test_linear_with_embedding_dynamic_shapes = (
         TestSelectAlgorithm.test_linear_with_embedding
     )
+
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_bmm_with_pointwise_dynamic_shapes(self, dtype):
+        bs = 79
+        Md = 384
+        Kd = 16
+        Nd = 96
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.epilogue = torch.nn.ReLU()
+
+            def forward(self, x, other):
+                return self.epilogue((x @ other))
+
+        counters.clear()
+        u = torch.randn(bs, Md, Kd).to(dtype=dtype)
+        v = torch.randn(bs, Kd, Nd).to(dtype=dtype)
+        torch._dynamo.mark_dynamic(u, 0)
+        torch._dynamo.mark_dynamic(u, 1)
+        torch._dynamo.mark_static(u, 2)
+        torch._dynamo.mark_static(v, 2)
+        mod = M().to(dtype=dtype).eval()
+        self.common(mod, (u,v))
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
 
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")

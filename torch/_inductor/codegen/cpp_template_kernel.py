@@ -46,12 +46,12 @@ class CppTemplateKernel(CppKernel):
             template.render(kernel=self, **kwargs), self.render_hooks
         ).finalize_all()
 
-    def def_kernel(
+    def set_args(
         self,
         inputs: Dict[str, ir.Buffer],
         outputs: Dict[str, ir.Buffer],
         aliases: Optional[List[Tuple[ir.Buffer, ir.Buffer]]] = None,
-    ) -> str:
+    ):
         for name, inp in inputs.items():
             if inp is not None:
                 self.args.input_buffers[inp.get_name()] = name
@@ -69,7 +69,15 @@ class CppTemplateKernel(CppKernel):
                     self.args.output_buffers[alias_name] = self.args.output_buffers[
                         orig_name
                     ]
+        return ""
 
+    def def_kernel(
+        self,
+        inputs: Dict[str, ir.Buffer],
+        outputs: Dict[str, ir.Buffer],
+        aliases: Optional[List[Tuple[ir.Buffer, ir.Buffer]]] = None,
+    ) -> str:
+        self.set_args(inputs, outputs, aliases)
         unique_sizevars = {
             s
             for input in inputs.values()
@@ -120,8 +128,14 @@ class CppTemplateKernel(CppKernel):
         else:
             raise NotImplementedError(f"Unsupported dtype: {node.get_dtype()}")
 
-    def size(self, node: ir.Buffer, dim: int) -> str:
-        return cexpr_index(self.rename_indexing(node.get_size()[dim]))
+    def size(self, node: ir.Buffer, dim: int, default_value=-1, unwrapped=False) -> str:
+        sizes = node.get_size()
+        dim = dim if dim >= 0 else dim + len(sizes)
+        if dim < 0 or dim >= len(sizes):
+            return default_value
+        if unwrapped:
+            return str(self.rename_indexing(sizes[dim]))
+        return cexpr_index(self.rename_indexing(sizes[dim]))
 
     def stride(self, node: ir.Buffer, dim: int) -> str:
         return cexpr_index(self.rename_indexing(node.get_stride()[dim]))

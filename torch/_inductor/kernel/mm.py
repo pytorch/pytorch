@@ -23,7 +23,7 @@ from ..utils import (
     get_gpu_shared_memory,
     use_aten_gemm_kernels,
     use_ck_template,
-    use_cpp_packed_gemm_template,
+    use_cpp_gemm_template,
     use_cutlass_template,
     use_max_autotune,
     use_triton_template,
@@ -168,7 +168,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if use_ck_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
-    if use_cpp_packed_gemm_template(layout, mat1, mat2):
+    if use_cpp_gemm_template(layout, mat1, mat2):
         CppPackedGemmTemplate.add_choices(
             choices,
             layout,
@@ -339,7 +339,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 beta=beta,
             )
 
-    if use_cpp_packed_gemm_template(layout, mat1, mat2):
+    if use_cpp_gemm_template(layout, mat1, mat2):
         CppPackedGemmTemplate.add_choices(
             choices,
             layout,

@@ -1143,7 +1143,7 @@ def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 
 
-def use_cpp_packed_gemm_template(layout, mat1, mat2):
+def use_cpp_gemm_template(layout, mat1, mat2, require_constant=True):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
     from .kernel.mm_common import mm_args
@@ -1177,7 +1177,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         and n % micro_gemm.register_blocking[1] == 0
         and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
-        and mat2.is_module_buffer()
+        and (mat2.is_module_buffer() or not require_constant)
     )
 
 

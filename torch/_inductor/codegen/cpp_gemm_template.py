@@ -16,18 +16,24 @@ from .cpp_template import CppTemplate
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import GemmBlocking
 
-GEMM_TEMPLATE = r"""
+MICROKERNEL_DEF = r"""
 {{template.header().getvalue()}}
 
 {{micro_gemm.codegen_define(kernel)}}
 
+"""
+
+GEMM_STUB = r"""
 extern "C"
 {{kernel.def_kernel(inputs={"X": X, "W": W, "inp": inp}, outputs={"Y": Y}, aliases=buffer_aliases)}}
+"""
+
+GEMM_TEMPLATE = r"""
 {
     {{kernel.maybe_codegen_profile()}}
     constexpr int64_t num_threads = {{num_threads}};
-    constexpr int64_t N = {{kernel.size(GemmOut, 1)}};
-    constexpr int64_t K = {{kernel.size(X, 1)}};
+    constexpr int64_t N = {{kernel.size(GemmOut, -1)}};
+    constexpr int64_t K = {{kernel.size(X, -1)}};
     constexpr int64_t M0 = {{micro_gemm.register_blocking.block_m}};
     constexpr int64_t N0 = {{micro_gemm.register_blocking.block_n}};
     constexpr int64_t K0 = {{micro_gemm.register_blocking.block_k}};
@@ -38,7 +44,7 @@ extern "C"
 
     // TODO(jgong5): improve cache blocking with CPU info (Mc, Kc)
     {%- if is_dynamic_M %}
-    const int64_t M = {{kernel.size(GemmOut, 0)}};
+    const int64_t M = {{kernel.size(GemmOut, -2)}};
     const int64_t M0_blocks = (M + M0 - 1) / M0;
     {%- if num_threads > 1 %}
     int64_t Mt_blocks, Nt_blocks, Kt_blocks;
@@ -51,7 +57,7 @@ extern "C"
     const int64_t Mc_blocks = Mt_blocks;
     const int64_t Kc_blocks = Kt_blocks;
     {%- else %}
-    constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
+    constexpr int64_t M = {{kernel.size(GemmOut, -2)}};
     constexpr int64_t M0_blocks = (M + M0 - 1) / M0;
     constexpr int64_t Mt_blocks = {{template.thread_blocking().block_m}};
     constexpr int64_t Nt_blocks = {{template.thread_blocking().block_n}};
@@ -91,15 +97,17 @@ extern "C"
             const int64_t m_end = std::min((mc + Mc_blocks) * M0, M);
             const int64_t m_size = m_end - m_start;
             {%- if use_local_acc %}
-            {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "N0"]) }}
+            {%- set buffer_size = ([1] if is_bmm else []) + ["m_end - m_start", "N0"] %}
+            {{ kernel.define_buffer(acc_buf_name, buffer_size) }}
             {%- endif %}
             for (int64_t nc = n_block_start; nc < n_block_end; ++nc) {
                 const int64_t n_start = nc * N0;
                 const int64_t n_size = N0;
+                {%- set Y_slice_dims = ([(0,1)] if is_bmm else []) + [("m_start", "m_end"), ("n_start", "n_start + N0")] %}
                 {%- if use_local_acc %}
                 {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {%- else %}
-                {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
+                {%- set acc = kernel.slice_nd(GemmOut, Y_slice_dims) %}
                 {%- endif %}
                 {%- if inp is not none and beta != 0 %}
                 for (int64_t m = 0; m < m_size; ++m) {
@@ -112,22 +120,29 @@ extern "C"
                 for (int64_t kc = k_block_start; kc < k_block_end; kc += Kc_blocks) {
                     int64_t k_start = kc * K0;
                     int64_t k_end = std::min((kc + Kc_blocks) * K0, K);
-                    {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
+                    {%- set X_slice_dims = ([(0,1)] if is_bmm else []) + [("m_start", "m_end"), ("k_start", "k_end")] %}
+                    {%- set tile_X = kernel.slice_nd(X, X_slice_dims) %}
+                    {%- if should_pack_weights %}
                     {%- set tile_W_3d = kernel.slice_nd(W, [("nc", "nc + 1"), ("k_start", "k_end"), ()]) %}
                     {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
+                    {%- else %}
+                    {%- set W_slice_dims = ([(0,1)] if is_bmm else []) + [("k_start", "k_end"), ("n_start", "n_start + n_size")] %}
+                    {%- set tile_W = kernel.slice_nd(W, W_slice_dims) %}
+                    {%- endif %}
                     {%- if inp is not none and beta != 0 %}
-                    {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(20, false) }}
+                    {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True, is_bmm=is_bmm)|indent(20, false) }}
                     {%- else %}
                     if (kc == k_block_start) {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=False)|indent(24, false) }}
+                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=False, is_bmm=is_bmm)|indent(24, false) }}
                     } else {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(24, false) }}
+                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True, is_bmm=is_bmm)|indent(24, false) }}
                     }
                     {%- endif %}
                 }
-                {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
+                {%- set tile_Y = kernel.slice_nd(Y_2d, Y_slice_dims) %}
+                {%- set offsets = (0, "m_start", "n_start") if is_bmm else ("m_start", "n_start") %}
                 {{ kernel.store_output(
-                      tile_Y, acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
+                      tile_Y, acc, GemmOut, epilogue_nodes, offsets=offsets, reindexers=reindexers
                    )|indent(16, false)
                 }}
             }
@@ -149,10 +164,11 @@ class CppPackedGemmTemplate(CppTemplate):
         alpha=1,
         has_bias=False,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+        name="packed_gemm",
     ):
         assert layout.dtype in [torch.float, torch.bfloat16, torch.half]
         super().__init__(
-            "packed_gemm",
+            name,
             input_nodes,
             layout,
             num_threads,
@@ -162,10 +178,11 @@ class CppPackedGemmTemplate(CppTemplate):
         self.alpha = alpha
         self.has_bias = has_bias
         self.register_blocking = register_blocking
-        m, n = layout.size
-        _, k = input_nodes[0].get_size()
+        m, n = layout.size[-2:]
+        k = input_nodes[0].get_size()[-1]
         self.m, self.n, self.k = m, n, k
         self.is_dynamic_M = has_free_symbols((m,))
+        self.should_pack_weights = True
 
     @cache_on_self
     def thread_blocking(self) -> GemmBlocking:
@@ -221,8 +238,7 @@ class CppPackedGemmTemplate(CppTemplate):
         return GemmBlocking(thread_blocking.block_m, 1, thread_blocking.block_k)
 
     @staticmethod
-    def add_choices(
-        choices,
+    def _get_params_for_choices(
         layout,
         input_nodes,
         beta=1,
@@ -230,6 +246,7 @@ class CppPackedGemmTemplate(CppTemplate):
         has_bias=False,
         trans_w=False,
         input_indices=None,
+        should_pack_weights=True,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
     ):
         if input_indices is None:
@@ -309,6 +326,8 @@ class CppPackedGemmTemplate(CppTemplate):
         _, block_n, _ = micro_gemm.register_blocking
 
         def pack_weight(inputs, layout_or_out):
+            if not should_pack_weights:
+                return inputs, layout_or_out
             W = inputs[1]
             new_inputs = list(inputs)
             if isinstance(W, ir.IRNode):
@@ -366,7 +385,7 @@ class CppPackedGemmTemplate(CppTemplate):
             )
 
         def postprocessor(output):
-            if isinstance(output, ir.TensorBox):
+            if isinstance(output, ir.TensorBox) and should_pack_weights:
                 # prepack the weight as input to the template buffer
                 # TODO(jgong5): prune the unused constants in V.graph
                 # Should we implement it with constant folding in the scheduler instead?
@@ -387,10 +406,9 @@ class CppPackedGemmTemplate(CppTemplate):
                 )
             return output
 
-        template = DataProcessorTemplateWrapper(
-            CppPackedGemmTemplate,
-            preprocessor,
-            postprocessor,
+        return dict(
+            preprocessor=preprocessor,
+            postprocessor=postprocessor,
             input_nodes=input_nodes,
             layout=layout,
             num_threads=num_threads,
@@ -400,16 +418,42 @@ class CppPackedGemmTemplate(CppTemplate):
             has_bias=has_bias,
             epilogue_creator=epilogue_creator,
         )
+
+    @staticmethod
+    def add_choices(
+        choices,
+        layout,
+        input_nodes,
+        beta=1,
+        alpha=1,
+        has_bias=False,
+        trans_w=False,
+        input_indices=None,
+        should_pack_weights=True,
+        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+    ):
+        options = CppPackedGemmTemplate._get_params_for_choices(
+            layout=layout,
+            input_nodes=input_nodes,
+            beta=beta,
+            alpha=alpha,
+            has_bias=has_bias,
+            trans_w=trans_w,
+            input_indices=input_indices,
+            should_pack_weights=should_pack_weights,
+            epilogue_creator=epilogue_creator,
+        )
+        template = DataProcessorTemplateWrapper(CppPackedGemmTemplate, **options)
         template.maybe_append_choice(choices)
         return template
 
-    def render(  # type: ignore[override]
+    def get_options(  # type: ignore[override]
         self,
         kernel: CppTemplateKernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         **kwargs,
-    ) -> str:
+    ) -> dict[str, Any]:
         assert len(self.input_nodes) >= 2
 
         X, W = self.input_nodes[0], self.input_nodes[1]
@@ -498,6 +542,7 @@ class CppPackedGemmTemplate(CppTemplate):
             num_threads=self.num_threads,
             micro_gemm=micro_gemm,
             is_dynamic_M=self.is_dynamic_M,
+            should_pack_weights=self.should_pack_weights,
             template=self,
             kernel=kernel,
             epilogue_nodes=epilogues,
@@ -505,5 +550,20 @@ class CppPackedGemmTemplate(CppTemplate):
             Y_2d=Y_2d,
             use_local_acc=use_local_acc,
             acc_buf_name=acc_buf_name,
+            is_bmm=False,
         )
-        return self._template_from_string(GEMM_TEMPLATE).render(**options)
+        return options
+
+    def render(  # type: ignore[override]
+        self,
+        kernel: CppTemplateKernel,
+        template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
+        epilogue_nodes: Optional[List[ir.IRNode]] = None,
+        **kwargs,
+    ) -> str:
+        options = self.get_options(
+            kernel, template_buffer_node, epilogue_nodes, **kwargs
+        )
+
+        full_template = MICROKERNEL_DEF + GEMM_STUB + GEMM_TEMPLATE
+        return self._template_from_string(full_template).render(**options)

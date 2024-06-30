@@ -101,20 +101,22 @@ inline void {{kernel_name}}(
         B: ir.Buffer,
         C: ir.Buffer,
         accum: bool,
+        is_bmm: bool = False,
     ) -> str:
         """
         Generate the code for calling the templated kernel that computes
         `C += alpha * A @ B` if `accum` is True, or `C = alpha * A @ B` otherwise.
         """
-        A_ptr = f"&({kernel.index(A, [0, 0])})"
-        B_ptr = f"&({kernel.index(B, [0, 0])})"
-        C_ptr = f"&({kernel.index(C, [0, 0])})"
-        M = kernel.size(C, 0)
-        N = kernel.size(C, 1)
-        K = kernel.size(A, 1)
-        lda = kernel.stride(A, 0)
-        ldb = kernel.stride(B, 0)
-        ldc = kernel.stride(C, 0)
+        A_ptr = f"&({kernel.index(A, [0] * len(A.get_size()))})"
+        B_ptr = f"&({kernel.index(B, [0] * len(B.get_size()))})"
+        C_ptr = f"&({kernel.index(C, [0] * len(C.get_size()))})"
+        M = kernel.size(C, -2)
+        N = kernel.size(C, -1)
+        K = kernel.size(A, -1)
+        stride_index = 1 if is_bmm else 0
+        lda = kernel.stride(A, stride_index)
+        ldb = kernel.stride(B, stride_index)
+        ldc = kernel.stride(C, stride_index)
         res = IndentedBuffer()
         res.writeline(f"{self.name}<{value_to_cpp(accum, 'bool')}>(")
         with res.indent():
