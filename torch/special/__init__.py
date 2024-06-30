@@ -519,6 +519,7 @@ betainc = _add_docstr(_special.special_betainc,
 betainc(input, a, b, out=None) -> Tensor
 Computes the regularized incomplete Beta function (as defined below)
 for each element of :attr:`input`,  :attr:`a`, :attr:`b`.
+
 .. math::
     \frac{1}{\Beta(a,b)} \int_0^x t^{a-1}\,(1-t)^{b-1}\,dt
 Similar to SciPy's `scipy.special.betainc`.
