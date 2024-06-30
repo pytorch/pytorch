@@ -1188,10 +1188,17 @@ def gen_pyi(
                     "S",
                 )
             ],
+            "__contains__": [
+                defs(
+                    "__contains__",
+                    ["self", "other: Any", "/"],
+                    "_bool",
+                )
+            ],
             "__getitem__": [
                 defs(
                     "__getitem__",
-                    ["self", "indices: _Index | tuple[_Index, ...]"],
+                    ["self", "indices: _Index | tuple[_Index, ...]", "/"],
                     "Tensor",
                 )
             ],
@@ -1202,6 +1209,7 @@ def gen_pyi(
                         "self",
                         "indices: _Index | tuple[_Index, ...]",
                         "value: Tensor | Number",
+                        "/",
                     ],
                     "None",
                 )

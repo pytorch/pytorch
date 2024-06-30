@@ -31,6 +31,7 @@ line_length = 88
 lines_after_imports = 2
 multi_line_output = 3
 include_trailing_comma = true
+combine_as_imports = true
 
 
 [tool.usort.known]
