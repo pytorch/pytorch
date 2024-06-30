@@ -2103,9 +2103,6 @@ class CheckFunctionManager:
             guard.create(builder)
 
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
-        if config.enable_cpp_guard_manager:
-            guard_manager = self.check_fn
-            assert guard_manager.check(output_graph.local_scope)
 
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to
@@ -2126,6 +2123,7 @@ class CheckFunctionManager:
             assert self.guard_manager  # to make mypy happy
             self.guard_manager.id_matched_objs = builder.id_matched_objs
             self.check_fn = self.guard_manager
+            assert self.guard_manager.check(output_graph.local_scope)
 
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
