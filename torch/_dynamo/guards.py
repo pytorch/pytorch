@@ -2103,8 +2103,9 @@ class CheckFunctionManager:
             guard.create(builder)
 
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
-        # Check that the check_fn is True for this frame
-        assert self.check_fn(output_graph.local_scope)
+        if config.enable_cpp_guard_manager:
+            guard_manager = self.check_fn
+            assert guard_manager.check(output_graph.local_scope)
 
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to
