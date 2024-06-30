@@ -5,7 +5,6 @@ from pathlib import Path
 
 import torch
 import torch._dynamo as torchdynamo
-
 from torch._export.db.case import ExportCase, normalize_inputs
 from torch._export.db.examples import all_examples
 from torch.export import export

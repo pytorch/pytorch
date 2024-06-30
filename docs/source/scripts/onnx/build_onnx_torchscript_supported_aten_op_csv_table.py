@@ -8,6 +8,7 @@ import os
 
 from torch.onnx import _onnx_supported_ops
 
+
 # Constants
 BUILD_DIR = "build/onnx"
 SUPPORTED_OPS_CSV_FILE = "auto_gen_supported_op_list.csv"
