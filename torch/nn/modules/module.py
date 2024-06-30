@@ -779,9 +779,6 @@ class Module:
             
             if not isinstance(mod, torch.nn.Module):
                 raise AttributeError("`" + item + "` is not an nn.Module")
-
-        if type(mod) is not torch.nn.Module:
-                raise AttributeError("Type of `" + item + "` is not nn.Module")
             
         setattr(mod, name, module)
 
