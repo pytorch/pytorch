@@ -989,7 +989,8 @@ def _annotate_cat(
 
         shared_with_input0_qspec = SharedQuantizationSpec((input_act0, cat_node))
         for input_act in inputs[1:]:
-            input_qspec_map[input_act] = shared_with_input0_qspec
+            if input_act not in input_qspec_map:
+                input_qspec_map[input_act] = shared_with_input0_qspec
 
         output_act_qspec = shared_with_input0_qspec
 
