@@ -56,6 +56,14 @@ void Context::setDeterministicCuDNN(bool b) {
   deterministic_cudnn = b;
 }
 
+bool Context::deterministicMkldnn() const {
+  return deterministic_mkldnn;
+}
+
+void Context::setDeterministicMkldnn(bool b) {
+  deterministic_mkldnn = b;
+}
+
 bool Context::deterministicAlgorithms() const {
   return _deterministic_algorithms;
 }
@@ -145,6 +153,13 @@ void Context::setSDPUseCuDNN(bool e) {
   enabled_cudnnSDP = e;
 }
 
+void Context::setSDPUseOverrideable(bool e) {
+  enabled_overrideable = e;
+}
+
+bool Context::userEnabledOverrideableSDP() const {
+  return enabled_overrideable;
+}
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
