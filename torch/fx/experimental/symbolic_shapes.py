@@ -2805,7 +2805,9 @@ class ShapeEnv:
             if not (min <= int(a) <= max):
                 raise ValueRangeError(f"Invalid value {int(a)} for range [{min}:{max}]")
             return
-        assert isinstance(a, sympy.Symbol), "constraining non-Symbols NYI"
+        if isinstance(a, sympy.Expr) and a in self.replacements.values():
+            return
+        assert isinstance(a, sympy.Symbol), f"constraining non-Symbols NYI, got {type(a)}"
 
         # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
         # semantics that this is an "unchecked" assert (but it this actually
