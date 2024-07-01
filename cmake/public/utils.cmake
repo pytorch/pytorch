@@ -435,7 +435,6 @@ function(torch_compile_options libname)
       -Wdeprecated
       -Wno-unused-parameter
       -Wno-missing-field-initializers
-      -Wno-unknown-pragmas
       -Wno-type-limits
       -Wno-array-bounds
       -Wno-unknown-pragmas
@@ -444,6 +443,13 @@ function(torch_compile_options libname)
       )
     if("${libname}" STREQUAL "torch_cpu")
       list(APPEND private_compile_options -Wunused-function)
+      list(APPEND private_compile_options -Wunused-variable)
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        list(APPEND private_compile_options -Wunused-but-set-variable)
+      endif()
+      if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+        list(APPEND private_compile_options -Wunused-private-field)
+      endif()
     else()
       list(APPEND private_compile_options -Wno-unused-function)
     endif()
