@@ -15,7 +15,7 @@ import pickle
 import shutil
 import pathlib
 import platform
-from collections import OrderedDict
+from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from itertools import product
 
@@ -23,7 +23,7 @@ from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
 from torch.utils._import_utils import import_dill
 from torch.serialization import check_module_version_greater_or_equal, get_default_load_endianness, \
-    set_default_load_endianness, LoadEndianness
+    set_default_load_endianness, LoadEndianness, SourceChangeWarning
 
 from torch.testing._internal.common_utils import (
     IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName,
@@ -804,6 +804,17 @@ class serialization_method:
     def __exit__(self, *args, **kwargs):
         torch.save = self.torch_save
 
+Point = namedtuple('Point', ['x', 'y'])
+
+class ClassThatUsesBuildInstruction:
+    def __init__(self, num):
+        self.num = num
+
+    def __reduce_ex__(self, proto):
+        # Third item, state here will cause pickle to push a BUILD instruction
+        return ClassThatUsesBuildInstruction, (self.num,), {'foo': 'bar'}
+
+
 @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
 class TestBothSerialization(TestCase):
     @parametrize("weights_only", (True, False))
@@ -854,7 +865,9 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
-                    self.assertEqual(len(w), 0)
+                    self.assertEqual(len(w), 1)
+                    self.assertEqual(w[0].category, FutureWarning)
+                    self.assertTrue("You are using `torch.load` with `weights_only=False`" in str(w[0].message))
 
             # Replace the module with different source
             fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
@@ -865,8 +878,9 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
-                    self.assertEqual(len(w), 1)
-                    self.assertTrue(w[0].category, 'SourceChangeWarning')
+                    self.assertEqual(len(w), 2)
+                    self.assertEqual(w[0].category, FutureWarning)
+                    self.assertEqual(w[1].category, SourceChangeWarning)
 
     def test_serialization_container(self):
         self._test_serialization_container('file', tempfile.NamedTemporaryFile)
@@ -1040,8 +1054,79 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertIsNone(torch.load(f, weights_only=False))
             f.seek(0)
             # Safe load should assert
-            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global: GLOBAL __builtin__.print"):
+            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global: GLOBAL builtins.print"):
                 torch.load(f, weights_only=True)
+            try:
+                torch.serialization.add_safe_globals([print])
+                f.seek(0)
+                torch.load(f, weights_only=True)
+            finally:
+                torch.serialization.clear_safe_globals()
+
+    def test_weights_only_safe_globals_newobj(self):
+        # This will use NEWOBJ
+        p = Point(x=1, y=2)
+        with BytesIOContext() as f:
+            torch.save(p, f)
+            f.seek(0)
+            with self.assertRaisesRegex(pickle.UnpicklingError,
+                                        "GLOBAL __main__.Point was not an allowed global by default"):
+                torch.load(f, weights_only=True)
+            f.seek(0)
+            try:
+                torch.serialization.add_safe_globals([Point])
+                loaded_p = torch.load(f, weights_only=True)
+                self.assertEqual(loaded_p, p)
+            finally:
+                torch.serialization.clear_safe_globals()
+
+    def test_weights_only_safe_globals_build(self):
+        counter = 0
+
+        def fake_set_state(obj, *args):
+            nonlocal counter
+            counter += 1
+
+        c = ClassThatUsesBuildInstruction(2)
+        with BytesIOContext() as f:
+            torch.save(c, f)
+            f.seek(0)
+            with self.assertRaisesRegex(pickle.UnpicklingError,
+                                        "GLOBAL __main__.ClassThatUsesBuildInstruction was not an allowed global by default"):
+                torch.load(f, weights_only=True)
+            try:
+                torch.serialization.add_safe_globals([ClassThatUsesBuildInstruction])
+                # Test dict update path
+                f.seek(0)
+                loaded_c = torch.load(f, weights_only=True)
+                self.assertEqual(loaded_c.num, 2)
+                self.assertEqual(loaded_c.foo, 'bar')
+                # Test setstate path
+                ClassThatUsesBuildInstruction.__setstate__ = fake_set_state
+                f.seek(0)
+                loaded_c = torch.load(f, weights_only=True)
+                self.assertEqual(loaded_c.num, 2)
+                self.assertEqual(counter, 1)
+                self.assertFalse(hasattr(loaded_c, 'foo'))
+            finally:
+                torch.serialization.clear_safe_globals()
+                ClassThatUsesBuildInstruction.__setstate__ = None
+
+    @parametrize("unsafe_global", [True, False])
+    def test_weights_only_error(self, unsafe_global):
+        sd = {'t': TwoTensor(torch.randn(2), torch.randn(2))}
+        pickle_protocol = torch.serialization.DEFAULT_PROTOCOL if unsafe_global else 5
+        with BytesIOContext() as f:
+            torch.save(sd, f, pickle_protocol=pickle_protocol)
+            f.seek(0)
+            if unsafe_global:
+                with self.assertRaisesRegex(pickle.UnpicklingError,
+                                            r"use `torch.serialization.add_safe_globals\(\[TwoTensor\]\)` to allowlist"):
+                    torch.load(f, weights_only=True)
+            else:
+                with self.assertRaisesRegex(pickle.UnpicklingError,
+                                            "file an issue with the following so that we can make `weights_only=True`"):
+                    torch.load(f, weights_only=True)
 
     @parametrize('weights_only', (False, True))
     def test_serialization_math_bits(self, weights_only):
