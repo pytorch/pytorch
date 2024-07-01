@@ -1713,7 +1713,7 @@
   self: grad.roll_symint(fmap(reverse_list_symint(shifts), [](c10::SymInt i){return -i;}), reverse_list(dims))
   result: auto_linear
 
-- name: rot90(Tensor self, int k=1, int[] dims=[0, 1]) -> Tensor
+- name: rot90(Tensor self, int k=1, int[] dims=[0,1]) -> Tensor
   self: grad.rot90(-k, dims)
   result: auto_linear
 
