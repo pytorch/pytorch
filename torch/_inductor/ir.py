@@ -4994,7 +4994,7 @@ class UserDefinedTritonKernel(ExternKernel):
         V.graph.register_operation(self)
 
     def get_outputs(self) -> List[Buffer]:
-        return self.mutation_outputs
+        return list(self.mutation_outputs)
 
     def get_device(self) -> torch.device:
         return self.device
