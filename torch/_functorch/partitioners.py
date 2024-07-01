@@ -27,9 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes import graph_drawer
 from torch.utils.checkpoint import CheckpointPolicy
 from . import config
-from ._aot_autograd.functional_utils import (
-    collect_nodes_set_into_primal_in_graph_epilogue,
-)
+from ._aot_autograd.fx_passes import collect_nodes_set_into_primal_in_graph_epilogue
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from .compile_utils import fx_graph_cse, get_aten_target
 
@@ -936,6 +934,9 @@ def solve_min_cut(
 
         if node in nodes_set_into_primal_in_epilogue:
             # If a node Y is used in `.set_(primal_X, Y)`, we explicitly want to save Y.
+            # This won't cause additional memory usage because the lifetime of graph input
+            # is longer than the graph itself anyway, so saving a tensor that shares storage
+            # with graph input won't increase memory usage.
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
             nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
             nx_graph.add_edge(node.name + "_in", node.name + "_out", capacity=0)

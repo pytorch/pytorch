@@ -10,6 +10,7 @@ import torch._dynamo.testing
 import torch.distributed._composable.fsdp._fsdp_param
 from torch import nn
 from torch._dynamo import compiled_autograd
+from torch._functorch._aot_autograd.fx_passes import collect_graph_epilogue_mutable_ops
 from torch._inductor import comms
 
 from torch.distributed._composable.fsdp import fully_shard
@@ -26,8 +27,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.utils._triton import has_triton
 
 
-def _is_op_in_graph(graph, op):
-    return any(node.target is op for node in graph.nodes)
+def _is_op_in_nodes(nodes, op):
+    return any(node.target is op for node in nodes)
 
 
 class TestFullyShardCompileCompute(FSDPTest):
@@ -138,23 +139,38 @@ class TestFullyShardCompile(FSDPTest):
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
 
-    def _reinplace_all_gather_with_checks(self, graph):
+    def _apply_fsdp_passes_with_checks(self, graph):
+        # Check `.set_` and `.resize_` ops are NOT in middle-of-graph (i.e. only in graph epilogue).
+        epilogue_mutable_ops = collect_graph_epilogue_mutable_ops(graph)
+        mid_graph_nodes = set(graph.nodes) - set(epilogue_mutable_ops)
+        self.assertFalse(
+            _is_op_in_nodes(mid_graph_nodes, torch.ops.aten.set_.source_Tensor),
+            f"`aten.set_` is used in middle of graph: {graph}",
+        )
+        self.assertFalse(
+            _is_op_in_nodes(
+                mid_graph_nodes, torch.ops.inductor.resize_storage_bytes_.default
+            ),
+            f"`inductor.resize_storage_bytes_` is used in middle of graph: {graph}",
+        )
+
+        # Apply "re-inplace AllGather" pass with checks.
         self.assertTrue(
-            _is_op_in_graph(
-                graph,
+            _is_op_in_nodes(
+                graph.nodes,
                 torch.ops._c10d_functional.all_gather_into_tensor.default,
             )
         )
         comms.reinplace_fsdp_all_gather(graph)
         self.assertFalse(
-            _is_op_in_graph(
-                graph,
+            _is_op_in_nodes(
+                graph.nodes,
                 torch.ops._c10d_functional.all_gather_into_tensor.default,
             )
         )
         self.assertTrue(
-            _is_op_in_graph(
-                graph,
+            _is_op_in_nodes(
+                graph.nodes,
                 torch.ops._c10d_functional.all_gather_into_tensor_out.default,
             )
         )
@@ -296,6 +312,12 @@ class TestFullyShardCompile(FSDPTest):
                     self.layers.append(TestSubmodule(hidden_dim))
 
             def forward(self, x):
+                # Intentionally reusing all layers a few times,
+                # to test "multiple all-gathers for the same parameter" case.
+                for layer in self.layers:
+                    x = layer(x)
+                for layer in self.layers:
+                    x = layer(x)
                 for layer in self.layers:
                     x = layer(x)
                 return x
@@ -341,7 +363,7 @@ class TestFullyShardCompile(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_nested_fully_shard_fullgraph_backend_inductor(self):
         with torch._inductor.config.patch(
-            post_grad_custom_post_reinplace_pass=self._reinplace_all_gather_with_checks,
+            post_grad_custom_post_reinplace_pass=self._apply_fsdp_passes_with_checks,
         ):
             self._test_traceable_fsdp(
                 *self._create_nested_fully_shard_factory_fns(),
@@ -401,7 +423,7 @@ class TestFullyShardCompile(FSDPTest):
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_fullgraph_backend_inductor(self):
         with torch._inductor.config.patch(
-            post_grad_custom_post_reinplace_pass=self._reinplace_all_gather_with_checks
+            post_grad_custom_post_reinplace_pass=self._apply_fsdp_passes_with_checks
         ):
             self._test_traceable_fsdp(
                 *self._create_transformer_factory_fns(), "inductor", fullgraph=True

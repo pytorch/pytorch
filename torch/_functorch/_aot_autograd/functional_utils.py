@@ -405,12 +405,20 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
             if n.target in [
                 torch.ops.aten.copy_.default,
                 torch.ops.aten.set_.source_Tensor,
+                torch.ops.inductor.resize_storage_bytes_.default,
             ]:
                 suffix = True
-                # Can only copy_/set_ into an input, and can only do so once
-                # this is mostly a hack to avoid failing XLA tests.
-                # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
-                if "set_buffer_donor_" not in str(n.args[0]):
+                if (
+                    # Can only copy_/set_ into an input, and can only do so once
+                    # this is mostly a hack to avoid failing XLA tests.
+                    # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
+                    "set_buffer_donor_" not in str(n.args[0])
+                    # Allow `.resize_storage_bytes_(X, 0)` to mutate any X tensor.
+                    and not (
+                        n.target is torch.ops.inductor.resize_storage_bytes_.default
+                        and n.args[1] == 0
+                    )
+                ):
                     assert (
                         n.args[0] in placeholders
                     ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
@@ -481,32 +489,3 @@ keep in the graph. This is not supported today. Current state:
   mutation_inductor_storage_resize={mutation_inductor_storage_resize}
   requires_grad={requires_grad}"""
     return in_graph
-
-
-def collect_graph_epilogue_mutable_ops(graph):
-    epilogue_mutable_ops = []
-    node_list = list(graph.nodes)
-    for node in reversed(node_list):
-        if node.op == "output":
-            continue
-        elif node.op == "call_function" and node.target._schema.is_mutable:
-            epilogue_mutable_ops.append(node)
-        else:
-            break
-    return reversed(epilogue_mutable_ops)
-
-
-def _is_primal(node: torch.fx.Node) -> bool:
-    return node.op == "placeholder" and "tangents" not in str(node.target)
-
-
-def collect_nodes_set_into_primal_in_graph_epilogue(graph):
-    primal_inputs = [*filter(_is_primal, graph.nodes)]
-    epilogue_mutable_ops = collect_graph_epilogue_mutable_ops(graph)
-    node_to_primal_map = {
-        node.args[1]: node.args[0]
-        for node in epilogue_mutable_ops
-        if node.target is torch.ops.aten.set_.source_Tensor
-        and node.args[0] in primal_inputs
-    }
-    return node_to_primal_map
