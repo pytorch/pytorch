@@ -1,7 +1,5 @@
 # mypy: allow-untyped-defs
-from __future__ import annotations
-
-from typing import Callable, Iterator, TypeVar
+from typing import Callable, Iterator, Tuple, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
@@ -79,7 +77,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
             else:
                 StreamWrapper.close_streams(data)
 
-    def _returnIfTrue(self, data: T) -> tuple[bool, T]:
+    def _returnIfTrue(self, data: T) -> Tuple[bool, T]:
         condition = self._apply_filter_fn(data)
 
         if df_wrapper.is_column(condition):

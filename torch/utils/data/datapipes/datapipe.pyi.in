@@ -8,32 +8,23 @@ from typing import (
     Any,
     Callable,
     Dict,
-    Iterable,
+    Generic,
     Iterator,
     List,
     Literal,
     Optional,
     TypeVar,
+    Union,
 )
 
 from torch.utils.data import Dataset, default_collate, IterableDataset
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
 from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta
 
+
 T_co = TypeVar("T_co", covariant=True)
 T = TypeVar("T")
 UNTRACABLE_DATAFRAME_PIPES: Any
-
-class DataChunk(List[T]):
-    def __init__(self, items):
-        super().__init__(items)
-        self.items = items
-    def as_str(self, indent: str = "") -> str:
-        return indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
-    def __iter__(self) -> Iterator[T]:
-        yield from super().__iter__()
-    def raw_iterator(self) -> T:  # type: ignore[misc]
-        yield from self.items
 
 class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
     functions: Dict[str, Callable] = ...
@@ -90,13 +81,25 @@ class DFIterDataPipe(IterDataPipe):
     def __iter__(self): ...
 
 class _DataPipeSerializationWrapper:
-    def __init__(self, datapipe) -> None: ...
+    def __init__(self, datapipe): ...
     def __getstate__(self): ...
     def __setstate__(self, state): ...
-    def __len__(self) -> int: ...
+    def __len__(self): ...
 
 class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataPipe):
     def __iter__(self): ...
 
 class _MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPipe):
     def __getitem__(self, idx): ...
+
+class DataChunk(list, Generic[T]):
+    def __init__(self, items):
+        super().__init__(items)
+        self.items = items
+    def as_str(self, indent: str = "") -> str:
+        res = indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
+        return res
+    def __iter__(self) -> Iterator[T]:
+        yield from super().__iter__()
+    def raw_iterator(self) -> T:  # type: ignore[misc]
+        yield from self.items

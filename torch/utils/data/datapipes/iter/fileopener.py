@@ -1,8 +1,6 @@
 # mypy: allow-untyped-defs
-from __future__ import annotations
-
 from io import IOBase
-from typing import Iterable, Tuple
+from typing import Iterable, Optional, Tuple
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
@@ -46,13 +44,13 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         self,
         datapipe: Iterable[str],
         mode: str = "r",
-        encoding: str | None = None,
+        encoding: Optional[str] = None,
         length: int = -1,
     ):
         super().__init__()
         self.datapipe: Iterable = datapipe
         self.mode: str = mode
-        self.encoding: str | None = encoding
+        self.encoding: Optional[str] = encoding
 
         if self.mode not in ("b", "t", "rb", "rt", "r"):
             raise ValueError(f"Invalid mode {mode}")
