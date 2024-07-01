@@ -425,9 +425,9 @@ class CppPackedGemmTemplate(CppTemplate):
                 )
                 W_packed = new_input_nodes[W_idx]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
-                template_buffer.inputs[
-                    W_idx
-                ] = ir.InputsKernel.unwrap_storage_for_input(W_packed_constant)
+                template_buffer.inputs[W_idx] = (
+                    ir.InputsKernel.unwrap_storage_for_input(W_packed_constant)
+                )
             return output
 
         template = DataProcessorTemplateWrapper(
@@ -549,9 +549,9 @@ class CppPackedGemmTemplate(CppTemplate):
             inp=inp,
             Y=Y,
             GemmOut=gemm_output_buffer,
-            buffer_aliases=[(gemm_output_buffer, Y)]
-            if gemm_output_buffer is not Y
-            else None,
+            buffer_aliases=(
+                [(gemm_output_buffer, Y)] if gemm_output_buffer is not Y else None
+            ),
             beta=self.beta,
             alpha=self.alpha,
             num_threads=self.num_threads,
