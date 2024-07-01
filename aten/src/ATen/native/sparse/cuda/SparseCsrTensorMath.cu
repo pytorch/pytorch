@@ -709,8 +709,8 @@ struct ReductionMulOp {
 void _apply_sparse_csr_linear_solve(
   const Tensor& A,
   const Tensor& b,
-  const Tensor& x,
-  int &_singularity) {
+  const bool left, 
+  const Tensor& x) {
 #if defined(USE_ROCM) || !defined(USE_CUDSS)
   TORCH_CHECK(
       false,
@@ -720,6 +720,7 @@ void _apply_sparse_csr_linear_solve(
   TORCH_CHECK(A.is_sparse_csr(), "A must be a CSR matrix");
   TORCH_CHECK(b.dim() == 1, "b must be a 1D tensor");
   TORCH_CHECK(A.dtype() == b.dtype(), "A and b must have the same dtype");
+  TORCH_CHECK(left == true, "only left == true is supported by the Sparse CSR backend")
 
   // Device pointers and scalar shape parameters, matrix properties
 
@@ -813,6 +814,13 @@ Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bo
   return result;
 }
 
+Tensor _sparse_csr_linear_solve(  const Tensor& A,
+  const Tensor& b,
+  const bool left) {
+    Tensor out = b.new_empty(b.sizes());
+    _apply_sparse_csr_linear_solve(A, b, left, out);
+    return out;
+}
 
 
 } // namespace at::native
