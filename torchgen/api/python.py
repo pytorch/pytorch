@@ -299,9 +299,7 @@ class PythonArgument:
                 and self.default.startswith("{")
                 and self.default.endswith("}")
             ):
-                default = (
-                    "(" + ", ".join(map(str.strip, self.default[1:-1].split(","))) + ")"
-                )
+                default = "(" + self.default[1:-1] + ")"
             else:
                 default = {
                     "nullptr": "None",
