@@ -1457,9 +1457,8 @@ def export(
                     )
                     graph_captured_input = graph_captured_input + (flat_args[i],)
                     example_inputs.append(flat_args[i])
-            for r in pytree.tree_flatten(result_traced)[0]:
-                if torch.is_tensor(r):
-                    graph_captured_result = graph_captured_result + (r,)
+            if torch.is_tensor(result_traced):
+                graph_captured_result = graph_captured_result + (result_traced,)
             fx_graph.output(graph_captured_result)
             module = torch.nn.Module()
             graph = torch.fx.GraphModule(module, fx_graph)
