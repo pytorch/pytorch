@@ -61,8 +61,8 @@ def refunctionalize_set(graph: fx.Graph) -> None:
     # 1. `.set_(primal_X, Y)` exists in graph.
     # 2. `.set_(Y, ...)` is not called between primal_X's this `.set_(primal_X, Y)` and its next `.set_(primal_X, ...)` (or end of graph)  # noqa: B950
     #    - This ensures primal_X and Y are semantically always meant to be the same tensor within this section of the graph.
-    # If the above two conditions are met, then within this section of the graph
-    # we will replace usage of output of this `.set_(primal_X, Y)` node with Y, and delete this `.set_(primal_X, Y)` node.
+    # If the above two conditions are met, then within this section of the graph we will replace
+    # usage of output of this `.set_(primal_X, Y)` node with Y, and delete this `.set_(primal_X, Y)` node.
     # For any primal input, if we have deleted the last `.set_(primal_X, ...)`, we will re-insert
     # `.set_(primal_X, Y_last)` at the end of the graph.
     for i, n in enumerate(node_list):
