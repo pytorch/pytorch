@@ -33,7 +33,6 @@ enum UsageFlags : uint32_t {
   PRIVATE = 0,
   SMALL   = (1 << 0), // small heaps have sizes of kSmallHeap, and large ones kLargeHeap
   SHARED  = (1 << 1), // shared pools allocated on devices with unified memory; otherwise, private between host/device
-  MANAGED = (1 << 2), // managed storage mode
   HAZARD  = (1 << 3), // enables Automatic Hazard Tracking for the resources allocated on the pool
   SCALAR  = (1 << 4), // used to import CPU scalar values to GPU and use them in MPS Stream
 };
@@ -119,13 +118,11 @@ struct HeapBlock {
     // TODO: check the caching performance of write-combined mode
     MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache;
 
-    if (usage & UsageFlags::MANAGED)
-      options |= MTLResourceStorageModeManaged;
-    else if (usage & UsageFlags::SHARED)
+    if (usage & UsageFlags::SHARED) {
       options |= MTLResourceStorageModeShared;
-    else
+    } else {
       options |= MTLResourceStorageModePrivate;
-
+    }
     options |= (usage & UsageFlags::HAZARD) ? MTLResourceHazardTrackingModeTracked : MTLResourceHazardTrackingModeUntracked;
 
     return options;
@@ -212,7 +209,6 @@ typedef bool (*HeapComparison)(const HeapBlock*, const HeapBlock*);
 
 struct BufferPool {
   enum class Kind {
-    PRIVATE_SMALL,
     PRIVATE_LARGE,
     SHARED_SMALL,
     SHARED_LARGE,
