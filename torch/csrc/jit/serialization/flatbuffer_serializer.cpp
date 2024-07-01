@@ -6,7 +6,6 @@
 
 #include <fstream>
 #include <functional>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -129,11 +128,11 @@ class FlatbufferSerializer {
       flatbuffers::FlatBufferBuilder& fbb,
       const std::vector<Argument>& args,
       const std::vector<Argument>& returns,
-      c10::TypePrinter type_printer);
+      const c10::TypePrinter& type_printer);
 
   flatbuffers::Offset<mobile::serialization::ObjectType> classTypeToFB(
       flatbuffers::FlatBufferBuilder& fbb,
-      ClassTypePtr class_ptr);
+      const ClassTypePtr& class_ptr);
 
   uint32_t storeIValueAndGetIndex(
       flatbuffers::FlatBufferBuilder& fbb,
@@ -145,7 +144,7 @@ class FlatbufferSerializer {
 
   uint32_t storeClassTypeAndGetIndex(
       flatbuffers::FlatBufferBuilder& fbb,
-      ClassTypePtr class_type);
+      const ClassTypePtr& class_type);
 
   flatbuffers::Offset<flatbuffers::Vector<
       flatbuffers::Offset<mobile::serialization::ExtraFile>>>
@@ -210,7 +209,7 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> FlatbufferSerializer::
         flatbuffers::FlatBufferBuilder& fbb,
         const std::vector<Argument>& args,
         const std::vector<Argument>& returns,
-        c10::TypePrinter type_printer) {
+        const c10::TypePrinter& type_printer) {
   std::vector<flatbuffers::Offset<jit::mobile::serialization::Arg>> arg_vec;
   arg_vec.reserve(args.size());
   std::vector<flatbuffers::Offset<jit::mobile::serialization::Arg>> return_vec;
@@ -499,7 +498,7 @@ flatbuffers::Offset<mobile::serialization::Dict> FlatbufferSerializer::dictToFB(
 }
 
 flatbuffers::Offset<mobile::serialization::ObjectType> FlatbufferSerializer::
-    classTypeToFB(FlatBufferBuilder& fbb, ClassTypePtr class_ptr) {
+    classTypeToFB(FlatBufferBuilder& fbb, const ClassTypePtr& class_ptr) {
   mobile::serialization::TypeType typetype =
       mobile::serialization::TypeType::UNSET;
 
@@ -552,7 +551,7 @@ uint32_t FlatbufferSerializer::storeFunctionAndGetIndex(
 
 uint32_t FlatbufferSerializer::storeClassTypeAndGetIndex(
     FlatBufferBuilder& fbb,
-    ClassTypePtr class_ptr) {
+    const ClassTypePtr& class_ptr) {
   const auto& type_str = class_ptr->name()->qualifiedName();
   auto iter = qn_to_serialized_values_.find(type_str);
   if (iter != qn_to_serialized_values_.end()) {

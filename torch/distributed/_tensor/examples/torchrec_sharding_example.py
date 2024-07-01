@@ -9,7 +9,6 @@ from functools import cached_property
 from typing import List, TYPE_CHECKING
 
 import torch
-
 from torch.distributed._tensor import (
     DeviceMesh,
     DTensor,
@@ -23,6 +22,7 @@ from torch.distributed.checkpoint.metadata import (
     TensorProperties,
     TensorStorageMetadata,
 )
+
 
 if TYPE_CHECKING:
     from torch.distributed._tensor.placement_types import Placement

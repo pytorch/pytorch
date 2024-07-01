@@ -279,12 +279,16 @@ class ReplicateTest(MultiProcessTestCase):
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         return code
 
-    def test_bucketing_coalesced_op(self):
-        torch._inductor.config._fuse_ddp_communication_passes = [
+    @torch._inductor.config.patch(
+        _fuse_ddp_communication_passes=[
             "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
-
+    )
+    # todo: This pass mucks things up since Inductor thinks its inference
+    # and can apply this. Should turn off these passes in compiled autograd
+    @torch._inductor.config.patch(reorder_for_locality=False)
+    def test_bucketing_coalesced_op(self):
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
@@ -311,12 +315,16 @@ class ReplicateTest(MultiProcessTestCase):
 
         fc.run(code)
 
-    def test_bucketing_concat_op(self):
-        torch._inductor.config._fuse_ddp_communication_passes = [
+    @torch._inductor.config.patch(
+        _fuse_ddp_communication_passes=[
             "fuse_ddp_with_concat_op",
             "schedule_comm_wait",
         ]
-
+    )
+    # todo: This pass mucks things up since Inductor thinks its inference
+    # and can apply this. Should turn off these passes in compiled autograd
+    @torch._inductor.config.patch(reorder_for_locality=False)
+    def test_bucketing_concat_op(self):
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)

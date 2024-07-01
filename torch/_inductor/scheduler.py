@@ -1,4 +1,6 @@
 # mypy: disallow-untyped-defs
+from __future__ import annotations
+
 import collections
 import dataclasses
 import functools
@@ -68,12 +70,10 @@ class BaseSchedulerNode:
     read_writes: dependencies.ReadWrites
     unmet_dependencies: Set[Dep]
 
-    def __init__(self, scheduler: "Scheduler", node: ir.Buffer) -> None:
+    def __init__(self, scheduler: Scheduler, node: ir.Buffer) -> None:
         self.scheduler: Scheduler = scheduler
         self.node: Optional[ir.Buffer] = node
         self.users: List[NodeUser] = []
-        self.inverse_users: List[BaseSchedulerNode] = []
-        self.node_users: List[BaseSchedulerNode] = []
         self.set_read_writes(node.get_read_writes())
         self.ancestors: Set[str] = set()
         self.min_order: int
@@ -137,7 +137,7 @@ class BaseSchedulerNode:
     def add_fake_dep(self, dep: Dep) -> None:
         self.set_read_writes(self.read_writes.with_read(dep))
 
-    def set_users(self, users: List["NodeUser"]) -> None:
+    def set_users(self, users: List[NodeUser]) -> None:
         # deduplicate
         result: Dict[int, NodeUser] = {}
         for use in users:
@@ -211,7 +211,7 @@ class BaseSchedulerNode:
         self.set_read_writes(self.read_writes.remove_reads(to_remove))
 
     def prune_redundant_deps(
-        self, name_to_fused_node: Dict[str, "BaseSchedulerNode"]
+        self, name_to_fused_node: Dict[str, BaseSchedulerNode]
     ) -> None:
         _prune_redundant_deps(self, name_to_fused_node)
 
@@ -225,7 +225,7 @@ class BaseSchedulerNode:
     def get_names(self) -> Set[str]:
         return {self.get_name()}
 
-    def get_nodes(self) -> Sequence["BaseSchedulerNode"]:
+    def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return [self]
 
     def get_device(self) -> torch.device:
@@ -661,7 +661,6 @@ def pformat(obj: Any) -> str:
 class OutputNode:
     def __init__(self, dep: StarDep) -> None:
         self.unmet_dependencies = {dep}
-        self.inverse_users: List[BaseSchedulerNode] = []
 
     def is_reduction(self) -> bool:
         return False
@@ -740,7 +739,7 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
 class SchedulerNode(BaseSchedulerNode):
     def __init__(
         self,
-        scheduler: "Scheduler",
+        scheduler: Scheduler,
         node: Union[ir.ComputedBuffer, ir.TemplateBuffer],
     ) -> None:
         super().__init__(scheduler, node)
@@ -905,7 +904,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @classmethod
     def fuse(
         cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> "FusedSchedulerNode":
+    ) -> FusedSchedulerNode:
         assert node1.scheduler is node2.scheduler
         assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
         assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
@@ -913,15 +912,13 @@ class FusedSchedulerNode(BaseSchedulerNode):
         return cls(node1.scheduler, nodes)
 
     def __init__(
-        self, scheduler: "Scheduler", snodes: Sequence[BaseSchedulerNode]
+        self, scheduler: Scheduler, snodes: Sequence[BaseSchedulerNode]
     ) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
         self.snodes = snodes
         self.scheduler = scheduler
         self.node = None
         self.users: List[NodeUser] = []
-        self.inverse_users = []
-        self.node_users = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
         self.ancestors = set.union(
             *[x.ancestors for x in snodes if x.ancestors is not None]
@@ -1035,7 +1032,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def add_fake_dep(self, name: Dep) -> None:
         raise NotImplementedError
 
-    def set_users(self, users: List["NodeUser"]) -> None:
+    def set_users(self, users: List[NodeUser]) -> None:
         raise NotImplementedError
 
     def get_aliases(self) -> Sequence[str]:
@@ -1145,7 +1142,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     @classmethod
     def fuse(
         cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode
-    ) -> "ForeachKernelSchedulerNode":
+    ) -> ForeachKernelSchedulerNode:
         assert producer.is_foreach() or consumer.is_foreach()
         prev_node_1 = None
         prev_node_2 = None
@@ -1190,7 +1187,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     def __init__(
         self,
-        scheduler: "Scheduler",
+        scheduler: Scheduler,
         nodes: Sequence[BaseSchedulerNode],
         prev_node_1: Optional[BaseSchedulerNode] = None,
         prev_node_2: Optional[BaseSchedulerNode] = None,
@@ -1352,7 +1349,7 @@ class NodeUser:
     def get_name(self) -> str:
         return self.node.get_name()
 
-    def merge(self, other: "NodeUser") -> "NodeUser":
+    def merge(self, other: NodeUser) -> NodeUser:
         assert self.node is other.node
         return NodeUser(
             self.node,
@@ -1429,8 +1426,6 @@ class Scheduler:
         self.fuse_nodes()
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
-            # Refresh node_users and inverse_users to reflect fused nodes
-            self.compute_node_users()
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
@@ -1547,7 +1542,7 @@ class Scheduler:
                 self.items.append(node_user)
                 self.membership.add(node_user)
 
-            def __add__(self, other: "DedupList[T]") -> "DedupList[T]":
+            def __add__(self, other: DedupList[T]) -> DedupList[T]:
                 new_membership = set.union(self.membership, other.membership)
                 new_items = self.items + [
                     x for x in other.items if x not in self.membership
@@ -1723,69 +1718,31 @@ class Scheduler:
         for node in self.nodes:
             node.set_users(name_to_users[node.get_name()].items)
 
-        # populate inverse_users
-        for node in self.nodes:
-            for user in node.users:
-                user.node.inverse_users.append(node)
-
-    def compute_node_users(self) -> None:
-        # set up buffer name to (fused)snode mapping
-        buf_to_snode: Dict[str, BaseSchedulerNode] = {}
-        for node in self.nodes:
-            if isinstance(node, FusedSchedulerNode):
-                for x in node.snodes:
-                    buf_to_snode[x.get_name()] = node
-            buf_to_snode[node.get_name()] = node
-
-        for node in self.nodes:
-            node.node_users = []
-            node.inverse_users = []
-
-        # compute inverse_users
-        for node in self.nodes:
-            inverse_users: List[BaseSchedulerNode] = []
-            for dep in node.unmet_dependencies:
-                assert dep.name in buf_to_snode
-                dep_node = buf_to_snode[dep.name]
-                inverse_users.append(dep_node)
-            node.inverse_users = inverse_users
-
-        # compute node_users
-        # TODO: ideally, we should deduplicate .users and .node_users,
-        # but currently .users contains extra information that's difficult to
-        # extract into a standalone container.
-        node_to_users: Dict[BaseSchedulerNode, List[BaseSchedulerNode]] = {}
-        for node in self.nodes:
-            for inverse_user in node.inverse_users:
-                node_to_users.setdefault(inverse_user, []).append(node)
-        for node, users in node_to_users.items():
-            node.node_users = users
-
     def dead_node_elimination(self) -> None:
         """
         Remove any nodes without users
         """
-        again = True  # repeat until a fixed point
-        while again:
-            updated_nodes = []
-            for node in self.nodes:
+        # self.nodes is in topological order, so by iterating in reverse order
+        # we have visited (and potentially removed) all users before visiting a
+        # given node.
+        updated_nodes = []
+        for node in reversed(self.nodes):
 
-                def can_eliminate_user(user: NodeUser) -> bool:
-                    return user.is_weak or user.get_name() in V.graph.removed_buffers
+            def can_eliminate_user(user: NodeUser) -> bool:
+                return user.is_weak or user.get_name() in V.graph.removed_buffers
 
-                can_eliminate = not node.has_side_effects() and all(
-                    can_eliminate_user(u) for u in node.users
-                )
+            can_eliminate = not node.has_side_effects() and all(
+                can_eliminate_user(u) for u in node.users
+            )
 
-                if not can_eliminate:
-                    updated_nodes.append(node)
-                else:
-                    # dead code
-                    log.debug("removed dead node: %s", node.get_name())
-                    V.graph.removed_buffers.add(node.get_name())
+            if not can_eliminate:
+                updated_nodes.append(node)
+            else:
+                # dead code
+                log.debug("removed dead node: %s", node.get_name())
+                V.graph.removed_buffers.add(node.get_name())
 
-            again = len(self.nodes) > len(updated_nodes)
-            self.nodes = updated_nodes
+        self.nodes = list(reversed(updated_nodes))
 
         # Prune any WeakDeps no longer needed
         for node in self.nodes:
@@ -1915,9 +1872,6 @@ class Scheduler:
                 new_scheduler_node.min_order = node.min_order
                 new_scheduler_node.max_order = node.max_order
                 new_scheduler_node.last_usage = node.last_usage
-                for user in new_scheduler_node.users:
-                    user.node.inverse_users.remove(node)
-                    user.node.inverse_users.append(new_scheduler_node)
 
     def speedup_by_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -2657,7 +2611,7 @@ class Scheduler:
         node.codegen(V.graph.wrapper_code)
         self.free_buffers()
 
-    def create_backend(self, device: torch.device) -> "BaseScheduling":
+    def create_backend(self, device: torch.device) -> BaseScheduling:
         assert (
             not is_gpu(device.type) or device.index is not None
         ), f"{device} should have been normalized in lowering"
@@ -2682,7 +2636,7 @@ class Scheduler:
 
         return device_scheduling(self)
 
-    def get_backend(self, device: torch.device) -> "BaseScheduling":
+    def get_backend(self, device: torch.device) -> BaseScheduling:
         if device not in self.backends:
             self.backends[device] = self.create_backend(device)
         return self.backends[device]
