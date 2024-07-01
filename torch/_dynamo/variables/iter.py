@@ -147,9 +147,11 @@ class ItertoolsVariable(VariableTracker):
                     result.append(
                         variables.TupleVariable(
                             [
-                                variables.ConstantVariable.create(k)
-                                if variables.ConstantVariable.is_literal(k)
-                                else k,
+                                (
+                                    variables.ConstantVariable.create(k)
+                                    if variables.ConstantVariable.is_literal(k)
+                                    else k
+                                ),
                                 variables.ListIteratorVariable(
                                     list(v), mutable_local=MutableLocal()
                                 ),

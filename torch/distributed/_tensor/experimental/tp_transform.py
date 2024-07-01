@@ -190,9 +190,9 @@ def _mark_sharding(
     """
     Mark the sharding strategy for each node in the graph module.
     """
-    placement_strategies: Dict[
-        Node, PlacementStrategy
-    ] = _mark_tensor_parallel_shardings(gm, graph_signature, mesh, parameter_placements)
+    placement_strategies: Dict[Node, PlacementStrategy] = (
+        _mark_tensor_parallel_shardings(gm, graph_signature, mesh, parameter_placements)
+    )
 
     for node in gm.graph.nodes:
         if node.op == "placeholder":
@@ -237,9 +237,11 @@ def _mark_sharding(
                     )
                 placement_strategies[node] = PlacementStrategy(
                     output_specs=_get_output_spec_from_output_sharding(output_sharding),
-                    input_specs=output_sharding.redistribute_schema.args_spec
-                    if output_sharding.redistribute_schema is not None
-                    else _get_input_node_specs(node, placement_strategies),
+                    input_specs=(
+                        output_sharding.redistribute_schema.args_spec
+                        if output_sharding.redistribute_schema is not None
+                        else _get_input_node_specs(node, placement_strategies)
+                    ),
                 )
                 node.meta["sharding"] = placement_strategies[node]
         elif node.op == "output":
