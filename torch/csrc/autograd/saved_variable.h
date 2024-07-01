@@ -86,7 +86,6 @@ class TORCH_API SavedVariable {
   // In that case, the grad_fn passed in to the unpack function at unwrapping
   // time is unused.
   std::weak_ptr<Node> weak_grad_fn_;
-  c10::VariableVersion version_counter_;
 
   uint32_t saved_version_ = 0;
   uint32_t output_nr_ = 0;
