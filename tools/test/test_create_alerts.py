@@ -1,4 +1,6 @@
-from typing import Any, List
+from __future__ import annotations
+
+from typing import Any
 from unittest import main, TestCase
 
 from tools.alerts.create_alerts import filter_job_names, JobStatus
@@ -38,7 +40,7 @@ MOCK_TEST_DATA = [
 class TestGitHubPR(TestCase):
     # Should fail when jobs are ? ? Fail Fail
     def test_alert(self) -> None:
-        modified_data: List[Any] = [{}]
+        modified_data: list[Any] = [{}]
         modified_data.append({})
         modified_data.extend(MOCK_TEST_DATA)
         status = JobStatus(JOB_NAME, modified_data)

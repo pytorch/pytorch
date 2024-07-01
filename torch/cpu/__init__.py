@@ -45,6 +45,16 @@ def _is_cpu_support_vnni() -> bool:
     return torch._C._cpu._is_cpu_support_avx512_vnni()
 
 
+def _is_cpu_support_amx_tile() -> bool:
+    r"""Returns a bool indicating if CPU supports AMX_TILE."""
+    return torch._C._cpu._is_cpu_support_amx_tile()
+
+
+def _init_amx() -> bool:
+    r"""Initializes AMX instructions."""
+    return torch._C._cpu._init_amx()
+
+
 def is_available() -> bool:
     r"""Returns a bool indicating if CPU is currently available.
 

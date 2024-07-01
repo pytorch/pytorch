@@ -44,8 +44,9 @@ enum class ncclResult {
   InternalError = 3,
   InvalidArgument = 4,
   InvalidUsage = 5,
-  NumResults = 6,
-  InProgress = 7
+  RemoteError = 6,
+  InProgress = 7,
+  NumResults = 8
 };
 
 /* Reduction operation selector */

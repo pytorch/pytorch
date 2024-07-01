@@ -22,9 +22,10 @@ torch/csrc/autograd/generated/
 #  gen_python_functions.py: generates Python bindings to THPVariable
 #
 
+from __future__ import annotations
+
 import argparse
 import os
-from typing import List
 
 from torchgen.api import cpp
 from torchgen.api.autograd import (
@@ -69,7 +70,7 @@ def gen_autograd(
         ),
         key=lambda f: cpp.name(f.func),
     )
-    fns_with_diff_infos: List[
+    fns_with_diff_infos: list[
         NativeFunctionWithDifferentiabilityInfo
     ] = match_differentiability_info(fns, differentiability_infos)
 
