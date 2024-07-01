@@ -150,9 +150,9 @@ class StateDictOptions:
 
 @dataclass
 class _StateDictInfo(StateDictOptions):
-    fqn_param_mapping: Dict[
-        Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
-    ] = field(default_factory=dict)
+    fqn_param_mapping: Dict[Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]] = (
+        field(default_factory=dict)
+    )
     shared_params_mapping: Dict[
         Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
     ] = field(default_factory=dict)
@@ -286,9 +286,9 @@ def _verify_options(
 
     options = options or StateDictOptions()
 
-    fqn_param_mapping: Dict[
-        Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
-    ] = {}
+    fqn_param_mapping: Dict[Union[str, torch.Tensor], Union[Set[str], torch.Tensor]] = (
+        {}
+    )
     shared_params_mapping: Dict[
         Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
     ] = {}

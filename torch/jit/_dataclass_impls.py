@@ -165,9 +165,11 @@ def synthesize_comparison(
                 "if val1 is not None and val2 is not None:",
                 *["  " + line for line in inner],
                 "elif (val1 is None) != (val2 is None):",
-                f"  raise TypeError('Cannot compare {cls.__name__} with None')"
-                if raise_on_none
-                else "  return False",
+                (
+                    f"  raise TypeError('Cannot compare {cls.__name__} with None')"
+                    if raise_on_none
+                    else "  return False"
+                ),
             ]
         )
 
