@@ -2328,7 +2328,8 @@ class TestOperators(TestCase):
             xfail("nn.functional.max_unpool2d"),  # contiguous call
             xfail("to_sparse"),  # dispatch key issue
             xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
-            # https://github.com/pytorch/pytorch/issues/96560
+            # https://github.com/pytorch/pytorch/issues/96560#issuecomment-2151063723
+            # ** minor accuracy issue for float32 on ROCm
             decorate("xlogy", decorator=skipIfRocm),
             # numerical inconsistencies, look like bugs
             skip(
