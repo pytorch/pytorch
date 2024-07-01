@@ -1002,6 +1002,42 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(bias_mod)
 
     @supported_platform
+    def test_autograd_function_in_score_mod(self):
+        class ApplyMask(torch.autograd.Function):
+            generate_vmap_rule = True
+
+            @staticmethod
+            def forward(a, mask):
+                return torch.where(mask, a, -float("inf"))
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                _, mask = inputs
+                ctx.mark_non_differentiable(mask)
+                pass
+
+            @staticmethod
+            def backward(ctx, i):
+                return i, None
+
+        def score_mod(score, b, h, q, kv):
+            return ApplyMask.apply(score, q <= kv)
+
+        func = torch.compile(_flex_attention, fullgraph=True)
+
+        q, k, v = (
+            torch.randn(1, 8, 1024, 64, device="cuda", requires_grad=True)
+            for _ in range(3)
+        )
+
+        # Just checking that it runs
+        func(q, k, v)
+
+        # expectedFailure
+        # This doesn't work due to vmap + autograd.Function + torch.compile not composing
+        # self.run_test(score_mod)
+
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", [_identity, _causal])
     def test_logsumexp_correctness(self, dtype, score_mod):
