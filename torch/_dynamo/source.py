@@ -581,6 +581,15 @@ class NumpyTensorSource(ChainedSource):
         codegen.extend_output(create_call_function(1, False))
 
 
+@dataclasses.dataclass(frozen=True)
+class SubclassAttrListSource(ChainedSource):
+    def name(self) -> str:
+        return f"{self.base.name()}.__tensor_flatten__()[0]"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+
 # NB: We don't expect you to actually ever generate guards against this
 # source, it is ephemeral
 @dataclasses.dataclass(frozen=True)
