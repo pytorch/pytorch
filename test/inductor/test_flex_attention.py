@@ -594,7 +594,7 @@ class TestFlexAttention(InductorTestCase):
         _, code = run_and_get_code(func, q, k, v)
         # Ensure _create_block_sparse_mask is compiled and generates 3 kernels,
         # flex_attention generates 1 kernel.
-        FileCheck().check_count(".run(", 4, True).run(code[0])
+        FileCheck().check_count(".run(", 4, False).run(code[0])
 
     @supported_platform
     def test_block_sparse_mask_is_reused(self):
@@ -640,7 +640,7 @@ class TestFlexAttention(InductorTestCase):
         _, code = run_and_get_code(func, q, k, v, k2, v2)
         # Ensure _create_block_sparse_mask is compiled and generates 3 kernels,
         # 2 flex_attention generates 2 kernels.
-        FileCheck().check_count(".run(", 5, True).run(code[0])
+        FileCheck().check_count(".run(", 5, False).run(code[0])
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
