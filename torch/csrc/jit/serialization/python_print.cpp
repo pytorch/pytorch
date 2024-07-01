@@ -579,7 +579,8 @@ struct PythonPrintImpl {
 
     auto loop_type = stmt.loopType();
     if (loop_type == LoopView::ModifiedLoop) {
-      throw (ErrorReport(stmt.node()->sourceRange())
+      throw(
+          ErrorReport(stmt.node()->sourceRange())
           << "loop cannot be printed as python "
           << "because it has gone through an optimization "
           << "that combined while and for loops. File a bug");
@@ -674,7 +675,9 @@ struct PythonPrintImpl {
       std::vector<Value*>& to_split_reversed) {
     auto it = visited_split_inline_uses_.find(user);
     bool present = it != visited_split_inline_uses_.end();
-    for (int64_t i = static_cast<int64_t>(offset); i >= (present ? it->second + 1 : 0); --i) {
+    for (int64_t i = static_cast<int64_t>(offset);
+         i >= (present ? it->second + 1 : 0);
+         --i) {
       Value* prev_arg = user->input(i);
       if (isNonConstantInline(prev_arg)) {
         to_split_reversed.push_back(prev_arg);
@@ -683,7 +686,7 @@ struct PythonPrintImpl {
     visited_split_inline_uses_[user] = static_cast<int64_t>(offset);
     if (!present && output_inline_.count(user)) {
       Use u = user->output()->uses().at(0);
-      scanLongInlines(u.user,u.offset - 1, to_split_reversed);
+      scanLongInlines(u.user, u.offset - 1, to_split_reversed);
       // -1 because the actual use is still being
       // emitted so it cannot be split
     }
@@ -778,7 +781,8 @@ struct PythonPrintImpl {
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
-          throw (ErrorReport(node->sourceRange())
+          throw(
+              ErrorReport(node->sourceRange())
               << "Exportable methods must have a single return value. "
               << "Normal use of ScriptMethods should enforce this");
         }
@@ -868,7 +872,8 @@ struct PythonPrintImpl {
       } break;
       case prim::Closure: {
         if (enforce_importable_) {
-          throw (ErrorReport(node->sourceRange())
+          throw(
+              ErrorReport(node->sourceRange())
               << "closures are not exportable");
         }
         assignValuesToTheirUniqueNames(node->outputs());
@@ -994,7 +999,8 @@ struct PythonPrintImpl {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
         if (enforce_importable_) {
-          throw (ErrorReport(node->sourceRange())
+          throw(
+              ErrorReport(node->sourceRange())
               << "Could not export Python function call '" << value->name()
               << "'. Remove calls to Python functions before export. "
               << "Did you forget to add @script or @script_method annotation? "

@@ -663,7 +663,8 @@ flatbuffers::Offset<mobile::serialization::TensorMetadata> FlatbufferSerializer:
       fbb,
       /* storage_location_index */ storage_index,
       /* scalar_type */ static_cast<int8_t>(tensor.scalar_type()),
-      /* int32_t storage_offset */ static_cast<int32_t>(tensor.storage_offset()),
+      /* int32_t storage_offset */
+      static_cast<int32_t>(tensor.storage_offset()),
       /* sizes */ &sizes,
       /* strides */ &strides,
       /* bool requires_grad */ tensor.requires_grad(),
@@ -682,6 +683,7 @@ uint32_t FlatbufferSerializer::storeIValueAndGetIndex(
     if (iter != cached_ivalues_.end()) {
       return iter->second;
     }
+    // NOLINTNEXTLINE(bugprone-empty-catch)
   } catch (...) {
     // Threw if ivalue is not hashable or
     // if ivalue is don't have proper operator==
@@ -692,6 +694,7 @@ uint32_t FlatbufferSerializer::storeIValueAndGetIndex(
   uint32_t index = insertIValue(offset);
   try {
     cached_ivalues_[ivalue] = index;
+    // NOLINTNEXTLINE(bugprone-empty-catch)
   } catch (...) {
     // Threw if ivalue is not hashable or
     // if ivalue is don't have proper operator==
