@@ -167,7 +167,7 @@ def build_subgraph_buffer(
             )
             return subgraph_buffer
 
-    raise ValueError("TemplatedAttention was passed a subgraph with no output node!")
+    raise ValueError("FlexAttention was passed a subgraph with no output node!")
 
 
 flex_attention_template = TritonTemplate(
