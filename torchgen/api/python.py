@@ -197,6 +197,66 @@ from torchgen.model import (
 # For examples, only pyi signatures include return types.
 
 
+inplace_binary_ops = {
+    "iadd",
+    "iand",
+    "ifloordiv",
+    "ilshift",
+    "imatmul",
+    "imod",
+    "imul",
+    "ior",
+    "ipow",
+    "irshift",
+    "isub",
+    "itruediv",
+    "ixor",
+}
+binary_ops = inplace_binary_ops | {
+    "add",
+    "sub",
+    "mul",
+    "div",
+    "pow",
+    "lshift",
+    "rshift",
+    "mod",
+    "truediv",
+    "matmul",
+    "floordiv",
+    "radd",
+    "rsub",
+    "rmul",
+    "rtruediv",
+    "rfloordiv",
+    "rpow",  # reverse arithmetic
+    "and",
+    "or",
+    "xor",
+    "rand",
+    "ror",
+    "rxor",  # logic
+    "iadd",
+    "iand",
+    "idiv",
+    "ilshift",
+    "imul",
+    "ior",
+    "irshift",
+    "isub",
+    "ixor",
+    "ifloordiv",
+    "imod",  # inplace ops
+}
+symmetric_comparison_ops = {"eq", "ne"}
+asymmetric_comparison_ops = {"ge", "gt", "lt", "le"}
+comparison_ops = symmetric_comparison_ops | asymmetric_comparison_ops
+
+unary_ops = {"pos", "neg", "abs", "invert"}
+to_py_type_ops = {"bool", "float", "complex", "long", "index", "int", "nonzero"}
+all_ops = binary_ops | comparison_ops | unary_ops | to_py_type_ops
+
+
 def format_function_signature(
     name: str, arguments: Iterable[str] = (), return_type: str | None = None
 ) -> str:
@@ -303,7 +363,9 @@ class PythonArgument:
                 and self.default.startswith("{")
                 and self.default.endswith("}")
             ):
-                default = "(" + self.default[1:-1] + ")"
+                default = (
+                    "(" + ", ".join(map(str.strip, self.default[1:-1].split(","))) + ")"
+                )
             else:
                 default = {
                     "nullptr": "None",
@@ -314,6 +376,7 @@ class PythonArgument:
                     "MemoryFormat::Contiguous": "contiguous_format",
                     "QScheme::PER_TENSOR_AFFINE": "per_tensor_affine",
                 }.get(self.default, self.default)
+
             return f"{name}: {type_str} = {default}"
         else:
             return f"{name}: {type_str}"
@@ -1084,14 +1147,22 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
 
 
 def returns_str_pyi(signature: PythonSignature) -> str:
+    name = signature.name
     field_names = structseq_fieldnames(signature.returns.returns)
     if field_names:
-        return f"torch.return_types.{signature.name}"
+        return f"torch.return_types.{name}"
 
     python_returns = [return_type_str_pyi(r.type) for r in signature.returns.returns]
     if len(python_returns) > 1:
         return "tuple[" + ", ".join(python_returns) + "]"
     if len(python_returns) == 1:
+        if (
+            python_returns[0] == "Tensor"
+            and name.startswith("__")
+            and name.endswith("__")
+            and name[2:-2] in inplace_binary_ops
+        ):
+            return "Self"
         return python_returns[0]
     return "None"
 

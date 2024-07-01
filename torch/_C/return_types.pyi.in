@@ -1,12 +1,11 @@
 # mypy: allow-untyped-defs
-# ruff: noqa: F401
 # ${generated_comment}
 
 from typing import Final, NoReturn
 from typing_extensions import Self
 
 from torch import SymInt, Tensor
-from torch.types import (
+from torch.types import (  # noqa: F401
     _bool,
     _device,
     _dtype,

@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-# ruff: noqa: F401
 
 from typing import Any, Callable, Literal, overload, Sequence
 from typing_extensions import TypeAlias
