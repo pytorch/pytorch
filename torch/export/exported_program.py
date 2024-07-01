@@ -422,9 +422,9 @@ def _decompose_and_get_gm_with_new_signature_constants(
             fake_args,
             decompositions=decomp_table,
             trace_joint=True if joint_loss_index is not None else False,
-            output_loss_index=joint_loss_index
-            if joint_loss_index is not None
-            else None,
+            output_loss_index=(
+                joint_loss_index if joint_loss_index is not None else None
+            ),
         )
 
     # Update the signatures with the new placeholder names in case they
