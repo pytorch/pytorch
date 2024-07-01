@@ -10,6 +10,7 @@ import torch._dynamo.testing
 import torch.distributed._composable.fsdp._fsdp_param
 from torch import nn
 from torch._dynamo import compiled_autograd
+from torch._functorch._aot_autograd.fx_passes import collect_graph_epilogue_mutable_ops
 
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
@@ -23,6 +24,10 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
 )
 from torch.utils._triton import has_triton
+
+
+def _is_op_in_nodes(nodes, op):
+    return any(node.target is op for node in nodes)
 
 
 class TestFullyShardCompileCompute(FSDPTest):
@@ -132,6 +137,21 @@ class TestFullyShardCompile(FSDPTest):
         f(ref_x)
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
+
+    def _apply_fsdp_passes_with_checks(self, graph):
+        # Check `.set_` and `.resize_` ops are NOT in middle-of-graph (i.e. only in graph epilogue).
+        epilogue_mutable_ops = collect_graph_epilogue_mutable_ops(graph)
+        mid_graph_nodes = set(graph.nodes) - set(epilogue_mutable_ops)
+        self.assertFalse(
+            _is_op_in_nodes(mid_graph_nodes, torch.ops.aten.set_.source_Tensor),
+            f"`aten.set_` is used in middle of graph: {graph}",
+        )
+        self.assertFalse(
+            _is_op_in_nodes(
+                mid_graph_nodes, torch.ops.inductor.resize_storage_bytes_.default
+            ),
+            f"`inductor.resize_storage_bytes_` is used in middle of graph: {graph}",
+        )
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._functorch.config.patch(recompute_views=True)
@@ -247,6 +267,88 @@ class TestFullyShardCompile(FSDPTest):
             *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
         )
 
+    def _create_nested_fully_shard_factory_fns(self):
+        hidden_dim = 16
+
+        class TestSubmodule(nn.Module):
+            def __init__(self, hidden_dim):
+                super().__init__()
+                self.param = nn.Parameter(
+                    torch.randn(hidden_dim, hidden_dim, device="cuda")
+                )
+
+            def forward(self, x):
+                ret = torch.matmul(x, self.param)
+                ret = torch.relu(ret)
+                return ret
+
+        class TestModule(nn.Module):
+            def __init__(self, n_layers):
+                super().__init__()
+                self.layers = torch.nn.ModuleList()
+                for layer_id in range(n_layers):
+                    self.layers.append(TestSubmodule(hidden_dim))
+
+            def forward(self, x):
+                # Intentionally reusing all layers a few times,
+                # to test "multiple all-gathers for the same parameter" case.
+                for layer in self.layers:
+                    x = layer(x)
+                for layer in self.layers:
+                    x = layer(x)
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        def model_init_fn():
+            torch.manual_seed(self.rank)
+            fsdp_config = {}
+            mesh = init_device_mesh("cuda", (self.world_size,))
+            model = TestModule(n_layers=3)
+            for layer_id, mod in enumerate(model.layers):
+                fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
+            model = fully_shard(
+                model, mesh=mesh, reshard_after_forward=True, **fsdp_config
+            )
+            optim = torch.optim.SGD(model.parameters(), lr=1e-4)
+            return model, optim
+
+        def input_creation_fn():
+            torch.manual_seed(self.rank)
+            inp = torch.randn((2, hidden_dim), device="cuda", requires_grad=False)
+            return inp
+
+        return model_init_fn, input_creation_fn
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_nested_fully_shard_fullgraph_backend_aot_eager(self):
+        self._test_traceable_fsdp(
+            *self._create_nested_fully_shard_factory_fns(), "aot_eager", fullgraph=True
+        )
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_nested_fully_shard_fullgraph_backend_aot_eager_decomp_partition(self):
+        self._test_traceable_fsdp(
+            *self._create_nested_fully_shard_factory_fns(),
+            "aot_eager_decomp_partition",
+            fullgraph=True,
+        )
+
+    @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_nested_fully_shard_fullgraph_backend_inductor(self):
+        with torch._inductor.config.patch(
+            post_grad_custom_post_pass=self._apply_fsdp_passes_with_checks,
+        ):
+            self._test_traceable_fsdp(
+                *self._create_nested_fully_shard_factory_fns(),
+                "inductor",
+                fullgraph=True,
+            )
+
     def _create_transformer_factory_fns(self):
         seq_len = 16
         vocab_size = 8
@@ -298,9 +400,12 @@ class TestFullyShardCompile(FSDPTest):
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_fullgraph_backend_inductor(self):
-        self._test_traceable_fsdp(
-            *self._create_transformer_factory_fns(), "inductor", fullgraph=True
-        )
+        with torch._inductor.config.patch(
+            post_grad_custom_post_pass=self._apply_fsdp_passes_with_checks
+        ):
+            self._test_traceable_fsdp(
+                *self._create_transformer_factory_fns(), "inductor", fullgraph=True
+            )
 
 
 if __name__ == "__main__":

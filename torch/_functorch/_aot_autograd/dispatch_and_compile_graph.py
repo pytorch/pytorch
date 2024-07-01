@@ -24,6 +24,7 @@ from .functional_utils import (
     assert_functional_graph,
     propagate_input_mutation_stacktraces,
 )
+from .fx_passes import move_resize_zero_to_end_of_graph, refunctionalize_set
 from .schemas import AOTConfig, SubclassMeta, ViewAndMutationMeta
 from .traced_function_transforms import (
     aot_dispatch_subclass,
@@ -140,6 +141,8 @@ def aot_dispatch_base_graph(
         updated_flat_args_subclasses_desugared,
         aot_config=aot_config,
     )
+    move_resize_zero_to_end_of_graph(fw_module.graph)
+    refunctionalize_set(fw_module.graph)
 
     if aot_config.is_export and mod_when_exporting_non_strict is not None:
         # We update metadata to consider any assigned buffers as buffer mutations.
@@ -275,6 +278,8 @@ def aot_dispatch_autograd_graph(
     )
 
     fx_g = _create_graph(joint_fn_to_trace, updated_joint_inputs, aot_config=aot_config)
+    move_resize_zero_to_end_of_graph(fx_g.graph)
+    refunctionalize_set(fx_g.graph)
 
     # There should be *NO* mutating ops in the graph at this point.
     assert_functional_graph(fx_g.graph)
