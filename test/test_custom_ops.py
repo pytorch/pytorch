@@ -2506,9 +2506,12 @@ class TestCustomOpAPI(TestCase):
             self.assertGreater(after, prev)
 
     def test_mutated_unknown(self):
-        @torch.library.custom_op("_torch_testing::f", mutates_args="unknown")
-        def f(x: Tensor) -> Tensor:
-            x.sin_()
+        @torch.library.custom_op(
+            "_torch_testing::f", mutates_args="unknown", device_types="cpu"
+        )
+        def f(x: Tensor) -> None:
+            x_np = x.numpy()
+            np.sin(x_np, out=x_np)
 
         x = torch.randn(3)
         version = x._version
@@ -2517,7 +2520,7 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(x, expected)
         self.assertGreater(x._version, version)
 
-        @torch.library.custom_op("_torch_testing::f2", mutates_args={"y", "z", "w"})
+        @torch.library.custom_op("_torch_testing::f2", mutates_args="unknown")
         def f2(
             x: Tensor, y: Optional[Tensor], z: List[Tensor], w: List[Optional[Tensor]]
         ) -> None:
@@ -2535,9 +2538,8 @@ class TestCustomOpAPI(TestCase):
             torch.Tensor, lambda x: x._version, (x, y, z, w)
         )
 
-        self.assertEqual(initial_versions[0], new_versions[0])
-        initial_versions, _ = pytree.tree_flatten(initial_versions[1:])
-        new_versions, _ = pytree.tree_flatten(new_versions[1:])
+        initial_versions, _ = pytree.tree_flatten(initial_versions)
+        new_versions, _ = pytree.tree_flatten(new_versions)
         for prev, after in zip(initial_versions, new_versions):
             if prev is None and after is None:
                 continue
