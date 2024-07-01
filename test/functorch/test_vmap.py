@@ -4382,9 +4382,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 # but found at least two devices, cuda:0 and cpu!
                 xfail("ge", device_type="cuda"),
                 xfail(
-                    "argsort"
-                ),  # aten::argsort.stable hit the vmap fallback which is currently disabled
-                xfail(
                     "searchsorted"
                 ),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
             }
