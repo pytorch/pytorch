@@ -2037,6 +2037,8 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_getset_descriptor(self):
         def fn(g, x):
+            # Just to make Dynamo not skip the frame
+            torch.sin(x)
             return g.__get__(x)
 
         cnts = torch._dynamo.testing.CompileCounter()
@@ -2046,6 +2048,9 @@ utils_device.CURRENT_DEVICE == None""".split(
         res = opt_fn(g, torch.ones(2, 2))
         exp_res = fn(g, torch.ones(2, 2))
         self.assertEqual(res, exp_res)
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            res = opt_fn(g, torch.ones(2, 2))
 
     def test_get_attr_function(self):
         def fn(g, x):

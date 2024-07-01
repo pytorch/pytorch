@@ -4029,7 +4029,7 @@ def check_if_test_is_skipped(fn):
     def wrapper(self, *args, **kwargs):
         for skip in TEST_SKIPS.values():
             if self.processes[0].exitcode == skip.exit_code:
-                return MultiProcessTestCase()._check_return_codes(self)
+                return MultiProcessTestCase._check_return_codes(self, *args, **kwargs)
         return fn(self, *args, **kwargs)
 
     return wrapper
@@ -4067,7 +4067,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
 
 class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
     @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_if_lt_x_gpu(2)
     @parametrize("timing_enabled", [True, False])
     def test_timeout_dumps(self, timing_enabled):
         # dump on heartbeatmonitor thread
@@ -4125,7 +4125,7 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
         self.assertEqual(self.processes[1].exitcode, -6)
 
     @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_if_lt_x_gpu(2)
     def test_timeout_dumps_on_stuck_ranks(self):
         # need rank0 to crash quicker after detecting timeout
         os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "1"
