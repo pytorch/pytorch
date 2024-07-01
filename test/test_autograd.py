@@ -13210,7 +13210,7 @@ class TestNestedCheckpoint(TestCase):
 
         # With early stopping (enabled by default)
         a = torch.tensor(1.0, requires_grad=True)
-        with SinCounterMode() as python_dispatch_counter:
+        with SinCounterMode() as python_dispatch_counter:  # noqa: F811
             out = checkpoint(fn, a, use_reentrant=False)
             out.backward()
         self.assertEqual(counter[0], 2)
