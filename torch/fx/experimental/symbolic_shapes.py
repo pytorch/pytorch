@@ -5129,7 +5129,7 @@ class ShapeEnv:
             raise
 
     def _evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None,
-                      expect_rational=True, size_oblivious: bool = False, *, forcing_spec: bool = False):
+                       expect_rational=True, size_oblivious: bool = False, *, forcing_spec: bool = False):
         """
         Given an expression, evaluates it, adding guards if necessary
         """

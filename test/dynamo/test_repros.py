@@ -5256,11 +5256,11 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         class CompiledClass(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.nums = torch.tensor([1,2,3,4,5,6,7,8,9,10])
+                self.nums = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
                 self.t = 5
 
             def forward(self):
-                self.num = self.nums[self.t//12]
+                self.num = self.nums[self.t // 12]
                 self.t += 1
                 return self.num
 
