@@ -2788,7 +2788,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             "int",
             np.intp,
             np.int32,
-            np.uint8,
+            np.uint8
             # np.dtype('int')       # XXX: as above
         ]
 
@@ -7511,7 +7511,8 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
-            def forward(self): ...
+            def forward(self):
+                ...
 
             def training_step(self):
                 self()
