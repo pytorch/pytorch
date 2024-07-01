@@ -461,6 +461,21 @@ class TestControlFlow(TestCase):
         true_outs = fwbw(control_flow.map, f, x, y)
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
+        
+    def test_generic_associative_scan_CUDA_issue(self):
+        def fct(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        for n in range(20):
+            x = torch.arange(n, device=torch.device('cuda'))
+            associative_scan1 = torch.compile(associative_scan)
+            associative_scan2 = associative_scan
+            result1 = associative_scan1(fct, x, 0, True, True)
+            result2 = associative_scan2(fct, x, 0, True, True)
+            print(str(n), ': ', ['{:2d}'.format(int(r.cpu().numpy())) for r in result1])
+            print(str(n), ': ', ['{:2d}'.format(int(r.cpu().numpy())) for r in result2])
+            print(str(n), ': ', [' T' if result1[i] == result2[i] else ' F' for i in range(n)])
+            print('-'*80)
 
     def test_generic_associative_scan_simple(self):
         def add(x: torch.Tensor, y: torch.Tensor):

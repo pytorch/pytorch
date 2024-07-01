@@ -69,16 +69,16 @@ def check_args(input, combine_fn, leaves, tree, dim):
     ), "The pytree of the output of the operator needs to match the input pytree"
     
     generic_scan_required = False
-    combine_fn = make_fx(combine_fn)(pytree.tree_unflatten(
-            [e[slice_along_axis(0, 1, stride=None, dim=0)] for e in leaves], tree
-        ),
-        pytree.tree_unflatten(
-            [e[slice_along_axis(0, 1, stride=None, dim=0)] for e in leaves], tree
-        ),)
-    for node in combine_fn.graph.nodes:
-        if not all(is_pointwise_use(use) or use.op == 'output' for use in node.users):
-            generic_scan_required = True
-            break
+    # combine_fn = make_fx(combine_fn)(pytree.tree_unflatten(
+    #         [e[slice_along_axis(0, 1, stride=None, dim=0)] for e in leaves], tree
+    #     ),
+    #     pytree.tree_unflatten(
+    #         [e[slice_along_axis(0, 1, stride=None, dim=0)] for e in leaves], tree
+    #     ),)
+    # for node in combine_fn.graph.nodes:
+    #     if not all(is_pointwise_use(use) or use.op == 'output' for use in node.users):
+    #         generic_scan_required = True
+    #         break
         
     if not all([l.device.type == 'cuda' for l in leaves]):
         generic_scan_required = True
@@ -132,9 +132,10 @@ def associative_scan(
 
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            return torch.compile(associative_scan, fullgraph=False)(
-                    combine_fn, input, dim, reverse, generic_scan
-                )
+            # return torch.compile(associative_scan, fullgraph=False)(
+            #         combine_fn, input, dim, reverse, generic_scan
+            #     )
+            pass
             
     leaves, spec = pytree.tree_flatten(input)
     generic_scan_required = check_args(input, combine_fn, leaves, spec, dim)
