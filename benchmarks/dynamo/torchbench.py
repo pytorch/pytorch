@@ -228,6 +228,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             "detectron2_maskrcnn_r_50_fpn",
             "detectron2_maskrcnn_r_101_fpn",
             "vision_maskrcnn",
+            "doctr_reco_predictor",
         }
 
     def load_model(

@@ -151,6 +151,7 @@ select = [
 ]
 "test/torch_np/numpy_tests/**" = [
     "F821",
+    "NPY201",
 ]
 "test/dynamo/test_bytecode_utils.py" = [
     "F821",
