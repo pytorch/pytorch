@@ -11,7 +11,6 @@ import torch.distributed._composable.fsdp._fsdp_param
 from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._functorch._aot_autograd.fx_passes import collect_graph_epilogue_mutable_ops
-from torch._inductor import comms
 
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
@@ -152,27 +151,6 @@ class TestFullyShardCompile(FSDPTest):
                 mid_graph_nodes, torch.ops.inductor.resize_storage_bytes_.default
             ),
             f"`inductor.resize_storage_bytes_` is used in middle of graph: {graph}",
-        )
-
-        # Apply "re-inplace AllGather" pass with checks.
-        self.assertTrue(
-            _is_op_in_nodes(
-                graph.nodes,
-                torch.ops._c10d_functional.all_gather_into_tensor.default,
-            )
-        )
-        comms.reinplace_fsdp_all_gather(graph)
-        self.assertFalse(
-            _is_op_in_nodes(
-                graph.nodes,
-                torch.ops._c10d_functional.all_gather_into_tensor.default,
-            )
-        )
-        self.assertTrue(
-            _is_op_in_nodes(
-                graph.nodes,
-                torch.ops._c10d_functional.all_gather_into_tensor_out.default,
-            )
         )
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
@@ -363,7 +341,7 @@ class TestFullyShardCompile(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_nested_fully_shard_fullgraph_backend_inductor(self):
         with torch._inductor.config.patch(
-            post_grad_custom_post_reinplace_pass=self._apply_fsdp_passes_with_checks,
+            post_grad_custom_post_pass=self._apply_fsdp_passes_with_checks,
         ):
             self._test_traceable_fsdp(
                 *self._create_nested_fully_shard_factory_fns(),
@@ -423,7 +401,7 @@ class TestFullyShardCompile(FSDPTest):
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_fullgraph_backend_inductor(self):
         with torch._inductor.config.patch(
-            post_grad_custom_post_reinplace_pass=self._apply_fsdp_passes_with_checks
+            post_grad_custom_post_pass=self._apply_fsdp_passes_with_checks
         ):
             self._test_traceable_fsdp(
                 *self._create_transformer_factory_fns(), "inductor", fullgraph=True
