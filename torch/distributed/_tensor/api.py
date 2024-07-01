@@ -5,7 +5,6 @@ import warnings
 from typing import Any, Callable, cast, Optional, Sequence, Tuple
 
 import torch
-
 import torch.distributed._tensor._dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
@@ -532,6 +531,38 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         .. note:: placements is a read-only property, it can not be set.
         """
         return self._spec.placements
+
+    def __create_write_items__(self, fqn: str, object: Any):
+        from torch.distributed.checkpoint.planner_helpers import (
+            _create_write_items_for_dtensor,
+        )
+
+        if hasattr(self._local_tensor, "__create_write_items__"):
+            return self._local_tensor.__create_write_items__(fqn, object)  # type: ignore[attr-defined]
+        elif isinstance(self._local_tensor, torch.Tensor):
+            return [_create_write_items_for_dtensor(fqn, object)]
+        else:
+            raise RuntimeError("Unsupported tensor type!")
+
+    def __create_chunk_list__(self):
+        from torch.distributed.checkpoint.planner_helpers import (
+            _create_chunk_from_dtensor,
+        )
+
+        if hasattr(self._local_tensor, "__create_chunk_list__"):
+            return self._local_tensor.__create_chunk_list__()  # type: ignore[attr-defined]
+        elif isinstance(self._local_tensor, torch.Tensor):
+            return [_create_chunk_from_dtensor(self)]
+        else:
+            raise RuntimeError("Unsupported tensor type!")
+
+    def __get_tensor_shard__(self, index):
+        if hasattr(self._local_tensor, "__get_tensor_shard__"):
+            return self._local_tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
+        elif isinstance(self._local_tensor, torch.Tensor):
+            return self.to_local()
+        else:
+            raise RuntimeError("Unsupported tensor type!")
 
 
 def distribute_tensor(
