@@ -933,6 +933,8 @@ def solve_min_cut(
 
         if node in nodes_set_into_primal_in_epilogue:
             # If a node Y is used in `.set_(primal_X, Y)`, we explicitly want to save Y.
+            # This is important for Traceable FSDP2 because by default the partitioner will save
+            # an alias of Y which will not work.
             # This won't cause additional memory usage because the lifetime of graph input
             # is longer than the graph itself anyway, so saving a tensor that shares storage
             # with graph input won't increase memory usage.
@@ -1814,7 +1816,10 @@ def min_cut_rematerialization_partition(
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
     def return_primal_if_set_is_used(graph):
-        # If `.set_(primal_X, Y)` is in graph epilogue and Y is in graph output, then replace Y with primal_X in graph output.
+        # If `.set_(primal_X, Y)` is in graph epilogue and Y is in graph output,
+        # then replace Y with primal_X in graph output.
+        # This is important for Traceable FSDP2 because the BWD graph relies on
+        # being able to `.set_` into the same primal again before BWD computation.
         Y_to_primal_map = collect_nodes_set_into_primal_in_graph_epilogue(graph)
         return_node = list(graph.nodes)[-1]
         new_return_args = []
