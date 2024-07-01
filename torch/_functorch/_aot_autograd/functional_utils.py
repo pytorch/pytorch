@@ -481,3 +481,32 @@ keep in the graph. This is not supported today. Current state:
   mutation_inductor_storage_resize={mutation_inductor_storage_resize}
   requires_grad={requires_grad}"""
     return in_graph
+
+
+def collect_graph_epilogue_mutable_ops(graph):
+    epilogue_mutable_ops = []
+    node_list = list(graph.nodes)
+    for node in reversed(node_list):
+        if node.op == "output":
+            continue
+        elif node.op == "call_function" and node.target._schema.is_mutable:
+            epilogue_mutable_ops.append(node)
+        else:
+            break
+    return reversed(epilogue_mutable_ops)
+
+
+def _is_primal(node: torch.fx.Node) -> bool:
+    return node.op == "placeholder" and "tangents" not in str(node.target)
+
+
+def collect_nodes_set_into_primal_in_graph_epilogue(graph):
+    primal_inputs = [*filter(_is_primal, graph.nodes)]
+    epilogue_mutable_ops = collect_graph_epilogue_mutable_ops(graph)
+    node_to_primal_map = {
+        node.args[1]: node.args[0]
+        for node in epilogue_mutable_ops
+        if node.target is torch.ops.aten.set_.source_Tensor
+        and node.args[0] in primal_inputs
+    }
+    return node_to_primal_map
