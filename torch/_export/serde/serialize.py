@@ -173,6 +173,7 @@ _SYM_INT_OPS = {
     operator.floordiv,
     operator.mod,
     operator.neg,
+    operator.pos,
     torch.sym_int,
     torch.sym_float,
     torch.sym_ite,
