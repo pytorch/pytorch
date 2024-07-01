@@ -456,9 +456,9 @@ class TS2FXGraphConverter:
                 self.name_to_node[output_name] = self.fx_graph.get_attr(attr_fqn)
             else:
                 if attr_fqn not in self.name_to_non_tensor_attribute_node:
-                    self.name_to_non_tensor_attribute_node[
-                        attr_fqn
-                    ] = self.name_to_non_tensor_attribute[attr_fqn]
+                    self.name_to_non_tensor_attribute_node[attr_fqn] = (
+                        self.name_to_non_tensor_attribute[attr_fqn]
+                    )
                 self.name_to_node[output_name] = self.name_to_non_tensor_attribute_node[
                     attr_fqn
                 ]
