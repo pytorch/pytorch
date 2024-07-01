@@ -82,7 +82,8 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
         if type(mutates_args) == str:
             if mutates_args != UNKNOWN_MUTATES:
                 raise ValueError(
-                    "mutates_args must either be a sequence of the names of the arguments that are mutated or the string 'unknown'. "
+                    "mutates_args must either be a sequence of the names of "
+                    "the arguments that are mutated or the string 'unknown'. "
                 )
             if schema_type.startswith("Tensor"):
                 schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"
