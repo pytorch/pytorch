@@ -41,6 +41,7 @@ from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.hints import ReductionHint
 from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
+from ..streamscheduler import DEFAULT_STREAM_ID
 from ..utils import (
     get_dtype_size,
     IndentedBuffer,
@@ -1368,7 +1369,36 @@ class SIMDScheduling(BaseScheduling):
                     node.mark_run()
 
         self.codegen_comment(node_schedule)
-        final_kernel.call_kernel(final_kernel.kernel_name)
+        final_kernel_name = final_kernel.kernel_name
+        if config.multiple_streams:
+            for node in node_schedule:
+                if isinstance(node, scheduler.SchedulerNode):
+                    node_name = node.get_name()
+                    break
+            else:
+                raise RuntimeError(f"Cannot find node name in {node_schedule}")
+            ssnode = V.graph.stream_graph.name_mapping[node_name]
+            stream_id = ssnode.stream_id
+            # print(f"findhao-> kernel_name: {final_kernel_name}, stream_id: {stream_id}")
+            kernel_IndentedBuffer = IndentedBuffer()
+            wrapper = V.graph.wrapper_code
+            wrapper.cuda_event_dependency(node_name, kernel_IndentedBuffer)
+            if ssnode.cuda_event:
+                wrapper.cuda_event_create(node_name, kernel_IndentedBuffer)
+            # @Yueming : is it correct to use torch.cuda.current_stream().cuda_stream here?
+            if stream_id != DEFAULT_STREAM_ID:
+                kernel_IndentedBuffer.writeline(f"torch.cuda.set_stream(stream{stream_id}_raw)")
+                final_kernel.call_kernel(final_kernel_name, stream_id=stream_id, kernel_IndentedBuffer=kernel_IndentedBuffer)
+                kernel_IndentedBuffer.writeline(f"torch.cuda.set_stream(stream{DEFAULT_STREAM_ID}_raw)")
+            else:
+                final_kernel.call_kernel(final_kernel_name, stream_id=stream_id,
+                                         kernel_IndentedBuffer=kernel_IndentedBuffer)
+            if ssnode.cuda_event:
+                wrapper.cuda_event_record(node_name, kernel_IndentedBuffer)
+            for line in [_ for _ in kernel_IndentedBuffer.getrawvalue().split("\n") if _]:
+                V.graph.wrapper_code.writeline(line)
+        else:
+            final_kernel.call_kernel(final_kernel_name)
         if config.nan_asserts:
             final_kernel.codegen_nan_check()
         if config.warn_mix_layout:

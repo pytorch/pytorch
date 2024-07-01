@@ -412,6 +412,9 @@ optimize_scatter_upon_const_tensor = (
     os.environ.get("TORCHINDUCTOR_OPTIMIZE_SCATTER_UPON_CONST_TENSOR", "1") == "1"
 )
 
+# enable mutiple streams 
+multiple_streams = os.environ.get("TORCHINDUCTOR_MULTIPLE_STREAMS", "0") == "1"
+
 
 # The multiprocessing start method to use for inductor workers in the codecache.
 # "subprocess", "fork", or "spawn"

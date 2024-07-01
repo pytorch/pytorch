@@ -72,6 +72,7 @@ from .simd import (
     SIMDScheduling,
 )
 from .triton_utils import config_of, signature_of, signature_to_meta
+from ..streamscheduler import DEFAULT_STREAM_ID
 
 if TYPE_CHECKING:
     from ..ir import IRNode
@@ -2723,7 +2724,8 @@ class TritonKernel(SIMDKernel):
             if tree.grid_dim is not None:
                 grid.append(expr)
 
-    def call_kernel(self, name: str, node: Optional[IRNode] = None):
+
+    def call_kernel(self, name: str, node: Optional[IRNode] = None, stream_id=DEFAULT_STREAM_ID, kernel_IndentedBuffer=None):
         wrapper = V.graph.wrapper_code
         _, call_args, _, arg_types = self.args.python_argdefs()
         grid: List[Any] = []
@@ -2747,6 +2749,8 @@ class TritonKernel(SIMDKernel):
             arg_types=arg_types,
             grid_fn=self._get_grid_fn(),
             triton_meta=self.triton_meta,
+            stream_id=stream_id,
+            kernel_IndentedBuffer=kernel_IndentedBuffer
         )
 
         if self.args.workspace_arg is not None:

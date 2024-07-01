@@ -4695,6 +4695,7 @@ class ExternKernelOut(ExternKernel):
             self.codegen_reference(),
             self.output_view.codegen_reference() if self.output_view else None,
             args,
+            self.name
         )
 
     def __init__(
@@ -4827,7 +4828,7 @@ class UserDefinedTritonKernel(ExternKernel):
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            new_name, self.grid, configs, args, triton_meta, raw_args
+            new_name, self.grid, configs, args, triton_meta, raw_args, node_name=self.name
         )
 
     def should_allocate(self):
@@ -4937,7 +4938,6 @@ class MutationOutput(ExternKernel):
     def get_inputs_that_alias_output(self):
         return [self.inputs[0].get_name()]
 
-
 class InplaceBernoulliFallback(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly
@@ -4950,7 +4950,7 @@ class InplaceBernoulliFallback(ExternKernel):
             # Inductor doesn't really support aten Generator, so the Generator kwarg is always NULL here,
             # which needs to be explicitly generated for cpp wrapper
             wrapper.writeline(
-                f"{self.get_kernel_name()}({x}, {', '.join(map(repr, self.constant_args))}, NULL){wrapper.ending}"
+                f"{self.get_kernel_name()}({x}, {', '.join(map(repr, self.constant_args))}, NULL){wrapper.ending}", caller=self
             )
         else:
             wrapper.writeline(
@@ -4981,7 +4981,6 @@ class InplaceBernoulliFallback(ExternKernel):
             self.cpp_kernel_name = "at::native::bernoulli_"
         mark_node_as_mutating(self, x)
 
-
 # Used to deal with torch.complex types
 class InplaceCopyFallback(ExternKernel):
     """
@@ -4991,7 +4990,7 @@ class InplaceCopyFallback(ExternKernel):
     def codegen(self, wrapper):
         (dst, src, non_blocking) = self.codegen_args()
         wrapper.writeline(
-            f"{self.get_kernel_name()}({dst}, {src}, {non_blocking}){wrapper.ending}"
+            f"{self.get_kernel_name()}({dst}, {src}, {non_blocking}){wrapper.ending}", caller=self
         )
 
     def should_allocate(self):
@@ -5045,7 +5044,7 @@ class MutatingFirstArgExternKernel(ExternKernel):
             *map(repr, self.constant_args),
         ]
         wrapper.writeline(
-            f"{self.get_kernel_name()}({', '.join(argrefs)}){wrapper.ending}"
+            f"{self.get_kernel_name()}({', '.join(argrefs)}){wrapper.ending}", caller=self
         )
 
     def should_allocate(self):
@@ -5129,6 +5128,7 @@ class ScatterFallback(ExternKernel):
             self.src_is_tensor,
             reduce,
             self.codegen_kwargs(),
+            node_name=self.name
         )
 
     def should_allocate(self):
@@ -5192,7 +5192,7 @@ class IndexPutFallback(ExternKernel):
                 indices.append(V.graph.wrapper_code.none_str)
 
         wrapper.generate_index_put_fallback(
-            self.get_kernel_name(), x, indices, values, *self.codegen_const_args()
+            self.get_kernel_name(), x, indices, values, *self.codegen_const_args(), node_name=self.name
         )
 
     def should_allocate(self):
@@ -5254,9 +5254,9 @@ class DeviceCopy(ExternKernelOut):
         args = self.codegen_args()
         assert len(args) == 1
         if self.output_view:
-            wrapper.codegen_device_copy(args[0], self.output_view.codegen_reference())
+            wrapper.codegen_device_copy(args[0], self.output_view.codegen_reference(), node_name=self.name)
         else:
-            wrapper.codegen_device_copy(args[0], self.codegen_reference())
+            wrapper.codegen_device_copy(args[0], self.codegen_reference(), node_name=self.name)
 
 
 class DynamicScalar(ExternKernel):
@@ -5322,13 +5322,10 @@ class AssertScalar(ExternKernel):
             # get True (because we've already runtime assert'ed that it's
             # true).  But we're code generating the actual runtime assert
             # here!!
-            wrapper.writeline(
-                f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar, simplify=False)}:"
-            )
-            wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
-            # No one should ever use this buffer, but for uniformity
-            # define the variable and assign it None
-            wrapper.writeline(f"{self.get_name()} = None")
+            call_strs = [f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar, simplify=False)}:", ]
+            call_strs.append(f"    raise RuntimeError({repr(self.msg)})")
+            call_strs.append(f"{self.get_name()} = None")
+            wrapper.writelines(call_strs, node_name=self.get_name())
 
 
 @dataclasses.dataclass
@@ -5530,7 +5527,7 @@ class FallbackKernel(ExternKernelAlloc):
                     return go(self.get_name(), keypath)
 
             wrapper.writeline(
-                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {go_outer()}{wrapper.ending}"
+                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {go_outer()}{wrapper.ending}", node_name=self.name
             )
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
