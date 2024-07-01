@@ -99,7 +99,8 @@ epilogue_fusion_first = False
 pattern_matcher = True
 
 # register custom graph optimization pass hook. so far, pre/post passes are
-# only applied before/after pattern_matcher in post_grad_passes.
+# only applied before/after pattern_matcher in post_grad_passes, and post-reinplace passes
+# are only applied after the reinplace passes in post_grad_passes.
 #
 # def my_custom_pre_pass(graph: torch.fx.graph.Graph):
 #     # my custom graph optimization pass
@@ -109,10 +110,18 @@ pattern_matcher = True
 #     # my custom graph optimization pass
 #     ...
 #
+# def my_custom_post_reinplace_pass(graph: torch.fx.graph.Graph):
+#     # my custom graph optimization pass
+#     ...
+#
 # torch._inductor.config.post_grad_custom_pre_pass = my_custom_pre_pass
 # torch._inductor.config.post_grad_custom_post_pass = my_custom_post_pass
+# torch._inductor.config.post_grad_custom_post_reinplace_pass = my_custom_post_reinplace_pass
 post_grad_custom_pre_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 post_grad_custom_post_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
+post_grad_custom_post_reinplace_pass: Optional[
+    Callable[[torch.fx.graph.Graph], None]
+] = None
 
 # Registers a custom joint graph pass.
 joint_custom_pre_pass: Optional[Callable[[torch.fx.Graph], None]] = None
