@@ -1480,6 +1480,17 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
 
 
 class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    @staticmethod
+    def normalize_to_args(args, kwargs):
+        # input signature is (query, key, value, score_mod, block_mask, *other_buffers),
+        # block_mask is a tuple, and we don't want to flatten it.
+        # only flatten kwargs into lists
+        flat_kwargs = pytree.tree_flatten(kwargs)[0]
+
+        # Combine the flattened lists
+        all_args = args + flat_kwargs
+        return all_args
+
     def create_wrapped_node(
         self, tx, query: "VariableTracker", score_function: "VariableTracker"
     ):
@@ -1553,7 +1564,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             value,
             score_mod,
             block_mask,
-        ) = args
+        ) = self.normalize_to_args(args, kwargs)
 
         p_args = self.create_wrapped_node(tx, query, score_mod)
         proxied_args = [
