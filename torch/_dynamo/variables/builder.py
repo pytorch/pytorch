@@ -69,6 +69,7 @@ from ..source import (
     OptimizerSource,
     RandomValueSource,
     Source,
+    SubclassAttrListSource,
     TupleIteratorGetItemSource,
 )
 from ..trace_rules import (
@@ -1396,6 +1397,10 @@ class VariableBuilder:
         # and recursively install corresponding guard for each inner attribute.
         if is_traceable_wrapper_subclass(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
+            install_guard(
+                SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
+            )
+
             attrs, _ = value.__tensor_flatten__()
             for attr in attrs:
                 inner_value = getattr(value, attr)
