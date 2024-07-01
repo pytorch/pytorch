@@ -934,8 +934,9 @@ def solve_min_cut(
         if node in nodes_set_into_primal_in_epilogue:
             # If a node Y is used in `.set_(primal_X, Y)`, we explicitly want to save Y.
             # This is important for Traceable FSDP2 because by default the partitioner will save
-            # an alias of Y, but our requirement is that what's saved must be Y here,
-            # and after the FWD graph is produced, we swapped that Y with primal_X.
+            # an alias of Y, but our requirement is that what's saved must be primal_X,
+            # so our approach is that we save Y here, and after the FWD graph is produced,
+            # we swapped that Y with primal_X.
             #
             # This won't cause additional memory usage because the lifetime of graph input
             # is longer than the graph itself anyway, so saving a tensor that shares storage
