@@ -201,17 +201,22 @@ def sig_for_ops(opname: str) -> list[str]:
 
     name = opname[2:-2]
     if name in symmetric_comparison_ops:
+        # e.g.: `__eq__`, `__ne__`
         # unsafe override https://github.com/python/mypy/issues/5704
         return [
             f"def {opname}(self, other: Any) -> Tensor: ...  # type: ignore[override] # noqa: PYI032"
         ]
     if name in inplace_binary_ops:
+        # e.g.: `__iadd__`, `__imul__`
         return [f"def {opname}(self, other: Any) -> Self: ..."]
     if name in binary_ops or name in comparison_ops:
+        # e.g.: `__add__`, `__mal__` and `__le__`, `__gt__`
         return [f"def {opname}(self, other: Any) -> Tensor: ..."]
     if name in unary_ops:
+        # e.g.: `__pos__`, `__neg__`, `__abs__`
         return [f"def {opname}(self) -> Tensor: ..."]
     if name in to_py_type_ops:
+        # e.g.: `__int__`, `__index__`, `__float__`, `__bool__`
         if name in {"bool", "float", "complex"}:
             tname = name
         elif name == "nonzero":

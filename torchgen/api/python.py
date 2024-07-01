@@ -1157,7 +1157,7 @@ def returns_str_pyi(signature: PythonSignature) -> str:
         if (
             name.startswith("__")
             and name.endswith("__")
-            and name[2:-2] in inplace_binary_ops
+            and name[2:-2] in inplace_binary_ops  # e.g.: `__iadd__`, `__imul__`
         ):
             return "Self"
         return python_returns[0]
