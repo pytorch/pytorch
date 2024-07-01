@@ -312,7 +312,8 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // location
   pushString(tensor.device().str());
   // size
-  pushInt(tensor.storage().nbytes() / tensor.element_size());
+  pushInt(
+      static_cast<int64_t>(tensor.storage().nbytes() / tensor.element_size()));
 
   push<PickleOpCode>(PickleOpCode::TUPLE);
   push<PickleOpCode>(PickleOpCode::BINPERSID);
@@ -583,11 +584,11 @@ void Pickler::pushLong(const std::string& data) {
 void Pickler::pushTensorReference(const IValue& ivalue) {
   pushGlobal("torch.jit._pickle", "build_tensor_from_id");
   tensor_table_->push_back(ivalue.toTensor());
-  int64_t tensor_id = tensor_table_->size() - 1;
+  auto tensor_id = tensor_table_->size() - 1;
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
   // so wrap in a tuple
   push<PickleOpCode>(PickleOpCode::MARK);
-  pushIValue(tensor_id);
+  pushIValue(static_cast<int64_t>(tensor_id));
   push<PickleOpCode>(PickleOpCode::TUPLE);
 
   push<PickleOpCode>(PickleOpCode::REDUCE);
