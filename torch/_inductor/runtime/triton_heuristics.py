@@ -210,7 +210,6 @@ class CachingAutotuner(KernelInterface):
                 "triton",
                 str(self.triton_meta.get("device", 0)),
             )
-        log.debug("Triton cache dir: %s", os.environ["TRITON_CACHE_DIR"])
 
         self.size_hints = size_hints
         self.coordesc_tuner = CoordescTuner(
@@ -628,43 +627,45 @@ class CachingAutotuner(KernelInterface):
 
         return binary, launcher
 
-    def bench(self, launcher, *args, grid, **kwargs):
-        """Measure the performance of a given launcher"""
-        # we don't skip configs wiht spilled registers when auto-tuning custom
-        # (user-written) Triton kernels, as (i) we don't have any knowledge or
-        # control over the kernel code; (ii) there is empirical evidence that
-        # for some (complicated) custom Triton kernels, a register-spilling
-        # config may yield the best latency.
-        if not self.custom_kernel and launcher.n_spills > self.inductor_meta.get(
-            "spill_threshold", 16
-        ):
-            log.debug(
-                "Skip config %s because of register spilling: %d",
-                launcher.config,
-                launcher.n_spills,
-            )
-            return float("inf")
+    def benchmark_launcher(self, launcher, *args, grid, **kwargs):
+        return self.bench_many([launcher], *args, grid, **kwargs)[0]
+    
+    def benchmark_many_launchers(self, launchers, *args, grid, **kwargs):
+        launcher_to_timing = {}
 
-        device_interface = self.get_device_interface()
-        stream = device_interface.get_raw_stream(  # type: ignore[call-arg]
-            device_interface.current_device()
-        )
+        if not self.custom_kernel:
+            for launcher in launchers:
+                if launcher.n_spills > self.inductor_meta.get("spill_threshold", 16):
+                    log.debug("Skipping config %s because of register spilling: %d", launcher.config, launcher.n_spills)
+                    launcher_to_timing[launcher] = float("inf")
+        
+        if len(launchers) == len(launcher_to_timing):
+            return [launcher_to_timing[launcher] for launcher in launchers]
+        
+        interface = self.get_device_interface()
+        stream = interface.get_raw_stream(interface.current_device())
 
-        def kernel_call():
+        def make_callable(launcher):
             if launcher.config.pre_hook is not None:
                 launcher.config.pre_hook(
                     {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
                 )
-
-            cloned_args, cloned_kwargs = self.clone_args(*args, **kwargs)
-            launcher(
-                *cloned_args,
-                **cloned_kwargs,
-                grid=grid,
-                stream=stream,
-            )
-
-        return do_bench_gpu(kernel_call, memory_warmup_iters=1000)
+            def callable():
+                cloned_args, cloned_kwargs = self.clone_args(*args, **kwargs)
+                launcher(
+                    *cloned_args,
+                    **cloned_kwargs,
+                    grid=grid,
+                    stream=stream,
+                )
+            return callable
+        
+        launchers_to_benchmark = [launcher for launcher in launchers if launcher not in launcher_to_timing]
+        timings = do_bench_gpu([make_callable(launcher) for launcher in launchers_to_benchmark], memory_warmup_iters=1000)
+        for launcher, timing in zip(launchers_to_benchmark, timings):
+            launcher_to_timing[launcher] = timing
+        
+        return [launcher_to_timing[launcher] for launcher in launchers]
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides
@@ -692,27 +693,28 @@ class CachingAutotuner(KernelInterface):
 
     @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
-        timings = {
-            launcher: self.bench(launcher, *args, **kwargs)
-            for launcher in self.launchers
+        timings = self.benchmark_many_launchers(self.launchers, *args, **kwargs)
+        launcher_to_timing = {
+            launcher: timing
+            for launcher, timing in zip(self.launchers, timings)
         }
 
-        for k, v in timings.items():
-            self.coordesc_tuner.cache_benchmark_result(k.config, v)
+        for launcher, timing in launcher_to_timing.items():
+            self.coordesc_tuner.cache_benchmark_result(launcher.config, timing)
 
         if log.isEnabledFor(logging.DEBUG):
             log.debug("Benchmark all input configs for %s, get:", self.fn.__name__)
-            for k, v in timings.items():
+            for launcher, timing in launcher_to_timing.items():
                 log.debug(
                     "%s: %f, nreg %d, nspill %d, #shared-mem %s",
-                    k.config,
-                    v,
-                    k.n_regs,
-                    k.n_spills,
-                    k.shared,
+                    launcher.config,
+                    timing,
+                    launcher.n_regs,
+                    launcher.n_spills,
+                    launcher.shared,
                 )
 
-        return timings
+        return launcher_to_timing
 
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
@@ -780,6 +782,7 @@ class CachingAutotuner(KernelInterface):
             # skip triton template
             return launcher
 
+        cloned_args, _ = self.clone_args(*args)
         config2launcher = {launcher.config: launcher}
 
         def benchmark_one_config(config):
@@ -787,7 +790,7 @@ class CachingAutotuner(KernelInterface):
                 _, launcher = self._precompile_config(config, False)
             config2launcher[config] = launcher
 
-            out = self.bench(launcher, *args, **kwargs)
+            out = self.benchmark_launcher(launcher, *cloned_args, **kwargs)
             log.debug(
                 "COORDESC: %s: %f, nreg %d, nspill %d, #shared-mem %d",
                 launcher.config,
@@ -955,7 +958,7 @@ class DebugAutotuner(CachingAutotuner):
         (launcher,) = self.launchers
 
         if self.cached is None:
-            ms = self.bench(launcher, *args, grid=grid)
+            ms = self.benchmark_launcher(launcher, *args, grid=grid)
             num_in_out_ptrs = len(
                 [
                     arg_name
