@@ -1875,12 +1875,9 @@ class Kernel(CodeGen):
             def _update_store_cache(name: str, value: CSEVariable):
                 self.cse.store_cache[name] = value
                 if self.current_node:
-                    for buf in self.current_node.get_outputs():
-                        if buf.get_name() != name:
-                            continue
-
-                        for other_name in buf.get_mutations():
-                            self.cse.store_cache[other_name] = value
+                    buf = self.current_node.get_output(name)
+                    for other_name in buf.get_mutations():
+                        self.cse.store_cache[other_name] = value
 
             @staticmethod
             def store(
