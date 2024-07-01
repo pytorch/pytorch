@@ -536,7 +536,7 @@ def triton_compute_type(dtype):
         triton_type_name = "float8e5"
     elif triton_type_name == "float8_e4m3fnuz":
         triton_type_name = "float8e4b8"
-    elif triton_type_name == "float8_e5m2":
+    elif triton_type_name == "float8_e5m2fnuz":
         triton_type_name = "float8e5b16"
     return f"tl.{triton_type_name}"
 
@@ -1005,6 +1005,12 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def masked(mask, body, other):
+        if mask is not None and torch.version.hip is not None:
+            mask = V.kernel.cse.generate(
+                V.kernel.compute,
+                f"{mask}.to(tl.int1)",
+            )
+
         nodes = body.graph.find_nodes(op="output")
         assert nodes, "graph for body does not contain an output"
 
@@ -1135,7 +1141,7 @@ class TritonKernel(SIMDKernel):
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
-        disable_persistent_reduction=False,
+        override_persistent_reduction=None,
     ):
         super().__init__(
             *groups,
@@ -1143,7 +1149,7 @@ class TritonKernel(SIMDKernel):
             mutations=mutations,
             reduction_hint=reduction_hint,
             pid_cache=pid_cache,
-            disable_persistent_reduction=disable_persistent_reduction,
+            override_persistent_reduction=override_persistent_reduction,
         )
         self.suffix: IndentedBuffer = IndentedBuffer()  # type: ignore[assignment]
         self.outside_loop_vars: Set[Any] = set()
@@ -2231,6 +2237,66 @@ class TritonKernel(SIMDKernel):
 
         return tuple(result_vars)
 
+    def sort(
+        self,
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[CSEVariable, ...],
+        stable: bool,
+        descending: bool,
+    ) -> Tuple[CSEVariable, ...]:
+        assert self.inside_reduction
+        masks = {f"{tree.prefix}mask" for tree in self.range_trees}
+        self.filter_masks(masks)
+        masks = sorted(masks)
+        assert not self._load_mask, "ops.sort not supported inside ops.masked"
+        assert (
+            self.persistent_reduction
+        ), "ops.sort is only supported in persistent reductions"
+        reduction_range_prefix = self.range_trees[-1].prefix
+
+        cse_compute = functools.partial(self.cse.generate, self.compute)
+        dim = self.triton_tensor_ndim() - 1
+
+        broadcasted_values = [
+            cse_compute(f"tl.broadcast_to({value}, {self.dense_size_str()})")
+            for value in values
+        ]
+
+        def csv(values):
+            return " ".join(f"{value}," for value in values)
+
+        def cse_multiple(line, n, masks):
+            cache_keys = [f"{line}, {i}, {masks}" for i in range(n)]
+            if all(cache_key in self.cse.cache for cache_key in cache_keys):
+                return [self.cse.cache[cache_key] for cache_key in cache_keys]
+            result_vars = [self.cse.newvar() for _ in range(n)]
+            self.compute.writeline(
+                f"{csv(result_vars)} = {line}",
+            )
+            for result_var, cache_key in zip(result_vars, cache_keys):
+                if masks:
+                    result_var.mask_vars = masks  # type: ignore[attr-defined]
+                self.cse.cache[cache_key] = result_var
+            return tuple(result_vars)
+
+        assert self.range_trees[-1].prefix == "r"
+        rmask = "None" if self._has_constant_mask(self.range_trees[-1]) else "rmask"
+
+        if len(values) == 2:
+            line = (
+                f"triton_helpers.sort_with_index({broadcasted_values[0]}, {broadcasted_values[1]},"
+                f" {rmask}, {dim}, stable={stable}, descending={descending})"
+            )
+            result_vars = cse_multiple(line, len(values), masks)
+        else:
+            raise AssertionError("Unhandled sort")
+
+        for result_var, input_var in zip(result_vars, values):
+            result_var.mask_vars = masks  # type: ignore[attr-defined]
+            result_var.bounds = input_var.bounds
+
+        return tuple(result_vars)
+
     def codegen_body(self):
         """
         Concat output code from index_code, loads, compute, stores,
@@ -2659,6 +2725,7 @@ class TritonKernel(SIMDKernel):
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None):
         wrapper = V.graph.wrapper_code
+        wrapper.write_triton_header_once()
         _, call_args, _, arg_types = self.args.python_argdefs()
         grid: List[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
@@ -2810,6 +2877,7 @@ class TritonScheduling(SIMDScheduling):
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.MASKED_SCATTER_WITH_INDEX,
             BackendFeature.SCAN,
+            BackendFeature.TRITON_TEMPLATES,
         ]
     )
     if torch.version.hip is None:
@@ -2818,6 +2886,7 @@ class TritonScheduling(SIMDScheduling):
                 [
                     # TODO: Move this above when ROCm triton adds support for multiple inputs
                     BackendFeature.TUPLE_REDUCTION,
+                    BackendFeature.SORT,
                 ]
             )
         )
