@@ -22,6 +22,7 @@
 #include <limits>
 #include <ostream>
 #include <type_traits>
+#include <unordered_map>
 
 namespace c10 {
 
@@ -560,5 +561,13 @@ inline std::ostream& operator<<(
     at::ScalarType scalar_type) {
   return stream << toString(scalar_type);
 }
+
+// Returns a pair of strings representing the names for each dtype.
+// The returned pair is (name, legacy_name_if_applicable)
+C10_API std::pair<std::string, std::string> getDtypeNames(
+    c10::ScalarType scalarType);
+
+// Returns a map of string name to dtype.
+C10_API const std::unordered_map<std::string, ScalarType>& getStringToDtypeMap();
 
 } // namespace c10

@@ -498,7 +498,7 @@ def should_pad_bench(
             multiplier = torch._inductor.config.post_grad_fusion_options[
                 "shape_padding_multiplier"
             ].get("value", 1.1)
-        counters["inductor"]["shape_padding_multiplier"] += 1
+            counters["inductor"]["shape_padding_multiplier"] += 1
         should_pad = _skip_do_bench_times or ori_time > pad_time * multiplier
         set_cached_should_pad(key, should_pad)
         return should_pad

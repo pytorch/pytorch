@@ -84,7 +84,11 @@ class _Action(NamedTuple):
 
     @staticmethod
     def from_str(str):
-        """Reverse of __repr__"""
+        """
+        Reverse of __repr__
+
+        String should be formatted as [stage][action type][microbatch] e.g. `2F0`
+        """
         if match := _action_regex.match(str):
             stage_index, computation_type, microbatch_index = match.groups()
             return _Action(
