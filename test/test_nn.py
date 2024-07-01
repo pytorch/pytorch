@@ -1435,6 +1435,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertRaisesRegex(TypeError, 'module name should be a string. Got NoneType',
                                    lambda: getattr(net, fn)(None, l))
 
+    def test_set_submodule(self):
+        net = nn.Module()
+        net.t = nn.Module()
+        l = nn.Linear(1, 2)
+        target = "t.l"
+        net.set_submodule(target, l)
+        self.assertEqual(net.get_submodule(target), l)
+        l2 = nn.Linear(2, 1)
+        net.set_submodule(target, l2)
+        self.assertEqual(net.get_submodule(target), l2)
+        self.assertRaises(ValueError, net.set_submodule, "", l)
+        self.assertRaises(AttributeError, net.set_submodule, "a.l", l)
+        self.assertRaises(AttributeError, net.set_submodule, "t.l.l2", l2)
+
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))
         cpu = torch.device('cpu')
@@ -1799,29 +1813,27 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(len(w) == 0)
 
     def test_parameterlistdict_pickle(self):
+        # warning from torch.load call in _load_from_bytes used in UntypedStorage.__reduce__
+        WEIGHTS_ONLY_WARN = "You are using `torch.load` with `weights_only=False`"
         m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
 
         # Test whether loading from older checkpoints works without triggering warnings
         m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
         del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
 
         m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
 
         # Test whether loading from older checkpoints works without triggering warnings
         m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
         del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
 
     def test_weight_norm_pickle(self):
         m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
@@ -8011,7 +8023,28 @@ class TestNNDeviceType(NNTestCase):
         o.sum().backward()
         o_cpu = m(a_cpu)
         o_cpu.sum().backward()
+        # workaround for memory usage overhead of assertEqual
         self.assertTrue(torch.allclose(a.grad.cpu(), a_cpu.grad.half()))
+
+    @onlyCUDA
+    @largeTensorTest("48GB", "cpu")
+    @largeTensorTest("48GB", "cuda")
+    def test_avg_pool_large_tensor2(self, device):
+        # test for https://github.com/pytorch/pytorch/issues/129785
+        out_size = [2048, 64, 104, 79]
+        size = [2048, 64, 209, 159]
+        inp = torch.randn(size, device=device, requires_grad=True, dtype=torch.float)
+        inp_cpu = inp.detach().cpu()
+        m = torch.nn.AvgPool2d([2, 2], [2, 2], [0, 0], False, True, None)
+        o = m(inp)
+        inp_cpu.requires_grad = True
+        o.sum().backward()
+        o_cpu = m(inp_cpu)
+        o_cpu.sum().backward()
+        self.assertEqual(o.shape, out_size)
+        self.assertEqual(o_cpu.shape, out_size)
+        # reduce memory usage
+        self.assertEqual(inp.grad.sum(), inp_cpu.grad.sum())
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
