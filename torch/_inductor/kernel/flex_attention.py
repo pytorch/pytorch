@@ -347,8 +347,8 @@ flex_attention_template = TritonTemplate(
         # update pointers
         indices_idx = start_n // SPARSE_KV_MULTIPLE
 
-        cur_block = tl.load(kv_indices + indices_idx)
-        next_block = tl.load(kv_indices + indices_idx + 1)
+        cur_block = tl.load(kv_indices + indices_idx, eviction_policy="evict_last")
+        next_block = tl.load(kv_indices + indices_idx + 1, eviction_policy="evict_last")
         needs_jump = (start_n + 1) % SPARSE_KV_MULTIPLE == 0
         jump_to_block = (next_block - cur_block ) * SPARSE_KV_BLOCK_SIZE - (SPARSE_KV_MULTIPLE - 1) * BLOCK_N
 
@@ -547,8 +547,8 @@ def flex_attention(*args, **kwargs):
             BLOCK_N=BLOCK_N,
             BLOCK_DMODEL=query.get_size()[-1],
             # For now, we always assume the "sound" option
-            SCORE_MOD_IS_LINEAR=True,
-            ROWS_GUARANTEED_SAFE=True,
+            SCORE_MOD_IS_LINEAR=False,
+            ROWS_GUARANTEED_SAFE=False,
             OUTPUT_LOGSUMEXP=True,
             SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
