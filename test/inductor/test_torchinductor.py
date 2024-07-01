@@ -50,6 +50,7 @@ from torch._inductor.utils import (
     run_and_get_code,
     run_and_get_cpp_code,
     run_and_get_triton_code,
+    fresh_inductor_cache,
 )
 from torch._inductor.virtualized import V
 from torch._prims_common import is_integer_dtype
@@ -10559,17 +10560,57 @@ class CommonTemplate:
         self.common(fn, (x,))
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @fresh_inductor_cache()
     def test_dtypeview(self):
         # https://github.com/pytorch/pytorch/issues/126338
         @torch.compile
-        def fn(x, y):
-            x = x.view(torch.float16)
-            y = y.view(torch.float16) + 1
-            return x @ y
+        def fn(x, y, x_dtype, x2):
+            x = x.view(x_dtype)
+            y = y.view(x_dtype) + 1
+            x2 = x2.view(x_dtype) + 1
+            return x @ y, x2 @ x
 
-        x = torch.randn((2, 2), device=self.device, dtype=torch.bfloat16)
-        y = torch.randn((2, 2), device=self.device, dtype=torch.bfloat16)
-        self.common(fn, (x, y), reference_in_float=False)
+        def _get_primitive_bitwidth(dtype):
+            if dtype.is_floating_point:
+                return torch.finfo(dtype).bits
+            else:
+                return torch.iinfo(dtype).bits
+        dtype_ranges = {
+            torch.uint8: (0, 256),
+            torch.int8: (-128, 128),
+            torch.int16: (-32768, 32767),
+            torch.int32: (-2147483648, 2147483647),
+            torch.int64: (-9223372036854775808, 9223372036854775807)
+        }
+        test_dtypes = [torch.float, torch.float64, torch.float16, torch.bfloat16, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
+        for test_dtype_x in test_dtypes:
+            for test_dtype_y in test_dtypes:
+                # @ operation needs arguments to be the same dtype
+                for view_dtype in test_dtypes:
+                    print(f"({test_dtype_x}, {test_dtype_y}, {view_dtype})")
+                    if _get_primitive_bitwidth(test_dtype_x) != _get_primitive_bitwidth(test_dtype_y) or _get_primitive_bitwidth(test_dtype_x) != _get_primitive_bitwidth(view_dtype) or view_dtype in [torch.int32, torch.int64, torch.int16, torch.uint8, torch.int8]:
+                        print("skip")
+                        continue
+                    if test_dtype_x.is_floating_point:
+                        x = torch.randn((2, 2), device='cuda', dtype=test_dtype_x)
+                    else:
+                        # Use the range from dtype_ranges if available
+                        if test_dtype_x in dtype_ranges:
+                            low, high = dtype_ranges[test_dtype_x]
+                            x = torch.randint(low=low, high=high, size=(2, 2), device='cuda', dtype=test_dtype_x)
+                        else:
+                            raise ValueError(f"Unsupported dtype: {test_dtype_x}")
+                    if test_dtype_y.is_floating_point:
+                        y = torch.randn((2, 2), device='cuda', dtype=test_dtype_y)
+                    else:
+                        # Use the range from dtype_ranges if available
+                        if test_dtype_y in dtype_ranges:
+                            low, high = dtype_ranges[test_dtype_y]
+                            y = torch.randint(low=low, high=high, size=(2, 2), device='cuda', dtype=test_dtype_y)
+                        else:
+                            raise ValueError(f"Unsupported dtype: {test_dtype_y}")
+                    x2 = x.clone()
+                    self.common(fn, (x, y, view_dtype, x2), reference_in_float=False)
 
     def test_dtypeview_fusion(self):
         @torch.compile
