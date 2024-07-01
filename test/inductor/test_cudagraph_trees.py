@@ -881,15 +881,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo2(x):
                 return x[2:]
 
-            x = torch.rand([10, 10], device="cuda", requires_grad=True)
             param_c = cdata(m.weight)
             for _ in range(3):
+                x = torch.rand([10, 10], device="cuda", requires_grad=True)
+                torch.compiler.cudagraph_mark_step_begin()
                 out1, alias_1, alias_2 = foo(m, x)
                 self.assertEqual(len({param_c, cdata(alias_1), cdata(alias_2)}), 1)
 
                 out2 = foo2(out1)
                 out2.sum().backward()
                 self.assertEqual(cdata(out1), cdata(out2))
+                m.weight.grad = None
+                m.bias.grad = None
 
             node = self.curr_node()
             first_node = next(node._path_from_root)
@@ -1493,12 +1496,37 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out = foo(inp)
             out2 = foo(inp)
 
-            with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
+            with self.assertRaisesRegex(
+                Exception, "overwritten by a subsequent forward run."
+            ):
                 out + out
 
             foo(inp)
 
-            with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
+            with self.assertRaisesRegex(
+                Exception, "overwritten by a subsequent forward run."
+            ):
+                out2 + out2
+
+        def test_error_on_dealloc_use2(self):
+            @torch.compile()
+            def foo(x):
+                return x * x * x
+
+            inp = torch.rand([4], device="cuda")
+            out = foo(inp).detach()
+            out2 = foo(inp).detach()
+
+            with self.assertRaisesRegex(
+                Exception, "overwritten by a subsequent forward run."
+            ):
+                out + out
+
+            foo(inp)
+
+            with self.assertRaisesRegex(
+                Exception, "overwritten by a subsequent forward run."
+            ):
                 out2 + out2
 
         @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
@@ -1525,6 +1553,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             streams_init = {seg["stream"] for seg in get_all_cudagraph_segments()}
             for _ in range(4):
                 foo(inp).sum().backward()
+                inp.grad = None
 
             streams = {
                 seg["stream"] for seg in get_all_cudagraph_segments()
@@ -1612,6 +1641,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out2.sum().backward()
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
+            ones.grad = None
             del out
             del out2
 
