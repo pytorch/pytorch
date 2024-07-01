@@ -164,42 +164,42 @@ def translate(
             and isinstance(t.elem.elem, BaseCType)
             and str(t.elem.elem.type) == "at::Tensor"
         ):
-            ctx[
-                NamedCType(t.elem.elem.name, ConstRefCType(BaseCType(tensorT)))
-            ] = f"({b.expr}.has_value() ? *{b.expr} : at::Tensor())"
+            ctx[NamedCType(t.elem.elem.name, ConstRefCType(BaseCType(tensorT)))] = (
+                f"({b.expr}.has_value() ? *{b.expr} : at::Tensor())"
+            )
 
         if t.type == ConstRefCType(OptionalCType(BaseCType(tensorT))):
-            ctx[
-                NamedCType(t.name, BaseCType(optionalTensorRefT))
-            ] = f"(({b.expr}.has_value() && (*{b.expr}).defined()) ? at::OptionalTensorRef(*{b.expr}) : at::OptionalTensorRef())"
+            ctx[NamedCType(t.name, BaseCType(optionalTensorRefT))] = (
+                f"(({b.expr}.has_value() && (*{b.expr}).defined()) ? at::OptionalTensorRef(*{b.expr}) : at::OptionalTensorRef())"
+            )
 
         if t.type == ConstRefCType(BaseCType(scalarT)):
             ctx[NamedCType(t.name, BaseCType(opmath_t))] = f"({b.expr}).to<opmath_t>()"
 
         if t.type == ConstRefCType(OptionalCType(BaseCType(scalarT))):
-            ctx[
-                NamedCType(t.name, BaseCType(optionalScalarRefT))
-            ] = f"({b.expr}.has_value() ? at::OptionalScalarRef(&({b.expr}.value())) : at::OptionalScalarRef())"
+            ctx[NamedCType(t.name, BaseCType(optionalScalarRefT))] = (
+                f"({b.expr}.has_value() ? at::OptionalScalarRef(&({b.expr}.value())) : at::OptionalScalarRef())"
+            )
 
         if t.type == BaseCType(scalar_t):
-            ctx[
-                NamedCType(t.name, BaseCType(opmath_t))
-            ] = f"static_cast<opmath_t>({b.expr})"
+            ctx[NamedCType(t.name, BaseCType(opmath_t))] = (
+                f"static_cast<opmath_t>({b.expr})"
+            )
 
         # [Note: IOptTensorListRef]
         if t.type == ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))):
-            ctx[
-                NamedCType(t.name, BaseCType(iOptTensorListRefT))
-            ] = f"at::IOptTensorListRef({b.expr})"
+            ctx[NamedCType(t.name, BaseCType(iOptTensorListRefT))] = (
+                f"at::IOptTensorListRef({b.expr})"
+            )
 
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:
-        ctx[
-            NamedCType("self", MutRefCType(BaseCType(tensorT)))
-        ] = "const_cast<Tensor&>(*this)"
-        ctx[
-            NamedCType("self", ConstRefCType(BaseCType(tensorT)))
-        ] = "const_cast<Tensor&>(*this)"
+        ctx[NamedCType("self", MutRefCType(BaseCType(tensorT)))] = (
+            "const_cast<Tensor&>(*this)"
+        )
+        ctx[NamedCType("self", ConstRefCType(BaseCType(tensorT)))] = (
+            "const_cast<Tensor&>(*this)"
+        )
         # This is better!  Byte-for-byte compat
         # ctx[NamedCType("self", ConstRefCType(BaseCType(tensorT)))] = "*this"
 
