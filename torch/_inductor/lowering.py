@@ -536,7 +536,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                     operation_list.append(output.get_operation_name())
 
             if operation_list:
-                V.graph.register_list(operation_list)
+                V.graph.register_operation_list(operation_list)
 
         assert all(x is not None for x in outputs)
         return outputs

@@ -175,6 +175,9 @@ class BaseSchedulerNode:
             )
             for output in node.get_outputs()
         ]
+        self.outputs_by_name: Dict[str, SchedulerBuffer] = {
+            buf.get_name(): buf for buf in self.outputs
+        }
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(name={self.get_name()!r})"
@@ -290,14 +293,12 @@ class BaseSchedulerNode:
         }
 
     def prune_weak_deps(self) -> None:
-        # Prune weak dependencies on buffers that have been removed
+        # Prune weak dependencies on operations that have been removed
         def should_prune(dep: Dep) -> bool:
             if not isinstance(dep, WeakDep):
                 return False
             op = self.scheduler.name_to_buf[dep.name].defining_op
-            return all(
-                buf.get_name() in V.graph.removed_buffers for buf in op.get_outputs()
-            )
+            return op.get_name() in V.graph.removed_operations
 
         to_remove = {dep for dep in self.read_writes.reads if should_prune(dep)}
         self.set_read_writes(self.read_writes.remove_reads(to_remove))
@@ -325,6 +326,9 @@ class BaseSchedulerNode:
 
     def get_outputs(self) -> Sequence[SchedulerBuffer]:
         return self.outputs
+
+    def get_output(self, buf_name: str) -> SchedulerBuffer:
+        return self.outputs_by_name[buf_name]
 
     def get_device(self) -> torch.device:
         assert self.node is not None
@@ -981,6 +985,9 @@ class FusedSchedulerNode(BaseSchedulerNode):
         } - self.read_writes.writes
         self.min_order = min(x.min_order for x in self.snodes)
         self.max_order = max(x.max_order for x in self.snodes)
+        self.outputs_by_name: Dict[str, SchedulerBuffer] = {
+            buf.get_name(): buf for buf in self.get_outputs()
+        }
 
     @cache_on_self
     def get_name(self) -> str:

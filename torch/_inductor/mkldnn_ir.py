@@ -7,7 +7,6 @@ import torch
 
 from torch._prims_common import make_channels_last_strides_for
 
-from . import ir
 from .ir import (
     ExternKernelAlloc,
     FixedLayout,
@@ -429,9 +428,6 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             MutationOutput(NoneLayout(inputs[0].get_device()), inputs[0], self),
             MutationOutput(NoneLayout(inputs[1].get_device()), inputs[1], self),
         ]
-
-    def get_outputs(self) -> List[ir.Buffer]:
-        return [self, *self.mutation_outputs]
 
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
