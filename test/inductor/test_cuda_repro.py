@@ -1028,7 +1028,10 @@ class CudaReproTests(TestCase):
         model = torch.compile(model, backend=cnts, dynamic=True)
 
         with torch.backends.cuda.sdp_kernel(
-            enable_flash=True, enable_math=False, enable_mem_efficient=False
+            enable_flash=True,
+            enable_math=False,
+            enable_mem_efficient=False,
+            enable_cudnn=False,
         ):
             input1 = torch.rand(5, 512, 1024, device="cuda", dtype=torch.float16)
             input2 = torch.rand(5, 513, 1024, device="cuda", dtype=torch.float16)
@@ -1271,11 +1274,9 @@ def triton_(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
                     getitem_24,
                 ]
             )
-            getitem_17 = (
-                getitem_18
-            ) = (
-                getitem_19
-            ) = getitem_20 = getitem_21 = getitem_22 = getitem_23 = getitem_24 = None
+            getitem_17 = getitem_18 = getitem_19 = getitem_20 = getitem_21 = (
+                getitem_22
+            ) = getitem_23 = getitem_24 = None
             return cat_1
 
         for mark_dynamic in [False, True]:

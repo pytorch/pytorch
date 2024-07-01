@@ -1,6 +1,6 @@
 import functools
 import pickle
-from typing import Callable, Dict, Iterable, Iterator, List, Optional, TypeVar
+from typing import Callable, Dict, Generic, Iterator, Optional, TypeVar
 
 from torch.utils._import_utils import import_dill
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
@@ -13,6 +13,9 @@ from torch.utils.data.datapipes.utils.common import (
 from torch.utils.data.dataset import Dataset, IterableDataset
 
 
+dill = import_dill()
+HAS_DILL = dill is not None
+
 __all__ = [
     "DataChunk",
     "DFIterDataPipe",
@@ -22,9 +25,6 @@ __all__ = [
 
 T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
-
-dill = import_dill()
-HAS_DILL = dill is not None
 
 UNTRACABLE_DATAFRAME_PIPES = [
     "batch",  # As it returns DataChunks
@@ -399,17 +399,17 @@ class _MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPip
         return self._datapipe[idx]
 
 
-class DataChunk(List[T]):
-    def __init__(self, items: Iterable[T]) -> None:
-        items = list(items)
+class DataChunk(list, Generic[T]):
+    def __init__(self, items):
         super().__init__(items)
         self.items = items
 
-    def as_str(self, indent: str = "") -> str:
-        return indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
+    def as_str(self, indent=""):
+        res = indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
+        return res
 
     def __iter__(self) -> Iterator[T]:
         yield from super().__iter__()
 
-    def raw_iterator(self) -> Iterator[T]:
+    def raw_iterator(self) -> T:  # type: ignore[misc]
         yield from self.items

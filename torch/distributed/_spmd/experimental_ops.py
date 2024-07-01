@@ -106,9 +106,9 @@ def _prop__foreach_addcop_scalar(op_schema: OpSchema):
             output_spec=None,
             redistribute_schema=OpSchema(
                 op=op_schema.op,
-                args_schema=(self, self, self, scalar)
-                if scalar
-                else (self, self, self),
+                args_schema=(
+                    (self, self, self, scalar) if scalar else (self, self, self)
+                ),
                 kwargs_schema=op_schema.kwargs_schema,
             ),
         )
@@ -348,11 +348,13 @@ def _refine_sharding(
                 mesh=s.mesh,  # type: ignore[attr-defined]
                 placements=s.placements,  # type: ignore[attr-defined]
                 tensor_meta=TensorMeta(
-                    shape=torch.Size(
-                        s.shape[0:active_dim] + (1,) + s.shape[active_dim + 1 :]
-                    )
-                    if active_dim is not None
-                    else s.shape,
+                    shape=(
+                        torch.Size(
+                            s.shape[0:active_dim] + (1,) + s.shape[active_dim + 1 :]
+                        )
+                        if active_dim is not None
+                        else s.shape
+                    ),
                     stride=s.tensor_meta.stride,
                     dtype=s.tensor_meta.dtype,
                 ),

@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-# ruff: noqa: F401
 # ${generated_comment}
 
 from typing import (
@@ -8,17 +7,12 @@ from typing import (
     ContextManager,
     Final,
     Iterator,
-    List,
     Literal,
     NamedTuple,
     NoReturn,
-    Optional,
     overload,
     Sequence,
-    Tuple,
-    Type,
     TypeVar,
-    Union,
 )
 from typing_extensions import Self
 
@@ -43,10 +37,6 @@ from torch.types import (
     Number,
 )
 
-${return_types___all__}
-
-def pytree_register_structseq(cls: type) -> None: ...
-
 ${structseq_defs}
 
-all_return_types: list[type] = ...
+all_return_types: list[type] = []

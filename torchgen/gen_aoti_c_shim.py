@@ -79,9 +79,11 @@ def convert_arg_type_and_name(typ: Type, name: str) -> tuple[list[str], list[str
                 [name],
                 [base_type_to_aten_type[typ.name]],
                 [
-                    f"{base_type_to_callsite_expr[typ.name]}({name})"
-                    if base_type_to_callsite_expr[typ.name]
-                    else name
+                    (
+                        f"{base_type_to_callsite_expr[typ.name]}({name})"
+                        if base_type_to_callsite_expr[typ.name]
+                        else name
+                    )
                 ],
             )
         elif typ.name == BaseTy.Device:
@@ -218,6 +220,7 @@ def gen_returns(schema: FunctionSchema) -> tuple[list[str], list[str]]:
     for name in [
         "_scaled_dot_product_flash_attention",
         "_scaled_dot_product_efficient_attention",
+        "_scaled_dot_product_cudnn_attention",
         "convolution_backward",
     ]:
         if name in unambiguous_name:

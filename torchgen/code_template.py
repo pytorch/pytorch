@@ -42,7 +42,7 @@ class CodeTemplate:
 
         def indent_lines(indent: str, v: Sequence[object]) -> str:
             return "".join(
-                [f"{(indent + l).rstrip()}\n" for e in v for l in str(e).splitlines()]
+                [indent + l + "\n" for e in v for l in str(e).splitlines()]
             ).rstrip()
 
         def replace(match: re.Match[str]) -> str:
