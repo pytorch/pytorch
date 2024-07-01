@@ -666,7 +666,6 @@ def _fused_adamw(
     ) in grouped_tensors.items():
         if device.type == "mps":  # type: ignore[union-attr]
             assert found_inf is None and grad_scale is None
-            assert not isinstance(lr, Tensor)
 
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:

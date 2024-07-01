@@ -49,6 +49,37 @@ struct FusedAdamEncodingFunctor {
     [computeEncoder setBytes:&eps_lv length:sizeof(float) atIndex:6];
     [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
   }
+
+  void operator()(
+      id<MTLComputeCommandEncoder>& computeEncoder,
+      id<MTLBuffer>& tensorArgumentBuffer,
+      const MetadataArguments& metadata_arguments,
+      const at::Tensor& lr,
+      const double beta1,
+      const double beta2,
+      const double weight_decay,
+      const double eps,
+      const bool maximize
+    ) const {
+    float beta1_lv = beta1;
+    float beta2_lv = beta2;
+    float weight_decay_lv = weight_decay;
+    float eps_lv = eps;
+    uint8_t maximize_lv = maximize;
+
+    [computeEncoder setBuffer:tensorArgumentBuffer
+                                  offset:0
+                                  atIndex:0];
+    [computeEncoder setBytes:&metadata_arguments
+                                  length:sizeof(MetadataArguments)
+                                  atIndex:1];
+    [computeEncoder setBuffer:getMTLBufferStorage(lr) offset:lr.storage_offset() * lr.element_size() atIndex:2];
+    [computeEncoder setBytes:&beta1_lv length:sizeof(float) atIndex:3];
+    [computeEncoder setBytes:&beta2_lv length:sizeof(float) atIndex:4];
+    [computeEncoder setBytes:&weight_decay_lv length:sizeof(float) atIndex:5];
+    [computeEncoder setBytes:&eps_lv length:sizeof(float) atIndex:6];
+    [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
+  }
 };
 
 struct FusedSgdEncodingFunctor {
