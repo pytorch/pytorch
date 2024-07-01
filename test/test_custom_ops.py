@@ -2471,6 +2471,12 @@ class TestCustomOpAPI(TestCase):
             defaults,
             [None, 3.14, True, 3, "foo", torch.float, torch.float32, torch.int, torch.device("cpu:0"), "cpu"],
         )
+        default_values = [arg.default_value for arg in torch.ops._torch_testing.f.default._schema.arguments]
+        print(default_values)
+        self.assertEqual(
+            default_values,
+            [None, None, 3.14, True, 3, "foo", float, float, int, torch.device("cpu:0"), torch.device("cpu")],
+        )
 
     def test_mutated_error(self):
         with self.assertRaisesRegex(
