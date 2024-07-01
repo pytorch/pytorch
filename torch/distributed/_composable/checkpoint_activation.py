@@ -91,16 +91,16 @@ def checkpoint(module: nn.Module, **kwargs) -> nn.Module:
                 else:
                     return nullcontext(), _no_hook(module)
 
-            checkpoint.state(
-                module
-            )._ac_generator = _checkpoint_without_reentrant_generator(
-                module,
-                preserve_rng_state,
-                context_fns,
-                determinism_check,
-                debug,
-                *args,
-                **kwargs,
+            checkpoint.state(module)._ac_generator = (
+                _checkpoint_without_reentrant_generator(
+                    module,
+                    preserve_rng_state,
+                    context_fns,
+                    determinism_check,
+                    debug,
+                    *args,
+                    **kwargs,
+                )
             )
             next(checkpoint.state(module)._ac_generator)
 
