@@ -1,7 +1,7 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 #include <ATen/mps/MPSProfiler.h>
-#include <Aten/native/mps/operations/FusedOptimizerOps.h>
+#include <ATen/native/mps/operations/FusedOptimizerOps.h>
 
 namespace at::native {
 namespace mps {
