@@ -199,11 +199,9 @@ class SizeVarAllocator:
             # for which "strides" don't make sense so we ignore them here.
             # NOTE: These expressions may still block merging dims in the sound
             # substitution test performed in can_merge_dims.
-            (
-                self.stride_vars(x, index_vars)
-                if isinstance(x, sympy.Expr)
-                else [0] * len(index_vars)
-            )
+            self.stride_vars(x, index_vars)
+            if isinstance(x, sympy.Expr)
+            else [0] * len(index_vars)
             for x in index_formulas
         ]
         assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
@@ -825,9 +823,9 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     def __init__(self, inner, var_ranges: VarRanges):
         super().__init__(inner)
         self.name = "SimplifyIndexing"
-        self._simplify: Callable[[Expr], Expr] = (
-            lambda index: V.graph.sizevars.simplify_with_ranges(index, var_ranges)
-        )
+        self._simplify: Callable[
+            [Expr], Expr
+        ] = lambda index: V.graph.sizevars.simplify_with_ranges(index, var_ranges)
 
     def load(self, name: str, index: sympy.Expr):
         return self._inner.load(name, self._simplify(index))

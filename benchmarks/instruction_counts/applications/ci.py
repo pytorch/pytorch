@@ -1,5 +1,4 @@
 """Collect instruction counts for continuous integration."""
-
 import argparse
 import hashlib
 import json

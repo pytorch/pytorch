@@ -1,10 +1,11 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import unittest
-from typing import Any, Dict, TYPE_CHECKING
+from typing import Any, Dict
 
 import torch
 from torch._export import capture_pre_autograd_graph
+
 from torch.ao.quantization.observer import (
     HistogramObserver,
     MinMaxObserver,
@@ -24,12 +25,9 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     OP_TO_ANNOTATOR,
     QuantizationConfig,
 )
+
 from torch.testing._internal.common_quantization import QuantizationTestCase
 from torch.testing._internal.common_utils import IS_WINDOWS
-
-
-if TYPE_CHECKING:
-    from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 
 
 class TestHelperModules:
@@ -252,7 +250,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                     eps=2**-12
                 ),
             )
-            weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
+            weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (  # noqa: F821
                 MinMaxObserver
             )
 
@@ -269,7 +267,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                 ),
             )
 
-            bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
+            bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (  # noqa: F821
                 PlaceholderObserver
             )
             bias_quantization_spec = QuantizationSpec(
