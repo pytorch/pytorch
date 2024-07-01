@@ -258,6 +258,61 @@ class ScaledTensor(torch.Tensor):
         return f"{self._data.__repr__()}\n{self._scale.__repr__()}"
 
 
+class OptionalScaledTensor(torch.Tensor):
+    def __new__(
+        cls,
+        data,
+        scale,
+        *,
+        constant: int = 0,
+    ):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            data.size(),
+            strides=data.stride(),
+            storage_offset=data.storage_offset(),
+            dtype=data.dtype,
+            layout=data.layout,
+            requires_grad=data.requires_grad,
+            device=data.device,
+        )
+
+    def __init__(self, data: torch.Tensor, scale, constant: int = 0):
+        self._data = data
+        self._scale = scale
+        self._constant = constant
+
+    def __tensor_flatten__(self):
+        ctx = {"_constant": self._constant}
+        if self._scale is not None:
+            return ["_data", "_scale"], ctx
+        else:
+            return ["_data"], ctx
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+        return OptionalScaledTensor(
+            inner_tensors["_data"],
+            inner_tensors["_scale"] if "_scale" in inner_tensors else None,
+            constant=metadata["_constant"],
+        )
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        scaled_tensor = args[0]
+        out = func(scaled_tensor._data, *args[1:], **kwargs)
+        if scaled_tensor._scale is not None:
+            out = out * scaled_tensor._scale
+        return OptionalScaledTensor(
+            out, scaled_tensor._scale, constant=scaled_tensor._constant
+        )
+
+    def __repr__(self):
+        return (
+            f"OptionalScaledTensor({self._data.__repr__()}\n{self._scale.__repr__()})"
+        )
+
+
 def func(a):
     return a.sin()
 
@@ -1135,7 +1190,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend=backend)
         def fn(x):
-            if x.shape[0] < 10:
+            if x.shape[0] < 13:
                 return torch.mul(x, x)
             else:
                 return torch.div(x, x)
@@ -1161,7 +1216,7 @@ class GraphModule(torch.nn.Module):
             "\n".join(guards),
             """\
 Eq(2*s1, s0)
-2*s1 < 10
+2*s1 < 13
 s1 > 3""",
         )
 
@@ -1197,6 +1252,26 @@ s1 > 3""",
         torch._dynamo.mark_dynamic(sub1, 1)
         sub2 = ScaledTensor(torch.randn(2, 4), torch.randn(5))
         self.assertTrue(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
+
+    def test_recompiles_with_optional_inner_tensor(self):
+        def f(x):
+            return x + 1
+
+        # sub1 does not have the optional tensor specified while sub2 does
+        sub1 = OptionalScaledTensor(torch.randn(2, 4), None)
+        sub2 = OptionalScaledTensor(torch.randn(2, 4), torch.randn(2, 4))
+
+        # sanity check; don't recompile for same input
+        self.assertFalse(_recompiles_for_inputs(f, (sub1,), (sub1,), dynamic=True))
+        self.assertFalse(_recompiles_for_inputs(f, (sub2,), (sub2,), dynamic=True))
+
+        # these should recompile; optional tensor changes between specified and unspecified
+        self.assertTrue(_recompiles_for_inputs(f, (sub1,), (sub2,), dynamic=True))
+        self.assertTrue(_recompiles_for_inputs(f, (sub2,), (sub1,), dynamic=True))
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+        self.assertEqual(f(sub1)._data, f_compiled(sub1)._data)
+        self.assertEqual(f(sub2)._data, f_compiled(sub2)._data)
 
     def test_torch_dispatch_subclass_guard_recompile(self):
         x = torch.ones(2, 2)
@@ -1607,6 +1682,25 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             return torch.nested.nested_tensor_from_jagged(x.values() * 2, x.offsets())
 
         torch.compile(fn, fullgraph=True, backend="aot_eager")(nt)
+
+    # The test here: nn.Parameters that are secretly subclasses
+    # have a metaclass that overrides __isinstance__,
+    # that dynamo needs to respect when it inlines the if statement.
+    def test_param_subclass_isinstance_input(self):
+        x_inner = torch.randn(16, 16, requires_grad=True)
+        x = torch.nn.Parameter(TwoTensor(x_inner, x_inner))
+        m = torch.nn.Linear(16, 16)
+        m.weight = x
+
+        def fn():
+            if isinstance(m.weight, torch.nn.Parameter):
+                return m.weight + 1
+            else:
+                return m.weight + 2
+
+        out_ref = fn()
+        out_test = torch.compile(fn, backend="aot_eager")()
+        self.assertEqual(out_ref, out_test)
 
     def _input_view_test(self, nt_view_name):
         nt_view = VIEW_TEST_CASES[nt_view_name]()
