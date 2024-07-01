@@ -695,9 +695,9 @@ class BwdCompilationMetrics:
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
 
 
-_compilation_metrics: Deque[Union[CompilationMetrics, BwdCompilationMetrics]] = (
-    collections.deque(maxlen=DEFAULT_COMPILATION_METRICS_LIMIT)
-)
+_compilation_metrics: Deque[
+    Union[CompilationMetrics, BwdCompilationMetrics]
+] = collections.deque(maxlen=DEFAULT_COMPILATION_METRICS_LIMIT)
 
 
 def record_compilation_metrics(
