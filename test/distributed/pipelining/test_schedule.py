@@ -23,6 +23,7 @@ from torch.distributed.pipelining import (
 )
 from torch.distributed.pipelining.schedules import (
     _Action,
+    _add_unshard_reshard,
     _ComputationType,
     B,
     F,
@@ -838,6 +839,42 @@ class TestScheduleLowering(unittest.TestCase):
         self.assertEqual(act, ref)
         self.assertEqual(act_str, act.__repr__())
 
+    @parametrize(
+        "test_info",
+        [
+            {
+                "compute": {
+                    "0": ["0F0", "0F1", "   ", "0B0", "0B1"],
+                    "1": ["   ", "1F0", "1B0", "1B1", "   "],
+                },
+                "comms": {
+                    "0": ["0UNSHARD", "0F0", "0F1", "0B0", "0B1", "0RESHARD"],
+                    "1": ["1UNSHARD", "1F0", "1B0", "1B1", "1RESHARD"],
+                },
+            },
+        ],
+    )
+    def test_unshard_reshard(self, test_info):
+        compute_sch = test_info["compute"]
+        expected_comms_sch = test_info["comms"]
+        for rank in compute_sch:
+            compute_sch[rank] = [_Action.from_str(s) for s in compute_sch[rank]]
+            expected_comms_sch[rank] = [
+                _Action.from_str(s) for s in expected_comms_sch[rank]
+            ]
+
+        comms_sch = _add_unshard_reshard(compute_sch)
+        for rank in expected_comms_sch:
+            for expected, actual in zip(expected_comms_sch[rank], comms_sch[rank]):
+                self.assertEqual(
+                    expected,
+                    actual,
+                    (
+                        f"Mismatch for rank {rank}, expected action {expected} but found {actual}."
+                        f"\nWhole Schedule: {comms_sch}"
+                    ),
+                )
+
 
 instantiate_parametrized_tests(TestScheduleLowering)
 
@@ -845,6 +882,7 @@ if __name__ == "__main__":
     # Run only the TestSchedulePlan tests (single process)
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromTestCase(TestSchedulePlan)
+    suite = loader.loadTestsFromTestCase(TestScheduleLowering)
     runner = unittest.TextTestRunner()
     runner.run(suite)
 
