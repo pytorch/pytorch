@@ -1740,12 +1740,6 @@ class GuardBuilder(GuardBuilderBase):
             value = value if value is not None else self.get(guard.name)
             assert isinstance(value, torch.Tensor)
 
-            if value.is_sparse:
-                log.warning(
-                    "Skipped guard on sparse tensor. This can cause issues. Sparse tensor support is WIP"
-                )
-                return
-
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]
             #
