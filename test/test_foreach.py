@@ -579,10 +579,6 @@ class TestForeach(TestCase):
         filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
     )
-    @unittest.skipIf(
-        torch.cuda.is_available() and not torch.cuda.get_device_capability(0) == (8, 6),
-        "failing flakily on non sm86 cuda jobs, ex https://github.com/pytorch/pytorch/issues/125035",
-    )
     def test_binary_op_list_error_cases(self, device, dtype, op):
         foreach_op, foreach_op_, ref, ref_ = (
             op.method_variant,
@@ -630,28 +626,27 @@ class TestForeach(TestCase):
         # to be the same as torch regular function.
         tensors1 = [torch.zeros(10, 10, device=device, dtype=dtype) for _ in range(10)]
         tensors2 = [torch.ones(11, 11, device=device, dtype=dtype) for _ in range(10)]
-        try:
+
+        if dtype == torch.bool and foreach_op == torch._foreach_sub:
+            for fop in ops_to_test:
+                with self.assertRaisesRegex(RuntimeError, re.escape(_BOOL_SUB_ERR_MSG)):
+                    fop(tensors1, tensors2)
+            return
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"The size of tensor a \(10\) must match the size of tensor b \(11\) at non-singleton dimension 1",
+        ):
             foreach_op(tensors1, tensors2)
-        except RuntimeError as e:
-            with self.assertRaisesRegex(type(e), re.escape(str(e))):
-                [ref(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
-        try:
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"The size of tensor a \(10\) must match the size of tensor b \(11\) at non-singleton dimension 1",
+        ):
             foreach_op_(tensors1, tensors2)
-        except RuntimeError as e:
-            with self.assertRaisesRegex(type(e), re.escape(str(e))):
-                [ref_(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
 
         # different devices
         if self.device_type == "cuda" and torch.cuda.device_count() > 1:
             tensor1 = torch.zeros(10, 10, device="cuda:0", dtype=dtype)
             tensor2 = torch.ones(10, 10, device="cuda:1", dtype=dtype)
-            if dtype == torch.bool and foreach_op == torch._foreach_sub:
-                for fop in ops_to_test:
-                    with self.assertRaisesRegex(
-                        RuntimeError, re.escape(_BOOL_SUB_ERR_MSG)
-                    ):
-                        fop([tensor1], [tensor2])
-                return
             with self.assertRaisesRegex(
                 RuntimeError, "Expected all tensors to be on the same device"
             ):
