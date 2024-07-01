@@ -19,6 +19,7 @@ from torch.nn.attention._flex_attention import (
     _causal,
     _compose,
     _create_block_mask,
+    _create_block_mask_from_mask,
     _create_empty_block_mask,
     _flex_attention,
     _generate_alibi_bias,
@@ -52,19 +53,14 @@ def create_attention(score_mod, block_mask):
     )
 
 
-def create_block_mask_from_score_mod(score_mod, query, key, value):
-    Q_LEN = query.shape[-2]
-    KV_LEN = key.shape[-2]
-    if score_mod == _causal:
-        return _create_block_mask(
-            torch.tril(
-                torch.ones(Q_LEN, KV_LEN, dtype=torch.bool, device=query.device)
-            ),
-            128,
-            128,
+def create_block_mask(score_mod, query, key):
+    if score_mod in test_score_mods:
+        block_mask = _create_block_mask(
+            score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
         )
     else:
-        return None
+        block_mask = None
+    return block_mask
 
 
 test_dtypes = (
@@ -233,7 +229,7 @@ class TestFlexAttention(InductorTestCase):
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
-        block_mask = create_block_mask_from_score_mod(score_mod, q, k, v)
+        block_mask = create_block_mask(score_mod, q, k)
         sdpa_partial = create_attention(score_mod, block_mask)
         compiled_sdpa = torch.compile(sdpa_partial)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
@@ -529,7 +525,7 @@ class TestFlexAttention(InductorTestCase):
 
         @torch.compile
         def func(q, k, v):
-            block_mask = _create_block_mask(
+            block_mask = _create_block_mask_from_mask(
                 torch.tril(
                     torch.ones(
                         q.shape[-2], k.shape[-2], dtype=torch.bool, device=q.device
@@ -549,7 +545,7 @@ class TestFlexAttention(InductorTestCase):
             return out
 
         _, code = run_and_get_code(func, q, k, v)
-        # Ensure _create_block_mask is compiled and generates 3 kernels,
+        # Ensure _create_block_mask_from_mask is compiled and generates 3 kernels,
         # flex_attention generates 1 kernel.
         FileCheck().check_count(".run(", 4, True).run(code[0])
 
@@ -568,7 +564,7 @@ class TestFlexAttention(InductorTestCase):
 
         @torch.compile
         def func(q, k, v, k2, v2):
-            block_mask = _create_block_mask(
+            block_mask = _create_block_mask_from_mask(
                 torch.tril(
                     torch.ones(
                         q.shape[-2], k.shape[-2], dtype=torch.bool, device=q.device
@@ -595,7 +591,7 @@ class TestFlexAttention(InductorTestCase):
             return out
 
         _, code = run_and_get_code(func, q, k, v, k2, v2)
-        # Ensure _create_block_mask is compiled and generates 3 kernels,
+        # Ensure _create_block_mask_from_mask is compiled and generates 3 kernels,
         # 2 flex_attention generates 2 kernels.
         FileCheck().check_count(".run(", 5, True).run(code[0])
 
