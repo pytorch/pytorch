@@ -334,51 +334,59 @@ class MetaTensorDescriber:
             stride=stride,
             storage_offset=storage_offset,
             dynamo_dynamic_indices=list(getattr(t, "_dynamo_dynamic_indices", set())),
-            sparse_dim=t.sparse_dim()
-            if t.is_sparse or is_sparse_compressed(t)
-            else None,
+            sparse_dim=(
+                t.sparse_dim() if t.is_sparse or is_sparse_compressed(t) else None
+            ),
             dense_dim=t.dense_dim() if t.is_sparse or is_sparse_compressed(t) else None,
             is_coalesced=t.is_coalesced() if t.is_sparse else None,
             # TODO: I actually think recursing here is correct, but we have at
             # least an infinite cycle from base -> values -> base
             # https://github.com/pytorch/pytorch/issues/122089
-            crow_indices=self.describe_tensor(
-                t.crow_indices(), recurse=False, trace=trace
-            )
-            if recurse and t.layout in {torch.sparse_csr, torch.sparse_bsr}
-            else None,
-            col_indices=self.describe_tensor(
-                t.col_indices(), recurse=False, trace=trace
-            )
-            if recurse and t.layout in {torch.sparse_csr, torch.sparse_bsr}
-            else None,
-            ccol_indices=self.describe_tensor(
-                t.ccol_indices(), recurse=False, trace=trace
-            )
-            if recurse and t.layout in {torch.sparse_csc, torch.sparse_bsc}
-            else None,
-            row_indices=self.describe_tensor(
-                t.row_indices(), recurse=False, trace=trace
-            )
-            if recurse and t.layout in {torch.sparse_csc, torch.sparse_bsc}
-            else None,
-            values=self.describe_tensor(t.values(), recurse=False, trace=trace)
-            if recurse and is_sparse_compressed(t)
-            else None,
-            grad=self.describe_tensor(safe_grad(t), trace=trace)
-            if safe_grad(t) is not None
-            else None,
-            creation_meta=torch._C._autograd._get_creation_meta(t)
-            if t._is_view()
-            else None,
+            crow_indices=(
+                self.describe_tensor(t.crow_indices(), recurse=False, trace=trace)
+                if recurse and t.layout in {torch.sparse_csr, torch.sparse_bsr}
+                else None
+            ),
+            col_indices=(
+                self.describe_tensor(t.col_indices(), recurse=False, trace=trace)
+                if recurse and t.layout in {torch.sparse_csr, torch.sparse_bsr}
+                else None
+            ),
+            ccol_indices=(
+                self.describe_tensor(t.ccol_indices(), recurse=False, trace=trace)
+                if recurse and t.layout in {torch.sparse_csc, torch.sparse_bsc}
+                else None
+            ),
+            row_indices=(
+                self.describe_tensor(t.row_indices(), recurse=False, trace=trace)
+                if recurse and t.layout in {torch.sparse_csc, torch.sparse_bsc}
+                else None
+            ),
+            values=(
+                self.describe_tensor(t.values(), recurse=False, trace=trace)
+                if recurse and is_sparse_compressed(t)
+                else None
+            ),
+            grad=(
+                self.describe_tensor(safe_grad(t), trace=trace)
+                if safe_grad(t) is not None
+                else None
+            ),
+            creation_meta=(
+                torch._C._autograd._get_creation_meta(t) if t._is_view() else None
+            ),
             unwrapped=unwrapped,
-            level=maybe_get_level(t)
-            if is_batchedtensor_v or is_gradtrackingtensor_v
-            else None,
+            level=(
+                maybe_get_level(t)
+                if is_batchedtensor_v or is_gradtrackingtensor_v
+                else None
+            ),
             bdim=maybe_get_bdim(t) if is_batchedtensor_v else None,
-            base=self.describe_tensor(t._base, trace=trace)
-            if recurse and t._is_view() and t._base is not None
-            else None,
+            base=(
+                self.describe_tensor(t._base, trace=trace)
+                if recurse and t._is_view() and t._base is not None
+                else None
+            ),
             fake_mode=torch._subclasses.fake_tensor.maybe_get_fake_mode(t),
             view_func=t._view_func_unsafe,
             attrs=attrs,
@@ -1582,7 +1590,7 @@ class MetaConverter:
 
         # Filter out cases we don't support
         # TODO: This can probably be simplified quite a bit
-        if isinstance(t, torch.Tensor) or is_traceable_wrapper_subclass(t):
+        if isinstance(t, torch.Tensor):
             if (
                 # Lazy tensors are not supported.  Note that XLA is
                 # implemented on top of lazy tensor, not excluded here; we

@@ -3,7 +3,8 @@ import contextlib
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Union, Protocol, Sequence, Tuple, overload
+from typing_extensions import TypeGuard
 
 import torch
 import torchgen
@@ -265,7 +266,70 @@ class BaseTorchDispatchMode(TorchDispatchMode):
         return func(*args, **kwargs)
 
 
-def is_traceable_wrapper_subclass(t):
+# Subtypes which have __tensor_flatten__ and __tensor_unflatten__.
+class TensorWithFlatten(Protocol):
+    def __tensor_flatten__(self) -> Tuple[Sequence[str], object]:
+        ...
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors: int, flatten_spec: int, outer_size: int, outer_stride: int) -> torch.Tensor:
+        ...
+
+    # It would be really nice to be able to say that the return of
+    # is_traceable_wrapper_subclass() is Intersection[torch.Tensor,
+    # TensorWithFlatten] - but that doesn't exist.
+
+    shape: torch._C.Size
+
+    @overload
+    def stride(self, dim: None = None) -> Tuple[int, ...]:
+        ...
+
+    @overload
+    def stride(self, dim: int) -> int:
+        ...
+
+    def dim(self) -> int:
+        ...
+
+    @overload
+    def to(
+            self,
+            dtype: torch.types._dtype,
+            non_blocking: bool = False,
+            copy: bool = False,
+            *,
+            memory_format: Optional[torch.memory_format] = None
+    ) -> torch.Tensor:
+        ...
+
+    @overload
+    def to(
+            self,
+            device: Optional["torch._prims_common.DeviceLikeType"] = None,
+            dtype: Optional[torch.types._dtype] = None,
+            non_blocking: bool = False,
+            copy: bool = False,
+            *,
+            memory_format: Optional[torch.memory_format] = None
+    ) -> torch.Tensor:
+        ...
+
+    @overload
+    def to(
+            self,
+            other: torch.Tensor,
+            non_blocking: bool = False,
+            copy: bool = False,
+            *,
+            memory_format: Optional[torch.memory_format] = None
+    ) -> torch.Tensor:
+        ...
+
+
+
+
+def is_traceable_wrapper_subclass(t: object) -> TypeGuard[TensorWithFlatten]:
     """
     Returns whether or not a tensor subclass that implements __torch_dispatch__
     is 'traceable' with torch.compile.
