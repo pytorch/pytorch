@@ -69,6 +69,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_ROOT}/third_party/flatbuffers/include
     ${TORCH_ROOT}/third_party/kineto/libkineto/include
     ${TORCH_ROOT}/third_party/cpp-httplib
+    ${TORCH_ROOT}/third_party/nlohmann/include
 
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include
@@ -82,6 +83,7 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     pybind::pybind11
     opentelemetry::api
     httplib
+    nlohmann
     shm
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
@@ -298,6 +300,16 @@ endif()
 
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+
+if(CAFFE2_USE_MKL AND BUILD_LIBTORCHLESS)
+
+  # Use the RPATH of the linked libraries
+  set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+  # we need to explicitly link caffe2::mkl in order to have the
+  # correct RPATH in torch_python for the split build
+  target_link_libraries(torch_python PRIVATE caffe2::mkl)
+endif()
+
 add_dependencies(torch_python onnx_proto)
 # Avoid numpy for the DEPLOY build
 if(USE_NUMPY)
