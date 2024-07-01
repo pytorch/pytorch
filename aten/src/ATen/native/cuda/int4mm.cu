@@ -231,58 +231,68 @@ inline __device__ bf16x2x4 convert_i4x8_to_bf16x2x4(uint32_t source) {
   bf16x2x4 result;
   constexpr int kElements = 8;
 
-#if defined(USE_ROCM)
-  const __hip_bfloat16 lut[16] = {
-    -8.0f, -7.0f, -6.0f, -5.0f,
-    -4.0f, -3.0f, -2.0f, -1.0f,
-    0.0f, 1.0f, 2.0f, 3.0f,
-    4.0f, 5.0f, 6.0f, 7.0f
-  };
-  uint32_t i4s = source;
-  for (int ii = 0; ii < kElements / 2; ++ii) {
-    result.vals[ii].x = lut[i4s & 0xf];
-    result.vals[ii].y = lut[(i4s & 0xf0) >> 4];
-    i4s >>= 8; // or is it 8?
-  }
-#else
   uint32_t* h = reinterpret_cast<uint32_t*>(&result);
   uint32_t const source_i4s = source;
 
   // First, we extract the i4s and construct an intermediate fp16 number.
+#if !defined(USE_ROCM)
   static constexpr uint32_t immLut = (0xf0 & 0xcc) | 0xaa;
+#endif
   static constexpr uint32_t MASK = 0x000f000f;
   static constexpr uint32_t I4s_TO_BF16s_MAGIC_NUM = 0x43004300;
 
   // We don't have enough mantissa to remove as much shift overhead as FP16, so
   // we must loop. No shift needed for first item.
   uint32_t i4s = source_i4s;
+
+#if defined(USE_ROCM)
+  asm volatile("v_and_or_b32 %0, %1, %2, %3"
+               : "=v"(h[0])
+               : "v"(i4s), "v"(MASK), "v"(I4s_TO_BF16s_MAGIC_NUM));
+#else
   asm volatile("lop3.b32 %0, %1, %2, %3, %4;\n"
                : "=r"(h[0])
                : "r"(i4s), "n"(MASK), "n"(I4s_TO_BF16s_MAGIC_NUM), "n"(immLut));
+#endif
+
 #pragma unroll
   for (int ii = 1; ii < kElements / 2; ++ii) {
     i4s >>= 4; // or is it 8?
     // (i4s & 0x000f000f) | 0x43004300
+#if defined(USE_ROCM)
+    asm volatile("v_and_or_b32 %0, %1, %2, %3"
+        : "=v"(h[ii])
+        : "v"(i4s), "v"(MASK), "v"(I4s_TO_BF16s_MAGIC_NUM));
+#else
     asm volatile(
         "lop3.b32 %0, %1, %2, %3, %4;\n"
         : "=r"(h[ii])
         : "r"(i4s), "n"(MASK), "n"(I4s_TO_BF16s_MAGIC_NUM), "n"(immLut));
+#endif
   }
 
   // This is the BF16 {-136, -136} represented as an integer.
+#if defined(USE_ROCM)
+  auto BF16_BIAS = __bfloat162bfloat162(__hip_bfloat16(__hip_bfloat16_raw{0xC308}));
+  auto BF16_ONE = __bfloat162bfloat162(__hip_bfloat16(__hip_bfloat16_raw{0x3F80}));
+#else
   static constexpr uint32_t BF16_BIAS = 0xC308C308;
   static constexpr uint32_t BF16_ONE = 0x3F803F80;
+#endif
 
 // Finally, we construct the output numbers.
 #pragma unroll
   for (int ii = 0; ii < kElements / 2; ++ii) {
     // Since this section is for Ampere+, we use bf16 fma to do the bias
     // subtraction
+#if defined(USE_ROCM)
+     result.vals[ii] = __hfma2(result.vals[ii], BF16_ONE, BF16_BIAS);
+#else
     asm("fma.rn.bf16x2 %0, %1, %2, %3;\n"
         : "=r"(h[ii])
         : "r"(h[ii]), "r"(BF16_ONE), "r"(BF16_BIAS));
-  }
 #endif
+  }
 
   return result;
 }
@@ -1042,13 +1052,8 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
       v[i] = (n0Valid && ks[i] < in.size(1)) ? pIn[ks[i]] : uint32_t(0);
     }
 
-#if defined(USE_ROCM)
-    int32_t pack = (v[7] << 28) | (v[6] << 24) | (v[5] << 20) | (v[4] << 16) |
-        (v[3] << 12) | (v[2] << 8) | (v[1] << 4) | v[0];
-#else
     int32_t pack = (v[7] << 28) | (v[5] << 24) | (v[3] << 20) | (v[1] << 16) |
         (v[6] << 12) | (v[4] << 8) | (v[2] << 4) | v[0];
-#endif
 
     // inner k-tiles pack two at a time
 #if defined(USE_ROCM)
