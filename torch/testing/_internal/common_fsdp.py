@@ -904,9 +904,11 @@ class MLPStack(nn.Sequential):
             "1.in_proj": ColwiseParallel(use_local_output=False),
             "1.out_proj": RowwiseParallel(use_local_output=False),
             "2.in_proj": ColwiseParallel(use_local_output=False),
-            "2.out_proj": RowwiseParallel(output_layouts=Shard(1))
-            if self.with_seq_parallel
-            else RowwiseParallel(),
+            "2.out_proj": (
+                RowwiseParallel(output_layouts=Shard(1))
+                if self.with_seq_parallel
+                else RowwiseParallel()
+            ),
         }
         if self.with_seq_parallel:
             parallelize_plan["3"] = SequenceParallel(sequence_dim=1)

@@ -161,9 +161,11 @@ def validate_op_between_ort_torch(
                 # Use torch.testing as opposed to np.testing to ensure dtypes and shapes match
                 torch.testing.assert_close(
                     torch.tensor(function_output).cpu(),
-                    torch_output.cpu()
-                    if isinstance(torch_output, torch.Tensor)
-                    else torch.tensor(torch_output).cpu(),
+                    (
+                        torch_output.cpu()
+                        if isinstance(torch_output, torch.Tensor)
+                        else torch.tensor(torch_output).cpu()
+                    ),
                     rtol=1e-4,
                     atol=1e-3,
                 )
@@ -303,7 +305,10 @@ def _convert_torch_args_to_onnxfunction_args(
     args: List[fx_type_utils.Argument],
     kwargs: Dict[str, fx_type_utils.Argument],
     allow_extra_kwargs: bool = False,
-) -> Tuple[List[Any], Dict[str, Any],]:
+) -> Tuple[
+    List[Any],
+    Dict[str, Any],
+]:
     """Convert Python args and kwargs to OnnxFunction acceptable with matching ONNX ParamSchema.
 
     NOTE: This is different from the param_schema separating in dispatcher, since at this point

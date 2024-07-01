@@ -1331,9 +1331,11 @@ class TestCommon(TestCase):
             # sample.transform applies the lambda to torch.Tensor and torch.dtype.
             # However, we only want to apply it to Tensors with dtype `torch.complex32`..
             transformed_sample = sample.transform(
-                lambda x: x.to(torch.complex64)
-                if isinstance(x, torch.Tensor) and x.dtype is torch.complex32
-                else x
+                lambda x: (
+                    x.to(torch.complex64)
+                    if isinstance(x, torch.Tensor) and x.dtype is torch.complex32
+                    else x
+                )
             )
             expected = op(
                 transformed_sample.input,
@@ -1344,9 +1346,11 @@ class TestCommon(TestCase):
             # we get `inf`s easily (eg. with `pow`, `exp`),
             # so we cast `cfloat` back to `chalf`.
             expected = tree_map(
-                lambda x: x.to(torch.complex32)
-                if isinstance(x, torch.Tensor) and x.dtype is torch.complex64
-                else x,
+                lambda x: (
+                    x.to(torch.complex32)
+                    if isinstance(x, torch.Tensor) and x.dtype is torch.complex64
+                    else x
+                ),
                 expected,
             )
 

@@ -607,13 +607,15 @@ def _flatten_optim_state(
     # There may still be some unflattened parameters with state and some
     # without
     unflat_param_states = [
-        _gather_state_dict(
-            unflat_osd_state[unflat_param_name],
-            pg=fsdp_state.process_group,
-            device=fsdp_state.compute_device,
+        (
+            _gather_state_dict(
+                unflat_osd_state[unflat_param_name],
+                pg=fsdp_state.process_group,
+                device=fsdp_state.compute_device,
+            )
+            if unflat_param_name in unflat_osd_state
+            else None
         )
-        if unflat_param_name in unflat_osd_state
-        else None
         for unflat_param_name in unflat_param_names
     ]
     # Check that the unflattened parameters have the same state names
@@ -761,13 +763,15 @@ def _flatten_tensor_optim_state(
     # parameter)
     cpu_device = torch.device("cpu")
     tensors_to_flatten = [
-        torch.flatten(state_value.to(cpu_device))
-        if state_value is not None
-        else torch.flatten(
-            torch.zeros(
-                size=shape,
-                dtype=dtype,
-                device=cpu_device,
+        (
+            torch.flatten(state_value.to(cpu_device))
+            if state_value is not None
+            else torch.flatten(
+                torch.zeros(
+                    size=shape,
+                    dtype=dtype,
+                    device=cpu_device,
+                )
             )
         )
         for state_value, shape in zip(pos_dim_tensors, unflat_param_shapes)
@@ -910,12 +914,10 @@ def _rekey_sharded_optim_state_dict(
     # passed to the optimizer
     assert len(param_to_param_key) <= len(param_to_fqns)
 
-    unflat_param_names_to_flat_param_key: Dict[
-        Tuple[str, ...], Union[int, str]
-    ] = {}  # for "state"
-    unflat_param_name_to_flat_param_key: Dict[
-        str, Union[int, str]
-    ] = {}  # for "param_groups"
+    # for "state"
+    unflat_param_names_to_flat_param_key: Dict[Tuple[str, ...], Union[int, str]] = {}
+    # for "param_groups"
+    unflat_param_name_to_flat_param_key: Dict[str, Union[int, str]] = {}
     for param, unflat_param_names in param_to_fqns.items():
         if param not in param_to_param_key:
             # This parameter was not passed to the optimizer
