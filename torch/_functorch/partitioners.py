@@ -1819,8 +1819,8 @@ def min_cut_rematerialization_partition(
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
     def return_primal_if_set_is_used(graph):
-        # If `.set_(primal_X, Y)` is in graph epilogue and Y is in graph output,
-        # then replace Y with primal_X in graph output.
+        # If `.set_(primal_X, Y)` is in graph epilogue and Y is in FWD graph output,
+        # then replace Y with primal_X in FWD graph output.
         # This is important for Traceable FSDP2 because the BWD graph relies on
         # being able to `.set_` into the same primal again before BWD computation.
         Y_to_primal_map = collect_nodes_set_into_primal_in_graph_epilogue(graph)
