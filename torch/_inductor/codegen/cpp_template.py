@@ -28,12 +28,14 @@ class CppTemplate(KernelTemplate):
         name: str,
         input_nodes,
         layout: ir.Layout,
+        num_threads: int,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
     ):
         super().__init__(name)
         self.input_nodes = input_nodes
         self.output_node: ir.Buffer = ir.Buffer("buf_out", layout)
         self.layout = layout
+        self.num_threads = num_threads
         self.epilogue_creator = epilogue_creator
 
     def generate(self, **kwargs):
@@ -41,7 +43,7 @@ class CppTemplate(KernelTemplate):
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
         ), patch.object(ir.FlexibleLayout, "allow_indexing", True), CppTemplateKernel(
-            kernel_name=kernel_name,
+            kernel_name=kernel_name, num_threads=self.num_threads
         ) as kernel:
             code = kernel.render(self, **kwargs)
             _, call_args, _, _ = kernel.args.python_argdefs()
@@ -83,7 +85,7 @@ class CppTemplate(KernelTemplate):
             epilogue_nodes: Optional[List[ir.IRNode]] = None,
         ):
             kernel = CppTemplateKernel(
-                kernel_name=str(Placeholder.KERNEL_NAME),
+                kernel_name=str(Placeholder.KERNEL_NAME), num_threads=self.num_threads
             )
             render = functools.partial(
                 kernel.render,

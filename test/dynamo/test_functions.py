@@ -113,8 +113,8 @@ def inline_lru_cache_fn_with_default_args(x, y, _=None):
 
 
 @torch.jit.script_if_tracing
-def inline_script_if_tracing_fn_with_default_args(x, y, _=None):
-    return torch.cos(x * y)
+def inline_script_if_tracing_fn_with_default_args(x, y, c=1.2):
+    return torch.cos(x * y) + c
 
 
 class FunctionTests(torch._dynamo.test_case.TestCase):
@@ -127,7 +127,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_inline_script_if_tracing_fn_with_default_args(a, b):
-        return inline_script_if_tracing_fn_with_default_args(a, 2, b)
+        return inline_script_if_tracing_fn_with_default_args(a, b)
 
     @make_test
     def test_inline_lru_cache_fn_with_default_args(a, b):
