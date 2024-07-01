@@ -13,10 +13,6 @@ namespace at {
 namespace cuda {
 namespace solver {
 
-#define CUDSS_ARGTYPES(Dtype, Vtype)  \
-    cusolverSpHandle_t handle, int m, int nnz, const cusparseMatDescr_t descrA, const Dtype *csrVal, const int *csrRowPtr, const int *csrColInd, const Dtype *b, Vtype tol, int reorder, Dtype *x, int *singularity
-
-
 #define CUDASOLVER_GETRF_ARGTYPES(Dtype)  \
     cusolverDnHandle_t handle, int m, int n, Dtype* dA, int ldda, int* ipiv, int* info
 
