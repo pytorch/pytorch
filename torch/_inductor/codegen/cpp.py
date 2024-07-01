@@ -16,7 +16,7 @@ import sympy
 import torch
 import torch.fx
 from torch._inductor import dependencies
-from torch._prims_common import is_float_dtype
+from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -1230,6 +1230,30 @@ class CppVecOverrides(CppOverrides):
     @staticmethod
     def bitwise_right_shift(a, b):
         return f"{a} >> {b}"
+
+    @staticmethod
+    def remainder(a, b):
+        # Since we register remainder as ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT in
+        # the lowering phase: https://github.com/pytorch/pytorch/blob/
+        # eb1583dbc1a8c4a8f0d1525438f16350f11f1208/torch/_inductor/lowering.py#L5853
+        # Should expect same dtype for a and b. Otherwise, we need to handle
+        # the case when a and b with mixed integer and float.
+        assert (
+            a.dtype == b.dtype
+        ), "remainder vec implementation expect the same inputs' dtype."
+        if is_float_dtype(a.dtype):
+            return f"{a} - ({a} / {b}).floor() * {b}"
+        else:
+            assert is_integer_dtype(a.dtype)
+            if a.dtype in [torch.uint8, torch.int8]:
+                # Since we load 16 int8 elements into vec512, the remaining bits of vec512 could be zero
+                # and causes div with float exception. Convert to int for div to avoid this issue.
+                a_cast = f"at::vec::convert<int32_t>({a})"
+                b_cast = f"at::vec::convert<int32_t>({b})"
+                floor_div = f"({CppVecOverrides.floordiv(a_cast, b_cast)})"
+                cast_down = f"at::vec::convert<{DTYPE_TO_CPP[a.dtype]}>({floor_div})"
+                return f"{a} - {cast_down} * {b}"
+            return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
 
     @staticmethod
     def tan(a):
