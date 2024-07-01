@@ -2486,7 +2486,6 @@ class TestCustomOpAPI(TestCase):
             arg.default_value
             for arg in torch.ops._torch_testing.f.default._schema.arguments
         ]
-        print(default_values)
         # enum values taken from c10/core/ScalarType.h
         type_enum = {
             "float": 6,
