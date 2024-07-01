@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import traceback
 from contextlib import contextmanager
 from typing import List, Any, Dict

@@ -67,6 +67,7 @@
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/functorch/init.h>
+#include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
@@ -739,6 +740,25 @@ PyObject* THPModule_userEnabledMathSDP(PyObject* _unused, PyObject* noargs) {
   else
     Py_RETURN_FALSE;
 }
+PyObject* THPModule_setSDPUseOverrideable(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_sdp_use_overrideable expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseOverrideable(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+PyObject* THPModule_userEnabledOverrideableSDP(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().userEnabledOverrideableSDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
 PyObject* THPModule_setSDPUseCuDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -809,6 +829,25 @@ PyObject* THPModule_setDeterministicCuDNN(PyObject* _unused, PyObject* arg) {
 
 PyObject* THPModule_deterministicCuDNN(PyObject* _unused, PyObject* noargs) {
   if (at::globalContext().deterministicCuDNN())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+
+PyObject* THPModule_setDeterministicMkldnn(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_deterministic_mkldnn expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setDeterministicMkldnn(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_deterministicMkldnn(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().deterministicMkldnn())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
@@ -1325,6 +1364,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"_set_sdp_use_math", THPModule_setSDPUseMath, METH_O, nullptr},
+    {"_get_overrideable_sdp_enabled",
+     THPModule_userEnabledOverrideableSDP,
+     METH_NOARGS,
+     nullptr},
+    {"_set_sdp_use_overrideable",
+     THPModule_setSDPUseOverrideable,
+     METH_O,
+     nullptr},
     {"_get_cudnn_sdp_enabled",
      THPModule_userEnabledCuDNNSDP,
      METH_NOARGS,
@@ -1344,6 +1391,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      nullptr},
     {"_set_cudnn_deterministic",
      THPModule_setDeterministicCuDNN,
+     METH_O,
+     nullptr},
+    {"_get_mkldnn_deterministic",
+     THPModule_deterministicMkldnn,
+     METH_NOARGS,
+     nullptr},
+    {"_set_mkldnn_deterministic",
+     THPModule_setDeterministicMkldnn,
      METH_O,
      nullptr},
     {"_get_deterministic_algorithms",
@@ -1602,6 +1657,8 @@ PyObject* initModule() {
   THPDevice_init(module);
   THPStream_init(module);
   THPEvent_init(module);
+  NodeBase_init(module);
+  NodeIter_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
@@ -1900,7 +1957,8 @@ Call this whenever a new thread is created in order to propagate values from
       .value("MATH", sdp::SDPBackend::math)
       .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
       .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention)
-      .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention);
+      .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention)
+      .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
 
   py_module.def(
       "_can_use_flash_attention",
@@ -1916,6 +1974,15 @@ Call this whenever a new thread is created in order to propagate values from
       [](const sdp::sdp_params& params, bool debug) {
 #ifdef USE_CUDA
         return sdp::can_use_mem_efficient_attention(params, debug);
+#else
+        return false;
+#endif
+      });
+  py_module.def(
+      "_can_use_cudnn_attention",
+      [](const sdp::sdp_params& params, bool debug) {
+#ifdef USE_CUDA
+        return sdp::can_use_cudnn_attention(params, debug);
 #else
         return false;
 #endif

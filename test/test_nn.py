@@ -1063,6 +1063,7 @@ class TestNN(NNTestCase):
         self.assertRaises(NotImplementedError, module_dict)
         self.assertRaises(NotImplementedError, module_dict, torch.rand(1, 3))
 
+    @skipIfTorchDynamo()
     def test_ParameterList(self):
         def make_param():
             return Parameter(torch.randn(2, 2))
@@ -1434,6 +1435,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertRaisesRegex(TypeError, 'module name should be a string. Got NoneType',
                                    lambda: getattr(net, fn)(None, l))
 
+    def test_set_submodule(self):
+        net = nn.Module()
+        net.t = nn.Module()
+        l = nn.Linear(1, 2)
+        target = "t.l"
+        net.set_submodule(target, l)
+        self.assertEqual(net.get_submodule(target), l)
+        l2 = nn.Linear(2, 1)
+        net.set_submodule(target, l2)
+        self.assertEqual(net.get_submodule(target), l2)
+        self.assertRaises(ValueError, net.set_submodule, "", l)
+        self.assertRaises(AttributeError, net.set_submodule, "a.l", l)
+        self.assertRaises(AttributeError, net.set_submodule, "t.l.l2", l2)
+
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))
         cpu = torch.device('cpu')
@@ -1798,29 +1813,27 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(len(w) == 0)
 
     def test_parameterlistdict_pickle(self):
+        # warning from torch.load call in _load_from_bytes used in UntypedStorage.__reduce__
+        WEIGHTS_ONLY_WARN = "You are using `torch.load` with `weights_only=False`"
         m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
 
         # Test whether loading from older checkpoints works without triggering warnings
         m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
         del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
 
         m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
 
         # Test whether loading from older checkpoints works without triggering warnings
         m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
         del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
             m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
 
     def test_weight_norm_pickle(self):
         m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
@@ -2280,58 +2293,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         # Reference https://github.com/pytorch/pytorch/pull/75507#issuecomment-1110291545
         self.assertNotWarn(lambda: l.state_dict(destination=dict()), "Should not warn kwarg destination w/o _metadata")
-
-    def _test_register_state_dict_pre_hook(self, model, submodule):
-        _state_dict_prefix = "foo."
-        state_dict_pre_hook_count = 0
-        keep_var_setting = False
-
-        def my_state_dict_pre_hook(module, prefix, keep_vars):
-            self.assertEqual(keep_vars, keep_var_setting)
-            nonlocal state_dict_pre_hook_count
-            state_dict_pre_hook_count += 1
-            self.assertTrue(prefix.startswith(_state_dict_prefix))
-
-        model.register_state_dict_pre_hook(my_state_dict_pre_hook)
-        # Test to ensure submodules run the hook as well.
-        submodule.register_state_dict_pre_hook(my_state_dict_pre_hook)
-
-        def check_results(model):
-            nonlocal state_dict_pre_hook_count, keep_var_setting
-            for keep_var_setting in [True, False]:
-                _ = model.state_dict(prefix=_state_dict_prefix, keep_vars=keep_var_setting)
-                self.assertEqual(2, state_dict_pre_hook_count)
-                state_dict_pre_hook_count = 0
-        # Test state dict works as expected after model construction
-        check_results(model)
-        # Test state dict works as expected after forward
-        model(torch.ones(10, 3))
-        check_results(model)
-
-    def test_register_state_dict_pre_hook(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = nn.Sequential(nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3))
-
-            def forward(self, x):
-                return self.a(x)
-
-        mod = MyModule()
-        self._test_register_state_dict_pre_hook(mod, mod.a)
-
-    def test_register_state_dict_pre_hook_lazy_module(self):
-        class MyLazyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.layer1 = nn.LazyLinear(8)
-                self.layer2 = nn.LazyLinear(5)
-
-            def forward(self, x):
-                return self.layer2(self.layer1(x))
-
-        mod = MyLazyModule()
-        self._test_register_state_dict_pre_hook(mod, mod.layer1)
 
     def test_extra_state(self):
 
@@ -8062,7 +8023,28 @@ class TestNNDeviceType(NNTestCase):
         o.sum().backward()
         o_cpu = m(a_cpu)
         o_cpu.sum().backward()
+        # workaround for memory usage overhead of assertEqual
         self.assertTrue(torch.allclose(a.grad.cpu(), a_cpu.grad.half()))
+
+    @onlyCUDA
+    @largeTensorTest("48GB", "cpu")
+    @largeTensorTest("48GB", "cuda")
+    def test_avg_pool_large_tensor2(self, device):
+        # test for https://github.com/pytorch/pytorch/issues/129785
+        out_size = [2048, 64, 104, 79]
+        size = [2048, 64, 209, 159]
+        inp = torch.randn(size, device=device, requires_grad=True, dtype=torch.float)
+        inp_cpu = inp.detach().cpu()
+        m = torch.nn.AvgPool2d([2, 2], [2, 2], [0, 0], False, True, None)
+        o = m(inp)
+        inp_cpu.requires_grad = True
+        o.sum().backward()
+        o_cpu = m(inp_cpu)
+        o_cpu.sum().backward()
+        self.assertEqual(o.shape, out_size)
+        self.assertEqual(o_cpu.shape, out_size)
+        # reduce memory usage
+        self.assertEqual(inp.grad.sum(), inp_cpu.grad.sum())
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
@@ -11182,6 +11164,35 @@ class TestNNDeviceType(NNTestCase):
             grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
         loss_cudnn = torch.nn.functional.ctc_loss(log_probs, targets.to('cpu', torch.int32),
                                                   input_lengths, target_lengths, reduction='none')
+        self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
+        grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
+        self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
+
+    @onlyCUDA
+    @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
+    @skipCUDAIfCudnnVersionLessThan(8000)
+    def test_ctc_loss_cudnn_tensor(self, device):
+        batch_size = 16
+        input_length = 30
+        num_labels = 101
+        target_length = 15
+        targets = torch.randint(1, num_labels, (batch_size * target_length,),
+                                device='cuda', dtype=torch.long)
+        log_probs = torch.log_softmax(torch.randn(input_length, batch_size, num_labels, device='cuda', dtype=torch.float), 2)
+        log_probs.requires_grad_()
+
+        input_lengths = batch_size * [input_length]
+        input_lengths = torch.linspace(start=15, end=input_length, steps=batch_size, dtype=torch.long, device='cuda')
+        target_lengths = torch.tensor(batch_size * [target_length], dtype=torch.long, device='cuda')
+        grad_out = torch.randn(batch_size, device='cuda', dtype=torch.float)
+        with torch.backends.cudnn.flags(enabled=False):
+            loss_native = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
+            grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
+        loss_cudnn = torch.nn.functional.ctc_loss(log_probs,
+                                                  targets.to('cuda', torch.int32),
+                                                  input_lengths.to('cuda', torch.int32),
+                                                  target_lengths.to('cuda', torch.int32),
+                                                  reduction='none')
         self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)

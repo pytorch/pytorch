@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import logging
 import math
@@ -16,9 +17,7 @@ from typing import (
 
 import torch
 import torch.distributed as dist
-
 import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
-
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._shard.sharded_tensor import (
@@ -28,7 +27,6 @@ from torch.distributed._shard.sharded_tensor import (
 )
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import _mesh_resources
-
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _get_module_fsdp_state_if_fully_sharded_module,

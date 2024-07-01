@@ -86,7 +86,7 @@ detectron2_maskrcnn_r_101_c4,pass,57
 
 
 
-detectron2_maskrcnn_r_101_fpn,fail_accuracy,64
+detectron2_maskrcnn_r_101_fpn,fail_accuracy,63
 
 
 
@@ -94,7 +94,7 @@ detectron2_maskrcnn_r_50_c4,fail_accuracy,57
 
 
 
-detectron2_maskrcnn_r_50_fpn,pass,64
+detectron2_maskrcnn_r_50_fpn,pass,63
 
 
 
@@ -334,8 +334,8 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,28
+vision_maskrcnn,pass,27
 
 
 
-yolov3,pass,2
+yolov3,pass,0

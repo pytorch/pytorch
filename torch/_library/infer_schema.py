@@ -1,6 +1,9 @@
+# mypy: allow-untyped-defs
 import inspect
 import typing
+from typing import List, Optional, Sequence, Union  # noqa: F401
 
+import torch  # noqa: F401
 from .. import device, dtype, Tensor, types
 
 
@@ -11,6 +14,9 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
     write custom ops in real life:
     - none of the outputs alias any of the inputs or each other.
     - only the args listed in mutates_args are being mutated.
+    - string type annotations "device, dtype, Tensor, types" without library specification
+      are assumed to be torch.*. Similarly, string type annotations "Optional, List, Sequence, Union"
+      without library specification are assumed to be typing.*.
 
     Callers (e.g. the custom ops API) are responsible for checking these assumptions.
     """
@@ -20,6 +26,14 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
         raise ValueError(
             f"infer_schema(func): {what} " f"Got func with signature {sig})"
         )
+
+    def convert_type_string(annotation_type: str):
+        try:
+            return eval(annotation_type)
+        except Exception as e:
+            error_fn(
+                f"Unsupported type annotation {annotation_type}. It is not a type."
+            )
 
     params = []
     seen_args = set()
@@ -37,13 +51,32 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
         if param.annotation is inspect.Parameter.empty:
             error_fn(f"Parameter {name} must have a type annotation.")
 
-        if param.annotation not in SUPPORTED_PARAM_TYPES.keys():
-            error_fn(
-                f"Parameter {name} has unsupported type {param.annotation}. "
-                f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
-            )
+        # The annotation might be converted to a string by annotation,
+        # we convert it to the actual type.
+        annotation_type = param.annotation
+        if type(annotation_type) == str:
+            annotation_type = convert_type_string(annotation_type)
 
-        schema_type = SUPPORTED_PARAM_TYPES[param.annotation]
+        if annotation_type not in SUPPORTED_PARAM_TYPES.keys():
+            if annotation_type.__origin__ is tuple:
+                list_type = tuple_to_list(annotation_type)
+                example_type_str = "\n\n"
+                # Only suggest the list type if this type is supported.
+                if list_type in SUPPORTED_PARAM_TYPES.keys():
+                    example_type_str = f"For example, {list_type}.\n\n"
+                error_fn(
+                    f"Parameter {name} has unsupported type {param.annotation}. "
+                    f"We do not support Tuple inputs in schema. As a workaround, please try to use List instead. "
+                    f"{example_type_str}"
+                    f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
+                )
+            else:
+                error_fn(
+                    f"Parameter {name} has unsupported type {param.annotation}. "
+                    f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
+                )
+
+        schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
         if name in mutates_args:
             if not schema_type.startswith("Tensor"):
                 error_fn(
@@ -54,15 +87,22 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
         if param.default is inspect.Parameter.empty:
             params.append(f"{schema_type} {name}")
         else:
-            if param.default is not None and not isinstance(
-                param.default, (int, float, bool)
-            ):
+            default_repr = None
+            if param.default is None or isinstance(param.default, (int, float, bool)):
+                default_repr = str(param.default)
+            elif isinstance(param.default, str):
+                default_repr = f'"{param.default}"'
+            elif isinstance(param.default, torch.dtype):
+                dtype_repr = str(param.default)
+                torch_dot = "torch."
+                assert dtype_repr.startswith(torch_dot)
+                default_repr = dtype_repr[len(torch_dot) :]
+            else:
                 error_fn(
-                    f"Parameter {name} has an unsupported default value (we only support "
-                    f"int, float, bool, None). Please file an issue on GitHub so we can "
-                    f"prioritize this."
+                    f"Parameter {name} has an unsupported default value type {type(param.default)}. "
+                    f"Please file an issue on GitHub so we can prioritize this."
                 )
-            params.append(f"{schema_type} {name}={param.default}")
+            params.append(f"{schema_type} {name}={default_repr}")
     mutates_args_not_seen = set(mutates_args) - seen_args
     if len(mutates_args_not_seen) > 0:
         error_fn(
@@ -71,7 +111,10 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
             f"mutates_args should contain the names of all args that the "
             f"custom op mutates."
         )
-    ret = parse_return(sig.return_annotation, error_fn)
+    return_annotation = sig.return_annotation
+    if type(return_annotation) == str:
+        return_annotation = convert_type_string(return_annotation)
+    ret = parse_return(return_annotation, error_fn)
     return f"({', '.join(params)}) -> {ret}"
 
 
@@ -161,3 +204,22 @@ def supported_param(param: inspect.Parameter) -> bool:
         inspect.Parameter.POSITIONAL_OR_KEYWORD,
         inspect.Parameter.KEYWORD_ONLY,
     )
+
+
+def tuple_to_list(tuple_type: typing.Type[typing.Tuple]) -> typing.Type[typing.List]:
+    """
+    Convert `tuple_type` into a list type with the same type arguments. Assumes that `tuple_type` is typing.Tuple type.
+    """
+    type_args = getattr(tuple_type, "__args__", None)
+    # Account for different python versions, e.g. python 3.8 would give ()
+    # but python 3.12 would give None.
+    if tuple_type is typing.Tuple or type_args == () or type_args is None:
+        # Handle the case of an empty tuple type
+        return typing.List
+    elif len(type_args) == 1:
+        # General case: create a List with the same type arguments
+        return typing.List[type_args[0]]  # type: ignore[valid-type]
+    elif len(type_args) == 2 and type_args[1] is Ellipsis:  # type: ignore[valid-type]
+        return typing.List[type_args[0]]  # type: ignore[valid-type]
+    else:
+        return typing.List[typing.Union[tuple(type_args)]]  # type: ignore[misc]

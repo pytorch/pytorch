@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
@@ -248,7 +249,7 @@ def conv_layout(
             ir.ir_node_to_tensor(bias, guard_shape=True),
             V.graph.sizevars.size_hints(stride),  # type: ignore[arg-type]
             V.graph.sizevars.size_hints(padding),  # type: ignore[arg-type]
-            dilation,
+            V.graph.sizevars.size_hints(dilation),  # type: ignore[arg-type]
             transposed,
             V.graph.sizevars.size_hints(output_padding),  # type: ignore[arg-type]
             groups,
@@ -277,12 +278,7 @@ def convert_1x1_conv_to_mm(x, weight, bias):
         weight = L[aten.squeeze](weight, dim=-1)
     weight = L[aten.permute](weight, [1, 0])
 
-    if x.get_size()[0] != 1:
-        x = ir.ExternKernel.require_stride_order(x, channels_last_order(rank))
-    else:
-        x.realize()
-        x.freeze_layout()
-
+    x = ir.ExternKernel.require_stride_order(x, channels_last_order(rank))
     x_permute = list(range(rank))
     x_permute.append(x_permute.pop(1))
     x = L[aten.permute](x, x_permute)

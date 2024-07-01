@@ -4,21 +4,20 @@ set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
-AOTRITON_DIR="aotriton"
-AOTRITON_PINNED_NAME="aotriton" # No .txt extension
-AOTRITON_PINNED_COMMIT=$(get_pinned_commit ${AOTRITON_PINNED_NAME})
+TARBALL='aotriton.tar.bz2'
+# This read command alwasy returns with exit code 1
+read -d "\n" VER MANYLINUX ROCMBASE PINNED_COMMIT SHA256 < aotriton_version.txt || true
+ARCH=$(uname -m)
 AOTRITON_INSTALL_PREFIX="$1"
+AOTRITON_URL="https://github.com/ROCm/aotriton/releases/download/${VER}/aotriton-${VER}-${MANYLINUX}_${ARCH}-${ROCMBASE}.tar.bz2"
 
-git clone https://github.com/ROCm/aotriton.git "${AOTRITON_DIR}"
-cd "${AOTRITON_DIR}"
-git checkout "${AOTRITON_PINNED_COMMIT}"
-git submodule sync --recursive
-git submodule update --init --recursive --force --depth 1
-mkdir build
-cd build
-cmake .. -G Ninja -DCMAKE_INSTALL_PREFIX=./install_dir -DCMAKE_BUILD_TYPE=Release -DAOTRITON_COMPRESS_KERNEL=OFF -DAOTRITON_NO_PYTHON=ON -DAOTRITON_NO_SHARED=ON
-ninja install
-mkdir -p "${AOTRITON_INSTALL_PREFIX}"
-cp -r install_dir/* "${AOTRITON_INSTALL_PREFIX}"
-find /tmp/ -mindepth 1 -delete
-rm -rf ~/.triton
+cd "${AOTRITON_INSTALL_PREFIX}"
+# Must use -L to follow redirects
+curl -L --retry 3 -o "${TARBALL}" "${AOTRITON_URL}"
+ACTUAL_SHA256=$(sha256sum "${TARBALL}" | cut -d " " -f 1)
+if [ "${SHA256}" != "${ACTUAL_SHA256}" ]; then
+  echo -n "Error: The SHA256 of downloaded tarball is ${ACTUAL_SHA256},"
+  echo " which does not match the expected value ${SHA256}."
+  exit
+fi
+tar xf "${TARBALL}" && rm -rf "${TARBALL}"

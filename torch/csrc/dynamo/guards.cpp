@@ -2,8 +2,11 @@
 #include <ATen/EmptyTensor.h>
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/guards.h>
+#include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_symnode.h>
@@ -668,6 +671,8 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     PyErr_SetString(PyExc_AssertionError, "wrong number of dimensions");
     return nullptr;
   }
+  std::stringstream msg;
+  int num_errors = 0;
   for (auto i : c10::irange(ndim)) {
     int64_t want_size = THPUtils_unpackLong(PyTuple_GET_ITEM(size, i));
     int64_t want_stride = THPUtils_unpackLong(PyTuple_GET_ITEM(stride, i));
@@ -676,13 +681,19 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     if (want_size != actual_size ||
         // ignore stride differences when size is 1
         (want_stride != actual_stride && actual_size > 1)) {
-      std::stringstream msg;
+      if (num_errors > 0)
+        msg << "; ";
       msg << "expected size " << actual_size << "==" << want_size << ", stride "
           << actual_stride << "==" << want_stride << " at dim=" << i;
-      PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
-      return nullptr;
+      num_errors++;
     }
   }
+
+  if (num_errors) {
+    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    return nullptr;
+  }
+
   Py_RETURN_TRUE;
 }
 
@@ -742,6 +753,27 @@ static PyObject* _empty_strided_cuda(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
+static PyObject* _reinterpret_tensor(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
+  static PythonArgParser parser(
+      {"_reinterpret_tensor(Tensor base, IntArrayRef sizes, IntArrayRef strides, int64_t offset_increment=0)"},
+      /*traceable=*/true);
+
+  ParsedArgs<4> parsed_args;
+  auto r = parser.parse(args, /*kwargs=*/nullptr, parsed_args);
+
+  Tensor self = r.tensor(0);
+  auto sizes = r.intlist(1);
+  auto strides = r.intlist(2);
+  auto offset_increment = r.toInt64(3);
+
+  auto res = torch::inductor::_reinterpret_tensor(
+      self, sizes, strides, offset_increment);
+  return torch::autograd::utils::wrap(res);
+
+  END_HANDLE_TH_ERRORS;
+}
+
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef _methods[] = {
     {"check_type_id", check_type_id, METH_VARARGS, nullptr},
@@ -750,6 +782,7 @@ static PyMethodDef _methods[] = {
     {"dict_version", dict_version, METH_VARARGS, nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
     {"_empty_strided_cuda", _empty_strided_cuda, METH_VARARGS, nullptr},
+    {"_reinterpret_tensor", _reinterpret_tensor, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -3149,6 +3182,51 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Implements weakref call - x_weak()
+ */
+class WeakRefCallGuardAccessor : public GuardAccessor {
+ public:
+  WeakRefCallGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            std::move(name),
+            std::move(source),
+            example_value,
+            guard_manager_enum) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    if (!PyWeakref_Check(obj)) {
+      return false;
+    }
+
+    PyObject* x = PyWeakref_GetObject(obj); // borrowed ref
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    if (!PyWeakref_Check(obj)) {
+      return GuardDebugInfo(
+          false, std::string("Not a weakref obj ") + get_source(), 0);
+    }
+
+    PyObject* x = PyWeakref_GetObject(obj); // borrowed ref
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "WeakRefCallGuardAccessor()";
+  }
+};
+
+/**
  * Similar to PythonLambdaLeafGuard, this class is a way to allow developers to
  * supply accessor as a python function. This is useful for from_numpy source.
  */
@@ -3222,13 +3300,13 @@ void install_tensor_aliasing_guard(
 
 void install_no_tensor_aliasing_guard(
     const py::list& guard_managers,
-    py::list tensor_names,
+    const py::list& tensor_names,
     py::object verbose_code_parts) {
   // Adds a guard that checks none of tensors alias. This is a an example of
   // relational guard. There is one guard object that is shared between multiple
   // guard managers.
   std::shared_ptr<RelationalGuard> guard = std::make_shared<NO_TENSOR_ALIASING>(
-      std::move(tensor_names), std::move(verbose_code_parts));
+      tensor_names, std::move(verbose_code_parts));
 
   // Register the resetter on the toor guard mananger, so that it can reset
   // the newly added relational guard when the guard eval fails.
@@ -3474,6 +3552,12 @@ PyObject* torch_c_dynamo_guards_init() {
       TypeGuardAccessor,
       GuardAccessor,
       std::unique_ptr<TypeGuardAccessor>>(py_m, "TypeGuardAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
+      WeakRefCallGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<WeakRefCallGuardAccessor>>(
+      py_m, "WeakRefCallGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       TupleIteratorGetItemAccessor,
@@ -3766,6 +3850,26 @@ PyObject* torch_c_dynamo_guards_init() {
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
       .def(
+          "weakref_call_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::handle example_value,
+             py::handle guard_manager_enum) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__weakref_call_accessor__");
+            return self.get_child_manager<WeakRefCallGuardAccessor>(
+                std::move(unique_key),
+                std::move(source),
+                example_value,
+                guard_manager_enum);
+          },
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
           "tuple_iterator_getitem_manager",
           &GuardManager::get_child_manager<TupleIteratorGetItemAccessor>,
           py::arg("index"),
@@ -3981,7 +4085,15 @@ PyObject* torch_c_dynamo_guards_init() {
       DictSubclassGuardManager,
       DictGuardManager,
       std::unique_ptr<DictSubclassGuardManager>>(
-      py_m, "DictSubclassGuardManager"); // NOLINT
+      py_m, "DictSubclassGuardManager") // NOLINT
+      .def(
+          "add_no_hasattr_guard",
+          [](DictSubclassGuardManager& self,
+             py::object attr_name,
+             py::object verbose_code_parts) -> void {
+            self.add_permitted_leaf_guard(std::make_shared<NO_HASATTR>(
+                std::move(attr_name), std::move(verbose_code_parts)));
+          });
 
   py_m.def("install_tensor_aliasing_guard", install_tensor_aliasing_guard);
   py_m.def(

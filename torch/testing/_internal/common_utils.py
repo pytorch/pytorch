@@ -230,7 +230,7 @@ if os.getenv("SLOW_TESTS_FILE", ""):
 if os.getenv("DISABLED_TESTS_FILE", ""):
     disabled_tests_dict = maybe_load_json(os.getenv("DISABLED_TESTS_FILE", ""))
 
-NATIVE_DEVICES = ('cpu', 'cuda', 'meta', torch._C._get_privateuse1_backend_name())
+NATIVE_DEVICES = ('cpu', 'cuda', 'xpu', 'meta', torch._C._get_privateuse1_backend_name())
 
 check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
 IS_JETSON = any(name in platform.platform() for name in check_names)
@@ -1236,6 +1236,7 @@ TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_MPS = torch.backends.mps.is_available()
 TEST_XPU = torch.xpu.is_available()
+TEST_HPU = True if (hasattr(torch, "hpu") and torch.hpu.is_available()) else False
 TEST_CUDA = torch.cuda.is_available()
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 custom_device_is_available = hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()
@@ -1250,8 +1251,6 @@ TEST_LIBROSA = _check_module_exists('librosa') and not IS_ARM64
 TEST_OPT_EINSUM = _check_module_exists('opt_einsum')
 
 TEST_Z3 = _check_module_exists('z3')
-
-BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 
 def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
@@ -1622,6 +1621,15 @@ def skipIfMps(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def skipIfHpu(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_HPU:
+            raise unittest.SkipTest("test doesn't currently work with HPU")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
 # Skips a test on CUDA if ROCm is available and its version is lower than requested.
 def skipIfRocmVersionLessThan(version=None):
     def dec_fn(fn):
@@ -1875,19 +1883,6 @@ def skipIfNotRegistered(op_name, message):
             This will check if 'MyOp' is in the caffe2.python.core
     """
     return unittest.skip("Pytorch is compiled without Caffe2")
-
-def _decide_skip_caffe2(expect_caffe2, reason):
-    def skip_dec(func):
-        @wraps(func)
-        def wrapper(self):
-            if torch.onnx._CAFFE2_ATEN_FALLBACK != expect_caffe2:
-                raise unittest.SkipTest(reason)
-            return func(self)
-        return wrapper
-    return skip_dec
-
-skipIfCaffe2 = _decide_skip_caffe2(False, "Not compatible with Caffe2")
-skipIfNoCaffe2 = _decide_skip_caffe2(True, "Caffe2 is not available")
 
 def skipIfNoSciPy(fn):
     @wraps(fn)

@@ -1036,7 +1036,7 @@ class FakeTensorConstHandling(TestCase):
 make_propagate_real_tensors_cls(FakeTensorConstHandling)
 
 
-def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
+def contains_type(type: torch.Type, maybe_contained_type: torch.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
         contains_type(e, maybe_contained_type) for e in type.containedTypes()
     )

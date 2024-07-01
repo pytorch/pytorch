@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import numbers
 from typing import Optional, Tuple
 import warnings

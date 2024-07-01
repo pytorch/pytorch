@@ -22,7 +22,6 @@ from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.testing import expectedFailureDynamic, same
-from torch._dynamo.utils import ifdynstaticdefault
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 
@@ -751,6 +750,27 @@ class ParametersModule3(ParametersModule1):
         return F.relu(self.linear1(x)) * self.scale + ones
 
 
+class ParametersModule4(ParametersModule1):
+    def forward(self, x):
+        ones = torch.ones(10, dtype=next(self.parameters(recurse=False)).dtype)
+        return F.relu(self.linear1(x)) * self.scale + ones
+
+
+class ParametersModule5(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = torch.nn.Linear(10, 10)
+        self.scale = torch.nn.Parameter(torch.randn(10, 10))
+        self.scale_dup = self.scale
+
+    def forward(self, x):
+        counter = 0
+        for param in self.parameters():
+            counter += 1
+
+        return x * self.scale * counter
+
+
 class SuperModule(BasicModule):
     def forward(self, x):
         x = super().forward(x)
@@ -1108,37 +1128,6 @@ class UnspecNonInlinableToplevelModule(torch.nn.Module):
         return self.m(x)
 
 
-class ModuleWithIntAttr(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.layer = torch.nn.Linear(4, 4)
-        self.step = 10
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + 1
-        self.step += 1
-        return self.layer(x) + self.step
-
-
-class UnspecInlinableModule(torch.nn.Module):
-    torchdynamo_force_dynamic = True  # forced to be a UnspecializedNNModule
-
-    def forward(self, x):
-        return torch.sin(x)
-
-
-class UnspecModuleWithIntAttr(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.layer = UnspecInlinableModule()
-        self.step = 10
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + 1
-        self.step += 1
-        return self.layer(x) + self.step
-
-
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torch._dynamo.testing.standard_test(
@@ -1192,6 +1181,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_parameters1 = make_test(ParametersModule1())
     test_parameters2 = make_test(ParametersModule2())
     test_parameters3 = make_test(ParametersModule3(), expected_ops=5)
+    test_parameters4 = make_test(ParametersModule4())
+    test_parameters5 = make_test(ParametersModule5())
     test_hasattr = make_test(HasAttrModule())
     test_enumvalues = make_test(EnumValues())
     test_access_by_keys = make_test(AccessByKeys())
@@ -1247,7 +1238,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         out4 = [opt_m4(i), opt_m4(i), opt_m4(i)]
         self.assertTrue(torch._dynamo.testing.same(out2, out3))
         self.assertTrue(torch._dynamo.testing.same(out2, out4))
-        self.assertExpectedInline(cnt.frame_count, """2""")
+        self.assertExpectedInline(cnt.frame_count, """1""")
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_generation_tag(self):
@@ -1391,31 +1382,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 1)
         self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
         self.assertTrue(torch._dynamo.testing.same(out1, out_post))
-
-    def test_nn_module_unspec_int_attr(self):
-        for module_class in [ModuleWithIntAttr, UnspecModuleWithIntAttr]:
-            mod = module_class()
-            cnt = torch._dynamo.testing.CompileCounter()
-            opt_mod = torch.compile(backend=cnt)(copy.deepcopy(mod))
-            x = torch.randn(3, 4)
-
-            # Compiling self.step as static.
-            ref1 = mod(x)
-            res1 = opt_mod(x)
-            self.assertTrue(torch.allclose(ref1, res1))
-            self.assertEqual(cnt.frame_count, 1)
-
-            # Compiling self.step as dynamic.
-            ref2 = mod(x)
-            res2 = opt_mod(x)
-            self.assertTrue(torch.allclose(ref2, res2))
-            self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
-
-            # No re-compilation!
-            ref3 = mod(x)
-            res3 = opt_mod(x)
-            self.assertTrue(torch.allclose(ref3, res3))
-            self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
@@ -2568,6 +2534,19 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         optim_res = torch._dynamo.optimize(cnt)(MyModule())(torch.ones(10, 10))
         self.assertEqual(eager_res, optim_res)
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_module_setattr(self):
+        models = torch.nn.Sequential(torch.nn.Linear(3, 3))
+        models[0].abc = False
+
+        def run():
+            models[0].abc = True
+            x = torch.randn(1, 3)
+            return models(x)
+
+        run = torch.compile(run, fullgraph=True)
+        run()
+        self.assertTrue(models[0].abc)
 
     def test_assign_does_not_exist(self):
         class MyModule(torch.nn.Module):

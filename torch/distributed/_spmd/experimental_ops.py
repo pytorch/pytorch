@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from typing import cast, List, Optional, Sequence, Tuple
 
@@ -5,7 +6,6 @@ import torch
 from torch.distributed._tensor._op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import register_prop_rule
-
 from torch.distributed._tensor.placement_types import (
     _Partial,
     DTensorSpec,
@@ -14,6 +14,7 @@ from torch.distributed._tensor.placement_types import (
     Shard,
     TensorMeta,
 )
+
 
 aten = torch.ops.aten  # pyre-ignore
 
