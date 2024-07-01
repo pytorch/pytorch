@@ -10570,7 +10570,7 @@ class CommonTemplate:
         x = torch.randn((2, 2), device=self.device, dtype=torch.bfloat16)
         y = torch.randn((2, 2), device=self.device, dtype=torch.bfloat16)
         fn(x, y)
-    
+
     def test_dtypeview_fusion(self):
         @torch.compile
         def fn(x):
@@ -10578,6 +10578,7 @@ class CommonTemplate:
             x = torch.ops.aten.view.dtype(x, torch.int16)
             x = x * 2
             return x
+
         torch._inductor.metrics.generated_kernel_count = 0
         x = torch.randn([1024], dtype=torch.float16, device="cuda")
         fn(x)
