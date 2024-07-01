@@ -203,14 +203,16 @@ def sig_for_ops(opname: str) -> list[str]:
     if name in symmetric_comparison_ops:
         # e.g.: `__eq__`, `__ne__`
         # unsafe override https://github.com/python/mypy/issues/5704
+        # PYI032 any-eq-ne-annotation https://docs.astral.sh/ruff/rules/any-eq-ne-annotation
         return [
             f"def {opname}(self, other: Any) -> Tensor: ...  # type: ignore[override] # noqa: PYI032"
         ]
     if name in inplace_binary_ops:
         # e.g.: `__iadd__`, `__imul__`
+        # Use `Self` as return type instead of `Tensor` to allow for subclasses
         return [f"def {opname}(self, other: Any) -> Self: ..."]
     if name in binary_ops or name in comparison_ops:
-        # e.g.: `__add__`, `__mal__` and `__le__`, `__gt__`
+        # e.g.: `__add__`, `__mul__` and `__le__`, `__gt__`
         return [f"def {opname}(self, other: Any) -> Tensor: ..."]
     if name in unary_ops:
         # e.g.: `__pos__`, `__neg__`, `__abs__`

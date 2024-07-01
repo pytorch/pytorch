@@ -1159,6 +1159,8 @@ def returns_str_pyi(signature: PythonSignature) -> str:
             and name.endswith("__")
             and name[2:-2] in inplace_binary_ops  # e.g.: `__iadd__`, `__imul__`
         ):
+            # Got in-place dunder magic method
+            # use `Self` as return type to allow for subclasses
             return "Self"
         return python_returns[0]
     return "None"
