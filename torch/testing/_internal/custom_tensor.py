@@ -58,9 +58,11 @@ class ConstantExtraMetadataTensor(torch.Tensor):
         # for aten ops that return non-tensors, just assume that
         # our cust inner tensors return the same value
         out_flat = [
-            ConstantExtraMetadataTensor(o_inner)
-            if isinstance(o_inner, torch.Tensor)
-            else o_inner
+            (
+                ConstantExtraMetadataTensor(o_inner)
+                if isinstance(o_inner, torch.Tensor)
+                else o_inner
+            )
             for o_inner in out_inner_flat
         ]
         out = pytree.tree_unflatten(out_flat, spec)
