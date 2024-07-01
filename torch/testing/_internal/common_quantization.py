@@ -477,7 +477,7 @@ def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
 
     out = out.to(dtype=torch.int32).reshape(w.shape)
 
-    out_uint8 = torch.empty((w.shape[0], w.shape[1] // 2), dtype=torch.uint8)
+    out_uint8 = torch.empty((w.shape[0], w.shape[1] // 2), dtype=torch.uint8, device=w.device)
     for n in range(w.shape[0]):
         for j in range(w.shape[1] // 2):
             out_uint8[n][j] = out[n][j * 2] << 4 | out[n][j * 2 + 1]
