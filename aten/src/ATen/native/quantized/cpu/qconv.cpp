@@ -1793,7 +1793,9 @@ class QConvAddInt8 final {
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
+#if AT_MKLDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
     auto& ctx = at::globalContext();
+#endif
 #if AT_MKLDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       if (kReluFused) {
