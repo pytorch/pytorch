@@ -178,9 +178,11 @@ def add_test(unit_test_class, test_name, test_fn):
 def set_cpp_tensors_requires_grad(cpp_tensor_stmts, python_tensors):
     assert len(cpp_tensor_stmts) == len(python_tensors)
     return [
-        f"{tensor_stmt}.requires_grad_(true)"
-        if tensor.dtype != torch.long
-        else tensor_stmt
+        (
+            f"{tensor_stmt}.requires_grad_(true)"
+            if tensor.dtype != torch.long
+            else tensor_stmt
+        )
         for tensor_stmt, (_, tensor) in zip(cpp_tensor_stmts, python_tensors)
     ]
 
