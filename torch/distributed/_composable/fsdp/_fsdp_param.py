@@ -447,6 +447,7 @@ class FSDPParam:
             with torch.no_grad():
                 torch.ops.fsdp.set_(self._unsharded_param, unsharded_param)
         else:
+            # eager only
             self._unsharded_param = nn.Parameter(
                 unsharded_param, requires_grad=self.sharded_param.requires_grad
             )
