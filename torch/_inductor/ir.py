@@ -2535,7 +2535,16 @@ class DtypeView(BaseView):
 
     @property
     def layout(self):
-        return self.data.get_layout()
+        old_layout = self.data.get_layout()
+        layout_class = type(old_layout)
+        new_layout = layout_class(
+            old_layout.device,
+            self.target_dtype,
+            old_layout.size,
+            old_layout.stride,
+            old_layout.offset,
+        )
+        return new_layout
 
     def get_size(self):
         return self.data.get_size()
