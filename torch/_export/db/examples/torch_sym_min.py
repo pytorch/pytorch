@@ -1,13 +1,9 @@
+# mypy: allow-untyped-defs
 import torch
 
-from torch._export.db.case import export_case, SupportLevel
+from torch._export.db.case import SupportLevel
 
 
-@export_case(
-    example_inputs=(torch.randn(3, 2),),
-    tags={"torch.operator"},
-    support_level=SupportLevel.NOT_SUPPORTED_YET,
-)
 class TorchSymMin(torch.nn.Module):
     """
     torch.sym_min operator is not supported in export.
@@ -15,3 +11,9 @@ class TorchSymMin(torch.nn.Module):
 
     def forward(self, x):
         return x.sum() + torch.sym_min(x.size(0), 100)
+
+
+example_inputs = (torch.randn(3, 2),)
+tags = {"torch.operator"}
+support_level = SupportLevel.NOT_SUPPORTED_YET
+model = TorchSymMin()

@@ -1,7 +1,7 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import contextlib
-
 import dataclasses
 import enum
 import functools
@@ -30,6 +30,7 @@ from torch.utils import _pytree as pytree
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakTensorKeyDictionary
 
+
 log = logging.getLogger(__name__)
 
 
@@ -39,7 +40,6 @@ if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
     # imported in user code.
-
     import torch
 
 
@@ -175,7 +175,7 @@ class Guard:
     def sort_key(self):
         # Put the duplicate input guards at the end. The duplicate guards have
         # two sources while guard.name only considers one source.
-        from ._dynamo.guards import GuardBuilder
+        from torch._dynamo.guards import GuardBuilder
 
         is_duplicate_input = (
             isinstance(self.create_fn, functools.partial)
@@ -637,7 +637,7 @@ class TracingContext:
         # careful not to accidentally induce guards on the SymInt if
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
-        self.output_strides: Optional[List[Optional[List[int]]]] = None
+        self.output_strides: Optional[List[Optional[Tuple[int, ...]]]] = None
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of

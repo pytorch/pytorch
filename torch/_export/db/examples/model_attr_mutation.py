@@ -1,13 +1,9 @@
+# mypy: allow-untyped-defs
 import torch
 
-from torch._export.db.case import export_case, SupportLevel
+from torch._export.db.case import SupportLevel
 
 
-@export_case(
-    example_inputs=(torch.randn(3, 2),),
-    tags={"python.object-model"},
-    support_level=SupportLevel.NOT_SUPPORTED_YET,
-)
 class ModelAttrMutation(torch.nn.Module):
     """
     Attribute mutation is not supported.
@@ -23,3 +19,9 @@ class ModelAttrMutation(torch.nn.Module):
     def forward(self, x):
         self.attr_list = self.recreate_list()
         return x.sum() + self.attr_list[0].sum()
+
+
+example_inputs = (torch.randn(3, 2),)
+tags = {"python.object-model"}
+support_level = SupportLevel.NOT_SUPPORTED_YET
+model = ModelAttrMutation()

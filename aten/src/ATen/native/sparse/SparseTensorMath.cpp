@@ -270,10 +270,6 @@ Tensor& div_sparse_(Tensor& self, const Tensor& value) {
   return div_out_sparse_zerodim(self, value, self);
 }
 
-static SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, SparseTensor& r) {
-  return div_out_sparse_zerodim(t, wrapped_scalar_tensor(value), r);
-}
-
 Tensor div_sparse(const Tensor& self, const Tensor& value, std::optional<c10::string_view> rounding_mode) {
   auto commonDtype = at::result_type(self, value);
   if (c10::isIntegralType(commonDtype, /*includeBool=*/true) && !rounding_mode.has_value()) {
@@ -285,10 +281,6 @@ Tensor div_sparse(const Tensor& self, const Tensor& value, std::optional<c10::st
 
 Tensor& div_sparse_(Tensor& self, const Tensor& value, std::optional<c10::string_view> rounding_mode) {
   return div_out_sparse_zerodim(self, value, std::move(rounding_mode), self);
-}
-
-static SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, std::optional<c10::string_view> rounding_mode, SparseTensor& r) {
-  return div_out_sparse_zerodim(t, wrapped_scalar_tensor(value), std::move(rounding_mode), r);
 }
 
 // --------------------------------------------------------------------
@@ -348,10 +340,6 @@ Tensor floor_divide_sparse(const Tensor& self, const Tensor& value) {
 
 Tensor& floor_divide_sparse_(Tensor& self, const Tensor& value) {
   return floor_divide_out_sparse_zerodim(self, value, self);
-}
-
-static SparseTensor& floor_divide_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, const Scalar& value) {
-  return floor_divide_out_sparse_zerodim(t, wrapped_scalar_tensor(value), r);
 }
 
 // --------------------------------------------------------------------

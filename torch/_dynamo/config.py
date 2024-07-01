@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import getpass
 import inspect
 import os
@@ -303,10 +304,7 @@ def _get_optimize_ddp_mode():
     return mode
 
 
-# If True, delays DDPOptimizer submodule compilation to 1st run of the model,
-# so that real tensor strides are used in all submodules
-# (instead of using FakeTensor strides which can differ from real tensor strides and causes error in some cases).
-# This feature is not hardened yet and it's known to cause issues to some models, so False by default.
+# No longer used
 optimize_ddp_lazy_compile = False
 
 # Whether to skip guarding on FSDP-managed modules
@@ -349,9 +347,6 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 
 # Trace through NumPy or graphbreak
 trace_numpy = True
-
-# Trace through torch.distributed code
-trace_distributed = False
 
 # Default NumPy dtypes when tracing with torch.compile
 # We default to 64bits. For efficiency, one may want to change these to float32
@@ -450,10 +445,6 @@ fake_tensor_cache_enabled = (
 fake_tensor_cache_crosscheck_enabled = (
     os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE_CROSSCHECK", "0") == "1"
 )
-
-# support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
-# WARNING: this is an experimental flag and is subject to change.
-_experimental_support_context_fn_in_torch_utils_checkpoint = False
 
 # Enables the Compiled Autograd engine to trace .backward() calls made under torch.compile().
 # Note: AOT Autograd will still trace joint graphs.

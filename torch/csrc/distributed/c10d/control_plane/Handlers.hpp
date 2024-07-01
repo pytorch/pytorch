@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <string>
 
 #include <c10/macros/Export.h>
@@ -15,6 +16,8 @@ class TORCH_API Request {
   virtual ~Request() = default;
 
   virtual const std::string& body() = 0;
+
+  virtual const std::multimap<std::string, std::string>& params() const = 0;
 };
 
 // Response represents a response to the handler. This conceptually maps to an

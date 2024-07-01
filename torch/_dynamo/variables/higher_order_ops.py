@@ -12,7 +12,7 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
+from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
@@ -554,6 +554,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return TraceWrappedHigherOrderOperatorVariable(value, source, **kwargs)
         elif value.__name__ == "strict_mode":
             return StrictModeHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "run_with_rng_state":
+            return RunWithRNGStateHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "associative_scan":
             return AssociativeScanHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "call_torchbind":
@@ -1149,17 +1151,16 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         p_args = tuple(arg.as_proxy() for arg in args[1:])
         real_sub_args = pytree.tree_map_only(
-            torch.fx.Proxy, lambda a: get_real_value(a.node, tx.output), p_args
+            torch.fx.Proxy, lambda a: get_fake_value(a.node, tx), p_args
         )
 
-        example_res = lowered_module.original_module.module()(*real_sub_args)
+        with tx.fake_mode:
+            example_value = lowered_module.original_module.module()(*real_sub_args)
 
         # NOTE [Guaranteeing the 1-1 correspondence of FakeTensors and real tensors]:
         # executorch modules promise not to alias inputs and outputs.
         # Thus, output FakeTensors will correctly not alias input FakeTensors.
-        _assert_tensors_nonaliasing(real_sub_args, example_res)
-
-        example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
+        _assert_tensors_nonaliasing(real_sub_args, example_value)
 
         p_args = (lowered_node,) + p_args
 
@@ -1442,6 +1443,26 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        p_args = tuple(arg.as_proxy() for arg in args)
+        p_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=p_args,
+                kwargs=p_kwargs,
+            ),
+            example_value=None,
+        )
+
+
 class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
     """
     Handles torch._dynamo._trace_wrapped_higher_order_op.inner_trace
@@ -1537,10 +1558,31 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        query, key, value, score_mod = self.normalize_to_args(args, kwargs)
+        (
+            query,
+            key,
+            value,
+            score_mod,
+            sparse_kv_num_blocks,
+            sparse_kv_indices,
+            sparse_q_num_blocks,
+            sparse_q_indices,
+            SPARSE_KV_BLOCK_SIZE,
+            SPARSE_Q_BLOCK_SIZE,
+        ) = self.normalize_to_args(args, kwargs)
 
         p_args = self.create_wrapped_node(tx, query, score_mod)
-        proxied_args = [query, key, value]
+        proxied_args = [
+            query,
+            key,
+            value,
+            sparse_kv_num_blocks,
+            sparse_kv_indices,
+            sparse_q_num_blocks,
+            sparse_q_indices,
+            SPARSE_KV_BLOCK_SIZE,
+            SPARSE_Q_BLOCK_SIZE,
+        ]
 
         # Store the invocation as a call
         # Norm_kwargs contains the score_function and we dont want to proxy this because
@@ -1556,12 +1598,16 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             lse_meta = query_meta.new_empty(logsumexp_shape, dtype=torch.float32)
         example_value = (out_meta, lse_meta)
 
+        # Compose the ordered HOO args from two parts:
+        # - inp_args: [query, key, value, sparse_kv_num_blocks, sparse_kv_indices,
+        #   sparse_q_num_blocks, sparse_q_indices, SPARSE_KV_BLOCK_SIZE, SPARSE_Q_BLOCK_SIZE]
+        # - p_args: [score_mod, *other_buffers]
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
                 self.value,
-                args=inp_args + p_args,
+                args=inp_args[:3] + p_args[:1] + inp_args[3:] + p_args[1:],
                 kwargs={},
             ),
             example_value=example_value,

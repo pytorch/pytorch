@@ -18,7 +18,7 @@ from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
-from torch._inductor import codecache, config, metrics
+from torch._inductor import config, cpu_vec_isa, metrics, test_operators
 from torch._inductor.codegen.common import OptimizationContext
 from torch._inductor.codegen.cpp import (
     CppOverrides,
@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
     parametrize,
+    skipIfRocm,
     slowTest,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -66,12 +67,12 @@ aten = torch.ops.aten
 check_model = test_torchinductor.check_model
 
 requires_vectorization = unittest.skipUnless(
-    codecache.valid_vec_isa_list(), "Does not support vectorization"
+    cpu_vec_isa.valid_vec_isa_list(), "Does not support vectorization"
 )
 
 
 def check_metrics_vec_kernel_count(num_expected_vec_kernels):
-    if codecache.valid_vec_isa_list():
+    if cpu_vec_isa.valid_vec_isa_list():
         assert metrics.generated_cpp_vec_kernel_count == num_expected_vec_kernels
 
 
@@ -112,6 +113,7 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    @skipIfRocm
     def test_conv_stride_constraints(self):
         for fmt in [torch.contiguous_format, torch.channels_last]:
             # TorchDispatch doesn't work in our cuda invocation for some reason
@@ -1581,13 +1583,17 @@ class CPUReproTests(TestCase):
             self.common(fn, (value,))
 
     @unittest.skipIf(
-        platform.machine() != "x86_64" or not codecache.valid_vec_isa_list(),
+        platform.machine() != "x86_64" or not cpu_vec_isa.valid_vec_isa_list(),
         "Does not support vectorization or not x86_64 machine",
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_simd(self):
-        vec_avx512 = codecache.supported_vec_isa_list[0]
-        vec_avx2 = codecache.supported_vec_isa_list[1]
+        vec_amx = cpu_vec_isa.supported_vec_isa_list[0]
+        vec_avx512 = cpu_vec_isa.supported_vec_isa_list[1]
+        vec_avx2 = cpu_vec_isa.supported_vec_isa_list[2]
+        self.assertTrue(vec_amx.bit_width() == 512)
+        self.assertTrue(vec_amx.nelements() == 16)
+        self.assertTrue(vec_amx.nelements(torch.bfloat16) == 32)
         self.assertTrue(vec_avx512.bit_width() == 512)
         self.assertTrue(vec_avx2.bit_width() == 256)
         self.assertTrue(vec_avx512.nelements() == 16)
@@ -1596,39 +1602,43 @@ class CPUReproTests(TestCase):
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
 
         with config.patch({"cpp.simdlen": None}):
-            isa = codecache.pick_vec_isa()
-            if vec_avx512 in codecache.valid_vec_isa_list():
+            isa = cpu_vec_isa.pick_vec_isa()
+            if vec_amx in cpu_vec_isa.valid_vec_isa_list():
+                self.assertTrue(isa == vec_amx)
+            elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
                 self.assertTrue(isa == vec_avx512)
             else:
                 self.assertTrue(isa == vec_avx2)
 
         with config.patch({"cpp.simdlen": 0}):
-            isa = codecache.pick_vec_isa()
+            isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 1}):
-            isa = codecache.pick_vec_isa()
+            isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 257}):
-            isa = codecache.pick_vec_isa()
+            isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 513}):
-            isa_list = codecache.valid_vec_isa_list()
+            isa_list = cpu_vec_isa.valid_vec_isa_list()
             if vec_avx512 in isa_list:
                 self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 512}):
-            isa_list = codecache.valid_vec_isa_list()
-            if vec_avx512 in isa_list:
-                isa = codecache.pick_vec_isa()
+            isa_list = cpu_vec_isa.valid_vec_isa_list()
+            isa = cpu_vec_isa.pick_vec_isa()
+            if vec_amx in isa_list:
+                self.assertTrue(isa == vec_amx)
+            elif vec_avx512 in isa_list:
                 self.assertTrue(isa == vec_avx512)
 
         with config.patch({"cpp.simdlen": 256}):
-            isa_list = codecache.valid_vec_isa_list()
+            isa_list = cpu_vec_isa.valid_vec_isa_list()
             if vec_avx2 in isa_list:
-                isa = codecache.pick_vec_isa()
+                isa = cpu_vec_isa.pick_vec_isa()
                 self.assertTrue(isa == vec_avx2)
 
     @requires_vectorization
@@ -1918,6 +1928,8 @@ class CPUReproTests(TestCase):
                 FileCheck().check(_target_code_check).run(code)
             if _target_code_check_not:
                 FileCheck().check_not(_target_code_check_not).run(code)
+                # Verify that the output isn't empty
+                FileCheck().check("Output code:").run(code)
 
             self.assertEqual(
                 _fn(*_inps),
@@ -1931,10 +1943,16 @@ class CPUReproTests(TestCase):
             _internal_check(fn, inps, "aten.scatter_reduce_")
 
         if "ATen parallel backend: OpenMP" in torch.__config__.parallel_info():
-            # Fix https://github.com/pytorch/pytorch/issues/118518
-            # which fails to change thread number with native thread pool
             with set_num_threads(1):
-                _internal_check(fn, inps, _target_code_check_not="aten.scatter_reduce_")
+                # When running with a single thread, we expect the aten.scatter will go
+                # into the cpp backend codegen instead of a fallback to aten.scatter_reduce_.
+                # Avoid the inductor cache so we don't serve an entry compiled above.
+                with config.patch(
+                    {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+                ):
+                    _internal_check(
+                        fn, inps, _target_code_check_not="aten.scatter_reduce_"
+                    )
 
             with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
                 _internal_check(fn, inps, "aten.scatter_reduce_")
@@ -1971,7 +1989,9 @@ class CPUReproTests(TestCase):
         x[0, 0] = torch.nan
         x[1, -1] = torch.nan
 
-        bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()] + [None]
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()] + [
+            None
+        ]
         for item in bit_widths:
             with config.patch({"cpp.simdlen": item}):
                 torch._dynamo.reset()
@@ -1989,7 +2009,7 @@ class CPUReproTests(TestCase):
 
             return fn
 
-        bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()]
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
         ih = [16, 65]
         iw = ih
         oh = ih
@@ -2041,6 +2061,52 @@ class CPUReproTests(TestCase):
                     _fn = wrap_fn2(logical_fn)
                     _args = (x, y)
                 self.common(_fn, _args)
+                check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
+    def test_vec_bitwise(self):
+        for dtype in [
+            torch.bool,
+            torch.uint8,
+            torch.int8,
+            torch.int32,
+            torch.int64,
+        ]:
+            x = torch.randn(64, dtype=torch.float32)
+            y = torch.randn(64, dtype=torch.float32)
+            if dtype == torch.bool:
+                x = x > 0
+                y = y > 0
+            else:
+                x = x.to(dtype)
+                y = y.to(dtype)
+            bitwise_fns = [
+                torch.bitwise_and,
+                torch.bitwise_not,
+                torch.bitwise_or,
+                torch.bitwise_xor,
+                torch.bitwise_left_shift,
+                torch.bitwise_right_shift,
+            ]
+            for bitwise_fn in bitwise_fns:
+                if (
+                    bitwise_fn
+                    in [
+                        torch.bitwise_left_shift,
+                        torch.bitwise_right_shift,
+                    ]
+                    and dtype == torch.bool
+                ):
+                    # Eager doesn't support bool
+                    # https://pytorch.org/docs/stable/generated/torch.bitwise_left_shift.html
+                    continue
+                torch._dynamo.reset()
+                metrics.reset()
+                if bitwise_fn == torch.bitwise_not:
+                    _args = (x,)
+                else:
+                    _args = (x, y)
+                self.common(bitwise_fn, _args)
                 check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
@@ -2248,7 +2314,7 @@ class CPUReproTests(TestCase):
             graph_lowering
         ):
             # The moset inner loop variable is used in the index_expr
-            tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
+            tiling_factor = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.float)
             with CppVecKernelChecker(
                 args=None, num_threads=1, tiling_factor=tiling_factor
             ) as vec_checker:
@@ -2348,7 +2414,7 @@ class CPUReproTests(TestCase):
         ):
             itervars = [sympy.Symbol("i"), sympy.Symbol("j"), sympy.Symbol("k")]
 
-            tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
+            tiling_factor = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.float)
             # The most inner loop variable is used in the index_expr
             with CppVecKernelChecker(
                 args=None, num_threads=1, tiling_factor=tiling_factor
@@ -3657,6 +3723,30 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1
 
+    def test_highp_to_lowp_cse_var_cache_with_store(self):
+        # Fix issue: https://github.com/pytorch/pytorch/issues/128263
+        input = torch.randn(5, 128, dtype=torch.float32)
+        input2 = torch.randint(0, 10, (5, 128), dtype=torch.int8)
+        input3 = torch.randn(128, 128, dtype=torch.float32)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, x2, x3):
+                x2 = x2.to(torch.int32)
+                temp = test_operators.realize(x2.to(torch.float16))
+                temp2 = temp.to(torch.float32)
+                temp2 = temp2 * x
+                return torch.mm(temp, x3.to(torch.float16)), temp2
+
+        metrics.reset()
+        m = Model()
+        self.common(
+            m,
+            (input, input2, input3),
+        )
+
     def test_reduction_float_to_int64(self):
         # https://github.com/pytorch/pytorch/issues/124821
         def fn(x):
@@ -3758,6 +3848,20 @@ class CPUReproTests(TestCase):
         FileCheck().check_count(
             "return at::vec::VectorizedN<int64_t,2>::loadu(tmpbuf.data(),",
             4,
+            exactly=True,
+        ).run(code)
+
+    def test_repeated_exp(self):
+        def fn(x):
+            y = x.sigmoid()
+            return y + 1, y.sum(-1)
+
+        x = torch.randn(1000, 1000)
+        opt_fn = torch.compile(fn)
+        _, code = run_and_get_cpp_code(opt_fn, x)
+        FileCheck().check_count(
+            ".exp()",
+            1,
             exactly=True,
         ).run(code)
 

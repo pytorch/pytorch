@@ -1,10 +1,22 @@
+# mypy: allow-untyped-defs
+import contextlib
+import copy
 import math
 
 from collections import namedtuple
+from typing import Dict, List, Tuple
+from unittest.mock import patch
+
+import sympy
 
 import torch
+from torch.utils._sympy.symbol import symbol_is_type, SymT
+from .. import ir
+from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix
+from ..virtualized import V
 
-from .common import ExprPrinter
+from .common import CSEVariable, ExprPrinter, Kernel
+
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
@@ -100,10 +112,53 @@ class CppPrinter(ExprPrinter):
         r = f"std::floor({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
-    def _print_Trunc(self, expr):
+    def _print_FloorToInt(self, expr):
+        assert len(expr.args) == 1
+        r = f"std::floor({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
+    def _print_TruncToInt(self, expr):
         assert len(expr.args) == 1
         r = f"std::trunc({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+        return f"static_cast<{INDEX_TYPE}>({r})"
+
+    def _print_TruncToFloat(self, expr):
+        assert len(expr.args) == 1
+        return f"std::trunc({self._print(expr.args[0])})"
+
+    def _print_ToFloat(self, expr):
+        assert len(expr.args) == 1
+        return f"static_cast<double>({self._print(expr.args[0])})"
+
+    # TODO: This is wrong if one of the inputs is negative.  This is hard to
+    # tickle though, as the inputs are typically positive (and if we can prove
+    # they are positive, we will have used Mod instead, for which this codegen
+    # is right).
+    def _print_PythonMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+    def _print_CMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+    def _print_IntTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        # TODO: This is only accurate up to 2**53
+        return f"static_cast<double>({self._print(lhs)}) / static_cast<double>({self._print(rhs)})"
+
+    # TODO: PowByNatural: we need to implement our own int-int pow.  Do NOT
+    # use std::pow, that operates on floats
+    def _print_PowByNatural(self, expr):
+        raise NotImplementedError(
+            f"_print_PowByNatural not implemented for {type(self)}"
+        )
+
+    def _print_FloatTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
+
+    def _print_FloatPow(self, expr):
+        base, exp = expr.args
+        return f"std::pow({self._print(base)}, {self._print(exp)})"
 
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
@@ -135,6 +190,11 @@ class CppPrinter(ExprPrinter):
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        r = f"std::ceil({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
+    def _print_CeilToInt(self, expr):
         assert len(expr.args) == 1
         r = f"std::ceil({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
@@ -200,8 +260,9 @@ class CppPrinter(ExprPrinter):
     def _print_OpaqueUnaryFn_sqrt(self, expr):
         return f"std::sqrt({self._print(expr.args[0])})"
 
-    def _print_Round(self, expr):
+    def _print_RoundToInt(self, expr):
         assert len(expr.args) == 1
+        # TODO: dispatch to llrint depending on index type
         return f"std::lrint({self._print(expr.args[0])})"
 
     def _print_RoundDecimal(self, expr):
@@ -241,3 +302,142 @@ def value_to_cpp(value, cpp_type):
         return f"std::numeric_limits<{cpp_type}>::quiet_NaN()"
     else:
         return f"static_cast<{cpp_type}>({repr(value)})"
+
+
+class LocalBufferScope:
+    """
+    This class creates a context that helps to generate code involving Inductor IR with
+    function local buffers. These buffers are constructed during the codegen process and
+    are used to store intermediate results such as local accumulators. We do not want to
+    add them to `V.graph` since they are not global and we do not want to add them as
+    function arguments either. So we patch the codegen processes under this scope to support
+    these buffers without exposure to the outside world.
+    """
+
+    def __init__(self, kernel: Kernel):
+        self.kernel = kernel
+        self.exit_stack = contextlib.ExitStack()
+        self.local_buffers: Dict[str, ir.Buffer] = {}
+
+    def __enter__(self):
+        self.exit_stack.__enter__()
+        original_get_dtype = V.graph.get_dtype
+
+        def get_dtype(name):
+            if name in self.local_buffers:
+                return self.local_buffers[name].get_dtype()
+            return original_get_dtype(name)
+
+        self.exit_stack.enter_context(patch.object(V.graph, "get_dtype", get_dtype))
+
+        original_input = self.kernel.args.input
+
+        def input(name):
+            if name in self.local_buffers:
+                return name
+            return original_input(name)
+
+        self.exit_stack.enter_context(patch.object(self.kernel.args, "input", input))
+
+        original_output = self.kernel.args.output
+
+        def output(name):
+            if name in self.local_buffers:
+                return name
+            return original_output(name)
+
+        self.exit_stack.enter_context(patch.object(self.kernel.args, "output", output))
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.local_buffers.clear()
+        self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
+
+    def add_local_buffer(self, buffer: ir.Buffer):
+        assert buffer.get_name() not in self.local_buffers
+        self.local_buffers[buffer.get_name()] = buffer
+
+    def localize_buffer(
+        self, global_buf: ir.Buffer, local_buf: ir.Buffer, nodes: List[ir.IRNode]
+    ) -> List[ir.IRNode]:
+        """
+        Localizes the buffer `global_buf` to `local_buf` in the given `nodes` and returns
+        a new list of IR nodes that work on `local_buf` instead of `global_buf`, i.e., all
+        the loads and stores are redirected to `local_buf`. This helps the fused loops to
+        work on smaller-sized local buffers for better data locality.
+
+        The `local_buf` should already be registered in the local scope and the data access
+        is assumed to be contiguous with the same order as the `global_buf`.
+        """
+        assert local_buf.get_name() in self.local_buffers
+        assert len(global_buf.get_size()) == len(local_buf.get_size())
+        assert len(nodes) > 0
+
+        class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
+            def __init__(self, inner):
+                super().__init__(inner)
+
+            def localize(self, name: str, index: sympy.Expr):
+                if name == global_buf.get_name():
+                    name = local_buf.get_name()
+                    used_vars = {
+                        s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)
+                    }
+                    index_vars = []
+                    for i in range(len(local_buf.get_size())):
+                        var = sympy_index_symbol_with_prefix(SymT.INDEX, i)
+                        index_vars.append(var if var in used_vars else 0)
+                    index = local_buf.layout.make_indexer()(index_vars)
+                return name, index
+
+            def load(self, name: str, index: sympy.Expr):
+                return self._inner.load(*self.localize(name, index))
+
+            def store(self, name, index, value, mode=None):
+                return self._inner.store(*self.localize(name, index), value, mode)
+
+            def store_reduction(self, name, index, value):
+                return self._inner.store_reduction(*self.localize(name, index), value)
+
+        def wrap_inner_fn_for_node(node: ir.IRNode, inner_fn_wrapper):
+            loops = node.data if isinstance(node, ir.ComputedBuffer) else node
+            assert isinstance(loops, ir.Loops)
+            new_loops = copy.copy(loops)
+            if isinstance(node, ir.ComputedBuffer):
+                new_node = ir.ComputedBuffer(
+                    node.get_name(), node.get_layout(), new_loops
+                )
+            else:
+                new_node = new_loops  # type: ignore[assignment]
+
+            new_loops.inner_fn = inner_fn_wrapper(new_loops.inner_fn)
+            return new_node
+
+        def inner_fn_wrapper(inner_fn):
+            def inner(index):
+                with V.set_ops_handler(LocalizeBufferHandler(V.get_ops_handler())):
+                    return inner_fn(index)
+
+            return inner
+
+        return [wrap_inner_fn_for_node(node, inner_fn_wrapper) for node in nodes]
+
+
+def unify_mask_base_type(
+    buffer: IndentedBuffer,
+    vars: Tuple[CSEVariable, ...],
+    dtype=torch.float,
+):
+    """
+    Given list of cse variables,
+    Cast each to new mask base dtype and return casted cse variable.
+    """
+    new_vars = (
+        V.kernel.cse.generate(
+            buffer,
+            f"{V.kernel._get_mask_cast(var, dtype)}",
+        )
+        for var in vars
+    )
+    return new_vars
