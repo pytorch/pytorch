@@ -447,8 +447,10 @@ class FakeTensorConverter:
 def init_cuda_context():
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available():
-        torch.empty(1, device="cuda") if torch.version.hip is None else torch.zeros(
-            1, device="cuda"
+        (
+            torch.empty(1, device="cuda")
+            if torch.version.hip is None
+            else torch.zeros(1, device="cuda")
         )
 
 
@@ -854,7 +856,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
     Extract the TensorMetadata of a tensor.
     """
     memory_format: Optional[torch.memory_format] = suggest_memory_format(t)
-    if is_sparse_any(t) or not t.is_contiguous(memory_format=memory_format):
+    if is_sparse_any(t) or not t.is_contiguous(memory_format=memory_format):  # type: ignore[arg-type]
         memory_format = None
 
     return TensorMetadata(

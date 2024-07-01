@@ -1,20 +1,11 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import copy as copymodule
 import warnings
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import (
-    Any,
-    Callable,
-    Deque,
-    Iterator,
-    List,
-    Literal,
-    Optional,
-    Sized,
-    Tuple,
-    TypeVar,
-)
+from typing import Any, Callable, Iterator, Literal, Sized, Tuple, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
@@ -53,7 +44,7 @@ class ConcaterIterDataPipe(IterDataPipe):
         [0, 1, 2, 0, 1, 2, 3, 4]
     """
 
-    datapipes: Tuple[IterDataPipe]
+    datapipes: tuple[IterDataPipe]
 
     def __init__(self, *datapipes: IterDataPipe):
         if len(datapipes) == 0:
@@ -109,7 +100,7 @@ class ForkerIterDataPipe(IterDataPipe):
         datapipe: IterDataPipe,
         num_instances: int,
         buffer_size: int = 1000,
-        copy: Optional[Literal["shallow", "deep"]] = None,
+        copy: Literal["shallow", "deep"] | None = None,
     ):
         if num_instances < 1:
             raise ValueError(
@@ -126,15 +117,15 @@ class _ContainerTemplate(ABC):
 
     @abstractmethod
     def get_next_element_by_instance(self, instance_id: int):
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     def is_every_instance_exhausted(self) -> bool:
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     def reset(self) -> None:
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     def get_length_by_instance(self, instance_id: int):
@@ -158,12 +149,12 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         datapipe: IterDataPipe,
         num_instances: int,
         buffer_size: int = 1000,
-        copy: Optional[Literal["shallow", "deep"]] = None,
+        copy: Literal["shallow", "deep"] | None = None,
     ):
         self.main_datapipe = datapipe
-        self._datapipe_iterator: Optional[Iterator[Any]] = None
+        self._datapipe_iterator: Iterator[Any] | None = None
         self.num_instances = num_instances
-        self.buffer: Deque = deque()
+        self.buffer: deque = deque()
         self.buffer_size = buffer_size
         if self.buffer_size < 0:
             warnings.warn(
@@ -182,13 +173,13 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 f"Unknown copy method `{copy}` requested, choose one of None, `shallow` or `deep`."
             )
 
-        self.child_pointers: List[int] = [
+        self.child_pointers: list[int] = [
             0
         ] * num_instances  # Indicate the indices of the next element to get
         self.slowest_ptr = 0  # The index to read by the slowest child
         self.leading_ptr = 0  # The index to read by the fastest child
-        self.end_ptr: Optional[int] = None  # The index to stop child
-        self._child_stop: List[bool] = [True for _ in range(num_instances)]
+        self.end_ptr: int | None = None  # The index to stop child
+        self._child_stop: list[bool] = [True for _ in range(num_instances)]
 
     def __len__(self):
         return len(self.main_datapipe)
@@ -423,7 +414,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         cls,
         datapipe: IterDataPipe,
         num_instances: int,
-        classifier_fn: Callable[[T_co], Optional[int]],
+        classifier_fn: Callable[[T_co], int | None],
         drop_none: bool = False,
         buffer_size: int = 1000,
     ):
@@ -453,12 +444,12 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self,
         datapipe: IterDataPipe[T_co],
         num_instances: int,
-        classifier_fn: Callable[[T_co], Optional[int]],
+        classifier_fn: Callable[[T_co], int | None],
         drop_none: bool,
         buffer_size: int,
     ):
         self.main_datapipe = datapipe
-        self._datapipe_iterator: Optional[Iterator[Any]] = None
+        self._datapipe_iterator: Iterator[Any] | None = None
         self.num_instances = num_instances
         self.buffer_size = buffer_size
         if self.buffer_size < 0:
@@ -468,11 +459,11 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 UserWarning,
             )
         self.current_buffer_usage = 0
-        self.child_buffers: List[Deque[T_co]] = [deque() for _ in range(num_instances)]
+        self.child_buffers: list[deque[T_co]] = [deque() for _ in range(num_instances)]
         self.classifier_fn = classifier_fn
         self.drop_none = drop_none
         self.main_datapipe_exhausted = False
-        self._child_stop: List[bool] = [True for _ in range(num_instances)]
+        self._child_stop: list[bool] = [True for _ in range(num_instances)]
 
     def _find_next(self, instance_id: int) -> T_co:  # type: ignore[type-var]
         while True:
@@ -579,7 +570,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self._child_stop = [True for _ in range(self.num_instances)]
         self.main_datapipe_exhausted = False
 
-    def _cleanup(self, instance_id: Optional[int] = None):
+    def _cleanup(self, instance_id: int | None = None):
         ids = (
             range(self.num_instances)
             if instance_id is None
@@ -618,7 +609,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
 
     def __init__(self, *datapipes):
         self.datapipes = datapipes
-        self.buffer: List = (
+        self.buffer: list = (
             []
         )  # Store values to be yielded only when every iterator provides one
 
@@ -684,7 +675,7 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         [(0, 10, 20), (1, 11, 21), (2, 12, 22), (3, 13, 23), (4, 14, 24)]
     """
 
-    datapipes: Tuple[IterDataPipe]
+    datapipes: tuple[IterDataPipe]
 
     def __init__(self, *datapipes: IterDataPipe):
         if not all(isinstance(dp, IterDataPipe) for dp in datapipes):
@@ -694,7 +685,7 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         super().__init__()
         self.datapipes = datapipes  # type: ignore[assignment]
 
-    def __iter__(self) -> Iterator[Tuple[T_co]]:
+    def __iter__(self) -> Iterator[tuple[T_co]]:
         iterators = [iter(datapipe) for datapipe in self.datapipes]
         yield from zip(*iterators)
 

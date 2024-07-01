@@ -321,14 +321,16 @@ def format_prerecord_trace(f: NativeFunction) -> str:
     return PRE_RECORD_TRACE.substitute(
         set_op_name=format_trace_op_name(f),
         add_trace_inputs=format_trace_inputs(f) + additional_inputs,
-        inplace_guard=INPLACE_GUARD.substitute(
-            name=cpp.name(f.func),
-            mutable_input=f.func.arguments.out[0].name
-            if f.func.arguments.out
-            else "self",
-        )
-        if is_inplace
-        else "",
+        inplace_guard=(
+            INPLACE_GUARD.substitute(
+                name=cpp.name(f.func),
+                mutable_input=(
+                    f.func.arguments.out[0].name if f.func.arguments.out else "self"
+                ),
+            )
+            if is_inplace
+            else ""
+        ),
     )
 
 

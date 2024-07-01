@@ -531,9 +531,7 @@ class TestExpandedWeightFunctional(TestCase):
             norm_layer = (
                 nn.InstanceNorm1d
                 if num_dim == 1
-                else nn.InstanceNorm2d
-                if num_dim == 2
-                else nn.InstanceNorm3d
+                else nn.InstanceNorm2d if num_dim == 2 else nn.InstanceNorm3d
             )
             return nn.Sequential(
                 conv_layer(3, 32, kernel_size=3, stride=1, padding=1),

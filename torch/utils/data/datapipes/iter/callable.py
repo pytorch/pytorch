@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import functools
 from collections import namedtuple
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, TypeVar, Union
+from typing import Any, Callable, Iterator, Sized, TypeVar
 
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.data.datapipes._decorator import functional_datapipe
@@ -140,8 +142,8 @@ def _collate_helper(conversion, item):
         raise RuntimeError("Only supports one DataFrame per batch")
     df = item[0]
     columns_name = df_wrapper.get_columns(df)
-    tuple_names: List = []
-    tuple_values: List = []
+    tuple_names = []
+    tuple_values = []
 
     for name in conversion.keys():
         if name not in columns_name:
@@ -222,13 +224,10 @@ class CollatorIterDataPipe(MapperIterDataPipe):
     def __init__(
         self,
         datapipe: IterDataPipe,
-        conversion: Optional[
-            Union[
-                Callable[..., Any],
-                Dict[Union[str, Any], Union[Callable, Any]],
-            ]
-        ] = default_collate,
-        collate_fn: Optional[Callable] = None,
+        conversion: (
+            Callable[..., Any] | dict[str | Any, Callable | Any] | None
+        ) = default_collate,
+        collate_fn: Callable | None = None,
     ) -> None:
         # TODO(VitalyFedyunin): Replace `Callable[..., Any]` with `Callable[[IColumn], Any]`
         # TODO(VitalyFedyunin): Replace with `Dict[Union[str, IColumn], Union[Callable, Enum]]`

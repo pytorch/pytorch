@@ -388,11 +388,11 @@ def _compile(
     # Lift states and parameters as function arguments so that make_fx
     # can trace operations applied to them.
     def stateless_func(func, params, buffers, named_states, args, kwargs):
-        with stateless._reparametrize_module(
-            mod, {**params, **buffers}
-        ), _rematerialize_optimizer(
-            opt, named_states, params
-        ) if opt else nullcontext():
+        with stateless._reparametrize_module(mod, {**params, **buffers}), (
+            _rematerialize_optimizer(opt, named_states, params)
+            if opt
+            else nullcontext()
+        ):
             # For DataParallel mode, install hooks first to tag the gradients
             with gradients_tagging(params) if is_data_parallel_mode else nullcontext():
                 ret = func(*args, **kwargs)

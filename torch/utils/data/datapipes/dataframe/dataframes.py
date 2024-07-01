@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
+
+from typing import Any
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.dataframe.structures import DataChunkDF
@@ -373,7 +375,7 @@ def get_val(capture):
 
 class CaptureInitial(CaptureVariable):
     def __init__(self, schema_df=None):
-        new_ctx: Dict[str, List[Any]] = {
+        new_ctx: dict[str, list[Any]] = {
             "operations": [],
             "variables": [],
             "schema_df": schema_df,
@@ -396,7 +398,12 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
     def __iter__(self):
         return iter(self._dataframes_as_tuples())
 
-    def batch(self, batch_size=10, drop_last: bool = False, wrapper_class=DataChunkDF):
+    def batch(
+        self,
+        batch_size=10,
+        drop_last: bool = False,
+        wrapper_class: type = DataChunkDF,
+    ):
         dp = self._dataframes_per_row()._dataframes_concat(batch_size)
         dp = dp.as_datapipe().batch(1, drop_last=drop_last, wrapper_class=wrapper_class)
         dp._dp_contains_dataframe = True
@@ -440,7 +447,7 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
 
 @functional_datapipe("trace_as_dataframe")
 class DataFrameTracer(CaptureDataFrameWithDataPipeOps, IterDataPipe):  # type: ignore[misc]
-    source_datapipe: Optional[Any] = None
+    source_datapipe: Any | None = None
 
     # TODO(VitalyFedyunin): Must implement all special functions of datapipes
 
