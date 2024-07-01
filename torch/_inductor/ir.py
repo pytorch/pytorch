@@ -128,6 +128,14 @@ If you mutate the data of such a tensor, we swing the StorageBox pointer to poin
 Tensors backed by views add one more indirection to the IR.
 TensorBox -> View -> StorageBox -> Buffer
 In these cases, the underlying StorageBox/Buffer will be shared with the pre-view TensorBox.
+
+Computation is represented by Operation nodes, with each operation producing 1
+or more output Buffers. In the case of mutations, these will be new Buffers that have the
+mutated buffer listed in its get_mutation_names().
+
+It is also possible to have an InputBuffer for which there is no corresponding Operation,
+e.g. it may be a graph input or compile time constant.
+
 """
 
 
@@ -441,7 +449,7 @@ class Operation:
 
 
 @dataclasses.dataclass
-class Loops(IRNode, Operation):
+class Loops(IRNode):
     device: torch.device
     dtype: torch.dtype
     inner_fn: Callable[..., Any]
@@ -3343,10 +3351,10 @@ class Buffer(IRNode):
     def get_read_names(self) -> Set[str]:
         return {self.get_name()}
 
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return set()
 
-    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
     def realize(self):
@@ -3357,6 +3365,7 @@ class Buffer(IRNode):
         return False
 
 
+@dataclasses.dataclass
 class OperationBuffer(Buffer, Operation):
     # An operation that produces a single output buffer
     def get_outputs(self) -> List[Buffer]:
@@ -3364,6 +3373,10 @@ class OperationBuffer(Buffer, Operation):
 
     def get_defining_op(self) -> Operation:
         return self
+
+    def __post_init__(self):
+        Buffer.__post_init__(self)
+        Operation.__post_init__(self)
 
 
 class InputBuffer(Buffer):
@@ -4080,7 +4093,7 @@ class ConcatKernel(NopKernel):
                 op_names.append(input_buffer.get_operation_name())
 
         if len(op_names) > 1 and V.graph.has_feature(device, BackendFeature.FOREACH):
-            V.graph.register_list(op_names)
+            V.graph.register_operation_list(op_names)
 
         concat_kernel.name = V.graph.register_buffer(concat_kernel)
         concat_kernel.inputs = cls.unwrap_storage(concat_kernel.inputs)
@@ -4169,6 +4182,7 @@ class ExternKernel(InputsKernel):
     unbacked_bindings: Dict[sympy.Symbol, pytree.KeyPath] = dataclasses.field(
         default_factory=dict
     )
+    mutation_outputs: List[MutationOutput] = dataclasses.field(default_factory=list)
 
     def __init__(
         self,
@@ -4198,7 +4212,11 @@ class ExternKernel(InputsKernel):
         self.op_overload = op_overload
         self.collect_arg_kwarg_properties()
         self.unbacked_bindings = {}
+        self.mutation_outputs = []
         self.fx_node = V.graph.current_node
+
+    def get_outputs(self) -> List[Buffer]:
+        return [self, *self.mutation_outputs]
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
@@ -4969,17 +4987,17 @@ class UserDefinedTritonKernel(ExternKernel):
             )
         ]
 
-        self.outputs: List[Buffer] = [
+        self.mutation_outputs = [
             MutationOutput(NoneLayout(self.device), buf, self)
             for buf in self.mutable_args
         ]
         V.graph.register_operation(self)
 
+    def get_outputs(self) -> List[Buffer]:
+        return self.mutation_outputs
+
     def get_device(self) -> torch.device:
         return self.device
-
-    def get_outputs(self) -> List[Buffer]:
-        return self.outputs
 
 
 class InplaceBernoulliFallback(ExternKernel):
@@ -5136,14 +5154,10 @@ class SetSourceTensorKernel(ExternKernelAlloc):
         V.graph.never_reuse_buffers.add(storage_tensor.get_name())
         V.graph.never_reuse_buffers.add(self.get_name())
         device = storage_tensor.get_device()
-        self.outputs: List[Buffer] = [
-            self,
+        self.mutation_outputs = [
             MutationOutput(NoneLayout(device), self_tensor, self),
             MutationOutput(NoneLayout(device), storage_tensor, self),
         ]
-
-    def get_outputs(self) -> List[Buffer]:
-        return self.outputs
 
     def get_inputs_that_alias_output(self):
         return [self.inputs[0].get_name(), self.inputs[1].get_name()]
@@ -5435,7 +5449,6 @@ class FallbackKernel(ExternKernelAlloc):
         # abi-compatible mode, where we retrieve outputs by pass each individual
         # output through the abi-compatible interface.
         self.outputs: Sequence[Any] = []
-        self.mutation_outputs: List[Buffer] = []
         self.use_runtime_dispatch = False
         self.unbacked_bindings = unbacked_bindings
 
@@ -5522,9 +5535,6 @@ class FallbackKernel(ExternKernelAlloc):
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
-
-    def get_outputs(self) -> List[Buffer]:
-        return [self, *self.mutation_outputs]
 
     def codegen_unbacked_symbol_defs(self, wrapper):
         if not hasattr(self, "unbacked_bindings"):
