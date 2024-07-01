@@ -9,6 +9,7 @@ import torch
 
 import torch.utils._pytree as pytree
 
+from functorch.experimental.control_flow import cond, map
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
@@ -974,16 +975,15 @@ class TestConverter(TestCase):
     def test_context_manager(self):
         class ContextManager:
             def __init__(self):
-                # TODO: enable this once we supporot prim::SetAttr
-                # self.count = 0
+                self.count = 0
                 return
 
             def __enter__(self):
-                # self.count += 1
+                self.count += 1
                 return
 
             def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-                # self.count -= 1
+                self.count -= 1
                 return
 
         class M(torch.nn.Module):
@@ -995,6 +995,171 @@ class TestConverter(TestCase):
         inp = (torch.ones(3, 3), torch.ones(3, 3))
         self._check_equal_ts_ep_converter(M(), inp)
 
+    def test_predispatch_cond(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("pred", torch.tensor(False))
+                self.register_buffer("t", torch.tensor(10))
+
+            def forward(self, x, y):
+                def true_fn(x, y):
+                    with torch.enable_grad():
+                        return x - 1 + self.t + y
+
+                return torch.cond(
+                    self.pred,
+                    true_fn,
+                    lambda x, y: x + 1 - self.t + y,
+                    [x, y],
+                )
+
+        model = Model()
+        with torch.no_grad():
+            exported_program = torch.export._trace._export(
+                model,
+                (torch.tensor(10), torch.tensor(12)),
+                {},
+                dynamic_shapes=None,
+                pre_dispatch=True,
+                strict=False,
+            )
+            print(exported_program.graph_module.print_readable())
+
+        self.assertExpectedInline(
+            str(exported_program.graph_module.code.strip()),
+            """\
+def forward(self, b_pred, b_t, x, y):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(b_pred, true_graph_0, false_graph_0, [b_t, x, y]);  b_pred = true_graph_0 = false_graph_0 = b_t = x = y = None
+    getitem = conditional[0];  conditional = None
+    return (getitem,)""",
+        )  # noqa: B950
+
+        self.assertExpectedInline(
+            str(exported_program.graph_module.true_graph_0.code.strip()),
+            """\
+def forward(self, b_t, x, y):
+    submod_3 = self.submod_1
+    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_3, x, b_t, y);  submod_3 = x = b_t = y = None
+    return (add_1,)""",
+        )
+
+        self.assertExpectedInline(
+            str(exported_program.graph_module.true_graph_0.submod_1.code.strip()),
+            """\
+def forward(self, x, b_t, y):
+    sub = torch.ops.aten.sub.Tensor(x, 1);  x = None
+    add = torch.ops.aten.add.Tensor(sub, b_t);  sub = b_t = None
+    add_1 = torch.ops.aten.add.Tensor(add, y);  add = y = None
+    return add_1""",
+        )
+
+    def test_predispatch_grad_wrappers(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                with torch.enable_grad():
+                    x = x - y
+                with torch.no_grad():
+                    x = x + y
+                return x
+
+        # no grad
+        model = Model()
+        with torch.no_grad():
+            ep_nograd = torch.export._trace._export(
+                model,
+                (torch.tensor(10), torch.tensor(12)),
+                {},
+                dynamic_shapes=None,
+                pre_dispatch=True,
+                strict=False,
+            )
+        # check that only sub op is wrapped with grad_enabled
+        getattr_nodes = [
+            node for node in ep_nograd.graph.nodes if node.op == "get_attr"
+        ]
+        self.assertEqual(len(getattr_nodes), 1)
+        grad_subgraph = getattr(ep_nograd.graph_module, getattr_nodes[0].target)
+        op_node = [
+            node for node in grad_subgraph.graph.nodes if node.op == "call_function"
+        ][0]
+        self.assertEqual(op_node.target._name, "aten::sub.Tensor")
+
+        # enable grad
+        model = Model()
+        ep_grad = torch.export._trace._export(
+            model,
+            (torch.tensor(10), torch.tensor(12)),
+            {},
+            dynamic_shapes=None,
+            pre_dispatch=True,
+            strict=False,
+        )
+        # check that only add op is wrapped with grad_enabled
+        getattr_nodes = [node for node in ep_grad.graph.nodes if node.op == "get_attr"]
+        self.assertEqual(len(getattr_nodes), 1)
+        grad_subgraph = getattr(ep_grad.graph_module, getattr_nodes[0].target)
+        op_node = [
+            node for node in grad_subgraph.graph.nodes if node.op == "call_function"
+        ][0]
+        self.assertEqual(op_node.target._name, "aten::add.Tensor")
+
+    def test_unbacked_deferred_runtime_retrace(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                y_sum = y.sin().sum()
+                with torch.no_grad():
+                    a = x.item()
+                    torch._check_is_size(a)
+                    torch._check(a > 2)
+                    torch._check(a < 6)
+                    unbacked_shape = torch.ops.testlib.foo_unbacked(a)
+                return y + y_sum + unbacked_shape.sum()
+
+        inps = (torch.tensor(4), torch.randn(5, 5))
+        from torch.export import _trace
+
+        ep_pre = _trace._export(Foo(), inps, pre_dispatch=True, strict=False)
+        self.assertExpectedInline(
+            str(ep_pre.graph_module.submod_1.code).strip(),
+            """\
+def forward(self, x):
+    item = torch.ops.aten.item.default(x);  x = None
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item)
+    sym_constrain_range_default = torch.ops.aten.sym_constrain_range.default(item, min = 3, max = 5)
+    ge = item >= 0
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression 0 <= u1 on node 'ge'");  ge = None
+    gt = item > 2
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
+    lt = item < 6
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
+    foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
+    return foo_unbacked""",
+        )
+        ep_aot = ep_pre.run_decompositions()
+        self.assertExpectedInline(
+            str(ep_aot.graph_module.code).strip(),
+            """\
+def forward(self, x, y):
+    sin = torch.ops.aten.sin.default(y)
+    sum_1 = torch.ops.aten.sum.dim_IntList(sin, []);  sin = None
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
+    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
+    sym_constrain_range = torch.ops.aten.sym_constrain_range.default(_local_scalar_dense, min = 3, max = 5)
+    ge = _local_scalar_dense >= 0
+    _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression 0 <= u1 on node 'ge'");  ge = None
+    gt = _local_scalar_dense > 2
+    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
+    lt = _local_scalar_dense < 6;  _local_scalar_dense = None
+    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
+    full = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
+    sum_2 = torch.ops.aten.sum.dim_IntList(full, []);  full = None
+    add_1 = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
+    return (add_1,)""",
+        )
 
 if __name__ == "__main__":
     run_tests()
