@@ -275,9 +275,9 @@ def expand_to_full_mesh_op_strategy(
                 for input_strategy, input_spec in zip(input_args_strategy, input_specs)
             ]
             strategy = PlacementStrategy(
-                output_specs=(
-                    tuple(spec_list[:input_index]) if input_index > 1 else spec_list[0]
-                ),
+                output_specs=tuple(spec_list[:input_index])
+                if input_index > 1
+                else spec_list[0],
                 input_specs=input_specs,
                 redistribute_cost=redistribute_cost,
             )
