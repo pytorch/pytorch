@@ -578,8 +578,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_flash_attention_hardware_support,
       check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89,
       check_flash_causal_non_square_seqlens,
-      check_dtypes_low_precision,
-      check_batch_size_and_num_heads_dense<true /*supports_grouped_query_attention=*/>
+      check_dtypes_low_precision
       );
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
