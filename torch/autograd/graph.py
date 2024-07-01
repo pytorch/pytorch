@@ -172,8 +172,11 @@ class Node(abc.ABC):
 
 def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Node:
     if t.requires_grad and t.grad_fn is None:
-        return t.view_as(t).grad_fn.next_functions[0][0]  # type: ignore[union-attr,return-value]
-    return t.grad_fn  # type: ignore[return-value]
+        node = t.view_as(t).grad_fn.next_functions[0][0]  # type: ignore[union-attr]
+    else:
+        node = t.grad_fn
+    assert node is not None
+    return node
 
 
 class GradientEdge(NamedTuple):
