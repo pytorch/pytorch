@@ -69,6 +69,7 @@ from ..source import (
     OptimizerSource,
     RandomValueSource,
     Source,
+    SubclassAttrListSource,
     TupleIteratorGetItemSource,
 )
 from ..trace_rules import (
@@ -85,6 +86,7 @@ from ..utils import (
     get_locals_to_steal,
     get_static_address_type,
     is_function_or_wrapper,
+    is_lru_cache_wrapped_function,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
@@ -131,6 +133,7 @@ from .functions import (
     TritonKernelVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    WrapperUserFunctionVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .iter import ItertoolsVariable
@@ -274,8 +277,10 @@ class BackwardStateGraphArg(GraphArg):
 
     def reconstruct(self, codegen):
         assert codegen.tx.output.backward_state_var
-        codegen.load_import_from(BackwardState.__module__, "BackwardState")
-        codegen.call_function(0, True)
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(BackwardState.__module__, "BackwardState")
+        )
+        codegen.call_function(0, False)
         codegen.dup_top()
         codegen.store(codegen.tx.output.backward_state_var)
 
@@ -392,6 +397,7 @@ class VariableBuilder:
             (re.Pattern, cls.wrap_regex_pattern),
             (weakref.ReferenceType, cls.wrap_weakref),
             (torch.utils.hooks.RemovableHandle, cls.wrap_removable_handle),
+            (torch.jit.ScriptFunction, cls.wrap_jit_function),
         ]
 
         if config.trace_numpy and np:
@@ -420,6 +426,12 @@ class VariableBuilder:
         # the same frame. So graph break.
         # Related test - PYTORCH_TEST_WITH_DYNAMO=1 python test/test_autograd.py -k TestAutograd.test_hooks
         unimplemented("unregistered hook removable handle")
+
+    def wrap_jit_function(self, value):
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        return WrapperUserFunctionVariable(
+            value, "_torchdynamo_inline", source=self.source
+        )
 
     @classmethod
     @functools.lru_cache(None)
@@ -889,6 +901,14 @@ class VariableBuilder:
         elif TorchCtxManagerClassVariable.is_matching_cls(value):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchCtxManagerClassVariable(value, source=self.source)
+        elif inspect.getattr_static(value, "__script_if_tracing_wrapper", False):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return WrapperUserFunctionVariable(
+                value, "__original_fn", source=self.source
+            )
+        elif is_lru_cache_wrapped_function(value):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
@@ -1377,6 +1397,10 @@ class VariableBuilder:
         # and recursively install corresponding guard for each inner attribute.
         if is_traceable_wrapper_subclass(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
+            install_guard(
+                SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
+            )
+
             attrs, _ = value.__tensor_flatten__()
             for attr in attrs:
                 inner_value = getattr(value, attr)
@@ -2093,15 +2117,14 @@ def _automatic_dynamic(
         )
 
         # Get symbolic contexts for inner tensors
-        attrs, _ = type(e).__tensor_flatten__(e)
         inner_contexts = {}  # mapping from attr -> symbolic context
+        attrs, _ = type(e).__tensor_flatten__(e)
         for attr in attrs:
             inner_tensor = getattr(e, attr)
             inner_source = AttrSource(source, attr)
-            inner_context = _automatic_dynamic(
+            inner_contexts[attr] = _automatic_dynamic(
                 inner_tensor, tx, inner_source, static_shapes
             )
-            inner_contexts[attr] = inner_context
 
         return SubclassSymbolicContext(
             dynamic_sizes=outer_context.dynamic_sizes,

@@ -2,7 +2,6 @@
 
 import os
 import sys
-from os import path
 
 import torch
 import torch.distributed as dist
@@ -39,7 +38,6 @@ if (
     "BACKEND" not in os.environ
     or "WORLD_SIZE" not in os.environ
     or "TEMP_DIR" not in os.environ
-    or not path.exists(path.join(os.environ["TEMP_DIR"], "barrier"))
 ):
     # TODO can we actually have `run_tests.py` emit the complete instructions when it prints a repro command?
     raise RuntimeError(
