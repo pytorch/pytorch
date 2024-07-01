@@ -555,7 +555,7 @@ def gen_nn_functional(fm: FileManager) -> None:
 
     extra_nn_functional___all__ = [
         "__all__ += [",
-        *(f'    "{_}",' for _ in extra_nn_functional___all__),
+        *(f'    "{name}",' for name in extra_nn_functional___all__),
         "]",
     ]
 
