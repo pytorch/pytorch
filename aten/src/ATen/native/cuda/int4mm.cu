@@ -804,8 +804,8 @@ void launch_tinygemm_kernel(
 // FIXME: parallelize better, smem staging etc?
 template <int InnerKTiles>
 __global__ void matrix_to_m16n8k16_Bint4_layout(
-    // size [n][k]
-    const at::PackedTensorAccessor32<int32_t, 2, at::RestrictPtrTraits> in,
+    // size [n][k / 2]
+    const at::PackedTensorAccessor32<uint8_t, 2, at::RestrictPtrTraits> in,
     // size [ceil(n / 8)][ceil(k / (InnerKTiles * 16))][32][InnerKTiles / 2]
     at::PackedTensorAccessor32<int32_t, 4, at::RestrictPtrTraits> out) {
   // int4 values are packed into int32 values, which require at least 8. Given
@@ -820,6 +820,8 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
   auto kOuterTile = blockIdx.x;
   auto nTile = blockIdx.y;
   auto t = threadIdx.x;
+  printf("%d %d %d\n", kOuterTile, nTile, t);
+  printf("InnerKTiles %d\n", InnerKTiles);
 
   // Two k-tiles are packed into an int32 at a time
 #pragma unroll
@@ -829,30 +831,39 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
 
     bool n0Valid = n0 < in.size(0);
 
-    int32_t ks[8];
+    // Four uint8 are packed into an int32
+    int32_t ks[4];
 
-    auto kBase0 = (kOuterTile * InnerKTiles + innerKTile) * kKTileSize;
-    ks[0] = kBase0 + (t % 4) * 2;
-    ks[1] = ks[0] + 1;
-    ks[2] = ks[0] + 8;
-    ks[3] = ks[0] + 8 + 1;
+    auto kBase0 = (kOuterTile * InnerKTiles + innerKTile) * kKTileSize / 2;
+    ks[0] = kBase0 + t % 4;
+    ks[1] = ks[0] + 4;
 
-    auto kBase1 = kBase0 + kKTileSize;
-    ks[4] = kBase1 + (t % 4) * 2;
-    ks[5] = ks[4] + 1;
-    ks[6] = ks[4] + 8;
-    ks[7] = ks[4] + 8 + 1;
+    auto kBase1 = kBase0 + kKTileSize / 2;
+    ks[2] = kBase1 + t % 4;
+    ks[3] = ks[2] + 4;
 
+    // printf("%d %d: %d %d %d %d %d %d %d %d \n", n0, t, ks[0], ks[1], ks[2],
+    // ks[3], ks[4], ks[5], ks[6], ks[7]);
+    printf("%d %d: %d %d %d %d \n", n0, t, ks[0], ks[1], ks[2], ks[3]);
     auto pIn = &in[n0][0];
 
-    uint32_t v[8];
+    uint8_t v[4];
 #pragma unroll
-    for (int i = 0; i < 8; ++i) {
-      v[i] = (n0Valid && ks[i] < in.size(1)) ? pIn[ks[i]] : uint32_t(0);
+    for (int i = 0; i < 4; ++i) {
+      v[i] = (n0Valid && ks[i] < in.size(1)) ? pIn[ks[i]] : uint8_t(0);
     }
 
-    int32_t pack = (v[7] << 28) | (v[5] << 24) | (v[3] << 20) | (v[1] << 16) |
-        (v[6] << 12) | (v[4] << 8) | (v[2] << 4) | v[0];
+    // To clearly explain the packed result with 8 int4 values into one int32,
+    // we use the follow figure:
+    //[n][k]     int32: v[0] v[1] v[2] v[3] v[4] v[5] v[6] v[7]
+    //[n][k / 2] uint8:    v[0]     v[1]      v[2]      v[3]
+    // Packed result is consisted of v[7] v[5] v[3] v[1] v[6] v[4] v[2] v[0],
+    // which epuals to v[3]L v[2]L v[1]L v[0]L v[3]H v[2]H v[1]H v[0]H.
+    int32_t pack = ((uint32_t)(v[3] & 0xF) << 28) |
+        ((uint32_t)(v[2] & 0xF) << 24) | ((uint32_t)(v[1] & 0xF) << 20) |
+        ((uint32_t)(v[0] & 0xF) << 16) | ((uint32_t)(v[3] & 0xF0) << 8) |
+        ((uint32_t)(v[2] & 0xF0) << 4) | ((uint32_t)(v[1] & 0xF0)) |
+        ((uint32_t)(v[0] & 0xF0) >> 4);
 
     // inner k-tiles pack two at a time
     out[nTile][kOuterTile][t][innerKTile / 2] = pack;
@@ -1035,15 +1046,15 @@ at::Tensor _weight_int4pack_mm_cuda(
   return C_final;
 }
 
-// input is [n][k] (int32 dtype)
-// output is [n / 8][k / (InnerKTiles * 16)][32][innerKTiles / 2]
+// input is [n][k / 2] (uint8 dtype)
+// output is [n / 8][k / (InnerKTiles * 16)][32][innerKTiles / 2] (int32 dtype)
 at::Tensor _convert_weight_to_int4pack_cuda(
     const at::Tensor& in,
     int64_t innerKTiles) {
   c10::cuda::CUDAGuard g(in.device());
 
   TORCH_CHECK(in.dim() == 2);
-  TORCH_CHECK(in.dtype() == at::kInt);
+  TORCH_CHECK(in.dtype() == at::kByte);
   TORCH_CHECK(in.is_contiguous());
 
   // At least 2 k-tiles need to be packed back to back in the innermost
@@ -1060,9 +1071,9 @@ at::Tensor _convert_weight_to_int4pack_cuda(
 
   // k-tiles are packed back to back in the innermost dimension in order to
   // allow for 4/8/16 byte loads
-  TORCH_CHECK(isEvenDivisor(in.size(1), innerKTiles * kKTileSize));
+  TORCH_CHECK(isEvenDivisor(in.size(1) * 2, innerKTiles * kKTileSize));
   // kSuperTiles is the number of k-tiles assuming k is innerKTiles * kKTileSize
-  auto kSuperTiles = divUp(in.size(1), innerKTiles * kKTileSize);
+  auto kSuperTiles = divUp(in.size(1) * 2, innerKTiles * kKTileSize);
 
   // each block handles `innerKTiles` k-tiles.
   // 2 k-tiles are a single int32
@@ -1076,15 +1087,15 @@ at::Tensor _convert_weight_to_int4pack_cuda(
 
   if (innerKTiles == 2) {
     matrix_to_m16n8k16_Bint4_layout<2><<<grid, kWarpSize, 0, stream>>>(
-        in.packed_accessor32<int32_t, 2, at::RestrictPtrTraits>(),
+        in.packed_accessor32<uint8_t, 2, at::RestrictPtrTraits>(),
         out.packed_accessor32<int32_t, 4, at::RestrictPtrTraits>());
   } else if (innerKTiles == 4) {
     matrix_to_m16n8k16_Bint4_layout<4><<<grid, kWarpSize, 0, stream>>>(
-        in.packed_accessor32<int32_t, 2, at::RestrictPtrTraits>(),
+        in.packed_accessor32<uint8_t, 2, at::RestrictPtrTraits>(),
         out.packed_accessor32<int32_t, 4, at::RestrictPtrTraits>());
   } else if (innerKTiles == 8) {
     matrix_to_m16n8k16_Bint4_layout<8><<<grid, kWarpSize, 0, stream>>>(
-        in.packed_accessor32<int32_t, 2, at::RestrictPtrTraits>(),
+        in.packed_accessor32<uint8_t, 2, at::RestrictPtrTraits>(),
         out.packed_accessor32<int32_t, 4, at::RestrictPtrTraits>());
   }
 
