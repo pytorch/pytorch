@@ -146,7 +146,10 @@ flex_decoding_template = TritonTemplate(
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
 
-    q = tl.load(Q_block_ptr, boundary_check=(0, 1))
+    if SAFE_M_BOUNDARY:
+        q = tl.load(Q_block_ptr)
+    else:
+        q = tl.load(Q_block_ptr, boundary_check=(0, ))
     if SCORE_MOD_IS_LINEAR:
         qk_scale *= 1.44269504
     q = (q * qk_scale).to(MATMUL_PRECISION)
@@ -156,8 +159,8 @@ flex_decoding_template = TritonTemplate(
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- load k, v --
-        k = tl.load(K_block_ptr, boundary_check=(0, 1)).to(MATMUL_PRECISION)
-        v = tl.load(V_block_ptr, boundary_check=(0, 1))
+        k = tl.load(K_block_ptr).to(MATMUL_PRECISION)
+        v = tl.load(V_block_ptr)
         # -- compute qk ---
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         qk = tl.dot(q, k, acc=qk)
@@ -203,8 +206,12 @@ flex_decoding_template = TritonTemplate(
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
 
     # Store output, logsumexp and rowmax for cross CTA reduction. (all in float32, even when input data are in fp16)
-    tl.store(M_block_ptr, m_i[None, :], boundary_check=(0, 1))
-    tl.store(L_block_ptr, l_i[None, :], boundary_check=(0, 1))
+    if SAFE_M_BOUNDARY:
+        tl.store(M_block_ptr, m_i[None, :])
+        tl.store(L_block_ptr, l_i[None, :])
+    else:
+        tl.store(M_block_ptr, m_i[None, :], boundary_check=(1,))
+        tl.store(L_block_ptr, l_i[None, :], boundary_check=(1,))
 
     # -- store output
     idx_z = off_z
@@ -222,36 +229,10 @@ flex_decoding_template = TritonTemplate(
 MAX_SPLIT_KV = 64
 
 
-def get_split_k(B: int, H: int, Mk: int, G: int = 1) -> int:
+def get_split_k(B: int, H: int, Mk: int, SM: int = 128) -> int:
     """Heuristic for the number of splits from xformer"""
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
-    if torch.version.hip:
-        split_k = max(Mk + bh - 1, 1024) // bh
-        max_chunk_size = 64
-        split_k_stop_val = 1024 / (B * G * H)
-        while split_k > 1 and Mk / (split_k - 1) < max_chunk_size:
-            split_k = split_k - 1
-
-        while split_k > split_k_stop_val:
-            split_k = split_k // 2
-
-        split_size = (Mk + split_k - 1) // split_k
-
-        chunk_size = split_size // max_chunk_size * max_chunk_size
-        if chunk_size < split_size:
-            split_k += 1
-
-        split_k_upper_bound = 512
-    else:
-        split_k = max(Mk, 1024) // bh
-        max_chunk_size = 64 if Mk <= 512 and bh <= 64 else 128
-        split_k_stop_val = Mk / max_chunk_size
-        split_k_upper_bound = 64
-
-        while split_k > split_k_stop_val:
-            split_k = split_k // 2
-
-    split_k = min(split_k, split_k_upper_bound)
+    split_k = SM // bh  # Each SM should at least get one block.
     split_k = max(split_k, 1)
 
     return split_k
@@ -265,7 +246,7 @@ def _get_decoding_default_config(key) -> Tuple[int, int, int]:
     dtype = key.get_dtype()
     default_config = None
 
-    default_config = (64, 2, 1)
+    default_config = (64, 2, 3)
 
     return default_config
 
@@ -277,11 +258,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     configs.append(_get_decoding_default_config(key))
     if config.max_autotune:
         configs += [
-            (128, 2, 1),
-            (128, 2, 1),
-            (64, 2, 1),
-            (32, 2, 1),
-            (16, 2, 1),
+            (64, 2, 2),
+            (32, 2, 3),
+            (16, 2, 3),
         ]
 
     SPLIT_KV = get_split_k(key.get_size()[0], key.get_size()[1], key.get_size()[2])
@@ -348,6 +327,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
             SCORE_MOD_IS_LINEAR=False,
             ROWS_GUARANTEED_SAFE=False,
             OUTPUT_LOGSUMEXP=True,
+            SAFE_M_BOUNDARY=(query.get_size()[-2] % BLOCK_M) == 0,
+            SAFE_N_BOUNDARY=True,
         )
 
     inputs_for_flex_decoding = [query, key, value, buf_M, buf_L] + list(other_buffers)
