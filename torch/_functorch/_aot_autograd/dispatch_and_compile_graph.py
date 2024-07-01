@@ -24,7 +24,6 @@ from .functional_utils import (
     assert_functional_graph,
     propagate_input_mutation_stacktraces,
 )
-from .fx_passes import move_resize_zero_to_end_of_graph, refunctionalize_set
 from .schemas import AOTConfig, SubclassMeta, ViewAndMutationMeta
 from .traced_function_transforms import (
     aot_dispatch_subclass,
