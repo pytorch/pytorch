@@ -9,7 +9,8 @@ from torch.utils.data.datapipes.datapipe import DataChunk, MapDataPipe
 
 __all__ = ["BatcherMapDataPipe"]
 
-T = TypeVar("T")
+
+_T = TypeVar("_T")
 
 
 @functional_datapipe("batch")
@@ -40,7 +41,7 @@ class BatcherMapDataPipe(MapDataPipe[DataChunk]):
 
     def __init__(
         self,
-        datapipe: MapDataPipe[T],
+        datapipe: MapDataPipe[_T],
         batch_size: int,
         drop_last: bool = False,
         wrapper_class: type = DataChunk,

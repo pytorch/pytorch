@@ -17,7 +17,8 @@ __all__ = [
     "UnBatcherIterDataPipe",
 ]
 
-T_co = TypeVar("T_co", covariant=True)
+
+_T_co = TypeVar("_T_co", covariant=True)
 
 
 def __getattr__(name: str):
@@ -198,8 +199,8 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
 
     def __init__(
         self,
-        datapipe: IterDataPipe[T_co],
-        group_key_fn: Callable[[T_co], Any],
+        datapipe: IterDataPipe[_T_co],
+        group_key_fn: Callable[[_T_co], Any],
         *,
         keep_key: bool = False,
         buffer_size: int = 10000,

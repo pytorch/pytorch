@@ -15,10 +15,11 @@ __all__ = [
     "ShufflerIterDataPipe",
 ]
 
-T_co = TypeVar("T_co", covariant=True)
+
+_T_co = TypeVar("_T_co", covariant=True)
 
 
-class SamplerIterDataPipe(IterDataPipe[T_co]):
+class SamplerIterDataPipe(IterDataPipe[_T_co]):
     r"""
     Generate sample elements using the provided ``Sampler`` (defaults to :class:`SequentialSampler`).
 
@@ -48,7 +49,7 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
         # https://github.com/python/mypy/pull/9629 will solve
         self.sampler = sampler(*self.sampler_args, data_source=self.datapipe, **self.sampler_kwargs)  # type: ignore[misc]
 
-    def __iter__(self) -> Iterator[T_co]:
+    def __iter__(self) -> Iterator[_T_co]:
         return iter(self.sampler)
 
     def __len__(self) -> int:
@@ -59,7 +60,7 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
 
 
 @functional_datapipe("shuffle")
-class ShufflerIterDataPipe(IterDataPipe[T_co]):
+class ShufflerIterDataPipe(IterDataPipe[_T_co]):
     r"""
     Shuffle the input DataPipe with a buffer (functional name: ``shuffle``).
 
@@ -93,16 +94,16 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         [0, 4, 1, 6, 3, 2, 9, 5, 7, 8]
     """
 
-    datapipe: IterDataPipe[T_co]
+    datapipe: IterDataPipe[_T_co]
     buffer_size: int
-    _buffer: list[T_co]
+    _buffer: list[_T_co]
     _enabled: bool
     _seed: int | None
     _rng: random.Random
 
     def __init__(
         self,
-        datapipe: IterDataPipe[T_co],
+        datapipe: IterDataPipe[_T_co],
         *,
         buffer_size: int = 10000,
         unbatch_level: int = 0,
@@ -110,7 +111,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         super().__init__()
         # TODO: Performance optimization
         #       buffer can be a fixed size and remove expensive `append()` and `len()` operations
-        self._buffer: list[T_co] = []
+        self._buffer: list[_T_co] = []
         assert buffer_size > 0, "buffer_size should be larger than 0"
         if unbatch_level == 0:
             self.datapipe = datapipe
@@ -129,7 +130,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         self._seed = seed
         return self
 
-    def __iter__(self) -> Iterator[T_co]:
+    def __iter__(self) -> Iterator[_T_co]:
         if not self._enabled:
             yield from self.datapipe
         else:

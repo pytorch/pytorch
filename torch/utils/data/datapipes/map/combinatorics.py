@@ -11,11 +11,11 @@ from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
 __all__ = ["ShufflerIterDataPipe"]
 
 
-T_co = TypeVar("T_co", covariant=True)
+_T_co = TypeVar("_T_co", covariant=True)
 
 
 # @functional_datapipe('shuffle')
-class ShufflerIterDataPipe(IterDataPipe[T_co]):
+class ShufflerIterDataPipe(IterDataPipe[_T_co]):
     r"""
     Shuffle the input MapDataPipe via its indices (functional name: ``shuffle``).
 
@@ -52,14 +52,14 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         of data during data-processing.
     """
 
-    datapipe: MapDataPipe[T_co]
+    datapipe: MapDataPipe[_T_co]
     _enabled: bool
     _seed: int | None
     _rng: random.Random
 
     def __init__(
         self,
-        datapipe: MapDataPipe[T_co],
+        datapipe: MapDataPipe[_T_co],
         *,
         indices: list | None = None,
     ) -> None:
@@ -79,7 +79,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         self._seed = seed
         return self
 
-    def __iter__(self) -> Iterator[T_co]:
+    def __iter__(self) -> Iterator[_T_co]:
         if not self._enabled:
             for idx in self.indices:
                 yield self.datapipe[idx]

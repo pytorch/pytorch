@@ -9,7 +9,7 @@ from torch.utils.data.datapipes.datapipe import MapDataPipe
 
 __all__ = ["ConcaterMapDataPipe", "ZipperMapDataPipe"]
 
-T_co = TypeVar("T_co", covariant=True)
+_T_co = TypeVar("_T_co", covariant=True)
 
 
 @functional_datapipe("concat")
@@ -47,7 +47,7 @@ class ConcaterMapDataPipe(MapDataPipe):
             raise TypeError("Expected all inputs to be `Sized`")
         self.datapipes = datapipes  # type: ignore[assignment]
 
-    def __getitem__(self, index) -> T_co:  # type: ignore[type-var]
+    def __getitem__(self, index) -> _T_co:  # type: ignore[type-var]
         offset = 0
         for dp in self.datapipes:
             if index - offset < len(dp):
@@ -61,7 +61,7 @@ class ConcaterMapDataPipe(MapDataPipe):
 
 
 @functional_datapipe("zip")
-class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
+class ZipperMapDataPipe(MapDataPipe[Tuple[_T_co, ...]]):
     r"""
     Aggregates elements into a tuple from each of the input DataPipes (functional name: ``zip``).
 
@@ -80,9 +80,9 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
         [(0, 10), (1, 11), (2, 12)]
     """
 
-    datapipes: tuple[MapDataPipe[T_co], ...]
+    datapipes: tuple[MapDataPipe[_T_co], ...]
 
-    def __init__(self, *datapipes: MapDataPipe[T_co]) -> None:
+    def __init__(self, *datapipes: MapDataPipe[_T_co]) -> None:
         if len(datapipes) == 0:
             raise ValueError("Expected at least one DataPipe, but got nothing")
         if not all(isinstance(dp, MapDataPipe) for dp in datapipes):
@@ -91,7 +91,7 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
             raise TypeError("Expected all inputs to be `Sized`")
         self.datapipes = datapipes
 
-    def __getitem__(self, index) -> tuple[T_co, ...]:
+    def __getitem__(self, index) -> tuple[_T_co, ...]:
         res = []
         for dp in self.datapipes:
             try:

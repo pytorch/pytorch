@@ -20,11 +20,12 @@ __all__ = [
     "MapperIterDataPipe",
 ]
 
-T_co = TypeVar("T_co", covariant=True)
+
+_T_co = TypeVar("_T_co", covariant=True)
 
 
 @functional_datapipe("map")
-class MapperIterDataPipe(IterDataPipe[T_co]):
+class MapperIterDataPipe(IterDataPipe[_T_co]):
     r"""
     Applies a function over each item from the source DataPipe (functional name: ``map``).
 
@@ -125,7 +126,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         # Convert list back to tuple
         return tuple(data) if t_flag else data
 
-    def __iter__(self) -> Iterator[T_co]:
+    def __iter__(self) -> Iterator[_T_co]:
         for data in self.datapipe:
             yield self._apply_fn(data)
 
