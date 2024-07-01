@@ -80,15 +80,7 @@ class _ProfilerEvent:
     children: list[_ProfilerEvent]
 
     # TODO(robieta): remove in favor of `self.typed`
-    extra_fields: (
-        _ExtraFields_TorchOp
-        | _ExtraFields_Backend
-        | _ExtraFields_Allocation
-        | _ExtraFields_OutOfMemory
-        | _ExtraFields_PyCall
-        | _ExtraFields_PyCCall
-        | _ExtraFields_Kineto
-    )
+    extra_fields: _ExtraFields_TorchOp | _ExtraFields_Backend | _ExtraFields_Allocation | _ExtraFields_OutOfMemory | _ExtraFields_PyCall | _ExtraFields_PyCCall | _ExtraFields_Kineto
 
     @property
     def typed(

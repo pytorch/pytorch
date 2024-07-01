@@ -567,7 +567,6 @@ class AsyncCollectiveTensor(torch.Tensor):
         tensor = torch.ops.c10d_functional.{collective}(self, tag, rankset, group_size)
         return _maybe_wrap_tensor(tensor)
     """
-
     elem: torch.Tensor
     completed: bool
 
