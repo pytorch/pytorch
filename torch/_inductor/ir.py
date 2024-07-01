@@ -696,7 +696,7 @@ class Reduction(Loops):
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
         should_split = (
-            is_gpu(get_device_type(device))
+            not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
             and reduction_type
             not in {
                 "argmax",

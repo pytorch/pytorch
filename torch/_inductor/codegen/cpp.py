@@ -3522,6 +3522,7 @@ class CppScheduling(BaseScheduling):
     backend_features = dict.fromkeys(
         [
             BackendFeature.INPLACE_BUFFERS,
+            BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
         ]
     )
 
