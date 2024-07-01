@@ -293,15 +293,17 @@ def insert_deferred_runtime_asserts(
                 node.op != "placeholder"
                 and (sym_expr := _get_sym_val(node)) is not None
             ):
-                if sym_expr in expr_to_proxy or (  # example value is redundant
-                _is_intermediate_tensor_sym_call(node)
-                and not (sym_expr.free_symbols - expr_to_proxy.keys())
-                # this guards against calls like item() that produce new untracked symbols
-                )  # shape call on intermediate tensor, turn into computation on input shapes
-                and not (
-                    resolve_unbacked_bindings(
-                        shape_env, node.meta.get("unbacked_bindings", {})
-                    ).keys() - expr_to_proxy.keys()
+                if (
+                    sym_expr in expr_to_proxy or (  # example value is redundant
+                    _is_intermediate_tensor_sym_call(node)
+                    and not (sym_expr.free_symbols - expr_to_proxy.keys())
+                    # this guards against calls like item() that produce new untracked symbols
+                    )  # shape call on intermediate tensor, turn into computation on input shapes
+                    and not (
+                        resolve_unbacked_bindings(
+                            shape_env, node.meta.get("unbacked_bindings", {})
+                        ).keys() - expr_to_proxy.keys()
+                    )
                 ):
                 # this guards against calls that produce unbacked bindings we haven't yet seen.
                 # this is possible if the example value has a hint (is backed), but produces an unbacked symbol.
