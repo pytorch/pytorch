@@ -163,7 +163,12 @@ class FileManager:
                 comment += f" from {template_path.name}"
                 env["generated_comment"] = comment
             template = _read_template(template_path)
-            return template.substitute(env)
+            substitute_out = template.substitute(env)
+            return re.sub(
+                r'("""\n)( *(@.*\n)* *def)',
+                r"\g<1>\n\g<2>",  # add an extra blank line after function docstring
+                substitute_out,
+            )
         if isinstance(env, str):
             return env
         assert_never(env)
