@@ -6,8 +6,6 @@
 #include <caffe2/serialize/read_adapter_interface.h>
 
 #include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/serialization/import.h>
-#include <torch/csrc/jit/serialization/source_range_serialization.h>
 
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue_inl.h>
@@ -21,6 +19,7 @@
 #include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/import_source.h>
@@ -31,7 +30,7 @@
 #include <fmt/format.h>
 
 #include <string>
-#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace torch::jit {
@@ -180,7 +179,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       type_resolver,
       ObjLoaderFunc,
       device_,
-      *reader_.get(),
+      *reader_,
       nullptr,
       storage_context_);
 }
@@ -312,7 +311,7 @@ Module import_ir_module(
 }
 
 static Module _load_jit_module_from_bytes(
-    std::shared_ptr<char> data,
+    const std::shared_ptr<char>& data,
     size_t size,
     std::shared_ptr<CompilationUnit> cu,
     std::optional<c10::Device> device,
@@ -320,7 +319,7 @@ static Module _load_jit_module_from_bytes(
     bool restore_shapes);
 
 Module parse_and_initialize_jit_module(
-    std::shared_ptr<char> data,
+    const std::shared_ptr<char>& data,
     size_t size,
     ExtraFilesMap& extra_files,
     std::optional<at::Device> device) {
@@ -345,7 +344,7 @@ Module load_jit_module_from_file(
     std::optional<at::Device> device) {
   auto data = get_file_content(filename.c_str());
   return parse_and_initialize_jit_module(
-      std::move(std::get<0>(data)), std::get<1>(data), extra_files, device);
+      std::get<0>(data), std::get<1>(data), extra_files, device);
 }
 
 Module load_jit_module_from_stream(
@@ -354,7 +353,7 @@ Module load_jit_module_from_stream(
     std::optional<at::Device> device) {
   auto data = get_stream_content(in);
   return parse_and_initialize_jit_module(
-      std::move(std::get<0>(data)), std::get<1>(data), extra_files, device);
+      std::get<0>(data), std::get<1>(data), extra_files, device);
 }
 
 Module import_ir_module(
@@ -384,13 +383,13 @@ Module import_ir_module(
     std::shared_ptr<PyTorchStreamReader> reader,
     std::shared_ptr<DeserializationStorageContext> storage_context,
     std::optional<at::Device> device,
-    std::string ts_id) {
+    const std::string& ts_id) {
   ScriptModuleDeserializer deserializer(
       std::move(cu),
       std::move(reader),
       /* pickle_dir_prefix = */ ".data/ts_code/" + ts_id + "/",
       /* tensor_dir_prefix = */ ".data/",
-      storage_context);
+      std::move(storage_context));
   ExtraFilesMap extra_files;
   return deserializer.deserialize(device, extra_files);
 }
@@ -443,7 +442,7 @@ Module import_ir_module(
     bool load_debug_files) {
   std::shared_ptr<ReadAdapterInterface> rai_shared = std::move(rai);
   return import_ir_module(
-      cu, rai_shared, device, extra_files, load_debug_files);
+      std::move(cu), rai_shared, device, extra_files, load_debug_files);
 }
 
 Module import_ir_module(
@@ -515,7 +514,7 @@ Module load(
 }
 
 Module _load_jit_module_from_bytes(
-    std::shared_ptr<char> data,
+    const std::shared_ptr<char>& data,
     size_t size,
     std::shared_ptr<CompilationUnit> cu,
     std::optional<c10::Device> device,
@@ -544,7 +543,7 @@ Module _load_jit_module_from_bytes(
 // methods are attached to type; we need to replace it's type.
 // Non-objects are unchanged; however, nested structures such as list, dict
 // are also reconstructed because they might contain an object.
-static IValue recreateObject(IValue ivalue, TypeResolver resolver) {
+static IValue recreateObject(IValue ivalue, const TypeResolver& resolver) {
   if (ivalue.isObject()) {
     auto obj = ivalue.toObject();
     auto classtype_old = obj->type();

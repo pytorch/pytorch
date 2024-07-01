@@ -26,6 +26,7 @@ runs:
           -e PYTORCH_FINAL_PACKAGE_DIR \
           -e PYTORCH_ROOT \
           -e SKIP_ALL_TESTS \
+          -e USE_SPLIT_BUILD \
           --tty \
           --detach \
           -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \

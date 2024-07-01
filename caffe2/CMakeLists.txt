@@ -548,7 +548,7 @@ if(USE_CUDA)
     set(DELAY_LOAD_FLAGS "")
   endif()
 
-  target_link_libraries(caffe2_nvrtc ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB} ${DELAY_LOAD_FLAGS})
+  target_link_libraries(caffe2_nvrtc PRIVATE caffe2::nvrtc ${DELAY_LOAD_FLAGS})
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   if(USE_NCCL)
     list(APPEND Caffe2_GPU_SRCS
@@ -560,6 +560,7 @@ if(USE_CUDA)
       append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_GPU_SRCS)
       set_source_files_properties(
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/CudaDMAConnectivity.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemory.cu
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
@@ -750,6 +751,9 @@ if(BUILD_LIBTORCHLESS)
     find_library(TORCH_XPU_LIB torch_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
   endif()
   add_subdirectory(../torch torch)
+  # ---[ Torch python bindings build
+  set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
+  set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
 else()
   set(TORCH_LIB torch)
   set(TORCH_CPU_LIB torch_cpu)
@@ -1190,6 +1194,9 @@ endif()
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/cpp-httplib)
 
+target_include_directories(torch_cpu PRIVATE
+  ${TORCH_ROOT}/third_party/nlohmann/include)
+
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
@@ -1270,12 +1277,10 @@ install(FILES
   ${PROJECT_BINARY_DIR}/TorchConfig.cmake
   DESTINATION share/cmake/Torch)
 
-
 # ---[ Torch python bindings build
 add_subdirectory(../torch torch)
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
 set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
-
 # ==========================================================
 # END formerly-libtorch flags
 # ==========================================================
@@ -1735,7 +1740,7 @@ if(BUILD_TEST)
         if(NOT MSVC)
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/AffineQuantizerBase.cpp)
           # TODO: Get rid of c10 dependency (which is only needed for the implementation of AT_ERROR)
-          target_link_libraries(${test_name}_${CPU_CAPABILITY} c10 sleef gtest_main)
+          target_link_libraries(${test_name}_${CPU_CAPABILITY} c10 sleef gtest_main nlohmann)
           if(USE_FBGEMM)
             target_link_libraries(${test_name}_${CPU_CAPABILITY} fbgemm)
           endif()
@@ -1889,35 +1894,4 @@ if(MSVC)
     set_source_files_properties(${tmp_path} PROPERTIES COMPILE_FLAGS "-Xcompiler /Zc:lambda")
   endforeach()
 endif()
-endif()
-
-# Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
-# This is because the build rules here written in such a way that they always
-# appear to need to be re-run generating >600 pieces of work during the pytorch
-# rebuild step. The long-term fix should be to clean up these rules so they
-# only rerun when needed.
-
-if(BUILD_PYTHON)
-  # ---[ Options.
-  set(PYTHON_LIB_REL_PATH "${Python_SITELIB}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
-  message(STATUS "Using ${PYTHON_LIB_REL_PATH} as python relative installation path")
-
-
-  set(build_files)
-  foreach(python_src ${PYTHON_SRCS})
-    add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/${python_src}
-                       DEPENDS ${PROJECT_SOURCE_DIR}/${python_src}
-                       COMMAND ${CMAKE_COMMAND} -E copy
-                       ${PROJECT_SOURCE_DIR}/${python_src}
-                       ${CMAKE_BINARY_DIR}/${python_src})
-    list(APPEND build_files ${CMAKE_BINARY_DIR}/${python_src})
-  endforeach()
-
-  add_custom_target(python_copy_files ALL DEPENDS ${build_files})
-
-
-  # Install commands
-  # Pick up static python files
-  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
-          FILES_MATCHING PATTERN "*.py")
 endif()
