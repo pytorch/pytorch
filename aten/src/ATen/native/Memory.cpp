@@ -8,6 +8,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/CPUFunctions.h>
 #else
 #include <ATen/ops/_debug_has_internal_overlap_native.h>
 #include <ATen/ops/_pin_memory.h>
