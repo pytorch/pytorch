@@ -3441,12 +3441,6 @@ class ShapeEnv:
     ) -> "sympy.Expr":
         """Create a new symbol which is tracked by this ShapeEnv
         """
-        if dynamic_dim is DimDynamic.SIZE_LIKE_UNBACKED:
-            r = self.create_unbacked_symint().node.expr
-            self._constrain_range_for_size(r)
-            # TODO: maybe put the hint somewhere
-            return r
-
         # check if constraint_dim is actually static integer
         if isinstance(constraint_dim, StrictMinMaxConstraint) and constraint_dim.vr.lower == constraint_dim.vr.upper:
             dynamic_dim = DimDynamic.STATIC
@@ -3470,6 +3464,14 @@ class ShapeEnv:
                 and source_name
                 and (source_name in symbolic_context.shape_env_to_source_to_symbol_cache[id(self)])):
             return symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name]
+
+        if dynamic_dim is DimDynamic.SIZE_LIKE_UNBACKED:
+            out = self.create_unbacked_symint().node.expr
+            self._constrain_range_for_size(out)
+            # TODO: maybe put the hint somewhere
+            if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
+                symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name] = out
+            return out
 
         if do_not_specialize_zero_one:
             specialize_zero_one = False
