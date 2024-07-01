@@ -37,7 +37,6 @@ if TYPE_CHECKING:
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
 log = logging.getLogger(__name__)
-torch_log = logging.getLogger("torch")
 
 aten = torch.ops.aten
 prims = torch.ops.prims

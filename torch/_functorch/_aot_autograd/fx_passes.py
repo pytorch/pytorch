@@ -1,13 +1,15 @@
 from collections import defaultdict
+from typing import Dict, List
 
 import torch
+from torch import fx
 
 
-def is_primal(node: torch.fx.Node) -> bool:
+def is_primal(node: fx.Node) -> bool:
     return node.op == "placeholder" and "tangents" not in str(node.target)
 
 
-def move_resize_zero_to_end_of_graph(graph):
+def move_resize_zero_to_end_of_graph(graph: fx.Graph) -> None:
     node_list = list(graph.nodes)
     return_node = node_list[-1]
     assert return_node.target == "output"
@@ -25,7 +27,7 @@ def move_resize_zero_to_end_of_graph(graph):
             graph.erase_node(resize_node)
 
 
-def refunctionalize_set(graph):
+def refunctionalize_set(graph: fx.Graph) -> None:
     node_list = list(graph.nodes)
     return_node = node_list[-1]
     assert return_node.target == "output"
@@ -57,11 +59,12 @@ def refunctionalize_set(graph):
     # Step 2: Re-functionalizing `.set_(primal_X, ...)`.
     # Replacement conditions:
     # 1. `.set_(primal_X, Y)` exists in graph.
-    # 2. `.set_(Y, ...)` is not called between primal_X's this `.set_(primal_X, Y)` vs. its next `.set_(primal_X, ...)` (or end of graph)
-    #     - This ensures primal_X and Y are semantically always meant to be the same tensor within this section of the graph.
+    # 2. `.set_(Y, ...)` is not called between primal_X's this `.set_(primal_X, Y)` and its next `.set_(primal_X, ...)` (or end of graph)  # noqa: B950
+    #    - This ensures primal_X and Y are semantically always meant to be the same tensor within this section of the graph.
     # If the above two conditions are met, then within this section of the graph
     # we will replace usage of output of this `.set_(primal_X, Y)` node with Y, and delete this `.set_(primal_X, Y)` node.
-    # For any primal input, if we have deleted the last `.set_(primal_X, ...)`, we will re-insert `.set_(primal_X, Y_last)` at the end of the graph.
+    # For any primal input, if we have deleted the last `.set_(primal_X, ...)`, we will re-insert
+    # `.set_(primal_X, Y_last)` at the end of the graph.
     for i, n in enumerate(node_list):
         # For aten.set_(X, Y), X must be primal input of graph.
         if (
@@ -85,15 +88,18 @@ def refunctionalize_set(graph):
                 and node_list[idx].args[0] == Y_input
                 for idx in range(set_node_idx + 1, next_set_node_idx)
             ):
-                # If `.set_(Y, ...)` is never called between primal input X's this `.set_(X, Y)` vs. its next `.set_(X, ...)` (or end of graph),
-                # then within this section of the graph we will replace usage of output of this `.set_(X, Y)` node with Y, and delete the `.set_(X, Y)` node.
+                # If `.set_(Y, ...)` is never called between primal_X's
+                # this `.set_(primal_X, Y)` and its next `.set_(primal_X, ...)` (or end of graph),
+                # then within this section of the graph we will replace usage of output of
+                # this `.set_(primal_X, Y)` node with Y, and delete the `.set_(primal_X, Y)` node.
                 set_node.replace_all_uses_with(
                     Y_input,
                     delete_user_cb=lambda n: node_to_idx[n] > set_node_idx
                     and node_to_idx[n] < next_set_node_idx,
                 )
                 set_nodes_to_be_deleted.add(set_node)
-        # For any primal input, if we have deleted the last `.set_(X, ...)`, we will re-insert `.set_(X, Y_last)` at the end of the graph.
+        # For any primal input, if we have deleted the last `.set_(primal_X, ...)`,
+        # we will re-insert `.set_(primal_X, Y_last)` at the end of the graph.
         last_set_node = node_list[primal_input_to_set_idx[primal_input][-1]]
         if last_set_node in set_nodes_to_be_deleted:
             with graph.inserting_before(return_node):
@@ -112,7 +118,7 @@ def refunctionalize_set(graph):
         graph.erase_node(set_node)
 
 
-def collect_graph_epilogue_mutable_ops(graph):
+def collect_graph_epilogue_mutable_ops(graph: fx.Graph) -> List[fx.Node]:
     epilogue_mutable_ops = []
     node_list = list(graph.nodes)
     for node in reversed(node_list):
@@ -122,10 +128,12 @@ def collect_graph_epilogue_mutable_ops(graph):
             epilogue_mutable_ops.append(node)
         else:
             break
-    return reversed(epilogue_mutable_ops)
+    return reversed(epilogue_mutable_ops)  # type: ignore[return-value]
 
 
-def collect_nodes_set_into_primal_in_graph_epilogue(graph):
+def collect_nodes_set_into_primal_in_graph_epilogue(
+    graph: fx.Graph,
+) -> Dict[fx.Node, fx.Node]:
     primal_inputs = [*filter(is_primal, graph.nodes)]
     epilogue_mutable_ops = collect_graph_epilogue_mutable_ops(graph)
     node_to_primal_map = {
@@ -134,4 +142,4 @@ def collect_nodes_set_into_primal_in_graph_epilogue(graph):
         if node.target is torch.ops.aten.set_.source_Tensor
         and node.args[0] in primal_inputs
     }
-    return node_to_primal_map
+    return node_to_primal_map  # type: ignore[return-value]
