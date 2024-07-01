@@ -818,7 +818,7 @@ def _get_device_from_device_id(
             "before FSDP initialization or pass in the explicit device "
             "index as the `device_id` argument."
         )
-        device = torch.device(f"{device.type}:{device_idx}")
+        device = torch.device(device.type, device_idx)
     return device
 
 
