@@ -274,7 +274,7 @@ class FileManager:
         that varies across builds. So, just use the path relative to this file,
         which will point to the codegen source but will be stable.
         """
-        return str(self.template_dir.relative_to(Path(__file__).parent))
+        return os.path.relpath(self.template_dir, os.path.dirname(__file__))
 
 
 # Helper function to generate file manager
