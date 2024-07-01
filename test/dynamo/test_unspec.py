@@ -617,7 +617,7 @@ def forward(self):
         self.assertTrue(f(torch.empty(8)).item())
         self.assertFalse(f(torch.empty(13)).item())
 
-    @torch._dynamo.config.patch(error_on_recompile = True)
+    @torch._dynamo.config.patch(error_on_recompile=True)
     def test_mark_unbacked(self):
         class TestModel(torch.nn.Module):
             def __init__(
