@@ -1,4 +1,4 @@
-#if defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
+#if (defined(USE_ROCM) && ROCM_VERSION >= 57000) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
@@ -152,6 +152,8 @@ constexpr int32_t kWarpSize = 32;
 #endif
 
 #define CDNA2_OR_LATER() (defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__))
+
+#if (defined(USE_ROCM) && ROCM_VERSION >= 57000) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
 
 // f16 vector types
 struct __align__(2) f16x1 {
@@ -913,7 +915,7 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
         sum_f32);
   }
 #else
-    printf("_weight_int4pack_mm_cuda is only supported on AMD gpu arch greater than or equal to CDNA2\n");
+    printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is only supported on AMD gpu arch greater than or equal to CDNA2\n");
 #endif
 }
 
@@ -1072,6 +1074,8 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
   }
 }
 
+#endif
+
 
 at::Tensor _weight_int4pack_mm_cuda(
     const at::Tensor& A,
@@ -1149,6 +1153,7 @@ at::Tensor _weight_int4pack_mm_cuda(
   auto C_final = at::empty(
       {m, n}, at::TensorOptions().dtype(at::kBFloat16).device(A.device()));
 
+#if (defined(USE_ROCM) && ROCM_VERSION >= 57000) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
   auto stream = at::cuda::getCurrentCUDAStream();
 #define RUN_GEMM(WARPS, K_TILES_PER_WARP, Q_GROUP_SIZE, REDUCE_TYPE) \
   do {                                                               \
@@ -1254,6 +1259,9 @@ at::Tensor _weight_int4pack_mm_cuda(
 #undef RUN_GEMM
 
   return C_final;
+#endif
+  TORCH_CHECK(false, "_weight_int4pack_mm_cuda is not available for build.")
+  return C_final;
 }
 
 // input is [n][k] (int32 dtype)
@@ -1273,6 +1281,12 @@ at::Tensor _convert_weight_to_int4pack_cuda(
   // (int32). 4 inner K-tiles = 8 byte load, 8 inner k-tiles = 16 byte load
   // which is the maximum vectorized load/store size
   TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8);
+
+#if defined(USE_ROCM)
+  if (!isCDNA2orLater(in.device().index())) {
+    TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is only supported on AMD gpu arch greater than or equal to CDNA2");
+  }
+#endif
 
 #if defined(USE_ROCM)
   constexpr int32_t kNTileSize = 16;
@@ -1305,6 +1319,7 @@ at::Tensor _convert_weight_to_int4pack_cuda(
       {nTilesTensor, kSuperTiles, 32, innerKTiles / 2},
       at::TensorOptions().dtype(at::kInt).device(in.device()));
 
+#if (defined(USE_ROCM) && ROCM_VERSION >= 57000) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
   auto stream = at::cuda::getCurrentCUDAStream();
   dim3 grid(kSuperTiles, nTiles);
 
@@ -1322,6 +1337,9 @@ at::Tensor _convert_weight_to_int4pack_cuda(
         out.packed_accessor32<int32_t, 4, at::RestrictPtrTraits>());
   }
 
+  return out;
+#endif
+  TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is not available for build.")
   return out;
 }
 
