@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import unittest
+from collections import Counter
 from typing import Dict
 
 import torch
@@ -9,19 +10,14 @@ from torch.ao.quantization import (
     generate_numeric_debug_handle,
     NUMERIC_DEBUG_HANDLE_KEY,
 )
-from torch.ao.quantization.pt2e.export_utils import _WrapperModule
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
 )
-from torch.fx import Node
-from torch.fx.passes.utils.matcher_with_name_node_map_utils import (
-    SubgraphMatcherWithNameNodeMap,
-)
 from torch.testing._internal.common_quantization import TestHelperModules
 from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
-from collections import Counter
+
 
 def _extract_debug_handles(model) -> Dict[torch.fx.Node, int]:
     debug_handle_map: Dict[torch.fx.Node, int] = {}
@@ -65,7 +61,6 @@ class TestGenerateNumericDebugHandle(TestCase):
         # torch.ops.aten.conv2d.default, torch.ops.aten.squeeze.dim, torch.ops.aten.conv1d.default
         for dh_id in repeated_debug_handle_ids:
             self.assertEqual(res_counter[dh_id], 2)
-
 
         m(*example_inputs)
         m = convert_pt2e(m)
