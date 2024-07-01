@@ -1,0 +1,600 @@
+name: pull
+
+on:
+  pull_request:
+    branches-ignore:
+      - nightly
+  push:
+    branches:
+      - main
+      - release/*
+      - landchecks/*
+  workflow_dispatch:
+  schedule:
+    - cron: 29 8 * * *  # about 1:29am PDT
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  # Often fails due to conda availability issues
+  # See https://github.com/pytorch/pytorch/issues/129717
+  # llm-td:
+  #  name: before-test
+  #  uses: ./.github/workflows/llm_td_retrieval.yml
+  #  permissions:
+  #    id-token: write
+  #    contents: read
+
+  target-determination:
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+    # needs: llm-td
+    permissions:
+      id-token: write
+      contents: read
+
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+
+  linux-jammy-py3_8-gcc11-build:
+    name: linux-jammy-py3.8-gcc11
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-jammy-py3.8-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 4, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "docs_test", shard: 1, num_shards: 1,  runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "distributed", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+
+  linux-jammy-py3_8-gcc11-test:
+    name: linux-jammy-py3.8-gcc11
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-py3_8-gcc11-build
+      - target-determination
+    with:
+      build-environment: linux-jammy-py3.8-gcc11
+      docker-image: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.test-matrix }}
+
+  linux-docs:
+    name: linux-docs
+    uses: ./.github/workflows/_docs.yml
+    needs: linux-jammy-py3_8-gcc11-build
+    with:
+      build-environment: linux-jammy-py3.8-gcc11
+      docker-image: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
+
+  linux-jammy-py3_8-gcc11-no-ops:
+    name: linux-jammy-py3.8-gcc11-no-ops
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-jammy-py3.8-gcc11-no-ops
+      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
+
+  linux-jammy-py3_8-gcc11-pch:
+    name: linux-jammy-py3.8-gcc11-pch
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-jammy-py3.8-gcc11-pch
+      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
+
+
+  linux-jammy-py3_10-clang15-asan-build:
+    name: linux-jammy-py3.10-clang15-asan
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-jammy-py3.10-clang15-asan
+      docker-image-name: pytorch-linux-jammy-py3-clang15-asan
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 2, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 3, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 4, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 5, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 6, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+        ]}
+      sync-tag: asan-build
+
+
+  linux-jammy-py3_10-clang15-asan-test:
+    name: linux-jammy-py3.10-clang15-asan
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-py3_10-clang15-asan-build
+      - target-determination
+    with:
+      build-environment: linux-jammy-py3.10-clang15-asan
+      docker-image: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.test-matrix }}
+      sync-tag: asan-test
+
+  linux-focal-py3_8-clang10-onnx-build:
+    name: linux-focal-py3.8-clang10-onnx
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-focal-py3.8-clang10-onnx
+      docker-image-name: pytorch-linux-focal-py3-clang10-onnx
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+
+  linux-focal-py3_8-clang10-onnx-test:
+    name: linux-focal-py3.8-clang10-onnx
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-focal-py3_8-clang10-onnx-build
+      - target-determination
+    with:
+      build-environment: linux-focal-py3.8-clang10-onnx
+      docker-image: ${{ needs.linux-focal-py3_8-clang10-onnx-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_8-clang10-onnx-build.outputs.test-matrix }}
+
+  linux-focal-py3_8-clang10-build:
+    name: linux-focal-py3.8-clang10
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-focal-py3.8-clang10
+      docker-image-name: pytorch-linux-focal-py3.8-clang10
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 4, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+  linux-focal-py3_8-clang10-test:
+    name: linux-focal-py3.8-clang10
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-focal-py3_8-clang10-build
+      - target-determination
+    with:
+      build-environment: linux-focal-py3.8-clang10
+      docker-image: ${{ needs.linux-focal-py3_8-clang10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_8-clang10-build.outputs.test-matrix }}
+
+  linux-focal-py3_11-clang10-build:
+    name: linux-focal-py3.11-clang10
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-focal-py3.11-clang10
+      docker-image-name: pytorch-linux-focal-py3.11-clang10
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 4, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+
+  linux-focal-py3_11-clang10-test:
+    name: linux-focal-py3.11-clang10
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-focal-py3_11-clang10-build
+      - target-determination
+    with:
+      build-environment: linux-focal-py3.11-clang10
+      docker-image: ${{ needs.linux-focal-py3_11-clang10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_11-clang10-build.outputs.test-matrix }}
+
+  linux-focal-py3_12-clang10-build:
+    name: linux-focal-py3.12-clang10
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-focal-py3.12-clang10
+      docker-image-name: pytorch-linux-focal-py3.12-clang10
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 4, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+
+  linux-focal-py3_12-clang10-test:
+    name: linux-focal-py3.12-clang10
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-py3_12-clang10-build
+    with:
+      build-environment: linux-focal-py3.12-clang10
+      docker-image: ${{ needs.linux-focal-py3_12-clang10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_12-clang10-build.outputs.test-matrix }}
+      timeout-minutes: 600
+
+  linux-focal-cuda11_8-py3_10-gcc9-build:
+    name: linux-focal-cuda11.8-py3.10-gcc9
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-focal-cuda11.8-py3.10-gcc9
+      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
+      test-matrix: |
+        { include: [
+          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.nvidia.gpu" },
+        ]}
+
+  linux-focal-cuda11_8-py3_10-gcc9-test:
+    name: linux-focal-cuda11.8-py3.10-gcc9
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-focal-cuda11_8-py3_10-gcc9-build
+      - target-determination
+    with:
+      timeout-minutes: 360
+      build-environment: linux-focal-cuda11.8-py3.10-gcc9
+      docker-image: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-build.outputs.test-matrix }}
+
+  linux-focal-cuda12_1-py3_10-gcc9-build:
+    name: linux-focal-cuda12.1-py3.10-gcc9
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+        ]}
+
+  linux-focal-cuda12_1-py3_10-gcc9-test:
+    name: linux-focal-cuda12.1-py3.10-gcc9
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-focal-cuda12_1-py3_10-gcc9-build
+      - target-determination
+    with:
+      timeout-minutes: 360
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.test-matrix }}
+
+  linux-jammy-py3-clang12-mobile-build:
+    name: linux-jammy-py3-clang12-mobile-build
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-jammy-py3-clang12-mobile-build
+      docker-image-name: pytorch-linux-jammy-py3-clang15-asan
+      build-generates-artifacts: false
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
+
+  linux-jammy-cuda-11_8-cudnn9-py3_8-clang12-build:
+    name: linux-jammy-cuda11.8-cudnn9-py3.8-clang12
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-jammy-cuda11.8-cudnn9-py3.8-clang12
+      docker-image-name: pytorch-linux-jammy-cuda11.8-cudnn9-py3.8-clang12
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
+
+  linux-focal-py3-clang9-mobile-custom-build-static:
+    name: linux-focal-py3-clang9-mobile-custom-build-static
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-focal-py3-clang9-mobile-custom-build-static
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
+      build-generates-artifacts: false
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
+
+  linux-focal-py3_8-clang9-xla-build:
+    name: linux-focal-py3_8-clang9-xla
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-focal-py3.8-clang9-xla
+      docker-image-name: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/xla_base:v1.1-lite
+      test-matrix: |
+        { include: [
+          { config: "xla", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+        ]}
+
+  linux-focal-py3_8-clang9-xla-test:
+    name: linux-focal-py3_8-clang9-xla
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-py3_8-clang9-xla-build
+    with:
+      build-environment: linux-focal-py3.8-clang9-xla
+      docker-image: ${{ needs.linux-focal-py3_8-clang9-xla-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_8-clang9-xla-build.outputs.test-matrix }}
+
+  win-vs2019-cpu-py3-build:
+    # don't run build twice on main
+    if: github.event_name == 'pull_request'
+    name: win-vs2019-cpu-py3
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2019-cpu-py3
+      cuda-version: cpu
+      sync-tag: win-cpu-build
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+        ]}
+
+  linux-focal-cpu-py3_10-gcc9-bazel-test:
+    name: linux-focal-cpu-py3.10-gcc9-bazel-test
+    uses: ./.github/workflows/_bazel-build-test.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
+      cuda-version: cpu
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+        ]}
+
+  linux-focal-cuda12_1-py3_10-gcc9-bazel-test:
+    name: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
+    uses: ./.github/workflows/_bazel-build-test.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
+      cuda-version: "12.1"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+        ]}
+
+  linux-focal-cuda12_4-py3_10-gcc9-bazel-test:
+    name: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
+    uses: ./.github/workflows/_bazel-build-test.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
+      cuda-version: "12.4"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+        ]}
+
+  linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single:
+    name: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single
+    uses: ./.github/workflows/_android-build-test.yml
+    with:
+      build-environment: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+        ]}
+
+  linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit:
+    name: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit
+    uses: ./.github/workflows/_android-build-test.yml
+    with:
+      build-environment: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+        ]}
+
+  linux-jammy-py3_8-gcc11-mobile-lightweight-dispatch-build:
+    name: linux-jammy-py3.8-gcc11-mobile-lightweight-dispatch-build
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-jammy-py3.8-gcc111-mobile-lightweight-dispatch-build
+      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
+      build-generates-artifacts: false
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
+
+  linux-focal-rocm6_1-py3_8-build:
+    # don't run build twice on main
+    if: github.event_name == 'pull_request'
+    name: linux-focal-rocm6.1-py3.8
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-focal-rocm6.1-py3.8
+      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      sync-tag: rocm-build
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 3, runner: "linux.rocm.gpu" },
+          { config: "default", shard: 2, num_shards: 3, runner: "linux.rocm.gpu" },
+          { config: "default", shard: 3, num_shards: 3, runner: "linux.rocm.gpu" },
+        ]}
+
+  linux-focal-cuda12_1-py3_10-gcc9-sm86-build:
+    name: linux-focal-cuda12.1-py3.10-gcc9-sm86
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
+      cuda-arch-list: 8.6
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+
+  linux-focal-cuda12_1-py3_10-gcc9-sm86-test:
+    name: linux-focal-cuda12.1-py3.10-gcc9-sm86
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-focal-cuda12_1-py3_10-gcc9-sm86-build
+      - target-determination
+    with:
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.test-matrix }}
+
+  linux-jammy-py3-clang12-executorch-build:
+    name: linux-jammy-py3-clang12-executorch
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-jammy-py3-clang12-executorch
+      docker-image-name: pytorch-linux-jammy-py3-clang12-executorch
+      test-matrix: |
+        { include: [
+          { config: "executorch", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+
+  linux-jammy-py3-clang12-executorch-test:
+    name: linux-jammy-py3-clang12-executorch
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-py3-clang12-executorch-build
+    with:
+      build-environment: linux-jammy-py3-clang12-executorch
+      docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}
+
+  linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build:
+    name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      use_split_build: true
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+        ]}
+
+  linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build-test:
+    name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build
+      - target-determination
+    with:
+      timeout-minutes: 360
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build.outputs.test-matrix }}
+
+  linux-focal-py3_12-clang10-experimental-split-build:
+    name: linux-focal-py3.12-clang10-experimental-split-build
+    uses: ./.github/workflows/_linux-build-label.yml
+    with:
+      use_split_build: True
+      build-environment: linux-focal-py3.12-clang10
+      docker-image-name: pytorch-linux-focal-py3.12-clang10
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
+        ]}
+  linux-focal-py3_12-clang10-experimental-split-build-test:
+    name: linux-focal-py3.12-clang10-experimental-split-build
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-py3_12-clang10-experimental-split-build
+    with:
+      build-environment: linux-focal-py3.12-clang10-experimental-split-build
+      docker-image: ${{ needs.linux-focal-py3_12-clang10-experimental-split-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_12-clang10-experimental-split-build.outputs.test-matrix }}
+      timeout-minutes: 600
