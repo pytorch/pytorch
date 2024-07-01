@@ -279,9 +279,9 @@ class AggregatedHeuristics:
 
         stats["heuristics"] = heuristics
 
-        stats[
-            "aggregated"
-        ] = self.get_aggregated_priorities().get_priority_info_for_test(test)
+        stats["aggregated"] = (
+            self.get_aggregated_priorities().get_priority_info_for_test(test)
+        )
 
         stats["aggregated_trial"] = self.get_aggregated_priorities(
             include_trial=True
