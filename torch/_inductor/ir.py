@@ -128,6 +128,14 @@ If you mutate the data of such a tensor, we swing the StorageBox pointer to poin
 Tensors backed by views add one more indirection to the IR.
 TensorBox -> View -> StorageBox -> Buffer
 In these cases, the underlying StorageBox/Buffer will be shared with the pre-view TensorBox.
+
+Computation is represented by Operation nodes, with each operation producing 1
+or more output Buffers. In the case of mutations, these will be new Buffers that have the
+mutated buffer listed in its get_mutation_names().
+
+It is also possible to have an InputBuffer for which there is no corresponding Operation,
+e.g. it may be a graph input or compile time constant.
+
 """
 
 
@@ -441,7 +449,7 @@ class Operation:
 
 
 @dataclasses.dataclass
-class Loops(IRNode, Operation):
+class Loops(IRNode):
     device: torch.device
     dtype: torch.dtype
     inner_fn: Callable[..., Any]
@@ -3343,10 +3351,10 @@ class Buffer(IRNode):
     def get_read_names(self) -> Set[str]:
         return {self.get_name()}
 
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return set()
 
-    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
     def realize(self):
@@ -3357,6 +3365,7 @@ class Buffer(IRNode):
         return False
 
 
+@dataclasses.dataclass
 class OperationBuffer(Buffer, Operation):
     # An operation that produces a single output buffer
     def get_outputs(self) -> List[Buffer]:
@@ -3364,6 +3373,10 @@ class OperationBuffer(Buffer, Operation):
 
     def get_defining_op(self) -> Operation:
         return self
+
+    def __post_init__(self):
+        Buffer.__post_init__(self)
+        Operation.__post_init__(self)
 
 
 class InputBuffer(Buffer):
@@ -4073,7 +4086,7 @@ class ConcatKernel(NopKernel):
                 op_names.append(input_buffer.get_operation_name())
 
         if len(op_names) > 1 and V.graph.has_feature(device, BackendFeature.FOREACH):
-            V.graph.register_list(op_names)
+            V.graph.register_operation_list(op_names)
 
         concat_kernel.name = V.graph.register_buffer(concat_kernel)
         concat_kernel.inputs = cls.unwrap_storage(concat_kernel.inputs)
