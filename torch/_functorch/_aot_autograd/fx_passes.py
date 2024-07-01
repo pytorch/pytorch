@@ -125,7 +125,10 @@ def collect_graph_epilogue_mutable_ops(graph: fx.Graph) -> List[fx.Node]:
     for node in reversed(node_list):
         if node.op == "output":
             continue
-        elif node.op == "call_function" and node.target._schema.is_mutable:
+        elif node.op == "call_function" and (
+            node.target._schema.is_mutable
+            or node.target is torch.ops.inductor.resize_storage_bytes_.default
+        ):
             epilogue_mutable_ops.append(node)
         else:
             break
