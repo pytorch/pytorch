@@ -1004,7 +1004,10 @@ def trace(
     # Preserve a copy of module and inputs before tracing.
     func_copy, example_inputs_copy, example_kwarg_inputs_copy = None, None, None
     if check_if_torch_exportable():
-        func_copy = copy.deepcopy(func)
+        if isinstance(func, torch.nn.Module):
+            func_copy = copy.deepcopy(func)
+        else:
+            func_copy = func
         example_inputs_copy = copy.deepcopy(example_inputs)
         example_kwarg_inputs_copy = copy.deepcopy(example_kwarg_inputs)
 
