@@ -5527,18 +5527,19 @@ class FallbackKernel(ExternKernelAlloc):
             if info.alias_info is None:
                 return
 
-            def add_mutation(t):
+            def add_alias(t):
                 self.alias_names.append(t.get_name())
-                self.mutation_outputs.append(
-                    MutationOutput(NoneLayout(t.get_device()), t, self)
-                )
+                if info.alias_info.is_write:
+                    self.mutation_outputs.append(
+                        MutationOutput(NoneLayout(t.get_device()), t, self)
+                    )
 
             if is_list_tensor:
                 for tensor_arg in arg:
-                    add_mutation(tensor_arg)
+                    add_alias(tensor_arg)
             else:
                 assert isinstance(info.type, torch.TensorType) or is_optional_tensor
-                add_mutation(arg)
+                add_alias(arg)
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
