@@ -1976,16 +1976,13 @@ def as_storage_and_layout(
             else:
                 x.data.decide_layout()
         return x, x.data.layout
-    if isinstance(x, ReinterpretView):
+    if isinstance(x, (ReinterpretView, DtypeView)):
         # making the base of x contiguous or stride_ordered will not necessarily make
         # the ReinterpretView either, so don't pass along those arguments
         buffer, _ = as_storage_and_layout(
             x.data,
             freeze=freeze,
         )
-        return buffer, x.layout
-    if isinstance(x, DtypeView):
-        buffer, _ = as_storage_and_layout(x.data, freeze=freeze)
         return buffer, x.layout
     raise NotImplementedError
 
