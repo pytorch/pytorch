@@ -2469,13 +2469,44 @@ class TestCustomOpAPI(TestCase):
         f(x)
         self.assertEqual(
             defaults,
-            [None, 3.14, True, 3, "foo", torch.float, torch.float32, torch.int, torch.device("cpu:0"), "cpu"],
+            [
+                None,
+                3.14,
+                True,
+                3,
+                "foo",
+                torch.float,
+                torch.float32,
+                torch.int,
+                torch.device("cpu:0"),
+                "cpu",
+            ],
         )
-        default_values = [arg.default_value for arg in torch.ops._torch_testing.f.default._schema.arguments]
+        default_values = [
+            arg.default_value
+            for arg in torch.ops._torch_testing.f.default._schema.arguments
+        ]
         print(default_values)
+        # enum values taken from c10/core/ScalarType.h
+        type_enum = {
+            "float": 6,
+            "int": 3,
+        }
         self.assertEqual(
             default_values,
-            [None, None, 3.14, True, 3, "foo", float, float, int, torch.device("cpu:0"), torch.device("cpu")],
+            [
+                None,
+                None,
+                3.14,
+                True,
+                3,
+                "foo",
+                type_enum["float"],
+                type_enum["float"],
+                type_enum["int"],
+                torch.device("cpu:0"),
+                torch.device("cpu"),
+            ],
         )
 
     def test_mutated_error(self):
