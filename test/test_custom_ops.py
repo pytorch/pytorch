@@ -695,8 +695,10 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         self.assertExpectedInline(
             infer_schema(h),
-            ("""(Tensor x, SymInt? a=None, float b=3.14, bool c=True, SymInt d=3, str e="foo", """
-             """ScalarType f=float32, ScalarType g=float32, ScalarType h=int32, Device i="cpu:0", Device j="cpu") -> ()"""),
+            (
+                """(Tensor x, SymInt? a=None, float b=3.14, bool c=True, SymInt d=3, str e="foo", """
+                """ScalarType f=float32, ScalarType g=float32, ScalarType h=int32, Device i="cpu:0", Device j="cpu") -> ()"""
+            ),
         )
 
     def test_infer_schema_unsupported(self):
