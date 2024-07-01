@@ -705,7 +705,7 @@ class record_function(_ContextDecorator):
             with torch._C.DisableTorchFunctionSubclass():
                 torch.ops.profiler._record_function_exit._RecordFunction(record)
         else:
-            torch.ops.profiler._record_function_exit(record)
+            torch.ops.profiler._record_function_exit._RecordFunction(record)
 
     def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
         """Use for profiling async calls that return a future.
@@ -746,8 +746,10 @@ class record_function(_ContextDecorator):
                     )
                 )
         else:
-            profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(
-                record, fut
+            profiled_future = (
+                torch.ops.profiler._call_end_callbacks_on_jit_fut._RecordFunction(
+                    record, fut
+                )
             )
         return profiled_future
 
