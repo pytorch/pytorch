@@ -106,8 +106,8 @@ def context(msg_fn: Callable[[], str]) -> Iterator[None]:
 # A little trick from https://github.com/python/mypy/issues/6366
 # for getting mypy to do exhaustiveness checking
 # TODO: put this somewhere else, maybe
-def assert_never(x: NoReturn) -> NoReturn:
-    raise TypeError(f"Unhandled type: {type(x).__name__}")
+def assert_never(x: Any) -> NoReturn:
+    raise AssertionError(f"Unhandled type: {type(x).__name__}")
 
 
 @functools.lru_cache(maxsize=None)
