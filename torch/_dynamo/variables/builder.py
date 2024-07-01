@@ -957,7 +957,10 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MethodWrapperType):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            # Method-wrappers are written in C, and they are not guaranteed to
+            # return the same object on attribute lookup. Therefore, we cannot
+            # insert a FUNCTION_MATCH guard here. method-wrappers are very
+            # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
             if value in (torch.utils.hooks.BackwardHook, torch.nn.Parameter):

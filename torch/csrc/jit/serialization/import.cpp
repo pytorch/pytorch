@@ -6,8 +6,6 @@
 #include <caffe2/serialize/read_adapter_interface.h>
 
 #include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/serialization/import.h>
-#include <torch/csrc/jit/serialization/source_range_serialization.h>
 
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue_inl.h>
@@ -21,6 +19,7 @@
 #include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/import_source.h>
@@ -31,7 +30,6 @@
 #include <fmt/format.h>
 
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
