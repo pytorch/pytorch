@@ -155,7 +155,7 @@ def split_outside_bracket(line: str, delimiter: str = ",") -> List[str]:
     return res
 
 
-def process_signature(line: str) -> list[str]:
+def process_signature(line: str) -> List[str]:
     """
     Clean up a given raw function signature.
 
