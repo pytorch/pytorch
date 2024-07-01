@@ -106,14 +106,14 @@ def refunctionalize_set(graph: fx.Graph) -> None:
                 new_last_set_node = graph.call_function(
                     last_set_node.target, last_set_node.args
                 )
-        # Replace set_ nodes in graph output with the corresponding primal input.
-        new_return_node_args = []
-        for arg in list(graph.nodes)[-1].args:
-            if arg in set_nodes_to_be_deleted:
-                arg = arg.args[0]
-                assert arg in primal_inputs
-            new_return_node_args.append(arg)
-        list(graph.nodes)[-1].args = tuple(new_return_node_args)
+    # Replace set_ nodes in graph output with the corresponding primal input.
+    new_return_node_args = []
+    for arg in list(graph.nodes)[-1].args:
+        if arg in set_nodes_to_be_deleted:
+            arg = arg.args[0]
+            assert arg in primal_inputs
+        new_return_node_args.append(arg)
+    list(graph.nodes)[-1].args = tuple(new_return_node_args)
     for set_node in set_nodes_to_be_deleted:
         graph.erase_node(set_node)
 
