@@ -1,5 +1,4 @@
 """Handle the details of subprocess calls and retries for a given benchmark run."""
-
 import dataclasses
 import json
 import os
