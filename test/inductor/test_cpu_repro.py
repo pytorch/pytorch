@@ -34,6 +34,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import InterpreterShim
 from torch._inductor.utils import timed
 from torch._inductor.virtualized import V
+from torch._prims_common import is_float_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
@@ -2106,6 +2107,31 @@ class CPUReproTests(TestCase):
                     _args = (x, y)
                 self.common(bitwise_fn, _args)
                 check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
+    def test_vec_remainder(self):
+        for dtype in [
+            torch.int32,
+            torch.int64,
+            torch.bfloat16,
+            torch.float16,
+            torch.float32,
+        ]:
+            x = (
+                torch.randn(64, dtype=dtype)
+                if is_float_dtype(dtype)
+                else torch.randint(1, 100, (64,), dtype=dtype)
+            )
+            y = (
+                torch.randn(64, dtype=dtype)
+                if is_float_dtype(dtype)
+                else torch.randint(1, 100, (64,), dtype=dtype)
+            )
+            torch._dynamo.reset()
+            metrics.reset()
+            _args = (x, y)
+            self.common(torch.remainder, _args)
+            check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
