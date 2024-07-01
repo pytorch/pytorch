@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 from typing import Callable, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe

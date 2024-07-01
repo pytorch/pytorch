@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import random
-from typing import Dict, Iterator, List, Optional, Sized, Tuple, Type, TypeVar
+from typing import Iterator, Sized, TypeVar
 
 import torch
 from torch.utils.data.datapipes._decorator import functional_datapipe
@@ -32,9 +34,9 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
     def __init__(
         self,
         datapipe: IterDataPipe,
-        sampler: Type[Sampler] = SequentialSampler,
-        sampler_args: Optional[Tuple] = None,
-        sampler_kwargs: Optional[Dict] = None,
+        sampler: type[Sampler] = SequentialSampler,
+        sampler_args: tuple | None = None,
+        sampler_kwargs: dict | None = None,
     ) -> None:
         assert isinstance(
             datapipe, Sized
@@ -93,9 +95,9 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
 
     datapipe: IterDataPipe[T_co]
     buffer_size: int
-    _buffer: List[T_co]
+    _buffer: list[T_co]
     _enabled: bool
-    _seed: Optional[int]
+    _seed: int | None
     _rng: random.Random
 
     def __init__(
@@ -108,7 +110,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         super().__init__()
         # TODO: Performance optimization
         #       buffer can be a fixed size and remove expensive `append()` and `len()` operations
-        self._buffer: List[T_co] = []
+        self._buffer: list[T_co] = []
         assert buffer_size > 0, "buffer_size should be larger than 0"
         if unbatch_level == 0:
             self.datapipe = datapipe

@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 from typing import Sized, Tuple, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
@@ -34,7 +36,7 @@ class ConcaterMapDataPipe(MapDataPipe):
         [0, 1, 2, 0, 1, 2]
     """
 
-    datapipes: Tuple[MapDataPipe]
+    datapipes: tuple[MapDataPipe]
 
     def __init__(self, *datapipes: MapDataPipe):
         if len(datapipes) == 0:
@@ -78,7 +80,7 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
         [(0, 10), (1, 11), (2, 12)]
     """
 
-    datapipes: Tuple[MapDataPipe[T_co], ...]
+    datapipes: tuple[MapDataPipe[T_co], ...]
 
     def __init__(self, *datapipes: MapDataPipe[T_co]) -> None:
         if len(datapipes) == 0:
@@ -89,7 +91,7 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
             raise TypeError("Expected all inputs to be `Sized`")
         self.datapipes = datapipes
 
-    def __getitem__(self, index) -> Tuple[T_co, ...]:
+    def __getitem__(self, index) -> tuple[T_co, ...]:
         res = []
         for dp in self.datapipes:
             try:
