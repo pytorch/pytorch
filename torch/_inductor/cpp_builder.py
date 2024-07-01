@@ -20,15 +20,16 @@ from typing import List, Sequence, Tuple, Union
 
 import torch
 from torch._inductor import config, exc
+
+# TODO: import below objects in function scope, in further optimization
 from torch._inductor.codecache import (
     _get_python_include_dirs,
     _LINKER_SCRIPT,
     _transform_cuda_paths,
     get_lock_dir,
-    invalid_vec_isa,
     LOCK_TIMEOUT,
-    VecISA,
 )
+from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
 
 if config.is_fbcode():
@@ -132,6 +133,10 @@ def _get_cpp_compiler() -> str:
             search = (config.cpp.cxx,)
         compiler = cpp_compiler_search(search)
     return compiler
+
+
+def cpp_compiler() -> str:
+    return _get_cpp_compiler()
 
 
 def _is_gcc(cpp_compiler) -> bool:
@@ -320,25 +325,13 @@ def _get_optimization_cflags() -> List[str]:
         if not config.cpp.enable_floating_point_contract_flag:
             cflags.append("ffp-contract=off")
 
-        if config.is_fbcode():
-            # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
-            # This causes `ldopen` to fail in fbcode, because libgomp does not exist in the default paths.
-            # We will fix it later by exposing the lib path.
-            return cflags
-
-        if sys.platform == "darwin":
-            # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
-            # Also, `-march=native` is unrecognized option on M1
-            cflags.append("Xclang")
-        else:
+        if sys.platform != "darwin":
+            # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
+            # `-march=native` is unrecognized option on M1
             if platform.machine() == "ppc64le":
                 cflags.append("mcpu=native")
             else:
                 cflags.append("march=native")
-
-        # Internal cannot find libgomp.so
-        if not config.is_fbcode():
-            cflags.append("fopenmp")
 
         return cflags
 
@@ -547,13 +540,13 @@ def _get_build_args_of_chosen_isa(vec_isa: VecISA):
 
         build_flags = [vec_isa.build_arch_flags()]
 
-    if config.is_fbcode() and vec_isa != invalid_vec_isa:
-        cap = str(vec_isa).upper()
-        macros = [
-            f"CPU_CAPABILITY={cap}",
-            f"CPU_CAPABILITY_{cap}",
-            f"HAVE_{cap}_CPU_DEFINITION",
-        ]
+        if config.is_fbcode():
+            cap = str(vec_isa).upper()
+            macros = [
+                f"CPU_CAPABILITY={cap}",
+                f"CPU_CAPABILITY_{cap}",
+                f"HAVE_{cap}_CPU_DEFINITION",
+            ]
 
     return macros, build_flags
 
@@ -615,6 +608,10 @@ def _get_openmp_args(cpp_compiler):
     libs: List[str] = []
     passthough_args: List[str] = []
     if _IS_MACOS:
+        # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
+        cflags.append("Xclang")
+        cflags.append("fopenmp")
+
         from torch._inductor.codecache import (
             homebrew_libomp,
             is_conda_llvm_openmp_installed,
@@ -665,10 +662,8 @@ def _get_openmp_args(cpp_compiler):
         # /openmp, /openmp:llvm
         # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
         # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
-
         cflags.append("openmp")
         cflags.append("openmp:experimental")  # MSVC CL
-        libs = []
     else:
         if config.is_fbcode():
             include_dir_paths.append(build_paths.openmp())
