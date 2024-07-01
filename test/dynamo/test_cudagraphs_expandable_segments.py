@@ -10,11 +10,7 @@ import torch
 from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
 from torch.testing._internal.common_utils import run_tests
 
-from test_cuda import (  # noqa: F401
-    TestBlockStateAbsorption,
-    TestCuda,
-    TestCudaMallocAsync,
-)
+from test_cudagraphs import TestAotCudagraphs  # noqa: F401
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -26,7 +22,5 @@ if __name__ == "__main__":
         get_disabled_tests(".")
 
         torch.cuda.memory._set_allocator_settings("expandable_segments:True")
-        TestCuda.expandable_segments = lambda _: True
-        TestBlockStateAbsorption.expandable_segments = lambda _: True
 
         run_tests()
