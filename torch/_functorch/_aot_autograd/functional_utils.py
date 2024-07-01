@@ -405,12 +405,20 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
             if n.target in [
                 torch.ops.aten.copy_.default,
                 torch.ops.aten.set_.source_Tensor,
+                torch.ops.inductor.resize_storage_bytes_.default,
             ]:
                 suffix = True
-                # Can only copy_/set_ into an input, and can only do so once
-                # this is mostly a hack to avoid failing XLA tests.
-                # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
-                if "set_buffer_donor_" not in str(n.args[0]):
+                if (
+                    # Can only copy_/set_ into an input, and can only do so once
+                    # this is mostly a hack to avoid failing XLA tests.
+                    # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
+                    "set_buffer_donor_" not in str(n.args[0])
+                    # Allow `.resize_storage_bytes_(X, 0)` to mutate any X tensor.
+                    and not (
+                        n.target is torch.ops.inductor.resize_storage_bytes_.default
+                        and n.args[1] == 0
+                    )
+                ):
                     assert (
                         n.args[0] in placeholders
                     ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
