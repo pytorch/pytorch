@@ -199,9 +199,9 @@ class TestCustomLowering(InductorTestCase):
         b = torch.randn(32, device="cuda")
         fn_opt = torch.compile(fn)
 
-        a = a + b
-        b = fn_opt(a, b)
-        self.assertEqual(a, b)
+        out1 = a + b
+        out2 = fn_opt(a, b)
+        self.assertEqual(out1, out2)
 
 
 if __name__ == "__main__":
