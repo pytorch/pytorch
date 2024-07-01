@@ -42,7 +42,7 @@ def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
 
 def is_valid_for_codegen(name):
     if len(name) == 0:
-        raise RuntimeError(f"Invalid name '{name}' for codegen")
+        raise RuntimeError("Empty argument name for codegen")
     if name[0].isdigit():
         return False
     return True
