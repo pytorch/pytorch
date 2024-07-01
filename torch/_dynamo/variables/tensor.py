@@ -342,6 +342,8 @@ class TensorVariable(VariableTracker):
             return ConstantVariable.create(True)
         except AttributeError:
             return ConstantVariable.create(False)
+        except NotImplementedError:
+            unimplemented("Tensor hasattr: unimplemented getattr case")
 
     def var_getattr(self, tx, name):
         from . import UserDefinedClassVariable
