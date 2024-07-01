@@ -910,14 +910,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
                         _batch_p2p(ops).wait()
             except Exception as e:
                 logger.error(
-                    "[Rank %s] PipelineSchedule %s caught the following exception \
-                     at time_step %s when running %sth microbatch %s for stage %s",
+                    "[Rank %s] pipeline schedule %s caught the following exception \
+                     at time_step %s when running action %s",
                     self.rank,
                     self.__class__.__name__,
                     time_step,
                     action,
-                    mb_index,
-                    stage_index,
                 )
                 logger.error("%s", _format_pipeline_order(self.pipeline_order))
                 raise e
