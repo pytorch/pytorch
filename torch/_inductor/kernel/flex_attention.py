@@ -65,19 +65,14 @@ def index_to_other_buffers(cnt: int, graph_type: SubgraphType) -> int:
     #   key,
     #   value,
     #   score_mod,
-    #   sparse_kv_num_blocks,
-    #   sparse_kv_indices,
-    #   sparse_q_num_blocks,
-    #   sparse_q_indices,
-    #   SPARSE_KV_BLOCK_SIZE,
-    #   SPARSE_Q_BLOCK_SIZE,
+    #   block_mask,
     #   *other_buffers
     # ]
     # For fwd_graphs we have 5 dummy values this when the first lifted args
-    # is seen cnt = 5 and the start of the index_buffers is at args[10]
-    # thus we add 5 from the current cnt
+    # is seen cnt = 5 and the start of the index_buffers is at args[5]
+    # thus we add 0 from the current cnt
     if graph_type == SubgraphType.FWD:
-        return cnt + 5
+        return cnt + 0
 
     # Current bwd_args = [
     #   q,
@@ -88,21 +83,16 @@ def index_to_other_buffers(cnt: int, graph_type: SubgraphType) -> int:
     #   grad_out,
     #   fw_graph,
     #   joint_graph,
-    #   sparse_kv_num_blocks,
-    #   sparse_kv_indices,
-    #   sparse_q_num_blocks,
-    #   sparse_q_indices,
-    #   SPARSE_KV_BLOCK_SIZE,
-    #   SPARSE_Q_BLOCK_SIZE,
+    #   block_mask,
     #   *other_buffers
     # ]
-    # We have 5 dummy values but the start of other_buffers is at index 14
+    # We have 5 dummy values but the start of other_buffers is at index 9
     if graph_type == SubgraphType.JOINT_FWD:
-        return cnt + 9
+        return cnt + 4
 
-    # Same bwd args but now with 6 dummy values while other_buffers still start at 14
+    # Same bwd args but now with 6 dummy values while other_buffers still start at 9
     if graph_type == SubgraphType.JOINT_BWD:
-        return cnt + 8
+        return cnt + 3
 
 
 def build_subgraph_buffer(
@@ -458,14 +448,17 @@ def flex_attention(*args, **kwargs):
         key,
         value,
         subgraph,
+        block_mask,
+        *other_buffers,
+    ) = args
+    (
         sparse_kv_num_blocks,
         sparse_kv_indices,
         sparse_q_num_blocks,
         sparse_q_indices,
         SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
-        *other_buffers,
-    ) = args
+    ) = block_mask
     for buf in [
         query,
         key,
@@ -897,14 +890,17 @@ def flex_attention_backward(*args, **kwargs):
         grad_out,
         fw_graph,
         joint_graph,
+        block_mask,
+        *other_buffers,
+    ) = args
+    (
         sparse_kv_num_blocks,
         sparse_kv_indices,
         sparse_q_num_blocks,
         sparse_q_indices,
         SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
-        *other_buffers,
-    ) = args
+    ) = block_mask
     for buf in [
         query,
         key,
