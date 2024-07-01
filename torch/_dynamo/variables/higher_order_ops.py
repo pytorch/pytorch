@@ -542,7 +542,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "flex_attention":
-            return TemplatedAttentionHigherOrderVariable(value, source, **kwargs)
+            return FlexAttentionHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
             "wrap_activation_checkpoint",
             "tag_activation_checkpoint",
@@ -1479,7 +1479,7 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
         return fn.call_function(tx, args, kwargs)
 
 
-class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
+class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @staticmethod
     def normalize_to_args(args, kwargs):
         # input signature is (query, key, value, score_mod, block_mask, *other_buffers),
