@@ -3470,7 +3470,6 @@ Tensor _convert_weight_to_int4pack_cpu(
       at::TensorOptions().dtype(at::kInt));
 
   weight_to_int4pack_stub(kCPU, weight_packed, weight, N, K);
-  std::cout<<"stub end\n";
   return weight_packed;
 }
 

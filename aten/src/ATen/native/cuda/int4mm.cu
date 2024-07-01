@@ -820,8 +820,6 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
   auto kOuterTile = blockIdx.x;
   auto nTile = blockIdx.y;
   auto t = threadIdx.x;
-  printf("%d %d %d\n", kOuterTile, nTile, t);
-  printf("InnerKTiles %d\n", InnerKTiles);
 
   // Two k-tiles are packed into an int32 at a time
 #pragma unroll
@@ -842,9 +840,6 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
     ks[2] = kBase1 + t % 4;
     ks[3] = ks[2] + 4;
 
-    // printf("%d %d: %d %d %d %d %d %d %d %d \n", n0, t, ks[0], ks[1], ks[2],
-    // ks[3], ks[4], ks[5], ks[6], ks[7]);
-    printf("%d %d: %d %d %d %d \n", n0, t, ks[0], ks[1], ks[2], ks[3]);
     auto pIn = &in[n0][0];
 
     uint8_t v[4];
@@ -853,12 +848,15 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
       v[i] = (n0Valid && ks[i] < in.size(1)) ? pIn[ks[i]] : uint8_t(0);
     }
 
-    // To clearly explain the packed result with 8 int4 values into one int32,
-    // we use the follow figure:
-    //[n][k]     int32: v[0] v[1] v[2] v[3] v[4] v[5] v[6] v[7]
-    //[n][k / 2] uint8:    v[0]     v[1]      v[2]      v[3]
-    // Packed result is consisted of v[7] v[5] v[3] v[1] v[6] v[4] v[2] v[0],
-    // which epuals to v[3]L v[2]L v[1]L v[0]L v[3]H v[2]H v[1]H v[0]H.
+    // To clearly explain the packed result with 8 int4 values (4 uint8)
+    // into one int32, we use the follow figure:
+    // [n][k]     int32: v[0] v[1] v[2] v[3] v[4] v[5] v[6] v[7]
+    // [n][k / 2] uint8:    v[0]     v[1]      v[2]      v[3]
+    // When using int32 weight as input, the packed result is consisted of
+    // v[7] | v[5] | v[3] | v[1] | v[6] | v[4] | v[2] | v[0],
+    // which epuals to
+    // v[3]L | v[2]L | v[1]L | v[0]L | v[3]H | v[2]H | v[1]H | v[0]H
+    // when using uint8 weight as input.
     int32_t pack = ((uint32_t)(v[3] & 0xF) << 28) |
         ((uint32_t)(v[2] & 0xF) << 24) | ((uint32_t)(v[1] & 0xF) << 20) |
         ((uint32_t)(v[0] & 0xF) << 16) | ((uint32_t)(v[3] & 0xF0) << 8) |
