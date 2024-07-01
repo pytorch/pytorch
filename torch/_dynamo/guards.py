@@ -2129,7 +2129,12 @@ class CheckFunctionManager:
             # TODO(anijain2305, ydwu4) - Skipping export because of following test
             # python -s test/dynamo/test_export.py -k test_export_with_symbool_inputs
             if not output_graph.export:
-                assert self.guard_manager.check(output_graph.local_scope)
+                if not self.guard_manager.check(output_graph.local_scope):
+                    reasons = get_guard_fail_reason_helper(
+                        self.guard_manager,  # type: ignore[arg-type]
+                        output_graph.local_scope,
+                    )
+                    raise AssertionError(f"Guard check failed: {reasons}")
 
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
@@ -2464,9 +2469,8 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
     return [f"Duplicate tensors found: {reason}"]
 
 
-def get_guard_fail_reason(
+def get_guard_fail_reason_helper(
     guard_fn: GuardFn,
-    code: types.CodeType,
     f_locals: Dict[str, object],
 ) -> str:
     """
@@ -2533,6 +2537,15 @@ def get_guard_fail_reason(
                     break
 
     reason_str = "\n".join(reasons)
+    return reason_str
+
+
+def get_guard_fail_reason(
+    guard_fn: GuardFn,
+    code: types.CodeType,
+    f_locals: Dict[str, object],
+) -> str:
+    reason_str = get_guard_fail_reason_helper(guard_fn, f_locals)
     guard_failures[orig_code_map[code]].append(reason_str)
 
     try:
