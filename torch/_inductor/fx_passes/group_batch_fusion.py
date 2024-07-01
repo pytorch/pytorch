@@ -718,11 +718,9 @@ class BatchLayernormFusion(BatchFusion):
                 (
                     "batch_layernorm",
                     str(input.meta["example_value"].shape),
-                    (
-                        str(weight.meta["example_value"].shape)
-                        if weight is not None
-                        else ""
-                    ),
+                    str(weight.meta["example_value"].shape)
+                    if weight is not None
+                    else "",
                     str(bias.meta["example_value"].shape) if bias is not None else "",
                     str(get_arg_value(node, 1, "normalized_shape")),
                     str(get_arg_value(node, 4, "eps")),
