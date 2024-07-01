@@ -57,7 +57,7 @@ from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 from .triton_utils import config_of, signature_to_meta
-from ..streamscheduler import CRITICAL_PATH_STREAM_ID, DEFAULT_STREAM_ID
+from ..stream_scheduler import CRITICAL_PATH_STREAM_ID, DEFAULT_STREAM_ID
 
 if TYPE_CHECKING:
     import triton
@@ -770,7 +770,7 @@ class WrapperCodeGen(CodeGen):
         ssnode = V.graph.stream_graph.name_mapping[node_name]
         kernel_IndentedBuffer.writeline(f"event_{ssnode.get_name()}.record(stream{ssnode.stream_id}_raw)")
 
-    def generate_extern_kernel_w_stream(self, node_name, call_strs):
+    def generate_kernel_w_stream(self, node_name, call_strs, stream_switch=True):
         """
         Attributes:
             node_name: name of the caller buffer
@@ -785,12 +785,14 @@ class WrapperCodeGen(CodeGen):
         stream_id = ssnode.stream_id
         kernel_IndentedBuffer = kernel_IndentedBuffer
         if stream_id != 0:
-            kernel_IndentedBuffer.writeline(f"torch.cuda.set_stream(stream{stream_id}_raw)")
+            if stream_switch:
+                kernel_IndentedBuffer.writeline(f"torch.cuda.set_stream(stream{stream_id}_raw)")
             if isinstance(call_strs, list):
                 kernel_IndentedBuffer.writelines(call_strs)
             else:
                 kernel_IndentedBuffer.writeline(call_strs)
-            kernel_IndentedBuffer.writeline(f"torch.cuda.set_stream(stream0_raw)")
+            if stream_switch:
+                kernel_IndentedBuffer.writeline(f"torch.cuda.set_stream(stream0_raw)")
         else:
             if isinstance(call_strs, list):
                 kernel_IndentedBuffer.writelines(call_strs)
@@ -837,7 +839,7 @@ class WrapperCodeGen(CodeGen):
     ):
         args.append(f"out={out_view if out_view else out}")
         call_strs = [f"{kernel}({', '.join(args)})"]
-        self.writeline(call_strs, node_name=node_name)
+        self.writelines(call_strs, node_name=node_name)
 
     def generate_user_defined_triton_kernel(
         self, kernel_name, grid, configs, args, triton_meta, raw_args, node_name=None
@@ -922,6 +924,9 @@ class WrapperCodeGen(CodeGen):
         if config.profile_bandwidth:
             self.write_triton_header_once()
         result = IndentedBuffer()
+        #@TODO Yueming: how to make it run only when necessnary like what write_triton_header_once did
+        self.generate_stream_creation()
+        self.write_triton_header_once()
         result.splice(self.header)
         # We do not want the cpp header for intermediate const graph. Headers would be
         # rendered by the main module instead.
@@ -1678,8 +1683,6 @@ class WrapperCodeGen(CodeGen):
         grid_fn: str = "grid",
         triton_meta=None,
         node_name=None,
-        stream_id=DEFAULT_STREAM_ID,
-        kernel_IndentedBuffer=None
     ):
         """
         Generates kernel call code.
@@ -1692,10 +1695,6 @@ class WrapperCodeGen(CodeGen):
         """
 
         if cuda:
-            if kernel_IndentedBuffer:
-                writer = kernel_IndentedBuffer
-            else:
-                writer = self
             device_index, call_args_str = self.prepare_triton_kernel_call(
                 device_index, call_args
             )
@@ -1703,6 +1702,7 @@ class WrapperCodeGen(CodeGen):
             if config.multiple_streams:
                 ssnode = V.graph.stream_graph.name_mapping[node_name]
                 stream_id = ssnode.stream_id
+                stream_name = f"stream{stream_id}"
             else:
                 stream_name = self.write_get_raw_stream(device_index, V.graph)
             if triton:
@@ -1711,9 +1711,11 @@ class WrapperCodeGen(CodeGen):
                 else:
                     grid_str = ", ".join(pexpr(item) for item in grid)
                     grid_str = f"{grid_fn}({grid_str})"
-                writer.writeline(
-                    f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
-                )
+                call_str = f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+                if config.multiple_streams:
+                    self.generate_kernel_w_stream(node_name, call_str, stream_switch=False)
+                else:
+                    self.writeline(call_str)
                 if (
                     config.triton.autotune_at_compile_time
                     and kernel_name not in self.kernel_autotun_names
@@ -1772,11 +1774,12 @@ class WrapperCodeGen(CodeGen):
                     self.kernel_autotun_names.add(kernel_name)
             else:
                 stream_ptr = f"c_void_p({stream_name})"
-                writer.writeline(
+                self.writeline(
                     f"{kernel_name}.{kernel_name}({call_args_str}, {stream_ptr})"
                 )
         else:
             self.writeline(self.wrap_kernel_call(kernel_name, call_args))
+        
 
     def writeline(self, line, caller=None, node_name=None):
         if config.multiple_streams:
@@ -1784,7 +1787,7 @@ class WrapperCodeGen(CodeGen):
                 assert (isinstance(caller, ExternKernel))
                 node_name = caller.name
             if node_name is not None:
-                self.generate_extern_kernel_w_stream(node_name, line, out_node=out_node)
+                self.generate_kernel_w_stream(node_name, line)
             else:
                 self.lines.append(line)    
         else:
@@ -1796,7 +1799,7 @@ class WrapperCodeGen(CodeGen):
                 assert (isinstance(caller, ExternKernel))
                 node_name = caller.name
             if node_name is not None:
-                self.generate_extern_kernel_w_streams(node_name, lines, out_node=out_node)
+                self.generate_kernel_w_stream(node_name, lines)
             else:
                 for line in lines:
                     self.writeline(line)
