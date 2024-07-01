@@ -703,7 +703,6 @@ def forward(self, x, y):
 def forward(self, x, y):
     arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
     arg0_1 = arg0
-    _tensor_constant0 = self._tensor_constant0
     return pytree.tree_unflatten([arg0_1], self._out_spec)""",
         )   
 
