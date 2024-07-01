@@ -720,6 +720,8 @@ class GraphLowering(torch.fx.Interpreter):
         return super().run(*args)
 
     def register_operation(self, op: ir.Operation):
+        assert op.operation_name is None, f"Operation registered twice: {op}"
+        assert isinstance(op, ir.Operation)
         name = self.qualify_name(f"op{len(self.operations)}")
         self.operations.append(op)
         self.name_to_op[name] = op
@@ -741,7 +743,7 @@ class GraphLowering(torch.fx.Interpreter):
             buffer.name = name
         return name
 
-    def register_list(self, operation_names: List[str]):
+    def register_operation_list(self, operation_names: List[str]) -> str:
         name = self.qualify_name("list_" + "_".join(operation_names))
         self.lists[name] = operation_names
         return name
@@ -1160,6 +1162,7 @@ class GraphLowering(torch.fx.Interpreter):
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
 
         buffer_watermark = len(self.buffers)
+        operation_watermark = len(self.operations)
 
         origins = {n}
         if n.op == "call_function":
@@ -1374,14 +1377,20 @@ class GraphLowering(torch.fx.Interpreter):
         self.register_users_of(result)
 
         new_unbacked_defs = set()
-        for i in range(buffer_watermark, len(self.buffers)):
-            new_unbacked_defs |= self.buffers[i].get_unbacked_symbol_defs()
+        for buf in self.buffers[buffer_watermark:]:
+            new_unbacked_defs |= buf.get_unbacked_symbol_defs()
+        for op in self.operations[operation_watermark:]:
+            new_unbacked_defs |= op.get_unbacked_symbol_defs()
 
-        def format_buffers():
+        def format_new_defs():
             r = []
-            for b in self.buffers[buffer_watermark:]:
+            for buf in self.buffers[buffer_watermark:]:
                 r.append(
-                    f"unbacked_symbol_defs={b.get_unbacked_symbol_defs()} in:\n{b}\n"
+                    f"unbacked_symbol_defs={buf.get_unbacked_symbol_defs()} in:\n{buf}\n"
+                )
+            for op in self.operations[operation_watermark:]:
+                r.append(
+                    f"unbacked_symbol_defs={op.get_unbacked_symbol_defs()} in:\n{op}\n"
                 )
             return "***\n".join(r)
 
@@ -1468,7 +1477,7 @@ class GraphLowering(torch.fx.Interpreter):
             assert new_unbacked_defs >= renamed_unbacked_bindings, (
                 f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
                 f"fx node is: {n.format_node()}\n"
-                f"new buffers are:\n\n{format_buffers()}"
+                f"new operations are:\n\n{format_new_defs()}"
             )
 
         return result
