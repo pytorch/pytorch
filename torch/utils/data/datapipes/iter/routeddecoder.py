@@ -1,6 +1,5 @@
-from __future__ import annotations
-
-from typing import Any, Callable, Iterable, Iterator, Sized, Tuple, TYPE_CHECKING
+from io import BufferedIOBase
+from typing import Any, Callable, Iterable, Iterator, Sized, Tuple
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
@@ -11,10 +10,6 @@ from torch.utils.data.datapipes.utils.decoder import (
     extension_extract_fn,
     imagehandler as decoder_imagehandler,
 )
-
-
-if TYPE_CHECKING:
-    from io import BufferedIOBase
 
 
 __all__ = ["RoutedDecoderIterDataPipe"]
@@ -43,12 +38,12 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
 
     def __init__(
         self,
-        datapipe: Iterable[tuple[str, BufferedIOBase]],
+        datapipe: Iterable[Tuple[str, BufferedIOBase]],
         *handlers: Callable,
         key_fn: Callable = extension_extract_fn,
     ) -> None:
         super().__init__()
-        self.datapipe: Iterable[tuple[str, BufferedIOBase]] = datapipe
+        self.datapipe: Iterable[Tuple[str, BufferedIOBase]] = datapipe
         if not handlers:
             handlers = (decoder_basichandlers, decoder_imagehandler("torch"))
         self.decoder = Decoder(*handlers, key_fn=key_fn)
@@ -62,7 +57,7 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
     def add_handler(self, *handler: Callable) -> None:
         self.decoder.add_handler(*handler)
 
-    def __iter__(self) -> Iterator[tuple[str, Any]]:
+    def __iter__(self) -> Iterator[Tuple[str, Any]]:
         for data in self.datapipe:
             pathname = data[0]
             result = self.decoder(data)

@@ -1,9 +1,17 @@
 # mypy: allow-untyped-defs
-from __future__ import annotations
-
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, Iterator, Sized, TypeVar
+from typing import (
+    Any,
+    Callable,
+    DefaultDict,
+    Iterator,
+    List,
+    Optional,
+    Sized,
+    Type,
+    TypeVar,
+)
 
 import torch.utils.data.datapipes.iter.sharding
 from torch.utils.data.datapipes._decorator import functional_datapipe
@@ -68,7 +76,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         datapipe: IterDataPipe,
         batch_size: int,
         drop_last: bool = False,
-        wrapper_class: type = DataChunk,
+        wrapper_class: Type[DataChunk] = DataChunk,
     ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
@@ -78,7 +86,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         self.wrapper_class = wrapper_class
 
     def __iter__(self) -> Iterator[DataChunk]:
-        batch = []
+        batch: List = []
         for x in self.datapipe:
             batch.append(x)
             if len(batch) == self.batch_size:
@@ -204,8 +212,8 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         *,
         keep_key: bool = False,
         buffer_size: int = 10000,
-        group_size: int | None = None,
-        guaranteed_group_size: int | None = None,
+        group_size: Optional[int] = None,
+        guaranteed_group_size: Optional[int] = None,
         drop_remaining: bool = False,
     ):
         _check_unpickable_fn(group_key_fn)
@@ -214,7 +222,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
 
         self.keep_key = keep_key
         self.max_buffer_size = buffer_size
-        self.buffer_elements: defaultdict[Any, list] = defaultdict(list)
+        self.buffer_elements: DefaultDict[Any, List] = defaultdict(list)
         self.curr_buffer_size = 0
         self.group_size = group_size
         self.guaranteed_group_size = None

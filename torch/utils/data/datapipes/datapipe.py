@@ -13,6 +13,9 @@ from torch.utils.data.datapipes.utils.common import (
 from torch.utils.data.dataset import Dataset, IterableDataset
 
 
+dill = import_dill()
+HAS_DILL = dill is not None
+
 __all__ = [
     "DataChunk",
     "DFIterDataPipe",
@@ -23,9 +26,6 @@ __all__ = [
 
 _T = TypeVar("_T")
 _T_co = TypeVar("_T_co", covariant=True)
-
-dill = import_dill()
-HAS_DILL = dill is not None
 
 UNTRACABLE_DATAFRAME_PIPES = [
     "batch",  # As it returns DataChunks

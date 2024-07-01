@@ -1,8 +1,6 @@
 # mypy: allow-untyped-defs
-from __future__ import annotations
-
 import random
-from typing import Iterator, TypeVar
+from typing import Iterator, List, Optional, TypeVar
 
 import torch
 from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
@@ -54,14 +52,14 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
 
     datapipe: MapDataPipe[_T_co]
     _enabled: bool
-    _seed: int | None
+    _seed: Optional[int]
     _rng: random.Random
 
     def __init__(
         self,
         datapipe: MapDataPipe[_T_co],
         *,
-        indices: list | None = None,
+        indices: Optional[List] = None,
     ) -> None:
         super().__init__()
         self.datapipe = datapipe
@@ -69,7 +67,7 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
         self._enabled = True
         self._seed = None
         self._rng = random.Random()
-        self._shuffled_indices: list = self.indices
+        self._shuffled_indices: List = self.indices
 
     def set_shuffle(self, shuffle=True):
         self._enabled = shuffle
