@@ -27,6 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes import graph_drawer
 from torch.utils.checkpoint import CheckpointPolicy
 from . import config
+from ._aot_autograd.fx_passes import collect_nodes_set_into_primal_in_graph_epilogue
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from .compile_utils import fx_graph_cse, get_aten_target
 
@@ -908,6 +909,10 @@ def solve_min_cut(
         nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
         return True
 
+    nodes_set_into_primal_in_epilogue = collect_nodes_set_into_primal_in_graph_epilogue(
+        joint_graph
+    )
+
     for node in joint_graph.nodes:
         if node.op == "output":
             continue
@@ -925,6 +930,21 @@ def solve_min_cut(
             # NestedTensor saves a offset tensor as part of the singleton int
             # in sizes.
             nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
+
+        if node in nodes_set_into_primal_in_epilogue:
+            # If a node Y is used in `.set_(primal_X, Y)`, we explicitly want to save Y.
+            # This is important for Traceable FSDP2 because by default the partitioner will save
+            # an alias of Y, but our requirement is that what's saved must be primal_X,
+            # so our approach is that we save Y here, and after the FWD graph is produced,
+            # we swapped that Y with primal_X.
+            #
+            # This won't cause additional memory usage because the lifetime of graph input
+            # is longer than the graph itself anyway, so saving a tensor that shares storage
+            # with graph input won't increase memory usage.
+            nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+            nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
+            nx_graph.add_edge(node.name + "_in", node.name + "_out", capacity=0)
+            continue
 
         if must_recompute(node):
             # If user explicitly says they want to recompute a node, we honor it
@@ -1797,6 +1817,25 @@ def min_cut_rematerialization_partition(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
+
+    def return_primal_if_set_is_used(graph):
+        # If `.set_(primal_X, Y)` is in graph epilogue and Y is in FWD graph output,
+        # then replace Y with primal_X in FWD graph output.
+        # This is important for Traceable FSDP2 because:
+        # 1) BWD graph user-code computation uses whichever tensor that's saved in FWD graph output.
+        # 2) BWD graph has FSDP2 framework logic that does all-gather to re-materialize primal_X.
+        # 3) In order for BWD user-code computation to use the re-materialized primal_X,
+        #    that saved tensor in FWD graph output must be primal_X.
+        Y_to_primal_map = collect_nodes_set_into_primal_in_graph_epilogue(graph)
+        return_node = list(graph.nodes)[-1]
+        new_return_args = []
+        for arg in return_node.args[0]:
+            if arg in Y_to_primal_map:
+                arg = Y_to_primal_map[arg]
+            new_return_args.append(arg)
+        return_node.args = (new_return_args,)
+
+    return_primal_if_set_is_used(fw_module.graph)
 
     if AOT_PARTITIONER_DEBUG:
         from torch._inductor.fx_utils import get_node_storage
