@@ -307,9 +307,9 @@ def insert_deferred_runtime_asserts(
                 ):
                     # this guards against calls that produce unbacked bindings we haven't yet seen.
                     # this is possible if the example value has a hint (is backed), but produces an unbacked symbol.
-                    # reify from input shapes or hit hash cons
-                    # won't try DCEing here
-                    expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)
+                    if _is_intermediate_tensor_sym_call(node):  # reify from input shapes
+                        expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)
+                        # won't try DCE-ing tensor compute here
                     hash_node = expr_to_proxy[sym_expr].node
                     node.replace_all_uses_with(hash_node)
                     gm.graph.erase_node(node)
