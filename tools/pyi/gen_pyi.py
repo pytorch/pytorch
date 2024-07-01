@@ -203,7 +203,7 @@ def sig_for_ops(opname: str) -> list[str]:
     if name in symmetric_comparison_ops:
         # unsafe override https://github.com/python/mypy/issues/5704
         return [
-            f"def {opname}(self, other: Any) -> Tensor: ...  # noqa: PYI032 # type: ignore[override]"
+            f"def {opname}(self, other: Any) -> Tensor: ...  # type: ignore[override] # noqa: PYI032"
         ]
     if name in inplace_binary_ops:
         return [f"def {opname}(self, other: Any) -> Self: ..."]

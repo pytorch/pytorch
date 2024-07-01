@@ -15,6 +15,7 @@ The life of a worker is very simple:
 Because this file only expects to run in a child context, error handling means
 plumbing failures up to the caller, not raising in this process.
 """
+
 import argparse
 import dataclasses
 import io

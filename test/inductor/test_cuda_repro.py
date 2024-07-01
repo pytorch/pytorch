@@ -1274,11 +1274,9 @@ def triton_(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
                     getitem_24,
                 ]
             )
-            getitem_17 = (
-                getitem_18
-            ) = (
-                getitem_19
-            ) = getitem_20 = getitem_21 = getitem_22 = getitem_23 = getitem_24 = None
+            getitem_17 = getitem_18 = getitem_19 = getitem_20 = getitem_21 = (
+                getitem_22
+            ) = getitem_23 = getitem_24 = None
             return cat_1
 
         for mark_dynamic in [False, True]:

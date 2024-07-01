@@ -318,12 +318,16 @@ class RingAttentionTest(DTensorTestBase):
     @parametrize(
         "attention_fn",
         [
-            _scaled_dot_product_ring_flash_attention
-            if PLATFORM_SUPPORTS_FLASH_ATTENTION
-            else None,
-            _scaled_dot_product_ring_efficient_attention
-            if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
-            else None,
+            (
+                _scaled_dot_product_ring_flash_attention
+                if PLATFORM_SUPPORTS_FLASH_ATTENTION
+                else None
+            ),
+            (
+                _scaled_dot_product_ring_efficient_attention
+                if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+                else None
+            ),
             # _scaled_dot_product_ring_cudnn_attention, # TODO: not built by default
         ],
     )
