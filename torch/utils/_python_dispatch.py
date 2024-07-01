@@ -3,7 +3,7 @@ import contextlib
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Union, Protocol, Sequence, Tuple, overload
+from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload
 from typing_extensions import TypeGuard
 
 import torch

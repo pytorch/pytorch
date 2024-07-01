@@ -11,7 +11,7 @@ import pprint
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils.dlpack
@@ -1399,7 +1399,7 @@ Expected metadata: {str(expected_tangent_metadata)}
 
 Runtime metadata: {str(runtime_tangent_metadata)}
 
-shape: {str(x.shape)}
+shape: {str(cast(torch.Tensor, x).shape)}
 To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
 """
             )
@@ -1779,14 +1779,16 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
                     assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
-                        AOTDispatchAutograd.coerce_runtime_tangent(
-                            t,
-                            CompiledFunction.metadata.traced_tangent_metas[
-                                i - tangents_start_idx
-                            ],
+                        (
+                            AOTDispatchAutograd.coerce_runtime_tangent(
+                                t,
+                                CompiledFunction.metadata.traced_tangent_metas[
+                                    i - tangents_start_idx
+                                ],
+                            )
+                            if tangents_start_idx <= i < tangents_end_idx
+                            else t
                         )
-                        if tangents_start_idx <= i < tangents_end_idx
-                        else t
                         for i, t in enumerate(all_args)
                     ]
                     all_args = unwrap_tensor_subclasses(
@@ -1798,9 +1800,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # Make the tangents contiguous. Note that we must do this after subclass desugaring
                 # because inputs to inductor have to be contiguous
                 all_args = [
-                    AOTDispatchAutograd._force_contiguous(t)
-                    if (tangents_start_idx <= i < tangents_end_idx)
-                    else t
+                    (
+                        AOTDispatchAutograd._force_contiguous(t)
+                        if (tangents_start_idx <= i < tangents_end_idx)
+                        else t
+                    )
                     for i, t in enumerate(all_args)
                 ]
 

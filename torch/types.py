@@ -17,6 +17,7 @@ from builtins import (  # noqa: F401
 from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
 
 import torch
+from torch import SymInt
 
 
 if TYPE_CHECKING:
@@ -40,6 +41,7 @@ _device = torch.device
 _qscheme = torch.qscheme
 _layout = torch.layout
 _size = Union[torch.Size, List[builtins.int], Tuple[builtins.int, ...]]
+_symsize = Union[torch.Size, Sequence[Union[_int, SymInt]]]
 _dispatchkey = Union[builtins.str, torch._C.DispatchKey]
 
 # int or SymInt

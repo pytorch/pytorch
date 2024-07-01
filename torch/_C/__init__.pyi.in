@@ -56,6 +56,7 @@ from torch.types import (
     _qscheme,
     _size,
     _str,
+    _symsize,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -1659,6 +1660,18 @@ class _SetExcludeDispatchKeyGuard:
     def __init__(self, k: DispatchKey, enabled: _bool): ...
     def __enter__(self): ...
     def __exit__(self, exc_type, exc_value, traceback): ...
+
+# Defined in torch/csrc/utils/schema_info.h
+
+class _SchemaInfo:
+    def __init__(self, schema: _int) -> None: ...
+
+    @overload
+    def is_mutable(self) -> _bool: ...
+    @overload
+    def is_mutable(self, name: str) -> _bool: ...
+
+    def has_argument(self, name: str) -> _bool: ...
 
 # Defined in torch/csrc/utils/init.cpp
 class BenchmarkConfig:

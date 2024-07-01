@@ -5,6 +5,7 @@ AOTAutograd's responsibility is to trace through all pytorch capabilities that l
 and this includes tensor subclasses that implement __torch_dispatch__.
 """
 
+import typing
 from typing import Any, List, Optional, Tuple, Union
 
 import torch.utils._pytree as pytree
@@ -112,7 +113,7 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
         xs_inner = []
         for x in xs:
             if is_traceable_wrapper_subclass(x):
-                xs_inner.extend(get_plain_tensors(x))
+                xs_inner.extend(get_plain_tensors(typing.cast(Tensor, x)))
             else:
                 xs_inner.append(x)
         return xs_inner
