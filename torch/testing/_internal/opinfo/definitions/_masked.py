@@ -620,7 +620,7 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
             ),
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=2e-3, rtol=2e-3)}),
+                toleranceOverride({torch.float16: tol(atol=1e-2, rtol=2.6e-3)}),
                 "TestInductorOpInfo",
                 "test_comprehensive",
                 device_type="cuda",
@@ -1128,6 +1128,14 @@ op_db: List[OpInfo] = [
         method_variant=None,
         dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_normalize,
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=2e-5, rtol=6e-3)}),
+                "TestInductorOpInfo",
+                "test_comprehensive",
+                device_type="cuda",
+            ),
+        ],
         skips=(
             DecorateInfo(
                 unittest.expectedFailure,

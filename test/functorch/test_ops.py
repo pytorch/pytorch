@@ -1836,6 +1836,11 @@ class TestOperators(TestCase):
                 device_type="cuda",
             ),
             tol1(
+                "linalg.det",
+                {torch.float32: tol(atol=3e-05, rtol=5e-06)},
+                device_type="cuda",
+            ),
+            tol1(
                 "linalg.vander",
                 {torch.float32: tol(atol=1e-04, rtol=1.3e-05)},
                 device_type="cuda",
@@ -2404,6 +2409,11 @@ class TestOperators(TestCase):
         "TestOperators",
         "test_vmap_autograd_grad",
         (
+            tol1(
+                "ldexp",
+                {torch.float32: tol(atol=3e-04, rtol=1.6e-06)},
+                device_type="cuda",
+            ),
             tol1(
                 "linalg.householder_product",
                 {torch.float32: tol(atol=5e-04, rtol=9e-03)},

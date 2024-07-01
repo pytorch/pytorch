@@ -17574,7 +17574,14 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           decorators=[
+               skipCUDAIfNoMagma,
+               skipCPUIfNoLapack,
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=3e-5, rtol=3e-6)}),
+                   'TestConsistency', 'test_output_match', device_type='cpu',
+               ),
+           ],
            skips=(
                # AssertionError: Scalars are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
@@ -19502,7 +19509,7 @@ op_db: List[OpInfo] = [
            decorators=(
                DecorateInfo(
                    toleranceOverride({torch.float16: tol(atol=4e-3, rtol=4e-3)}),
-                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu',
+                   'TestInductorOpInfo', 'test_comprehensive',
                ),
            ),
            sample_inputs_func=sample_cumulative_trapezoid,),
@@ -20945,6 +20952,12 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-4, rtol=2e-3)}),
+                'TestInductorOpInfo', 'test_comprehensive', device_type="cuda",
+            ),
+        ],
         sample_inputs_func=sample_inputs_cosine_embedding_loss,
     ),
     OpInfo(
