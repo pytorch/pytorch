@@ -359,9 +359,7 @@ class PythonArgument:
                 and self.default.startswith("{")
                 and self.default.endswith("}")
             ):
-                default = (
-                    "(" + ", ".join(map(str.strip, self.default[1:-1].split(","))) + ")"
-                )
+                default = "(" + self.default[1:-1] + ")"
             else:
                 default = {
                     "nullptr": "None",
@@ -1143,7 +1141,7 @@ def returns_str_pyi(signature: PythonSignature) -> str:
         if (
             name.startswith("__")
             and name.endswith("__")
-            and name[2:-2] in inplace_binary_ops
+            and name[2:-2] in inplace_binary_ops  # e.g.: `__iadd__`, `__imul__`
         ):
             return "Self"
         return python_returns[0]
