@@ -9370,6 +9370,35 @@ for shape in [(1,), ()]:
             self.assertEqual(pack_count, 1)
             self.assertEqual(unpack_count, 1)
 
+    def test_save_tensor_hook_version_counter_not_shared(self):
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                before = a._version
+                x.add_(1)
+                self.assertEqual(a._version, before)
+                return grad_output
+
+        a = torch.tensor(1.0, requires_grad=True)
+        a_replacement = a.clone()
+
+        def pack_hook(x):
+            return a_replacement
+
+        def unpack_hook(x):
+            return x
+
+        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+            b = Test.apply(a)
+
+        b.backward()
+
     def test_save_on_cpu_and_checkpoint(self):
         a = torch.randn(2, 2, requires_grad=True)
 
@@ -13181,7 +13210,7 @@ class TestNestedCheckpoint(TestCase):
 
         # With early stopping (enabled by default)
         a = torch.tensor(1.0, requires_grad=True)
-        with SinCounterMode() as python_dispatch_counter:
+        with SinCounterMode() as python_dispatch_counter:  # noqa: F811
             out = checkpoint(fn, a, use_reentrant=False)
             out.backward()
         self.assertEqual(counter[0], 2)
@@ -13280,6 +13309,17 @@ class TestSelectiveActivationCheckpoint(TestCase):
             out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
             return out
 
+        def policy_fn_bool(ctx, op, *args, **kwargs):
+            return op == torch.ops.aten.mm.default
+
+        def fn_sac3(x, y):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts,
+                policy_fn_bool,
+            )
+            out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
+            return out
+
         act_mem_noac = get_act_mem(lambda: fn(x, y))
         bw_flops_noac = get_bw_flops(lambda: fn(x, y))
 
@@ -13303,6 +13343,12 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
         self.assertEqual(act_mem_sac2, 1.0)
         self.assertEqual(bw_flops_sac2, 2.0)
+
+        act_mem_sac3 = get_act_mem(lambda: fn_sac3(x, y))
+        bw_flops_sac3 = get_bw_flops(lambda: fn_sac3(x, y))
+
+        self.assertEqual(act_mem_sac3, 1.0)
+        self.assertEqual(bw_flops_sac3, 2.0)
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_output_already_has_autograd_meta(self):

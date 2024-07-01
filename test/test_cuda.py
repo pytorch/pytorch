@@ -46,8 +46,10 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     instantiate_parametrized_tests,
     IS_ARM64,
+    IS_FBCODE,
     IS_JETSON,
     IS_LINUX,
+    IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
     NO_MULTIPROCESSING_SPAWN,
@@ -275,6 +277,12 @@ class TestCuda(TestCase):
         # ensure out of memory error doesn't disturb subsequent kernel
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "uuid attribute not yet available")
+    def test_uuid(self):
+        uuid = torch.cuda.get_device_properties(0).uuid
+        self.assertEqual(len(str(uuid)), 36)  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        self.assertEqual(len(uuid.bytes), 16)
 
     def test_copy_non_blocking(self):
         def _test_copy_non_blocking(a, b):
@@ -2006,13 +2014,12 @@ torch.cuda.synchronize()
         input = torch.rand(
             (8, 8), device="cuda", dtype=torch.float16, requires_grad=True
         )
-        with torch.autocast(
-            "cuda",
-        ):
-            output = checkpoint_sequential(model, 2, input, use_reentrant=True)
-        self.assertTrue(output.requires_grad)
-        self.assertTrue(output.dtype is torch.float16)
-        output.sum().backward()
+        for reentrant in (True, False):
+            with torch.autocast("cuda"):
+                output = checkpoint_sequential(model, 2, input, use_reentrant=reentrant)
+            self.assertTrue(output.requires_grad)
+            self.assertTrue(output.dtype is torch.float16)
+            output.sum().backward()
 
     def test_cuda_autocast_deprecated_warning(self):
         with self.assertWarnsRegex(
@@ -2318,6 +2325,9 @@ exit(2)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
     def test_graph_capture_oom(self):
         oom_regex = (
@@ -4821,6 +4831,35 @@ class TestCudaOptims(TestCase):
                                 actual = actual.squeeze()
                             tracker.add(state_control[k])
                             tracker.pop_check_set(actual, self)
+
+    @onlyCUDA
+    @parametrize("in_place_unscale", [False, True])
+    @optims(
+        [optim for optim in optim_db if "cuda" in optim.supports_fused_on],
+        dtypes=[torch.float32],
+    )
+    def test_grad_scaler_with_preset_grad_scale(
+        self, device, dtype, optim_info, in_place_unscale
+    ):
+        weight = torch.ones((5, 5), device="cuda", requires_grad=True)
+        weight.grad = torch.full_like(weight, fill_value=15)
+        opt = optim_info.optim_cls([weight], lr=0.1, fused=True)
+        scaler = torch.amp.GradScaler(init_scale=5)
+
+        # simulate scaling a loss
+        scaler.scale(torch.ones(5))
+
+        if in_place_unscale:
+            scaler.unscale_(opt)
+            # the gradient should have been divided in-place
+            self.assertEqual(weight.grad, torch.full_like(weight, fill_value=3))
+
+        # the user sets a `grad_scale` value which should be fused with the optimizer step
+        opt.grad_scale = torch.Tensor([3]).cuda()
+        scaler.step(opt)
+
+        # check that the user's grad_scale was respected (i.e. the gradient was divided by 5 * 3)
+        self.assertEqual(weight.grad, torch.full_like(weight, fill_value=1))
 
     @onlyCUDA
     @unittest.skipIf(
