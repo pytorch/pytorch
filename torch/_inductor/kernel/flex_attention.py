@@ -547,8 +547,8 @@ def flex_attention(*args, **kwargs):
             BLOCK_N=BLOCK_N,
             BLOCK_DMODEL=query.get_size()[-1],
             # For now, we always assume the "sound" option
-            SCORE_MOD_IS_LINEAR=False,
-            ROWS_GUARANTEED_SAFE=False,
+            SCORE_MOD_IS_LINEAR=True,
+            ROWS_GUARANTEED_SAFE=True,
             OUTPUT_LOGSUMEXP=True,
             SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,

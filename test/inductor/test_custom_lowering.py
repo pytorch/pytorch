@@ -109,11 +109,6 @@ class TestCustomLowering(InductorTestCase):
 
         cls.impl_meta.impl("tanh_approx", tanh_approx_meta)
 
-        def tanh_approx_cuda(inp):
-            return torch.tanh(inp)
-
-        cls.impl_cuda.impl("tanh_approx", tanh_approx_cuda)
-
         def tanh_approx_lowering(inp):
             fn = partial(ops.inline_asm_elementwise, asm="tanh.approx.f32 $0, $1;")
             return make_pointwise(fn)(inp)
@@ -128,15 +123,14 @@ class TestCustomLowering(InductorTestCase):
             return a + b
 
         cls.impl_meta.impl("add_custom", add_custom)
-        cls.impl_cuda.impl("add_custom", add_custom)
 
         def add_custom_lowering(a, b):
             fn = partial(ops.inline_asm_elementwise, asm="add.f32 $0, $1, $2;")
             return make_pointwise(fn)(a, b)
 
         register_lowering(
-            torch.ops.test_inductor_ops.tanh_approx, type_promotion_kind=None
-        )(tanh_approx_lowering)
+            torch.ops.test_inductor_ops.add_custom, type_promotion_kind=None
+        )(add_custom_lowering)
 
     @unittest.skipIf(not HAS_CUDA, "CUDA needed")
     def test_jagged_to_padded_dense_sanity_cuda(self):
@@ -192,9 +186,9 @@ class TestCustomLowering(InductorTestCase):
         inp = torch.randn(32, device="cuda")
         fn_opt = torch.compile(fn)
 
-        a = fn(inp)
+        a = torch.tanh(inp)
         b = fn_opt(inp)
-        self.assertEqual(fn(inp), fn_opt(inp))
+        self.assertEqual(a, b)
 
     @unittest.skipIf(not HAS_CUDA, "CUDA needed")
     def test_multi_inp_asm(self):
@@ -205,9 +199,9 @@ class TestCustomLowering(InductorTestCase):
         b = torch.randn(32, device="cuda")
         fn_opt = torch.compile(fn)
 
-        a = fn(a, b)
+        a = a + b
         b = fn_opt(a, b)
-        self.assertEqual(fn(a, b), fn_opt(a, b))
+        self.assertEqual(a, b)
 
 
 if __name__ == "__main__":
