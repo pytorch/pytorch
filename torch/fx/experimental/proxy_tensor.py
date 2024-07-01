@@ -16,6 +16,7 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 import traceback
 import typing
+import typing_extensions
 import warnings
 import weakref
 
@@ -309,9 +310,10 @@ def extract_val(val: _ExtractValType) -> _ExtractValType:
             return None
     elif isinstance(val, (int, float, bool)):
         return val
+    elif val is None:
+        return None
 
-    # BUG? Should this return val?
-    return None
+    typing_extensions.assert_never(val)
 
 # What invariants do we have for the 'val' set on the FX node?  It has accurate
 # metadata... but only for metadata that exists "below" all other subsystems
