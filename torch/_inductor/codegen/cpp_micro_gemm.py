@@ -78,11 +78,11 @@ inline void {{kernel_name}}(
             "output_dtype": self.output_dtype,
             "compute_dtype": self.compute_dtype,
             "input_t": DTYPE_TO_CPP[self.input_dtype],
-            "input2_t": (
-                DTYPE_TO_CPP[torch.int8]
-                if self.input_dtype == torch.uint8
-                else DTYPE_TO_CPP[self.input_dtype]
-            ),  # TODO: support dtype other than s8 for weight
+            "input2_t": DTYPE_TO_CPP[torch.int8]
+            if self.input_dtype == torch.uint8
+            else DTYPE_TO_CPP[
+                self.input_dtype
+            ],  # TODO: support dtype other than s8 for weight
             "output_t": DTYPE_TO_CPP[self.output_dtype],
             "compute_t": DTYPE_TO_CPP[self.compute_dtype],
             "alpha": self.alpha,

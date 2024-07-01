@@ -181,7 +181,8 @@ class AttentionOp(Protocol):
         *args: object,
         is_causal: bool = False,
         **kwargs: object,
-    ) -> Tuple[torch.Tensor, ...]: ...
+    ) -> Tuple[torch.Tensor, ...]:
+        ...
 
 
 def _templated_ring_attention(

@@ -934,19 +934,13 @@ class OpInfo:
             else (
                 self.backward_dtypesIfCUDA
                 if self.backward_dtypesIfCUDA is not None
-                else (
-                    self.backward_dtypes
-                    if self.backward_dtypes is not None
-                    else (
-                        self.dtypesIfROCM
-                        if self.dtypesIfROCM is not None
-                        else (
-                            self.dtypesIfCUDA
-                            if self.dtypesIfCUDA is not None
-                            else self.dtypes
-                        )
-                    )
-                )
+                else self.backward_dtypes
+                if self.backward_dtypes is not None
+                else self.dtypesIfROCM
+                if self.dtypesIfROCM is not None
+                else self.dtypesIfCUDA
+                if self.dtypesIfCUDA is not None
+                else self.dtypes
             )
         )
         self.backward_dtypesIfCUDA = (
@@ -955,7 +949,9 @@ class OpInfo:
             else (
                 self.backward_dtypes
                 if self.backward_dtypes is not None
-                else self.dtypesIfCUDA if self.dtypesIfCUDA is not None else self.dtypes
+                else self.dtypesIfCUDA
+                if self.dtypesIfCUDA is not None
+                else self.dtypes
             )
         )
         self.backward_dtypes = (
@@ -2697,18 +2693,16 @@ def sample_inputs_foreach(
     else:
         # interweave some empty tensors + have the last 2 tensors be empty (see #100701)
         return [
-            (
-                torch.empty(0, dtype=dtype, device=device, requires_grad=requires_grad)
-                if (i % 3 == 0 or i >= N - 2) and intersperse_empty_tensors
-                else make_tensor(
-                    (N - i, N - i),
-                    dtype=dtype,
-                    device=device,
-                    noncontiguous=noncontiguous,
-                    low=low,
-                    high=high,
-                    requires_grad=requires_grad,
-                )
+            torch.empty(0, dtype=dtype, device=device, requires_grad=requires_grad)
+            if (i % 3 == 0 or i >= N - 2) and intersperse_empty_tensors
+            else make_tensor(
+                (N - i, N - i),
+                dtype=dtype,
+                device=device,
+                noncontiguous=noncontiguous,
+                low=low,
+                high=high,
+                requires_grad=requires_grad,
             )
             for i in range(N)
         ]
