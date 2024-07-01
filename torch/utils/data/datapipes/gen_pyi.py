@@ -228,7 +228,7 @@ def get_method_definitions(
                 method_name,
                 arguments,
                 output_type,
-            )[: -len(" ...")]
+            )[:-3].rstrip()  # remove "..."
             + doc_string,
         )
     method_definitions.sort(
