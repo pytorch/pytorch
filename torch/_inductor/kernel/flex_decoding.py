@@ -3,7 +3,6 @@
 from typing import Any, List, Tuple
 
 import torch
-from .. import config
 from ..ir import FixedLayout, FlexibleLayout
 from ..lowering import empty_strided, lowerings
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
@@ -256,12 +255,11 @@ def create_flex_decoding_kernel(*args, **kwargs):
     choices: List[Any] = []
     configs: List[Tuple[int, int, int]] = []
     configs.append(_get_decoding_default_config(key))
-    if config.max_autotune:
-        configs += [
-            (64, 2, 2),
-            (32, 2, 3),
-            (16, 2, 3),
-        ]
+    # if config.max_autotune:
+    #     configs += [
+    #         (64, 2, 2),
+    #         (32, 2, 3),
+    #     ]
 
     SPLIT_KV = get_split_k(key.get_size()[0], key.get_size()[1], key.get_size()[2])
     MAX_SPLIT_KV = SPLIT_KV
