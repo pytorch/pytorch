@@ -60,9 +60,9 @@ class TestCutlassBackend(TestCase):
             os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
             super().setUp()
         finally:
-            os.environ[
-                "INDUCTOR_TEST_DISABLE_FRESH_CACHE"
-            ] = old_disable_fresh_cache_envvar
+            os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = (
+                old_disable_fresh_cache_envvar
+            )
         torch.random.manual_seed(1234)
 
     @unittest.skipIf(not SM75OrLater, "need sm_75")
