@@ -4,8 +4,19 @@ import pathlib
 from collections import defaultdict
 from typing import Dict, List, Set, Tuple, Union
 
-from torchgen.api.python import format_function_signature
-from torchgen.utils import FileManager
+try:
+    from torchgen.api.python import format_function_signature
+    from torchgen.utils import FileManager
+except ImportError:
+    import sys
+
+    REPO_ROOT = pathlib.Path(__file__).absolute().parents[4]
+    sys.path.insert(0, str(REPO_ROOT))
+
+    from torchgen.api.python import format_function_signature
+    from torchgen.utils import FileManager
+
+    sys.path.remove(str(REPO_ROOT))
 
 
 def find_file_paths(dir_paths: List[str], files_to_exclude: Set[str]) -> Set[str]:
