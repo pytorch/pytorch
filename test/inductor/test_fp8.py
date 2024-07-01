@@ -97,9 +97,11 @@ class TestFP8Types(TestCase):
     @parametrize("shape", ("15,3,13", "4,2048,4096"))
     @parametrize(
         "dst_types",
-        [(torch.float8_e4m3fn, torch.float8_e5m2)]
-        if torch.version.hip is None
-        else [(torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)],
+        (
+            [(torch.float8_e4m3fn, torch.float8_e5m2)]
+            if torch.version.hip is None
+            else [(torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)]
+        ),
     )
     def test_valid_cast(self, dtype: torch.dtype, shape: str, dst_types: tuple):
         e4m3, e5m2 = dst_types
@@ -145,9 +147,11 @@ class TestFP8Types(TestCase):
     @parametrize("src_dtype", (torch.float16, torch.bfloat16, torch.float))
     @parametrize(
         "dst_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
+        (
+            (torch.float8_e4m3fn, torch.float8_e5m2)
+            if torch.version.hip is None
+            else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
+        ),
     )
     @parametrize("shape", ("16,16,16", "4,2048,4096"))
     def test_to_fp8_saturated(
@@ -170,9 +174,11 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     @parametrize(
         "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
+        (
+            (torch.float8_e4m3fn, torch.float8_e5m2)
+            if torch.version.hip is None
+            else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
+        ),
     )
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     def test_amax_fp8_quant(self, float8_dtype: torch.dtype, shape: str):
@@ -199,9 +205,11 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize(
         "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
+        (
+            (torch.float8_e4m3fn, torch.float8_e5m2)
+            if torch.version.hip is None
+            else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
+        ),
     )
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     def test_amax_along_with_fp8_quant(self, float8_dtype: torch.dtype, shape: str):
@@ -234,9 +242,11 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     @parametrize(
         "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
+        (
+            (torch.float8_e4m3fn, torch.float8_e5m2)
+            if torch.version.hip is None
+            else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
+        ),
     )
     @parametrize("amax_keep_dim", (True, False))
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
@@ -280,9 +290,11 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize(
         "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
+        (
+            (torch.float8_e4m3fn, torch.float8_e5m2)
+            if torch.version.hip is None
+            else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
+        ),
     )
     @parametrize("shape", ("4,2048,4096",))
     @parametrize("keepdim", (False, True))
