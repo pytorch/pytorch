@@ -447,10 +447,8 @@ class FakeTensorConverter:
 def init_cuda_context():
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available():
-        (
-            torch.empty(1, device="cuda")
-            if torch.version.hip is None
-            else torch.zeros(1, device="cuda")
+        torch.empty(1, device="cuda") if torch.version.hip is None else torch.zeros(
+            1, device="cuda"
         )
 
 

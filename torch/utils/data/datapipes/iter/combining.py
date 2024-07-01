@@ -125,13 +125,16 @@ class _ContainerTemplate(ABC):
     r"""Abstract class for container ``DataPipes``. The followings are three required methods."""
 
     @abstractmethod
-    def get_next_element_by_instance(self, instance_id: int): ...
+    def get_next_element_by_instance(self, instance_id: int):
+        ...
 
     @abstractmethod
-    def is_every_instance_exhausted(self) -> bool: ...
+    def is_every_instance_exhausted(self) -> bool:
+        ...
 
     @abstractmethod
-    def reset(self) -> None: ...
+    def reset(self) -> None:
+        ...
 
     @abstractmethod
     def get_length_by_instance(self, instance_id: int):
