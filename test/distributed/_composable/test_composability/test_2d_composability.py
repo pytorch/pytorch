@@ -34,7 +34,7 @@ class TestFullyShard2DTraining(FSDPTest):
     global funcol
     c10d_ops = torch.ops.c10d
     funcol = torch.ops.c10d_functional
-
+    
     @property
     def world_size(self) -> int:
         return min(4, torch.cuda.device_count())
