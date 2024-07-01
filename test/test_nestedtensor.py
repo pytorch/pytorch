@@ -3561,10 +3561,24 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.dim(), 3)
         self.assertEqual(nt.numel(), 27)
 
-    def test_linear(self, device):
-        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
-        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
-        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+    @parametrize("nt_dim", [3, 4, 5])
+    def test_linear(self, device, nt_dim):
+        if nt_dim == 3:
+            fixed_shape = (3,)
+        elif nt_dim == 4:
+            fixed_shape = (4, 3)
+        elif nt_dim == 5:
+            fixed_shape = (5, 4, 3)
+
+        a = torch.randn(
+            2, *fixed_shape, requires_grad=True, dtype=torch.float64, device=device
+        )
+        b = torch.randn(
+            3, *fixed_shape, requires_grad=True, dtype=torch.float64, device=device
+        )
+        c = torch.randn(
+            4, *fixed_shape, requires_grad=True, dtype=torch.float64, device=device
+        )
         weight = torch.randn(
             4, 3, requires_grad=True, dtype=torch.float64, device=device
         )
@@ -5174,18 +5188,26 @@ class TestNestedTensorSubclass(TestCase):
         # S: (constant) sequence length
         # D: embedding size
         query = random_nt_from_dims(
-            [4, None, 8, 10], device=device, dtype=dtype, layout=torch.jagged
+            [4, None, 8, 10],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
         )
         key = random_nt_from_similar(query)
         value = random_nt_from_similar(query)
         output = F.scaled_dot_product_attention(query, key, value)
         self.assertTrue(isinstance(output, NestedTensor))
+        output.values().sum().backward()
 
+        query_dense = query.clone().detach().requires_grad_(True)
         # should be equivalent to just running the buffers through
         output_dense = F.scaled_dot_product_attention(
-            query._values, key._values, value._values
+            query_dense.values(), key.values(), value.values()
         )
-        self.assertEqual(output._values, output_dense)
+        torch._dynamo.disable(self.assertEqual)(output._values, output_dense)
+        output_dense.sum().backward()
+        torch._dynamo.disable(self.assertEqual)(query.grad, query_dense.grad)
 
     @onlyCUDA
     @unittest.skipIf(
@@ -5610,8 +5632,25 @@ class TestNestedTensorSubclass(TestCase):
         for dynamic in [False, True, None]:
             self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
 
-    # TODO: test CPU as well when a backup non-FBGEMM impl exists
-    @onlyCUDA
+    @dtypes(torch.float32, torch.double, torch.half)
+    def test_unbind_backward(self, device, dtype):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 4, device=device),
+                torch.randn(5, 4, device=device),
+                torch.randn(3, 4, device=device),
+            ],
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+
+        a, b, c = nt.unbind()
+        b.sum().backward()
+
+        expected_grad = torch.zeros_like(nt)
+        expected_grad.unbind()[1].add_(1.0)
+        torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
+
     @dtypes(torch.float32, torch.double, torch.half)
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
@@ -5655,7 +5694,6 @@ class TestNestedTensorSubclass(TestCase):
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
-    @onlyCUDA
     @dtypes(torch.float32, torch.double, torch.half)
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
