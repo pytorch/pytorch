@@ -636,12 +636,12 @@ def gen_inplace_or_view_type_env(
             if definition is not None
             else []
         ),
-        "inplace_or_view_method_definitions": [definition]
-        if definition is not None
-        else [],
-        "inplace_or_view_wrapper_registrations": [registration]
-        if registration is not None
-        else [],
+        "inplace_or_view_method_definitions": (
+            [definition] if definition is not None else []
+        ),
+        "inplace_or_view_wrapper_registrations": (
+            [registration] if registration is not None else []
+        ),
     }
 
 

@@ -5,21 +5,26 @@ from typing import (
     Any,
     Callable,
     ContextManager,
+    Final,
     Iterator,
-    List,
     Literal,
     NamedTuple,
     NoReturn,
-    Optional,
     overload,
     Sequence,
-    Tuple,
-    Type,
     TypeVar,
-    Union,
 )
+from typing_extensions import Self
 
-from torch import contiguous_format, Generator, inf, memory_format, strided, Tensor, SymInt
+from torch import (
+    contiguous_format,
+    Generator,
+    inf,
+    memory_format,
+    strided,
+    SymInt,
+    Tensor,
+)
 from torch.types import (
     _bool,
     _device,
@@ -34,4 +39,4 @@ from torch.types import (
 
 ${structseq_defs}
 
-all_return_types: List[Type] = []
+all_return_types: list[type] = []
