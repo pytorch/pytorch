@@ -239,9 +239,11 @@ class EventList(list):
                         evt.trace_name,
                         evt.time_range.start,
                         evt.time_range.elapsed_us(),
-                        evt.thread
-                        if not evt.is_remote
-                        else f'" node_id:{evt.node_id}, thread_id:{evt.thread} "',
+                        (
+                            evt.thread
+                            if not evt.is_remote
+                            else f'" node_id:{evt.node_id}, thread_id:{evt.thread} "'
+                        ),
                     )
                 )
                 for k in evt.kernels:
@@ -1002,9 +1004,11 @@ def _build_table(
             _format_time_share(evt.self_cpu_time_total, sum_self_cpu_time_total),
             evt.self_cpu_time_total_str,  # Self CPU total
             # CPU total %, 0 for async events.
-            _format_time_share(evt.cpu_time_total, sum_self_cpu_time_total)
-            if not evt.is_async
-            else 0,
+            (
+                _format_time_share(evt.cpu_time_total, sum_self_cpu_time_total)
+                if not evt.is_async
+                else 0
+            ),
             evt.cpu_time_total_str,  # CPU total
             evt.cpu_time_str,  # CPU time avg
         ]
