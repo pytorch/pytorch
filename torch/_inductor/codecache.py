@@ -1556,6 +1556,8 @@ def split_aot_inductor_output_path(path: str) -> Tuple[str, str]:
     """Returns the path where the AOT Inductor compiled kernels are stored."""
     if path.endswith(".so"):
         return os.path.split(path)
+    elif path.endswith(".pt2"):
+        return os.path.split(path)
     else:
         return path, ""
 
@@ -1657,7 +1659,7 @@ class AotCodeCompiler:
             _, consts_path = write(
                 consts,
                 "bin",
-                specified_dir=specified_output_path,
+                specified_dir=os.path.split(input_path)[0],
             )
 
             consts_o = os.path.splitext(consts_path)[0] + ".o"
@@ -1726,7 +1728,7 @@ class AotCodeCompiler:
                 _, _binary_constants_path = write(
                     consts,
                     "bin",
-                    specified_dir=specified_output_path,
+                    specified_dir=os.path.split(input_path)[0],
                 )
                 log.debug("binary constants path: %s", _binary_constants_path)
 
@@ -1749,7 +1751,7 @@ class AotCodeCompiler:
             _, consts_path = write(
                 consts_asm,
                 "S",
-                specified_dir=specified_output_path,
+                specified_dir=os.path.split(input_path)[0],
             )
             consts_o = os.path.splitext(consts_path)[0] + ".o"
             cmd = f"{get_cpp_compiler()} -c -o {consts_o} {consts_path}"
@@ -1798,22 +1800,51 @@ class AotCodeCompiler:
             use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
-            compile_cmd = cpp_compile_command(
-                input=input_path,
-                output=output_o,
-                vec_isa=picked_vec_isa,
-                cuda=cuda,
-                aot_mode=graph.aot_mode,
-                compile_only=True,
-                use_absolute_path=use_absolute_path,
-                use_mmap_weights=use_mmap_weights,
-            )
-            log.debug("aot compilation command: %s", compile_cmd)
-            if fbcode_aot_cpu_re:
-                compile_file(input_path, output_o, compile_cmd.split())
-                os.chmod(output_o, 0o644)
+
+            if config.aot_inductor.package:
+                (
+                    object_output_name,
+                    object_output_dir,
+                ) = get_name_and_dir_from_output_file_path(input_path)
+                object_build_options = CppTorchCudaOptions(
+                    vec_isa=picked_vec_isa,
+                    cuda=cuda,
+                    aot_mode=graph.aot_mode,
+                    compile_only=True,
+                    use_absolute_path=use_absolute_path,
+                    use_mmap_weights=use_mmap_weights,
+                )
+                object_builder = CppBuilder(
+                    name=object_output_name,
+                    sources=input_path,
+                    output_dir=object_output_dir,
+                    BuildOption=object_build_options,
+                )
+                compile_cmd = object_builder.get_command_line()
+                output_o = object_builder.get_target_file_path()
+
+                compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
+                object_build_options.save_flags_to_file(compile_flags)
+
             else:
-                run_command_and_check(compile_cmd)
+                # TODO: replace this with using the CppBuilder above
+                compile_cmd = cpp_compile_command(
+                    input=input_path,
+                    output=output_o,
+                    vec_isa=picked_vec_isa,
+                    cuda=cuda,
+                    aot_mode=graph.aot_mode,
+                    compile_only=True,
+                    use_absolute_path=use_absolute_path,
+                    use_mmap_weights=use_mmap_weights,
+                )
+
+                log.debug("aot compilation command: %s", compile_cmd)
+                if fbcode_aot_cpu_re:
+                    compile_file(input_path, output_o, compile_cmd.split())
+                    os.chmod(output_o, 0o644)
+                else:
+                    run_command_and_check(compile_cmd)
 
             def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
                 def _pad_to_alignment(raw_bytes):
@@ -1863,10 +1894,47 @@ class AotCodeCompiler:
                     int, torch.randint(0, torch.iinfo(torch.int64).max, (1,)).item()
                 )
                 aot_constants = struct.pack("qq", consts_size + 8, magic_number)
+
             consts_o = {
                 "linux": _compile_consts_linux,
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
+
+            if config.aot_inductor.package:
+                output_name, output_dir = get_name_and_dir_from_output_file_path(
+                    output_so
+                )
+                so_build_options = CppTorchCudaOptions(
+                    vec_isa=picked_vec_isa,
+                    cuda=cuda,
+                    aot_mode=graph.aot_mode,
+                    use_absolute_path=use_absolute_path,
+                )
+                so_builder = CppBuilder(
+                    name=output_name,
+                    sources=[output_o, consts_o],
+                    output_dir=output_dir,
+                    BuildOption=so_build_options,
+                )
+                link_cmd = so_builder.get_command_line()
+                output_so = so_builder.get_target_file_path()
+
+                linker_flags = os.path.splitext(input_path)[0] + "_linker_flags.json"
+                so_build_options.save_flags_to_file(linker_flags)
+
+                from torch._inductor.package import package_aoti
+
+                package_constants = {
+                    name: graph.get_original_value_of_constant(name)
+                    for name in graph.constants.keys()
+                    if name not in graph.folded_constants
+                }
+                archive_path = package_aoti(
+                    os.path.split(input_path)[0], package_constants
+                )
+                return archive_path
+
+            # TODO: replace this with using the CppBuilder above
             link_cmd = cpp_compile_command(
                 input=[output_o, consts_o],
                 output=output_so,
@@ -1875,6 +1943,7 @@ class AotCodeCompiler:
                 aot_mode=graph.aot_mode,
                 use_absolute_path=use_absolute_path,
             )
+
             log.debug("aot linkage command: %s", link_cmd)
             if fbcode_aot_cpu_re:
                 compile_file([output_o, consts_o], output_so, link_cmd.split())
