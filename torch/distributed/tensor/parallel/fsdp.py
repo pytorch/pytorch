@@ -4,7 +4,6 @@ from typing import Any, cast, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
-
 import torch.distributed._shard.sharding_spec as shard_spec
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed._shard.sharded_tensor import (
@@ -13,12 +12,10 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensorMetadata,
     TensorProperties,
 )
-
 from torch.distributed._shard.sharding_spec import ShardMetadata
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShardingSpec
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
 from torch.distributed.device_mesh import _mesh_resources
-
 from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
 from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
 from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
@@ -27,6 +24,7 @@ from torch.distributed.tensor.parallel._data_parallel_utils import (
     _flatten_tensor,
     _unflatten_tensor,
 )
+
 
 __all__ = ["DTensorExtensions"]
 
@@ -245,7 +243,6 @@ def _chunk_dtensor(
     # e.g. When a layer is not sppecified in the parallelize_plan, TP will have no effect on the layer.
     # e.g. When you do PairwiseParallel on a 3 layer model, TP will have no effect on the third layer.
     if isinstance(tensor, torch.Tensor) and not isinstance(tensor, DTensor):
-
         # For tensors, it is replicated across tp dimension and sharded across FSDP dimension.
         # TP is the inner dimension and FSDP is the outer dimension.
         # Therefore, shard placements for tensor is (Shard(0), Replicate()).
@@ -324,6 +321,7 @@ class DTensorExtensions(FSDPExtensions):
     This is the implementation for FSDPExtensions defined in
     https://github.com/pytorch/pytorch/blob/main/torch/distributed/fsdp/_fsdp_extensions.py
     """
+
     def __init__(self, device_handle) -> None:
         super().__init__()
         self.compute_stream = None
@@ -352,7 +350,7 @@ class DTensorExtensions(FSDPExtensions):
                 tensor,
                 param_extension,
                 device_handle=self.device_handle,
-                compute_stream=self.compute_stream
+                compute_stream=self.compute_stream,
             )
             _set_fsdp_flattened(result)
             return result
