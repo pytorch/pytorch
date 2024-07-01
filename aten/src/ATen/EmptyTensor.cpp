@@ -29,6 +29,7 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
   return c10::GetCPUAllocator();
 }
 
+#ifndef C10_MOBILE
 constexpr uint64_t storage_max() {
   // int64_t and size_t are used somewhat inconsistently throughout ATen.
   // To be safe, storage size calculations must fit in both types.
@@ -38,6 +39,7 @@ constexpr uint64_t storage_max() {
       std::numeric_limits<size_t>::max());
   return std::min(int64_max, size_max);
 }
+#endif
 
 inline void raise_warning_for_complex_half(ScalarType dtype) {
   if (dtype == kComplexHalf) {
