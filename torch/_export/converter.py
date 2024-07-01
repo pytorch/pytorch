@@ -42,17 +42,17 @@ def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
 
 def is_valid_for_codegen(name):
     if len(name) == 0:
-        return False
+        raise RuntimeError(f"Invalid name '{name}' for codegen")
     if name[0].isdigit():
         return False
     return True
 
 
-def normalize_name(name: str) -> str:
+def normalize_name(name: str, prefix: str = "rename") -> str:
     name = name.replace(".", "_")
     if is_valid_for_codegen(name):
         return name
-    return f"rename_{name}"
+    return f"{prefix}_{name}"
 
 
 def ir_name_to_func_name(name: str) -> str:
@@ -363,9 +363,9 @@ class TS2FXGraphConverter:
     def convert_graph_inputs(self):
         for graph_input in self.ts_graph.inputs():
             name = graph_input.debugName()
-            normalized_name = normalize_name(name)
 
             if name in self.name_to_param_map:
+                normalized_name = normalize_name(name)
                 self.input_specs.append(
                     InputSpec(
                         InputKind.PARAMETER,
@@ -377,6 +377,7 @@ class TS2FXGraphConverter:
                     self.fx_graph, name, self.is_top_level_graph()
                 )
             elif name in self.name_to_buffer_map:
+                normalized_name = normalize_name(name)
                 self.input_specs.append(
                     InputSpec(
                         InputKind.BUFFER,
@@ -389,8 +390,7 @@ class TS2FXGraphConverter:
                     self.fx_graph, name, self.is_top_level_graph()
                 )
             else:
-                if not is_valid_for_codegen(normalized_name):
-                    normalized_name = f"input_{normalized_name}"
+                normalized_name = normalize_name(name, prefix="input")
                 self.input_specs.append(
                     InputSpec(
                         InputKind.USER_INPUT,
