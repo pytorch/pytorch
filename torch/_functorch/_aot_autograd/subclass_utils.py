@@ -85,7 +85,7 @@ def create_subclass_meta(
     infos: List[Union[int, SubclassCreationMeta]] = []
     for a in curr_args:
         if is_traceable_wrapper_subclass(a):
-            a = typing.cast(Tensor, a)
+            assert isinstance(a, Tensor)
             start_idx = idx
             subclass_meta, _ = create_subclass_metadata(a, start_idx)
             infos.append(subclass_meta)
