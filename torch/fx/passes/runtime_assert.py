@@ -146,12 +146,12 @@ def insert_deferred_runtime_asserts(
 
         from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 
-        # base cases, don't cache
-        if isinstance(expr, (Integer, Number, Symbol, BooleanAtom)):
-            return sympy_interp(PythonReferenceAnalysis, expr_to_proxy, expr)
         # hash cons
         if expr in expr_to_proxy:
             return expr_to_proxy[expr]
+        # base cases, don't cache
+        if isinstance(expr, (Integer, Number, Symbol, BooleanAtom)):
+            return sympy_interp(PythonReferenceAnalysis, expr_to_proxy, expr)
 
         # hash cons on arguments, run expr handler
         expr_to_proxy[expr] = _run_sympy_handler(
@@ -307,9 +307,9 @@ def insert_deferred_runtime_asserts(
                 ):
                 # this guards against calls that produce unbacked bindings we haven't yet seen.
                 # this is possible if the example value has a hint (is backed), but produces an unbacked symbol.
-                    if _is_intermediate_tensor_sym_call(node):  # reify from input shapes
-                        expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)
-                        # won't try DCE-ing tensor compute here
+                    # reify from input shapes or hit hash cons
+                    # won't try DCEing here
+                    expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)
                     hash_node = expr_to_proxy[sym_expr].node
                     node.replace_all_uses_with(hash_node)
                     gm.graph.erase_node(node)
