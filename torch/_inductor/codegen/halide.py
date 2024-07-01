@@ -1474,25 +1474,40 @@ class HalideKernel(SIMDKernel):
 
         code.do_unindent(2)
         code.splice(
-            f"""
+            """
             if __name__ == "__main__":
                 hl.main()
-            else:
-                hl.load_plugin({HalideCodeCache.find_libautoschedule(meta.scheduler)!r})
-                target = hl.Target({meta.target!r})
-                autoscheduler = hl.AutoschedulerParams({meta.scheduler!r}, {meta.scheduler_flags!r})
-                with hl.GeneratorContext(target, autoscheduler):
-                    gen = Kernel()
-                    pipeline = gen._build_pipeline()
-                    # gen.compile_to_callable() does not run the autoscheduler
-                    pipeline.apply_autoscheduler(target, autoscheduler)
-                    kernel = pipeline.compile_to_callable([
-                            gen._get_input_parameter(a.name)._to_argument()
-                            for a in gen._get_arginfos()
-                            if a.dir == hl.ArgInfoDirection.Input
-                        ], target)
-            """
+            """.rstrip(),
         )
+        if meta.scheduler:
+            code.splice(
+                f"""
+                else:
+                    hl.load_plugin({HalideCodeCache.find_libautoschedule(meta.scheduler)!r})
+                    target = hl.Target({meta.target!r})
+                    autoscheduler = hl.AutoschedulerParams({meta.scheduler!r}, {meta.scheduler_flags!r})
+                    with hl.GeneratorContext(target, autoscheduler):
+                        gen = Kernel()
+                        pipeline = gen._build_pipeline()
+                        # gen.compile_to_callable() does not run the autoscheduler
+                        pipeline.apply_autoscheduler(target, autoscheduler)
+                        kernel = pipeline.compile_to_callable([
+                                gen._get_input_parameter(a.name)._to_argument()
+                                for a in gen._get_arginfos()
+                                if a.dir == hl.ArgInfoDirection.Input
+                            ], target)
+                """,
+                strip=True,
+            )
+        else:
+            code.splice(
+                f"""
+                  else:
+                      with hl.GeneratorContext(hl.Target({meta.target!r})):
+                          kernel = Kernel().compile_to_callable()
+                  """,
+                strip=True,
+            )
         return code.getvalue()
 
     @staticmethod
