@@ -241,7 +241,17 @@ class TestWithNCCL(MultiProcessTestCase):
         )
         compiled = torch.compile(func)
         mem_usage = {}
-        for i in range(10):
+        # check if the aten.view.dtype is compiled to aten.view.dtype
+        code = run_and_get_triton_code(compiled, arg)
+        (
+            FileCheck()
+            .check(
+                "torch.ops._c10d_functional.wait_tensor.default(aten.view.dtype(buf0"
+            )
+            .run(code)
+        )
+        # check memory leak
+        for i in range(1, 10):
             mem_usage[i] = torch.cuda.max_memory_allocated()
             compiled(arg)
 
