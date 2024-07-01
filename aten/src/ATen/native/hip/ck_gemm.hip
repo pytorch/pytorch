@@ -14,7 +14,6 @@
 #undef __HIP_NO_HALF_CONVERSIONS__
 
 #include <ATen/ATen.h>
-//#include <c10/cuda/CUDAStream.h>
 #include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 #include <torch/torch.h>
 #include <ATen/native/hip/ck_gemm.h>
@@ -72,11 +71,6 @@ void gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   return;
 }
 
-template <>
-void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
-  return;
-}
-
 /*
 TODO - Remove this blurb
 Parameters traditionally being passed to gemms
@@ -109,24 +103,21 @@ template <
     int MPER_WAVE,
     int NPER_WAVE,
     int CNPER_WAVE = 1,
-    bool PADDING = false,
-    bool BIAS = false>
-at::Tensor bf16_gemm_impl(at::Tensor A, at::Tensor B, std::optional<at::Tensor> bias) {
+    bool PADDING = false>
+void bf16_gemm_impl(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   // Get input information.
-  int M = A.size(0);
-  int N = B.size(0);
-  int K = A.size(1);
+  int M = m;
+  int N = n;
+  int K = k;
 
-  int StrideA = K;
-  int StrideB = K;
-  int StrideC = N;
-
-  auto C = at::empty({M, N}, A.options().dtype(at::kBFloat16));
+  int StrideA = lda;
+  int StrideB = ldb;
+  int StrideC = ldc;
 
   using ADataType = ck::bhalf_t;
   using BDataType = ck::bhalf_t;
   using DDataType = ck::bhalf_t;
-  using DsDataType = std::conditional_t<BIAS, ck::Tuple<DDataType>, ck::Tuple<>>;
+  using DsDataType = ck::Tuple<>;
   using AccDataType = float;
   using CShuffleDataType = ck::bhalf_t;
   using CDataType = ck::bhalf_t;
@@ -134,12 +125,12 @@ at::Tensor bf16_gemm_impl(at::Tensor A, at::Tensor B, std::optional<at::Tensor> 
   using ALayout = Row;
   using BLayout = Col;
   using DLayout = Row;
-  using DsLayout = std::conditional_t<BIAS, ck::Tuple<DLayout>, ck::Tuple<>>;
+  using DsLayout = ck::Tuple<>;
   using CLayout = Row;
 
   using AElementOp = PassThrough;
   using BElementOp = PassThrough;
-  using CElementOp = std::conditional_t<BIAS, Add, PassThrough>;
+  using CElementOp = PassThrough;
 
   static constexpr auto GemmDefault =
       ck::tensor_operation::device::GemmSpecialization::Default;
@@ -207,22 +198,17 @@ at::Tensor bf16_gemm_impl(at::Tensor A, at::Tensor B, std::optional<at::Tensor> 
   auto b_element_op = BElementOp{};
   auto c_element_op = CElementOp{};
 
-  using DDataArrayType = std::conditional_t<BIAS, std::array<const void*, 1>, std::array<const void*, 0>>;
-  using DStrideArrayType = std::conditional_t<BIAS, std::array<ck::index_t, 1>, std::array<ck::index_t, 0>>;
+  using DDataArrayType = std::array<const void*, 0>;
+  using DStrideArrayType = std::array<ck::index_t, 0>;
 
   DDataArrayType DDataArray;
   DStrideArrayType DStrideArray;
 
-  if constexpr (BIAS) {
-    DDataArray = {reinterpret_cast<DDataType*>(bias.value().data_ptr())};
-    DStrideArray = {0};
-  }
-
   auto arguments = gemm.MakeArgument(
-      reinterpret_cast<ADataType*>(A.data_ptr()),
-      reinterpret_cast<BDataType*>(B.data_ptr()),
+      reinterpret_cast<const ADataType*>(a),
+      reinterpret_cast<const BDataType*>(b),
       DDataArray,
-      reinterpret_cast<CDataType*>(C.data_ptr()),
+      reinterpret_cast<CDataType*>(c),
       M,
       N,
       K,
@@ -236,45 +222,32 @@ at::Tensor bf16_gemm_impl(at::Tensor A, at::Tensor B, std::optional<at::Tensor> 
 
   auto stream = at::cuda::getCurrentHIPStream().stream();
   invoker.Run(arguments, StreamConfig{stream, false});
-
-  return C;
 }
 
-template<bool USE_BIAS=false>
-at::Tensor dispatch_bf16_gemm(at::Tensor A, at::Tensor B, std::optional<at::Tensor> bias) {
-  int M = A.size(0);
-  int N = B.size(0);
-  int K = A.size(1);
+void dispatch_bf16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   // If any of the shapes cant be tiled, we must use padding.
-  bool use_padding = ((M % 256 != 0) || (N % 128 != 0) || (K % 64 != 0));
+  bool use_padding = ((m % 256 != 0) || (n % 128 != 0) || (k % 64 != 0));
   // Dispatch to best implementation. TODO add more configurations.
   if (use_padding) {
-    if (M <= 128) {
-      return bf16_gemm_impl<256, 128, 64, 32, 32, 32, 2, 1, 1, true, USE_BIAS>(A, B, bias);
-    } else if ((M >= 8192 && N >= 4096) || (N >= 8192 && M >= 4096)) {
-      return bf16_gemm_impl<256, 256, 128, 64, 16, 16, 8, 4, 2, true, USE_BIAS>(A, B, bias);
+    if (m <= 128) {
+      bf16_gemm_impl<256, 128, 64, 32, 32, 32, 2, 1, 1, true>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+    } else if ((m >= 8192 && n >= 4096) || (n >= 8192 && m >= 4096)) {
+      bf16_gemm_impl<256, 256, 128, 64, 16, 16, 8, 4, 2, true>(CUDABLAS_GEMM_ARGS(at::BFloat16));
     } else {
-      return bf16_gemm_impl<256, 128, 128, 64, 16, 16, 4, 4, 2, true, USE_BIAS>(A, B, bias);
+      bf16_gemm_impl<256, 128, 128, 64, 16, 16, 4, 4, 2, true>(CUDABLAS_GEMM_ARGS(at::BFloat16));
     }
   } else {
-    if ((M >= 8192 && N >= 4096) || (N >= 8192 && M >= 4096)) {
-      return bf16_gemm_impl<256, 256, 128, 64, 16, 16, 8, 4, 2, false, USE_BIAS>(A, B, bias);
+    if ((m >= 8192 && n >= 4096) || (n >= 8192 && m >= 4096)) {
+      bf16_gemm_impl<256, 256, 128, 64, 16, 16, 8, 4, 2, false>(CUDABLAS_GEMM_ARGS(at::BFloat16));
     } else {
-      return bf16_gemm_impl<256, 128, 128, 64, 16, 16, 4, 4, 2, false, USE_BIAS>(A, B, bias);
+      bf16_gemm_impl<256, 128, 128, 64, 16, 16, 4, 4, 2, false>(CUDABLAS_GEMM_ARGS(at::BFloat16));
     }
   }
 }
 
-at::Tensor bf16_gemm(at::Tensor A, at::Tensor B, std::optional<at::Tensor> bias = c10::nullopt) {
-  TORCH_CHECK(
-      A.dtype() == at::kBFloat16 && B.dtype() == at::kBFloat16,
-      "Inputs must be bfloat16.");
-  if (bias.has_value()) {
-    TORCH_CHECK(bias.value().dtype() == at::kBFloat16, "Only bfloat16 currently supported for bias.");
-    return dispatch_bf16_gemm<true>(A, B, bias);
-  } else {
-    return dispatch_bf16_gemm<false>(A, B, bias);
-  }
+template <>
+void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
+  dispatch_bf16_gemm(CUDABLAS_GEMM_ARGS(at::BFloat16));
 }
 
 } // namespace at::native
