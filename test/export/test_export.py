@@ -3070,7 +3070,9 @@ def forward(self, x):
             fn,
             (torch.randint(3, 4, (2, 2)), torch.randint(3, 5, (2, 3))),
         )
-        with self.assertRaisesRegex(RuntimeError, r"Runtime assertion failed for expression u[\d+] \>\= 2"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"Runtime assertion failed for expression u[\d+] \>\= 2"
+        ):
             test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
             _ = ep.module()(*test_inp)
 
@@ -6044,14 +6046,18 @@ def forward(self, x, y):
         self.assertTrue(add_node.args[0].target == operator.mul)
         # test sym_size calls only happen on placeholders
         sym_size_nodes = [
-            node for node in ep.graph.nodes
+            node
+            for node in ep.graph.nodes
             if node.target == torch.ops.aten.sym_size.int
         ]
         self.assertEqual(len(sym_size_nodes), 2)
-        self.assertTrue(all(node.args[0].op == "placeholder" for node in sym_size_nodes))
+        self.assertTrue(
+            all(node.args[0].op == "placeholder" for node in sym_size_nodes)
+        )
         # dynamo will DCE the repeat node, AOTAutograd will leave it
         repeat_nodes = [
-            node for node in ep.graph.nodes
+            node
+            for node in ep.graph.nodes
             if node.target == torch.ops.aten.repeat.default
         ]
         self.assertEqual(
@@ -6127,22 +6133,22 @@ def forward(self, x, y):
             [node.target for node in ep.graph.nodes].count(
                 operator.pow,
             ),
-            2
+            2,
         )
-        FileCheck().check_count(
-            "torch.ops.aten.sym_size.int", 2, exactly=True
-        ).run(ep.graph_module.code)
+        FileCheck().check_count("torch.ops.aten.sym_size.int", 2, exactly=True).run(
+            ep.graph_module.code
+        )
 
         ep = ep.run_decompositions()
         self.assertEqual(
             [node.target for node in ep.graph.nodes].count(
                 operator.pow,
             ),
-            2
+            2,
         )
-        FileCheck().check_count(
-            "torch.ops.aten.sym_size.int", 2, exactly=True
-        ).run(ep.graph_module.code)
+        FileCheck().check_count("torch.ops.aten.sym_size.int", 2, exactly=True).run(
+            ep.graph_module.code
+        )
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")

@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional, Set, TYPE_CHECKING
 # Import sympy and ShapeEnv during TYPE_CHECKING since importing sympy is slow
 if TYPE_CHECKING:
     import sympy
+
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 else:
     ShapeEnv = Any
@@ -15,9 +16,9 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch.fx._compatibility import compatibility
 from torch.fx._utils import lazy_format_graph_code
+from torch.fx.experimental.proxy_tensor import py_sym_types
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.graph_module import GraphModule
-from torch.fx.experimental.proxy_tensor import py_sym_types
 
 log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
@@ -72,7 +73,7 @@ def insert_deferred_runtime_asserts(
         # turns into ->
         _w0 = 2 * s0
         _w = _w0 * s1
-        
+
         # where s0, s1 are either SymInt graph inputs, or the result of added size calls
 
     Redundant torch._check or torch.ops.aten._assert_scalar.default calls that assert
@@ -135,20 +136,19 @@ def insert_deferred_runtime_asserts(
         )
 
     # Track asserts/checks we've added
-    added_asserts: Set["sympy.Expr"] = set()
-    constrained_unbacked_symbols: Set["sympy.Symbol"] = set()
+    added_asserts: Set[sympy.Expr] = set()
+    constrained_unbacked_symbols: Set[sympy.Symbol] = set()
 
     def _sympy_interp(expr_to_proxy, expr):
         # sympy_interp() with hash consing
         from sympy import Integer, Number, Symbol
         from sympy.logic.boolalg import BooleanAtom
+
         from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 
         # base cases, don't cache
         if isinstance(expr, (Integer, Number, Symbol, BooleanAtom)):
-            return sympy_interp(
-                PythonReferenceAnalysis, expr_to_proxy, expr
-            )
+            return sympy_interp(PythonReferenceAnalysis, expr_to_proxy, expr)
         # hash cons
         if expr in expr_to_proxy:
             return expr_to_proxy[expr]
@@ -156,10 +156,7 @@ def insert_deferred_runtime_asserts(
         # hash cons on arguments, run expr handler
         expr_to_proxy[expr] = _run_sympy_handler(
             PythonReferenceAnalysis,
-            [
-                _sympy_interp(expr_to_proxy, arg)
-                for arg in expr.args
-            ],
+            [_sympy_interp(expr_to_proxy, arg) for arg in expr.args],
             expr,
         )
         return expr_to_proxy[expr]
@@ -168,15 +165,11 @@ def insert_deferred_runtime_asserts(
         # This is probably unnecessary, but since torch._check() calls for single-symbol bounds
         # like u0 >= 0, 10 >= u0 accumulate range info in the ShapeEnv, we designate these calls as redundant
         # and instead add 2 runtime asserts at the end of this pass, if the min/max bounds are non-trivial.
-        if (
-            len(expr.args) != 2
-            or expr.func not in (sympy.LessThan, sympy.GreaterThan)
-        ):
+        if len(expr.args) != 2 or expr.func not in (sympy.LessThan, sympy.GreaterThan):
             return False
         lhs, rhs = expr.args
-        return (
-            (isinstance(lhs, sympy.Symbol) and isinstance(rhs, sympy.Number))
-            or (isinstance(rhs, sympy.Symbol) and isinstance(lhs, sympy.Number))
+        return (isinstance(lhs, sympy.Symbol) and isinstance(rhs, sympy.Number)) or (
+            isinstance(rhs, sympy.Symbol) and isinstance(lhs, sympy.Number)
         )
 
     def add_runtime_asserts(ras):
@@ -280,16 +273,19 @@ def insert_deferred_runtime_asserts(
                 torch.ops.aten._assert_scalar.default,
             ):
                 if (
-                    node.args[0] == True  # trivial
+                    node.args[0] == True  # type: ignore[arg-type]
                     or (assert_expr := _get_sym_val(node.args[0])) in expr_to_proxy
-                    or (assert_expr is not None and _is_bound_expr_for_symbol(assert_expr))
+                    or (
+                        assert_expr is not None
+                        and _is_bound_expr_for_symbol(assert_expr)
+                    )
                 ):
                     arg = node.args[0]
                     gm.graph.erase_node(node)
                     if isinstance(arg, fx.Node) and not arg.users:
                         gm.graph.erase_node(arg)
                 else:
-                    added_asserts.add(assert_expr)
+                    added_asserts.add(assert_expr)  # type: ignore[arg-type]
 
             # hash cons, replace function calls that return torch.SymInts with direct references to
             # FX nodes built up to reify the sympy expression.
@@ -297,21 +293,27 @@ def insert_deferred_runtime_asserts(
                 node.op != "placeholder"
                 and (sym_expr := _get_sym_val(node)) is not None
             ):
-                if (
-                    sym_expr in expr_to_proxy  # example value is redundant
-                    or (
-                        _is_intermediate_tensor_sym_call(node)
-                        and not (sym_expr.free_symbols - expr_to_proxy.keys())
-                        # this guards against calls like item() that produce new untracked symbols
-                    )  # shape call on intermediate tensor, turn into computation on input shapes
+                if sym_expr in expr_to_proxy or (  # example value is redundant
+                _is_intermediate_tensor_sym_call(node)
+                and not (sym_expr.free_symbols - expr_to_proxy.keys())
+                # this guards against calls like item() that produce new untracked symbols
+                )  # shape call on intermediate tensor, turn into computation on input shapes
+                and not (
+                    resolve_unbacked_bindings(
+                        shape_env, node.meta.get("unbacked_bindings", {})
+                    ).keys() - expr_to_proxy.keys()
                 ):
-                    if _is_intermediate_tensor_sym_call(node):  # reify from input shapes
-                        expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)
-                        # won't try DCE-ing tensor compute here
+                # this guards against calls that produce unbacked bindings we haven't yet seen.
+                # this is possible if the example value has a hint (is backed), but produces an unbacked symbol.
+                    # reify from input shapes or hit hash cons
+                    # won't try DCEing here
+                    expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)
                     hash_node = expr_to_proxy[sym_expr].node
                     node.replace_all_uses_with(hash_node)
                     gm.graph.erase_node(node)
-                    log.debug("CSE node %s -> %s for expr %s", node, hash_node, sym_expr)
+                    log.debug(
+                        "CSE node %s -> %s for expr %s", node, hash_node, sym_expr
+                    )
                 else:
                     expr_to_proxy[sym_expr] = fx.Proxy(node)
 

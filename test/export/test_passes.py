@@ -529,7 +529,7 @@ class TestPasses(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Invalid value range for 6 between \[2, 5\]",
+            r"Runtime assertion failed for expression u[\d+] \<\= 5"
         ):
             ep.module()(torch.tensor([6]))
 
@@ -556,21 +556,21 @@ class TestPasses(TestCase):
         num_assert = count_call_function(
             ep.graph, torch.ops.aten._assert_scalar.default
         )
-        self.assertEqual(num_assert, 0)
+        self.assertEqual(num_assert, 2)
         num_constrain_range = count_call_function(
             ep.graph, torch.ops.aten.sym_constrain_range.default
         )
-        self.assertEqual(num_constrain_range, 1)
+        self.assertEqual(num_constrain_range, 0)
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Invalid value range for",
+            r"Runtime assertion failed for expression u[\d+] \>\= 3",
         ):
             ep.module()(torch.tensor([1, 1, 0, 0, 0]))
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Invalid value range for",
+            r"Runtime assertion failed for expression u[\d+] \<\= 5",
         ):
             ep.module()(torch.ones(6))
 

@@ -179,7 +179,7 @@ def sympy_interp(
     # Recursive case
     return _run_sympy_handler(
         analysis,
-        [sympy_interp(analysis, env, arg) for arg in expr.args],
+        [sympy_interp(analysis, env, arg) for arg in expr.args],  # type: ignore[arg-type]
         expr,
         index_dtype=index_dtype,
     )  # type: ignore[arg-type]

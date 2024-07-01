@@ -5,7 +5,7 @@ import random
 
 import torch
 import torch.nn.utils.rnn as rnn_utils
-from torch.testing._internal.common_utils import run_tests, xfailIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, xfailIfTorchDynamo
 
 
 class PackedSequenceTest(TestCase):
@@ -345,7 +345,6 @@ class PackedSequenceTest(TestCase):
             unpacked_sequences = rnn_utils.unpack_sequence(packed_sequences)
             self.assertEqual(sequences, unpacked_sequences)
 
-    @xfailIfTorchDynamo
     # can't turn ToFloat(Proxy(add)) intermediate size call into compute
     def test_pack_padded_sequence(self):
         def generate_test_case(sorted_lengths, should_shuffle):

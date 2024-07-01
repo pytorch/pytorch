@@ -571,12 +571,6 @@ def _decompose_exported_program(
     _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
-    from torch._dynamo import config as _dynamo_config
-    from torch._export.passes._node_metadata_hook import (
-        _node_metadata_hook,
-        _set_node_metadata_hook,
-    )
-
     from torch._export.passes.lift_constants_pass import (
         ConstantAttrMap,
         lift_constants_pass,
