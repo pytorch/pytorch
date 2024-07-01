@@ -79,9 +79,11 @@ def convert_arg_type_and_name(typ: Type, name: str) -> tuple[list[str], list[str
                 [name],
                 [base_type_to_aten_type[typ.name]],
                 [
-                    f"{base_type_to_callsite_expr[typ.name]}({name})"
-                    if base_type_to_callsite_expr[typ.name]
-                    else name
+                    (
+                        f"{base_type_to_callsite_expr[typ.name]}({name})"
+                        if base_type_to_callsite_expr[typ.name]
+                        else name
+                    )
                 ],
             )
         elif typ.name == BaseTy.Device:
