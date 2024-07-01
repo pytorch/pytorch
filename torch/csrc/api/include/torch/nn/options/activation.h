@@ -424,10 +424,10 @@ using ReLU6FuncOptions = ReLU6Options;
 /// RReLU model(RReLUOptions().lower(0.24).upper(0.42).inplace(true));
 /// ```
 struct TORCH_API RReLUOptions {
-  /// lower bound of the uniform distribution. Default: 1/8
+  /// lower bound of the uniform distribution. Default: 1 / 8
   TORCH_ARG(double, lower) = 1.0 / 8.0;
 
-  /// upper bound of the uniform distribution. Default: 1/3
+  /// upper bound of the uniform distribution. Default: 1 / 3
   TORCH_ARG(double, upper) = 1.0 / 3.0;
 
   /// can optionally do the operation in-place. Default: False
@@ -446,10 +446,10 @@ namespace functional {
 /// F::rrelu(x, F::RReLUFuncOptions().lower(0.1).upper(0.4).inplace(true));
 /// ```
 struct TORCH_API RReLUFuncOptions {
-  /// lower bound of the uniform distribution. Default: 1/8
+  /// lower bound of the uniform distribution. Default: 1 / 8
   TORCH_ARG(double, lower) = 1.0 / 8.0;
 
-  /// upper bound of the uniform distribution. Default: 1/3
+  /// upper bound of the uniform distribution. Default: 1 / 3
   TORCH_ARG(double, upper) = 1.0 / 3.0;
 
   TORCH_ARG(bool, training) = false;
