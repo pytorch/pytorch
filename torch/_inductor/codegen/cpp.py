@@ -1245,12 +1245,14 @@ class CppVecOverrides(CppOverrides):
             return f"{a} - ({a} / {b}).floor() * {b}"
         else:
             assert is_integer_dtype(a.dtype)
-            # Since we load 16 int8 elements into vec512, the remaining bits of vec512 could be zero
-            # and causes div with float exception.
-            assert a.dtype not in [
-                torch.uint8,
-                torch.int8,
-            ], "floordiv doesn't support uint8 and int8"
+            if a.dtype in [torch.uint8, torch.int8]:
+                # Since we load 16 int8 elements into vec512, the remaining bits of vec512 could be zero
+                # and causes div with float exception. Convert to int for div to avoid this issue.
+                a_cast = f"at::vec::convert<int32_t>({a})"
+                b_cast = f"at::vec::convert<int32_t>({b})"
+                floor_div = f"({CppVecOverrides.floordiv(a_cast, b_cast)})"
+                cast_down = f"at::vec::convert<{DTYPE_TO_CPP[a.dtype]}>({floor_div})"
+                return f"{a} - {cast_down} * {b}"
             return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
 
     @staticmethod

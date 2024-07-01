@@ -2111,6 +2111,8 @@ class CPUReproTests(TestCase):
     @requires_vectorization
     def test_vec_remainder(self):
         for dtype in [
+            torch.int8,
+            torch.uint8,
             torch.int32,
             torch.int64,
             torch.bfloat16,
