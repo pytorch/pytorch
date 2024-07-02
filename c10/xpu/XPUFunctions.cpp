@@ -94,6 +94,9 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
   device_prop->platform_name =
       raw_device.get_info<device::platform>().get_info<platform::name>();
 
+  device_prop->device_architecture =
+      raw_device.get_info<oneapi::experimental::info::device::architecture>();
+
   AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(ASSIGN_EXT_DEVICE_PROP);
 
   AT_FORALL_XPU_DEVICE_ASPECT(ASSIGN_DEVICE_ASPECT);

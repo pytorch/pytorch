@@ -159,6 +159,8 @@ struct C10_XPU_API DeviceProp {
   AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(DEFINE_EXT_DEVICE_PROP);
 
   AT_FORALL_XPU_DEVICE_ASPECT(DEFINE_DEVICE_ASPECT);
+
+  sycl::ext::oneapi::experimental::architecture device_architecture;
 };
 
 #undef _DEFINE_SYCL_PROP
