@@ -53,6 +53,7 @@ __global__ void nll_loss2d_forward_no_reduce_kernel(
   PackedTensorAccessor64<int64_t, 3> target,
   PackedTensorAccessor64<scalar_t, 3> output,
   const scalar_t* weight,
+  int n_classes,
   int64_t ignore_index
 ) {
   int64_t batch_size = input.size(0);
@@ -66,6 +67,7 @@ __global__ void nll_loss2d_forward_no_reduce_kernel(
     const int64_t w = (index / (batch_size * H)) % W;
 
     int64_t cur_target = target[b][h][w];
+    CUDA_KERNEL_ASSERT(cur_target >= 0 && cur_target < n_classes);
     if (cur_target == ignore_index) {
       output[b][h][w] = static_cast<scalar_t>(0);
       continue;
@@ -141,6 +143,7 @@ __global__ void nll_loss2d_backward_no_reduce_kernel(
   PackedTensorAccessor64<scalar_t, 3> grad_output,
   PackedTensorAccessor64<scalar_t, 4> grad_input,
   const scalar_t* weight,
+  int n_classes,
   int64_t ignore_index
 ) {
   int64_t batch_size = target.size(0);
@@ -153,6 +156,7 @@ __global__ void nll_loss2d_backward_no_reduce_kernel(
     const int64_t w = (index / (batch_size * H)) % W;
 
     int64_t cur_target = target[b][h][w];
+    CUDA_KERNEL_ASSERT(cur_target >= 0 && cur_target < n_classes);
     if (cur_target == ignore_index) {
       continue;
     }
@@ -279,6 +283,7 @@ void nll_loss2d_forward_out_cuda_template(
                   target.packed_accessor64<int64_t, 3>(),
                   output.packed_accessor64<scalar_t, 3>(),
                   optional_data<scalar_t>(weight_),
+                  input.size(1),
                   ignore_index);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
@@ -418,6 +423,7 @@ void nll_loss2d_backward_out_cuda_template(
                   grad_output.packed_accessor64<scalar_t, 3>(),
                   grad_input.packed_accessor64<scalar_t, 4>(),
                   optional_data<scalar_t>(weight_),
+                  input.size(1),
                   ignore_index);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
