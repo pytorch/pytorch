@@ -3,7 +3,7 @@ import os
 import pathlib
 from collections import defaultdict
 from typing import Any, Dict, List, Set, Tuple, Union
-from typing_extensions import deprecated
+from typing_extensions import deprecated as _deprecated
 
 try:
     from torchgen.api.python import (
@@ -24,7 +24,7 @@ except ImportError:
     sys.path.remove(str(REPO_ROOT))
 
 
-@deprecated(
+@_deprecated(
     "`torch.utils.data.datapipes.gen_pyi.materialize_lines` is deprecated and will be removed in the future.",
     category=FutureWarning,
 )
@@ -38,7 +38,7 @@ def materialize_lines(lines: List[str], indentation: int) -> str:
     return output
 
 
-@deprecated(
+@_deprecated(
     "`torch.utils.data.datapipes.gen_pyi.gen_from_template` is deprecated and will be removed in the future.",
     category=FutureWarning,
 )
