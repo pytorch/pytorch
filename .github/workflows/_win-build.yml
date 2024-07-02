@@ -30,6 +30,12 @@ on:
           An option JSON description of what test configs to run later on. This
           is moved here from the Linux test workflow so that we can apply filter
           logic using test-config labels earlier and skip unnecessary builds
+      runner:
+        required: false
+        type: string
+        default: "windows.4xlarge.nonephemeral"
+        description: |
+          Label of the runner this job should run on.
 
     outputs:
       test-matrix:
