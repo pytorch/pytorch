@@ -702,6 +702,38 @@ class TestUnflatten(TestCase):
             fqn_list,
         )
 
+    def test_dedup_sym_size(self):
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__() 
+            def forward(self, x, y):
+                d = x.size(0) // 2
+                return y[:d]
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__() 
+                self.m1 = M1() 
+
+            def forward(self, x, y):
+                d = x.size(0) // 2
+                m1_res = self.m1(x, y)
+                return y[d:] + m1_res
+
+        d_ = torch.export.Dim("foo", max=4611686018427387903)
+        d = 2 * d_
+        ep = torch.export.export(
+            M(), 
+            (torch.ones(10), torch.ones(10)),
+            dynamic_shapes=((d,), (d,)),
+            strict=False,
+            preserve_module_call_signature=("m1",),
+    
+        )
+
+        from torch.export.unflatten import unflatten
+        unflat = unflatten(ep)
+
     def test_duplicate_placeholder(self):
         N, C, H, W = 1, 2, 2, 3
 
