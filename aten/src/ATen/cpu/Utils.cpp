@@ -1,3 +1,4 @@
+#include <cassert>
 #include <ATen/cpu/Utils.h>
 #if !defined(__s390x__ ) && !defined(__powerpc__)
 #include <cpuinfo.h>
@@ -73,6 +74,45 @@ bool init_amx() {
 #else
   return true;
 #endif
+}
+
+static uint32_t get_cache_size(int level) {
+#if !defined(__s390x__) && !defined(__powerpc__)
+  if (!cpuinfo_initialize()) {
+    return 0;
+  }
+  const struct cpuinfo_processor* processors = cpuinfo_get_processors();
+  if (!processors) {
+    return 0;
+  }
+  const struct cpuinfo_cache* cache = NULL;
+  switch (level) {
+    case 1:
+      cache = processors[0].cache.l1d;
+      break;
+    case 2:
+      cache = processors[0].cache.l2;
+      break;
+    default:
+      assert(false && "Unsupported cache level");
+  }
+
+  if (!cache) {
+    return 0;
+  }
+  return cache->size;
+#else
+  return 0;
+#endif
+}
+
+uint32_t L1_cache_size() {
+  return get_cache_size(1);
+}
+
+// TODO: duplicated mostly with L1_cache_size
+uint32_t L2_cache_size() {
+  return get_cache_size(2);
 }
 
 } // namespace at::cpu
