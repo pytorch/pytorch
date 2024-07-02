@@ -69,18 +69,13 @@ class TensorArg:
     name: str
     buffer: str
     dtype: torch.dtype
-    offset: sympy.Expr = sympy.Integer(0)  # c++ only
-    alias_of: Optional[str] = None  # halide only
+    offset: sympy.Expr = sympy.Integer(0)
 
 
 @dataclasses.dataclass
 class SizeArg:
     name: str
     expr: sympy.Expr
-
-    @property
-    def alias_of(self):
-        return None
 
 
 @dataclasses.dataclass
@@ -153,8 +148,6 @@ class BackendFeature(Enum):
     SORT = auto()
     TUPLE_REDUCTION = auto()
     PREFER_STORE_LOOP_ORDER = auto()
-    TRITON_TEMPLATES = auto()
-    REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
 def get_backend_features(device: Union[torch.device, str]):
@@ -197,25 +190,22 @@ def init_backend_registration():
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_cuda import CppWrapperCuda
     from .cuda_combined_scheduling import CUDACombinedScheduling
-    from .halide import HalideScheduling
     from .triton import TritonScheduling
     from .wrapper import WrapperCodeGen
 
     if get_scheduling_for_device("cpu") is None:
-        cpu_backends = {"cpp": CppScheduling, "halide": HalideScheduling}
         register_backend_for_device(
             "cpu",
-            lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
+            CppScheduling,
             WrapperCodeGen,
             CppWrapperCpu,
         )
 
     if get_scheduling_for_device("cuda") is None:
         # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
-        cuda_backends = {"triton": CUDACombinedScheduling, "halide": HalideScheduling}
         register_backend_for_device(
             "cuda",
-            lambda *args, **kwargs: cuda_backends[config.cuda_backend](*args, **kwargs),
+            CUDACombinedScheduling,
             WrapperCodeGen,
             CppWrapperCuda,
         )
@@ -1344,6 +1334,7 @@ class KernelArgs:
             arg_defs.append("ws_ptr")
             call_args.append("workspace")
             precompile_args.append(self.workspace_arg)
+
         return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):

@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from typing import Sequence
+from typing import List, Optional, Sequence, Set, Union
 
 from torchgen import local
 from torchgen.api.types import (
@@ -65,7 +63,7 @@ def valuetype_type(
     *,
     binds: ArgName,
     remove_non_owning_ref_types: bool = False,
-) -> NamedCType | None:
+) -> Optional[NamedCType]:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor or t.name == BaseTy.Scalar:
             return None
@@ -211,7 +209,7 @@ def returns_type(rs: Sequence[Return]) -> CType:
 
 
 def return_names(f: NativeFunction, *, fallback_name: str = "result") -> Sequence[str]:
-    returns: list[str] = []
+    returns: List[str] = []
     for i, r in enumerate(f.func.returns):
         # If we have an inplace function, the return argument is
         # implicitly named self.
@@ -297,16 +295,16 @@ def default_expr(d: str, t: Type) -> str:
 
 
 def argument(
-    a: Argument | TensorOptionsArguments | SelfArgument,
+    a: Union[Argument, TensorOptionsArguments, SelfArgument],
     *,
-    cpp_no_default_args: set[str],
+    cpp_no_default_args: Set[str],
     method: bool,
     faithful: bool,
     has_tensor_options: bool,
-) -> list[Binding]:
+) -> List[Binding]:
     def sub_argument(
-        a: Argument | TensorOptionsArguments | SelfArgument,
-    ) -> list[Binding]:
+        a: Union[Argument, TensorOptionsArguments, SelfArgument]
+    ) -> List[Binding]:
         return argument(
             a,
             cpp_no_default_args=cpp_no_default_args,
@@ -321,7 +319,7 @@ def argument(
             binds = SpecialArgName.possibly_redundant_memory_format
         else:
             binds = a.name
-        default: str | None = None
+        default: Optional[str] = None
         if a.name not in cpp_no_default_args and a.default is not None:
             default = default_expr(a.default, a.type)
         return [
@@ -349,9 +347,9 @@ def arguments(
     *,
     faithful: bool,
     method: bool,
-    cpp_no_default_args: set[str],
-) -> list[Binding]:
-    args: list[Argument | TensorOptionsArguments | SelfArgument] = []
+    cpp_no_default_args: Set[str],
+) -> List[Binding]:
+    args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     if faithful:
         args.extend(arguments.non_out)
         args.extend(arguments.out)

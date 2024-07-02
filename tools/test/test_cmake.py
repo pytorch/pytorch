@@ -1,13 +1,12 @@
-from __future__ import annotations
-
 import contextlib
 import os
 import typing
 import unittest
 import unittest.mock
-from typing import Iterator, Sequence
+from typing import Iterator, Optional, Sequence
 
 import tools.setup_helpers.cmake
+
 import tools.setup_helpers.env  # noqa: F401 unused but resolves circular import
 
 
@@ -80,7 +79,7 @@ class TestCMake(unittest.TestCase):
 
 
 @contextlib.contextmanager
-def env_var(key: str, value: str | None) -> Iterator[None]:
+def env_var(key: str, value: Optional[str]) -> Iterator[None]:
     """Sets/clears an environment variable within a Python context."""
     # Get the previous value and then override it.
     previous_value = os.environ.get(key)
@@ -92,7 +91,7 @@ def env_var(key: str, value: str | None) -> Iterator[None]:
         set_env_var(key, previous_value)
 
 
-def set_env_var(key: str, value: str | None) -> None:
+def set_env_var(key: str, value: Optional[str]) -> None:
     """Sets/clears an environment variable."""
     if value is None:
         os.environ.pop(key, None)

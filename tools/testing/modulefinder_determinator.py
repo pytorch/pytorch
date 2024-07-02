@@ -1,13 +1,12 @@
-from __future__ import annotations
-
 import modulefinder
 import os
-import pathlib
 import sys
 import warnings
-from typing import Any
+from pathlib import Path
+from typing import Any, Dict, List, Set
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # These tests are slow enough that it's worth calculating whether the patch
 # touched any related files first. This list was manually generated, but for every
@@ -53,11 +52,11 @@ TARGET_DET_LIST = [
 ]
 
 
-_DEP_MODULES_CACHE: dict[str, set[str]] = {}
+_DEP_MODULES_CACHE: Dict[str, Set[str]] = {}
 
 
 def should_run_test(
-    target_det_list: list[str], test: str, touched_files: list[str], options: Any
+    target_det_list: List[str], test: str, touched_files: List[str], options: Any
 ) -> bool:
     test = parse_test_module(test)
     # Some tests are faster to execute than to determine.
@@ -141,7 +140,7 @@ def log_test_reason(file_type: str, filename: str, test: str, options: Any) -> N
         )
 
 
-def get_dep_modules(test: str) -> set[str]:
+def get_dep_modules(test: str) -> Set[str]:
     # Cache results in case of repetition
     if test in _DEP_MODULES_CACHE:
         return _DEP_MODULES_CACHE[test]

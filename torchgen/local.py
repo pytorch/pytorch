@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 import threading
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Iterator, Optional
 
 
 # Simple dynamic scoping implementation.  The name "parametrize" comes
@@ -19,8 +17,8 @@ from typing import Iterator
 
 
 class Locals(threading.local):
-    use_const_ref_for_mutable_tensors: bool | None = None
-    use_ilistref_for_tensor_lists: bool | None = None
+    use_const_ref_for_mutable_tensors: Optional[bool] = None
+    use_ilistref_for_tensor_lists: Optional[bool] = None
 
 
 _locals = Locals()

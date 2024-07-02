@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 from collections import defaultdict, namedtuple
-from typing import Any
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import yaml
 
@@ -24,7 +22,7 @@ ETParsedYaml = namedtuple("ETParsedYaml", ["native_functions", "et_kernel_indice
 ET_FIELDS = ["kernels", "type_alias", "dim_order_alias"]
 
 
-def parse_from_yaml(ei: dict[str, object]) -> dict[ETKernelKey, BackendMetadata]:
+def parse_from_yaml(ei: Dict[str, object]) -> Dict[ETKernelKey, BackendMetadata]:
     """Given a loaded yaml representing kernel assignment information, extract the
     mapping from `kernel keys` to `BackendMetadata` (the latter representing the kernel instance)
 
@@ -36,11 +34,11 @@ def parse_from_yaml(ei: dict[str, object]) -> dict[ETKernelKey, BackendMetadata]
     if (kernels := e.pop("kernels", None)) is None:
         return {}
 
-    type_alias: dict[str, list[str]] = e.pop("type_alias", {})  # type: ignore[assignment]
-    dim_order_alias: dict[str, list[str]] = e.pop("dim_order_alias", {})  # type: ignore[assignment]
+    type_alias: Dict[str, List[str]] = e.pop("type_alias", {})  # type: ignore[assignment]
+    dim_order_alias: Dict[str, List[str]] = e.pop("dim_order_alias", {})  # type: ignore[assignment]
     dim_order_alias.pop("__line__", None)
 
-    kernel_mapping: dict[ETKernelKey, BackendMetadata] = {}
+    kernel_mapping: Dict[ETKernelKey, BackendMetadata] = {}
 
     for entry in kernels:  # type: ignore[attr-defined]
         arg_meta = entry.get("arg_meta")
@@ -78,7 +76,7 @@ def parse_et_yaml_struct(es: object) -> ETKernelIndex:
     of `kernel keys` to `BackendMetadata` (the latter representing the kernel instance
     that should be used by the kernel key).
     """
-    indices: dict[OperatorName, dict[ETKernelKey, BackendMetadata]] = {}
+    indices: Dict[OperatorName, Dict[ETKernelKey, BackendMetadata]] = {}
     for ei in es:  # type: ignore[attr-defined]
         e = ei.copy()
 
@@ -97,11 +95,11 @@ def parse_et_yaml_struct(es: object) -> ETKernelIndex:
     return ETKernelIndex(indices)
 
 
-def extract_kernel_fields(es: object) -> dict[OperatorName, dict[str, Any]]:
+def extract_kernel_fields(es: object) -> Dict[OperatorName, Dict[str, Any]]:
     """Given a loaded yaml representing a list of operators, extract the
     kernel key related fields indexed by the operator name.
     """
-    fields: dict[OperatorName, dict[str, Any]] = defaultdict(dict)
+    fields: Dict[OperatorName, Dict[str, Any]] = defaultdict(dict)
     for ei in es:  # type: ignore[attr-defined]
         funcs = ei.get("func")
         assert isinstance(funcs, str), f"not a str: {funcs}"
@@ -120,9 +118,9 @@ def extract_kernel_fields(es: object) -> dict[OperatorName, dict[str, Any]]:
 def parse_et_yaml(
     path: str,
     tags_yaml_path: str,
-    ignore_keys: set[DispatchKey] | None = None,
+    ignore_keys: Optional[Set[DispatchKey]] = None,
     skip_native_fns_gen: bool = False,
-) -> tuple[list[NativeFunction], dict[OperatorName, dict[str, Any]]]:
+) -> Tuple[List[NativeFunction], Dict[OperatorName, Dict[str, Any]]]:
     """Parse native_functions.yaml into NativeFunctions and an Operator Indexed Dict
     of fields to persist from native_functions.yaml to functions.yaml
     """

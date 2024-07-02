@@ -1,29 +1,29 @@
-from __future__ import annotations
-
-import pathlib
 import sys
 import unittest
-from typing import Any
+from pathlib import Path
+from typing import Any, Dict
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.append(str(REPO_ROOT))
+
 import tools.testing.target_determination.heuristics.utils as utils
 from tools.testing.test_run import TestRun
+
 
 sys.path.remove(str(REPO_ROOT))
 
 
 class TestHeuristicsUtils(unittest.TestCase):
     def assertDictAlmostEqual(
-        self, first: dict[TestRun, Any], second: dict[TestRun, Any]
+        self, first: Dict[TestRun, Any], second: Dict[TestRun, Any]
     ) -> None:
         self.assertEqual(first.keys(), second.keys())
         for key in first.keys():
             self.assertAlmostEqual(first[key], second[key])
 
     def test_normalize_ratings(self) -> None:
-        ratings: dict[TestRun, float] = {
+        ratings: Dict[TestRun, float] = {
             TestRun("test1"): 1,
             TestRun("test2"): 2,
             TestRun("test3"): 4,

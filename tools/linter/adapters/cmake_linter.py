@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 import concurrent.futures
 import json
@@ -9,7 +7,7 @@ import re
 import subprocess
 import time
 from enum import Enum
-from typing import NamedTuple
+from typing import List, NamedTuple, Optional, Pattern
 
 
 LINTER_CODE = "CMAKE"
@@ -23,19 +21,19 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str | None
-    line: int | None
-    char: int | None
+    path: Optional[str]
+    line: Optional[int]
+    char: Optional[int]
     code: str
     severity: LintSeverity
     name: str
-    original: str | None
-    replacement: str | None
-    description: str | None
+    original: Optional[str]
+    replacement: Optional[str]
+    description: Optional[str]
 
 
 # CMakeLists.txt:901: Lines should be <= 80 characters long [linelength]
-RESULTS_RE: re.Pattern[str] = re.compile(
+RESULTS_RE: Pattern[str] = re.compile(
     r"""(?mx)
     ^
     (?P<file>.*?):
@@ -48,8 +46,8 @@ RESULTS_RE: re.Pattern[str] = re.compile(
 
 
 def run_command(
-    args: list[str],
-) -> subprocess.CompletedProcess[bytes]:
+    args: List[str],
+) -> "subprocess.CompletedProcess[bytes]":
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
@@ -65,7 +63,7 @@ def run_command(
 def check_file(
     filename: str,
     config: str,
-) -> list[LintMessage]:
+) -> List[LintMessage]:
     try:
         proc = run_command(
             ["cmakelint", f"--config={config}", filename],
