@@ -30,7 +30,11 @@ if not torch._running_with_deploy():
     def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
         group_size = _get_group_size_by_name(group_name)
         stacked_list = [torch.empty_like(input) for _ in range(group_size)]
-        return torch.cat(stacked_list, dim=gather_dim).chunk(group_size, dim=shard_dim)
+        # TODO: fix return for when get_group_rank() is not equal to get_rank()
+        # currently, it only works for 1d mesh, as we are not able to get the group rank from the group_name.
+        return torch.cat(stacked_list, dim=gather_dim).chunk(group_size, dim=shard_dim)[
+            get_rank()
+        ]
 
 else:
     import warnings
