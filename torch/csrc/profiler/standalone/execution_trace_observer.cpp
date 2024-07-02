@@ -73,6 +73,9 @@ inline std::string getValueType(
   if (val.isTensor()) {
     // Add tensor element data type.
     type += fmt::format("({})", std::string(val.toTensor().dtype().name()));
+    if (type == "Tensor(nullptr (uninitialized))")
+      // This is the case that the input tensor is optional and it is "None"
+      type = "None";
   } else if (val.isTuple()) {
     const auto& val_container = val.toTupleRef().elements();
     std::vector<std::string> str_array;
@@ -437,15 +440,18 @@ inline std::string convertIValue(
       numel = t->numel();
       itemsize = t->itemsize();
       device_str = t->device().str();
+
+      return fmt::format(
+          "[{},{},{},{},{},\"{}\"]",
+          tensor_id,
+          storage_id,
+          offset,
+          numel,
+          itemsize,
+          device_str);
+    } else {
+      return "\"<None>\"";
     }
-    return fmt::format(
-        "[{},{},{},{},{},\"{}\"]",
-        tensor_id,
-        storage_id,
-        offset,
-        numel,
-        itemsize,
-        device_str);
   } else if (val.isTuple()) {
     std::vector<std::string> str_array;
     const auto& val_tuple = val.toTupleRef().elements();
