@@ -1062,6 +1062,9 @@ class WrapperCodeGen(CodeGen):
         offset = self.codegen_sizevar(offset)
         return f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
 
+    def codegen_dtype_view(self, data, dtype, writer) -> str:
+        return f"aten.view.dtype({data.get_name()}, {dtype})"
+
     def codegen_device_copy(self, src, dst):
         self.writeline(f"{dst}.copy_({src})")
 

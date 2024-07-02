@@ -1975,7 +1975,7 @@ def as_storage_and_layout(
             else:
                 x.data.decide_layout()
         return x, x.data.layout
-    if isinstance(x, ReinterpretView):
+    if isinstance(x, (ReinterpretView, DtypeView)):
         # making the base of x contiguous or stride_ordered will not necessarily make
         # the ReinterpretView either, so don't pass along those arguments
         buffer, _ = as_storage_and_layout(
@@ -2508,6 +2508,61 @@ class ReinterpretView(BaseView):
             self.layout.size,
             self.layout.stride,
             self.layout.offset,
+            writer,
+        )
+
+
+@dataclasses.dataclass
+class DtypeView(BaseView):
+    """Pretend our storage has a different type"""
+
+    target_dtype: torch.dtype
+
+    def __post_init__(self):
+        super().__post_init__()
+        if isinstance(self.data, BaseView):
+            self.data = self.data.unwrap_view()
+
+    def __str__(self):
+        return self.str_helper([self.data, self.target_dtype])
+
+    __repr__ = __str__
+
+    @property
+    def dtype(self):
+        return self.target_dtype
+
+    @property
+    def layout(self):
+        old_layout = self.data.get_layout()
+        layout_class = type(old_layout)
+        new_layout = layout_class(
+            old_layout.device,
+            self.target_dtype,
+            old_layout.size,
+            old_layout.stride,
+            old_layout.offset,
+        )
+        return new_layout
+
+    def get_size(self):
+        return self.data.get_size()
+
+    def get_stride(self):
+        return self.data.get_stride()
+
+    def make_loader(self):
+        inner = self.data.make_loader()
+
+        def loader(idx):
+            return ops.to_dtype_bitcast(inner(idx), self.target_dtype, self.data.dtype)
+
+        return loader
+
+    def codegen_reference(self, writer=None):
+        return V.graph.wrapper_code.codegen_dtype_view(
+            self.data,
+            self.target_dtype,
             writer,
         )
 
@@ -3893,7 +3948,7 @@ class InputsKernel(Buffer):
             x = x.data
         if isinstance(x, StorageBox):
             x = x.data
-        if isinstance(x, BaseView) and not isinstance(x, ReinterpretView):
+        if isinstance(x, BaseView) and not isinstance(x, (ReinterpretView, DtypeView)):
             x = ExternKernel.realize_input(x)
         if isinstance(x, TensorBox):
             # when converting to ReinterpretView fails in the
@@ -3903,7 +3958,7 @@ class InputsKernel(Buffer):
             return cls.unwrap_storage_for_input(x)
         if isinstance(x, TorchBindObject):
             return x
-        assert isinstance(x, (Buffer, ReinterpretView)), x
+        assert isinstance(x, (Buffer, ReinterpretView, DtypeView)), x
         return x
 
     @staticmethod
@@ -4420,6 +4475,8 @@ class ExternKernel(InputsKernel):
             return cls.realize_input(x.data)
         if isinstance(x, ReinterpretView):
             return ReinterpretView(cls.realize_input(x.data), x.get_layout())
+        if isinstance(x, DtypeView):
+            return DtypeView(cls.realize_input(x.data), x.target_dtype)
         if isinstance(x, BaseView):
             x.realize()
             if is_storage_and_layout(x.unwrap_view()):
