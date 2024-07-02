@@ -23,7 +23,7 @@ from torch.nn import Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, IS_CI,
-     NoTest, skipIfSlowGradcheckEnv, suppress_warnings)
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
@@ -1198,6 +1198,29 @@ class MpsMemoryLeakCheck:
                    f"MPS driver allocated memory was {self.driver_before} and is now {driver_mem_allocated}.")
 
             raise RuntimeError(msg)
+
+class TestAutocastMPS(TestCase):
+
+    def test_matmul_autocast(self):
+        autocast_tensor_A = torch.rand((8, 8), device="mps")
+        autocast_tensor_B = torch.rand((8, 8), device="mps")
+        tensor_A = autocast_tensor_A.clone().detach()
+        tensor_B = autocast_tensor_B.clone().detach()
+        autocast_output_tensor = torch.empty(8, 8)
+        output_tensor = autocast_output_tensor.clone().detach()
+
+        with torch.autocast(device_type="mps"):
+            autocast_output_tensor = torch.mm(autocast_tensor_A, autocast_tensor_B)
+            autocast_output_tensor = torch.mm(autocast_tensor_A, autocast_output_tensor)
+
+        output_tensor = torch.mm(tensor_A, tensor_B)
+        output_tensor = torch.mm(tensor_A, output_tensor)
+
+        self.assertEqual(autocast_output_tensor.dtype, torch.float16, "Autocast output tensor was not expected type float16")
+        self.assertEqual(autocast_output_tensor,
+                         output_tensor.to(torch.float16),
+                         f"Autocast & non-autocast tensors did not match, \
+                         got:\n{autocast_output_tensor} \n{output_tensor.to(torch.float16)}")
 
 # Expand TestCase class with Memory Leak Detection on MPS device
 class TestCaseMPS(TestCase):
@@ -7836,7 +7859,7 @@ class TestMPS(TestCaseMPS):
         x.backward(torch.randn_like(x))
         torch.mps.synchronize()
 
-    @unittest.expectedFailure
+    @serialTest()
     def test_mps_allocator_module(self):
         # first garbage collect and empty the cached blocks
         gc.collect()
