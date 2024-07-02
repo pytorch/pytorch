@@ -814,6 +814,73 @@ class TS2FXGraphConverter:
         )  # Get rid of an extra list wrapped around final output.
 
 
+class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
+    """
+    Run TS2FXGraphConverter in an explain mode. It collects all failed operators conversions
+    and provide that information to users. In order to collect all failed conversions, it
+    also mocks some internal attributes (e.g., name_to_node).
+    """
+
+    class _DictMock(dict):
+        def __init__(self, dict_data, mock_value):
+            super().__init__(dict_data)
+            self.mock_value = mock_value
+
+        def __getitem__(self, key):
+            # If the original dictionary has the key, return its value.
+            # Otherwise, return the mock value.
+            if not super().__contains__(key):
+                warnings.warn(
+                    f"{key} is not found in <class 'dict'>. Mock is instead used."
+                )
+                return self.mock_value
+            return super().__getitem__(key)
+
+        def __contains__(self, key):
+            return True
+
+    def __init__(
+        self,
+        ts_graph: Union[torch._C.Graph, torch._C.Block],
+        name_to_param_map: Dict[str, torch.Tensor],
+        name_to_buffer_map: Dict[str, torch.Tensor],
+        blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
+        name_to_non_tensor_attribute: Dict[str, Any],
+    ):
+        super().__init__(
+            ts_graph, name_to_param_map, name_to_buffer_map, blocks_to_lifted_attrs, name_to_non_tensor_attribute
+        )
+
+        # Data to keep track of unsupported nodes.
+        self.unsupported_node_list: List[torch._C.Node] = []
+
+        # Add mock to needed attributes.
+        self.name_to_node = ExplainTS2FXGraphConverter._DictMock(
+            self.name_to_node,
+            # Dummy node.
+            torch.fx.Node(
+                None,
+                "mock",
+                "call_function",
+                lambda: None,
+                (),
+                {},
+            ),
+        )
+
+    def explain(self):
+        self.convert_graph_inputs()
+        for node in self.ts_graph.nodes():
+            self.convert_node(node)
+        self.convert_graph_outputs()
+
+    def convert_node(self, node):
+        try:
+            super().convert_node(node)
+        except Exception:
+            self.unsupported_node_list.append(node)
+
+
 class TS2EPConverter:
     # TorchScript model to ExportedProgram converter
     def __init__(
@@ -869,6 +936,27 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
             gm, graph_converter.name_to_tensor_constants
         )
         return ep
+
+
+    def explain(self):
+        blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
+
+        graph_converter = ExplainTS2FXGraphConverter(
+            self.ts_graph,
+            self.name_to_param_map,
+            self.name_to_buffer_map,
+            blocks_to_lifted_attrs,
+            self.name_to_non_tensor_attributes,
+        )
+        graph_converter.explain()
+        if len(graph_converter.unsupported_node_list) > 0:
+            explain_str = "Unsupported nodes are found in the following list:"
+            for i, n in enumerate(graph_converter.unsupported_node_list):
+                node_str = "".join(str(n).split("\n")[:1])
+                explain_str += f"\n\n    {i}. {n.kind()} [{node_str}]"
+            print(explain_str)
+        else:
+            print("Success!")
 
     def retrace_as_exported_program(
         self, gm: torch.fx.GraphModule, tensor_constants: Dict[str, torch.Tensor]
