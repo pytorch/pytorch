@@ -43,14 +43,15 @@ __all__ = [
     "default_convert",
 ]
 
-T_co = TypeVar("T_co", covariant=True)
-T = TypeVar("T")
+
+_T = TypeVar("_T")
+_T_co = TypeVar("_T_co", covariant=True)
 _worker_init_fn_t = Callable[[int], None]
 
 # Ideally we would parameterize `DataLoader` by the return type of `collate_fn`, but there is currently no way to have that
 # type parameter set to a default value if the user doesn't pass in a custom 'collate_fn'.
 # See https://github.com/python/mypy/issues/3737.
-_collate_fn_t = Callable[[List[T]], Any]
+_collate_fn_t = Callable[[List[_T]], Any]
 
 
 # These functions used to be defined in this file. However, it was moved to
@@ -126,7 +127,7 @@ def _share_dist_seed(generator, pg):
     return _shared_seed.item()
 
 
-class DataLoader(Generic[T_co]):
+class DataLoader(Generic[_T_co]):
     r"""
     Data loader combines a dataset and a sampler, and provides an iterable over the given dataset.
 
@@ -216,7 +217,7 @@ class DataLoader(Generic[T_co]):
         https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods
     """
 
-    dataset: Dataset[T_co]
+    dataset: Dataset[_T_co]
     batch_size: Optional[int]
     num_workers: int
     pin_memory: bool
@@ -230,7 +231,7 @@ class DataLoader(Generic[T_co]):
 
     def __init__(
         self,
-        dataset: Dataset[T_co],
+        dataset: Dataset[_T_co],
         batch_size: Optional[int] = 1,
         shuffle: Optional[bool] = None,
         sampler: Union[Sampler, Iterable, None] = None,
