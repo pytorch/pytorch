@@ -3353,6 +3353,9 @@ def sample_inputs_threshold(op_info, device, dtype, requires_grad, **kwargs):
     for x_size in sizes:
         # threshold and values args must be numbers
         yield SampleInput(make_arg(x_size), make_arg(()).item(), make_arg(()).item())
+    # additional test case for integral inputs
+    if dtype in integral_types() and dtype is not torch.uint8:
+        yield SampleInput(make_arg(x_size), -1.5, make_arg(()).item())
 
 def sample_inputs_unique(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)

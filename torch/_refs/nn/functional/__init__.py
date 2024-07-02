@@ -876,7 +876,8 @@ def threshold(
     if inplace:
         raise NotImplementedError
 
-    return torch.where(a <= threshold, value, a)
+    python_type = utils.dtype_to_type(a.dtype)
+    return torch.where(a <= python_type(threshold), value, a)
 
 
 # CompositeImplicitAutograd - don't register decomp
