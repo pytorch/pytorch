@@ -1433,8 +1433,12 @@ def same(
                 ref = ref.to(res.dtype)
 
             # First try usual allclose
-            if torch.allclose(ref, res, atol=tol, rtol=tol, equal_nan=equal_nan):
-                return True
+            try:
+                if torch.allclose(ref, res, atol=tol, rtol=tol, equal_nan=equal_nan):
+                    return True
+            except Exception:
+                logging.exception("An unexpected error occurred while comparing tensors with torch.allclose")
+                raise
 
             # Check error from fp64 version
             if fp64_ref.dtype == torch.float64:
