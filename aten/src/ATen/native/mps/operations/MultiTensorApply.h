@@ -51,6 +51,77 @@ struct FusedAdamEncodingFunctor {
   }
 };
 
+struct FusedSgdEncodingFunctor {
+  void operator()(
+    id<MTLComputeCommandEncoder>& computeEncoder,
+      id<MTLBuffer>& tensorArgumentBuffer,
+      const MetadataArguments& metadata_arguments,
+      const double weight_decay,
+      const double momentum,
+      const double lr,
+      const double dampening,
+      const bool nesterov,
+      const bool maximize,
+      const bool is_first_step
+    ) const {
+      float weight_decay_lv = weight_decay;
+      float momentum_lv = momentum;
+      float lr_lv = lr;
+      float dampening_lv = dampening;
+      uint8_t nesterov_lv = nesterov;
+      uint8_t maximize_lv = maximize;
+      uint8_t is_first_step_lv = is_first_step;
+
+      [computeEncoder setBuffer:tensorArgumentBuffer
+                                  offset:0
+                                  atIndex:0];
+      [computeEncoder setBytes:&metadata_arguments
+                                  length:sizeof(MetadataArguments)
+                                  atIndex:1];
+      [computeEncoder setBytes:&weight_decay_lv length:sizeof(float) atIndex:2];
+      [computeEncoder setBytes:&momentum_lv length:sizeof(float) atIndex:3];
+      [computeEncoder setBytes:&lr_lv length:sizeof(float) atIndex:4];
+      [computeEncoder setBytes:&dampening_lv length:sizeof(float) atIndex:5];
+      [computeEncoder setBytes:&nesterov_lv length:sizeof(uint8_t) atIndex:6];
+      [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
+      [computeEncoder setBytes:&is_first_step_lv length:sizeof(uint8_t) atIndex:8];
+  }
+
+  void operator()(
+    id<MTLComputeCommandEncoder>& computeEncoder,
+      id<MTLBuffer>& tensorArgumentBuffer,
+      const MetadataArguments& metadata_arguments,
+      const double weight_decay,
+      const double momentum,
+      const at::Tensor& lr,
+      const double dampening,
+      const bool nesterov,
+      const bool maximize,
+      const bool is_first_step
+    ) const {
+      float weight_decay_lv = weight_decay;
+      float momentum_lv = momentum;
+      float dampening_lv = dampening;
+      uint8_t nesterov_lv = nesterov;
+      uint8_t maximize_lv = maximize;
+      uint8_t is_first_step_lv = is_first_step;
+
+      [computeEncoder setBuffer:tensorArgumentBuffer
+                                  offset:0
+                                  atIndex:0];
+      [computeEncoder setBytes:&metadata_arguments
+                                  length:sizeof(MetadataArguments)
+                                  atIndex:1];
+      [computeEncoder setBytes:&weight_decay_lv length:sizeof(float) atIndex:2];
+      [computeEncoder setBytes:&momentum_lv length:sizeof(float) atIndex:3];
+      [computeEncoder setBuffer:getMTLBufferStorage(lr) offset:lr.storage_offset() * lr.element_size() atIndex:4];
+      [computeEncoder setBytes:&dampening_lv length:sizeof(float) atIndex:5];
+      [computeEncoder setBytes:&nesterov_lv length:sizeof(uint8_t) atIndex:6];
+      [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
+      [computeEncoder setBytes:&is_first_step_lv length:sizeof(uint8_t) atIndex:8];
+  }
+};
+
 template <int depth, uint32_t kThreadGroupSize, typename encoder_func_t, typename... ArgTypes>
 static void multi_tensor_apply_for_fused_optimizer(
     const std::string& kernel_name,
