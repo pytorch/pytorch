@@ -1127,6 +1127,8 @@ exclude_patterns = [
     'test/test_type_promotion.py',
     'test/test_unary_ufuncs.py',
     'test/test_vulkan.py',
+    'test/test_xnnpack_integration.py',
+    'test/torch_np/numpy_test/**/*.py',
     'torch/_awaits/__init__.py',
     'torch/_custom_op/__init__.py',
     'torch/_custom_op/autograd.py',
@@ -1780,7 +1782,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.5.0',
+    'ruff==0.4.8',
 ]
 is_formatter = true
 

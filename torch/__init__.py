@@ -26,15 +26,13 @@ from typing import (
     Callable as _Callable,
     Dict as _Dict,
     Optional as _Optional,
-    overload as _overload,
     Set as _Set,
     Tuple as _Tuple,
     Type as _Type,
     TYPE_CHECKING,
-    TypeVar as _TypeVar,
     Union as _Union,
 )
-from typing_extensions import ParamSpec as _ParamSpec, TypeGuard as _TypeGuard
+from typing_extensions import TypeGuard as _TypeGuard
 
 
 # multipy/deploy is setting this import before importing torch, this is the most
@@ -2192,38 +2190,6 @@ class _TorchCompileWrapper:
             self.compiler_fn.reset()
 
 
-_InputT = _ParamSpec("_InputT")
-_RetT = _TypeVar("_RetT")
-
-
-@_overload
-def compile(
-    model: _Callable[_InputT, _RetT],
-    *,
-    fullgraph: builtins.bool = False,
-    dynamic: _Optional[builtins.bool] = None,
-    backend: _Union[str, _Callable] = "inductor",
-    mode: _Union[str, None] = None,
-    options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
-    disable: builtins.bool = False,
-) -> _Callable[_InputT, _RetT]:
-    ...
-
-
-@_overload
-def compile(
-    model: None = None,
-    *,
-    fullgraph: builtins.bool = False,
-    dynamic: _Optional[builtins.bool] = None,
-    backend: _Union[str, _Callable] = "inductor",
-    mode: _Union[str, None] = None,
-    options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
-    disable: builtins.bool = False,
-) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]:
-    ...
-
-
 def compile(
     model: _Optional[_Callable] = None,
     *,
@@ -2233,10 +2199,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
-) -> _Union[
-    _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
-    _Callable[_InputT, _RetT],
-]:
+) -> _Callable:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
     If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
@@ -2328,7 +2291,7 @@ def compile(
     # Decorator mode
     if model is None:
 
-        def fn(model: _Callable[_InputT, _RetT]) -> _Callable[_InputT, _RetT]:
+        def fn(model: _Callable):
             if model is None:
                 raise RuntimeError("Model can't be None")
             return compile(
@@ -2359,9 +2322,7 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
-    )(
-        model
-    )  # type: ignore[return-value]
+    )(model)
 
 
 def _register_device_module(device_type, module):

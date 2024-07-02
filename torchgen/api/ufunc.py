@@ -1,6 +1,5 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
+from typing import List, Optional
 
 import torchgen.api.types as api_types
 from torchgen.api import cpp, structured
@@ -39,7 +38,7 @@ def kernel_name(g: NativeFunctionsGroup, dispatch_key: DispatchKey) -> str:
 # argument registers)
 #
 # NB: used for CPU only
-def dispatchstub_type(t: Type, *, binds: ArgName) -> NamedCType | None:
+def dispatchstub_type(t: Type, *, binds: ArgName) -> Optional[NamedCType]:
     # Dispatch stubs are always plain ints
     r = cpp.valuetype_type(t, binds=binds, symint=False)
     if r is not None:
@@ -135,8 +134,8 @@ def ufunc_argument(a: Argument, compute_t: CType) -> Binding:
 
 @dataclass(frozen=True)
 class UfunctorBindings:
-    ctor: list[Binding]
-    apply: list[Binding]
+    ctor: List[Binding]
+    apply: List[Binding]
 
 
 # ufunctors are a CUDA-only concept representing functors that take some of
@@ -157,7 +156,7 @@ class UfunctorBindings:
 # The ctor refers to the constructor CUDAFunctorOnSelf_add, while apply refers
 # to the operator() definition
 def ufunctor_arguments(
-    g: NativeFunctionsGroup, *, scalar_tensor_idx: int | None, scalar_t: BaseCppType
+    g: NativeFunctionsGroup, *, scalar_tensor_idx: Optional[int], scalar_t: BaseCppType
 ) -> UfunctorBindings:
     ctor = []
     apply = []
@@ -186,7 +185,7 @@ def ufunctor_arguments(
 # }
 #
 # In this file, we refer to T as compute_t which is bound by caller
-def ufunc_arguments(g: NativeFunctionsGroup, *, compute_t: CType) -> list[Binding]:
+def ufunc_arguments(g: NativeFunctionsGroup, *, compute_t: CType) -> List[Binding]:
     return [
         ufunc_argument(a, compute_t=compute_t)
         for a in g.functional.func.arguments.flat_non_out
@@ -198,7 +197,7 @@ def ufunc_arguments(g: NativeFunctionsGroup, *, compute_t: CType) -> list[Bindin
 #
 # using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, const Scalar& alpha);
 # DECLARE_DISPATCH(structured_binary_fn_alpha, add_stub);
-def stub_arguments(g: NativeFunctionsGroup) -> list[Binding]:
+def stub_arguments(g: NativeFunctionsGroup) -> List[Binding]:
     # stubs drop all tensor arguments (they are implicit in the TensorIterator
     # argument and keep everything else)
     return [

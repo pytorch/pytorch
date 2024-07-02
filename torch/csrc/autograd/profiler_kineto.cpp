@@ -518,12 +518,6 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
   }
 }
 
-struct ProfilerStateInfo {
-  std::shared_ptr<KinetoThreadLocalState> state_ptr;
-  std::unordered_set<at::RecordScope> scopes;
-};
-std::shared_ptr<ProfilerStateInfo> profiler_state_info_ptr{nullptr};
-
 } // namespace
 
 void reportBackendEventToActiveKinetoProfiler(
@@ -656,8 +650,8 @@ void enableProfiler(
       has_cpu || !config.global(),
       "Ondemand profiling must enable CPU tracing");
 
-  auto state_ptr = std::make_shared<KinetoThreadLocalState>(config, activities);
-  KinetoThreadLocalState::push(state_ptr);
+  KinetoThreadLocalState::push(
+      std::make_shared<KinetoThreadLocalState>(config, activities));
 
   if (has_cpu) {
     config.global() ? pushProfilingCallbacks</*global=*/true>(scopes)
@@ -667,42 +661,9 @@ void enableProfiler(
   if (!config.global()) {
     torch::profiler::impl::kineto::startTrace();
   }
-
-  if (has_cpu) {
-    auto state_info_ptr = std::make_shared<ProfilerStateInfo>();
-    state_info_ptr->state_ptr = state_ptr;
-    state_info_ptr->scopes = scopes;
-    profiler_state_info_ptr = state_info_ptr;
-  }
-}
-
-bool isProfilerEnabledInMainThread() {
-  return profiler_state_info_ptr != nullptr;
-}
-
-void enableProfilerInChildThread() {
-  auto state_info_ptr = profiler_state_info_ptr;
-  TORCH_CHECK(state_info_ptr, "Profiler is not enabled in main thread.");
-  TORCH_CHECK(
-      KinetoThreadLocalState::get(/*global=*/false) == nullptr,
-      "Profiler is already enabled in this thread.");
-
-  KinetoThreadLocalState::push(state_info_ptr->state_ptr);
-  pushProfilingCallbacks</*global=*/false>(state_info_ptr->scopes);
-}
-
-void disableProfilerInChildThread() {
-  auto state_ptr = ProfilerStateBase::pop();
-  TORCH_CHECK(
-      state_ptr,
-      "Can't disable Kineto profiler when it's not running in this thread");
-  state_ptr->removeCallback();
 }
 
 std::unique_ptr<ProfilerResult> disableProfiler() {
-  // releasing to inform child threads to stop profiling
-  profiler_state_info_ptr = nullptr;
-
   auto state_ptr = ProfilerStateBase::pop();
   const auto& config = state_ptr->config();
   TORCH_CHECK(

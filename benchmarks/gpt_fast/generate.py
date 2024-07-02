@@ -348,7 +348,7 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
         "int8",
         MixtralMoEWeightOnlyInt8QuantHandler,
         175,
-        1130,
+        1280,
         162,
     )
     token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)

@@ -1152,8 +1152,6 @@ def _set_sdp_use_mem_efficient(
 ) -> None: ...  # THPModule_setSDPUseMemEfficient
 def _get_math_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_math(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
-def _get_overrideable_sdp_enabled() -> _bool: ...  # THPModule_userEnabledOverrideableSDP
-def _set_sdp_use_overrideable(arg: _bool) -> None: ...  # THPModule_setSDPUseOverrideable
 def _get_cudnn_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_cudnn(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
 def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn
@@ -1954,6 +1952,7 @@ class _SDPBackend(Enum):
     EFFICIENT_ATTENTION = 2
     CUDNN_ATTENTION = 3
 
+def _can_use_cudnn_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
 def _can_use_flash_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
 def _can_use_mem_efficient_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
 

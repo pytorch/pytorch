@@ -1,4 +1,4 @@
-from __future__ import annotations
+from typing import List, Optional
 
 from torchgen.api import dispatcher
 from torchgen.api.types import (
@@ -93,7 +93,7 @@ def name(
     *,
     is_reverse: bool,
     include_namespace: bool,
-    reapply_views: bool | None = None,
+    reapply_views: Optional[bool] = None,
 ) -> str:
     if reapply_views is None:
         # reapply_views is only important for the fwd lambda,
@@ -124,7 +124,7 @@ def reverse_name(f: NativeFunction, include_namespace: bool) -> str:
         return f"{api_name}_inverse"
 
 
-def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> list[Binding]:
+def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> List[Binding]:
     # capture arguments include all arguments except `self`.
     # Importantly, they don't include any C++ reference types (or else we'll get a dangling reference in the capture),
     # So any reference types (IntArrayRef) need to be converted to value types (vector<int64_t>)
@@ -152,14 +152,14 @@ def returns_type(func: FunctionSchema) -> CType:
     return BaseCType(tensorT)
 
 
-def outer_arguments(*, is_reverse: bool) -> list[Binding]:
+def outer_arguments(*, is_reverse: bool) -> List[Binding]:
     if is_reverse:
         return [base_binding, mutated_view_binding, mutated_view_idx_binding]
     else:
         return [base_binding, mutated_view_idx_binding]
 
 
-def inner_call_index(func: FunctionSchema) -> Binding | None:
+def inner_call_index(func: FunctionSchema) -> Optional[Binding]:
     # For view ops that return multiple tensors (like `split`), we generate a separate lambda for each output.
     # When we replay a view op that returns multiple tensors, we need to index into the output appropriately
     if len(func.returns) > 1 or (
@@ -169,7 +169,7 @@ def inner_call_index(func: FunctionSchema) -> Binding | None:
     return None
 
 
-def inner_arguments(func: FunctionSchema, is_reverse: bool) -> list[Binding]:
+def inner_arguments(func: FunctionSchema, is_reverse: bool) -> List[Binding]:
     args = func.arguments.flat_all
     assert args[0].type == BaseType(BaseTy.Tensor)
     non_self_args = args[1:]

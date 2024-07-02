@@ -8,10 +8,10 @@ from tools.code_analyzer.gen_oplist import throw_if_any_op_includes_overloads
 
 
 class GenOplistTest(unittest.TestCase):
-    def setUp(self) -> None:
+    def setUp(self):
         pass
 
-    def test_throw_if_any_op_includes_overloads(self) -> None:
+    def test_throw_if_any_op_includes_overloads(self):
         selective_builder = MagicMock()
         selective_builder.operators = MagicMock()
         selective_builder.operators.items.return_value = [

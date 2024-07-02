@@ -3,10 +3,8 @@ This is refactored from cmake.py to avoid circular imports issue with env.py,
 which calls get_cmake_cache_variables_from_file
 """
 
-from __future__ import annotations
-
 import re
-from typing import IO, Optional, Union
+from typing import Dict, IO, Optional, Union
 
 
 CMakeValue = Optional[Union[bool, str]]
@@ -44,7 +42,7 @@ def convert_cmake_value_to_python_value(
 
 def get_cmake_cache_variables_from_file(
     cmake_cache_file: IO[str],
-) -> dict[str, CMakeValue]:
+) -> Dict[str, CMakeValue]:
     r"""Gets values in CMakeCache.txt into a dictionary.
 
     Args:

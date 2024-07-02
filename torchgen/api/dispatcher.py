@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 import itertools
-from typing import Sequence
+from typing import List, Sequence, Union
 
 from torchgen.api import cpp
 from torchgen.api.types import ArgName, Binding, CType, NamedCType
@@ -78,10 +76,10 @@ def returns_type(rs: Sequence[Return], *, symint: bool = True) -> CType:
     return cpp.returns_type(rs, symint=symint)
 
 
-def jit_arguments(func: FunctionSchema) -> list[Argument]:
+def jit_arguments(func: FunctionSchema) -> List[Argument]:
     def to_argument(
-        a: Argument | TensorOptionsArguments | SelfArgument,
-    ) -> list[Argument]:
+        a: Union[Argument, TensorOptionsArguments, SelfArgument]
+    ) -> List[Argument]:
         if isinstance(a, Argument):
             return [a]
         elif isinstance(a, SelfArgument):
@@ -116,5 +114,5 @@ def argument(
     )
 
 
-def arguments(func: FunctionSchema, *, symint: bool = True) -> list[Binding]:
+def arguments(func: FunctionSchema, *, symint: bool = True) -> List[Binding]:
     return [argument(a, symint=symint) for a in jit_arguments(func)]
