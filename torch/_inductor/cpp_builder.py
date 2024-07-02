@@ -576,6 +576,7 @@ def _get_build_args_of_chosen_isa(vec_isa: VecISA):
 
 
 def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
+    from torch._inductor.codecache import cpp_prefix_path
     from torch.utils.cpp_extension import _TORCH_PATH, TORCH_LIB_PATH
 
     include_dirs = [
@@ -589,9 +590,24 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
     libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
     if sys.platform != "darwin" and not config.is_fbcode():
-        libraries = ["torch", "torch_cpu"]
-        if not aot_mode:
-            libraries.append("torch_python")
+        if aot_mode:
+            libraries.append("torch")
+            libraries.append("torch_cpu")
+            # libraries.append("torch_python")
+
+        if include_pytorch:
+            libraries.append("torch")
+            libraries.append("torch_cpu")
+            if not aot_mode:
+                libraries.append("torch_python")
+
+    cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
+    if config.is_fbcode():
+        if aot_mode:
+            include_dirs += cpp_prefix_include_dir
+    else:
+        if not include_pytorch and aot_mode:
+            include_dirs += cpp_prefix_include_dir
 
     if _IS_WINDOWS:
         libraries.append("sleef")
@@ -617,7 +633,7 @@ def _get_python_include_dirs():
     return [str(include_dir)]
 
 
-def _get_python_related_args():
+def _get_python_related_args(include_pytorch: bool, aot_mode: bool):
     python_include_dirs = _get_python_include_dirs()
     python_include_path = sysconfig.get_path(
         "include", scheme="nt" if _IS_WINDOWS else "posix_prefix"
@@ -625,11 +641,13 @@ def _get_python_related_args():
     if python_include_path is not None:
         python_include_dirs.append(python_include_path)
 
+    python_lib_path = []
     if _IS_WINDOWS:
         python_path = os.path.dirname(sys.executable)
-        python_lib_path = [os.path.join(python_path, "libs")]
+        python_lib_path.append(os.path.join(python_path, "libs"))
     else:
-        python_lib_path = [sysconfig.get_config_var("LIBDIR")]
+        if include_pytorch:
+            python_lib_path.append(sysconfig.get_config_var("LIBDIR"))
 
     if config.is_fbcode():
         python_include_dirs.append(build_paths.python())
@@ -788,7 +806,9 @@ def get_cpp_torch_options(
         torch_libraries,
     ) = _get_torch_related_args(include_pytorch=include_pytorch, aot_mode=aot_mode)
 
-    python_include_dirs, python_libraries_dirs = _get_python_related_args()
+    python_include_dirs, python_libraries_dirs = _get_python_related_args(
+        include_pytorch=include_pytorch, aot_mode=aot_mode
+    )
 
     (
         omp_cflags,
@@ -970,12 +990,8 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
                 else:
                     libraries += ["c10_cuda", "cuda", "torch_cuda"]
 
-    if aot_mode:
-        cpp_prefix_include_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
-        include_dirs += cpp_prefix_include_dir
-
-        if cuda and torch.version.hip is None:
-            _transform_cuda_paths(libraries_dirs)
+    if cuda and torch.version.hip is None:
+        _transform_cuda_paths(libraries_dirs)
 
     if config.is_fbcode():
         if torch.version.hip is not None:
@@ -1060,16 +1076,24 @@ class CppTorchCudaOptions(CppTorchOptions):
         self._remove_duplicate_options()
 
 
-def get_name_and_dir_from_output_file_path(
-    aot_mode: bool, use_absolute_path: bool, file_path: str
-):
+def get_name_and_dir_from_output_file_path(file_path: str):
+    """
+    This function help prepare parameters to new cpp_builder.
+    Example:
+        input_code: /tmp/tmpof1n5g7t/5c/c5crkkcdvhdxpktrmjxbqkqyq5hmxpqsfza4pxcf3mwk42lphygc.cpp
+        name, dir = get_name_and_dir_from_output_file_path(input_code)
+    Run result:
+        name = c5crkkcdvhdxpktrmjxbqkqyq5hmxpqsfza4pxcf3mwk42lphygc
+        dir = /tmp/tmpof1n5g7t/5c/
+    put 'name' and 'dir' to CppBuilder's 'name' and 'output_dir'.
+    CppBuilder --> get_target_file_path will format output path accoding OS:
+    Linux: /tmp/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.so
+    Windows: [Windows temp path]/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.dll
+    """
     name_and_ext = os.path.basename(file_path)
     name, ext = os.path.splitext(name_and_ext)
     dir = os.path.dirname(file_path)
 
-    if config.is_fbcode():
-        if not (aot_mode and not use_absolute_path):
-            dir = "."
     return name, dir
 
 
