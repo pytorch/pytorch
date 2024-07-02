@@ -380,7 +380,7 @@ static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const T va
 }
 
 template<typename Container,
-         typename = std::enable_if_t<std::is_integral_v<typename Container::value_type>>>
+         typename = std::enable_if_t<std::is_integral_v<typename Container::size_type>>>
 static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Container& values, unsigned idx) {
   [encoder setBytes:values.data() length:sizeof(typename Container::value_type) * values.size() atIndex: idx];
 }
