@@ -507,6 +507,38 @@ class CommDebugModeExample:
         print(comm_mode.generate_operation_tracing_table())
         comm_mode.log_operation_tracing_table_to_file()
 
+    def test_MLP_json_dump(self) -> None:
+        """
+        Example code to demonstrate CommModeDebug's json dump using a MLP model. Sends the information to default
+        comm_mode_log.json file
+        """
+        torch.manual_seed(0)
+
+        model, inp = self._MLP_model_setup(model_type=MLPModule)
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            output_tp = model(inp)
+            output_tp.sum().backward()
+
+        comm_mode.generate_json_dump()
+
+    def test_transformer_json_dump(self, is_seq_parallel: bool = False) -> None:
+        """
+        Example code to demonstrate CommModeDebug's json dump using a transformer model. Sends the information to
+        user-passed transformer_log.json file
+        """
+
+        torch.manual_seed(0)
+
+        model, inp = self._transformer_model_setup()
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            output = model(inp)
+
+        comm_mode.generate_json_dump(file_name="transformer_log.json")
+
 
 def run_example(world_size: int, rank: int, example_name: str) -> None:
     # set manual seed
@@ -520,6 +552,8 @@ def run_example(world_size: int, rank: int, example_name: str) -> None:
         "transformer_module_tracing": instantiated_test.test_transformer_module_tracing,
         "MLP_operation_tracing": instantiated_test.test_MLP_operation_tracing,
         "transformer_operation_tracing": instantiated_test.test_transformer_operation_tracing,
+        "MLP_json_dump": instantiated_test.test_MLP_json_dump,
+        "transformer_json_dump": instantiated_test.test_transformer_json_dump,
     }
 
     name_to_example_code[example_name]()
