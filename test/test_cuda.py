@@ -3759,17 +3759,47 @@ exit(2)
             )
             self.assertEqual(rc, "3")
 
-    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
-    @unittest.skipIf(TEST_WITH_ROCM, "too lazy to debug this on ROCm")
-    def test_device_count_not_cached_pre_init(self):
+    @unittest.skipIf(not TEST_WITH_ROCM, "not relevant for CUDA testing")
+    def test_hip_device_count(self):
+        """Validate device_count works with both CUDA/HIP visible devices"""
         test_script = """\
 import torch
 import os
+print(f"{torch.cuda.device_count()}")
+"""
+        custom_envs = [
+            {"CUDA_VISIBLE_DEVICES": "0", "HIP_VISIBLE_DEVICES": None},
+            {"CUDA_VISIBLE_DEVICES": None, "HIP_VISIBLE_DEVICES": "0"},
+            {"CUDA_VISIBLE_DEVICES": "0,1,2,3", "HIP_VISIBLE_DEVICES": "0"},
+        ]
+
+        for env_config in custom_envs:
+            env = os.environ.copy()
+            for key, value in env_config.items():
+                if value is None:
+                    env.pop(key, None)
+                else:
+                    env[key] = value
+            r = (
+                subprocess.check_output([sys.executable, "-c", test_script], env=env)
+                .decode("ascii")
+                .strip()
+            )
+            self.assertEqual("1", r)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
+    def test_device_count_not_cached_pre_init(self):
+        visible_devices = (
+            "HIP_VISIBLE_DEVICES" if torch.version.hip else "CUDA_VISIBLE_DEVICES"
+        )
+        test_script = f"""\
+import torch
+import os
 r1 = torch.cuda.device_count()
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['{visible_devices}'] = '0'
 r2 = torch.cuda.device_count()
 torch.empty(10, device='cuda')
-print(f"{r1}, {r2}")
+print(f"{{r1}}, {{r2}}")
 """
 
         r = (
