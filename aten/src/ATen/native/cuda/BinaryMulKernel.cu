@@ -34,8 +34,8 @@ void mul_kernel_cuda(TensorIteratorBase& iter) {
         iter, binary_internal::MulFunctor<opmath_t>());
 #endif
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-        kHalf, kBFloat16, kBool, iter.common_dtype(), "mul_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        kHalf, kBFloat16, kBool, kUInt64, iter.common_dtype(), "mul_cuda", [&]() {
           using opmath_t = at::opmath_type<scalar_t>;
           opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
               iter, binary_internal::MulFunctor<opmath_t>());

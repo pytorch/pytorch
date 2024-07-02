@@ -12,7 +12,7 @@ namespace at::native {
 
 
 void lshift_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lshift_cuda", [&]() {
+  AT_DISPATCH_INTEGRAL_TYPES_AND(kUInt64, iter.dtype(), "lshift_cuda", [&]() {
     gpu_kernel_with_scalars(iter,
       []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         constexpr scalar_t max_shift = sizeof(scalar_t) * CHAR_BIT;
@@ -25,7 +25,7 @@ void lshift_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void rshift_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "rshift_cuda", [&]() {
+  AT_DISPATCH_INTEGRAL_TYPES_AND(kUInt64, iter.dtype(), "rshift_cuda", [&]() {
     gpu_kernel_with_scalars(iter,
       []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         // right shift value to retain sign bit for signed and no bits for unsigned
