@@ -1903,8 +1903,8 @@ class TestQuantizedOps(TestCase):
             X = np.array(X)
             scale = 1
             H, W = X.shape[-2:]
-            output_size_h = output_size_h if (output_size_h <= H) else H
-            output_size_w = output_size_w if (output_size_w <= W) else W
+            output_size_h = min(output_size_h, H)
+            output_size_w = min(output_size_w, W)
             if output_size_h == output_size_w:
                 output_size = output_size_h
             else:
@@ -1977,9 +1977,9 @@ class TestQuantizedOps(TestCase):
                 dim_to_check.append(3)
 
             D, H, W = X.shape[-3:]
-            output_size_d = output_size_d if (output_size_d <= D) else D
-            output_size_h = output_size_h if (output_size_h <= H) else H
-            output_size_w = output_size_w if (output_size_w <= W) else W
+            output_size_d = min(output_size_d, D)
+            output_size_h = min(output_size_h, H)
+            output_size_w = min(output_size_w, W)
 
             X = torch.from_numpy(X)
             qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
@@ -2049,9 +2049,9 @@ class TestQuantizedOps(TestCase):
             X = np.array(X)
             scale = 1
             D, H, W = X.shape[-3:]
-            output_size_d = output_size_d if (output_size_d <= D) else D
-            output_size_h = output_size_h if (output_size_h <= H) else H
-            output_size_w = output_size_w if (output_size_w <= W) else W
+            output_size_d = min(output_size_d, D)
+            output_size_h = min(output_size_h, H)
+            output_size_w = min(output_size_w, W)
             if output_size_d == output_size_h == output_size_w:
                 output_size = output_size_h
             else:
