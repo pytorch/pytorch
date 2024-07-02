@@ -754,11 +754,9 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.mean",
-        ref=(
-            reference_reduction_numpy(np.mean)
-            if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
-            else None
-        ),
+        ref=reference_reduction_numpy(np.mean)
+        if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
+        else None,
         method_variant=None,
         nan_policy="propagate",
         supports_out=False,
@@ -891,11 +889,9 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.var",
-        ref=(
-            reference_masked_std_var(np.var)
-            if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
-            else None
-        ),
+        ref=reference_masked_std_var(np.var)
+        if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
+        else None,
         method_variant=None,
         nan_policy="propagate",
         supports_out=False,
@@ -966,11 +962,9 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.std",
-        ref=(
-            reference_masked_std_var(np.std)
-            if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
-            else None
-        ),
+        ref=reference_masked_std_var(np.std)
+        if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
+        else None,
         method_variant=None,
         nan_policy="propagate",
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes

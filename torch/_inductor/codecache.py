@@ -542,9 +542,9 @@ class FxGraphCachePickler(pickle.Pickler):
     dispatch_table[FakeTensor] = functools.partial(_reduce_fake_tensor, _device_map)
     dispatch_table[torch.Tensor] = functools.partial(_reduce_tensor, _device_map)
     dispatch_table[torch.SymInt] = _reduce_symint
-    dispatch_table[torch.fx.experimental._backward_state.BackwardState] = (
-        _reduce_unsupported
-    )
+    dispatch_table[
+        torch.fx.experimental._backward_state.BackwardState
+    ] = _reduce_unsupported
 
     @classmethod
     def dumps(cls, obj) -> bytes:
@@ -1774,11 +1774,9 @@ class AotCodeCompiler:
 
             output_o = os.path.splitext(input_path)[0] + ".o"
             consts_size = sum(
-                (
-                    torch.ops.mkldnn._nbytes(tensor)
-                    if tensor.is_mkldnn
-                    else tensor.untyped_storage().nbytes()
-                )
+                torch.ops.mkldnn._nbytes(tensor)
+                if tensor.is_mkldnn
+                else tensor.untyped_storage().nbytes()
                 for (name, tensor) in graph.constants.items()
                 if name not in graph.folded_constants
             )
