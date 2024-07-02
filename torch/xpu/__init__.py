@@ -386,19 +386,6 @@ def synchronize(device: _device_t = None) -> None:
     return torch._C._xpu_synchronize(device)
 
 
-def empty_cache() -> None:
-    r"""Release all unoccupied cached memory currently held by the caching
-    allocator so that those can be used in other XPU application.
-
-    .. note::
-        :func:`~torch.xpu.empty_cache` doesn't increase the amount of XPU
-        memory available for PyTorch. However, it may help reduce fragmentation
-        of XPU memory in certain cases.
-    """
-    if is_initialized():
-        torch._C._xpu_emptyCache()
-
-
 def _get_generator(device: torch.device) -> torch._C.Generator:
     r"""Return the XPU Generator object for the given device.
 
@@ -446,6 +433,7 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "xpu") -> int:
     return default_generator.get_offset()
 
 
+from .memory import *  # noqa: F403
 from .random import *  # noqa: F403
 
 
