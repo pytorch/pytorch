@@ -116,7 +116,11 @@ def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
 
     for i in range(1, len(comm_nodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
-        comm_nodes[i].add_fake_dep(WeakDep(item(comm_nodes[i - 1].get_buffer_names())))
+        dep = WeakDep(
+            name=item(comm_nodes[i - 1].get_buffer_names()),
+            mutating_buf=item(comm_nodes[i].get_buffer_names()),
+        )
+        comm_nodes[i].add_fake_dep(dep)
 
 
 def assert_no_comm_nodes(snodes: List[BaseSchedulerNode]) -> None:
