@@ -1152,6 +1152,8 @@ def _set_sdp_use_mem_efficient(
 ) -> None: ...  # THPModule_setSDPUseMemEfficient
 def _get_math_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_math(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
+def _get_overrideable_sdp_enabled() -> _bool: ...  # THPModule_userEnabledOverrideableSDP
+def _set_sdp_use_overrideable(arg: _bool) -> None: ...  # THPModule_setSDPUseOverrideable
 def _get_cudnn_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_cudnn(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
 def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn
@@ -1926,6 +1928,7 @@ class _CudaDeviceProperties:
     is_multi_gpu_board: _int
     max_threads_per_multi_processor: _int
     gcnArchName: str
+    uuid: str
 
 # Functions related to SDPA
 class _SDPAParams:

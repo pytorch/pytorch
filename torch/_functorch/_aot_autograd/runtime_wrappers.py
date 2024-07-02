@@ -231,11 +231,8 @@ _HANDLER_MAP = {
     OutputType.non_alias: NoopAliasHandler,
     OutputType.unsafe_view_alias: NoopAliasHandler,
     OutputType.custom_function_view: NoopAliasHandler,
-
     OutputType.alias_of_input: AliasOfInputHandler,
-
     OutputType.is_input: IsInputHandler,
-
     OutputType.alias_of_intermediate: AliasOfIntermediateHandler,
     OutputType.alias_of_intermediate_save_as_output: AliasOfIntermediateHandler,
     OutputType.alias_of_intermediate_base_is_user_output: AliasOfIntermediateHandler,
