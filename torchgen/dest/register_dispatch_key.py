@@ -4,6 +4,7 @@ import itertools
 import textwrap
 from dataclasses import dataclass
 from typing import Literal, TYPE_CHECKING
+from typing_extensions import assert_never
 
 import torchgen.api.cpp as cpp
 import torchgen.api.meta as meta
@@ -36,7 +37,7 @@ from torchgen.model import (
     SchemaKind,
     TensorOptionsArguments,
 )
-from torchgen.utils import assert_never, mapMaybe, Target
+from torchgen.utils import mapMaybe, Target
 
 
 if TYPE_CHECKING:
