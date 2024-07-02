@@ -26,9 +26,6 @@ p_prepadded = 0.2
 # probability that we pick from uniform distribution
 p_uniform = 0.5
 
-# probability that a tensor is transposed
-p_transposed = 0.1
-
 p_float32_prec_highest = 0.8
 
 
@@ -36,17 +33,17 @@ def benchmark(
     m: int,
     k: int,
     n: int,
-    tranpose_left: bool,
-    tranpose_right: bool,
+    transpose_left: bool,
+    transpose_right: bool,
     dtype: Any,
     prepadded_left: bool,
     prepadded_right: bool,
 ) -> None:
-    if tranpose_left:
+    if transpose_left:
         a = torch.randn(k, m, dtype=dtype).t()
     else:
         a = torch.randn(m, k, dtype=dtype)
-    if tranpose_right:
+    if transpose_right:
         b = torch.randn(n, k, dtype=dtype).t()
     else:
         b = torch.randn(k, n, dtype=dtype)
@@ -111,8 +108,17 @@ def get_m_k_n(dtype: Any) -> Tuple[int, int, int]:
             return (m, k, n)
 
 
-def transposed() -> bool:
-    return random.choices([True, False], [p_transposed, 1 - p_transposed])[0]
+def transpose_tensors() -> Tuple[bool, bool]:
+    p_transpose_both = 0.05
+    transpose_both = random.choices(
+        [True, False], [p_transpose_both, 1 - p_transpose_both]
+    )[0]
+    if transpose_both:
+        return (True, True)
+    transpose_left = (True, False)
+    transpose_right = (False, True)
+    no_transpose = (False, False)
+    return random.choices([transpose_left, transpose_right, no_transpose])[0]
 
 
 def prepadded() -> bool:
@@ -145,22 +151,22 @@ def main(num_samples: int) -> None:
             # skip if already aligned
             continue
 
-        tranpose_left = transposed()
-        tranpose_right = transposed()
+        (transpose_left, transpose_right) = transpose_tensors()
         prepadded_left = prepadded()
         prepadded_right = prepadded()
 
-        print(
-            f"{m} {k} {n} mat1.t()={tranpose_left} mat2.t()={tranpose_right} dtype={dtype}"
-        )
-        print("prepadded_left:", prepadded_left, "prepadded_right:", prepadded_right)
+        print("Benchmarking the following input:")
+        print(f"m={m} k={k} n={n} dtype={dtype}")
+        print(f"transpose_left={transpose_left} transpose_right={transpose_right}")
+        print(f"prepadded_left={prepadded_left} prepadded_right={prepadded_right}")
+
         for i in range(3):
             benchmark(
                 m,
                 k,
                 n,
-                tranpose_left,
-                tranpose_right,
+                transpose_left,
+                transpose_right,
                 dtype,
                 prepadded_left,
                 prepadded_right,
