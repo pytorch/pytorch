@@ -456,6 +456,38 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # propagate names to higher order op subgraphs
     _name_hoo_subgraph_placeholders(gm)
 
+    # Run this pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
+    # Overwrite output specs afterwards.
+    from torch._dynamo import config as _dynamo_config
+    from torch._export.passes._node_metadata_hook import (
+        _node_metadata_hook,
+        _set_node_metadata_hook,
+    )
+    from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
+
+    if not _dynamo_config.do_not_emit_runtime_asserts:
+        stack_trace = (
+            'File "torch/fx/passes/runtime_assert.py", line 24, '
+            "in insert_deferred_runtime_asserts"
+        )
+        shape_env = _get_shape_env(gm)
+        if shape_env is not None:
+            with _set_node_metadata_hook(
+                gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+            ):
+                insert_deferred_runtime_asserts(
+                    gm,
+                    shape_env,
+                    f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                    export=True,
+                )
+
+    # update output specs
+    gm.recompile()
+    for i, name in enumerate(_graph_output_names(gm)):
+        if isinstance(new_outputs[i], torch.fx.Node):
+            new_outputs[i].name = name
+
     # To match the output target with correct input for input mutations
     # need to find the old to new placeholder map
     old_new_placeholder_map = {
@@ -539,12 +571,6 @@ def _decompose_exported_program(
     _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
-    from torch._dynamo import config as _dynamo_config
-    from torch._export.passes._node_metadata_hook import (
-        _node_metadata_hook,
-        _set_node_metadata_hook,
-    )
-
     from torch._export.passes.lift_constants_pass import (
         ConstantAttrMap,
         lift_constants_pass,
@@ -572,23 +598,6 @@ def _decompose_exported_program(
     for k, v in constants.items():
         assert k not in ep.constants
         ep.constants[k] = v
-
-    if not _dynamo_config.do_not_emit_runtime_asserts:
-        stack_trace = (
-            'File "torch/fx/passes/runtime_assert.py", line 24, '
-            "in insert_deferred_runtime_asserts"
-        )
-        shape_env = _get_shape_env(gm)
-        if shape_env is not None:
-            with _set_node_metadata_hook(
-                gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-            ):
-                insert_deferred_runtime_asserts(
-                    gm,
-                    shape_env,
-                    f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
-                    export=True,
-                )
 
     exported_program = ExportedProgram(
         root=gm,
