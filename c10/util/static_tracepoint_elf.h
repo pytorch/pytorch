@@ -8,7 +8,13 @@
 #endif
 
 // Instruction to emit for the probe.
+#if defined(__x86_64__) || defined(__i386__)
 #define TORCH_SDT_NOP                 nop
+#elif defined(__aarch64__) || defined(__arm__)
+#define TORCH_SDT_NOP                 nop
+#else
+#error "Unsupported architecture"
+#endif
 
 // Note section properties.
 #define TORCH_SDT_NOTE_NAME           "stapsdt"
