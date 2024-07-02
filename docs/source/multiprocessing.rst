@@ -174,8 +174,8 @@ The ``spawn`` function below addresses these concerns and takes care
 of error propagation, out of order termination, and will actively
 terminate processes upon detecting an error in one of them.
 
-.. automodule:: torch.multiprocessing.spawn
-.. currentmodule:: torch.multiprocessing.spawn
+.. automodule:: torch.multiprocessing
+.. currentmodule:: torch.multiprocessing
 
 .. autofunction:: spawn
 
