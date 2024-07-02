@@ -307,7 +307,6 @@ def _load_global_deps() -> None:
             "cusolver": "libcusolver.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
-            "nvtx": "libnvToolsExt.so.*[0-9]",
         }
         is_cuda_lib_err = [
             lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
