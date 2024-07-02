@@ -54,8 +54,8 @@ def bench_conv(with_stack=True):
         test_out[0][0][0][:32],
     )
 
-    baseline_ms = benchmarker.benchmark_gpu(baseline_fn)
-    test_ms = benchmarker.benchmark_gpu(test_fn)
+    baseline_ms = benchmarker.benchmark(baseline_fn, [], {})
+    test_ms = benchmarker.benchmark(test_fn, [], {})
     print(f"baseline {baseline_ms} test {test_ms} speedup {baseline_ms / test_ms:.3f}x")
 
 

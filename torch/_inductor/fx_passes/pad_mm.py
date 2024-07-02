@@ -390,14 +390,14 @@ def should_pad_bench(
         ori_time = get_cached_base_mm_benchmark_time(ori_time_key)
         if ori_time is None:
             if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
-                ori_time = benchmarker.lazy_benchmark(
+                ori_time = benchmarker.lazy_benchmark_gpu(
                     lambda: op(mat1, mat2),
                 )
             else:
                 if input is not None:
                     # realize bias for addmm
                     input = realize_tensor(input)
-                ori_time = benchmarker.lazy_benchmark(
+                ori_time = benchmarker.lazy_benchmark_gpu(
                     lambda: op(input, mat1, mat2),
                 )
             set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
@@ -482,7 +482,7 @@ def should_pad_bench(
                 )
             )
 
-        pad_time = benchmarker.lazy_benchmark(lambda: [fn() for fn in fns])
+        pad_time = benchmarker.lazy_benchmark_gpu(lambda: [fn() for fn in fns])
 
         # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
         # tradeoff between performance improvement from shape padding and overhead from additional memory ops
