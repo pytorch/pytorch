@@ -156,9 +156,10 @@ class FileManager:
                 env["generated_comment"] = comment
             template = _read_template(template_path)
             return template.substitute(env)
-        if isinstance(env, str):
+        elif isinstance(env, str):
             return env
-        assert_never(env)
+        else:
+            assert_never(env)
 
     def write_with_template(
         self,
