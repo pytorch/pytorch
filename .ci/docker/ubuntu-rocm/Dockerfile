@@ -83,6 +83,11 @@ COPY ./common/install_amdsmi.sh install_amdsmi.sh
 RUN bash ./install_amdsmi.sh
 RUN rm install_amdsmi.sh
 
+# Install composable_kernel
+COPY ./common/install_ck.sh install_ck.sh
+RUN bash ./install_ck.sh
+RUN rm install_ck.sh
+
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION
 COPY ./common/install_cmake.sh install_cmake.sh
