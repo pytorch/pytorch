@@ -3209,9 +3209,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
     at::Tensor& tensor,
-    at::cuda::CUDAStream &barrierStream,
-    const AllreduceOptions& opts
-    ) {
+    at::cuda::CUDAStream& barrierStream,
+    const AllreduceOptions& opts) {
   return collective(
       tensor,
       tensor,
@@ -3222,7 +3221,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-	barrierStream = stream;
+           barrierStream = stream;
         return ncclAllReduce(
             input.data_ptr(),
             output.data_ptr(),
@@ -3920,7 +3919,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   // Use one device only
   auto device = devices.back();
   at::Tensor barrierTensor =
-      at::zeros({1}, at::TensorOptions().device(device).dtype(at::kByte));
+      at::empty({1}, at::TensorOptions().device(device).dtype(at::kByte));
   // All reduce to achieve the barrier
   at::cuda::CUDAStream barrierStream = at::cuda::getCurrentCUDAStream();
   auto work = allreduce_impl(barrierTensor, barrierStream, AllreduceOptions());

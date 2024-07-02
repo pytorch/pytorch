@@ -770,7 +770,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   c10::intrusive_ptr<Work> allreduce_impl(
       at::Tensor& tensor,
-      at::cuda::CUDAStream &usedStream,
+      at::cuda::CUDAStream& usedStream,
       const AllreduceOptions& opts = AllreduceOptions());
 
   // Checks for NCCL errors on each of the communicators and returns an
