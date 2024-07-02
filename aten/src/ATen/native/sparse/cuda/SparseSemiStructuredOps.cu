@@ -845,7 +845,7 @@ static void reorder_meta(cutlass::TensorRef<Element, LayoutDest> dest,
 
 std::tuple<Tensor, Tensor>
 _to_sparse_semi_structured(const Tensor& dense) {
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
   AT_ERROR(__func__, " : CUTLASS not supported");
   return std::make_tuple(Tensor{}, Tensor{});
 #else
@@ -862,7 +862,7 @@ _to_sparse_semi_structured(const Tensor& dense) {
     meta_dtype = at::kInt;
     ksparse = 4;
     dense_elems_per_meta_elem = 32;
-  } else if (dense.dtype() == at::kHalf || dense.dtype() == at::kBFloat16) {
+  } else if (dense.dtype() =SS_ck= at::kHalf || dense.dtype() == at::kBFloat16) {
     meta_dtype = at::kShort;
     ksparse = 4;
     dense_elems_per_meta_elem = 16;
