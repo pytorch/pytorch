@@ -257,7 +257,6 @@ option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
-option(USE_GLOG "Use GLOG" OFF)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_MAGMA "Use MAGMA" ON)
 option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
@@ -1276,11 +1275,9 @@ endif()
 # ---[ Make configuration files for cmake to allow dependent libraries easier
 # access to Caffe2.
 
-if((NOT USE_GLOG)
-   OR(NOT USE_GFLAGS)
-   OR BUILD_CUSTOM_PROTOBUF)
+if((NOT USE_GFLAGS) OR BUILD_CUSTOM_PROTOBUF)
   message(WARNING "Generated cmake files are only fully tested if one builds "
-                  "with system glog, gflags, and protobuf. Other settings may "
+                  "with gflags, and protobuf. Other settings may "
                   "generate files that are not well tested.")
 endif()
 
@@ -1306,7 +1303,6 @@ if(BUILD_SHARED_LIBS)
   install(
     FILES ${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/xpu.cmake
-          ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/mkldnn.cmake

@@ -112,7 +112,6 @@ install_centos() {
     git \
     glibc-devel \
     glibc-headers \
-    glog-devel \
     libstdc++-devel \
     libsndfile-devel \
     make \

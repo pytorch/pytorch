@@ -77,7 +77,6 @@ def define_c10_ovrsource(name, is_mobile):
             "//arvr/third-party/gflags:gflags",
             "//third-party/cpuinfo:cpuinfo",
             "//third-party/fmt:fmt",
-            "//third-party/glog:glog",
         ],
     )
 
@@ -109,12 +108,10 @@ def define_ovrsource_targets():
     ]
 
     mobile_c10_cmake_defines = [
-        ("#cmakedefine C10_USE_GLOG", ""),
         ("#cmakedefine C10_USE_GFLAGS", ""),
     ]
 
     non_mobile_c10_cmake_defines = [
-        ("#cmakedefine C10_USE_GLOG", "#define C10_USE_GLOG 1"),
         ("#cmakedefine C10_USE_GFLAGS", "#define C10_USE_GFLAGS 1"),
     ]
 
