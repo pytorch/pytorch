@@ -3797,6 +3797,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         super().__init__(layout, inputs, make_kernel_render)
         self.debug_extra = debug_extra
         self.mutated_inputs = mutated_inputs
+        self.outputs: List[Buffer] = [self]
         if mutated_inputs is not None:
             # Ensure that the mutated inputs are only allowed for certain nodes
             allowed_set = {
@@ -3807,7 +3808,13 @@ class TritonTemplateBuffer(TemplateBuffer):
             assert (
                 current_node in allowed_set
             ), f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
-            mark_node_as_mutating(self, *mutated_inputs)
+            device = self.inputs[0].get_device()
+            self.outputs += [
+                MutationOutput(NoneLayout(device), buf, self) for buf in mutated_inputs
+            ]
+
+    def get_outputs(self) -> List[Buffer]:
+        return self.outputs
 
     def __str__(self):
         out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
