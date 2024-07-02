@@ -99,7 +99,7 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
       return;
     }
 
-    bool is_contiguous = result.is_contiguous();
+    bool is_contiguous = !mps::needsGather(result);
     Tensor r = !is_contiguous ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
     using namespace mps;
     auto cache_ = MPSGraphCache::getInstance();
@@ -212,7 +212,7 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
   } else if (steps == 1) {
     result.fill_(start);
   } else {
-    Tensor r = result.is_contiguous() ? result : result.contiguous();
+    Tensor r = !mps::needsGather(result) ? result : result.contiguous();
 
     // Do the MPSGraph computation
     MPSGraphCache* cache_ = MPSGraphCache::getInstance();
