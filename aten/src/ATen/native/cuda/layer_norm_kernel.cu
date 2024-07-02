@@ -229,7 +229,7 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
   T* Y){
     extern __shared__ float s_data[]; //if we made smem WelfordDataLN type, there would be bank conflicts,
     //as one thread would have to write 3 consecutive floats
-    auto i1 = blockIdx.x;
+    const int i1 = blockIdx.x;
     const T * block_row = X + i1 * N;
     WelfordDataLN wd = compute_stats(block_row, N, s_data);
 
