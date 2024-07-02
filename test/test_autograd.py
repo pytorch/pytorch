@@ -738,6 +738,21 @@ class TestAutograd(TestCase):
         test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
         test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
 
+    def test_multiple_insert_removal_caching(self):
+        torch._C._set_cached_tensors_enabled(True)
+        try:
+            x = torch.rand([4])
+
+            torch._C._add_cached_tensor(x)
+            self.assertTrue(torch._C._is_cached_tensor(x))
+
+            torch._C._add_cached_tensor(x)
+            torch._C._remove_cached_tensor(x)
+
+            self.assertFalse(torch._C._is_cached_tensor(x))
+        finally:
+            torch._C._set_cached_tensors_enabled(False)
+
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
 
