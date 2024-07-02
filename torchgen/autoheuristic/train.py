@@ -26,6 +26,13 @@ warnings.filterwarnings(
 
 
 class AHTrain:
+    """
+    This class is responsible for generating a heuristic by using data collected with AutoHeuristic. It will learn a
+    regression tree that predicts a score that represents how well a specific choice will perform given an input.
+    A higher score means a better choice. The heuristic will be generated in a file named <heuristic_name>.py in the
+    torch/_inductor/fx_passes/learned_heuristics/ directory.
+    """
+
     def __init__(self):
         self.parser = argparse.ArgumentParser()
         self.add_base_arguments()

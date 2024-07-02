@@ -12,6 +12,14 @@ FEEDBACK_COL = "feedback"
 
 
 class AHOperation:
+    """
+    AHOperation can be used to augment the data collected by AutoHeuristic.
+    One might for example store features like m, k, n, but also want to use
+    features like m*n, or k*n, to learn a heuristic. Instead of storing features
+    that can be created from the collected data, one can use AHOperation to
+    create new features from the collected data.
+    """
+
     def __init__(
         self, name: str, func: Callable[[Any], Value], is_categorical: bool = False
     ):

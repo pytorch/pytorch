@@ -40,6 +40,10 @@ def get_metadata_str_from_log(log_path: str) -> str:
 
 
 class _Feedback:
+    """
+    This is a base class for Feedback objects. It takes a function that calculates the feedback for a given choice.
+    """
+
     def __init__(self, feedback_fn: Callable[[Choice], Feedback]) -> None:
         self.feedback_fn = feedback_fn
 
@@ -48,17 +52,34 @@ class _Feedback:
 
 
 class LocalFeedback(_Feedback):
+    """
+    To be able to collect data for a choice, a function providing feedback given a choice has to be provided.
+    LocalFeedback can be used when AutoHeuristic should immediately run the function to collect feedback for each choice
+    (see pad_mm.py, where the autotuning happens locally, for an example).
+    """
+
     def __init__(self, feedback_fn: Callable[[Choice], Feedback]) -> None:
         super().__init__(feedback_fn)
 
 
 class GlobalFeedback(_Feedback):
+    """
+    In contrast to LocalFeedback, GlobalFeedback can be used when it is not possible to immediately collect feedback for
+    the provided choices. GlobalFeedback will be required for example for kernel choice selection, where the feedback
+    will be provided later after autotuning has happened in select_algorithm.py.
+    """
+
     # TODO: will be supported later
     def __init__(self, feedback_fn: Callable[[Choice], Feedback]) -> None:
         super().__init__(feedback_fn)
 
 
 class AHFeature:
+    """
+    The context, that AutoHeuristic stores, is a list of features. AutoHeuristic needs to know whether a feature is
+    categorical (i.e., not a continuous variable) to learn a machine learning model.
+    """
+
     def __init__(self, name: str, value: Value, is_categorical: bool = False) -> None:
         self.name = name
         self.value = value
@@ -66,6 +87,12 @@ class AHFeature:
 
 
 class AHContext:
+    """
+    This class is used to specify which information AutoHeuristic should store. For each choice, AutoHeursitic will
+    store the context and the collected feedback. The context could be something like the shape of a tensor, i.e.,
+    information that will help to learn a heuristic.
+    """
+
     features: List[AHFeature]
 
     def __init__(self) -> None:
@@ -81,10 +108,21 @@ class AHContext:
 
 
 class InconsistentMetadata(Exception):
+    """
+    Exception that is thrown when AutoHeuristic tries to log data to a file where the metadata stored in the file does
+    not match the metadata it would store if the file didn't exist.
+    """
+
     pass
 
 
 class AutoHeuristic:
+    """
+    AutoHeuristic is a framework that allows one to collect data, learn a heuristic (i.e. a regression tree) and
+    generate the heuristic to code. This class allows one to collect data. The collected data can then be used to train
+    a heuristic (see torchgen/autoheuristic/).
+    """
+
     collected_feedback: Dict[Choice, Feedback]
 
     def __init__(
@@ -96,6 +134,18 @@ class AutoHeuristic:
         name: str,
         augment_context: Optional[List[AHOperation]] = None,
     ) -> None:
+        """
+        Initializes an instance of the AutoHeuristic class.
+
+        Args:
+            fallback: A callable that returns a Choice when the heuristic is unsure which choice to make, or
+            AutoHeuristic is in data collection mode.
+            choices: A list of possible choices the heuristic can make.
+            feedback: An instance of LocalFeedback or GlobalFeedback that provides feedback for a given choice.
+            context: Context to store with each choice and feedback.
+            name: A string that identifies the heuristic.
+            augment_context: An optional list of AHOperation instances that augment the context.
+        """
         self.fallback = fallback
         self.choices = choices
         self.feedback = feedback
@@ -120,6 +170,16 @@ class AutoHeuristic:
                 self.save_data(choice, feedback_val)
 
     def get_choice(self) -> Choice:
+        """
+        Returns the chosen option based on the autoheuristic mode.
+
+        If the mode is "USE_HEURISTIC", it queries a learned heuristic to make a decision.
+        If the mode is not "USE_HEURISTIC", it falls back to the self.fallback() method.
+
+        Returns:
+            Choice: The chosen option.
+        """
+
         if torch._inductor.config.autoheuristic_mode == "USE_HEURISTIC":
             context_dict = self.context.to_dict()
             if self.augment_context is not None:

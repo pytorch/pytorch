@@ -43,8 +43,22 @@ def find_and_instantiate_subclasses(
 
 
 class LearnedHeuristicController:
+    """
+    Class that finds and instantiates all learned heuristics. It also provides
+    a way to get the decision of a learned heuristic.
+    """
+
     existing_heuristics: Dict[str, List[LearnedHeuristic]] = defaultdict(list)
+    """
+    A dictionary that stores all the learned heuristics for each optimization.
+    The key is the optimization name, and the value is a list of LearnedHeuristic objects.
+    """
+
     heuristics_initialized: bool = False
+    """
+    A flag that indicates whether the learned heuristics have been initialized.
+    Set to true when the get_decision() function is called for the first time.
+    """
 
     def __init__(
         self,
@@ -61,6 +75,10 @@ class LearnedHeuristicController:
         self.device_capa = device_capa
 
     def get_heuristics(self, name: str) -> List[LearnedHeuristic]:
+        """
+        Returns a list of learned heuristics for the given optimization name.
+        """
+
         if not LearnedHeuristicController.heuristics_initialized:
             # learned heuristics are generated into the following package
             learned_heuristics_package = "torch._inductor.fx_passes.learned_heuristics"
@@ -81,6 +99,11 @@ class LearnedHeuristicController:
         return LearnedHeuristicController.existing_heuristics[name]
 
     def get_decision(self) -> Optional[Choice]:
+        """
+        Returns the decision made by the learned heuristic or None if no heuristic was found or the heuristic is unsure
+        which choice to make.
+        """
+
         heuristics = self.get_heuristics(self.name)
         for heuristic in heuristics:
             if heuristic.check_precondition(

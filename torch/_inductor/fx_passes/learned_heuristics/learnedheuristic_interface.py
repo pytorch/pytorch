@@ -4,6 +4,10 @@ from torch._inductor.autoheuristic_utils import Choice, ContextDictT
 
 
 class LearnedHeuristic:
+    """
+    LearnedHeuristic is a base class for all learned heuristics.
+    """
+
     def __init__(self) -> None:
         pass
 
