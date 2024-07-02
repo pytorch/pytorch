@@ -215,15 +215,15 @@ translation validation failed.
 
 Model:
   ==> L['shape'][0]: 0
-  ==> L['shape'][1]: 0
-  ==> L['shape'][2]: 0
+  ==> L['shape'][1]: 1
+  ==> L['shape'][2]: 1
   ==> L['x'].size()[0]: 3
   ==> L['x'].storage_offset(): 0
   ==> L['x'].stride()[0]: 1
   ==> s0: 3
   ==> s1: 0
-  ==> s2: 0
-  ==> s3: 0
+  ==> s2: 1
+  ==> s3: 1
 
 Assertions:
   ==> (== 0 L['x'].storage_offset())
@@ -236,23 +236,23 @@ Assertions:
   ==> (True)
 
 Target Expressions:
+  ==> (!= (+ s1 s2 s3) s0)
+  ==> (<= (+ s1 s2 s3) s0)
+  ==> (<= (+ s1 s2) (+ s0 (* -1 s3)))
+  ==> (<= (+ s1 s2) s0)
   ==> (<= 0 s1)
   ==> (<= 0 s2)
   ==> (<= 0 s3)
   ==> (<= 2 s0)
-  ==> (== 0 L['shape'][0])
-  ==> (== 0 L['shape'][1])
-  ==> (== 0 L['shape'][2])
+  ==> (<= s1 (+ s0 (* -1 s2)))
   ==> (== 0 L['x'].storage_offset())
-  ==> (== 0 s1)
-  ==> (== 0 s2)
-  ==> (== 0 s3)
   ==> (== 1 L['x'].stride()[0])
+  ==> (== L['shape'][0] s1)
+  ==> (== L['shape'][1] s2)
+  ==> (== L['shape'][2] s3)
   ==> (== L['x'].size()[0] s0)
   ==> (> s0 0)
   ==> (>= 0 s1)
-  ==> (>= 0 s2)
-  ==> (>= 0 s3)
 
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
