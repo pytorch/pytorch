@@ -147,6 +147,8 @@ jobs:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
         run: |
           set -ex
+
+          chmod +x ".github/scripts/install_sphinx_theme.sh"
           # Convert refs/tags/v1.12.0rc3 into 1.12
           if [[ "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+)\.* ]]; then
             target="${BASH_REMATCH[1]}"
@@ -173,7 +175,8 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" bash -c "sudo chown -R jenkins . && pip install $(echo dist/*.whl)[opt-einsum] && ./.ci/pytorch/${DOCS_TYPE}_doc_push_script.sh"
+
+          docker exec -t "${container_name}" bash -c "sudo chown -R jenkins . && ./.github/scripts/install_sphinx_theme.sh && pip install $(echo dist/*.whl)[opt-einsum] && ./.ci/pytorch/${DOCS_TYPE}_doc_push_script.sh"
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
