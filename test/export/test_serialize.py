@@ -392,7 +392,7 @@ class TestSerialize(TestCase):
 class TestDeserialize(TestCase):
     def setUp(self):
         super().setUp()
-        # init_torchbind_implementations()
+        init_torchbind_implementations()
 
     def _check_graph_nodes(self, gm1, gm2, _check_meta=True):
         # TODO: The _check_meta flag bypasses checking for
