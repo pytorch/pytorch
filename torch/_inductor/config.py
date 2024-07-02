@@ -314,6 +314,9 @@ coordinate_descent_search_radius = int(
 # If set to "COLLECT_DATA", this will store data about the inputs and autotuning results.
 # If set to "USE_HEURISTIC", this will use the learned heuristic to make a choice in pad_mm.
 autoheuristic_mode = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_MODE", "USE_HEURISTIC")
+
+# If set to "DEFAULT", this will use the default log path specified in autoheuristic.py.
+# If set to another path, autoheuristic will instead log results to the given path.
 autoheuristic_log_path = os.environ.get(
     "TORCHINDUCTOR_AUTOHEURISTIC_LOG_PATH", "DEFAULT"
 )
