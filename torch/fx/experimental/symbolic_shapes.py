@@ -2809,7 +2809,7 @@ class ShapeEnv:
             # We're trying to constrain the range of a replacement. However,
             # the range constraint should already be set during _set_replacement.
             return
-        assert isinstance(a, sympy.Symbol), f"constraining non-Symbols NYI, got {type(a)}"
+        assert isinstance(a, sympy.Symbol), f"constraining non-Symbols NYI, {a} is {type(a)}"
 
         # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
         # semantics that this is an "unchecked" assert (but it this actually
