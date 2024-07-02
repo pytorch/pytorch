@@ -49,4 +49,7 @@ Functions
 .. autofunction:: spherical_bessel_j0
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
+.. autofunction:: beta
+.. autofunction:: betaln
+.. autofunction:: betainc
 .. autofunction:: zeta
