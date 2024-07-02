@@ -240,14 +240,6 @@ def set_cached_should_pad(key: str, value: bool):
     return get_pad_cache().set_value(key, value=value)
 
 
-def get_cached_base_mm_benchmark_time(key: str) -> float:
-    return get_pad_cache().lookup(key)
-
-
-def set_cached_base_mm_benchmark_time(key: str, value: float):
-    return get_pad_cache().set_value(key, value=value)
-
-
 def should_pad_bench_key(
     match,
     mat1: Tensor,
@@ -387,20 +379,17 @@ def should_pad_bench(
         ori_time_key = should_pad_bench_key(
             match, mat1, mat2, op, input, is_base_time_key=True
         )
-        ori_time = get_cached_base_mm_benchmark_time(ori_time_key)
-        if ori_time is None:
-            if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
-                ori_time = benchmarker.lazy_benchmark_gpu(
-                    lambda: op(mat1, mat2),
-                )
-            else:
-                if input is not None:
-                    # realize bias for addmm
-                    input = realize_tensor(input)
-                ori_time = benchmarker.lazy_benchmark_gpu(
-                    lambda: op(input, mat1, mat2),
-                )
-            set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
+        if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
+            ori_time = benchmarker.lazy_benchmark_gpu(
+                lambda: op(mat1, mat2),
+            )
+        else:
+            if input is not None:
+                # realize bias for addmm
+                input = realize_tensor(input)
+            ori_time = benchmarker.lazy_benchmark_gpu(
+                lambda: op(input, mat1, mat2), key=ori_time_key
+            )
 
         mat1_pad = mat1
         mat2_pad = mat2
