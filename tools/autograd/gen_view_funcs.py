@@ -4,10 +4,11 @@
 # if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
 # The fallback is expected to mimic this codegen, so we should keep the two in sync.
 
-from typing import List, Tuple
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import torchgen.api.dispatcher as dispatcher
-from torchgen.api.autograd import NativeFunctionWithDifferentiabilityInfo
 from torchgen.api.translate import translate
 from torchgen.api.types import (
     BaseCType,
@@ -28,6 +29,11 @@ from .gen_inplace_or_view_type import (
     modifies_arguments,
     use_derived,
 )
+
+
+if TYPE_CHECKING:
+    from torchgen.api.autograd import NativeFunctionWithDifferentiabilityInfo
+
 
 FUNCTION_DECLARATION = CodeTemplate(
     """\
@@ -155,9 +161,9 @@ def returns_multi_tensor(fn: NativeFunction) -> bool:
 #   tuple: (list of getter logic strings, list of setter logic strings, string
 #     with num items expression)
 def generate_state_getter_setter(
-    bindings: List[Binding],
+    bindings: list[Binding],
     state_vec_type: NamedCType,
-) -> Tuple[List[str], List[str], str]:
+) -> tuple[list[str], list[str], str]:
     getter_logic = []
     setter_logic = []
 
@@ -302,7 +308,7 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
 
 def gen_view_funcs(
     out: str,
-    fns_with_infos: List[NativeFunctionWithDifferentiabilityInfo],
+    fns_with_infos: list[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
 ) -> None:
     # don't need the info parts, just the function
