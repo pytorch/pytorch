@@ -52,11 +52,6 @@ void gemm_internal_ck<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
 }
 
 template <>
-void gemm_internal_ck<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
-  return;
-}
-
-template <>
 void gemm_internal_ck<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
   return;
 }
@@ -68,6 +63,11 @@ void gemm_internal_ck<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<f
 
 template <>
 void gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
+  return;
+}
+
+template <>
+void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   return;
 }
 
@@ -104,7 +104,7 @@ template <
     int NPER_WAVE,
     int CNPER_WAVE = 1,
     bool PADDING = false>
-void bf16_gemm_impl(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
+void float_gemm_impl(CUDABLAS_GEMM_ARGTYPES(float)) {
   // Get input information.
   int M = m;
   int N = n;
@@ -114,19 +114,27 @@ void bf16_gemm_impl(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   int StrideB = ldb;
   int StrideC = ldc;
 
-  using ADataType = ck::bhalf_t;
-  using BDataType = ck::bhalf_t;
-  using DDataType = ck::bhalf_t;
+  using ADataType = float;
+  using BDataType = float;
+  using DDataType = float;
   using DsDataType = ck::Tuple<>;
   using AccDataType = float;
-  using CShuffleDataType = ck::bhalf_t;
-  using CDataType = ck::bhalf_t;
+  using CShuffleDataType = float;
+  using CDataType = float;
 
+#if 0
   using ALayout = Row;
   using BLayout = Col;
   using DLayout = Row;
   using DsLayout = ck::Tuple<>;
   using CLayout = Row;
+#else
+  using ALayout = Col;
+  using BLayout = Col;
+  using DLayout = Col;
+  using DsLayout = ck::Tuple<>;
+  using CLayout = Col;
+#endif
 
   using AElementOp = PassThrough;
   using BElementOp = PassThrough;
@@ -224,30 +232,49 @@ void bf16_gemm_impl(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   invoker.Run(arguments, StreamConfig{stream, false});
 }
 
-void dispatch_bf16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
+#if 0
+    int BLOCK_SIZE,
+    int MBLOCK,
+    int NBLOCK,
+    int KBLOCK,
+    int MPER_XDL,
+    int NPER_XDL,
+    int MPER_WAVE,
+    int NPER_WAVE,
+    int CNPER_WAVE = 1,
+    bool PADDING = false>
+#endif
+void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
   // If any of the shapes cant be tiled, we must use padding.
   bool use_padding = ((m % 256 != 0) || (n % 128 != 0) || (k % 64 != 0));
   // Dispatch to best implementation. TODO add more configurations.
   if (use_padding) {
     if (m <= 128) {
-      bf16_gemm_impl<256, 128, 64, 32, 32, 32, 2, 1, 1, true>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+      float_gemm_impl<256, 128, 64, 32, 32, 32, 2, 1, 1, true>(CUDABLAS_GEMM_ARGS(float));
+#if 0
+    // as float type, get error: local memory (98304) exceeds limit (65536)
     } else if ((m >= 8192 && n >= 4096) || (n >= 8192 && m >= 4096)) {
-      bf16_gemm_impl<256, 256, 128, 64, 16, 16, 8, 4, 2, true>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+      float_gemm_impl<256, 256, 128, 64, 16, 16, 8, 4, 2, true>(CUDABLAS_GEMM_ARGS(float));
+#endif
     } else {
-      bf16_gemm_impl<256, 128, 128, 64, 16, 16, 4, 4, 2, true>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+      float_gemm_impl<256, 128, 128, 64, 16, 16, 4, 4, 2, true>(CUDABLAS_GEMM_ARGS(float));
     }
   } else {
+#if 0
+    // as float type, get error: local memory (98304) exceeds limit (65536)
     if ((m >= 8192 && n >= 4096) || (n >= 8192 && m >= 4096)) {
-      bf16_gemm_impl<256, 256, 128, 64, 16, 16, 8, 4, 2, false>(CUDABLAS_GEMM_ARGS(at::BFloat16));
-    } else {
-      bf16_gemm_impl<256, 128, 128, 64, 16, 16, 4, 4, 2, false>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+      float_gemm_impl<256, 256, 128, 64, 16, 16, 8, 4, 2, false>(CUDABLAS_GEMM_ARGS(float));
+    } else
+#endif
+    {
+      float_gemm_impl<256, 128, 128, 64, 16, 16, 4, 4, 2, false>(CUDABLAS_GEMM_ARGS(float));
     }
   }
 }
 
 template <>
-void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
-  dispatch_bf16_gemm(CUDABLAS_GEMM_ARGS(at::BFloat16));
+void gemm_internal_ck<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
+  dispatch_float_gemm(CUDABLAS_GEMM_ARGS(float));
 }
 
 } // namespace at::native
