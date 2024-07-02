@@ -1094,6 +1094,16 @@ class VariableBuilder:
             tensor_list_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=source
             )
+
+            # Go through Variable Builder to automatically install the guards
+            # and track the side effects. This ensures that duplicate tensors
+            # are tracked correctly.
+            for i, tensor_value in enumerate(value):
+                source_i = GetItemSource(base=source, index=i, index_is_slice=False)
+                tensor_variable = VariableBuilder(self.tx, source_i)(tensor_value)
+                # access unpacked tensor from this list instead of from a lifted arg
+                self.tx.output.input_source_to_var[source_i] = tensor_variable
+
             tensor_list_proxy.node.meta["steal_arg"] = True
 
             list_variable = wrap_fx_proxy_cls(
@@ -1104,19 +1114,6 @@ class VariableBuilder:
                 subclass_type=None,
                 source=source,
             )
-
-            guards = []
-            for i, tensor_variable in enumerate(list_variable.items):
-                source_i = GetItemSource(base=source, index=i, index_is_slice=False)
-                # access unpacked tensor from this list instead of from a lifted arg
-                self.tx.output.input_source_to_var[source_i] = tensor_variable
-
-                guard = functools.partial(
-                    GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
-                )
-                guards.append(source_i.make_guard(guard))
-
-            install_guard(*guards, skip=1)
 
             grapharg = GraphArg(
                 source,
@@ -1284,7 +1281,6 @@ class VariableBuilder:
 
     def wrap_tensor(self, value: torch.Tensor):
         source = self.get_source()
-
         # We cannot already be tracking the tensor, which implies
         # it would have already been wrapped
         assert value not in self.tx.output.side_effects
@@ -1895,6 +1891,10 @@ def wrap_fx_proxy_cls(
             pass
 
         elif isinstance(example_value, torch.Tensor):
+            # Check if the value is already tracked
+            if example_value in tx.output.side_effects:
+                return tx.output.side_effects[example_value]
+
             if tx.export:
                 # The legacy behavior for real value cache with subclasses was
                 # to perform a clone WITHOUT preserving the subclass.  It's
