@@ -9,16 +9,14 @@ import itertools
 import mmap
 import operator
 import os
-
-import pathlib
 import sys
 import tempfile
 import warnings
 import weakref
 from contextlib import contextmanager
 from decimal import Decimal
+from pathlib import Path
 from tempfile import mkstemp
-
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import numpy
@@ -36,6 +34,7 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
     xpassIfTorchDynamo,
 )
+
 
 # If we are going to trace through these, we should use NumPy
 # If testing on eager mode, we use torch._numpy
@@ -3866,7 +3865,7 @@ class TestIO(TestCase):
         assert_array_equal(y, x.flat)
 
     def test_roundtrip_dump_pathlib(self, x, tmp_filename):
-        p = pathlib.Path(tmp_filename)
+        p = Path(tmp_filename)
         x.dump(p)
         y = np.load(p, allow_pickle=True)
         assert_array_equal(y, x)

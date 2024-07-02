@@ -32,7 +32,7 @@
 
 namespace torch::jit {
 
-static std::vector<Method> gatherGetSetStates(ObjectPtr obj) {
+static std::vector<Method> gatherGetSetStates(const ObjectPtr& obj) {
   std::vector<Method> methods;
   // Use DFS on IValue's to traverse dependencies of module._ivalue and
   // add all setstate/getstates to initial stack.
@@ -395,7 +395,8 @@ mobile::Module jitModuleToMobile(
       backend_debug_info_map.begin(), backend_debug_info_map.end());
   m.setDebugTable(MobileDebugTable(
       debug_handle_cs_ptr_map.begin(), debug_handle_cs_ptr_map.end()));
-  m.set_min_operator_version(get_min_operator_version_from_version_map(m));
+  m.set_min_operator_version(
+      static_cast<int64_t>(get_min_operator_version_from_version_map(m)));
   m.set_bytecode_version(options.model_version);
   return m;
 }

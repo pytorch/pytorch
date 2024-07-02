@@ -89,6 +89,7 @@ from .source import (
     OptimizerSource,
     ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
+    SubclassAttrListSource,
     TupleIteratorGetItemSource,
     TypeSource,
     WeakRefCallSource,
@@ -972,6 +973,14 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, SubclassAttrListSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x.__tensor_flatten__()[0],
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, FlattenScriptObjectSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.lambda_manager(
@@ -1475,7 +1484,10 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
-        self.TYPE_MATCH(guard)
+        if not (config.enable_cpp_guard_manager and isinstance(value, dict)):
+            # C++ DICT_LENGTH checks for type
+            self.TYPE_MATCH(guard)
+
         code = list()
         if len(value) == 0:
             code.append(f"not {ref}")
@@ -1574,30 +1586,6 @@ class GuardBuilder(GuardBuilderBase):
         if config.enable_cpp_guard_manager:
             self.get_guard_manager(guard).add_not_none_guard(
                 get_verbose_code_parts(code, guard)
-            )
-        else:
-            self._produce_guard_code(guard, code)
-
-    def NN_MODULE_PARAM_NAMES(self, guard):
-        ref = self.arg_ref(guard)
-        value = self.get(guard.name)
-        t = type(value)
-        keys = {k for k, v in value.named_parameters()}
-
-        self.TYPE_MATCH(guard)
-        code = list()
-        code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
-
-        self._set_guard_export_info(guard, code)
-        if config.enable_cpp_guard_manager:
-            # TODO(anijain2305) - Consider moving this guard to C++. anijain2305
-            # tried but unable to come up with a testcase that installs this
-            # guard.
-            def fn(x):
-                return {k for k, v in x.named_parameters()} == keys
-
-            self.get_guard_manager(guard).add_lambda_guard(
-                fn, get_verbose_code_parts(code, guard)
             )
         else:
             self._produce_guard_code(guard, code)

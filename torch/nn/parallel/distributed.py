@@ -1598,7 +1598,9 @@ class DistributedDataParallel(Module, Joinable):
                 treespec,
                 output_is_rref,
             ) = _tree_flatten_with_rref(output)
-            output_placeholders = [None for _ in range(len(output_tensor_list))]
+            output_placeholders: List[Optional[torch.Tensor]] = [
+                None for _ in range(len(output_tensor_list))
+            ]
             # Do not touch tensors that have no grad_fn, which can cause issues
             # such as https://github.com/pytorch/pytorch/issues/60733
             for i, output in enumerate(output_tensor_list):
