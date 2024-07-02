@@ -5,6 +5,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+# pyre-unsafe
+
 import datetime
 import random
 import time
@@ -44,6 +46,7 @@ class EtcdStore(Store):
         self.prefix = etcd_store_prefix
 
         if timeout is not None:
+            # pyre-fixme[16]: `EtcdStore` has no attribute `set_timeout`.
             self.set_timeout(timeout)
 
         if not self.prefix.endswith("/"):
