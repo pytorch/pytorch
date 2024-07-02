@@ -312,12 +312,21 @@ flex_attention_template = TritonTemplate(
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = offs_n[None, :]
+
+        # All the inputs must be broadcasted to qk shape.
+        m = tl.broadcast(m, qk)
+        n = tl.broadcast(n, qk)
+        b = tl.broadcast(off_z, qk)
+        h = tl.broadcast(off_h, qk)
+        mod_mask = (m < Q_LEN) & (n < KV_LEN)
+
         {{ modification(
             subgraph_number=0,
             output_name="post_mod_scores",
+            load_mask="mod_mask",
             score="qk",
-            b="off_z",
-            h="off_h",
+            b="b",
+            h="h",
             m="m",
             n="n",
             out="qk"
@@ -554,6 +563,11 @@ def flex_attention(*args, **kwargs):
         query.get_size(),
         query.get_stride(),
     )
+
+    if _use_flex_decoding(query):
+        return create_flex_decoding_kernel(
+            subgraph_buffer, layout, query, key, value, subgraph, *other_buffers
+        )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = query.get_size()[:-1]  # [B, H, M]
     logsumexp = empty_strided(
@@ -785,9 +799,18 @@ flex_attention_backward_template = TritonTemplate(
             pre_mod_scores = qk
             m = offs_m2[:, None]
             n = offs_n2[None, :]
+
+            # All the inputs must be broadcasted to qk shape.
+            m = tl.broadcast(m, qk)
+            n = tl.broadcast(n, qk)
+            b = tl.broadcast(off_z, qk)
+            h = tl.broadcast(off_h, qk)
+            qk_mask = (m < Q_LEN) & (n < KV_LEN)
+
             {{ modification(
                 subgraph_number=0,
                 output_name="post_mod_scores",
+                load_mask="qk_mask",
                 score="qk",
                 b="off_z",
                 h="off_h",
@@ -806,6 +829,7 @@ flex_attention_backward_template = TritonTemplate(
             {{ modification(
                 subgraph_number=1,
                 output_name = "grad_scores",
+                load_mask="qk_mask",
                 score="pre_mod_scores",
                 b="off_z",
                 h="off_h",
@@ -883,12 +907,21 @@ flex_attention_backward_template = TritonTemplate(
             m = offs_m1[None, :]
             n = offs_n1[:, None]
             pre_mod_scores = qkT
+
+            # All the inputs must be broadcasted to qk shape.
+            m = tl.broadcast(m, qkT)
+            n = tl.broadcast(n, qkT)
+            b = tl.broadcast(off_z, qkT)
+            h = tl.broadcast(off_h, qkT)
+            qkT_mask = (m < Q_LEN) & (n < KV_LEN)
+
             {{ modification(
                 subgraph_number=0,
                 output_name="post_mod_scores",
+                load_mask="qkT_mask",
                 score="qkT",
-                b="off_z",
-                h="off_h",
+                b="b",
+                h="h",
                 m="m",
                 n="n",
                 out="qkT"
@@ -911,9 +944,10 @@ flex_attention_backward_template = TritonTemplate(
             {{ modification(
                 subgraph_number=1,
                 output_name = "grad_scores",
+                load_mask="qkT_mask",
                 score="pre_mod_scores",
-                b="off_z",
-                h="off_h",
+                b="b",
+                h="h",
                 m="m",
                 n="n",
                 grad_score_mod="dsT"

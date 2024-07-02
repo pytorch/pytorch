@@ -721,18 +721,29 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("decoding", [False, True])
+    def test_captured_buffers_query(self, dtype: torch.dtype, decoding):
+        q_scale = torch.randn(Hq // Hkv if decoding else S, device="cuda")
+
+        def all_bias(score, batch, head, token_q, token_kv):
+            score = score + q_scale[token_q]
+            return score
+
+        self.run_test(all_bias, dtype, decoding=decoding)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("decoding", [False, True])
     def test_captured_buffers_all_dims(self, dtype: torch.dtype, decoding):
         head_scale = torch.randn(Hkv if decoding else H, device="cuda")
         batch_scale = torch.randn(B, device="cuda")
         kv_scale = torch.randn(S, device="cuda")
         q_scale = torch.randn(Hq // Hkv if decoding else S, device="cuda")
-        if q_scale.shape[-1] < 16:
-            q_scale = torch.nn.functional.pad(q_scale, (0, 16 - Hq // Hkv))
 
         def all_bias(score, batch, head, token_q, token_kv):
             score = score + kv_scale[token_kv]
             score = score + q_scale[token_q]
             score = score + head_scale[head]
+            score = score + batch_scale[batch]
             return score
 
         self.run_test(all_bias, dtype, decoding=decoding)
@@ -750,13 +761,7 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
-    @common_utils.parametrize(
-        "decoding",
-        [
-            False,
-        ],
-    )
-    # @common_utils.parametrize("decoding", [False, True]) # TODO: Fix decoding
+    @common_utils.parametrize("decoding", [False, True])  # TODO: Fix decoding
     def test_load_from_bias_seq_only(self, dtype, decoding):
         bias = torch.randn(Hq // Hkv if decoding else S, S, device="cuda", dtype=dtype)
 
@@ -766,8 +771,7 @@ class TestFlexAttention(InductorTestCase):
         self.run_test(bias_mod, dtype, decoding=decoding)
 
     @supported_platform
-    @common_utils.parametrize("decoding", [False])
-    # @common_utils.parametrize("decoding", [False, True]) # TODO: Fix decoding
+    @common_utils.parametrize("decoding", [False, True])  # TODO: Fix decoding
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_seq_batch(self, dtype, decoding):
         bias = torch.randn(
@@ -780,14 +784,13 @@ class TestFlexAttention(InductorTestCase):
         self.run_test(bias_mod, dtype, decoding=decoding)
 
     @supported_platform
-    @common_utils.parametrize("decoding", [False])
-    # @common_utils.parametrize("decoding", [False, True]) # TODO: Fix decoding
+    @common_utils.parametrize("decoding", [False, True])  # TODO: Fix decoding
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_head_seq_batch(self, dtype, decoding):
         bias = torch.randn(
             B,
             Hkv if decoding else H,
-            Hkv // Hq if decoding else S,
+            Hq // Hkv if decoding else S,
             S,
             device="cuda",
             dtype=dtype,
@@ -1225,16 +1228,24 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
-    def test_logsumexp_only_return(self):
-        make_tensor = functools.partial(
+    @common_utils.parametrize("decoding", [False, True])
+    def test_logsumexp_only_return(self, decoding):
+        make_kv = functools.partial(
             torch.randn,
-            (B, H, S, D),
+            (B, Hkv if decoding else H, S, D),
+            dtype=torch.float32,
+            device="cuda",
+            requires_grad=True,
+        )
+        make_q = functools.partial(
+            torch.randn,
+            (B, Hkv if decoding else H, Hq // Hkv if decoding else S, D),
             dtype=torch.float32,
             device="cuda",
             requires_grad=True,
         )
 
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        q, k, v = make_q(), make_kv(), make_kv()
         block_mask = _create_empty_block_sparse_mask(q, k, v)
 
         @torch.compile
@@ -1256,18 +1267,27 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         _, code = run_and_get_code(func, q, k, v, _identity, block_mask)
         # Ensure that two kernels are generated
-        FileCheck().check_count(".run(", 2, True).run(code[0])
+        FileCheck().check_count(".run(", 3 if decoding else 2, False).run(code[0])
 
     @supported_platform
-    def test_logsumexp_is_not_fused(self):
-        make_tensor = functools.partial(
+    @common_utils.parametrize("decoding", [False, True])
+    def test_logsumexp_is_not_fused(self, decoding):
+        make_kv = functools.partial(
             torch.randn,
-            (B, H, S, D),
+            (B, Hkv if decoding else H, S, D),
             dtype=torch.float32,
             device="cuda",
             requires_grad=True,
         )
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        make_q = functools.partial(
+            torch.randn,
+            (B, Hkv if decoding else H, Hq // Hkv if decoding else S, D),
+            dtype=torch.float32,
+            device="cuda",
+            requires_grad=True,
+        )
+
+        q, k, v = make_q(), make_kv(), make_kv()
         block_mask = _create_empty_block_sparse_mask(q, k, v)
 
         @torch.compile
@@ -1289,7 +1309,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         _, code = run_and_get_code(func, q, k, v, _identity, block_mask)
         # Ensure that two kernels are generated
-        FileCheck().check_count(".run(", 2, True).run(code[0])
+        FileCheck().check_count(".run(", 3 if decoding else 2, False).run(code[0])
 
     @supported_platform
     @common_utils.parametrize(
