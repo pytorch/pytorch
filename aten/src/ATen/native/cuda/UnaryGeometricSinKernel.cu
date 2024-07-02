@@ -32,6 +32,7 @@ void sin_kernel_cuda(TensorIteratorBase& iter) {
               /*common_dtype=*/scalar_t,
               /*arity=*/1>(iter, sin_string);
         }),
+        AT_EXPAND(AT_COMPLEX_TYPES),
         kComplexHalf,
     )
 #else
@@ -45,6 +46,7 @@ void sin_kernel_cuda(TensorIteratorBase& iter) {
           });
         }),
         AT_EXPAND(AT_COMPLEX_TYPES),
+        kComplexHalf,
    )
 #endif
   } else {
