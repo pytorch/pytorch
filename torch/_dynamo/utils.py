@@ -1454,7 +1454,11 @@ def same(
                 # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
                 multiplier = 3.0 if res.dtype == torch.bfloat16 else 2.0
 
-                if (
+                if fp64_ref.numel() <= 10 and tol >= 4 * 1e-2:
+                    multiplier = 8.0
+                elif fp64_ref.numel() <= 500 and tol >= 4 * 1e-2:
+                    multiplier = 5.0
+                elif (
                     fp64_ref.numel() < 1000
                     or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
                     # large tol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE

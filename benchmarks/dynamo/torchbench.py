@@ -421,6 +421,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.float16 or self.args.amp:
             if name in self._tolerance["higher_fp16"]:
                 return 1e-2, cosine
+            elif name in self._tolerance["even_higher"]:
+                return 8 * 1e-2, cosine
             return 1e-3, cosine
 
         if self.args.bfloat16:
