@@ -9,7 +9,6 @@ import torch
 import torch._C
 from torch.testing._internal.common_utils import IS_FBCODE, skipIfTorchDynamo
 
-
 # hacky way to skip these tests in fbcode:
 # during test execution in fbcode, test_nnapi is available during test discovery,
 # but not during test execution. So we can't try-catch here, otherwise it'll think
@@ -41,7 +40,7 @@ Inherits most tests from TestNNAPI, which loads Android NNAPI models
 without the delegate API.
 """
 # First skip is needed for IS_WINDOWS or IS_MACOS to skip the tests.
-torch_root = Path(__file__).resolve().parents[2]
+torch_root = Path(__file__).resolve().parent.parent.parent
 lib_path = torch_root / "build" / "lib" / "libnnapi_backend.so"
 
 
