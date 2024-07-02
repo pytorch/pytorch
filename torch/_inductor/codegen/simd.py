@@ -1208,7 +1208,7 @@ class SIMDScheduling(BaseScheduling):
             if not isinstance(node, scheduler.BaseSchedulerNode):
                 continue
 
-            buffer_names.update(node.get_names())
+            buffer_names.update(node.get_buffer_names())
             buffer_names.update(node.used_buffer_names())
 
         # Get buffers objects
@@ -1280,8 +1280,11 @@ class SIMDScheduling(BaseScheduling):
 
         mutations = set()
         for node in node_schedule:
-            if hasattr(node, "get_mutations"):
-                mutations.update(node.get_mutations())
+            if node in (DisableReduction, EnableReduction):
+                continue
+
+            for buf in node.get_outputs():
+                mutations.update(buf.get_mutations())
 
         index_dtype = self.select_index_dtype(node_schedule, numel, reduction_numel)
 

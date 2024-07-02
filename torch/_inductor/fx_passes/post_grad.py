@@ -533,6 +533,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
 
     kernel.name = V.graph.register_buffer(kernel)
     kernel.inputs = ir.ConcatKernel.unwrap_storage(kernel.inputs)
+    V.graph.register_operation(kernel)
     return kernel_tensor
 
 
