@@ -624,6 +624,7 @@ at::Tensor shard_dim_alltoall(
 
 // DTensor comm op registry
 TORCH_LIBRARY(_dtensor, m) {
+  m.set_python_module("torch.distributed._tensor._collective_utils");
   m.def(
       "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor",
       torch::dispatch(
