@@ -5,6 +5,8 @@
 #include <ATen/core/Generator.h>
 #include <c10/util/Registry.h>
 
+#include <ATen/detail/AcceleratorHooksInterface.h>
+
 namespace at {
 
 constexpr const char* XPU_HELP =
@@ -14,7 +16,7 @@ constexpr const char* XPU_HELP =
     "loaded for some reason. The Intel Extension for Pytorch MUST "
     "be loaded, EVEN IF you don't directly use any symbols from that!";
 
-struct TORCH_API XPUHooksInterface {
+struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface {
   virtual ~XPUHooksInterface() = default;
 
   virtual void initXPU() const {
@@ -63,12 +65,16 @@ struct TORCH_API XPUHooksInterface {
     TORCH_CHECK(false, "Cannot synchronize XPU device without ATen_xpu library.");
   }
 
-  virtual Allocator* getPinnedMemoryAllocator() const  {
+  virtual Allocator* getPinnedMemoryAllocator() const override {
     TORCH_CHECK(false, "Cannot get XPU pinned memory allocator without ATen_xpu library.");
   }
 
-  virtual bool isPinnedPtr(const void* /*data*/) const {
+  virtual bool isPinnedPtr(const void* data) const override {
     return false;
+  }
+
+  virtual bool hasPrimaryContext(DeviceIndex device_index) const override {
+    TORCH_CHECK(false, "Cannot check primary context without ATen_xpu library.");
   }
 };
 
