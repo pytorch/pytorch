@@ -18,7 +18,7 @@ from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
-from torch._inductor import codecache, config, metrics, test_operators
+from torch._inductor import config, cpu_vec_isa, metrics, test_operators
 from torch._inductor.codegen.common import OptimizationContext
 from torch._inductor.codegen.cpp import (
     CppOverrides,
@@ -67,12 +67,12 @@ aten = torch.ops.aten
 check_model = test_torchinductor.check_model
 
 requires_vectorization = unittest.skipUnless(
-    codecache.valid_vec_isa_list(), "Does not support vectorization"
+    cpu_vec_isa.valid_vec_isa_list(), "Does not support vectorization"
 )
 
 
 def check_metrics_vec_kernel_count(num_expected_vec_kernels):
-    if codecache.valid_vec_isa_list():
+    if cpu_vec_isa.valid_vec_isa_list():
         assert metrics.generated_cpp_vec_kernel_count == num_expected_vec_kernels
 
 
@@ -1583,13 +1583,17 @@ class CPUReproTests(TestCase):
             self.common(fn, (value,))
 
     @unittest.skipIf(
-        platform.machine() != "x86_64" or not codecache.valid_vec_isa_list(),
+        platform.machine() != "x86_64" or not cpu_vec_isa.valid_vec_isa_list(),
         "Does not support vectorization or not x86_64 machine",
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_simd(self):
-        vec_avx512 = codecache.supported_vec_isa_list[1]
-        vec_avx2 = codecache.supported_vec_isa_list[2]
+        vec_amx = cpu_vec_isa.supported_vec_isa_list[0]
+        vec_avx512 = cpu_vec_isa.supported_vec_isa_list[1]
+        vec_avx2 = cpu_vec_isa.supported_vec_isa_list[2]
+        self.assertTrue(vec_amx.bit_width() == 512)
+        self.assertTrue(vec_amx.nelements() == 16)
+        self.assertTrue(vec_amx.nelements(torch.bfloat16) == 32)
         self.assertTrue(vec_avx512.bit_width() == 512)
         self.assertTrue(vec_avx2.bit_width() == 256)
         self.assertTrue(vec_avx512.nelements() == 16)
@@ -1598,39 +1602,43 @@ class CPUReproTests(TestCase):
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
 
         with config.patch({"cpp.simdlen": None}):
-            isa = codecache.pick_vec_isa()
-            if vec_avx512 in codecache.valid_vec_isa_list():
+            isa = cpu_vec_isa.pick_vec_isa()
+            if vec_amx in cpu_vec_isa.valid_vec_isa_list():
+                self.assertTrue(isa == vec_amx)
+            elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
                 self.assertTrue(isa == vec_avx512)
             else:
                 self.assertTrue(isa == vec_avx2)
 
         with config.patch({"cpp.simdlen": 0}):
-            isa = codecache.pick_vec_isa()
+            isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 1}):
-            isa = codecache.pick_vec_isa()
+            isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 257}):
-            isa = codecache.pick_vec_isa()
+            isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 513}):
-            isa_list = codecache.valid_vec_isa_list()
+            isa_list = cpu_vec_isa.valid_vec_isa_list()
             if vec_avx512 in isa_list:
                 self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 512}):
-            isa_list = codecache.valid_vec_isa_list()
-            if vec_avx512 in isa_list:
-                isa = codecache.pick_vec_isa()
+            isa_list = cpu_vec_isa.valid_vec_isa_list()
+            isa = cpu_vec_isa.pick_vec_isa()
+            if vec_amx in isa_list:
+                self.assertTrue(isa == vec_amx)
+            elif vec_avx512 in isa_list:
                 self.assertTrue(isa == vec_avx512)
 
         with config.patch({"cpp.simdlen": 256}):
-            isa_list = codecache.valid_vec_isa_list()
+            isa_list = cpu_vec_isa.valid_vec_isa_list()
             if vec_avx2 in isa_list:
-                isa = codecache.pick_vec_isa()
+                isa = cpu_vec_isa.pick_vec_isa()
                 self.assertTrue(isa == vec_avx2)
 
     @requires_vectorization
@@ -1981,7 +1989,9 @@ class CPUReproTests(TestCase):
         x[0, 0] = torch.nan
         x[1, -1] = torch.nan
 
-        bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()] + [None]
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()] + [
+            None
+        ]
         for item in bit_widths:
             with config.patch({"cpp.simdlen": item}):
                 torch._dynamo.reset()
@@ -1999,7 +2009,7 @@ class CPUReproTests(TestCase):
 
             return fn
 
-        bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()]
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
         ih = [16, 65]
         iw = ih
         oh = ih
@@ -2258,7 +2268,7 @@ class CPUReproTests(TestCase):
             graph_lowering
         ):
             # The moset inner loop variable is used in the index_expr
-            tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
+            tiling_factor = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.float)
             with CppVecKernelChecker(
                 args=None, num_threads=1, tiling_factor=tiling_factor
             ) as vec_checker:
@@ -2358,7 +2368,7 @@ class CPUReproTests(TestCase):
         ):
             itervars = [sympy.Symbol("i"), sympy.Symbol("j"), sympy.Symbol("k")]
 
-            tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
+            tiling_factor = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.float)
             # The most inner loop variable is used in the index_expr
             with CppVecKernelChecker(
                 args=None, num_threads=1, tiling_factor=tiling_factor
