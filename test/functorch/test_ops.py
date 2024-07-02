@@ -2142,8 +2142,9 @@ class TestOperators(TestCase):
                 else:
                     weight = torch.randn(weight_shape, device=device)
                 target = torch.randint(0, C, target_shape, device=device)
-                # Since we're ignoring index 0, at least one element must be non-zero
-                target[0] = 1
+                target[
+                    0
+                ] = 1  # since we're ignoring index 0, at least one element must be non-zero
 
                 fn = functools.partial(
                     torch.nn.functional.nll_loss, target=target, weight=weight, **kwargs

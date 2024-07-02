@@ -801,11 +801,9 @@ def register_onednn_fusion_ops():
                     CppPackedGemmTemplate.add_choices(
                         choices,
                         layout,
-                        (
-                            [x, x_scale, x_zp, packed_weight, w_scale, w_zp]
-                            if bias is None
-                            else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias]
-                        ),
+                        [x, x_scale, x_zp, packed_weight, w_scale, w_zp]
+                        if bias is None
+                        else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias],
                         has_bias=bias is not None,
                         epilogue_creator=epilogue_creator,
                     )
@@ -822,11 +820,9 @@ def register_onednn_fusion_ops():
                     kwargs["bias"] = None
                 choices.append(
                     aten_mkldnn_qlinear_unary.bind(
-                        (
-                            (x, x_scale, x_zp, packed_weight, w_scale, w_zp)
-                            if bias is None
-                            else (x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias)
-                        ),
+                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp)
+                        if bias is None
+                        else (x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias),
                         layout,
                         **kwargs,
                     )
@@ -841,11 +837,9 @@ def register_onednn_fusion_ops():
             result = autotune_select_algorithm(
                 "qlinear_unary",
                 choices,
-                (
-                    [x, x_scale, x_zp, packed_weight, w_scale, w_zp]
-                    if bias is None
-                    else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias]
-                ),
+                [x, x_scale, x_zp, packed_weight, w_scale, w_zp]
+                if bias is None
+                else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias],
                 layout,
                 input_gen_fns=input_gen_fns,
             )

@@ -2,7 +2,6 @@
 
 This is mostly string manipulation, with just a bit of importlib magic.
 """
-
 import importlib.abc
 import importlib.util
 import itertools as it
