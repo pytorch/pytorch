@@ -56,6 +56,8 @@ def custom_op(
             is valid for. If no device type is provided, then the function
             is used as the default implementation for all device types.
             Examples: "cpu", "cuda".
+            When registering a device-specific implementation for an operator that accepts no Tensors, 
+            we require the operator to have a "device: torch.device argument".
         schema (None | str): A schema string for the operator. If None
             (recommended) we'll infer a schema for the operator from its type
             annotations. We recommend letting us infer a schema unless you
@@ -107,6 +109,13 @@ def custom_op(
         >>> expected = x.sin()
         >>> numpy_sin_inplace(x)
         >>> assert torch.allclose(x, expected)
+        >>> 
+        >>> # Example of a factory function
+        >>> @torch.library.custom_op("mylib::bar", mutates_args={}, device_types="cpu")
+        >>> def bar(device: torch.device) -> Tensor:
+        >>>     return torch.ones(3)
+        >>>
+        >>> bar("cpu")
 
     """
 
@@ -119,6 +128,14 @@ def custom_op(
             schema_str = torch._custom_op.impl.infer_schema(fn, mutates_args)
         else:
             schema_str = schema
+        
+        from torch._library.infer_schema import has_device_arg, has_tensor_arg
+
+
+        if not has_tensor_arg(schema_str) and not has_device_arg(schema_str) and device_types is not None:
+            raise ValueError(
+                f"Functions without tensor inputs are required to have torch.device input."
+            )
         namespace, opname = name.split("::")
         result = CustomOpDef(namespace, opname, schema_str, fn)
         if schema is not None:

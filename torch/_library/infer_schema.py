@@ -223,3 +223,32 @@ def tuple_to_list(tuple_type: typing.Type[typing.Tuple]) -> typing.Type[typing.L
         return typing.List[type_args[0]]  # type: ignore[valid-type]
     else:
         return typing.List[typing.Union[tuple(type_args)]]  # type: ignore[misc]
+
+
+# def has_tensor_arg(prototype_function: typing.Callable):
+#     sig = inspect.signature(prototype_function)
+#     for idx, (name, param) in enumerate(sig.parameters.items()):
+#         if "Tensor" in str(param.annotation):
+#             return True
+#     return False
+
+
+def has_tensor_arg(schema: str):
+    """
+    Given a schema string, returns True if the schema has a Tensor arg.
+    A Tensor arg is any arg with a type annotation that might involve Tensor.
+    """
+    inputs = schema.split("->")[0].split("(")[1].split(")")[0].split(",")
+    input_types = [input.strip().split(" ")[0] for input in inputs]
+    return any("Tensor" in s for s in input_types)
+
+def has_device_arg(schema: str):
+    """
+    Given a schema string, returns True if the schema has a device arg.
+    A device arg is any arg with a type annotation that might involve device.
+    """
+    print(schema)
+    inputs = schema.split("->")[0].split("(")[1].split(")")[0].split(",")
+    input_types = [input.strip().split(" ")[0] for input in inputs]
+    print(input_types)
+    return any("Device" in s for s in input_types)
