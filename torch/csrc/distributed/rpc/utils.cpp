@@ -389,7 +389,7 @@ std::string wireSerialize(
       // out of scope of this loop.
       auto writeableTensorData = jit::getWriteableTensorData(tensorData[i]);
       entries.push_back(
-          {std::to_string(i),
+          {fmt::to_string(i),
            writeableTensorData.data(),
            writeableTensorData.sizeInBytes()});
     }
@@ -399,10 +399,7 @@ std::string wireSerialize(
   size_t tot = 0;
   for (const auto& e : entries) {
     tot += e.size;
-    header.append(e.name)
-        .append(" ")
-        .append(std::to_string(e.size))
-        .append("\n");
+    header += fmt::format("{} {}\n", e.name, e.size);
   }
   header.push_back('\n');
 

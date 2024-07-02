@@ -4,6 +4,7 @@
 
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -23,7 +24,7 @@ struct TemplateEnv {
   using string_list = std::vector<std::string>;
 
   // Add a string 'v' to the map at key 'k'.
-  void s(const std::string& k, const std::string& v) {
+  void s(const std::string& k, std::string_view v) {
     strings_[k] = v;
     lists_.erase(k);
   }
@@ -78,9 +79,7 @@ struct TemplateEnv {
 
  private:
   [[noreturn]] void notFound(const std::string& k) const {
-    std::stringstream ss;
-    ss << "key not found: " << k;
-    throw std::logic_error(ss.str());
+    throw std::logic_error(std::string("key not found: ") + k);
   }
 
   std::unordered_map<std::string, std::string> strings_;
@@ -98,7 +97,7 @@ struct TemplateEnv {
 # if this list is not empty and ${foo,} will insert one after.
 */
 struct CodeTemplate {
-  /* implicit */ CodeTemplate(std::string t) : template_text(std::move(t)) {}
+  /* implicit */ CodeTemplate(std::string_view t) : template_text(t) {}
 
   std::string format(const TemplateEnv& env) const {
     std::stringstream out;
@@ -213,7 +212,7 @@ struct CodeTemplate {
   void emitStringWithIndents(
       std::ostream& out,
       size_t indent,
-      const std::string& str) const {
+      std::string_view str) const {
     for (auto c : str) {
       out << c;
       if (c == '\n') {
@@ -236,7 +235,7 @@ struct CodeTemplate {
   std::string template_text;
 };
 
-static inline std::string format(const std::string& fmt, TemplateEnv& env) {
+static inline std::string format(std::string_view fmt, TemplateEnv& env) {
   return CodeTemplate(fmt).format(env);
 }
 
