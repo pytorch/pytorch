@@ -348,6 +348,7 @@ struct ModuleMethod {
   ModuleMethod(Module m, const GraphFunction& f, c10::QualifiedName n)
       : module(std::move(m)), function(f), exportName(std::move(n)) {}
   Module module;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const GraphFunction& function;
   c10::QualifiedName exportName;
 };
@@ -836,7 +837,8 @@ void ExportModule(
     bool save_mobile_debug_info,
     bool use_flatbuffer) {
   auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-    out.write(static_cast<const char*>(buf), nbytes);
+    out.write(
+        static_cast<const char*>(buf), static_cast<std::streamsize>(nbytes));
     return !out ? 0 : nbytes;
   };
   ExportModule(

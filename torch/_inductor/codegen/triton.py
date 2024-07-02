@@ -2735,6 +2735,7 @@ class TritonKernel(SIMDKernel):
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None):
         wrapper = V.graph.wrapper_code
+        wrapper.write_triton_header_once()
         _, call_args, _, arg_types = self.args.python_argdefs()
         grid: List[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
@@ -2886,6 +2887,7 @@ class TritonScheduling(SIMDScheduling):
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.MASKED_SCATTER_WITH_INDEX,
             BackendFeature.SCAN,
+            BackendFeature.TRITON_TEMPLATES,
         ]
     )
     if torch.version.hip is None:
