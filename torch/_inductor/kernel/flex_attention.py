@@ -456,10 +456,10 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
         return (16, 16, 4, 1)
 
 
-def create_num_blocks_fake(x, num_blocks_for_autotuning: int) -> torch.Tensor:
+def create_num_blocks_fake(x, num_blocks_for_autotuning) -> torch.Tensor:
     return torch.full(
         x.get_size(),
-        num_blocks_for_autotuning,
+        int(num_blocks_for_autotuning),
         dtype=x.get_dtype(),
         device=x.get_device(),
     )
