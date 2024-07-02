@@ -312,3 +312,6 @@ lxml==5.0.0
 # Python-3.9 binaries
 
 PyGithub==2.3.0
+
+zmq
+# Description: torchrun/torchelastic - supervisor
