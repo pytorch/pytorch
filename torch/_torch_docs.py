@@ -11423,7 +11423,7 @@ Example::
 add_docstr(
     torch.rot90,
     r"""
-rot90(input, k=1, dims=[0,1]) -> Tensor
+rot90(input, k=1, dims=(0, 1)) -> Tensor
 
 Rotate an n-D tensor by 90 degrees in the plane specified by dims axis.
 Rotation direction is from the first towards the second axis if k > 0, and from the second towards the first for k < 0.
