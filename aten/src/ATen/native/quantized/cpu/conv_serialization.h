@@ -177,6 +177,21 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
       optional.emplace_back();
     }
 
+    // Validate that tensor with packed parameters have valid storage.
+    auto config_t = non_optional[0];
+    auto expected_size = config_t.is_contiguous() ?
+            at::detail::computeStorageNbytesContiguous(
+                            config_t.sizes(), config_t.dtype().itemsize()) :
+            at::detail::computeStorageNbytes(config_t.sizes(),
+                            config_t.strides(), config_t.dtype().itemsize());
+    TORCH_CHECK(
+        config_t.storage().nbytes() >= expected_size,
+        "Parse conv serialized state with corrupted tensor: storage have only ",
+        config_t.storage().nbytes(),
+        " bytes allocated, but metadata (sizes, strides) required at least ",
+        expected_size,
+        " bytes.");
+
     auto config_a = non_optional[0].accessor<int16_t, 1>();
     std::vector<int64_t> config_vals;
     config_vals.reserve(config_a.size(0));
