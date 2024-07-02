@@ -249,6 +249,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 This is needed because Torch Dynamo uses the dynamic_shapes flag as a hint, only.
 
         """
+        from torch._dynamo import config as _dynamo_config
 
         # avoid mutable data structure
         if input_kwargs is None:
@@ -275,7 +276,10 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             self.model_type
             == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
         ):
-            ref_model = torch.export.export(ref_model, args=ref_input_args)
+            with _dynamo_config.patch(
+                do_not_emit_runtime_asserts=True
+            ):
+                ref_model = torch.export.export(ref_model, args=ref_input_args)
             if (
                 self.dynamic_shapes
             ):  # TODO: Support dynamic shapes for torch.export.ExportedProgram

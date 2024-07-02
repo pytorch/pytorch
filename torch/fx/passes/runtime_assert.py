@@ -127,6 +127,13 @@ def insert_deferred_runtime_asserts(
         return (
             (val := _get_sym_val(node)) is not None
             and not isinstance(val, sympy.Number)
+            and not isinstance(val, sympy.Function)
+            # this holds back from reifying anything in torch.utils._sympy.functions.py from input shapes.
+            # TODO: figure out missing parts, too many failures on TruncToInt, CeilToInt, etc.
+            # see for example:
+            # test/dynamo/test_unspec.py test_unspec_float_precision
+            # test/dynamo/test_repros.py test_do_paste_mask
+            # test/nn/test_packed_sequence.py test_pack_padded_sequence (PYTORCH_TEST_WITH_DYNAMO=1)
             and any(
                 isinstance(arg, fx.Node)
                 and isinstance(_get_example_value(arg), (torch.Tensor, torch.Size))
@@ -293,20 +300,22 @@ def insert_deferred_runtime_asserts(
                 node.op != "placeholder"
                 and (sym_expr := _get_sym_val(node)) is not None
             ):
-                has_new_unbacked_bindings = resolve_unbacked_bindings(
-                    shape_env, node.meta.get("unbacked_bindings", {})
-                ).keys() - expr_to_proxy.keys()
+                # this guards against calls like item() that produce new untracked symbols
+                new_untracked_symbols = sym_expr.free_symbols - expr_to_proxy.keys()
                 # this guards against hash consing calls that produce unbacked bindings we haven't yet seen.
                 # in this case looking at sym_expr.free_symbols might not be enough, if the example value has a hint
                 # (is backed), but produces an unbacked symbol. In this case keep the node alive.
+                new_unbacked_bindings = resolve_unbacked_bindings(
+                    shape_env, node.meta.get("unbacked_bindings", {})
+                ).keys() - expr_to_proxy.keys()
+
                 if (
                     sym_expr in expr_to_proxy or (  # example value is redundant
-                    _is_intermediate_tensor_sym_call(node)
-                    # shape call on intermediate tensor, turn into computation on input shapes
-                    and not (sym_expr.free_symbols - expr_to_proxy.keys())
-                    # this guards against calls like item() that produce new untracked symbols
+                        _is_intermediate_tensor_sym_call(node)
+                        # shape call on intermediate tensor, turn into computation on input shapes
+                        and not new_untracked_symbols
                     )
-                ) and not has_new_unbacked_bindings:  # hash cons
+                ) and not new_unbacked_bindings:  # hash cons
                     if _is_intermediate_tensor_sym_call(node):  # reify from input shapes
                         expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)
                         # won't try DCE-ing tensor compute here
@@ -316,6 +325,7 @@ def insert_deferred_runtime_asserts(
                     log.debug(
                         "CSE node %s -> %s for expr %s", node, hash_node, sym_expr
                     )
+                    
                 elif (
                     sym_expr not in expr_to_proxy
                     and not isinstance(sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom))  # don't hash cons primitives
@@ -365,7 +375,7 @@ def insert_deferred_runtime_asserts(
                             if keypath[0].name == "stride":
                                 return go(
                                     graph.call_function(
-                                        torch.ops.aten.stride.int,
+                                        torch.ops.aten.sym_stride.int,
                                         (node, keypath[1].idx),
                                     ),
                                     keypath[2:],

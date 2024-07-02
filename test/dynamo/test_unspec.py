@@ -248,8 +248,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(ref.device, res.device)
 
-    @unittest.expectedFailure
-    # can't turn ToFloat(Proxy(s1)) intermediate size call into compute
     def test_unspec_float_precision(self):
         def fn(image, scale_factor):
             image = torch.nn.functional.interpolate(
