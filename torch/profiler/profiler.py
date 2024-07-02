@@ -417,7 +417,10 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
 
 
 def tensorboard_trace_handler(
-    dir_name: str, worker_name: Optional[str] = None, use_gzip: bool = False
+    dir_name: str,
+    worker_name: Optional[str] = None,
+    use_gzip: bool = False,
+    customized_file_name: Optional[str] = None,
 ):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
@@ -431,6 +434,7 @@ def tensorboard_trace_handler(
 
     def handler_fn(prof) -> None:
         nonlocal worker_name
+        nonlocal customized_file_name
         if not os.path.isdir(dir_name):
             try:
                 os.makedirs(dir_name, exist_ok=True)
@@ -439,7 +443,10 @@ def tensorboard_trace_handler(
         if not worker_name:
             worker_name = f"{socket.gethostname()}_{os.getpid()}"
         # Use nanosecond here to avoid naming clash when exporting the trace
-        file_name = f"{worker_name}.{time.time_ns()}.pt.trace.json"
+        if customized_file_name is None:
+            file_name = f"{worker_name}.{time.time_ns()}.pt.trace.json"
+        else:
+            file_name = f"{customized_file_name}.{time.time_ns()}.pt.trace.json"
         if use_gzip:
             file_name = file_name + ".gz"
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
