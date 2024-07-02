@@ -611,7 +611,10 @@ instantiate_parametrized_tests(ScheduleTest)
 
 
 class TestSchedulePlan(unittest.TestCase):
-    @parametrize("ScheduleClass", [ScheduleFlexibleInterleaved1F1B, ScheduleInterleaved1F1B, ScheduleLoopedBFS])
+    @parametrize(
+        "ScheduleClass",
+        [ScheduleFlexibleInterleaved1F1B, ScheduleInterleaved1F1B, ScheduleLoopedBFS],
+    )
     def test_pipeline_order(self, ScheduleClass):
         # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
         # These should succeed since num_microbatches % group_size == 0
