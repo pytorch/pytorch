@@ -236,6 +236,13 @@ class SymNode:
     def __repr__(self):
         return self.str()
 
+    def debug_repr(self):
+        # This method includes additional debugging information
+        return (
+            f"SymNode(expr={self.expr}, shape_env={self.shape_env}, "
+            f"pytype={self.pytype}, hint={self._hint}, constant={self.constant})"
+        )
+
     # These methods call the metaprogrammed methods, they're hand written
     # here so we get good stack traces
     def abs(self) -> "SymNode":
