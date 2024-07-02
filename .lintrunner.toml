@@ -1695,9 +1695,8 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     '--no-black-binary',
     'black==23.12.1',
-    'ufmt==2.7.0',
-    'usort==1.0.8.post1',
-    'isort==5.13.2',
+    'ufmt==2.1.0',
+    'usort==1.0.6',
 ]
 is_formatter = true
 
