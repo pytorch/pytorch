@@ -316,6 +316,8 @@ class GraphLowering(torch.fx.Interpreter):
         self._shape_env = shape_env
         # We are going to start code generating runtime asserts, so make sure
         # you don't start adding new ones in the lowering process
+        shape_env.prefer_deferred_runtime_asserts_over_guards = False
+        shape_env.allow_complex_guards_as_runtime_asserts = False
         shape_env.freeze_runtime_asserts()
         # We're going to mutate ras_by_symbol as we finish generating them
         self.ras_by_symbol: Dict[
