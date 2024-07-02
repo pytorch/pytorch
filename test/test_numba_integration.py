@@ -114,9 +114,13 @@ class TestNumbaIntegration(common.TestCase):
             torch.float64,
             torch.uint8,
             torch.int8,
+            torch.uint16,
             torch.int16,
+            torch.uint32,
             torch.int32,
+            torch.uint64,
             torch.int64,
+            torch.bool,
         ]
 
         for dt in torch_dtypes:
