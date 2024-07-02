@@ -29,6 +29,7 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import make_channels_last_strides_for
 from torch._subclasses.fake_tensor import FakeTensor
@@ -324,7 +325,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.bound_unbacked_symbols: Set[sympy.Symbol] = set()
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: List[str] = []
-        self.graph_inputs: Dict[str, TensorBox] = {}
+        self.graph_inputs: Dict[str, Union[TensorBox, TorchBindObject]] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
         self.device_types: Set[str] = (
             const_module.device_types if const_module else set()
@@ -341,7 +342,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.constants: Dict[str, torch.Tensor] = (
             const_module.constants if const_module else {}
         )
-        self.torchbind_constants: Dict[str, torch._C.ScriptObject] = {}
+        self.torchbind_constants: Dict[
+            str, Union[FakeScriptObject, torch._C.ScriptObject]
+        ] = {}
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
@@ -861,6 +864,10 @@ class GraphLowering(torch.fx.Interpreter):
             expr = sympy.sympify(example)
             self.graph_inputs[target] = expr
             return expr
+        elif isinstance(example, FakeScriptObject):
+            obj = TorchBindObject(target, example)
+            self.graph_inputs[target] = obj
+            return obj
         if isinstance(example, BackwardState):
             # Ignored arg, must be unused
             # Alternately we could filter this out in AotAutograd
@@ -982,7 +989,7 @@ class GraphLowering(torch.fx.Interpreter):
         if isinstance(value, torch.fx.GraphModule):
             return ir.Subgraph(name=target, graph_module=value)
 
-        if isinstance(value, torch._C.ScriptObject):
+        if isinstance(value, (torch._C.ScriptObject, FakeScriptObject)):
             self.torchbind_constants[target] = value
             self.constant_reprs[target] = ""
             return TorchBindObject(target, value)
@@ -1057,6 +1064,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_outputs = result_correct_strides
         value: ir.IRNode
         for name, value in self.graph_inputs.items():
+            if isinstance(value, TorchBindObject):
+                continue
             assert isinstance(
                 value, (TensorBox, sympy.Expr)
             ), f"Unsupported inductor graph input type: {type(value)}"
