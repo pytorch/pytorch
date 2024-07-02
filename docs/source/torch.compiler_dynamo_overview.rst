@@ -57,6 +57,8 @@ Dynamo optimization:
 
    from typing import List
    import torch
+   # disable cpp guard so that we can see guards easily in Python
+   torch._dynamo.config.enable_cpp_guard_manager = False
    from torch import _dynamo as torchdynamo
    def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
        print("my_compiler() called with FX graph:")
