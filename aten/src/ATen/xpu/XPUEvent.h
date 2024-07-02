@@ -128,20 +128,25 @@ struct TORCH_XPU_API XPUEvent {
     }
   }
 
-  float elapsed_time(const XPUEvent& other) const {
+  float elapsed_time(const XPUEvent& end) const {
     TORCH_CHECK(
-        isCreated() && other.isCreated(),
+        isCreated() && end.isCreated(),
         "Both events must be recorded before calculating elapsed time.");
     TORCH_CHECK(
-        query() && other.query(),
+        query() && end.query(),
         "Both events must be completed before calculating elapsed time.");
     TORCH_CHECK(
-        enable_timing_ && other.enable_timing_,
+        enable_timing_ && end.enable_timing_,
         "Both events must be created with argument 'enable_timing=True'.");
-    // TODO: provides the ability to time the execution of commands in a SYCL
-    // queue without enabling profiling on the entire queue
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false, "elapsed_time is not supported by XPUEvent.");
+    auto end_time =
+        end.event()
+            .get_profiling_info<sycl::info::event_profiling::command_end>();
+    auto start_time =
+        this->event()
+            .get_profiling_info<sycl::info::event_profiling::command_end>();
+
+    auto time_ms = (end_time - start_time) / 1e6;
+    return time_ms;
   }
 
   void synchronize() const {

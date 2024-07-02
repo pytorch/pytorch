@@ -99,7 +99,9 @@ void initDeviceStreamState(DeviceIndex device) {
   using namespace sycl::ext::oneapi::property;
   // Need to align with StreamIdType.
   const std::vector<sycl::property_list> properties = {
-      {sycl::property::queue::in_order(), queue::priority_normal()},
+      {sycl::property::queue::in_order(),
+       queue::priority_normal(),
+       sycl::property::queue::enable_profiling()},
       {sycl::property::queue::in_order(), queue::priority_high()}};
   for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
     for (const auto i : c10::irange(kStreamsPerPool)) {
