@@ -13674,9 +13674,11 @@ An in-order queue of executing the respective tasks asynchronously in first in f
 It can control or synchronize the execution of other Stream or block the current host thread to ensure
 the correct task sequencing.
 
+See in-depth description of the CUDA behavior at :doc:`/notes/cuda` for details on the exact semantic that applies to all devices.
+
 Arguments:
     device (:class:`torch.device`, optional): the desired device for the Stream.
-        If not given, a default :ref:`accelerator<accelerators>` type will be used.
+        If not given, the current :ref:`accelerator<accelerators>` type will be used.
     priority (int, optional): priority of the stream, should be 0 or negative, where negative
         numbers indicate higher priority. By default, streams have priority 0.
 
@@ -13716,7 +13718,7 @@ add_docstr(
     r"""
 Stream.record_event(event) -> Event
 
-Record an event. Captures in event the contents of stream at the time of this call.
+Record an event. En-queuing it into the Stream to allow further synchronization from the current point in the FIFO queue.
 
 Arguments:
     event (:class:`torch.Event`, optional): event to record. If not given, a new one will be allocated.
@@ -13776,7 +13778,7 @@ add_docstr(
 Stream.wait_stream(stream) -> None
 
 Synchronize with another stream. All future work submitted to this stream will wait until all kernels
-submitted to a given stream at the time of call complete.
+already submitted to the given stream are completed.
 
 Arguments:
     stream (:class:`torch.Stream`): a stream to synchronize.
@@ -13800,7 +13802,7 @@ Query and record Stream status to identify or control dependencies across Stream
 
 Arguments:
     device (:class:`torch.device`, optional): the desired device for the Event.
-        If not given, a default :ref:`accelerator<accelerators>` type will be used.
+        If not given, the current :ref:`accelerator<accelerators>` type will be used.
     enable_timing (bool, optional): indicates if the event should measure time (default: ``False``).
 
 Returns:
@@ -13819,8 +13821,8 @@ add_docstr(
     r"""
 Event.elapsed_time(end_event) -> float
 
-Return the time elapsed. Time reported in milliseconds after the event was recorded and
-before the end_event was recorded.
+Returns the elapsed time in milliseconds between when this event and the :arg:`end_event` are
+each recorded via :func:`torch.Stream.record_event`.
 
 Arguments:
     end_event (:class:`torch.Event`): The ending event has been recorded.
@@ -13844,7 +13846,8 @@ add_docstr(
     r"""
 Event.query() -> bool
 
-Check if all work currently captured by event has completed.
+Check if the stream where this event was recorded already moved past the point where the event was recorded.
+Always returns ``True`` if the Event was not recorded.
 
 Returns:
     bool: A boolean indicating if all work currently captured by event has completed.
@@ -13866,6 +13869,7 @@ add_docstr(
 Event.record(stream) -> None
 
 Record the event in a given stream. The stream's device must match the event's device.
+This function is equivalent to ``stream.record_event(self)``.
 
 Arguments:
     stream (:class:`torch.Stream`, optional): A stream to be recorded.
