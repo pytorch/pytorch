@@ -127,7 +127,9 @@ class VecMask {
   static VecMask<T, N> from(U* b) {
     using int_t = int_same_size_t<T>;
     __at_align__ T mask[size()];
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
     for (int i = 0; i < size(); i++) {
       *(int_t*)(mask + i) = b[i] ? ~(int_t)0 : (int_t)0;
     }
@@ -257,6 +259,7 @@ VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator<, ~a& b)
 VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator==, ~(a ^ b))
 VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator>=, (a == b) | (a > b))
 VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator<=, (a == b) | (a < b))
+VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator!=, (a ^ b))
 
 #undef VEC_MASK_DEFINE_UNARY_OP_GLOBAL
 #undef VEC_MASK_DEFINE_BINARY_OP_GLOBAL

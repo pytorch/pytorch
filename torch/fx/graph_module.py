@@ -821,12 +821,12 @@ class {module_name}(torch.nn.Module):
         return res
 
     @compatibility(is_backward_compatible=False)
-    def print_readable(self, print_output=True, include_stride=False, include_device=False):
+    def print_readable(self, print_output=True, include_stride=False, include_device=False, colored=False):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
         """
         verbose_python_code = self._graph.python_code(
-            root_module="self", verbose=True, include_stride=include_stride, include_device=include_device
+            root_module="self", verbose=True, include_stride=include_stride, include_device=include_device, colored=colored
         )
         module_code = verbose_python_code.src
         module_code = module_code.lstrip("\n")

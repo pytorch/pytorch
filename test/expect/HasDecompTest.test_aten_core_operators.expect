@@ -61,6 +61,8 @@ aten::any.out
 aten::arange.out
 aten::arange.start_out
 aten::arange.start_step
+aten::as_strided_copy
+aten::as_strided_copy.out
 aten::as_strided_scatter
 aten::as_strided_scatter.out
 aten::asin
@@ -457,6 +459,8 @@ aten::sinh
 aten::sinh.out
 aten::sinh_
 aten::slice.Tensor
+aten::slice_scatter
+aten::slice_scatter.out
 aten::special_bessel_j0
 aten::special_bessel_j0.out
 aten::special_bessel_j1

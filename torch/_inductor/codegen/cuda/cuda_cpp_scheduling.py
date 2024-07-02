@@ -29,6 +29,10 @@ class CUDACPPScheduling(BaseScheduling):
         super().__init__()
         self.scheduler = scheduler
 
+    @classmethod
+    def get_backend_features(cls, device):
+        return {}
+
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 

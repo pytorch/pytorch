@@ -251,6 +251,26 @@ thread_local MHAGraphCache<graph_and_tensors, MHACacheKeyWrapper> mhagraphcache;
 thread_local MHAGraphCache<graph_and_tensors_backward, MHACacheKeyWrapper>
     mhagraphbackwardcache;
 
+namespace {
+// analogous to the same function in Descriptors.h for cuDNN Convolutions...
+auto fixSizeOneDimStrideSDPA(
+    const IntArrayRef sizes,
+    std::vector<int64_t> strides) {
+  int dims = sizes.size();
+  for (int d = 0; d < dims; d++) {
+    int64_t curr_stride = strides[d];
+    if (sizes[d] == 1 && !curr_stride) {
+      curr_stride = 1;
+      for (int d2 = d + 1; d2 < dims; d2++) {
+        curr_stride *= strides[d2];
+      }
+      strides[d] = curr_stride;
+    }
+  }
+  return strides;
+}
+} // namespace
+
 auto build_graph_and_tensors(
     int64_t b,
     int64_t h,
@@ -269,8 +289,7 @@ auto build_graph_and_tensors(
     Tensor& o,
     Tensor& dropoutseed,
     Tensor& dropoutoffset,
-    cudnnHandle_t& handle,
-    MHAParams& params) {
+    cudnnHandle_t& handle) {
   auto dtype = fe::DataType_t::HALF;
   if (q.scalar_type() == kBFloat16) {
     dtype = fe::DataType_t::BFLOAT16;
@@ -285,24 +304,33 @@ auto build_graph_and_tensors(
   auto Q = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_name("Q")
-          .set_dim(
-              std::vector<int64_t>(params.q_dim.begin(), params.q_dim.end()))
-          .set_stride(std::vector<int64_t>(
-              params.q_stride.begin(), params.q_stride.end())));
+          .set_dim(std::vector<int64_t>(
+              q.sizes().data(), q.sizes().data() + q.sizes().size()))
+          .set_stride(fixSizeOneDimStrideSDPA(
+              q.sizes(),
+              std::vector<int64_t>(
+                  q.strides().data(),
+                  q.strides().data() + q.strides().size()))));
   auto K = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_name("K")
-          .set_dim(
-              std::vector<int64_t>(params.k_dim.begin(), params.k_dim.end()))
-          .set_stride(std::vector<int64_t>(
-              params.k_stride.begin(), params.k_stride.end())));
+          .set_dim(std::vector<int64_t>(
+              k.sizes().data(), k.sizes().data() + k.sizes().size()))
+          .set_stride(fixSizeOneDimStrideSDPA(
+              k.sizes(),
+              std::vector<int64_t>(
+                  k.strides().data(),
+                  k.strides().data() + k.strides().size()))));
   auto V = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_name("V")
-          .set_dim(
-              std::vector<int64_t>(params.v_dim.begin(), params.v_dim.end()))
-          .set_stride(std::vector<int64_t>(
-              params.v_stride.begin(), params.v_stride.end())));
+          .set_dim(std::vector<int64_t>(
+              v.sizes().data(), v.sizes().data() + v.sizes().size()))
+          .set_stride(fixSizeOneDimStrideSDPA(
+              v.sizes(),
+              std::vector<int64_t>(
+                  v.strides().data(),
+                  v.strides().data() + v.strides().size()))));
   auto attn_scale =
       mha_graph->tensor(fe::graph::Tensor_attributes()
                             .set_name("Attn_scale")
@@ -407,8 +435,7 @@ auto build_graph_and_tensors_backward(
     Tensor& dV,
     const Tensor& dropoutseed,
     const Tensor& dropoutoffset,
-    cudnnHandle_t& handle,
-    MHAParams& params) {
+    cudnnHandle_t& handle) {
   auto dtype = fe::DataType_t::HALF;
   if (q.scalar_type() == kBFloat16) {
     dtype = fe::DataType_t::BFLOAT16;
@@ -537,9 +564,11 @@ void run_cudnn_SDP_fprop(
     Tensor& dropoutseed,
     Tensor& dropoutoffset) {
   cudnnHandle_t handle = getCudnnHandle();
-  o = at::empty_strided(
-      {b, h, s_q, d_v}, {s_q * h * d_v, d_v, h * d_v, 1}, q.options());
-  if (return_softmaxstats) {
+  if (!o.defined()) {
+    o = at::empty({b, h, s_q, d_v}, q.options());
+  }
+
+  if (return_softmaxstats && !softmaxstats.defined()) {
     // TODO(eqy): verify that this is correct
     softmaxstats = at::empty({b, h, s_q}, q.options().dtype(kFloat));
   }
@@ -580,8 +609,7 @@ void run_cudnn_SDP_fprop(
         o,
         dropoutseed,
         dropoutoffset,
-        handle,
-        key.pod);
+        handle);
   }
   auto [mha_graph, Q, K, V, attn_scale, seed, offset, O, Stats] =
       graph_and_tensors_values;
@@ -630,10 +658,27 @@ void run_cudnn_SDP_bprop(
   Tensor dO_ = dO;
   if (!dO.strides()[dO.strides().size() - 1]) {
     TORCH_WARN(
-        "cuDNN SDPA backward got an innermost stride of 0 in grad_out, which is unsupported. Materializing a contiguous\
-        tensor which will increase memory usage...");
+        "cuDNN SDPA backward got an innermost stride of 0 in grad_out, which is unsupported."
+        " Materializing a contiguous tensor which will increase memory usage...");
     dO_ = dO.contiguous();
   }
+  if (!std::equal(
+          o.strides().begin(), o.strides().end(), dO.strides().begin())) {
+    TORCH_WARN(
+        "cuDNN SDPA backward got grad_output.strides() != output.strides(), "
+        "attempting to materialize a grad_output with matching strides...");
+    if (o.is_contiguous()) {
+      dO_ = dO.contiguous();
+    } else {
+      dO_ = dO.transpose(1, 2).contiguous().transpose(1, 2);
+    }
+  }
+  TORCH_INTERNAL_ASSERT(
+      std::equal(
+          dO_.strides().begin(), dO_.strides().end(), o.strides().begin()),
+      "cuDNN SDPA expected grad_output.strides() == output.strides(), "
+      "the previous step probably failed to materialize a grad_output "
+      "with matching strides...");
   cudnnHandle_t handle = getCudnnHandle();
   auto key = MHACacheKeyWrapper(
       b,
@@ -674,8 +719,7 @@ void run_cudnn_SDP_bprop(
         dV,
         dropoutseed,
         dropoutoffset,
-        handle,
-        key.pod);
+        handle);
   }
   auto
       [mha_graph, Q, K, V, attn_scale, Seed, Offset, O, Do, Stats, Dq, Dk, Dv] =
@@ -686,7 +730,7 @@ void run_cudnn_SDP_bprop(
                       {K, k.data_ptr()},
                       {V, v.data_ptr()},
                       {O, o.data_ptr()},
-                      {Do, dO.data_ptr()},
+                      {Do, dO_.data_ptr()},
                       {Stats, softmaxstats.data_ptr()},
                       // outputs
                       {Dq, dQ.data_ptr()},

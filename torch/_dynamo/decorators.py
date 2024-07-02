@@ -185,6 +185,30 @@ class _DimRange:
 
 
 @forbid_in_graph
+def mark_unbacked(t, index):
+    """
+    Mark a tensor as having an unbacked dim.  This changes the semantics of operations,
+    we will always report the size does not equal zero/one, we will turn asserts
+    on this index into runtime asserts, and if you try to get the real value we will
+    raise an exception.  In other words, we will treat this dimension as if it was
+    data dependent (we do not know anything about its value.)
+    """
+    # You could have copied the mark_dynamic behavior but I'm not convinced
+    # it's what you want
+    assert not is_traceable_wrapper_subclass(t), "not implemented yet"
+
+    if isinstance(index, int):
+        if not hasattr(t, "_dynamo_unbacked_indices"):
+            t._dynamo_unbacked_indices = set()
+        t._dynamo_unbacked_indices.add(index)
+        return
+
+    assert isinstance(index, (list, tuple))
+    for i in index:
+        mark_unbacked(t, i)
+
+
+@forbid_in_graph
 def mark_dynamic(t, index, *, min=None, max=None):
     """
     Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.

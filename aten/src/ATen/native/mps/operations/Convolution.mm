@@ -161,6 +161,16 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   }
   TensorArg output{output_t, "result", 0};
 
+  // TODO: MPS convolution kernel currently does not support output channels > 2^16
+  for (auto elem : output_t.sizes()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        elem <= (1 << 16),
+        "Output channels > 65536 not supported at the MPS device. ",
+        "As a temporary fix, you can set the environment variable `PYTORCH_ENABLE_MPS_FALLBACK=1` ",
+        "to use the CPU as a fallback for this op. WARNING: this will be slower than running natively ",
+        "on MPS.");
+  }
+
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
 
   // Derive from MPSCachedGraph
@@ -193,24 +203,24 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
 
     string bias_shape_key;
     if (bias_defined) {
-      bias_shape_key = to_string(bias_shape[0]);
+      bias_shape_key = std::to_string(bias_shape[0]);
     } else {
       bias_shape_key = "nobias";
     }
 
     string key;
     if (is3DConv) {
-      key = "mps_3d_convolution:" + to_string(stride[0]) + ":" + to_string(stride[1]) + ":" + to_string(stride[2]) +
-          ":" + to_string(dilation[0]) + ":" + to_string(dilation[1]) + ":" + to_string(dilation[2]) + ":" +
-          to_string(padding[0]) + ":" + to_string(padding[1]) + ":" + to_string(padding[2]) + ":" + to_string(groups) +
-          ":" + mem_format_key + mps::getTensorsStringKey({input_t, weight_t}) + ":" + to_string(bias_defined) + ":" +
-          bias_shape_key;
+      key = "mps_3d_convolution:" + std::to_string(stride[0]) + ":" + std::to_string(stride[1]) + ":" +
+          std::to_string(stride[2]) + ":" + std::to_string(dilation[0]) + ":" + std::to_string(dilation[1]) + ":" +
+          std::to_string(dilation[2]) + ":" + std::to_string(padding[0]) + ":" + std::to_string(padding[1]) + ":" +
+          std::to_string(padding[2]) + ":" + std::to_string(groups) + ":" + mem_format_key +
+          mps::getTensorsStringKey({input_t, weight_t}) + ":" + std::to_string(bias_defined) + ":" + bias_shape_key;
 
     } else {
-      key = "mps_convolution:" + to_string(stride[0]) + ":" + to_string(stride[1]) + ":" + to_string(dilation[0]) +
-          ":" + to_string(dilation[1]) + ":" + to_string(padding[0]) + ":" + to_string(padding[1]) + ":" +
-          to_string(groups) + ":" + mem_format_key + mps::getTensorsStringKey({input_t, weight_t}) + ":" +
-          to_string(bias_defined) + ":" + bias_shape_key;
+      key = "mps_convolution:" + std::to_string(stride[0]) + ":" + std::to_string(stride[1]) + ":" +
+          std::to_string(dilation[0]) + ":" + std::to_string(dilation[1]) + ":" + std::to_string(padding[0]) + ":" +
+          std::to_string(padding[1]) + ":" + std::to_string(groups) + ":" + mem_format_key +
+          mps::getTensorsStringKey({input_t, weight_t}) + ":" + std::to_string(bias_defined) + ":" + bias_shape_key;
     }
 
     MPSShape* inputShape = mps::getMPSShape(input_t, memory_format);
@@ -346,6 +356,16 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   using namespace mps;
   bool is3DConv = grad_output_t.dim() == 5;
 
+  // TODO: MPS convolution kernel currently does not support output channels > 2^16
+  for (auto elem : grad_output_t.sizes()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        elem <= (1 << 16),
+        "Output channels > 65536 not supported at the MPS device. ",
+        "As a temporary fix, you can set the environment variable `PYTORCH_ENABLE_MPS_FALLBACK=1` ",
+        "to use the CPU as a fallback for this op. WARNING: this will be slower than running natively ",
+        "on MPS.");
+  }
+
   TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
   CheckedFrom c = "mps_convolution_backward_input";
   TensorArg grad_output{grad_output_t, "grad_output", 1}, weight{weight_t, "weight", 2};
@@ -388,16 +408,16 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
     NSString* ns_shape_key = [[gradOutputShape valueForKey:@"description"] componentsJoinedByString:@","];
     string key;
     if (is3DConv) {
-      key = "mps_3d_convolution_backward_input:" + to_string(stride[0]) + ":" + to_string(stride[1]) + ":" + ":" +
-          to_string(stride[2]) + to_string(dilation[0]) + ":" + to_string(dilation[1]) + ":" + to_string(dilation[2]) +
-          ":" + to_string(padding[0]) + ":" + to_string(padding[1]) + ":" + to_string(padding[2]) + ":" +
-          to_string(groups) + ":" + mem_format_key + getTensorsStringKey({grad_output_t, weight_t}) + ":" +
-          string([ns_shape_key UTF8String]);
+      key = "mps_3d_convolution_backward_input:" + std::to_string(stride[0]) + ":" + std::to_string(stride[1]) + ":" +
+          ":" + std::to_string(stride[2]) + std::to_string(dilation[0]) + ":" + std::to_string(dilation[1]) + ":" +
+          std::to_string(dilation[2]) + ":" + std::to_string(padding[0]) + ":" + std::to_string(padding[1]) + ":" +
+          std::to_string(padding[2]) + ":" + std::to_string(groups) + ":" + mem_format_key +
+          getTensorsStringKey({grad_output_t, weight_t}) + ":" + string([ns_shape_key UTF8String]);
 
     } else {
-      key = "mps_convolution_backward_input:" + to_string(stride[0]) + ":" + to_string(stride[1]) + ":" +
-          to_string(dilation[0]) + ":" + to_string(dilation[1]) + ":" + to_string(padding[0]) + ":" +
-          to_string(padding[1]) + ":" + to_string(groups) + ":" + mem_format_key +
+      key = "mps_convolution_backward_input:" + std::to_string(stride[0]) + ":" + std::to_string(stride[1]) + ":" +
+          std::to_string(dilation[0]) + ":" + std::to_string(dilation[1]) + ":" + std::to_string(padding[0]) + ":" +
+          std::to_string(padding[1]) + ":" + std::to_string(groups) + ":" + mem_format_key +
           getTensorsStringKey({grad_output_t, weight_t}) + ":" + string([ns_shape_key UTF8String]);
     }
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
@@ -547,15 +567,15 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
     NSString* ns_shape_key = [[gradOutputShape valueForKey:@"description"] componentsJoinedByString:@","];
     string key;
     if (is3DConv) {
-      key = "mps_3d_convolution_backward_weights:" + to_string(stride[0]) + ":" + to_string(stride[1]) + ":" +
-          to_string(stride[2]) + ":" + to_string(dilation[0]) + ":" + to_string(dilation[1]) + ":" +
-          to_string(dilation[2]) + ":" + to_string(padding[0]) + ":" + to_string(padding[1]) + ":" +
-          to_string(padding[2]) + ":" + to_string(groups) + ":" + mem_format_key +
+      key = "mps_3d_convolution_backward_weights:" + std::to_string(stride[0]) + ":" + std::to_string(stride[1]) + ":" +
+          std::to_string(stride[2]) + ":" + std::to_string(dilation[0]) + ":" + std::to_string(dilation[1]) + ":" +
+          std::to_string(dilation[2]) + ":" + std::to_string(padding[0]) + ":" + std::to_string(padding[1]) + ":" +
+          std::to_string(padding[2]) + ":" + std::to_string(groups) + ":" + mem_format_key +
           getTensorsStringKey({grad_output_t, input_t, grad_weight_t}) + ":" + string([ns_shape_key UTF8String]);
     } else {
-      key = "mps_convolution_backward_weights:" + to_string(stride[0]) + ":" + to_string(stride[1]) + ":" +
-          to_string(dilation[0]) + ":" + to_string(dilation[1]) + ":" + to_string(padding[0]) + ":" +
-          to_string(padding[1]) + ":" + to_string(groups) + ":" + mem_format_key +
+      key = "mps_convolution_backward_weights:" + std::to_string(stride[0]) + ":" + std::to_string(stride[1]) + ":" +
+          std::to_string(dilation[0]) + ":" + std::to_string(dilation[1]) + ":" + std::to_string(padding[0]) + ":" +
+          std::to_string(padding[1]) + ":" + std::to_string(groups) + ":" + mem_format_key +
           getTensorsStringKey({grad_output_t, input_t, grad_weight_t}) + ":" + string([ns_shape_key UTF8String]);
     }
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
