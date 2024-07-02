@@ -542,7 +542,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         {%- set tile_idx_b = tile_offset_b + tile_col %}
         {%- set tile_idx_c = tile_row * num_columns + tile_col %}
         {%- if tile_col == 0 %}
-        _tile_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k, lda * sizeof({{input_t}}));
+        _tile_stream_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k, lda * sizeof({{input_t}}));
         {%- endif %}
         {%- if tile_row == 0 %}
         _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * 2}}, ldb * 2 * sizeof({{input_t}}));
