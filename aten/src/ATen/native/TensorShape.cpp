@@ -3026,6 +3026,7 @@ static inline Tensor sparse_compressed_transpose(
 
   const auto transpose_type = classify_dim(dim0);
   {
+#ifndef STRIP_ERROR_MESSAGES
     auto dim_type_name = [](const TransposeDim dim) {
       switch (dim) {
         case TransposeDim::Batch:
@@ -3041,6 +3042,7 @@ static inline Tensor sparse_compressed_transpose(
               static_cast<std::underlying_type_t<TransposeDim>>(dim));
       }
     };
+#endif
     const auto dim1_type = classify_dim(dim1);
     TORCH_CHECK(
         dim1_type == transpose_type,

@@ -60,8 +60,10 @@ static void report_moving_unnamed_dim_error(
 static void report_not_a_subsequence_error(
     DimnameList names, DimnameList other, bool is_aligning_two_tensors) {
   if (is_aligning_two_tensors) {
+#ifndef STRIP_ERROR_MESSAGES
     auto shorter = names.size() > other.size() ? other : names;
     auto longer = names.size() > other.size() ? names : other;
+#endif
     TORCH_CHECK(false,
         "Could not align Tensor", shorter, " and Tensor", longer,
         " because ", shorter, " is not a subsequence of ", longer, ". ");
