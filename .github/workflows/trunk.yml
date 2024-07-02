@@ -212,6 +212,7 @@ jobs:
       build-environment: win-vs2019-cuda11.8-py3
       cuda-version: "11.8"
       sync-tag: win-cuda-build
+      runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}windows.g5.4xlarge.nvidia.gpu" },
