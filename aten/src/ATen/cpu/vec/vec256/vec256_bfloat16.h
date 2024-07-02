@@ -1075,6 +1075,21 @@ CONVERT_VECTORIZED_INIT(BFloat16, bfloat16);
 CONVERT_VECTORIZED_INIT(Half, half);
 
 #else // defined(CPU_CAPABILITY_AVX2)
+template <>
+inline void convert(const float* src, BFloat16* dst, int64_t n) {
+  // TODO: use simd intrinsics on the platforms that support bfloat16
+  for (int64_t i = 0; i < n; i++) {
+    dst[i] = c10::convert<BFloat16>(src[i]);
+  }
+}
+
+template <>
+inline void convert(const BFloat16* src, float* dst, int64_t n) {
+  // TODO: use simd intrinsics on the platforms that support bfloat16
+  for (int64_t i = 0; i < n; i++) {
+    dst[i] = c10::convert<float>(src[i]);
+  }
+}
 
 #define CONVERT_NON_VECTORIZED_INIT(type, name) \
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(const Vectorized<type>& a) { \
