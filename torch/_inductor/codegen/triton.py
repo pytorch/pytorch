@@ -545,7 +545,7 @@ def _get_primitive_bitwidth(dtype):
     if hasattr(dtype, "is_floating_point"):
         if dtype.is_floating_point:
             # triton_compute_type changes the bitwidth
-            if dtype == torch.bfloat16:
+            if dtype in [torch.bfloat16, torch.float16]:
                 return 32
             return torch.finfo(dtype).bits
         else:

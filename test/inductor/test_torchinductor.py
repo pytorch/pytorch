@@ -10598,7 +10598,6 @@ class CommonTemplate:
             for test_dtype_y in test_dtypes:
                 # @ operation needs arguments to be the same dtype
                 for view_dtype in test_dtypes:
-                    print(f"({test_dtype_x}, {test_dtype_y}, {view_dtype})")
                     if (
                         _get_primitive_bitwidth(test_dtype_x)
                         != _get_primitive_bitwidth(test_dtype_y)
@@ -10613,8 +10612,8 @@ class CommonTemplate:
                             torch.int8,
                         ]
                     ):
-                        print("skip")
                         continue
+                    print(f"({test_dtype_x}, {test_dtype_y}, {view_dtype})")
                     if test_dtype_x.is_floating_point:
                         x = torch.randn((2, 2), device="cuda", dtype=test_dtype_x)
                     else:
