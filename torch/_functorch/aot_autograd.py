@@ -1352,10 +1352,13 @@ def _aot_export_function(
     flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
     dynamic_shapes = False
-    for x in flat_args:
-        if isinstance(x, FakeTensor):
-            dynamic_shapes = x.fake_mode.shape_env is not None
-            break
+    if len(flat_args) == 0:
+        dynamic_shapes = FakeTensorMode()
+    else:
+        for x in flat_args:
+            if isinstance(x, FakeTensor):
+                dynamic_shapes = x.fake_mode.shape_env is not None
+                break
 
     # The export use case doesn't care about several bits of AOTConfig
     # (1) compilers (we just export the graph)
