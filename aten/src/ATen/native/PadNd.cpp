@@ -22,8 +22,13 @@
 #include <ATen/ops/replication_pad1d.h>
 #include <ATen/ops/replication_pad2d.h>
 #include <ATen/ops/replication_pad3d.h>
+#include <ATen/ops/_pad_symmetric.h>
+#include <ATen/ops/_pad_symmetric_native.h>
+#include <ATen/ops/cat.h>
 #endif
 
+using namespace at::indexing;
+using namespace std;
 namespace at::native {
 
 Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value) {
@@ -207,6 +212,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
       case at::padding_mode::reflect: return at::reflection_pad1d_symint(self, pad);
       case at::padding_mode::replicate: return at::replication_pad1d_symint(self, pad);
       case at::padding_mode::circular: return at::_pad_circular_symint(self, pad);
+      case at::padding_mode::symmetric: return at::_pad_symmetric_symint(self, pad);
       default: {}
     }
   } else if(pad.size() == 4 && (input_dim == 3 || input_dim == 4)) {
@@ -214,6 +220,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
       case at::padding_mode::reflect: return at::reflection_pad2d_symint(self, pad);
       case at::padding_mode::replicate: return at::replication_pad2d_symint(self, pad);
       case at::padding_mode::circular: return at::_pad_circular_symint(self, pad);
+      case at::padding_mode::symmetric: return at::_pad_symmetric_symint(self, pad);
       default: {}
     }
   } else if (pad.size() == 6 && (input_dim == 4 || input_dim == 5)) {
@@ -221,6 +228,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
       case at::padding_mode::reflect: return at::reflection_pad3d_symint(self, pad);
       case at::padding_mode::replicate: return at::replication_pad3d_symint(self, pad);
       case at::padding_mode::circular: return at::_pad_circular_symint(self, pad);
+      case at::padding_mode::symmetric: return at::_pad_symmetric_symint(self, pad);
       default: {}
     }
   }
@@ -238,6 +246,8 @@ Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, c10::string_view 
       return at::padding_mode::replicate;
     } else if (mode == "circular") {
       return at::padding_mode::circular;
+    } else if (mode == "symmetric") {
+      return at::padding_mode::symmetric;
     }
     C10_THROW_ERROR(NotImplementedError,
                     c10::str("Unrecognised padding mode ", mode));
@@ -245,4 +255,71 @@ Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, c10::string_view 
   return at::native::_pad_enum_symint(self, pad, static_cast<int64_t>(mode_enum), value);
 }
 
-}  // namespace at::native
+
+/**
+ * Pads a 1-dimensional tensor symmetrically.
+ */
+static Tensor _pad_symmetric_1d(Tensor signal, pair<c10::SymInt, c10::SymInt> pad_tuple, int dim)
+{   auto padl = pad_tuple.first;
+    auto padr = pad_tuple.second;
+    auto dimlen = signal.size(dim);
+    // If the padding is greater than the dimension length,
+    // currently we pad recursively until we have enough values.
+    // "circular"-mode raises an error when trying to wrap around more than once
+    // we could do that here as well for consistency.
+    if (padl > dimlen || padr > dimlen)
+    {
+        if (padl > dimlen)
+        {
+            signal = _pad_symmetric_1d(signal, make_pair(dimlen, 0), dim);
+            padl = padl - dimlen;
+        }
+        else
+        {
+            signal = _pad_symmetric_1d(signal, make_pair(0, dimlen), dim);
+            padr = padr - dimlen;
+        }
+        return _pad_symmetric_1d(signal, make_pair(padl, padr), dim);
+    }
+    else
+    {
+        vector<Tensor> cat_list = {signal};
+        if (padl > 0)
+        {
+            cat_list.insert(cat_list.begin(), signal.slice_symint(dim, 0, padl).flip(dim));
+        }
+        if (padr > 0)
+        {
+            cat_list.push_back(signal.slice_symint(dim, dimlen-padr, dimlen).flip(dim));
+        }
+        return cat(cat_list, dim);
+    }
+}
+
+/**
+ * Pads a given signal symmetrically along multiple dimensions.
+ */
+Tensor _pad_symmetric_symint(const Tensor &self, c10::SymIntArrayRef pad)
+{
+    std::vector<std::pair<c10::SymInt, c10::SymInt>> pad_lists;
+    for (size_t i = 0; i < pad.size(); i += 2) {
+        pad_lists.push_back(make_pair(pad[i], pad[i + 1]));
+    }
+
+    auto pad_dims = pad_lists.size();
+    Tensor output = self;
+    if (static_cast<long unsigned int>(output.dim()) < pad_dims)
+    {
+        throw std::invalid_argument("not enough dimensions to pad.");
+    }
+
+    auto dims = output.dim() - 1;
+    reverse(pad_lists.begin(), pad_lists.end());
+    for (auto pos = 0; pos < static_cast<int>(pad_dims); pos++)
+    {
+        int current_axis = dims - pos;
+        output = _pad_symmetric_1d(output, pad_lists[pos], current_axis);
+    }
+    return output;
+}
+} // namespace at::native
