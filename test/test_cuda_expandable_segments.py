@@ -1,20 +1,19 @@
 # Owner(s): ["module: cuda"]
 # run time cuda tests, but with the allocator using expandable segments
 
-import os
 import pathlib
 import sys
-
-import torch
-
-from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
-from torch.testing._internal.common_utils import run_tests
 
 from test_cuda import (  # noqa: F401
     TestBlockStateAbsorption,
     TestCuda,
     TestCudaMallocAsync,
 )
+
+import torch
+
+from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
+from torch.testing._internal.common_utils import run_tests
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
