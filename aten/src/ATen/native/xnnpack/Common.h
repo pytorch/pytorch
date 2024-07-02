@@ -124,5 +124,5 @@ struct Layout final {
 #endif /* USE_XNNPACK */
 
 namespace at::native::xnnpack {
-bool available();
+__attribute__((visibility("default"))) bool available();
 } // namespace at::native::xnnpack

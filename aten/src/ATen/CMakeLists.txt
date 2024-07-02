@@ -195,7 +195,8 @@ if(USE_MEM_EFF_ATTENTION)
 endif()
 
 # XNNPACK
-file(GLOB native_xnnpack "native/xnnpack/*.cpp")
+file(GLOB native_xnnpack_cpp "native/xnnpack/*.cpp")
+file(GLOB native_xnnpack_h "native/xnnpack/*.h")
 
 # Add files needed from jit folders
 append_filelist("jit_core_headers" ATen_CORE_HEADERS)
@@ -215,7 +216,7 @@ else()
     ${native_ao_sparse_cpp} ${native_sparse_cpp} ${native_nested_cpp}
     ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp}
     ${native_transformers_cpp}
-    ${native_utils_cpp} ${native_xnnpack} ${generated_sources} ${core_generated_sources}
+    ${native_utils_cpp} ${native_xnnpack_cpp} ${generated_sources} ${core_generated_sources}
     ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp}
   )
 endif()
@@ -570,7 +571,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_nested_h} ${ATen_TRANSFORMER_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
-  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${xpu_h} ${mps_h} ${native_mps_h} ${native_utils_h} ${miopen_h})
+  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${native_xnnpack_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${xpu_h} ${mps_h} ${native_mps_h} ${native_utils_h} ${miopen_h})
   # Metal
   if(USE_PYTORCH_METAL_EXPORT)
     # Add files needed from exporting metal models(optimized_for_mobile)
