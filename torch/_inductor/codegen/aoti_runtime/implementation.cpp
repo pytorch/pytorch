@@ -13,12 +13,15 @@ void convert_output_to_handle(
   handle = output.expensiveCopyToTensor();
 }
 
-void convert_output_to_handle(
-    const float& output,
-    AtenTensorHandle& handle) {
-  RAIIAtenTensorHandle scalar_to_tensor_0 = scalar_to_tensor_handle(output);
-  handle = scalar_to_tensor_0.release();
-}
+
+template<typename T,
+    typename = std::enable_if_t<std::is_scalar<T>::value>>
+    inline void convert_output_to_handle(
+      const T& output,
+      AtenTensorHandle& handle) {
+      RAIIAtenTensorHandle scalar_to_tensor_0 = scalar_to_tensor_handle(output);
+      handle = scalar_to_tensor_0.release();
+    }
 
 template <typename... Ts, std::size_t... Is>
 void convert_outputs_to_handles_helper(
