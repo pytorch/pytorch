@@ -36,6 +36,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA,
     HAS_GPU,
     HAS_MULTIGPU,
+    requires_gpu,
 )
 from torch.utils._triton import has_triton
 
@@ -46,7 +47,6 @@ if HAS_TRITON:
 
     from torch.testing._internal.triton_utils import add_kernel
 
-requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
 torch._dynamo.config.fake_tensor_cache_enabled = True

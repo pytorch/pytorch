@@ -18,9 +18,8 @@ from typing import (
 from typing_extensions import deprecated
 
 # No 'default_generator' in torch/__init__.pyi
-from torch import default_generator, randperm
+from torch import default_generator, Generator, randperm, Tensor
 
-from ... import Generator, Tensor
 
 __all__ = [
     "Dataset",

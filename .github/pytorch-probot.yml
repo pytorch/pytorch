@@ -26,3 +26,4 @@ retryable_workflows:
 - windows-binary
 labeler_config: labeler.yml
 label_to_label_config: label_to_label.yml
+mergebot: True

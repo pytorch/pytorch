@@ -1,7 +1,10 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
 #include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
+#include <algorithm>
 
 #ifdef USE_C10D_NCCL
 #include <vector>
@@ -236,6 +239,104 @@ std::string getNcclErrorDetailStr(
       interpret = "Unknown NCCL error!";
   }
   return interpret + err;
+}
+
+control_plane::RegisterHandler dumpHandler{
+    "dump_nccl_trace_pickle",
+    [](const control_plane::Request& req, control_plane::Response& res) {
+      const auto params = req.params();
+      size_t validParamCount = 0;
+
+      // valid params
+      const std::string includeCollectivesStr = "includecollectives";
+      const std::string includeStackTracesStr = "includestacktraces";
+      const std::string onlyActiveStr = "onlyactive";
+
+      std::unordered_map<std::string, bool> expectedParams = {
+          {includeCollectivesStr, true},
+          {includeStackTracesStr, true},
+          {onlyActiveStr, false}};
+
+      for (const auto& [paramName, paramValue] : params) {
+        auto it = expectedParams.find(paramName);
+        if (it != expectedParams.end()) {
+          validParamCount++;
+          if (paramValue == "true") {
+            it->second = true;
+          } else if (paramValue == "false") {
+            it->second = false;
+          } else {
+            res.setStatus(400);
+            res.setContent(
+                "Invalid value for " + paramName +
+                    " valid values are true or false",
+                "text/plain");
+            return;
+          }
+        }
+      }
+      if (validParamCount < params.size()) {
+        res.setStatus(400);
+        res.setContent(
+            "Invalid parameters - unexpected param passed in", "text/plain");
+        return;
+      }
+      res.setContent(
+          dump_nccl_trace(
+              expectedParams[includeCollectivesStr],
+              expectedParams[includeStackTracesStr],
+              expectedParams[onlyActiveStr]),
+          "application/octet-stream");
+    }};
+
+void DebugInfoWriter::write(const std::string& ncclTrace) {
+  // Open a file for writing. The ios::binary flag is used to write data as
+  // binary.
+  std::ofstream file(filename_, std::ios::binary);
+
+  // Check if the file was opened successfully.
+  if (!file.is_open()) {
+    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
+               << filename_;
+    return;
+  }
+
+  file.write(ncclTrace.data(), ncclTrace.size());
+  LOG(INFO) << "Finished writing NCCLPG debug info to " << filename_;
+}
+
+DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
+  if (writer_ == nullptr) {
+    std::string fileNamePrefix = getCvarString(
+        {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
+    // Using std::unique_ptr here to auto-delete the writer object
+    // when the pointer itself is destroyed.
+    std::unique_ptr<DebugInfoWriter> writerPtr(
+        new DebugInfoWriter(fileNamePrefix, rank));
+    DebugInfoWriter::registerWriter(std::move(writerPtr));
+  }
+  return *writer_;
+}
+
+void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      hasWriterRegistered_.load() == false,
+      "debugInfoWriter already registered");
+  hasWriterRegistered_.store(true);
+  writer_ = std::move(writer);
+}
+
+std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
+std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
+
+float getDurationFromEvent(
+    at::cuda::CUDAEvent& ncclStartEvent,
+    at::cuda::CUDAEvent& ncclEndEvent) {
+  TORCH_CHECK(
+      ncclEndEvent.query(),
+      "getDuration can only be called after work is succeeded.")
+  return ncclStartEvent.elapsed_time(ncclEndEvent);
 }
 
 } // namespace c10d
