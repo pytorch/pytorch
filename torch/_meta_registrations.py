@@ -5578,11 +5578,6 @@ def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=
     return v, i
 
 
-@register_meta(aten.argsort.stable)
-def meta_argsort(self, *, stable, dim=-1, descending=False):
-    return meta_sort(self, stable=stable, dim=dim, descending=descending)[1]
-
-
 def rnn_cell_checkSizes(
     input_gates,
     hidden_gates,
