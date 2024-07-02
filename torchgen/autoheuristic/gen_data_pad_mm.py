@@ -2,9 +2,9 @@ import argparse
 import random
 import time
 
-from typing import Tuple
+from typing import Any, Tuple
 
-from tqdm import tqdm
+from tqdm import tqdm  # type: ignore[import-untyped]
 
 import torch
 
@@ -38,7 +38,7 @@ def benchmark(
     n: int,
     tranpose_left: bool,
     tranpose_right: bool,
-    dtype: torch.dtype,
+    dtype: Any,
     prepadded_left: bool,
     prepadded_right: bool,
 ) -> None:
@@ -53,16 +53,16 @@ def benchmark(
 
     with fresh_inductor_cache():
 
-        def mm(a, b):
+        def mm(a: Any, b: Any) -> Any:
             return torch.mm(a, b)
 
-        def mm_mat1_prepadded(a, b):
+        def mm_mat1_prepadded(a: Any, b: Any) -> Any:
             return torch.mm(a + 1, b)
 
-        def mm_mat2_prepadded(a, b):
+        def mm_mat2_prepadded(a: Any, b: Any) -> Any:
             return torch.mm(a, b + 1)
 
-        def mm_mat1_mat2_prepadded(a, b):
+        def mm_mat1_mat2_prepadded(a: Any, b: Any) -> Any:
             return torch.mm(a + 1, b + 1)
 
         if prepadded_left and prepadded_right:
@@ -77,14 +77,14 @@ def benchmark(
         torch.compiler.reset()
 
 
-def fits_in_memory(dtype: torch.dtype, m: int, k: int, n: int) -> bool:
+def fits_in_memory(dtype: Any, m: int, k: int, n: int) -> Any:
     return dtype.itemsize * (m * k + k * n + m * n) < threshold_memory
 
 
 def get_random_dim(min_power2: int = 1, max_power2: int = 16) -> int:
     aligned = random.choices([True, False], [1 - p_unaligned, p_unaligned])[0]
     if aligned:
-        return 2 ** random.randint(min_power2, max_power2)
+        return 2 ** random.randint(min_power2, max_power2)  # type: ignore[no-any-return]
     else:
         # choose a random number between 2^i and 2^(i+1)
         i = random.randint(min_power2, max_power2 - 1)
@@ -93,7 +93,7 @@ def get_random_dim(min_power2: int = 1, max_power2: int = 16) -> int:
         return random.randint(lower, upper)
 
 
-def get_m_k_n(dtype: torch.dtype) -> Tuple[int, int, int]:
+def get_m_k_n(dtype: Any) -> Tuple[int, int, int]:
     uniform = random.choices([True, False], [0.5, 0.5])[0]
 
     # repeat until tensors fit in memory
@@ -119,12 +119,12 @@ def prepadded() -> bool:
     return random.choices([True, False], [p_prepadded, 1 - p_prepadded])[0]
 
 
-def get_dtype() -> torch.dtype:
+def get_dtype() -> Any:
     dtype_choices = [torch.float16, torch.bfloat16, torch.float32]
     return random.choices(dtype_choices)[0]
 
 
-def set_precision(dtype: torch.dtype) -> None:
+def set_precision(dtype: Any) -> None:
     if dtype == torch.float32:
         precisions = ["high", "highest"]
         weights = [1 - p_float32_prec_highest, p_float32_prec_highest]
@@ -134,7 +134,7 @@ def set_precision(dtype: torch.dtype) -> None:
     torch.set_float32_matmul_precision(precision)
 
 
-def main(num_samples) -> None:
+def main(num_samples: int) -> None:
     for i in tqdm(range(num_samples)):
         dtype = get_dtype()
         set_precision(dtype)
