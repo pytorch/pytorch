@@ -62,10 +62,10 @@ Tensor& addmm_out(
       " but got:",
       self.sizes());
 
-  // complex/double case
-  if (mat1.is_complex() || mat1.scalar_type() == ScalarType::Double) {
+  // complex case
+  if (mat1.is_complex()) {
     AT_ERROR(
-        "Double and complex datatype matmul is not supported in oneDNN");
+        "Complex datatype matmul is not supported in oneDNN");
   }
 
   // general case
@@ -139,9 +139,9 @@ Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
     return result;
   }
 
-  if (self.is_complex() || self.scalar_type() == ScalarType::Double) {
+  if (self.is_complex()) {
     AT_ERROR(
-        "Double and complex datatype matmul is not supported in oneDNN");
+        "Complex datatype matmul is not supported in oneDNN");
   }
 
   onednn::matmul(result, self, mat2, Tensor(), true, onednn::Attr());
@@ -193,10 +193,10 @@ Tensor& baddbmm_out(
       " but got:",
       input.sizes());
 
-  // complex and double case
-  if (batch1.is_complex() || batch2.scalar_type() == ScalarType::Double) {
+  // complex case
+  if (batch1.is_complex()) {
     AT_ERROR(
-        "Double and complex datatype matmul is not supported in oneDNN");
+        "Complex datatype matmul is not supported in oneDNN");
   }
 
   // general case
@@ -320,9 +320,9 @@ Tensor& bmm_out(const Tensor& self, const Tensor& batch2, Tensor& result) {
     return result;
   }
 
-  if (self.is_complex() || self.scalar_type() == ScalarType::Double) {
+  if (self.is_complex()) {
     AT_ERROR(
-        "Double and complex datatype matmul is not supported in oneDNN");
+        "Complex datatype matmul is not supported in oneDNN");
   }
   onednn::matmul(result, self, batch2, at::Tensor(), true, onednn::Attr());
   return result;
