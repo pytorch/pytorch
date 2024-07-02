@@ -1366,13 +1366,6 @@ class VariableBuilder:
         ):
             unimplemented("torch.compile does not support strided NestedTensor")
 
-        # Reject sparse, but not coo.
-        # TODO: remove this altogether when non-coo sparsity propagation is ready
-        if is_sparse_any(value) and not value.is_sparse:
-            unimplemented(
-                f"torch.compile does not support sparse Tensor with {value.layout} layout"
-            )
-
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,
