@@ -5,7 +5,6 @@
 #include <iostream>
 #include <sstream>
 
-#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/runtime/calculate_necessary_args.h>
 #include <torch/csrc/jit/serialization/export.h>
@@ -13,9 +12,9 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/script.h>
+#include <torch/serialize/inline_container.h>
+#include <torch/serialize/istream_adapter.h>
 #include <torch/torch.h>
-
-#include "caffe2/serialize/istream_adapter.h"
 
 namespace torch {
 namespace jit {
@@ -70,7 +69,7 @@ TEST(SerializationTest, ExtraFilesHookPreference) {
   SetExportModuleExtraFilesHook(nullptr);
 
   std::istringstream iss(oss.str());
-  caffe2::serialize::IStreamAdapter adapter{&iss};
+  torch::serialize::IStreamAdapter adapter{&iss};
   std::unordered_map<std::string, std::string> loaded_extra_files;
   loaded_extra_files["metadata.json"] = "";
   auto loaded_module = torch::jit::load(iss, torch::kCPU, loaded_extra_files);
@@ -324,7 +323,7 @@ TEST(TestSaveLoad, LoadWithoutDebugInfo) { // NOLINT (use =delete in gtest)
   std::stringstream ss;
   m.save(ss);
   ss.seekg(0);
-  caffe2::serialize::PyTorchStreamReader reader(&ss);
+  torch::serialize::PyTorchStreamReader reader(&ss);
   reader.setShouldLoadDebugSymbol(true);
   EXPECT_TRUE(reader.hasRecord("code/__torch__.py.debug_pkl"));
   reader.setShouldLoadDebugSymbol(false);

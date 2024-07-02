@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
-#include <caffe2/serialize/inline_container.h>
+#include <torch/serialize/inline_container.h>
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
@@ -68,7 +68,7 @@ class IValuePickler final {
     writer_.writeRecord(fname, data.data(), data.size());
   }
 
-  caffe2::serialize::PyTorchStreamWriter writer_;
+  torch::serialize::PyTorchStreamWriter writer_;
   TypeNameUniquer type_name_uniquer_;
 };
 

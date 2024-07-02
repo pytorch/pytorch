@@ -1,10 +1,9 @@
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 
 #include <c10/util/Optional.h>
-#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
-#include <iostream>
-#include <regex>
+#include <torch/serialize/versions.h>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -74,7 +73,7 @@ std::vector<std::string> loadPossibleHistoricOps(
 }
 
 uint64_t getMaxOperatorVersion() {
-  return caffe2::serialize::kProducedFileFormatVersion;
+  return torch::serialize::kProducedFileFormatVersion;
 }
 
 std::vector<UpgraderRange> getUpgradersRangeForOp(const std::string& name) {

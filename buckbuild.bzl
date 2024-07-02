@@ -1243,7 +1243,6 @@ def define_buck_targets(
         exported_deps = [
             ":aten_cpu",
             ":caffe2_headers",
-            ":caffe2_serialize",
             ":torch_common",
             ":torch_headers",
             ":torch_mobile_headers",
@@ -1347,6 +1346,9 @@ def define_buck_targets(
     pt_xplat_cxx_library(
         name = "torch_mobile_deserialize",
         srcs = [
+            "torch/csrc/api/src/serialize/file_adapter.cpp",
+            "torch/csrc/api/src/serialize/inline_container.cpp",
+            "torch/csrc/api/src/serialize/istream_adapter.cpp",
             "torch/csrc/jit/mobile/import.cpp",
             "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
         ],
@@ -1371,7 +1373,6 @@ def define_buck_targets(
         exported_deps = [
             ":aten_cpu",
             ":caffe2_headers",
-            ":caffe2_serialize",
             ":torch_common",
             ":torch_headers",
             ":torch_mobile_headers",
@@ -1379,6 +1380,7 @@ def define_buck_targets(
             ":torch_mobile_observer",
             ":torch_mobile_deserialize_common",
             ":mobile_bytecode",
+            "//third_party:miniz",
             C10,
         ],
     )
@@ -1433,6 +1435,7 @@ def define_buck_targets(
         exported_deps = [
             ":torch",
             ":torch_mobile_deserialize_common",  # for torch/csrc/api/src/serialize/input-archive.cpp
+            "//third_party:miniz",
         ],
     )
 
@@ -1650,7 +1653,6 @@ def define_buck_targets(
         ],
         visibility = ["PUBLIC"],
         deps = [
-            ":caffe2_serialize",
             ":generated-autograd-headers",
             ":torch_mobile_headers",
             ":torch_mobile_observer",
@@ -2014,6 +2016,9 @@ def define_buck_targets(
         name = "lean_runtime_with_flatbuffer",
         srcs = [
             "aten/src/ATen/core/DeprecatedTypePropertiesRegistry.cpp",
+            "torch/csrc/api/src/serialize/file_adapter.cpp",
+            "torch/csrc/api/src/serialize/inline_container.cpp",
+            "torch/csrc/api/src/serialize/istream_adapter.cpp",
             "torch/csrc/jit/mobile/import.cpp",
             "torch/csrc/jit/mobile/module.cpp",
             "torch/csrc/jit/mobile/observer.cpp",
@@ -2023,7 +2028,7 @@ def define_buck_targets(
         exported_headers = subdir_glob(
             [
                 ("", "torch/csrc/jit/ir/*.h"),
-                ("", "caffe2/serialize/*.h"),
+                ("", "torch/csrc/api/include/torch/serialize/*.h"),
                 ("", "caffe2/utils/*.h"),
                 ("", "caffe2/core/*.h"),
                 ("", "torch/csrc/*.h"),
@@ -2072,6 +2077,7 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         exported_deps = [
             ":lean_runtime_with_tensor",
+            "//third_party:miniz",
         ],
     )
 
@@ -2208,7 +2214,7 @@ def define_buck_targets(
         ],
         header_namespace = "",
         exported_headers = [
-            "caffe2/serialize/versions.h",
+            "torch/csrc/api/include/torch/serialize/versions.h",
             "torch/csrc/jit/backends/backend_exception.h",
             "torch/csrc/jit/mobile/register_ops_common_utils.h",
             "torch/csrc/jit/runtime/instruction.h",

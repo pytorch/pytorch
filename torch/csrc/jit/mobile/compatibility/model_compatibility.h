@@ -1,18 +1,20 @@
 #pragma once
 
+#include <ATen/core/ivalue.h>
 #include <c10/macros/Export.h>
 #include <torch/csrc/jit/mobile/compatibility/runtime_compatibility.h>
 
 #include <istream>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
-namespace caffe2 {
+namespace torch {
 namespace serialize {
 class PyTorchStreamReader;
 class ReadAdapterInterface;
 } // namespace serialize
-} // namespace caffe2
+} // namespace torch
 
 namespace torch {
 namespace jit {
@@ -24,7 +26,7 @@ TORCH_API uint64_t _get_model_bytecode_version(std::istream& in);
 TORCH_API uint64_t _get_model_bytecode_version(const std::string& filename);
 
 TORCH_API uint64_t _get_model_bytecode_version(
-    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
+    std::shared_ptr<torch::serialize::ReadAdapterInterface> rai);
 
 uint64_t _get_model_bytecode_version(
     const std::vector<c10::IValue>& bytecode_ivalues);
@@ -36,18 +38,18 @@ TORCH_API uint64_t _get_model_operator_version(std::istream& in);
 TORCH_API uint64_t _get_model_operator_version(const std::string& filename);
 
 TORCH_API uint64_t _get_model_operator_version(
-    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
+    std::shared_ptr<torch::serialize::ReadAdapterInterface> rai);
 
 // Utility Functions
 std::vector<c10::IValue> get_bytecode_ivalues(
-    caffe2::serialize::PyTorchStreamReader& reader);
+    torch::serialize::PyTorchStreamReader& reader);
 
 c10::IValue readArchive(
     const std::string& archive_name,
-    caffe2::serialize::PyTorchStreamReader& stream_reader);
+    torch::serialize::PyTorchStreamReader& stream_reader);
 
 bool check_zip_file(
-    const std::shared_ptr<caffe2::serialize::ReadAdapterInterface>& rai);
+    const std::shared_ptr<torch::serialize::ReadAdapterInterface>& rai);
 
 // The family of methods below to get the root ops and information from a model
 TORCH_API std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
@@ -57,7 +59,7 @@ TORCH_API std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     const std::string& filename);
 
 TORCH_API std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
-    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
+    std::shared_ptr<torch::serialize::ReadAdapterInterface> rai);
 
 // The family of methods below to get contained types from a model
 // Throws if not passed in a well formed model
@@ -68,7 +70,7 @@ TORCH_API std::unordered_set<std::string> _get_mobile_model_contained_types(
     const std::string& filename);
 
 TORCH_API std::unordered_set<std::string> _get_mobile_model_contained_types(
-    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
+    std::shared_ptr<torch::serialize::ReadAdapterInterface> rai);
 
 std::unordered_set<std::string> _get_mobile_model_contained_types(
     const std::vector<c10::IValue>& bytecode_ivalues);
@@ -84,7 +86,7 @@ struct ModelCompatibilityInfo {
   static TORCH_API ModelCompatibilityInfo get(std::istream& in);
   static TORCH_API ModelCompatibilityInfo get(const std::string& filename);
   static TORCH_API ModelCompatibilityInfo
-  get(std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
+  get(std::shared_ptr<torch::serialize::ReadAdapterInterface> rai);
 };
 
 enum ModelCompatibilityStatus {

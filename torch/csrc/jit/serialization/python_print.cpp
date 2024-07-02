@@ -7,7 +7,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
-#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
@@ -19,6 +18,7 @@
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/calculate_necessary_args.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
+#include <torch/serialize/versions.h>
 
 using c10::QualifiedName;
 
@@ -1639,7 +1639,7 @@ struct PythonPrintImpl {
   bool enforce_importable_;
 
   // The least version that supports all printed ops
-  uint64_t min_version_ = caffe2::serialize::kMinSupportedFileFormatVersion;
+  uint64_t min_version_ = torch::serialize::kMinSupportedFileFormatVersion;
 };
 
 PythonPrint::PythonPrint(

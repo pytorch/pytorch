@@ -21,7 +21,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/ScopeExit.h>
-#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/mobile/function.h>
@@ -35,6 +34,7 @@
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
+#include <torch/serialize/versions.h>
 
 #ifndef DISABLE_UPGRADER
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
@@ -361,7 +361,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
   // 2. Decides if upgrader is needed
   const uint32_t operator_version = module_->operator_version();
   bool use_upgrader =
-      (operator_version < caffe2::serialize::kProducedFileFormatVersion);
+      (operator_version < torch::serialize::kProducedFileFormatVersion);
 
   for (const auto* op : *method->operators()) {
     std::optional<int> num_args = c10::nullopt;

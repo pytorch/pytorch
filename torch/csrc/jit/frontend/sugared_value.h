@@ -6,7 +6,6 @@
 #include <utility>
 
 #include <ATen/core/symbol.h>
-#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>

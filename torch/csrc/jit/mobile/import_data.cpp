@@ -3,8 +3,6 @@
 #include <ATen/Functions.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/irange.h>
-#include <caffe2/serialize/file_adapter.h>
-#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
@@ -16,8 +14,10 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/custom_class.h>
+#include <torch/serialize/file_adapter.h>
+#include <torch/serialize/inline_container.h>
 
-#include <caffe2/serialize/in_memory_adapter.h>
+#include <torch/serialize/in_memory_adapter.h>
 #include <exception>
 #include <fstream>
 #include <string>
@@ -25,11 +25,11 @@
 
 namespace torch {
 namespace jit {
-using caffe2::serialize::FileAdapter;
-using caffe2::serialize::IStreamAdapter;
-using caffe2::serialize::MemoryReadAdapter;
-using caffe2::serialize::PyTorchStreamReader;
-using caffe2::serialize::ReadAdapterInterface;
+using torch::serialize::FileAdapter;
+using torch::serialize::IStreamAdapter;
+using torch::serialize::MemoryReadAdapter;
+using torch::serialize::PyTorchStreamReader;
+using torch::serialize::ReadAdapterInterface;
 
 namespace {
 
@@ -254,7 +254,7 @@ static std::map<std::string, at::Tensor> _load_parameters_bytes(
     }
 
     case FileFormat::ZipFileFormat: {
-      auto rai = std::make_unique<caffe2::serialize::MemoryReadAdapter>(
+      auto rai = std::make_unique<torch::serialize::MemoryReadAdapter>(
           data.get(), size);
       map = load_parameters_from_zip(std::move(rai), device);
       break;

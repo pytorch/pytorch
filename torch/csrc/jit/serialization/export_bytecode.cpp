@@ -28,7 +28,8 @@
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
-#include <caffe2/serialize/inline_container.h>
+#include <torch/serialize/inline_container.h>
+#include <torch/serialize/versions.h>
 
 namespace torch::jit {
 
@@ -344,7 +345,7 @@ static void getBackendDebugInfoMap(
 
 static uint64_t get_min_operator_version_from_version_map(
     const mobile::Module& module) {
-  uint64_t min_version = caffe2::serialize::kMinSupportedFileFormatVersion;
+  uint64_t min_version = torch::serialize::kMinSupportedFileFormatVersion;
   for (const auto& func : module.compilation_unit().methods()) {
     for (const auto& op_name : func->get_code().op_names_) {
       auto schema_name = op_name.overload_name.empty()

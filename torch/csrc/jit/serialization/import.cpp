@@ -1,9 +1,9 @@
 #include <ATen/core/interned_strings.h>
-#include <caffe2/serialize/file_adapter.h>
-#include <caffe2/serialize/in_memory_adapter.h>
-#include <caffe2/serialize/inline_container.h>
-#include <caffe2/serialize/istream_adapter.h>
-#include <caffe2/serialize/read_adapter_interface.h>
+#include <torch/csrc/api/include/torch/serialize/file_adapter.h>
+#include <torch/csrc/api/include/torch/serialize/in_memory_adapter.h>
+#include <torch/csrc/api/include/torch/serialize/inline_container.h>
+#include <torch/csrc/api/include/torch/serialize/istream_adapter.h>
+#include <torch/csrc/api/include/torch/serialize/read_adapter_interface.h>
 
 #include <torch/csrc/jit/api/compilation_unit.h>
 
@@ -35,9 +35,9 @@
 
 namespace torch::jit {
 
-using caffe2::serialize::MemoryReadAdapter;
-using caffe2::serialize::PyTorchStreamReader;
-using caffe2::serialize::ReadAdapterInterface;
+using torch::serialize::MemoryReadAdapter;
+using torch::serialize::PyTorchStreamReader;
+using torch::serialize::ReadAdapterInterface;
 
 static void postSetStateValidate(const IValue& v) {
   auto obj = v.toObject();

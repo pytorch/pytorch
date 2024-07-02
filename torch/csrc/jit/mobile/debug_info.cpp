@@ -112,7 +112,7 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
 } // namespace
 
 MobileDebugTable::MobileDebugTable(
-    std::unique_ptr<caffe2::serialize::PyTorchStreamReader>& reader,
+    std::unique_ptr<torch::serialize::PyTorchStreamReader>& reader,
     const std::shared_ptr<CompilationUnit>& cu) {
   ska::flat_hash_map<int64_t, SourceRange> source_range_map;
   const std::vector<std::string>& record_names = reader->getAllRecords();

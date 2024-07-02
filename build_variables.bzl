@@ -758,7 +758,11 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/optim/schedulers/lr_scheduler.cpp",
     "torch/csrc/api/src/optim/schedulers/reduce_on_plateau_scheduler.cpp",
     "torch/csrc/api/src/optim/schedulers/step_lr.cpp",
+    "torch/csrc/api/src/serialize/crc.cpp",
+    "torch/csrc/api/src/serialize/file_adapter.cpp",
+    "torch/csrc/api/src/serialize/inline_container.cpp",
     "torch/csrc/api/src/serialize/input-archive.cpp",
+    "torch/csrc/api/src/serialize/istream_adapter.cpp",
     "torch/csrc/api/src/serialize/output-archive.cpp",
     "torch/csrc/api/src/xpu.cpp",
 ]

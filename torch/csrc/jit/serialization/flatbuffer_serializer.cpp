@@ -14,7 +14,6 @@
 #include <ATen/ATen.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/Exception.h>
-#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/train/export_data.h>
 #include <torch/csrc/jit/passes/inliner.h>

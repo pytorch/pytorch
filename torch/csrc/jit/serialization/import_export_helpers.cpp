@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 
-#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/serialization/source_range_serialization_impl.h>
+#include <torch/serialize/inline_container.h>
 
 #include <c10/util/Exception.h>
 
@@ -21,7 +21,7 @@ std::string qualifierToArchivePath(
 }
 
 std::shared_ptr<Source> findSourceInArchiveFromQualifier(
-    caffe2::serialize::PyTorchStreamReader& reader,
+    torch::serialize::PyTorchStreamReader& reader,
     const std::string& export_prefix,
     const std::string& qualifier) {
   const std::string path = qualifierToArchivePath(qualifier, export_prefix);

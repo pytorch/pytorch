@@ -520,16 +520,16 @@ TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
   auto runtime_bytecode_version = _get_runtime_bytecode_version();
   AT_ASSERT(
       runtime_bytecode_version ==
-      caffe2::serialize::kMaxSupportedBytecodeVersion);
+      torch::serialize::kMaxSupportedBytecodeVersion);
 }
 
 TEST(LiteInterpreterTest, GetRuntimeOperatorsVersion) {
   auto runtime_operators_version = _get_runtime_operators_min_max_versions();
   AT_ASSERT(
       runtime_operators_version.first ==
-          caffe2::serialize::kMinSupportedFileFormatVersion &&
+          torch::serialize::kMinSupportedFileFormatVersion &&
       runtime_operators_version.second ==
-          caffe2::serialize::kMaxSupportedFileFormatVersion);
+          torch::serialize::kMaxSupportedFileFormatVersion);
 }
 
 /**
@@ -762,7 +762,7 @@ TEST(LiteInterpreterTest, isCompatibleSuccess) {
 
   std::unordered_set<std::string> types = {"List", "int", "NamedTuple"};
   auto model_info = ModelCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      torch::serialize::kMaxSupportedBytecodeVersion,
       model_ops,
       types,
       _get_runtime_bytecode_min_max_versions().first};
@@ -777,13 +777,13 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   std::unordered_map<std::string, OperatorInfo> model_ops;
   model_ops["aten::add.Scalar"] = OperatorInfo{2};
   auto model_info = ModelCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops};
+      torch::serialize::kMaxSupportedBytecodeVersion, model_ops};
   std::unordered_map<std::string, OperatorInfo> runtime_ops;
   runtime_ops["aten::add.Int"] = OperatorInfo{2};
   auto runtime_info = RuntimeCompatibilityInfo{
       std::pair<uint64_t, uint64_t>(
-          caffe2::serialize::kMinSupportedBytecodeVersion,
-          caffe2::serialize::kMaxSupportedBytecodeVersion),
+          torch::serialize::kMinSupportedBytecodeVersion,
+          torch::serialize::kMaxSupportedBytecodeVersion),
       runtime_ops,
       _get_mobile_supported_types()};
 
@@ -798,12 +798,12 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
   runtime_info = RuntimeCompatibilityInfo{
       std::pair<uint64_t, uint64_t>(
-          caffe2::serialize::kMinSupportedBytecodeVersion,
-          caffe2::serialize::kMaxSupportedBytecodeVersion),
+          torch::serialize::kMinSupportedBytecodeVersion,
+          torch::serialize::kMaxSupportedBytecodeVersion),
       runtime_ops,
       _get_mobile_supported_types()};
   model_info.bytecode_version =
-      caffe2::serialize::kMaxSupportedBytecodeVersion + 1;
+      torch::serialize::kMaxSupportedBytecodeVersion + 1;
 
   result = is_compatible(runtime_info, model_info);
   AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
@@ -813,12 +813,12 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
   runtime_info = RuntimeCompatibilityInfo{
       std::pair<uint64_t, uint64_t>(
-          caffe2::serialize::kMinSupportedBytecodeVersion,
-          caffe2::serialize::kMaxSupportedBytecodeVersion),
+          torch::serialize::kMinSupportedBytecodeVersion,
+          torch::serialize::kMaxSupportedBytecodeVersion),
       runtime_ops,
       _get_mobile_supported_types()};
   model_info.bytecode_version =
-      caffe2::serialize::kMinSupportedBytecodeVersion - 1;
+      torch::serialize::kMinSupportedBytecodeVersion - 1;
 
   result = is_compatible(runtime_info, model_info);
   AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
@@ -828,7 +828,7 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   std::unordered_set<std::string> types = {"List", "int", "Sequence"};
 
   model_info = ModelCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      torch::serialize::kMaxSupportedBytecodeVersion,
       model_ops,
       types,
       _get_runtime_bytecode_min_max_versions().first};
@@ -841,7 +841,7 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   runtime_info = RuntimeCompatibilityInfo::get();
 
   model_info = ModelCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, {}, 0};
+      torch::serialize::kMaxSupportedBytecodeVersion, model_ops, {}, 0};
 
   AT_ASSERT(
       is_compatible(runtime_info, model_info).status ==
@@ -1003,7 +1003,7 @@ TEST(LiteInterpreterTest, ExtraFiles) {
 
   loaded_extra_files.clear();
   std::vector<std::string> all_files =
-      caffe2::serialize::PyTorchStreamReader(&iss).getAllRecords();
+      torch::serialize::PyTorchStreamReader(&iss).getAllRecords();
 
   for (auto& file_name : all_files) {
     if (file_name.find("extra/") == 0) {

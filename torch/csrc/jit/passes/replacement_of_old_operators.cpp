@@ -1,16 +1,14 @@
 #include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 
 #include <c10/util/Exception.h>
-#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
-#include <limits>
+#include <torch/serialize/versions.h>
 #include <string>
-#include <unordered_map>
 #include <utility>
 
 namespace torch {
@@ -87,7 +85,7 @@ struct OldOpsReplacerWithUpgraders {
 
     // now that we updated the graph, we want to bump the
     // graph version too.
-    graph_->set_op_version(caffe2::serialize::kProducedFileFormatVersion);
+    graph_->set_op_version(torch::serialize::kProducedFileFormatVersion);
   }
 
   std::shared_ptr<Graph> graph_;

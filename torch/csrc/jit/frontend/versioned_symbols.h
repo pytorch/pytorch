@@ -1,6 +1,5 @@
 #pragma once
 
-#include <caffe2/serialize/versions.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/api/module.h>
 

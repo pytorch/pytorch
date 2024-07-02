@@ -80,6 +80,7 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'c10/util/strong_type.h',
     '**/fb/**',
+    'torch/csrc/api/include/torch/serialize/crc_alt.h',
     'torch/csrc/inductor/aoti_torch/generated/**',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/utils/pythoncapi_compat.h',

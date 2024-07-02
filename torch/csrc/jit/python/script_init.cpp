@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/python/script_init.h>
 #include <torch/csrc/utils/pybind.h>
 
-#include <caffe2/serialize/versions.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/jit/api/module.h>
@@ -1022,7 +1021,7 @@ void initJitScriptBindings(PyObject* module) {
 
   // Used by torch.package to save ScriptModule objects in unified format.
   py::class_<ScriptModuleSerializer>(m, "ScriptModuleSerializer")
-      .def(py::init<caffe2::serialize::PyTorchStreamWriter&>())
+      .def(py::init<torch::serialize::PyTorchStreamWriter&>())
       .def("serialize", &ScriptModuleSerializer::serialize_unified_format)
       .def(
           "write_files",
@@ -1872,7 +1871,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_import_ir_module_from_package",
       [](std::shared_ptr<CompilationUnit> cu,
-         std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
+         std::shared_ptr<torch::serialize::PyTorchStreamReader> reader,
          std::shared_ptr<torch::jit::DeserializationStorageContext>
              storage_context,
          py::object map_location,

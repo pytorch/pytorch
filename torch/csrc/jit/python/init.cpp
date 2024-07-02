@@ -104,7 +104,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
 #include <c10/util/signal_handler.h>
-#include <caffe2/serialize/inline_container.h>
+#include <torch/serialize/inline_container.h>
 
 #include <pybind11/cast.h>
 #include <pybind11/functional.h>
@@ -127,8 +127,8 @@ using c10::FunctionSchema;
 using c10::SchemaArgType;
 using c10::SchemaArgument;
 using c10::SymNode;
-using caffe2::serialize::PyTorchStreamReader;
-using caffe2::serialize::PyTorchStreamWriter;
+using torch::serialize::PyTorchStreamReader;
+using torch::serialize::PyTorchStreamWriter;
 using torch::utils::SchemaInfo;
 
 namespace {
@@ -1495,7 +1495,7 @@ void initJITBindings(PyObject* module) {
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires
   // that the buffer implement `seek()`, `tell()`, and `read()`.
-  class BufferAdapter : public caffe2::serialize::ReadAdapterInterface {
+  class BufferAdapter : public torch::serialize::ReadAdapterInterface {
    public:
     BufferAdapter(const py::object& buffer) : buffer_(buffer) {
       // Jump to the end of the buffer to get its size
