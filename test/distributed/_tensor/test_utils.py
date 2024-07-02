@@ -11,6 +11,7 @@ from torch.distributed._tensor._utils import (
 
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import (
+    _StridedShard,
     DTensorSpec,
     Replicate,
     Shard,
@@ -126,6 +127,34 @@ class UtilTest(DTensorTestBase):
                     dtensor.to_local(),
                     global_tensor[dim0_start:dim0_end, dim1_start:dim1_end],
                 )
+
+
+class TestStridedSharding(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 4
+
+    @with_comms
+    def test_1d_mesh_strided_sharding(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        
+        # Test 1: 1-d tensor
+        """
+        contiguous sharding: [0, 1 | 2, 3 | 4, 5 | 6, 7]
+        strided sharding: [0, 4 | 1, 5 | 2, 6 | 3, 7]
+        """
+        x = torch.arange(2 * self.world_size)
+        for i, split_factor in enumerate([1, 2]):
+            stride = self.world_size
+            shard_placement = _StridedShard(
+                0, _total_split=(split_factor * self.world_size)
+            )
+            tensor_list, _ = shard_placement._split_tensor(x, self.world_size)
+
+            self.assertEqual(
+                tensor_list[self.rank],
+                x.view(self.world_size, -1).swapdims(-1, i).reshape(-1, self.world_size).swapdims(-1, 0)[self.rank],
+            )
 
 
 class Test2DStridedLocalShard(DTensorTestBase):
