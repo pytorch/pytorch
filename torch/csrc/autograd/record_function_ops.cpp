@@ -6,12 +6,6 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/library.h>
 
-namespace caffe2 {
-// Required for cpp_custom_type_hack to work
-// NOLINTNEXTLINE(bugprone-exception-escape)
-CAFFE_KNOWN_TYPE(at::RecordFunction);
-} // namespace caffe2
-
 namespace torch {
 namespace autograd {
 namespace profiler {
@@ -32,15 +26,6 @@ static void record_function_enter(
   }
 }
 
-// Legacy signature using cpp_custom_type_hack
-static at::Tensor record_function_enter_legacy(
-    const std::string& name,
-    const std::optional<std::string>& args) {
-  auto rec = std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
-  record_function_enter(name, args, *rec);
-  return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
-}
-
 // New signature using custom_class
 c10::intrusive_ptr<PythonRecordFunction> record_function_enter_new(
     const std::string& name,
@@ -51,23 +36,9 @@ c10::intrusive_ptr<PythonRecordFunction> record_function_enter_new(
   return rec;
 }
 
-static at::RecordFunction& getRecordFunctionFromTensor(
-    const at::Tensor& handle) {
-  auto& rec = at::cpp_custom_type_hack::cast<at::RecordFunction>(handle);
-  return rec;
-}
-
 // Ends the profiling scope created with record_function_enter.
 static void record_function_exit(at::RecordFunction& rec) {
   rec.end();
-}
-
-// Legacy signature using cpp_custom_type_hack
-static void record_function_exit_legacy(const at::Tensor& handle) {
-  // We don't actually need to do anything with handle just need to persist the
-  // lifetime until now.
-  auto& rec = getRecordFunctionFromTensor(handle);
-  record_function_exit(rec);
 }
 
 // New signature using custom_class
@@ -100,23 +71,6 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
   return profiledFut;
 }
 
-// Legacy signature using cpp_custom_type_hack
-static c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut_legacy(
-    const at::Tensor& handle,
-    const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
-  return _call_end_callbacks_on_fut(
-      [handle]() -> at::RecordFunction& {
-        TORCH_INTERNAL_ASSERT(
-            handle.defined(),
-            "Undefined RecordFunction handle. This can happen if the handle is "
-            "not correctly persisted and is destroyed before the future is "
-            "realized.");
-
-        return getRecordFunctionFromTensor(handle);
-      },
-      fut);
-}
-
 // New signature using custom_class
 c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut_new(
     const c10::intrusive_ptr<PythonRecordFunction>& record,
@@ -130,26 +84,11 @@ TORCH_LIBRARY_FRAGMENT(profiler, m) {
   m.class_<PythonRecordFunction>("_RecordFunction");
 
   m.def(
-      "_record_function_enter(str name, str? args=None) -> Tensor",
-      &record_function_enter_legacy);
-  m.def(
       "_record_function_enter_new(str name, str? args=None) -> "
       "__torch__.torch.classes.profiler._RecordFunction",
       &record_function_enter_new);
-  m.def("_record_function_exit", &record_function_exit_legacy);
   m.def("_record_function_exit._RecordFunction", &record_function_exit_new);
 
-  torch::jit::registerOperator(torch::jit::Operator(
-      "profiler::_call_end_callbacks_on_jit_fut(Tensor x, Future(t) y) -> Future(t)",
-      [](jit::Stack& stack) {
-        // Pop inputs, which should be a future and a tensor
-        auto fut = jit::pop(stack).toFuture();
-        auto tensor = jit::pop(stack).toTensor();
-        auto profiledFut = _call_end_callbacks_on_fut_legacy(tensor, fut);
-        // return future that completes when profiling callbacks have run.
-        jit::push(stack, std::move(profiledFut));
-      },
-      c10::AliasAnalysisKind::FROM_SCHEMA));
   torch::jit::registerOperator(torch::jit::Operator(
       "profiler::_call_end_callbacks_on_jit_fut._RecordFunction("
       "__torch__.torch.classes.profiler._RecordFunction x, Future(t) y) -> Future(t)",
