@@ -40,7 +40,7 @@ from ..codecache import code_hash, get_path, PyCodeCache
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
-from ..runtime.runtime_utils import do_bench_gpu, get_max_y_grid, next_power_of_2
+from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
 from ..utils import (
     cache_on_self,
     get_bounds_index_expr,
