@@ -722,6 +722,16 @@ class TritonOverrides(OpOverrides):
         return f"tl.where({a}, {b}, {c})"
 
     @staticmethod
+    def inline_asm_elementwise(
+        *inputs, asm, constraints=None, dtype=torch.float32, is_pure=True, pack=1
+    ):
+        triton_type = triton_compute_type(dtype)
+        input_refs = ", ".join([str(i) for i in inputs])
+        if constraints is None:
+            constraints = ", ".join(["=r"] + ["r" for _ in inputs])
+        return f"tl.inline_asm_elementwise('{asm}', '{constraints}', [{input_refs}], dtype={triton_type}, is_pure={is_pure}, pack={pack})"  # noqa: B950
+
+    @staticmethod
     def cos(x):
         return f"tl_math.cos({x})"
 
