@@ -27,7 +27,9 @@ from __future__ import annotations
 import argparse
 import collections
 import importlib
+import inspect
 import sys
+import textwrap
 from typing import Sequence
 from unittest.mock import Mock, patch
 from warnings import warn
@@ -619,12 +621,16 @@ def gather_docstrs() -> dict[str, str]:
 
 
 def add_docstr_to_hint(docstr: str, hint: str) -> str:
+    docstr = inspect.cleandoc(docstr).strip()
     if "..." in hint:  # function or method
         assert hint.endswith("..."), f"Hint `{hint}` does not end with '...'"
-        hint = hint[:-3]  # remove "..."
-        return "\n    ".join((hint.rstrip(), 'r"""', *docstr.split("\n"), '"""'))
-    else:  # attribute or property
-        return f'{hint}\nr"""{docstr}"""\n'
+        hint = hint[:-3].rstrip()  # remove "..."
+        content = hint + "\n" + textwrap.indent(f'r"""\n{docstr}\n"""', prefix="    ")
+        # Remove trailing whitespace on each line
+        return "\n".join(map(str.rstrip, content.splitlines())).rstrip()
+
+    # attribute or property
+    return f'{hint}\nr"""{docstr}"""'
 
 
 def gen_pyi(
