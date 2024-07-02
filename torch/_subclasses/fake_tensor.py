@@ -2137,6 +2137,9 @@ class FakeTensorMode(TorchDispatchMode):
         )
 
 
+_StoragePointer = object
+
+
 # NB: returns fake tensors
 def run_fallback_kernel(
     fake_mode: FakeTensorMode,
@@ -2171,7 +2174,7 @@ def run_fallback_kernel(
 
         r = func(*args, **kwargs)
 
-    storages: Set[object] = set()
+    storages: Set[_StoragePointer] = set()
 
     for e in flat_args:
         if isinstance(e, Tensor):
