@@ -3645,6 +3645,34 @@ def meta_relu_(self):
 
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
+    if not isinstance(indices, tuple):
+        indices = (indices,)
+
+    torch._check(
+        len(indices) > 0,
+        lambda: "Passing an empty index list to torch.index_put() is not valid syntax",
+    )
+    torch._check(
+        self.dim() >= len(indices),
+        lambda: f"too many indices for tensor of dimension {self.dim()} (got {len(indices)})",
+    )
+
+    torch._check(
+        utils.is_expandable_to(values.size(), self.size()),
+        lambda: (
+            f"shape mismatch: value tensor of shape {values.size()} "
+            f"cannot be broadcast to indexing result of shape {self.size()}"
+        ),
+    )
+
+    torch._check(
+        values.dtype == self.dtype,
+        lambda: (
+            f"Index put requires the source and destination dtypes match, "
+            f"got {self.dtype} for the destination and {values.dtype} for the source."
+        ),
+    )
+
     return torch.empty_like(self)
 
 
