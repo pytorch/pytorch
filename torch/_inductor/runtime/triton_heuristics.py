@@ -627,45 +627,43 @@ class CachingAutotuner(KernelInterface):
 
         return binary, launcher
 
-    def benchmark_launcher(self, launcher, *args, grid, **kwargs):
-        return self.bench_many([launcher], *args, grid, **kwargs)[0]
-    
-    def benchmark_many_launchers(self, launchers, *args, grid, **kwargs):
-        launcher_to_timing = {}
+    def bench(self, launcher, *args, grid, **kwargs):
+        """Measure the performance of a given launcher"""
+        # we don't skip configs wiht spilled registers when auto-tuning custom
+        # (user-written) Triton kernels, as (i) we don't have any knowledge or
+        # control over the kernel code; (ii) there is empirical evidence that
+        # for some (complicated) custom Triton kernels, a register-spilling
+        # config may yield the best latency.
+        if not self.custom_kernel and launcher.n_spills > self.inductor_meta.get(
+            "spill_threshold", 16
+        ):
+            log.debug(
+                "Skip config %s because of register spilling: %d",
+                launcher.config,
+                launcher.n_spills,
+            )
+            return float("inf")
 
-        if not self.custom_kernel:
-            for launcher in launchers:
-                if launcher.n_spills > self.inductor_meta.get("spill_threshold", 16):
-                    log.debug("Skipping config %s because of register spilling: %d", launcher.config, launcher.n_spills)
-                    launcher_to_timing[launcher] = float("inf")
-        
-        if len(launchers) == len(launcher_to_timing):
-            return [launcher_to_timing[launcher] for launcher in launchers]
-        
-        interface = self.get_device_interface()
-        stream = interface.get_raw_stream(interface.current_device())
+        device_interface = self.get_device_interface()
+        stream = device_interface.get_raw_stream(  # type: ignore[call-arg]
+            device_interface.current_device()
+        )
 
-        def make_callable(launcher):
+        def kernel_call():
             if launcher.config.pre_hook is not None:
                 launcher.config.pre_hook(
                     {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
                 )
-            def callable():
-                cloned_args, cloned_kwargs = self.clone_args(*args, **kwargs)
-                launcher(
-                    *cloned_args,
-                    **cloned_kwargs,
-                    grid=grid,
-                    stream=stream,
-                )
-            return callable
-        
-        launchers_to_benchmark = [launcher for launcher in launchers if launcher not in launcher_to_timing]
-        timings = benchmarker.benchmark_many_gpu([make_callable(launcher) for launcher in launchers_to_benchmark], memory_warmup_iters=1000)
-        for launcher, timing in zip(launchers_to_benchmark, timings):
-            launcher_to_timing[launcher] = timing
-        
-        return [launcher_to_timing[launcher] for launcher in launchers]
+
+            cloned_args, cloned_kwargs = self.clone_args(*args, **kwargs)
+            launcher(
+                *cloned_args,
+                **cloned_kwargs,
+                grid=grid,
+                stream=stream,
+            )
+
+        return benchmarker.lazy_benchmark_gpu(kernel_call)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides
