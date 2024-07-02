@@ -98,7 +98,7 @@ class TestPythonRegistration(TestCase):
                 self.assertFalse(torch.mul(x, y)._is_zerotensor())
 
                 # Assert that a user can't override the behavior of a (ns, op, dispatch_key)
-                # combination if someone overrided the behavior for the same before them
+                # combination if someone overridden the behavior for the same before them
                 with self.assertRaisesRegex(
                     RuntimeError, "already a kernel registered from python"
                 ):

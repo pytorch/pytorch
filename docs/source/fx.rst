@@ -355,7 +355,7 @@ properties on the nodes as we see them at runtime. That might look like:
                 attr_itr = self.mod
                 for i, atom in enumerate(target_atoms):
                     if not hasattr(attr_itr, atom):
-                        raise RuntimeError(f"Node referenced nonexistant target {'.'.join(target_atoms[:i])}")
+                        raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}")
                     attr_itr = getattr(attr_itr, atom)
                 return attr_itr
 

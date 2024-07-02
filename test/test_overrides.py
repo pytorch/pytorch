@@ -400,7 +400,7 @@ class TestTorchFunctionOverride(TestCase):
         cls._stack.close()
 
     def test_mean_semantics(self):
-        """Test that a function with one argument can be overrided"""
+        """Test that a function with one argument can be overridden"""
         t1 = DiagonalTensor(5, 2)
         t2 = SubTensor([[1, 2], [1, 2]])
         t3 = SubDiagonalTensor(5, 2)
@@ -416,7 +416,7 @@ class TestTorchFunctionOverride(TestCase):
             has_torch_function(object())
 
     def test_mm_semantics(self):
-        """Test that a function with multiple arguments can be overrided"""
+        """Test that a function with multiple arguments can be overridden"""
         t1 = DiagonalTensor(5, 2)
         t2 = torch.eye(5) * 2
         t3 = SubTensor([[1, 2], [1, 2]])

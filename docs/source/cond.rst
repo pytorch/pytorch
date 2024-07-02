@@ -21,7 +21,7 @@ and can logically be seen as implemented as follows.
 
 Its unique power lies in its ability of expressing **data-dependent control flow**: it lowers to a conditional
 operator (`torch.ops.higher_order.cond`), which preserves predicate, true function and false functions.
-This unlocks great flexibilty in writing and deploying models that change model architecture based on
+This unlocks great flexibility in writing and deploying models that change model architecture based on
 the **value** or **shape** of inputs or intermediate outputs of tensor operations.
 
 .. warning::
@@ -109,7 +109,7 @@ This gives us an exported program as shown below:
 Notice that `torch.cond` is lowered to `torch.ops.higher_order.cond`, its predicate becomes a Symbolic expression over the shape of input,
 and branch functions becomes two sub-graph attributes of the top level graph module.
 
-Here is another exmaple that showcases how to express a data-dependet control flow:
+Here is another example that showcases how to express a data-dependent control flow:
 
 .. code-block:: python
 
