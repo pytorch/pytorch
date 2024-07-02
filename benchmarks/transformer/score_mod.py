@@ -251,7 +251,7 @@ def print_results(results: List[Experiment]):
         print(tabulate(average_data, headers="keys", tablefmt="github", floatfmt=".3f"))
 
 
-def generate_score_mods(score_mods: List[str]) -> List[Callable]:
+def generate_score_mods(shape: Tuple[int], mod: str) -> List[Callable]:
     def noop(score, b, h, m, n):
         return score
 
@@ -264,13 +264,29 @@ def generate_score_mods(score_mods: List[str]) -> List[Callable]:
     def head_bias(score, b, h, m, n):
         return score + 2 * h
 
+    (bsz, n_heads, seq_len, head_dim) = shape
+    head_scale = torch.randn(n_heads, device="cuda", dtype=torch.float32)
+    batch_scale = torch.randn(bsz, device="cuda", dtype=torch.float32)
+    kv_scale = torch.randn(seq_len, device="cuda", dtype=torch.float32)
+    q_scale = torch.randn(seq_len, device="cuda", dtype=torch.float32)
+
+    def all_bias(score, batch, head, token_q, token_kv):
+        score = score + kv_scale[token_kv]
+        score = score + q_scale[token_q]
+        score = score + head_scale[head]
+        score = score + batch_scale[batch]
+        return score
+
     function_dict = {
         "noop": noop,
         "causal": causal_mask,
         "rel": relative_bias,
         "head_bias": head_bias,
+        "all_bias": all_bias,
     }
-    return [function_dict[name] for name in score_mods]
+
+    # return [noop, causal_mask, relative_bias, head_bias]
+    return function_dict[mod]
 
 
 def generate_experiment_configs(
@@ -284,7 +300,6 @@ def generate_experiment_configs(
 ) -> List[ExperimentConfig]:
     q_kv_seq_lens = [(i, i) for i in seq_lens]  # only testing q_len == kv_len
     dtypes = [dtype]
-    score_mods = generate_score_mods(score_mods)
     all_configs = []
     for (
         bsz,
@@ -300,7 +315,9 @@ def generate_experiment_configs(
         all_configs.append(
             ExperimentConfig(
                 shape=(bsz, n_heads, q_seq_len, head_dim),
-                score_mod=score_mod,
+                score_mod=generate_score_mods(
+                    (bsz, n_heads, q_seq_len, head_dim), score_mod
+                ),
                 dtype=dtype,
                 calculate_bwd_time=calculate_bwd,
             )
