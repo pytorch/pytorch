@@ -448,7 +448,9 @@ class SizeVarAllocator:
         min_val = self.evaluate_min(left, right)
         return right if min_val is left else left
 
-    def evaluate_static_shape(self, left: Expr) -> int:
+    def evaluate_static_shape(self, left: Union[Expr, int]) -> int:
+        if isinstance(left, int):
+            return left
         right = self.size_hint(left)
         self.guard_equals(left, sympy.Integer(right))
         return int(right)
@@ -461,7 +463,9 @@ class SizeVarAllocator:
             return sympy_subs(expr, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         return expr
 
-    def symbolic_hint(self, expr: Expr) -> Union[Expr, int]:
+    def symbolic_hint(self, expr: Union[Expr, int]) -> Union[Expr, int]:
+        if isinstance(expr, int):
+            return expr
         # Substitute all hints into expr, but leave unbacked symints alone
         expr = self.simplify(expr)
         if not isinstance(expr, Expr):
@@ -476,7 +480,9 @@ class SizeVarAllocator:
         expr = self.remove_precomputed_replacements(expr)
         return sympy_subs(expr, self.var_to_val)
 
-    def size_hint(self, expr: Expr, *, fallback: Optional[int] = None) -> int:
+    def size_hint(
+        self, expr: Union[Expr, int], *, fallback: Optional[int] = None
+    ) -> int:
         out = self.symbolic_hint(expr)
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
             # Use the provided heuristic fallback hint
