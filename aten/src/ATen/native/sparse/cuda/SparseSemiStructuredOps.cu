@@ -4,6 +4,8 @@
 #include <ATen/Dispatch.h>
 
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#include <ck/ck.hpp>
+#include <ck/tensor_operation/gpu/device/tensor_layout.hpp>
 #else
 #include <cuda_runtime.h>
 #include <cutlass/cutlass.h>
@@ -855,7 +857,7 @@ _to_sparse_semi_structured(const Tensor& dense) {
               dense.dim(), " dims");
 
   // Determine PyTorch datatype for the metadata matrix.
-  auto meta_dtype = at::kChar;
+  auto meta_ddense_elems_per_meta_elemtype = at::kChar;
   auto ksparse = 0;
   auto dense_elems_per_meta_elem = 0;
   if (dense.dtype() == at::kChar) {
@@ -908,7 +910,7 @@ _to_sparse_semi_structured(const Tensor& dense) {
       for (auto k = 0; k < dense_elems_per_meta_elem / ksparse; ++k, mask_cpu_ptr += ksparse) {
         const auto mask_elems =
           (ksparse == 4) ? std::make_tuple(mask_cpu_ptr[0], mask_cpu_ptr[1],
-                                           mask_cpu_ptr[2], mask_cpu_ptr[3])
+              dense_elems_per_meta_elem                             mask_cpu_ptr[2], mask_cpu_ptr[3])
                          : std::make_tuple(mask_cpu_ptr[0], mask_cpu_ptr[0],
                                            mask_cpu_ptr[1], mask_cpu_ptr[1]);
         auto meta_quadruple = 0;
@@ -945,8 +947,19 @@ _to_sparse_semi_structured(const Tensor& dense) {
   }
 
   auto meta_reordered_cpu = meta_cpu.new_empty({meta_nrows, meta_ncols});
+  
+#ifdef USE_ROCM
+  using MetaLayout = ck::tensor_layout::gemm::RowMajor;
+#else
   using MetaLayout = cutlass::layout::RowMajor;
+#endif
+  
+#ifdef USE_ROCM
+  using MetaReorderedLayout = ck::tensor_layout::gemm::ColumnMajor;
+#else
   using MetaReorderedLayout = cutlass::layout::ColumnMajorInterleaved<2>;
+#endif 
+
   if (meta_dtype == at::kShort) {
     using MetaElement = int16_t;
     auto meta_cpu_ref =
