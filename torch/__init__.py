@@ -550,6 +550,9 @@ class SymFloat:
     def __bool__(self):
         return self.node.bool_()
 
+    def __float__(self):
+        return self.node.guard_float("", 0)
+
     # Symbolic power does NOT work with negative base, this is to avoid
     # potential complex outputs
     def __pow__(self, other):
@@ -611,6 +614,13 @@ class SymFloat:
 
     def __repr__(self):
         return self.node.str()
+
+    def __hash__(self):
+        if self.node.is_constant():
+            return hash(self.node.float_())
+        else:
+            # Force specialization
+            return hash(builtins.float(self))
 
 
 class SymBool:
@@ -674,7 +684,8 @@ class SymBool:
         if self.node.is_constant():
             return hash(self.node.bool_())
         else:
-            raise TypeError("unhashable type: SymBool")
+            # Force specialization
+            return hash(builtins.bool(self))
 
 
 def sym_not(a):
