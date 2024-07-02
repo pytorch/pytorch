@@ -187,6 +187,9 @@ def parse_return(annotation, error_fn):
     if annotation is None:
         return "()"
 
+    if annotation is inspect.Parameter.empty:
+        error_fn("No return type annotation was provided. Please add one.")
+
     origin = typing.get_origin(annotation)
     if origin is not tuple:
         if annotation not in SUPPORTED_RETURN_TYPES.keys():
