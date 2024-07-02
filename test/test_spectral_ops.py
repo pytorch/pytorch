@@ -115,6 +115,10 @@ def _stft_reference(x, hop_length, window):
 
 def skip_helper_for_fft(device, dtype):
     device_type = torch.device(device).type
+
+    if device_type == 'mps' and dtype in (torch.float64, torch.complex128):
+        raise unittest.SkipTest("float64 and complex128 are not supported on MPS")
+
     if dtype not in (torch.half, torch.complex32):
         return
 
@@ -122,7 +126,6 @@ def skip_helper_for_fft(device, dtype):
         raise unittest.SkipTest("half and complex32 are not supported on CPU")
     if not SM53OrLater:
         raise unittest.SkipTest("half and complex32 are only supported on CUDA device with SM>53")
-
 
 # Tests of functions related to Fourier analysis in the torch.fft namespace
 class TestFFT(TestCase):
@@ -170,7 +173,6 @@ class TestFFT(TestCase):
             self.assertEqual(actual, expected, exact_dtype=exact_dtype)
 
     @skipCPUIfNoFFT
-    @onlyNativeDeviceTypes
     @toleranceOverride({
         torch.half : tol(1e-2, 1e-2),
         torch.chalf : tol(1e-2, 1e-2),
@@ -1634,8 +1636,7 @@ def generate_doc_test(doc_test):
 for doc_test in FFTDocTestFinder().find(torch.fft, globs=dict(torch=torch)):
     generate_doc_test(doc_test)
 
-
-instantiate_device_type_tests(TestFFT, globals())
+instantiate_device_type_tests(TestFFT, globals(), allow_mps=True)
 instantiate_device_type_tests(TestFFTDocExamples, globals(), only_for='cpu')
 
 if __name__ == '__main__':
