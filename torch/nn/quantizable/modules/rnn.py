@@ -7,5 +7,5 @@ If you are adding a new entry/functionality, please, add it to the
 appropriate file under the `torch/ao/nn/quantizable/modules`,
 while adding an import statement here.
 """
-from torch.ao.nn.quantizable.modules.rnn import LSTM
-from torch.ao.nn.quantizable.modules.rnn import LSTMCell
+
+from torch.ao.nn.quantizable.modules.rnn import LSTM, LSTMCell
