@@ -35,6 +35,7 @@ import time
 import types
 import unittest
 import warnings
+import yaml
 from collections.abc import Mapping, Sequence
 from contextlib import closing, contextmanager
 from copy import deepcopy
@@ -5020,3 +5021,14 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
     return s
+
+def get_backend_op_dict(device='xpu'):
+    backend_op_dict = {}
+    if TEST_XPU and device == 'xpu':
+        xpu_op_db = CI_TEST_PREFIX + "/" + device + "/op_db.yaml"
+        try:
+            with open(xpu_op_db) as stream:
+                backend_op_dict = yaml.safe_load(stream)
+        except yaml.YAMLError or FileExistsError:
+            print("Error in loading op_db.yaml.")
+    return backend_op_dict

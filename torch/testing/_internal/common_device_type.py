@@ -793,7 +793,7 @@ def get_desired_device_type_test_bases(
     test_bases = device_type_test_bases.copy()
     if allow_mps and TEST_MPS and MPSTestBase not in test_bases:
         test_bases.append(MPSTestBase)
-    if allow_xpu and TEST_XPU and XPUTestBase not in test_bases:
+    if (allow_xpu or only_for == "xpu") and TEST_XPU and XPUTestBase not in test_bases:
         test_bases.append(XPUTestBase)
     if TEST_HPU and HPUTestBase not in test_bases:
         test_bases.append(HPUTestBase)
@@ -962,6 +962,9 @@ class OpDTypes(Enum):
     any_common_cpu_cuda_one = (
         6  # Test precisely one supported dtype that is common to both cuda and cpu
     )
+    any_common_cpu_xpu_one = (
+        7  # Test precisely one supported dtype that is common to both xpu and cpu
+    )
 
 
 # Arbitrary order
@@ -1092,7 +1095,15 @@ class ops(_TestParametrizer):
                     }
                 else:
                     dtypes = {}
-
+            elif self.opinfo_dtypes == OpDTypes.any_common_cpu_xpu_one:
+                # Tries to pick a dtype that supports both CPU and CUDA
+                supported = set(op.dtypes).intersection(op.dtypesIfXPU)
+                if supported:
+                    dtypes = {
+                        next(dtype for dtype in ANY_DTYPE_ORDER if dtype in supported)
+                    }
+                else:
+                    dtypes = {}
             elif self.opinfo_dtypes == OpDTypes.none:
                 dtypes = {None}
             else:
@@ -1202,6 +1213,11 @@ class skipCPUIf(skipIf):
 class skipCUDAIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type="cuda")
+
+
+class skipXPUIf(skipIf):
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type="xpu")
 
 
 # Skips a test on Lazy if the condition is true.
@@ -1332,14 +1348,19 @@ class expectedFailure:
 
 
 class onlyOn:
-    def __init__(self, device_type):
-        self.device_type = device_type
+    def __init__(self, device_type: Union[str, List[str]]):
+        self.device_types = []
+        if isinstance(device_type, str):
+            self.device_types.append(device_type)
+        else:
+            assert isinstance(device_type, list)
+            self.device_types = device_type
 
     def __call__(self, fn):
         @wraps(fn)
         def only_fn(slf, *args, **kwargs):
-            if self.device_type != slf.device_type:
-                reason = f"Only runs on {self.device_type}"
+            if slf.device_type not in self.device_types:
+                reason = f"Only runs on {self.device_types}"
                 raise unittest.SkipTest(reason)
 
             return fn(slf, *args, **kwargs)
@@ -1556,6 +1577,10 @@ def onlyCUDAAndPRIVATEUSE1(fn):
         return fn(self, *args, **kwargs)
 
     return only_fn
+
+
+def onlyCUDAAndXPU(fn):
+    return onlyOn(["cuda", "xpu"])(fn)
 
 
 def disablecuDNN(fn):
@@ -1829,6 +1854,10 @@ def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
 
 
+def skipXPU(fn):
+    return skipXPUIf(True, "test doesn't work with XPU tensors")(fn)
+
+
 def skipXLA(fn):
     return skipXLAIf(True, "Marked as skipped for XLA")(fn)
 
@@ -1849,3 +1878,15 @@ def skipPRIVATEUSE1(fn):
 #  This should probably enumerate all available device type test base classes.
 def get_all_device_types() -> List[str]:
     return ["cpu"] if not torch.cuda.is_available() else ["cpu", "cuda"]
+
+
+def any_common_cpu_device_one():
+    return (
+        OpDTypes.any_common_cpu_xpu_one
+        if TEST_XPU
+        else OpDTypes.any_common_cpu_cuda_one
+    )
+
+
+def has_gpu_device(devices: List[str]):
+    return "cuda" in devices or "xpu" in devices
