@@ -48,7 +48,7 @@ struct sdp_params {
   std::optional<at::Tensor> attn_mask;
   double dropout;
   bool is_causal;
-  // bool enable_gqa; TODO
+  bool enable_gqa;
 };
 
 SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params);
@@ -354,28 +354,35 @@ inline bool check_safe_kv_broadcast(at::Tensor const& param, bool debug) {
   return true;
 }
 
-template <bool supports_gqa>
 inline bool check_grouped_query_attention(sdp_params const& params, bool debug) {
   const auto q_num_heads = params.query.sym_size(-3);
   const auto k_num_heads = params.key.sym_size(-3);
   const auto v_num_heads = params.value.sym_size(-3);
   const bool same_kv_heads = k_num_heads == v_num_heads;
 
-  if (!same_kv_heads){
+  auto q_batch_size = params.query.sym_size(0);
+  auto k_batch_size = params.key.sym_size(0);
+  auto v_batch_size = params.value.sym_size(0);
+  bool same_batch_size =
+      q_batch_size == k_batch_size && q_batch_size == v_batch_size;
+
+  if (!(same_kv_heads && same_batch_size)){
     if (debug) {
       TORCH_WARN(
-          "Both fused kernels require key and value to have the same num_heads but got: ",
-          "Key heads: ",
-          params.key.size(-3),
-          ", Value heads: ",
-          params.value.size(-3),
+          "Both fused kernels require key and value to have the same num_heads and batch_size but got: ",
+          "Key sizes: ",
+          params.key.sizes(),
+          ", Value sizes: ",
+          params.value.sizes(),
+          ", Query sizes: ",
+          params.query.sizes(),
           " instead.");
     }
     return false;
   }
   // Check if grouped query attention is supported and validate the number of
   // heads
-  if (supports_gqa && q_num_heads % k_num_heads != 0) {
+  if (q_num_heads % k_num_heads != 0) {
     if (debug) {
       TORCH_WARN(
           "FlashAttentionV2 only supports grouped query attention, where the number of heads in key/value must divide number of heads in query.",
@@ -410,9 +417,16 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
 
   bool same_num_heads =
       q_num_heads == k_num_heads && q_num_heads == v_num_heads;
+  
+  if(params.enable_gqa && !supports_gqa){
+    TORCH_WARN(
+      "GQA is not supported for the kernel. Try with supported kernels, or set enable_gqa to false."
+    );
+  }
 
-  if(supports_gqa && same_batch_size){
-    return check_grouped_query_attention<supports_gqa>(params, debug);
+
+  if(params.enable_gqa && supports_gqa){
+    return check_grouped_query_attention(params, debug);
   }
 
   if (!(same_batch_size && same_num_heads)){
