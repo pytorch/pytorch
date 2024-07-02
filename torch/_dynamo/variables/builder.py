@@ -957,7 +957,10 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MethodWrapperType):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            # Method-wrappers are written in C, and they are not guaranteed to
+            # return the same object on attribute lookup. Therefore, we cannot
+            # insert a FUNCTION_MATCH guard here. method-wrappers are very
+            # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
             if value in (torch.utils.hooks.BackwardHook, torch.nn.Parameter):
@@ -1369,6 +1372,13 @@ class VariableBuilder:
             unimplemented(
                 f"torch.compile does not support sparse Tensor with {value.layout} layout"
             )
+
+        # TODO(pearu,sparse-team) - Add the corresponding SPARSE_TENSOR_MATCH guards
+        if is_sparse_any(value) and value.is_sparse and not self.tx.export:
+            # A hot fix for sparse tensors + torch.compile. There is some
+            # support for export + coo tensor. We need to create
+            # SPARSE_TENSOR_GUARDS for guards to work propertly.
+            unimplemented("torch.compile does not support sparse Tensors")
 
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
