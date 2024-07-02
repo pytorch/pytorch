@@ -344,7 +344,12 @@ class TimmRunner(BenchmarkRunner):
             tolerance = 8 * 1e-2
 
         if is_training:
-            if name in ["levit_128", "sebotnet33ts_256"]:
+            from torch._inductor import config as inductor_config
+
+            if inductor_config.max_autotune and name in ["gluon_inception_v3"]:
+                # These models need higher tolerance in MaxAutotune mode
+                tolerance = 8 * 1e-2
+            elif name in ["levit_128", "sebotnet33ts_256"]:
                 tolerance = 8 * 1e-2
             elif name in REQUIRE_HIGHER_TOLERANCE:
                 tolerance = 4 * 1e-2
