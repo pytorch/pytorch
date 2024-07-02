@@ -18,6 +18,7 @@ import itertools
 import torch.optim as optim
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, onlyCPU
 from typing import List, Tuple, Optional
+import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
@@ -45,6 +46,11 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION
+)
+
+from test_cpp_extensions_open_device_registration import (
+    remove_build_path,
+    generate_faked_module
 )
 
 if TEST_FAIRSEQ:
@@ -3551,6 +3557,68 @@ class TestAttnBias(NNTestCase):
 
         with self.assertRaisesRegex(ValueError, "CausalBias should not be used with causal=True"):
             scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)
+
+class TestSDPAPrivateUse1Only(NNTestCase):
+    @classmethod
+    def setUpClass(cls):
+        remove_build_path()
+        cls.module = torch.utils.cpp_extension.load(
+            name="custom_device_extension",
+            sources=[
+                "cpp_extensions/open_registration_extension.cpp",
+            ],
+            extra_include_paths=["cpp_extensions"],
+            extra_cflags=["-g"],
+            verbose=True,
+        )
+        # register torch.foo module and foo device to torch
+        torch.utils.rename_privateuse1_backend("foo")
+        torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
+        torch._register_device_module("foo", generate_faked_module())
+
+    @skipIfTorchDynamo()
+    def test_fused_sdp_choice_privateuseone(self):
+        batch_size, seq_len, num_heads, head_dim = 4, 256, 2, 128
+        make_tensor = partial(torch.rand, device="cpu", dtype=torch.float16)
+        shape = SdpaShape(batch_size, num_heads, seq_len, head_dim)
+        q_cpu, k_cpu, v_cpu = make_tensor(shape), make_tensor(shape), make_tensor(shape)
+        q_privateuse1 = q_cpu.to("foo")
+        k_privateuse1 = k_cpu.to("foo")
+        v_privateuse1 = v_cpu.to("foo")
+        assert torch._fused_sdp_choice(q_privateuse1, k_privateuse1, v_privateuse1) == SDPBackend.OVERRIDEABLE.value
+
+    def test_scaled_dot_product_fused_attention_overrideable(self):
+        batch_size, seq_len, num_heads, head_dim = 4, 256, 2, 128
+        make_tensor = partial(torch.rand, device="cpu", dtype=torch.float16)
+        shape = SdpaShape(batch_size, num_heads, seq_len, head_dim)
+        q_cpu, k_cpu, v_cpu = make_tensor(shape), make_tensor(shape), make_tensor(shape)
+        q_privateuse1 = q_cpu.to("foo")
+        k_privateuse1 = k_cpu.to("foo")
+        v_privateuse1 = v_cpu.to("foo")
+        actual = torch.nn.functional.scaled_dot_product_attention(
+            q_privateuse1, k_privateuse1, v_privateuse1, attn_mask=None, dropout_p=0.0)
+
+    def test_scaled_dot_product_fused_attention_overrideable_backward(self):
+        batch_size, seq_len, num_heads, head_dim = 4, 256, 2, 128
+        make_tensor = partial(torch.rand, device="cpu", dtype=torch.float16, requires_grad=True)
+        shape = (batch_size, num_heads, seq_len, head_dim)
+        q_cpu, k_cpu, v_cpu = make_tensor(shape), make_tensor(shape), make_tensor(shape)
+        attn_mask = make_tensor((batch_size, num_heads, seq_len, seq_len))
+        q_privateuse1 = q_cpu.to("foo")
+        k_privateuse1 = k_cpu.to("foo")
+        v_privateuse1 = v_cpu.to("foo")
+        attn_mask_privateuse1 = attn_mask.to("foo")
+        output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask = \
+            torch.ops.aten._scaled_dot_product_fused_attention_overrideable(
+                q_privateuse1, k_privateuse1, v_privateuse1, attn_bias=attn_mask_privateuse1)
+
+        rand_upward = torch.rand(shape, device="cpu", dtype=torch.float16, requires_grad=False)
+        rand_upward_privateuse1 = rand_upward.to("foo")
+        grad_input_mask = [True, True, True, True]
+        grad_q, grad_k, grad_v, grad_attn_mask = torch.ops.aten._scaled_dot_product_fused_attention_overrideable_backward(
+            rand_upward_privateuse1, q_privateuse1, k_privateuse1, v_privateuse1, attn_mask_privateuse1,
+            grad_input_mask, output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, dropout_p=0.0,
+            is_causal=False, philox_seed=philox_seed, philox_offset=philox_offset)
 
 if NOTEST_CPU:
     device_types = ("cuda", )
