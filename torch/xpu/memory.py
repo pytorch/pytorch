@@ -179,12 +179,12 @@ def max_memory_reserved(device: _device_t = None) -> int:
 
 __all__ = [
     "empty_cache",
+    "max_memory_allocated",
+    "max_memory_reserved",
+    "memory_allocated",
+    "memory_reserved",
     "memory_stats",
     "memory_stats_as_nested_dict",
     "reset_accumulated_memory_stats",
     "reset_peak_memory_stats",
-    "memory_allocated",
-    "max_memory_allocated",
-    "memory_reserved",
-    "max_memory_reserved",
 ]

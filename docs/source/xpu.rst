@@ -63,7 +63,7 @@ Memory management
      memory_reserved
      memory_stats
      memory_stats_as_nested_dict
-     reset_max_memory_allocated
+     reset_accumulated_memory_stats
      reset_peak_memory_stats
 
 
