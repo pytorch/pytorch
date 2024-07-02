@@ -105,7 +105,7 @@ class TensorProperties:
             layout=tensor.layout,
             requires_grad=tensor.requires_grad,
             memory_format=torch.contiguous_format,
-            pin_memory=tensor.is_pinned(device=tensor.device),
+            pin_memory=tensor.is_pinned(),
         )
 
 
