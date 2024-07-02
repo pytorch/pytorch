@@ -22,10 +22,16 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
 
     Args:
         dtype (type or string): The desired type
-        non_blocking (bool): If ``True``, and the source is in pinned memory
-            and destination is on the GPU or vice versa, the copy is performed
-            asynchronously with respect to the host. Otherwise, the argument
-            has no effect.
+        non_blocking (bool): If ``True``, and source and destination are on
+            different devices, the copy is performed asynchronously with
+            respect to the host. Otherwise, the argument has no effect.
+
+            .. warning:: When ``non_blocking=True``, subsequent access to the tensor data
+                after a device to CUDA transfer will trigger a CUDA stream synchronization.
+                In all other cases (CUDA to CPU or other device transfer) a call to ``synchronize``
+                is required for safe data access. Not calling ``torch.<device>.synchronize()``
+                will result in silent errors.
+
         **kwargs: For compatibility, may contain the key ``async`` in place of
             the ``non_blocking`` argument. The ``async`` arg is deprecated.
     """
@@ -61,9 +67,15 @@ def _to(self, device, non_blocking=False):
 
     Args:
         device (int): The destination device.
-        non_blocking (bool): If ``True`` and the source is in pinned memory,
-            the copy will be asynchronous with respect to the host. Otherwise,
-            the argument has no effect.
+        non_blocking (bool): if ``True`` the source is on a different device than the
+            destination, the copy may occur asynchronously with respect to the host.
+            For other cases, this argument has no effect.
+
+    .. warning:: When ``non_blocking=True``, subsequent access to the tensor data
+        after a device to CUDA transfer will trigger a CUDA stream synchronization.
+        In all other cases (CUDA to CPU or other device transfer) a call to ``synchronize``
+        is required for safe data access. Not calling ``torch.<device>.synchronize()``
+        will result in silent errors.
     """
     if self.device == device:
         return self

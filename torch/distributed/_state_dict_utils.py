@@ -108,12 +108,13 @@ def _iterate_state_dict(
         companion_obj (Any): A companion object to the state dict. If this object
             is supplied, we attempt to copy the tensor to the companion object.
         ranks_only (Tuple[int, ...]): if this tuple is empty, all ranks will
-            have the same state_dicts. Otherwise only ranks that in ``ranks_only``
+            have the same state_dicts. Otherwise, only ranks that in ``ranks_only``
             have the same state_dicts. Other ranks will get empty state_dicts.
         type_check (bool): check if the instance data type is a supported type
             that can be saved by DCP.  The current supported data types are
             torch.Tensor, DTensor, int, float, str, list, dict, None.
         non_blocking (bool): whether to use non-blocking copy when copying to the companion object.
+            Check :meth:`~torch.Tensor.to` for more context. Defaults to ``True``.
     """
     # TODO: should we use pytree?
     cpu_device = torch.device("cpu")

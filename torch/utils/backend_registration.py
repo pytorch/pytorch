@@ -137,9 +137,15 @@ def _generate_tensor_methods_for_privateuse1_backend(custom_backend_name: str) -
 
         Args:
             device (int, optional): if specified, all parameters will be copied to that device
-            non_blocking (bool): If ``True`` and the source is in pinned memory,
-                the copy will be asynchronous with respect to the host. Otherwise,
-                the argument has no effect.
+            non_blocking (bool): If ``True``, and source and destination are on
+                different devices, the copy is performed asynchronously with
+                respect to the host. Otherwise, the argument has no effect.
+
+                .. warning:: When ``non_blocking=True``, subsequent access to the tensor data
+                    after a device to CUDA transfer will trigger a CUDA stream synchronization.
+                    In all other cases (CUDA to CPU or other device transfer) a call to ``synchronize``
+                    is required for safe data access. Not calling ``torch.<device>.synchronize()``
+                    will result in silent errors.
             **kwargs (dict): For compatibility, may contain the key ``memory_format`` argument.
         """
         if has_torch_function_unary(self):
@@ -242,9 +248,15 @@ def _generate_storage_methods_for_privateuse1_backend(custom_backend_name: str,
 
         Args:
             device (int): The destination device id. Defaults to the current device.
-            non_blocking (bool): If ``True`` and the source is in pinned memory,
-            the copy will be asynchronous with respect to the host. Otherwise,
-            the argument has no effect.
+            non_blocking (bool): If ``True``, and source and destination are on
+                different devices, the copy is performed asynchronously with
+                respect to the host. Otherwise, the argument has no effect.
+
+                .. warning:: When ``non_blocking=True``, subsequent access to the tensor data
+                    after a device to CUDA transfer will trigger a CUDA stream synchronization.
+                    In all other cases (CUDA to CPU or other device transfer) a call to ``synchronize``
+                    is required for safe data access. Not calling ``torch.<device>.synchronize()``
+                    will result in silent errors.
         """
         # There should be a judgment related to storage device and a judgment related to storage type,
         # but it depends on the extended function, so this part is temporarily omitted in the automatic generation.
