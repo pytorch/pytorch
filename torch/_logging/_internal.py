@@ -989,7 +989,7 @@ class LazyTraceHandler(logging.StreamHandler):
 
                 import torch.version as torch_version
 
-                if hasattr(torch_version, "git_version"):
+                if hasattr(torch_version, "git_version") and os.getenv("MAST_HPC_JOB_NAME") is not None:
                     log.info("LazyTraceHandler: disabled because not fbcode")
                 elif not torch._utils_internal.justknobs_check("pytorch/trace:enable"):
                     log.info(
