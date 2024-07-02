@@ -740,12 +740,33 @@ def sym_max(a, b):
         # max(1, 1.0) === max(1.0, 1) === 1.0
         return b.__sym_max__(a)
     # TODO: Probably can make bool work too, just lazy
-    assert isinstance(a, (builtins.int, builtins.float)), type(a)
-    assert isinstance(b, (builtins.int, builtins.float)), type(b)
-    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+
+    all_types, float_types = __all_and_float_types()
+
+    assert isinstance(a, all_types), type(a)
+    assert isinstance(b, all_types), type(b)
+    if isinstance(a, float_types) or isinstance(b, float_types):
         return builtins.float(builtins.max(a, b))
     else:
         return builtins.max(a, b)
+
+
+def __all_and_float_types() -> _Tuple[_Tuple[_Type, ...], _Tuple[_Type, ...]]:
+    try:
+        import numpy as np
+
+        all_types: _Tuple[_Type, ...] = (
+            np.integer,
+            np.floating,
+            builtins.int,
+            builtins.float,
+        )
+        float_types: _Tuple[_Type, ...] = (np.floating, builtins.float)
+    except ModuleNotFoundError:
+        all_types = (builtins.int, builtins.float)
+        float_types = (builtins.float,)
+
+    return all_types, float_types
 
 
 def sym_min(a, b):
@@ -756,9 +777,12 @@ def sym_min(a, b):
         return a.__sym_min__(b)
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
-    assert isinstance(a, (builtins.int, builtins.float)), type(a)
-    assert isinstance(b, (builtins.int, builtins.float)), type(b)
-    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+
+    all_types, float_types = __all_and_float_types()
+
+    assert isinstance(a, all_types), type(a)
+    assert isinstance(b, all_types), type(b)
+    if isinstance(a, float_types) or isinstance(b, float_types):
         return builtins.float(builtins.min(a, b))
     else:
         return builtins.min(a, b)
