@@ -8,6 +8,7 @@ architectures:
     * CPU
     * Latest CUDA
     * Latest ROCM
+    * Latest XPU
 """
 
 import os
@@ -24,6 +25,7 @@ CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.1": "9", "12.4": "9"}
 
 ROCM_ARCHES = ["6.0", "6.1"]
 
+XPU_ARCHES = ["xpu"]
 
 CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
 
@@ -132,6 +134,8 @@ def arch_type(arch_version: str) -> str:
         return "cuda"
     elif arch_version in ROCM_ARCHES:
         return "rocm"
+    elif arch_version in XPU_ARCHES:
+        return "xpu"
     elif arch_version in CPU_CXX11_ABI_ARCH:
         return "cpu-cxx11-abi"
     elif arch_version in CPU_AARCH64_ARCH:
@@ -156,6 +160,7 @@ WHEEL_CONTAINER_IMAGES = {
         gpu_arch: f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
+    "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
     "cpu": f"pytorch/manylinux-builder:cpu-{DEFAULT_TAG}",
     "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinuxaarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
@@ -221,6 +226,7 @@ def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
         "cuda": f"cu{gpu_arch_version.replace('.', '')}",
         "cuda-aarch64": "cu124",
         "rocm": f"rocm{gpu_arch_version}",
+        "xpu": "xpu",
     }.get(gpu_arch_type, gpu_arch_version)
 
 
@@ -331,7 +337,7 @@ def generate_wheels_matrix(
         # Define default compute archivectures
         arches = ["cpu"]
         if os == "linux":
-            arches += CPU_CXX11_ABI_ARCH + CUDA_ARCHES + ROCM_ARCHES
+            arches += CPU_CXX11_ABI_ARCH + CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES
         elif os == "linux-aarch64":
@@ -354,6 +360,7 @@ def generate_wheels_matrix(
                 or arch_version == "cpu-aarch64"
                 or arch_version == "cpu-s390x"
                 or arch_version == "cuda-aarch64"
+                or arch_version == "xpu"
                 else arch_version
             )
 
@@ -421,7 +428,9 @@ def generate_wheels_matrix(
                             gpu_arch_type, gpu_arch_version
                         ),
                         "devtoolset": (
-                            "cxx11-abi" if arch_version == "cpu-cxx11-abi" else ""
+                            "cxx11-abi"
+                            if arch_version in ["cpu-cxx11-abi", "xpu"]
+                            else ""
                         ),
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
