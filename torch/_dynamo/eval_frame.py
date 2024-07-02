@@ -341,9 +341,9 @@ class _TorchDynamoContext:
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):
             # add context containing GraphModule to any GraphModule forward functions
-            code_context.get_context(fn.forward.__code__)[
-                "orig_graphmodule"
-            ] = weakref.ref(fn)
+            code_context.get_context(fn.forward.__code__)["orig_graphmodule"] = (
+                weakref.ref(fn)
+            )
 
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
@@ -760,9 +760,11 @@ def _optimize(
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
-        compiler_config=backend.get_compiler_config()
-        if hasattr(backend, "get_compiler_config")
-        else None,
+        compiler_config=(
+            backend.get_compiler_config()
+            if hasattr(backend, "get_compiler_config")
+            else None
+        ),
         rebuild_ctx=rebuild_ctx,
     )
 
@@ -876,9 +878,11 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                         flat_args[i],
                         symbolic_context=StatelessSymbolicContext(
                             dynamic_sizes=[
-                                DimDynamic.DYNAMIC
-                                if d in flat_args_dynamic_dims[i]
-                                else DimDynamic.STATIC
+                                (
+                                    DimDynamic.DYNAMIC
+                                    if d in flat_args_dynamic_dims[i]
+                                    else DimDynamic.STATIC
+                                )
                                 for d in range(len(flat_args[i].shape))
                             ],
                             constraint_sizes=[None] * len(flat_args[i].shape),
@@ -1432,7 +1436,9 @@ def export(
             raise constraint_violation_error
 
         if graph is None:
-            assert (same_signature), "Failed to produce a graph during tracing as no tensor operations were found and same_signature is False."
+            assert (
+                same_signature
+            ), "Failed to produce a graph during tracing as no tensor operations were found and same_signature is False."
             # If the module does not contain any tensor computation, we would create a graph with inputs and outputs.
             # To be consitant with the graph traced by dynano, `graph` will have only tensor inputs as placeholders
             # and tensor outputs as output nodes. non-tensor inputs and outputs will be added when rewriting signature.
