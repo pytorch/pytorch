@@ -128,19 +128,18 @@ def custom_op(
             schema_str = torch._custom_op.impl.infer_schema(fn, mutates_args)
         else:
             schema_str = schema
-        from torch._library.infer_schema import has_device_arg, has_tensor_arg
+        from torch._library.infer_schema import get_device_arg_id, has_tensor_arg
 
-        dispatch_using_device_arg = False
+        device_arg_id = None
         if not has_tensor_arg(schema_str) and device_types is not None:
-            if not has_device_arg(schema_str):
+            device_arg_id = get_device_arg_id(schema_str)
+            if device_arg_id is None:
                 raise ValueError(
                     "Functions without tensor inputs are required to have a `device: torch.device` argument"
                 )
-            dispatch_using_device_arg = True
+
         namespace, opname = name.split("::")
-        result = CustomOpDef(
-            namespace, opname, schema_str, fn, dispatch_using_device_arg
-        )
+        result = CustomOpDef(namespace, opname, schema_str, fn, device_arg_id)
         if schema is not None:
             # Check that schema's alias annotations match those of `mutates_args`.
             expected = set()
@@ -171,7 +170,7 @@ class CustomOpDef:
     You should not instantiate CustomOpDef directly; instead, use the
     :func:`torch.library.custom_op` API.
 
-    If `dispatch_using_device_arg` is True, we switch on the device argument to select the correct backend to dispatch to.
+    If `device_arg_id` is not None, we switch on the device argument to select the correct backend to dispatch to.
     """
 
     def __init__(
@@ -180,7 +179,7 @@ class CustomOpDef:
         name: str,
         schema: str,
         fn: Callable,
-        dispatch_using_device_arg: bool,
+        device_arg_id: Union[int, None],
     ) -> None:
         # Fields used to interface with the PyTorch dispatcher
         self._namespace = namespace
@@ -194,11 +193,11 @@ class CustomOpDef:
         self._setup_context_fn: Optional[Callable] = None
         self._backward_fn: Optional[Callable] = None
 
+        self._device_arg_id = device_arg_id
+
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher()
         OPDEFS[self._qualname] = self
-
-        self._dispatch_using_device_arg = dispatch_using_device_arg
 
     @property
     def _qualname(self) -> str:
@@ -533,16 +532,20 @@ class CustomOpDef:
                 with_keyset=True,
             )
 
+        if self._device_arg_id is not None:
+            device_arg_id: int = self._device_arg_id  # silent linter error
+
+            def backend_select(*args, **kwargs):
+                device = args[device_arg_id].type
+                if device not in self._backend_fns:
+                    raise RuntimeError(
+                        f"{self._name} does not have a kernel registered for {device}"
+                    )
+                return self._backend_fns[device](*args, **kwargs)
+
+            lib.impl(self._name, backend_select, "BackendSelect", with_keyset=False)
+
     def __call__(self, *args, **kwargs):
-        if self._dispatch_using_device_arg:
-            if "device" not in kwargs:
-                raise RuntimeError(f"{self._name} requires a device argument")
-            device = kwargs["device"]
-            if device not in self._backend_fns:
-                raise RuntimeError(
-                    f"{self._name} does not have a kernel registered for {device}"
-                )
-            return self._backend_fns[device](*args, **kwargs)
         return self._opoverload(*args, **kwargs)
 
 

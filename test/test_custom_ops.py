@@ -2980,6 +2980,15 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertEqual(result.device, torch.device("cpu"))
         self.assertEqual(result, torch.ones(3))
 
+        with self.assertRaisesRegex(RuntimeError, "f does not have a kernel registered for cuda"):
+            f("cuda")
+
+        with self.assertRaisesRegex(ValueError, "Functions without tensor inputs are required to have a `device: torch.device` argument"):
+            @torch.library.custom_op(
+                "_torch_testing::f2", mutates_args={}, device_types="cpu"
+            )
+            def f2() -> Tensor:
+                return torch.ones(3)
 
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"

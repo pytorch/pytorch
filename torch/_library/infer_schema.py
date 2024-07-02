@@ -225,7 +225,7 @@ def tuple_to_list(tuple_type: typing.Type[typing.Tuple]) -> typing.Type[typing.L
         return typing.List[typing.Union[tuple(type_args)]]  # type: ignore[misc]
 
 
-def has_tensor_arg(schema: str):
+def has_tensor_arg(schema: str) -> bool:
     """
     Given a schema string, returns True if the schema has a Tensor arg.
     A Tensor arg is any arg with a type annotation that might involve Tensor.
@@ -235,10 +235,11 @@ def has_tensor_arg(schema: str):
     return any("Tensor" in s for s in input_types)
 
 
-def has_device_arg(schema: str):
+def get_device_arg_id(schema: str) -> Union[int, None]:
     """
-    Given a schema string, returns True if the schema has a device: torch.device arg.
-    A device arg is any arg with a type annotation that might involve device.
+    Given a schema string, returns the id of the `device: torch.device` argument.
+    If it does not exist, returns None.
     """
     inputs = schema.split("->")[0].split("(")[1].split(")")[0].split(",")
-    return any("Device device" == s.strip() for s in inputs)
+
+    return next((i for i, s in enumerate(inputs) if "Device device" == s.strip()), None)
