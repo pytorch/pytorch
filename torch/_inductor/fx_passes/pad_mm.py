@@ -10,6 +10,8 @@ import torch._inductor.runtime.runtime_utils
 from torch import Tensor
 from torch._dynamo.utils import counters
 from torch._inductor import utils
+from torch._inductor.autoheuristic import AHContext, AutoHeuristic, LocalFeedback
+from torch._inductor.autoheuristic_utils import pad_mm_operations
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
@@ -50,9 +52,13 @@ def unwrap_fake_args(*arg_names):
 
 
 def get_alignment_size(x: Tensor) -> int:
-    if x.dtype == torch.float16 or x.dtype == torch.half or x.dtype == torch.bfloat16:
+    return get_alignment_size_dtype(x.dtype)
+
+
+def get_alignment_size_dtype(dtype: torch.dtype) -> int:
+    if dtype == torch.float16 or dtype == torch.half or dtype == torch.bfloat16:
         return 8
-    elif x.dtype == torch.float32 or x.dtype == torch.float:
+    elif dtype == torch.float32 or dtype == torch.float:
         return 4
     else:
         return 0
@@ -391,19 +397,9 @@ def should_pad_bench(
             match, mat1, mat2, op, input, is_base_time_key=True
         )
         ori_time = get_cached_base_mm_benchmark_time(ori_time_key)
-        if ori_time is None:
-            if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
-                ori_time = do_bench(
-                    lambda: op(mat1, mat2),
-                )
-            else:
-                if input is not None:
-                    # realize bias for addmm
-                    input = realize_tensor(input)
-                ori_time = do_bench(
-                    lambda: op(input, mat1, mat2),
-                )
-            set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
+        if ori_time is None and op is torch.ops.aten.addmm and input is not None:
+            # realize bias for addmm
+            input = realize_tensor(input)
 
         mat1_pad = mat1
         mat2_pad = mat2
@@ -485,7 +481,47 @@ def should_pad_bench(
                 )
             )
 
-        pad_time = do_bench(lambda: [fn() for fn in fns])
+        def orig_bench_fn():
+            if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
+                op(mat1, mat2)
+            else:
+                op(input, mat1, mat2)
+
+        def pad_bench_fn():
+            for fn in fns:
+                fn()
+
+        pad_time = None
+        if (
+            torch._inductor.config.autoheuristic_mode != "OFF"
+            and op is torch.ops.aten.mm
+        ):
+            (ah_should_pad, ah_ori_time, ah_pad_time) = run_autoheuristic(
+                mat1,
+                mat2,
+                orig_bench_fn,
+                pad_bench_fn,
+                m_padded_length,
+                k_padded_length,
+                n_padded_length,
+                do_bench,
+                mat1_pre_padded,
+                mat2_pre_padded,
+            )
+            if ori_time is None and ah_ori_time is not None:
+                ori_time = ah_ori_time
+                set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
+            pad_time = ah_pad_time
+            if ah_should_pad is not None:
+                set_cached_should_pad(key, ah_should_pad)
+                return ah_should_pad
+
+        if ori_time is None:
+            ori_time = do_bench(orig_bench_fn)
+            set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
+
+        if pad_time is None:
+            pad_time = do_bench(pad_bench_fn)
 
         # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
         # tradeoff between performance improvement from shape padding and overhead from additional memory ops
@@ -502,6 +538,106 @@ def should_pad_bench(
         should_pad = _skip_do_bench_times or ori_time > pad_time * multiplier
         set_cached_should_pad(key, should_pad)
         return should_pad
+
+
+def get_context(
+    mat1,
+    mat2,
+    mat1_pre_padded,
+    mat2_pre_padded,
+    m_padded_length,
+    k_padded_length,
+    n_padded_length,
+):
+    context = AHContext()
+
+    context.add_feature("m", mat1.shape[0])
+    context.add_feature("k", mat1.shape[1])
+    context.add_feature("n", mat2.shape[1])
+
+    mat1_strides = mat1.stride()
+    mat2_strides = mat2.stride()
+    context.add_feature("mat1_stride_0", mat1_strides[0])
+    context.add_feature("mat1_stride_1", mat1_strides[1])
+    context.add_feature("mat2_stride_0", mat2_strides[0])
+    context.add_feature("mat2_stride_1", mat2_strides[1])
+
+    context.add_feature("m_padded_length", m_padded_length)
+    context.add_feature("k_padded_length", k_padded_length)
+    context.add_feature("n_padded_length", n_padded_length)
+
+    context.add_feature("mat1_iscontig", mat1.is_contiguous(), is_categorical=True)
+    context.add_feature("mat2_iscontig", mat2.is_contiguous(), is_categorical=True)
+
+    context.add_feature("mat1_align_size", get_alignment_size(mat1))
+    context.add_feature("mat2_align_size", get_alignment_size(mat2))
+
+    context.add_feature("mat1_dtype", mat1.dtype, is_categorical=True)
+    context.add_feature("mat2_dtype", mat2.dtype, is_categorical=True)
+
+    context.add_feature("prepadded_mat1", mat1_pre_padded, is_categorical=True)
+    context.add_feature("prepadded_mat2", mat2_pre_padded, is_categorical=True)
+
+    using_tf32 = "not_float_32"
+    if mat1.dtype == torch.float32:
+        using_tf32 = torch.backends.cuda.matmul.allow_tf32
+    context.add_feature("using_tf32", using_tf32, is_categorical=True)
+
+    return context
+
+
+def run_autoheuristic(
+    mat1,
+    mat2,
+    orig_bench_fn,
+    pad_bench_fn,
+    m_padded_length,
+    k_padded_length,
+    n_padded_length,
+    do_bench,
+    mat1_pre_padded,
+    mat2_pre_padded,
+):
+    def feedback_fn(choice):
+        if choice == orig_choice:
+            return do_bench(orig_bench_fn)
+        elif choice == pad_choice:
+            return do_bench(pad_bench_fn)
+        return None
+
+    def fallback():
+        return "autotune"
+
+    orig_choice = "orig"
+    pad_choice = "pad"
+    choices = [orig_choice, pad_choice]
+    feedback = LocalFeedback(feedback_fn)
+    context = get_context(
+        mat1,
+        mat2,
+        mat1_pre_padded,
+        mat2_pre_padded,
+        m_padded_length,
+        k_padded_length,
+        n_padded_length,
+    )
+    name = "pad_mm"
+    autoheuristic = AutoHeuristic(
+        fallback=fallback,
+        choices=choices,
+        feedback=feedback,
+        context=context,
+        name=name,
+        augment_context=pad_mm_operations(),
+    )
+    choice = autoheuristic.get_choice()
+    choice2should_pad = {orig_choice: False, pad_choice: True, "autotune": None}
+    ah_should_pad = choice2should_pad.get(choice, None)
+
+    # get benchmarking times to avoid benchmarking again
+    ori_time = autoheuristic.get_collected_feedback(orig_choice)
+    pad_time = autoheuristic.get_collected_feedback(pad_choice)
+    return (ah_should_pad, ori_time, pad_time)
 
 
 def mm_pattern(mat1: Tensor, mat2: Tensor) -> Tensor:
