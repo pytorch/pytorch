@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/AccumulateType.h>
-#include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/OpMathType.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
