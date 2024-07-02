@@ -1105,10 +1105,18 @@ class VariableBuilder:
                 source=source,
             )
 
+            guards = []
             for i, tensor_variable in enumerate(list_variable.items):
                 source_i = GetItemSource(base=source, index=i, index_is_slice=False)
                 # access unpacked tensor from this list instead of from a lifted arg
                 self.tx.output.input_source_to_var[source_i] = tensor_variable
+
+                guard = functools.partial(
+                    GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
+                )
+                guards.append(source_i.make_guard(guard))
+
+            install_guard(*guards, skip=1)
 
             grapharg = GraphArg(
                 source,
@@ -1936,7 +1944,15 @@ def wrap_fx_proxy_cls(
             )
 
         options.update(specialized_props)
-        return target_cls(proxy, **options)
+        vt = target_cls(proxy, **options)
+        if (
+            "source" in options
+            and options["source"]
+            and initial_example_value is not None
+            and initial_example_value not in tx.output.side_effects
+        ):
+            vt = tx.output.side_effects.track_object_existing(initial_example_value, vt)
+        return vt
     elif (
         hasattr(proxy.node.target, "__name__")
         and proxy.node.target.__name__ == "set_state"
