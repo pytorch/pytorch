@@ -595,6 +595,15 @@ class TestCustomOp(CustomOpTestCaseBase):
         def blah9(x, *, y):
             pass
 
+    def test_infer_schema_no_return(self):
+        with self.assertRaisesRegex(
+            ValueError, "No return type annotation was provided. Please add one."
+        ):
+
+            @torch.library.custom_op("mylib::foo", mutates_args={})
+            def foo(x: torch.Tensor, y: int):
+                return x * y
+
     def test_infer_schema_supported(self):
         def a(x: Tensor) -> Tensor:
             return torch.empty([])
