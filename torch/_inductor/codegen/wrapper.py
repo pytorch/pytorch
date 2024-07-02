@@ -1937,6 +1937,13 @@ class WrapperCodeGen(CodeGen):
         )
         self.writeline(ExitSubgraphLine(self))
 
+    def codegen_grouped_node(self, grouped_node):
+        outer_inputs = [buf.codegen_reference() for buf in grouped_node.operands]
+        outer_outputs = [f"{name}[{i}]" for i in range(len(grouped_node.outputs))]
+        self.writeline(EnterSubgraphLine(self, grouped_node.subgraph.graph))
+        self.codegen_subgraph(grouped_node.subgraph, outer_inputs, outer_outputs)
+        self.writeline(ExitSubgraphLine(self))
+
     @staticmethod
     def statically_known_int_or_none(x):
         try:

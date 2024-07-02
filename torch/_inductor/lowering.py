@@ -6239,6 +6239,12 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
     return list(map(TensorBox.create, result))
 
 
+@register_lowering(torch.ops.higher_order.grouped_node)
+def grouped_node(fn, operands):
+    result = ir.GroupedNode.create(fn, operands)
+    return list(map(TensorBox.create, result))
+
+
 @register_lowering(associative_scan_op, type_promotion_kind=None)
 def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph

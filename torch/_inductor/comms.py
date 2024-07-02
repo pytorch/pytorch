@@ -17,6 +17,20 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode
 
 
+def group_fsdp_comm_and_copy_nodes(graph):
+    gm = graph.owning_module
+    # Step 1: do splitting to extract out the ops you want to group into one node
+    def mod_partition(node: Node):
+        if node.target is torch.ops.fsdp.all_gather_copy_in.default:
+            return 1
+        return 0
+
+    # split module in module with submodules
+    module_with_submodules = split_module(
+        my_module_traced, my_module, mod_partition
+    )
+
+
 def sink_waits(
     snodes: List[BaseSchedulerNode],
     node_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
