@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
 #include <ATen/OpMathType.h>
 #include <ATen/native/DispatchStub.h>
@@ -47,7 +48,7 @@ void sin_kernel_cuda(TensorIteratorBase& iter) {
         }),
         AT_EXPAND(AT_COMPLEX_TYPES),
         kComplexHalf,
-   )
+    )
 #endif
   } else {
     AT_DISPATCH_V2(
@@ -58,8 +59,8 @@ void sin_kernel_cuda(TensorIteratorBase& iter) {
             iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return ::sin(a); });
         }),
         AT_EXPAND(AT_FLOATING_TYPES),
-        ScalarType::Half,
-        ScalarType::BFloat16,
+        kHalf,
+        kBFloat16,
     ),
   }
 }
