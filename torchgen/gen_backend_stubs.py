@@ -529,7 +529,7 @@ def run(
     source_yaml: str, output_dir: str, dry_run: bool, impl_path: str | None = None
 ) -> None:
     # Assumes that this file lives at PYTORCH_ROOT/torchgen/gen_backend_stubs.py
-    pytorch_root = Path(__file__).parent.parent.absolute()
+    pytorch_root = Path(__file__).absolute().parent.parent
     template_dir = os.path.join(pytorch_root, "aten/src/ATen/templates")
 
     def make_file_manager(install_dir: str) -> FileManager:

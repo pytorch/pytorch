@@ -12,8 +12,8 @@ from common import (
     key,
     open_test_results,
 )
-
 from download_reports import download_reports
+
 
 """
 Usage: update_failures.py /path/to/dynamo_test_failures.py /path/to/test commit_sha
@@ -194,7 +194,7 @@ if __name__ == "__main__":
         "filename",
         nargs="?",
         default=str(
-            Path(__file__).absolute().parent.parent.parent
+            Path(__file__).absolute().parents[2]
             / "torch/testing/_internal/dynamo_test_failures.py"
         ),
         help="Optional path to dynamo_test_failures.py",
@@ -203,7 +203,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "test_dir",
         nargs="?",
-        default=str(Path(__file__).absolute().parent.parent.parent / "test"),
+        default=str(Path(__file__).absolute().parents[2] / "test"),
         help="Optional path to test folder",
     )
     parser.add_argument(

@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(REPO_ROOT))
-from tools.stats.upload_metrics import add_global_metric, emit_metric
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+
+from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.stats.upload_stats_lib import BATCH_SIZE, upload_to_rockset
+
 
 sys.path.remove(str(REPO_ROOT))
 

@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import os
 from enum import Enum
+from pathlib import Path
 from typing import Dict, List, Set
 
 
 # <project folder>
 HOME_DIR = os.environ["HOME"]
-TOOLS_FOLDER = os.path.join(
-    os.path.dirname(os.path.realpath(__file__)), os.path.pardir, os.path.pardir
-)
+TOOLS_FOLDER = str(Path(__file__).resolve().parents[2])
 
 
 # <profile folder>
