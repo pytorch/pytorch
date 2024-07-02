@@ -2206,7 +2206,8 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
-) -> _Callable[_InputT, _RetT]: ...
+) -> _Callable[_InputT, _RetT]:
+    ...
 
 
 @_overload
@@ -2219,7 +2220,8 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
-) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
+) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]:
+    ...
 
 
 def compile(

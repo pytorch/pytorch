@@ -1,5 +1,4 @@
 """Key enums and structs used to handle data flow within the benchmark."""
-
 import dataclasses
 import enum
 import itertools as it

@@ -74,11 +74,9 @@ class ExperimentResults:
             f"{self.nn_mha_time:2f}",
             f"{self.compiled_nn_mha_time:2f}" if self.compiled_nn_mha_time else None,
             f"{self.composite_mha_time:2f}",
-            (
-                f"{self.compiled_composite_mha_time:2f}"
-                if self.compiled_composite_mha_time
-                else None
-            ),
+            f"{self.compiled_composite_mha_time:2f}"
+            if self.compiled_composite_mha_time
+            else None,
         ]
 
     @classmethod

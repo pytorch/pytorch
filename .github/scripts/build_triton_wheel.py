@@ -178,9 +178,9 @@ def main() -> None:
 
     build_triton(
         build_rocm=args.build_rocm,
-        commit_hash=(
-            args.commit_hash if args.commit_hash else read_triton_pin(args.build_rocm)
-        ),
+        commit_hash=args.commit_hash
+        if args.commit_hash
+        else read_triton_pin(args.build_rocm),
         version=args.triton_version,
         build_conda=args.build_conda,
         py_version=args.py_version,

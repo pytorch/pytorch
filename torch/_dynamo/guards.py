@@ -516,9 +516,9 @@ class GuardBuilder(GuardBuilderBase):
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
 
         # Save the guard managers to avoid repeatedly traversing sources.
-        self._cached_guard_managers: Dict[str, torch._C._dynamo.guards.GuardManager] = (
-            {}
-        )
+        self._cached_guard_managers: Dict[
+            str, torch._C._dynamo.guards.GuardManager
+        ] = {}
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -2162,16 +2162,12 @@ class CheckFunctionManager:
             structured_guard_fns.append(
                 lambda: {
                     "code": code_part,
-                    "stack": (
-                        structured.from_traceback(guard.stack.summary())
-                        if guard.stack
-                        else None
-                    ),
-                    "user_stack": (
-                        structured.from_traceback(guard.user_stack)
-                        if guard.user_stack
-                        else None
-                    ),
+                    "stack": structured.from_traceback(guard.stack.summary())
+                    if guard.stack
+                    else None,
+                    "user_stack": structured.from_traceback(guard.user_stack)
+                    if guard.user_stack
+                    else None,
                 }
             )
 
