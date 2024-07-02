@@ -52,24 +52,9 @@ RUN useradd -m actions-runner
 USER actions-runner
 WORKDIR /home/actions-runner
 
-RUN curl -L https://github.com/actions/runner/releases/download/v2.317.0/actions-runner-linux-x64-2.317.0.tar.gz | tar -xz
+COPY --chown=actions-runner:actions-runner runner.tar /home/actions-runner/runner.tar
 
-# repository
-ARG repo
-
-# repository token
-ARG token
-
-# runner name
-ARG name
-
-RUN ./config.sh \
-        --unattended \
-        --url "https://github.com/${repo}" \
-        --token "${token}" \
-        --name "${name}" \
-        --no-default-labels \
-        --labels self-hosted,linux.s390x
+RUN tar xvpf runner.tar && rm runner.tar
 
 # copy prebuilt manywheel docker image for builds and tests
 # build command is:
