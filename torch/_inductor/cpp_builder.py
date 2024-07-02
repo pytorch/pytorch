@@ -330,6 +330,11 @@ class BuildOptionsBase:
         self._use_absolute_path: bool = use_absolute_path
         self._compile_only: bool = compile_only
 
+    def _process_compile_only_options(self):
+        if self._compile_only:
+            self._torch_libraries_dirs = []
+            self._torch_libraries = []
+
     def _remove_duplicate_options(self) -> None:
         self._definations = _remove_duplication_in_list(self._definations)
         self._include_dirs = _remove_duplication_in_list(self._include_dirs)
@@ -338,6 +343,10 @@ class BuildOptionsBase:
         self._libraries_dirs = _remove_duplication_in_list(self._libraries_dirs)
         self._libraries = _remove_duplication_in_list(self._libraries)
         self._passthough_args = _remove_duplication_in_list(self._passthough_args)
+
+    def _finalize_options(self):
+        self._process_compile_only_options
+        self._remove_duplicate_options
 
     def get_compiler(self) -> str:
         return self._compiler
@@ -557,7 +566,7 @@ class CppOptions(BuildOptionsBase):
         _append_list(self._libraries_dirs, libraries_dirs)
         _append_list(self._libraries, libraries)
         _append_list(self._passthough_args, passthough_args)
-        self._remove_duplicate_options()
+        self._finalize_options()
 
 
 def _get_glibcxx_abi_build_flags() -> List[str]:
@@ -980,10 +989,6 @@ class CppTorchOptions(CppOptions):
             use_mmap_weights=use_mmap_weights,
         )
 
-        if compile_only:
-            torch_libraries_dirs = []
-            torch_libraries = []
-
         _append_list(self._definations, torch_definations)
         _append_list(self._include_dirs, torch_include_dirs)
         _append_list(self._cflags, torch_cflags)
@@ -991,7 +996,7 @@ class CppTorchOptions(CppOptions):
         _append_list(self._libraries_dirs, torch_libraries_dirs)
         _append_list(self._libraries, torch_libraries)
         _append_list(self._passthough_args, torch_passthough_args)
-        self._remove_duplicate_options()
+        self._finalize_options()
 
 
 def _set_gpu_runtime_env() -> None:
@@ -1156,7 +1161,7 @@ class CppTorchCudaOptions(CppTorchOptions):
         _append_list(self._libraries_dirs, cuda_libraries_dirs)
         _append_list(self._libraries, cuda_libraries)
         _append_list(self._passthough_args, cuda_passthough_args)
-        self._remove_duplicate_options()
+        self._finalize_options()
 
 
 def get_name_and_dir_from_output_file_path(
