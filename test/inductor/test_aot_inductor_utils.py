@@ -49,6 +49,15 @@ class AOTIRunnerUtil:
                 restore_fqn=False,
             )
 
+        if IS_FBCODE:
+            from deeplearning.aot_inductor.extern_node_thrift_serializer import (
+                thrift_serializer,
+            )
+            if options is None:
+                options = {"extern_node_serializer": thrift_serializer}
+            else:
+                options["extern_node_serializer"] = thrift_serializer
+
         with torch.no_grad():
             so_path = torch._inductor.aot_compile(gm, example_inputs, options=options)  # type: ignore[arg-type]
 
