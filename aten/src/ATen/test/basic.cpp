@@ -365,6 +365,27 @@ void test(DeprecatedTypeProperties& type) {
   TestIntArrayRefExpansion(type);
 }
 
+void TestMatrixExpBatching(DeprecatedTypeProperties& type) {
+    auto matrices = at::randn({10, 3, 3}, type.options());
+    std::vector<Tensor> expected_results;
+
+    for (const auto& mat : matrices) {
+        expected_results.push_back(at::matrix_exp(mat)); 
+    }
+    auto expected = at::stack(expected_results); 
+
+    Tensor actual = at::matrix_exp(matrices); 
+
+    // Compare actual results to expected results
+    ASSERT_TRUE(actual.allclose(expected, 1e-5, 1e-8)); 
+}
+
+TEST(MatrixExpTest, BatchedMatrixExp) {
+    manual_seed(42); // Set a manual seed for reproducibility
+    DeprecatedTypeProperties type = CPU(at::kDouble); 
+    TestMatrixExpBatching(type);
+}
+
 TEST(BasicTest, BasicTestCPU) {
   manual_seed(123);
 
