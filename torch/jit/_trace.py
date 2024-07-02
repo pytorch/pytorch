@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 """Tracing.
 
-This module contains functionality to support the JIT's tracing frontend, notably:
+This module contains functionality to support the JIT's tracing frontend, notably
     * torch.jit.trace
     * torch.jit.trace_module
 
