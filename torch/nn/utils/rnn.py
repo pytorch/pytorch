@@ -108,6 +108,13 @@ class PackedSequence(PackedSequence_):
             return self.to(*args, **kwargs)
         return self.to(*args, device="cpu", **kwargs)
 
+    def xpu(self, *args, **kwargs):
+
+        ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(*args, **kwargs)
+        if ex.device.type == 'xpu':
+            return self.to(*args, **kwargs)
+        return self.to(*args, device='xpu', **kwargs)
+
     def double(self):
         return self.to(dtype=torch.double)
 
