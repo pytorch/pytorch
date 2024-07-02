@@ -48,7 +48,13 @@ def aot_compile(
     Returns:
         Path to the generated shared library
     """
-    from .compile_fx import compile_fx_aot
+    from .compile_fx import compile_fx_aot, graph_returns_tuple
+
+    assert graph_returns_tuple(gm), (
+        "Graph output must be a tuple(). This is so that we can avoid "
+        "pytree processing of the outputs. Please change the module to "
+        "have tuple outputs."
+    )
 
     # We will serialize the pytree info into the .so as constant strings
     in_spec = None
