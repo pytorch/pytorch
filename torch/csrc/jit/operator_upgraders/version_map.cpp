@@ -14,7 +14,8 @@ static bool isVersionMapSorted = false;
 // Main entry point for all operators that have valid upgraders.
 // Note for developers: The list of upgraders should be SORTED
 // by the version number where the upgrader is registered.
-static std::unordered_map<std::string, std::vector<UpgraderEntry>> operatorVersionMap(
+std::unordered_map<std::string, std::vector<UpgraderEntry>>& getOperatorVersionMap() {
+  static std::unordered_map<std::string, std::vector<UpgraderEntry>> operatorVersionMap(
     {{"aten::logspace",
       {{9,
         "logspace_0_8",
@@ -87,12 +88,16 @@ static std::unordered_map<std::string, std::vector<UpgraderEntry>> operatorVersi
      {"aten::gelu.out",
       {{10,
         "gelu_out_0_9",
-        "aten::gelu.out(Tensor self, *, Tensor(a!) out) -> Tensor"}}}});
+        "aten::gelu.out(Tensor self, *, Tensor(a!) out) -> Tensor"}}}});  
+  return operatorVersionMap;
+}
+
+
 
 const std::unordered_map<std::string, std::vector<UpgraderEntry>>&
 get_operator_version_map() {
   if (!isVersionMapSorted) {
-    for (auto entry : operatorVersionMap) {
+    for (auto entry : getOperatorVersionMap()) {
       std::sort(
           entry.second.begin(),
           entry.second.end(),
@@ -102,17 +107,17 @@ get_operator_version_map() {
     }
     isVersionMapSorted = true;
   }
-  return operatorVersionMap;
+  return getOperatorVersionMap();
 }
 
 void test_only_add_entry(const std::string& op_name, UpgraderEntry entry) {
   test_only_reset_flag();
-  operatorVersionMap[op_name].emplace_back(std::move(entry));
+  getOperatorVersionMap()[op_name].emplace_back(std::move(entry));
 }
 
 void test_only_remove_entry(const std::string& op_name) {
   test_only_reset_flag();
-  operatorVersionMap.erase(op_name);
+  getOperatorVersionMap().erase(op_name);
 }
 
 void test_only_reset_flag() {
