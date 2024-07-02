@@ -236,6 +236,12 @@ class PackedSequenceTest(TestCase):
             )
             self.assertEqual(sequences, unpadded_sequences)
 
+        # not modify input inplace
+        padded_sequences = rnn_utils.pad_sequence(sequences, batch_first=False)
+        padded_sequences_orig = padded_sequences.clone()
+        unpadded_sequences = rnn_utils.unpad_sequence(padded_sequences, lengths, batch_first=False, inplace=False)
+        self.assertEqual(padded_sequences, padded_sequences_orig)
+
         # more dimensions
         maxlen = 9
         for num_dim in (0, 1, 2, 3):
