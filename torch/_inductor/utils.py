@@ -683,6 +683,7 @@ def get_first_incompatible_cudagraph_node(gm):
         forbidden_set.update(
             {
                 "aten._unsafe_index_put.default",
+                "aten._unsafe_masked_index_put_accumulate.default",
                 "aten.index_put.default",
                 "aten.index_put_.default",
                 "aten.scatter.src",
@@ -738,7 +739,7 @@ def clear_inductor_caches():
 
 
 @contextlib.contextmanager
-def fresh_inductor_cache(cache_entries=None):
+def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
     """
     Contextmanager that provides a clean tmp cachedir for inductor.
 
@@ -747,11 +748,12 @@ def fresh_inductor_cache(cache_entries=None):
     """
     clear_inductor_caches()
 
-    inductor_cache_dir = tempfile.mkdtemp()
+    inductor_cache_dir = tempfile.mkdtemp(dir=dir)
     try:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
         ):
+            log.debug("Using inductor cache dir %s", inductor_cache_dir)
             triton_cache_dir = os.path.join(inductor_cache_dir, "triton")
             with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
                 yield
@@ -766,7 +768,8 @@ def fresh_inductor_cache(cache_entries=None):
                                 if ".lock" not in f
                             }
                         )
-        shutil.rmtree(inductor_cache_dir)
+        if delete:
+            shutil.rmtree(inductor_cache_dir)
     except Exception:
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
@@ -1010,11 +1013,15 @@ def _use_autotune_backend(backend: str) -> bool:
 
 
 def use_triton_template(layout, *, enable_int32=False):
+    from .codegen.common import BackendFeature, has_backend_feature
+
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
-    return _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
-        "TRITON"
+    return (
+        _use_template_for_cuda(layout, layout_dtypes)
+        and _use_autotune_backend("TRITON")
+        and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
 
 
@@ -1044,6 +1051,92 @@ def use_cutlass_template(layout, m, n, k):
             )
             return False
     return res
+
+
+@functools.lru_cache(None)
+def _rocm_native_device_arch_name(device):
+    return torch.cuda.get_device_properties(device).gcnArchName
+
+
+@functools.lru_cache(None)
+def try_import_ck_lib():
+    try:
+        import ck4inductor  # type: ignore[import]
+        from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
+            gen_ops_library,
+            gen_ops_preselected,
+        )
+        from ck4inductor.universal_gemm.op import (  # type: ignore[import]
+            CKGemmOperation,
+        )
+
+        package_dirname = os.path.dirname(ck4inductor.__file__)
+    except ImportError:
+
+        def gen_ops_library():
+            return []
+
+        def gen_ops_preselected():
+            return []
+
+        class CKGemmOperation:  # type: ignore[no-redef]
+            pass
+
+        package_dirname = None
+    return package_dirname, gen_ops_library, gen_ops_preselected, CKGemmOperation
+
+
+def use_ck_template(layout, m, n, k):
+    # config knobs check 1
+    if not use_max_autotune():
+        return False
+    # config knobs check 2
+    if not _use_autotune_backend("CK"):
+        return False
+    # platform check
+    if not torch.version.hip:
+        return False
+    # tensors must be on GPU
+    if not layout.device.type == "cuda":
+        return False
+    # hardware check
+    # if config arch list is not specified, get the native arch from the device properties
+    native_arch = _rocm_native_device_arch_name(layout.device)
+    requested_archs = {k.split(":")[0]: k for k in config.rocm.arch} or {
+        native_arch.split(":")[0]: native_arch
+    }
+    requested_supported_archs = [
+        requested_archs[k] for k in requested_archs.keys() & config.rocm.supported_arch
+    ]
+    if not requested_supported_archs:
+        return False
+    # supported input dtypes
+    if layout.dtype not in [torch.float16, torch.bfloat16]:
+        return False
+    # TBD: investigate if we need to disable backend based on number of available CUs similar to `is_big_gpu`
+    # check if shape is static and gemm size is not 0
+    from .virtualized import V
+
+    gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
+    if gemm_size <= 0:
+        return False
+    # TBD: investigate if backend needs to be disabled for small gemms similar to CUTLASS
+
+    ck_package_dirname, _, _, _ = try_import_ck_lib()
+
+    if not ck_package_dirname:
+        log.warning("Please pip install Composable Kernel package")
+        return False
+
+    if not config.rocm.ck_dir:
+        log.warning("Please set TORCHINDUCTOR_CK_DIR env variable")
+        return False
+
+    if ck_package_dirname != config.rocm.ck_dir:
+        log.warning("Invalid path to CK library")
+        return False
+
+    return True
 
 
 def _use_template_for_cpu(layout):
