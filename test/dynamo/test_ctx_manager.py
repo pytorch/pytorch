@@ -893,7 +893,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cm = f(x)
         self.assertFalse(cm.mode)
 
-    # @unittest.expectedFailure
     def test_return_context_manager_with_graph_break(self):
         @torch.compile(backend="eager", fullgraph=False)
         def f(x):
