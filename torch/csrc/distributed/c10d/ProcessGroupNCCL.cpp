@@ -29,8 +29,8 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
-#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
+#include <torch/csrc/monitor/instrumentation.h>
 #include <torch/torch.h>
 
 namespace c10d {
@@ -380,15 +380,6 @@ std::string dump_nccl_trace(
 }
 #endif
 
-// TODO(c-p-i-o): add a JSON endpoint.
-control_plane::RegisterHandler dumpHandler{
-    "dump_nccl_trace_pickle",
-    [](const control_plane::Request& req, control_plane::Response& res) {
-      // TODO: c-p-i-o: params from the request need to go to dump_nccl_trace.
-      res.setContent(
-          dump_nccl_trace(true, true, false), "application/octet-stream");
-    }};
-
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
   static std::optional<
@@ -585,6 +576,8 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
 
 bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
     std::optional<std::chrono::milliseconds> timeout) {
+  STATIC_SCOPED_WAIT_COUNTER(
+      pytorch.wait_counter.ProcessGroupNCCL__checkTimeout);
   auto currentTimepoint = std::chrono::steady_clock::now();
   auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       currentTimepoint - workStartTime_);
@@ -1467,6 +1460,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // Leave another two mins for desync report generation or process group
     // destroy.
     std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
+    LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_
+              << " waiting for desync report or process group destroy.";
   }
 
   // At this point, we either already sleep for another `heartbeatTimeoutInSec_`
@@ -1696,6 +1691,8 @@ void ProcessGroupNCCL::watchdogHandler() {
             // exception
             std::this_thread::sleep_for(
                 std::chrono::seconds(heartbeatTimeoutInSec_));
+            LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_
+                      << " giving time for flight recorder dumps to finish.";
           } catch (const std::exception& e) {
             LOG(ERROR) << logPrefix()
                        << "Failed to set dump signal in tcpstore. "
@@ -2118,7 +2115,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     // Find a valid, healthy communicator to split from if possible.
     std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
     auto& other_comms = options_->split_from->devNCCLCommMap_;
-    auto dit = other_comms.find(deviceKey);
+    auto dit = other_comms.find(getKeyFromDevice(device));
     if (dit != other_comms.end()) {
       auto& parentComm = dit->second;
       if (parentComm != nullptr && !parentComm->isAborted()) {

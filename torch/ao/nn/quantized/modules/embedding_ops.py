@@ -72,7 +72,7 @@ class Embedding(torch.nn.Module):
     r"""
     A quantized Embedding module with quantized packed weights as inputs.
     We adopt the same interface as `torch.nn.Embedding`, please see
-    https://pytorch.org/docs/stable/nn.html#torch.nn.Embedding for documentation.
+    https://pytorch.org/docs/stable/generated/torch.nn.Embedding.html for documentation.
 
     Similar to :class:`~torch.nn.Embedding`, attributes will be randomly
     initialized at module creation time and will be overwritten later
@@ -196,7 +196,7 @@ class EmbeddingBag(Embedding):
     r"""
     A quantized EmbeddingBag module with quantized packed weights as inputs.
     We adopt the same interface as `torch.nn.EmbeddingBag`, please see
-    https://pytorch.org/docs/stable/nn.html#torch.nn.EmbeddingBag for documentation.
+    https://pytorch.org/docs/stable/generated/torch.nn.EmbeddingBag.html for documentation.
 
     Similar to :class:`~torch.nn.EmbeddingBag`, attributes will be randomly
     initialized at module creation time and will be overwritten later

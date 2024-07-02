@@ -23,7 +23,7 @@ from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from ..._dynamo.utils import counters
 
-from .. import codecache, config, ir, metrics
+from .. import codecache, config, cpu_vec_isa, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import (
@@ -64,8 +64,16 @@ from .common import (
     OptimizationContext,
 )
 
-from .cpp_utils import cexpr, cexpr_index, DTYPE_TO_CPP, INDEX_TYPE, value_to_cpp
+from .cpp_utils import (
+    cexpr,
+    cexpr_index,
+    DTYPE_TO_CPP,
+    INDEX_TYPE,
+    unify_mask_base_type,
+    value_to_cpp,
+)
 
+_IS_WINDOWS = sys.platform == "win32"
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 NATIVE_OMP_RTYPES = {"+", "*", "^", "||", "min", "max"}
@@ -1107,8 +1115,13 @@ class CppVecOverrides(CppOverrides):
     def ne(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
-        assert x.dtype is not None
-        return f"{V.kernel._get_mask_type(x.dtype)}({x} != {y})"
+        if x.dtype == torch.bool:
+            assert y.dtype == torch.bool
+            x_cast, y_cast = unify_mask_base_type(V.kernel.compute, (x, y))
+            return f"{x_cast} != {y_cast}"
+        else:
+            assert x.dtype is not None
+            return f"{V.kernel._get_mask_type(x.dtype)}({x} != {y})"
 
     @staticmethod
     def lt(x, y):
@@ -1193,6 +1206,30 @@ class CppVecOverrides(CppOverrides):
     @staticmethod
     def logical_xor(a, b):
         return f"{a} ^ {b}"
+
+    @staticmethod
+    def bitwise_and(a, b):
+        return f"{a} & {b}"
+
+    @staticmethod
+    def bitwise_not(a):
+        return f"~{a}"
+
+    @staticmethod
+    def bitwise_or(a, b):
+        return f"{a} | {b}"
+
+    @staticmethod
+    def bitwise_xor(a, b):
+        return f"{a} ^ {b}"
+
+    @staticmethod
+    def bitwise_left_shift(a, b):
+        return f"{a} << {b}"
+
+    @staticmethod
+    def bitwise_right_shift(a, b):
+        return f"{a} >> {b}"
 
     @staticmethod
     def tan(a):
@@ -1311,11 +1348,21 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"at::vec::minimum({a}, {b})"
+        if a.dtype == torch.bool:
+            assert b.dtype == torch.bool
+            a_cast, b_cast = unify_mask_base_type(V.kernel.compute, (a, b))
+            return f"{a_cast} & {b_cast}"
+        else:
+            return f"at::vec::minimum({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
-        return f"at::vec::maximum({a}, {b})"
+        if a.dtype == torch.bool:
+            assert b.dtype == torch.bool
+            a_cast, b_cast = unify_mask_base_type(V.kernel.compute, (a, b))
+            return f"{a_cast} | {b_cast}"
+        else:
+            return f"at::vec::maximum({a}, {b})"
 
     @staticmethod
     def square(a):
@@ -1326,10 +1373,10 @@ class CppVecOverrides(CppOverrides):
         assert isinstance(V.kernel, CppVecKernel)
         if b.dtype == torch.bool:
             assert c.dtype == torch.bool
-            blendv_a = f"{V.kernel._get_mask_cast(a, torch.float)}"
-            blendv_b = f"{V.kernel._get_mask_cast(b, torch.float)}"
-            blendv_c = f"{V.kernel._get_mask_cast(c, torch.float)}"
-            return f"decltype({b})::blendv({blendv_c}, {blendv_b}, {blendv_a})"
+            blendv_a, blendv_b, blendv_c = unify_mask_base_type(
+                V.kernel.compute, (a, b, c)
+            )
+            return f"decltype({blendv_b})::blendv({blendv_c}, {blendv_b}, {blendv_a})"
         else:
             return f"decltype({b})::blendv({c}, {b}, {V.kernel._get_mask_cast(a, b.dtype)})"
 
@@ -2067,7 +2114,7 @@ class CppVecKernel(CppKernel):
         tiling_dtype=torch.float,
     ):
         super().__init__(args, num_threads)
-        self.vec_isa = codecache.pick_vec_isa()
+        self.vec_isa = cpu_vec_isa.pick_vec_isa()
         assert self.vec_isa
         if tiling_factor == 0:
             tiling_factor = self.vec_isa.nelements(dtype=tiling_dtype)
@@ -3021,7 +3068,7 @@ class CppKernelProxy(CppKernel):
         self.kernel_group = kernel_group
         self.loop_nest = None
         self.call_ranges = None
-        self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+        self.picked_vec_isa: cpu_vec_isa.VecISA = cpu_vec_isa.pick_vec_isa()
 
     def data_type_propagation(self, nodes):
         for _node in nodes:
@@ -3919,6 +3966,9 @@ class KernelGroup:
         args_num = len(arg_defs)
         return args_num
 
+    def get_export_declaration(self):
+        return "__declspec(dllexport)" if _IS_WINDOWS else ""
+
     def codegen_group(self, name=None) -> str:
         self.stack.close()
         if not self.scheduled_nodes:
@@ -3938,7 +3988,10 @@ class KernelGroup:
         kernel_name = str(Placeholder.DESCRIPTIVE_NAME) if name is None else name
         arg_defs, _, _ = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
-        code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
+        func_export_decl = self.get_export_declaration()
+        code.writeline(
+            f'extern "C" {func_export_decl} void {kernel_decl_name}({arg_defs})'
+        )
 
         # 3. Function body
         with code.indent():
@@ -4027,15 +4080,15 @@ class LoopLevel:
     kernel: Optional[CppKernel] = None
 
     def __post_init__(self):
-        # Regarding the C++/OpenMP backend, `codecache.pick_vec_isa()` to check
+        # Regarding the C++/OpenMP backend, `cpu_vec_isa.pick_vec_isa()` to check
         # vectorization ISA is a time-consuming and one-shot operation. It leads
         # to taking a longer time to import `codegen.cpp` package because the
         # `LoopLevel` of the package is decorated by `@dataclasses.dataclass` while
-        # the decorator will invoke `codecache.pick_vec_isa()` to initialize the
+        # the decorator will invoke `cpu_vec_isa.pick_vec_isa()` to initialize the
         # `simd_nelements` of the `LoopLevel`. It might introduce additional compilation
         # overhead to the Triton backend. Therefore, we moved the `simd_nelements` to
         # `__post_init__`
-        picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+        picked_vec_isa: cpu_vec_isa.VecISA = cpu_vec_isa.pick_vec_isa()
         self.simd_nelements: int = picked_vec_isa.nelements() if picked_vec_isa else 0
 
     def get_kernels(self) -> List[CppKernel]:

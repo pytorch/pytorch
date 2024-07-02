@@ -58,6 +58,8 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 
+from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
+
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
 
@@ -65,6 +67,21 @@ from torch.testing._internal.common_utils import (
 def _iter_constructors():
     # yield as_nested_tensor
     yield torch.nested.nested_tensor
+
+
+# Returns True if the function recompiles between inputs1 and inputs2 with the
+# specified dynamic setting.
+def _recompiles_for_inputs(fn, inputs1, inputs2, dynamic=True):
+    compile_count = [0]
+
+    def counter(gm, example_inputs):
+        compile_count[0] += 1
+        return gm
+
+    compiled_f = torch.compile(fn, fullgraph=True, backend=counter, dynamic=dynamic)
+    compiled_f(*inputs1)
+    compiled_f(*inputs2)
+    return compile_count[0] > 1
 
 
 # Helper function to generate a pair of random nested tensors
@@ -3546,10 +3563,24 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.dim(), 3)
         self.assertEqual(nt.numel(), 27)
 
-    def test_linear(self, device):
-        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
-        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
-        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+    @parametrize("nt_dim", [3, 4, 5])
+    def test_linear(self, device, nt_dim):
+        if nt_dim == 3:
+            fixed_shape = (3,)
+        elif nt_dim == 4:
+            fixed_shape = (4, 3)
+        elif nt_dim == 5:
+            fixed_shape = (5, 4, 3)
+
+        a = torch.randn(
+            2, *fixed_shape, requires_grad=True, dtype=torch.float64, device=device
+        )
+        b = torch.randn(
+            3, *fixed_shape, requires_grad=True, dtype=torch.float64, device=device
+        )
+        c = torch.randn(
+            4, *fixed_shape, requires_grad=True, dtype=torch.float64, device=device
+        )
         weight = torch.randn(
             4, 3, requires_grad=True, dtype=torch.float64, device=device
         )
@@ -4818,19 +4849,18 @@ class TestNestedTensorSubclass(TestCase):
         check_results(fn, compiled_fn, generate_inp(20))
         self.assertEqual(compile_counter.frame_count, frame_count_2)
 
-    # Doesn't work until we have real views
-    @xfailIfTorchDynamo
     # Note 1: Math fallback doesn't work with bfloat16 on CUDA
     # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
     @unittest.skipIf(
         TEST_WITH_ROCM,
         "ROCm doesn't support flash attention or mem_efficient attention for NT",
     )
-    @parametrize(
-        "dtype",
-        [torch.float16, torch.bfloat16, torch.float32]
-        if SM80OrLater
-        else [torch.float16, torch.float32],
+    @dtypes(
+        *(
+            [torch.float16, torch.bfloat16, torch.float32]
+            if SM80OrLater
+            else [torch.float16, torch.float32]
+        )
     )
     def test_sdpa(self, device, dtype):
         batch_size = 1
@@ -5160,21 +5190,27 @@ class TestNestedTensorSubclass(TestCase):
         # S: (constant) sequence length
         # D: embedding size
         query = random_nt_from_dims(
-            [4, None, 8, 10], device=device, dtype=dtype, layout=torch.jagged
+            [4, None, 8, 10],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
         )
         key = random_nt_from_similar(query)
         value = random_nt_from_similar(query)
         output = F.scaled_dot_product_attention(query, key, value)
         self.assertTrue(isinstance(output, NestedTensor))
+        output.values().sum().backward()
 
+        query_dense = query.clone().detach().requires_grad_(True)
         # should be equivalent to just running the buffers through
         output_dense = F.scaled_dot_product_attention(
-            query._values, key._values, value._values
+            query_dense.values(), key.values(), value.values()
         )
-        self.assertEqual(output._values, output_dense)
+        torch._dynamo.disable(self.assertEqual)(output._values, output_dense)
+        output_dense.sum().backward()
+        torch._dynamo.disable(self.assertEqual)(query.grad, query_dense.grad)
 
-    # Doesn't work until we have real views
-    @xfailIfTorchDynamo
     @onlyCUDA
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
@@ -5261,6 +5297,40 @@ class TestNestedTensorSubclass(TestCase):
         output = f(values, offsets)
         output.sum().backward()
         self.assertEqual(values.grad, torch.ones_like(values))
+
+    @skipIfTorchDynamo()
+    def test_nested_tensor_activation_checkpoint(self, device):
+        values = torch.randn(
+            9, 3, 256, requires_grad=True, device=device, dtype=torch.float32
+        )
+        lengths = torch.tensor([1, 2, 3, 3], device=device, dtype=torch.int64)
+        offsets = F.pad(lengths, pad=(1, 0)).cumsum(dim=0)
+
+        def fn(values, offsets):
+            nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
+            return convert_nt_to_jagged(nt).sum()
+
+        checkpoint(fn, values, offsets, use_reentrant=False).backward()
+        self.assertIsNotNone(values.grad)
+
+        context_fn = partial(
+            create_selective_checkpoint_contexts,
+            [
+                torch.ops.aten.cumsum.default,
+            ],
+        )
+
+        values.grad = None
+
+        def fn(values, lengths):
+            offsets = F.pad(lengths, pad=(1, 0)).cumsum(dim=0)
+            nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
+            return convert_nt_to_jagged(nt).sum()
+
+        checkpoint(
+            fn, values, lengths, use_reentrant=False, context_fn=context_fn
+        ).backward()
+        self.assertIsNotNone(values.grad)
 
     # Internally-defined NT use cases are lifted to here for maximum test realism.
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
@@ -5450,6 +5520,172 @@ class TestNestedTensorSubclass(TestCase):
                 torch.ops.aten._padded_dense_to_jagged_forward(
                     padded, [offsets_wrong], total_L
                 )
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
+    def test_compile_preserves_metadata_cache(self, device, dtype):
+        # shape (B, *, D)
+        nt = random_nt_from_dims(
+            [4, None, 3, 16],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+
+        # expect min / max seqlen to be stored here
+        cache = dict(nt._metadata_cache)
+
+        @torch.compile
+        def f(nt):
+            q = nt.transpose(-3, -2)
+            output = F.scaled_dot_product_attention(q, q, q).transpose(-3, -2)
+            return output
+
+        output = f(nt)
+        output.backward(torch.ones_like(output))
+        self.assertEqual(output._metadata_cache, cache)
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
+    def test_compile_with_dynamic_max_seq_len(self, device, dtype):
+        # shape (B, *, D)
+        # max seq len: 18
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(18, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        # max seq len: 19
+        nt2 = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(19, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        def f(nt):
+            # TODO: Replace with public API when we can use @properties
+            return torch.ones_like(nt) * nt._get_max_seqlen()
+
+        for dynamic in [False, True, None]:
+            self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
+    def test_compile_with_dynamic_min_seq_len(self, device, dtype):
+        # shape (B, *, D)
+        # min seq len: 7
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(7, 5),
+                torch.randn(8, 5),
+                torch.randn(9, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        # min seq len: 8
+        nt2 = torch.nested.nested_tensor(
+            [
+                torch.randn(8, 5),
+                torch.randn(9, 5),
+                torch.randn(10, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        def f(nt):
+            # TODO: Replace with public API when we can use @properties
+            return torch.ones_like(nt) * nt._get_min_seqlen()
+
+        for dynamic in [False, True, None]:
+            self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
+    def test_compile_with_propagated_dynamic_max_seq_len(self, device, dtype):
+        # shape (B, *, D)
+        # max seq len: 18
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(18, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        # max seq len: 19
+        nt2 = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(19, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        def f(nt):
+            nt2 = nt.sin() + 1
+            # TODO: Replace with public API when we can use @properties
+            return torch.ones_like(nt2) * nt2._get_max_seqlen()
+
+        ref = f(nt)
+        output = torch.compile(f, fullgraph=True, dynamic=False)(nt)
+        self.assertEqual(ref, output)
+
+        for dynamic in [False, True, None]:
+            self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
+
+    @dtypes(torch.float32, torch.double, torch.half)
+    def test_unbind_backward(self, device, dtype):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 4, device=device),
+                torch.randn(5, 4, device=device),
+                torch.randn(3, 4, device=device),
+            ],
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+
+        a, b, c = nt.unbind()
+        b.sum().backward()
+
+        expected_grad = torch.zeros_like(nt)
+        expected_grad.unbind()[1].add_(1.0)
+        torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
 
 
 instantiate_parametrized_tests(TestNestedTensor)
