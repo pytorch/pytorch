@@ -66,6 +66,61 @@ class _BlockSparseMask:
         self.KV_BLOCK_SIZE = KV_BLOCK_SIZE
         self.Q_BLOCK_SIZE = Q_BLOCK_SIZE
 
+    def __str__(self):
+        s = f"BlockMask(sparsity={100 *self.sparsity():.2f}%, mask=\n"
+        s += self.to_string()
+        s += ")"
+        return s
+
+    def sparsity(self):
+        dense_mask = self.to_dense()
+        return (1 - (dense_mask != 0).sum()) / dense_mask.numel()
+
+    def to_dense(self):
+        num_rows = self.kv_num_blocks.shape[-1]
+        num_cols = self.q_num_blocks.shape[-1]
+        batch, head = self.kv_num_blocks.shape[:2]
+        assert batch == 1, head == 1
+
+        def create_dense_one(kv_num_blocks, kv_indices):
+            dense_mask = kv_indices.new_zeros(num_rows, num_cols + 1, dtype=torch.int32)
+
+            row_indices = torch.arange(num_rows, dtype=torch.int).unsqueeze(-1)
+            col_indices = torch.arange(num_cols, dtype=torch.int)
+            index_mask = col_indices < kv_num_blocks.unsqueeze(-1)
+
+            # We write to one spot "out of bounds"
+            valid_indices = torch.where(index_mask, kv_indices, num_cols)
+
+            # set the values in 'a' to 1 where the indices are valid
+            dense_mask[row_indices, valid_indices] = 1
+            return dense_mask[:, :num_cols]
+
+        out = create_dense_one(self.kv_num_blocks[0, 0], self.kv_indices[0, 0])
+        return out
+
+    def to_string(self, max_rows=20, max_cols=20):
+        dense_mask = self.to_dense()
+        num_rows, num_cols = dense_mask.shape
+        vis = ""
+        def summarize_section(section):
+            percentage = section.float().mean().item()
+            if percentage == 1:
+                return "█"
+            elif percentage == 0:
+                return " "
+            else:
+                return "░"
+
+        row_step = max(1, num_rows // max_rows)
+        col_step = max(1, num_cols // max_cols)
+
+        for r in range(0, num_rows, row_step):
+            for c in range(0, num_cols, col_step):
+                char = summarize_section(dense_mask[r:r+row_step, c:c+col_step])
+                vis += char * 2
+            vis += "\n"
+        return vis
 
 def broadcast_to_dim(x, dim):
     while x.dim() < dim:
