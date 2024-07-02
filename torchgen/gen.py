@@ -8,6 +8,7 @@ from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal, Sequence, TypeVar
+from typing_extensions import assert_never
 
 import yaml
 
@@ -81,7 +82,6 @@ from torchgen.native_function_generation import (
 )
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import (
-    assert_never,
     concatMap,
     context,
     FileManager,
