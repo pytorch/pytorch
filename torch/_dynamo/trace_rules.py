@@ -3455,19 +3455,6 @@ def is_torch_inline_allowed(filename):
     return any(filename.startswith(d) for d in get_mod_inlinelist())
 
 
-@functools.lru_cache(None)
-def dynamo_dir():
-    import torch._dynamo
-
-    return _module_dir(torch._dynamo)
-
-
-def is_torch(filename):
-    if filename.startswith(dynamo_dir()):
-        return False
-    return filename.startswith(_module_dir(torch))
-
-
 """
 Main entry point for looking up the trace rule (the Dynamo variable) for a given callable object.
 """
