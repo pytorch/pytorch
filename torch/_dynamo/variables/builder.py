@@ -1945,7 +1945,9 @@ def wrap_fx_proxy_cls(
         options.update(specialized_props)
         vt = target_cls(proxy, **options)
         if (
-            initial_example_value is not None
+            "source" in options
+            and options["source"]
+            and initial_example_value is not None
             and initial_example_value not in tx.output.side_effects
         ):
             vt = tx.output.side_effects.track_object_existing(initial_example_value, vt)
