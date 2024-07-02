@@ -97,15 +97,13 @@ def get_tasks(op, backward_test, device):
                             f"{OPS_MAP[operation]}(x, y)",
                         ),
                         (
-                            (
-                                test_name,
-                                device,
-                                "scipy:" + operation,
-                                "scipy_matmul(sx, sy)",
-                            )
-                            if device == "cpu"
-                            else None
-                        ),
+                            test_name,
+                            device,
+                            "scipy:" + operation,
+                            "scipy_matmul(sx, sy)",
+                        )
+                        if device == "cpu"
+                        else None,
                     ],
                 )
             )

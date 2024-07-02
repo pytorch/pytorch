@@ -23,11 +23,10 @@ __all__ = [
     "WeightedRandomSampler",
 ]
 
+T_co = TypeVar("T_co", covariant=True)
 
-_T_co = TypeVar("_T_co", covariant=True)
 
-
-class Sampler(Generic[_T_co]):
+class Sampler(Generic[T_co]):
     r"""Base class for all Samplers.
 
     Every Sampler subclass has to provide an :meth:`__iter__` method, providing a
@@ -78,7 +77,7 @@ class Sampler(Generic[_T_co]):
                 "You may still have custom implementation that utilizes it."
             )
 
-    def __iter__(self) -> Iterator[_T_co]:
+    def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
 
     # NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]

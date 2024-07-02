@@ -1,17 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 from collections import defaultdict
-from typing import (
-    Any,
-    Callable,
-    DefaultDict,
-    Iterator,
-    List,
-    Optional,
-    Sized,
-    Type,
-    TypeVar,
-)
+from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
 
 import torch.utils.data.datapipes.iter.sharding
 from torch.utils.data.datapipes._decorator import functional_datapipe
@@ -25,8 +15,7 @@ __all__ = [
     "UnBatcherIterDataPipe",
 ]
 
-
-_T_co = TypeVar("_T_co", covariant=True)
+T_co = TypeVar("T_co", covariant=True)
 
 
 def __getattr__(name: str):
@@ -76,7 +65,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         datapipe: IterDataPipe,
         batch_size: int,
         drop_last: bool = False,
-        wrapper_class: Type[DataChunk] = DataChunk,
+        wrapper_class=DataChunk,
     ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
@@ -207,8 +196,8 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
 
     def __init__(
         self,
-        datapipe: IterDataPipe[_T_co],
-        group_key_fn: Callable[[_T_co], Any],
+        datapipe: IterDataPipe[T_co],
+        group_key_fn: Callable[[T_co], Any],
         *,
         keep_key: bool = False,
         buffer_size: int = 10000,

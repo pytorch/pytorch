@@ -31,7 +31,8 @@ if TYPE_CHECKING:
 @runtime_checkable
 class TensorLike(Protocol):
     @property
-    def dtype(self) -> Optional[torch.dtype]: ...
+    def dtype(self) -> Optional[torch.dtype]:
+        ...
 
 
 def is_torch_complex_dtype(tensor_dtype: torch.dtype) -> bool:

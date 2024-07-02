@@ -864,31 +864,23 @@ class SIMDKernel(Kernel):
                     log.warning(msg)
 
                     stride_order_list = [
-                        (
-                            ir.get_stride_order(V.graph.get_buffer(name).layout.stride)
-                            if V.graph.get_buffer(name)
-                            else None
-                        )
+                        ir.get_stride_order(V.graph.get_buffer(name).layout.stride)
+                        if V.graph.get_buffer(name)
+                        else None
                         for name in call_args
                     ]
                     size_list = [
-                        (
-                            V.graph.get_buffer(name).layout.size
-                            if V.graph.get_buffer(name)
-                            else None
-                        )
+                        V.graph.get_buffer(name).layout.size
+                        if V.graph.get_buffer(name)
+                        else None
                         for name in call_args
                     ]
                     source_list = [
-                        (
-                            "GraphInput"
-                            if name in V.graph.graph_inputs
-                            else (
-                                "IntermediateBuffer"
-                                if name in V.graph.name_to_buffer
-                                else None
-                            )
-                        )
+                        "GraphInput"
+                        if name in V.graph.graph_inputs
+                        else "IntermediateBuffer"
+                        if name in V.graph.name_to_buffer
+                        else None
                         for name in call_args
                     ]
 
