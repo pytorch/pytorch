@@ -537,6 +537,8 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
         ("CUuuid", ("hipUUID", CONV_TYPE, API_RUNTIME)),
         ("cudaGraph_t", ("hipGraph_t", CONV_TYPE, API_RAND)),
         ("cudaGraphExec_t", ("hipGraphExec_t", CONV_TYPE, API_RAND)),
+        ("__nv_bfloat16", ("__hip_bfloat16", CONV_TYPE, API_RUNTIME)),
+        ("__nv_bfloat162", ("__hip_bfloat162", CONV_TYPE, API_RUNTIME)),
     ]
 )
 
