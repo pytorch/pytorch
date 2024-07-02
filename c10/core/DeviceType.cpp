@@ -118,38 +118,50 @@ std::ostream& operator<<(std::ostream& stream, DeviceType type) {
 //     set this variable at the same time that another thread is print the
 //     device name. We could re-use the same mutex, but reading the atomic will
 //     be much faster.
-static std::atomic<bool> privateuse1_backend_name_set;
-static std::string privateuse1_backend_name;
-static std::mutex privateuse1_lock;
+std::atomic<bool>& getPrivateuse1BackendNameSet() {
+  static std::atomic<bool> privateuse1BackendNameSet;
+  return privateuse1BackendNameSet;
+}
+
+std::string& getPrivateuse1BackendName() {
+  static std::string privateuse1BackendNameSet;
+  return privateuse1BackendNameSet;
+}
+
+std::mutex& getPrivateuse1Lock() {
+  static std::mutex privateuse1Lock;
+  return privateuse1Lock;
+}
+
 
 std::string get_privateuse1_backend(bool lower_case) {
   // Applying the same atomic read memory ordering logic as in Note [Memory
   // ordering on Python interpreter tag].
   auto name_registered =
-      privateuse1_backend_name_set.load(std::memory_order_acquire);
+      getPrivateuse1BackendNameSet().load(std::memory_order_acquire);
   // Guaranteed that if the flag is set, then privateuse1_backend_name has been
   // set, and will never be written to.
   auto backend_name =
-      name_registered ? privateuse1_backend_name : "privateuseone";
+      name_registered ? getPrivateuse1BackendName() : "privateuseone";
   return backend_name;
 }
 
 void register_privateuse1_backend(const std::string& backend_name) {
-  std::lock_guard<std::mutex> guard(privateuse1_lock);
+  std::lock_guard<std::mutex> guard(getPrivateuse1Lock());
   TORCH_CHECK(
-      !privateuse1_backend_name_set.load() ||
-          privateuse1_backend_name == backend_name,
+      !getPrivateuse1BackendNameSet().load() ||
+          getPrivateuse1BackendName() == backend_name,
       "torch.register_privateuse1_backend() has already been set! Current backend: ",
-      privateuse1_backend_name);
+      getPrivateuse1BackendName());
 
-  privateuse1_backend_name = backend_name;
+  getPrivateuse1BackendName() = backend_name;
   // Invariant: once this flag is set, privateuse1_backend_name is NEVER written
   // to.
-  privateuse1_backend_name_set.store(true, std::memory_order_relaxed);
+  getPrivateuse1BackendNameSet().store(true, std::memory_order_relaxed);
 }
 
 bool is_privateuse1_backend_registered() {
-  return privateuse1_backend_name_set.load(std::memory_order_acquire);
+  return getPrivateuse1BackendNameSet().load(std::memory_order_acquire);
 }
 
 } // namespace c10
