@@ -24,16 +24,6 @@ void initXPUGenVector() {
   default_gens_xpu.resize(num_gpus);
 }
 
-inline void check_device(DeviceIndex device) {
-  TORCH_CHECK(
-      device >= 0 && device < num_gpus,
-      "device is out of range, device is ",
-      static_cast<int16_t>(device),
-      ", total number of device is ",
-      static_cast<int16_t>(num_gpus),
-      ".");
-}
-
 } // anonymous namespace
 
 // Get the default generator with a random seed for a specific xpu device.
