@@ -657,6 +657,11 @@
   self: at::sum_to(grad, self.sym_sizes())
   result: auto_linear
 
+- name: expand_as(Tensor(a) self, Tensor other) -> Tensor(a)
+  self: at::sum_to(grad, self.sym_sizes())
+  other: non_differentiable
+  result: auto_linear
+
 - name: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
   result: self_t.zero_()
