@@ -689,6 +689,7 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(PreDispatch)
       DEF_ONE(Functionalize)
       DEF_ONE(AutocastCPU)
+      DEF_ONE(AutocastMPS)
       DEF_ONE(AutocastXPU)
       DEF_ONE(AutocastHPU)
       DEF_ONE(AutocastIPU)
