@@ -13674,7 +13674,8 @@ An in-order queue of executing the respective tasks asynchronously in first in f
 It can control or synchronize the execution of other Stream or block the current host thread to ensure
 the correct task sequencing.
 
-See in-depth description of the CUDA behavior at :doc:`/notes/cuda` for details on the exact semantic that applies to all devices.
+See in-depth description of the CUDA behavior at :ref:`cuda-semantics` for details
+on the exact semantic that applies to all devices.
 
 Arguments:
     device (:class:`torch.device`, optional): the desired device for the Stream.
@@ -13821,7 +13822,7 @@ add_docstr(
     r"""
 Event.elapsed_time(end_event) -> float
 
-Returns the elapsed time in milliseconds between when this event and the :arg:`end_event` are
+Returns the elapsed time in milliseconds between when this event and the :attr:`end_event` are
 each recorded via :func:`torch.Stream.record_event`.
 
 Arguments:
