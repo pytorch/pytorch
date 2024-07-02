@@ -691,28 +691,27 @@ class CachingAutotuner(KernelInterface):
 
     @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
-        timings = self.benchmark_many_launchers(self.launchers, *args, **kwargs)
-        launcher_to_timing = {
-            launcher: timing
-            for launcher, timing in zip(self.launchers, timings)
+        timings = {
+            launcher: self.bench(launcher, *args, **kwargs)
+            for launcher in self.launchers
         }
 
-        for launcher, timing in launcher_to_timing.items():
-            self.coordesc_tuner.cache_benchmark_result(launcher.config, timing)
+        for k, v in timings.items():
+            self.coordesc_tuner.cache_benchmark_result(k.config, v)
 
         if log.isEnabledFor(logging.DEBUG):
             log.debug("Benchmark all input configs for %s, get:", self.fn.__name__)
-            for launcher, timing in launcher_to_timing.items():
+            for k, v in timings.items():
                 log.debug(
                     "%s: %f, nreg %d, nspill %d, #shared-mem %s",
-                    launcher.config,
-                    timing,
-                    launcher.n_regs,
-                    launcher.n_spills,
-                    launcher.shared,
+                    k.config,
+                    v,
+                    k.n_regs,
+                    k.n_spills,
+                    k.shared,
                 )
 
-        return launcher_to_timing
+        return timings
 
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
@@ -788,7 +787,7 @@ class CachingAutotuner(KernelInterface):
                 _, launcher = self._precompile_config(config, False)
             config2launcher[config] = launcher
 
-            out = self.benchmark_launcher(launcher, *cloned_args, **kwargs)
+            out = self.bench(launcher, *cloned_args, **kwargs)
             log.debug(
                 "COORDESC: %s: %f, nreg %d, nspill %d, #shared-mem %d",
                 launcher.config,
@@ -956,7 +955,7 @@ class DebugAutotuner(CachingAutotuner):
         (launcher,) = self.launchers
 
         if self.cached is None:
-            ms = self.benchmark_launcher(launcher, *args, grid=grid)
+            ms = self.bench(launcher, *args, grid=grid)
             num_in_out_ptrs = len(
                 [
                     arg_name
