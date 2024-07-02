@@ -100,7 +100,7 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
             default_repr = None
             if param.default is None or isinstance(param.default, (int, float, bool)):
                 default_repr = str(param.default)
-            elif isinstance(param.default, str):
+            elif isinstance(param.default, (str, torch.device)):
                 default_repr = f'"{param.default}"'
             elif isinstance(param.default, torch.dtype):
                 dtype_repr = str(param.default)
