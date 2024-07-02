@@ -594,6 +594,9 @@ class GraphModuleSerializer(metaclass=Final):
         if torch_fn := node.meta.get("torch_fn"):
             ret["torch_fn"] = ST_DELIMITER.join(list(torch_fn))
 
+        if quantization_tag := node.meta.get("quantization_tag"):
+            ret["quantization_tag"] = json.dumps(quantization_tag)
+
         return ret
 
     def serialize_script_obj_meta(
@@ -2147,6 +2150,10 @@ class GraphModuleDeserializer(metaclass=Final):
 
         if torch_fn_str := metadata.get("torch_fn"):
             ret["torch_fn"] = tuple(torch_fn_str.split(ST_DELIMITER))
+
+        if quantization_tag_str := metadata.get("quantization_tag"):
+            ret["quantization_tag"] = json.loads(quantization_tag_str)
+
         return ret
 
     def deserialize_argument_spec(self, x: Argument) -> ep.ArgumentSpec:
