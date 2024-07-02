@@ -95,7 +95,7 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
       # default include dir
       find_path(__header_dir "omp.h" HINTS "/usr/local/include")
     endif()
-    set(OMP_FLAG_AppleClang "-Xpreprocessor -fopenmp" "-Xpreprocessor -fopenmp -I${__header_dir}")
+    set(OMP_FLAG_AppleClang "-Xpreprocessor -fopenmp" "-Xpreprocessor -fopenmp -isystem ${__header_dir}")
 
     set(OMP_FLAG_HP "+Oopenmp")
     if(WIN32)
