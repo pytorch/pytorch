@@ -148,6 +148,12 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     if hasattr(activation_post_process, "is_dynamic"):
         is_dynamic = activation_post_process.is_dynamic  # type: ignore[assignment]
 
+    def get_dq_out_dtype(input_node):
+        dq_out_dtype = torch.float32
+        if 'val' in input_node.meta:
+            dq_out_dtype = input_node.meta['val'].dtype
+        return dq_out_dtype
+
     if dtype in SUPPORTED_QDTYPES and (not is_dynamic):
         # TODO: probably should cleanup this condition check, it's hard
         # to reason about this if and the following elif
@@ -218,7 +224,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             dequantized_node = graph.call_function(
                 dequantize_op,
                 tuple(dq_inputs),
-                {}
+                {"out_dtype": get_dq_out_dtype(input_node)}
             )
 
             def remap_fn(x):
@@ -326,7 +332,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             dequantized_node = graph.call_function(
                 dequantize_op,
                 tuple(dq_inputs),
-                {}
+                {"out_dtype": get_dq_out_dtype(input_node)}
             )
 
             def remap_fn(x):
