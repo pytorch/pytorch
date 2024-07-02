@@ -103,6 +103,7 @@ class _BlockSparseMask:
         dense_mask = self.to_dense()
         num_rows, num_cols = dense_mask.shape
         vis = ""
+
         def summarize_section(section):
             percentage = section.float().mean().item()
             if percentage == 1:
@@ -117,10 +118,11 @@ class _BlockSparseMask:
 
         for r in range(0, num_rows, row_step):
             for c in range(0, num_cols, col_step):
-                char = summarize_section(dense_mask[r:r+row_step, c:c+col_step])
+                char = summarize_section(dense_mask[r : r + row_step, c : c + col_step])
                 vis += char * 2
             vis += "\n"
         return vis
+
 
 def broadcast_to_dim(x, dim):
     while x.dim() < dim:
