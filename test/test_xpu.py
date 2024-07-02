@@ -1,6 +1,7 @@
 # Owner(s): ["module: intel"]
 
 import collections
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -23,6 +24,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     TestCase,
 )
+from torch.utils.checkpoint import checkpoint_sequential
 
 if not TEST_XPU:
     print("XPU not available, skipping tests", file=sys.stderr)
@@ -129,6 +131,46 @@ if __name__ == "__main__":
 """
         )
         self.assertRegex(stderr, "Cannot re-initialize XPU in forked subprocess.")
+
+    def test_lazy_init(self):
+        """Validate that no XPU calls are made during `import torch` call"""
+
+        def check_output(script: str) -> str:
+            return (
+                subprocess.check_output([sys.executable, "-c", script])
+                .decode("ascii")
+                .strip()
+            )
+
+        test_script = """\
+import torch
+from torch.multiprocessing import Process
+import copy
+
+def run_model(model, input):
+    input_xpu = input.clone().to('xpu')
+    model_xpu = copy.deepcopy(model).to('xpu')
+    loss_xpu = model_xpu(input_xpu).sum()
+    loss = model(input).sum()
+    assert torch.allclose(loss_xpu.cpu(), loss)
+
+def test_multi_process(model, input):
+    p = Process(target=run_model, args=(model, input))
+    p.start()
+    p.join()
+    assert p.exitcode == 0
+
+input = torch.rand(1, 4, 16, 16)
+model = torch.nn.Sequential(
+    torch.nn.Conv2d(4, 2, 1, stride=2),
+    torch.nn.BatchNorm2d(2, eps=1e-05, momentum=0.1),
+)
+test_multi_process(model, input)
+test_multi_process(model, input)
+print(torch.xpu.device_count())
+"""
+        rc = check_output(test_script)
+        self.assertEqual(rc, str(torch.xpu.device_count()))
 
     def test_streams(self):
         s0 = torch.xpu.Stream()
@@ -312,6 +354,11 @@ instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
 
 
 class TestXpuAutocast(TestCase):
+    # These operators are not implemented on XPU backend and we can NOT fall back
+    # them to CPU. So we have to skip them at this moment.
+    # TODO: remove these operators from skip list when they are implemented on XPU backend.
+    skip_list = ["gru_cell"]
+
     def setUp(self):
         super().setUp()
         self.autocast_lists = AutocastTestLists(torch.device("xpu"))
@@ -335,9 +382,9 @@ class TestXpuAutocast(TestCase):
         if add_kwargs is None:
             add_kwargs = {}
         fast_dtype = torch.bfloat16 if run_as_type == torch.bfloat16 else torch.float16
-        self.assertFalse(torch.is_autocast_enabled())
+        self.assertFalse(torch.is_autocast_enabled("xpu"))
         with torch.amp.autocast("xpu", dtype=fast_dtype):
-            self.assertTrue(torch.is_autocast_enabled())
+            self.assertTrue(torch.is_autocast_enabled("xpu"))
 
             out_type = out_type if out_type is not None else run_as_type
             output = output_method = None
@@ -387,7 +434,7 @@ class TestXpuAutocast(TestCase):
             # as the C++-side autocasting, and should be bitwise accurate.
             output_to_compare = output if output is not None else output_method
             with torch.amp.autocast("xpu", enabled=False):
-                self.assertFalse(torch.is_autocast_enabled())
+                self.assertFalse(torch.is_autocast_enabled("xpu"))
 
                 if module is not None and hasattr(module, op):
                     control = getattr(module, op)(
@@ -400,13 +447,15 @@ class TestXpuAutocast(TestCase):
                 self.assertTrue(type(output_to_compare) == type(control))
                 comparison = compare(output_to_compare, control)
                 self.assertTrue(comparison, f"torch.{op} result did not match control")
-            self.assertTrue(torch.is_autocast_enabled())
-        self.assertFalse(torch.is_autocast_enabled())
+            self.assertTrue(torch.is_autocast_enabled("xpu"))
+        self.assertFalse(torch.is_autocast_enabled("xpu"))
 
     def test_autocast_torch_fp16(self):
         for op_with_args in self.autocast_lists.torch_fp16:
             skip_test = False
             op, args = op_with_args[0], op_with_args[1]
+            if op in self.skip_list:
+                skip_test = True  # skip unimplemented op
             if len(op_with_args) == 3:
                 skip_test = True  # skip cudnn op
             if not skip_test:
@@ -416,6 +465,8 @@ class TestXpuAutocast(TestCase):
         for op_with_args in self.autocast_lists.torch_fp16:
             skip_test = False
             op, args = op_with_args[0], op_with_args[1]
+            if op in self.skip_list:
+                skip_test = True  # skip unimplemented op
             if len(op_with_args) == 3:
                 skip_test = True  # skip cudnn op
             if not skip_test:
@@ -428,6 +479,20 @@ class TestXpuAutocast(TestCase):
     def test_autocast_torch_expect_builtin_promote(self):
         for op, args, out_type in self.autocast_lists.torch_expect_builtin_promote:
             self._run_autocast_outofplace(op, args, torch.float32, out_type=out_type)
+
+    def test_autocast_checkpointing(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(8, 8), torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)
+        ).xpu()
+        input = torch.rand(
+            (8, 8), device="xpu", dtype=torch.float16, requires_grad=True
+        )
+        for reentrant in (True, False):
+            with torch.autocast("xpu"):
+                output = checkpoint_sequential(model, 2, input, use_reentrant=reentrant)
+            self.assertTrue(output.requires_grad)
+            self.assertTrue(output.dtype is torch.float16)
+            output.sum().backward()
 
     def test_xpu_autocast_dtype(self):
         dtype = torch.get_autocast_dtype("xpu")

@@ -210,7 +210,6 @@
 #include <ATen/ops/zeros_native.h>
 #endif
 
-#include <c10/util/StringUtil.h>
 #include <algorithm>
 #include <cstdint>
 #include <utility>
@@ -421,8 +420,9 @@ Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt st
     // it.  TODO: Actually this might not quite be correct if we use special
     // pointers to track whether or not fake cuda tensors are pinned or not
     const auto itemsize = result.dtype().itemsize();
-    c10::SymInt new_size_bytes = at::detail::computeStorageNbytes(
-        size, stride, itemsize, std::move(storage_offset));
+    c10::SymInt new_size_bytes = result.is_contiguous()
+      ? at::detail::computeStorageNbytesContiguous(size, itemsize, std::move(storage_offset))
+      : at::detail::computeStorageNbytes(size, stride, itemsize, std::move(storage_offset));
     // TODO: When there are unbacked SymInts, we unconditionally skip the
     // setter.  This is technically wrong, but we cannot conveniently test
     // the real condition in many cases, because a lot of people are using
@@ -1619,7 +1619,7 @@ Tensor alias_with_sizes_and_strides(
 
 Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   if (self.is_sparse()) {
-    AT_ERROR("reshape is not implemented for sparse tensors");
+    TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
 
   if (self.is_contiguous() && !self.is_mkldnn()) {
@@ -1682,7 +1682,7 @@ Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_sha
 // minimize breakages.
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
-    AT_ERROR("reshape is not implemented for sparse tensors");
+    TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
   DimVector shape = infer_size_dv(proposed_shape, self.numel());
 

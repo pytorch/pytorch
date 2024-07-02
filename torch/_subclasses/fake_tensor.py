@@ -148,13 +148,28 @@ def unset_fake_temporarily():
             torch._C._set_dispatch_mode(old)
 
 
+def get_plain_tensors(subclass):
+    assert is_traceable_wrapper_subclass(subclass)
+    plain_tensors = []
+    todo = [subclass]
+    while todo:
+        curr = todo.pop()
+        inner_keys, _ = curr.__tensor_flatten__()
+        for key in inner_keys:
+            val = getattr(curr, key)
+            if not is_traceable_wrapper_subclass(val):
+                plain_tensors.append(val)
+            else:
+                todo.append(val)
+    return plain_tensors
+
+
 def is_fake(x):
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
         attrs, _ = type(x).__tensor_flatten__(x)
         flattened_tensors = [getattr(x, attr) for attr in attrs]
-        # need to recurse because we could have nested subclasses
         all_fake = all(is_fake(x) for x in flattened_tensors)
         any_fake = any(is_fake(x) for x in flattened_tensors)
         assert all_fake == any_fake, "got mixed fake and real tensors!"
@@ -1713,13 +1728,13 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        maybe_abstract_impl = torch._library.simple_registry.singleton.find(
+        maybe_fake_impl = torch._library.simple_registry.singleton.find(
             func.name()
-        ).abstract_impl.kernel
-        if maybe_abstract_impl:
-            ctx = torch._library.abstract_impl.AbstractImplCtx(self, func)
-            with torch._library.abstract_impl.set_ctx_getter(lambda: ctx), self:
-                result = maybe_abstract_impl(*args, **kwargs)
+        ).fake_impl.kernel
+        if maybe_fake_impl:
+            ctx = torch._library.fake_impl.FakeImplCtx(self, func)
+            with torch._library.fake_impl.set_ctx_getter(lambda: ctx), self:
+                result = maybe_fake_impl(*args, **kwargs)
                 return maybe_propagate_real_tensors(result)
 
         # special handling for funcs registered through `register_op_impl`,

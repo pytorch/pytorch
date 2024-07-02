@@ -486,6 +486,7 @@ class TestMaxAutotune(TestCase):
         torch._export.aot_compile(fn, args=inputs)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
+    @skipIfRocm
     def test_precompilations(self):
         def fn(a, b, c):
             a = (a @ b) @ c

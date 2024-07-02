@@ -6,7 +6,6 @@ from typing import Any, cast, List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
-
 from torch.distributed._tensor._collective_utils import (
     fill_empty_tensor_to_shards,
     mesh_broadcast,
@@ -342,7 +341,7 @@ class Shard(Placement):
 
 
 @dataclass(frozen=True, kw_only=True)
-class StridedShard(Shard):
+class _StridedShard(Shard):
     """
     StridedShard allows a more flexible Shard placement on device compared to the default
     behavior where tensor is sharded on the leftmost (i.e. outermost) mesh dimension
@@ -399,26 +398,81 @@ class StridedShard(Shard):
     """
     # the shard stride for current mesh dimension: the shard on next local rank along the
     # mesh dim will be (_shard_stride - 1) shards away from the current shard.
-    _shard_stride: int
+    _total_split: int
+    # _stride: int (_stride == mesh.size(idx))
+    # TODO: post-init check that _stride is a factor of _total_split
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Shard):
             return False
         # question: does sharding order matter here???
-        return self.dim == other.dim
+        return self.dim == other.dim and self._total_split == other._total_split
 
     def __hash__(self) -> int:
-        return hash(self.dim)
+        return hash((self.dim, self._total_split))
 
     def __repr__(self) -> str:
         """
-        machine readable representation of the StridedShard placement
+        machine readable representation of the _StridedShard placement
         """
-        return f"StridedShard(dim={self.dim}, _shard_stride={self._shard_stride})"
+        return f"_StridedShard(dim={self.dim}, _total_split={self._total_split})"
 
     def __str__(self) -> str:
-        """human readable representation of the StridedShard placement"""
-        return f"StrS({self.dim}, {self._shard_stride})"
+        """human readable representation of the _StridedShard placement"""
+        return f"_S({self.dim}, {self._total_split})"
+
+    def _split_tensor(
+        self,
+        tensor: torch.Tensor,
+        num_chunks: int,
+        *,
+        with_padding: bool = True,
+        contiguous: bool = True,
+    ) -> Tuple[List[torch.Tensor], List[int]]:
+        """
+        Note: currently _StridedShard does not support padding
+        """
+        assert (
+            self.dim <= tensor.ndim
+        ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
+
+        assert (
+            self._total_split % num_chunks == 0
+        ), (
+            f"_StridedShard requires _total_split % num_chunks == 0 but "
+            f"{self._total_split} % {num_chunks} == {self._total_split % num_chunks}"
+        )
+
+        assert (
+            tensor.size(self.dim) % self._total_split == 0
+        ), (
+            "_StridedShard currently only allows even sharding but got tensor size"
+            f" {tensor.size(self.dim)} on dim {self.dim} and _total_split"
+            f" {self._total_split}"
+        )
+
+        group_size = self._total_split // num_chunks
+        total_split_tensor_list = list(
+            torch.chunk(tensor, self._total_split, dim=self.dim)
+        )
+        tensor_list = [
+            torch.cat(
+                [
+                    total_split_tensor_list[i + j * num_chunks]  # stride is num_chunks
+                    for j in range(group_size)
+                ],
+                dim=self.dim,
+            )
+            for i in range(num_chunks)
+        ]
+        
+        if contiguous:
+            tensor_list = [t.contiguous() for t in tensor_list]
+
+        return tensor_list, []
+
+    
+
 
 
 @dataclass(frozen=True)
