@@ -184,6 +184,8 @@ REQUIRE_HIGHER_TOLERANCE_TRAINING = {
     # AlbertForQuestionAnswering fails in CI GCP A100 but error does not seem
     # harmful.
     "AlbertForQuestionAnswering",
+    # DebertaForQuestionAnswering needs higher tolerance in Max-Autotune mode
+    "DebertaForQuestionAnswering",
 }
 REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
     "GPT2ForSequenceClassification",
