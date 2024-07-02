@@ -984,8 +984,14 @@ Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
   return std::get<1>(at::sort(self, dim, descending));
 }
 
-Tensor argsort_stable(const Tensor & self, bool stable, int64_t dim, bool descending) {
+Tensor argsort(const Tensor & self, bool stable, int64_t dim, bool descending) {
   return std::get<1>(at::sort(self, stable, dim, descending));
+}
+
+Tensor& argsort_out(const Tensor & self, bool stable, int64_t dim, bool descending, Tensor& out) {
+  auto values = at::empty({0}, self.options());
+  at::sort_outf(self, stable, dim, descending, values, out);
+  return out;
 }
 
 
