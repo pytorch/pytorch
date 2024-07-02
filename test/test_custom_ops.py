@@ -2969,6 +2969,17 @@ Please use `add.register_fake` to add an fake impl.""",
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             numpy_sin_inplace(x)
 
+    def test_factory_function(self):
+        @torch.library.custom_op(
+            "_torch_testing::f", mutates_args={}, device_types="cpu"
+        )
+        def f(device: torch.device) -> Tensor:
+            return torch.ones(3)
+
+        result = f(device="cpu")
+        self.assertEqual(result.device, torch.device("cpu"))
+        self.assertEqual(result, torch.ones(3))
+
 
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"

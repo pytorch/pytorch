@@ -56,7 +56,7 @@ def custom_op(
             is valid for. If no device type is provided, then the function
             is used as the default implementation for all device types.
             Examples: "cpu", "cuda".
-            When registering a device-specific implementation for an operator that accepts no Tensors, 
+            When registering a device-specific implementation for an operator that accepts no Tensors,
             we require the operator to have a "device: torch.device argument".
         schema (None | str): A schema string for the operator. If None
             (recommended) we'll infer a schema for the operator from its type
@@ -109,7 +109,7 @@ def custom_op(
         >>> expected = x.sin()
         >>> numpy_sin_inplace(x)
         >>> assert torch.allclose(x, expected)
-        >>> 
+        >>>
         >>> # Example of a factory function
         >>> @torch.library.custom_op("mylib::bar", mutates_args={}, device_types="cpu")
         >>> def bar(device: torch.device) -> Tensor:
@@ -128,16 +128,19 @@ def custom_op(
             schema_str = torch._custom_op.impl.infer_schema(fn, mutates_args)
         else:
             schema_str = schema
-        
         from torch._library.infer_schema import has_device_arg, has_tensor_arg
 
-
-        if not has_tensor_arg(schema_str) and not has_device_arg(schema_str) and device_types is not None:
-            raise ValueError(
-                f"Functions without tensor inputs are required to have torch.device input."
-            )
+        dispatch_using_device_arg = False
+        if not has_tensor_arg(schema_str) and device_types is not None:
+            if not has_device_arg(schema_str):
+                raise ValueError(
+                    "Functions without tensor inputs are required to have a `device: torch.device` argument"
+                )
+            dispatch_using_device_arg = True
         namespace, opname = name.split("::")
-        result = CustomOpDef(namespace, opname, schema_str, fn)
+        result = CustomOpDef(
+            namespace, opname, schema_str, fn, dispatch_using_device_arg
+        )
         if schema is not None:
             # Check that schema's alias annotations match those of `mutates_args`.
             expected = set()
@@ -167,9 +170,18 @@ class CustomOpDef:
 
     You should not instantiate CustomOpDef directly; instead, use the
     :func:`torch.library.custom_op` API.
+
+    If `dispatch_using_device_arg` is True, we switch on the device argument to select the correct backend to dispatch to.
     """
 
-    def __init__(self, namespace: str, name: str, schema: str, fn: Callable) -> None:
+    def __init__(
+        self,
+        namespace: str,
+        name: str,
+        schema: str,
+        fn: Callable,
+        dispatch_using_device_arg: bool,
+    ) -> None:
         # Fields used to interface with the PyTorch dispatcher
         self._namespace = namespace
         self._name = name
@@ -185,6 +197,8 @@ class CustomOpDef:
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher()
         OPDEFS[self._qualname] = self
+
+        self._dispatch_using_device_arg = dispatch_using_device_arg
 
     @property
     def _qualname(self) -> str:
@@ -520,6 +534,15 @@ class CustomOpDef:
             )
 
     def __call__(self, *args, **kwargs):
+        if self._dispatch_using_device_arg:
+            if "device" not in kwargs:
+                raise RuntimeError(f"{self._name} requires a device argument")
+            device = kwargs["device"]
+            if device not in self._backend_fns:
+                raise RuntimeError(
+                    f"{self._name} does not have a kernel registered for {device}"
+                )
+            return self._backend_fns[device](*args, **kwargs)
         return self._opoverload(*args, **kwargs)
 
 
