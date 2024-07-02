@@ -799,10 +799,6 @@ class OutputGraph:
                     example_value=target,
                     **options,
                 )
-
-                # Track the object so to avoid duplicate registration in case of
-                # different sources pointing to the same tensor object.
-                vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
                 return vt
 
         elif isinstance(target, torch.nn.Module):
