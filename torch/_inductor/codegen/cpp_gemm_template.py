@@ -213,62 +213,12 @@ class CppPackedGemmTemplate(CppTemplate):
 
     @cache_on_self
     def cache_blocking(self) -> GemmBlocking:
-        def get_cache_blocking(register_blocking, thread_blocking):
-            M0 = register_blocking.block_m
-            N0 = register_blocking.block_n
-            K0 = register_blocking.block_k
-
-            Mc_blocks = thread_blocking.block_m
-            Kc_blocks = thread_blocking.block_k
-
-            # TODO: support multi-thread
-            if self.num_threads != 1:
-                return Mc_blocks, Kc_blocks
-
-            # TODO: tune the factor here
-            L1_limit_factor = 1
-            L2_limit_factor = 0.5
-
-            L1_cache_size = (
-                torch._C._cpu._L1_cache_size()
-            )  # per core cache size in Bytes
-            assert (
-                L1_cache_size > 0
-            ), f"Expect L1_cache_size > 0 but got {L1_cache_size}"
-            L2_cache_size = (
-                torch._C._cpu._L2_cache_size()
-            )  # per core cache size in Bytes
-            assert (
-                L2_cache_size > 0
-            ), f"Expect L2_cache_size > 0 but got {L2_cache_size}"
-            B_size_limit = L1_cache_size * L1_limit_factor
-            A_size_limit = L2_cache_size * L2_limit_factor
-
-            num_byte = torch.tensor([], dtype=self.layout.dtype).element_size()
-
-            size_cache_B = K0 * Kc_blocks * N0 * num_byte
-
-            import math
-
-            def round_down(f):
-                return math.floor(f)
-
-            if size_cache_B > B_size_limit:
-                Kc_blocks = round_down(B_size_limit / (K0 * N0 * num_byte))
-
-            size_cache_A = M0 * Mc_blocks * K0 * Kc_blocks * num_byte
-            if size_cache_A > A_size_limit:
-                Mc_blocks = round_down(A_size_limit / (M0 * Kc_blocks * K0 * num_byte))
-            return Mc_blocks, Kc_blocks
-
+        # TODO(jgong5): improve cache blocking with CPU info
         assert (
             not self.is_dynamic_M
         ), "Unable to determine cache blocking for dynamic M."
-        register_blocking = self.register_blocking
         thread_blocking = self.thread_blocking()
-
-        Mc_blocks, Kc_blocks = get_cache_blocking(register_blocking, thread_blocking)
-        return GemmBlocking(Mc_blocks, 1, Kc_blocks)
+        return GemmBlocking(thread_blocking.block_m, 1, thread_blocking.block_k)
 
     @staticmethod
     def add_choices(
