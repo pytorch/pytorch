@@ -5054,6 +5054,26 @@ def forward(self, x, b_t, y):
     return add_1""",
         )
 
+    def test_max_dynamic(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                # x: [s0, s1]
+                # y: [s2, s3]
+                a = x[0] + y[0]  # s1 == s3
+                b = x.T @ torch.randn(4, 4)  # s0 == 4
+                torch._check(y.shape[0] >= 8)
+                torch._check(y.shape[0] <= 16)  # 8 <= s2 <= 16
+
+        inputs = (
+            torch.randn(4, 8),
+            torch.randn(9, 8),
+        )
+        dynamic_shapes = {
+            "x": {0: Dim("dx0"), 1: Dim("dx1")},
+            "y": {0: Dim("dy0"), 1: Dim("dy1")},
+        }
+        export(Model(), inputs, dynamic_shapes=dynamic_shapes)
+
     def test_predispatch_grad_wrappers(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
