@@ -1690,7 +1690,7 @@ def check_memory_pool(device, pool_id, live_storages_ptrs: List[StorageWeakRefWr
         lambda: f"These storage data ptrs are not allocated in pool {pool_id} but should be {unique_storages}",
     )
 
-    if allocated_not_in_live_storages != 0:
+    if len(allocated_not_in_live_storages) != 0:
         formatted = []
         for dp, block in allocated_not_in_live_storages.items():
             trace = format_tb(block.get("frames", []))
