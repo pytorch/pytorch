@@ -347,8 +347,8 @@ flex_attention_template = TritonTemplate(
         # update pointers
         indices_idx = start_n // SPARSE_KV_MULTIPLE
 
-        cur_block = tl.load(kv_indices + indices_idx, eviction_policy="evict_last")
-        next_block = tl.load(kv_indices + indices_idx + 1, eviction_policy="evict_last")
+        cur_block = tl.load(kv_indices + indices_idx)
+        next_block = tl.load(kv_indices + indices_idx + 1)
         needs_jump = (start_n + 1) % SPARSE_KV_MULTIPLE == 0
         jump_to_block = (next_block - cur_block ) * SPARSE_KV_BLOCK_SIZE - (SPARSE_KV_MULTIPLE - 1) * BLOCK_N
 
