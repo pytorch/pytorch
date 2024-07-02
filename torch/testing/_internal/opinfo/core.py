@@ -1197,6 +1197,7 @@ class OpInfo:
         return TrackedInputIter(
             iter(conj_samples),
             "conjugate sample input",
+            set_seed=kwargs.get("set_seed", True),
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
 
@@ -1220,6 +1221,7 @@ class OpInfo:
         return TrackedInputIter(
             iter(samples),
             "sample input",
+            set_seed=kwargs.get("set_seed", True),
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
 
@@ -1237,7 +1239,8 @@ class OpInfo:
             )
             return TrackedInputIter(
                 iter(samples),
-                "sample input",
+                "reference input",
+                set_seed=kwargs.get("set_seed", True),
                 restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
             )
 
@@ -1250,6 +1253,7 @@ class OpInfo:
         return TrackedInputIter(
             iter(references),
             "reference input",
+            set_seed=kwargs.get("set_seed", True),
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
 
@@ -1262,6 +1266,7 @@ class OpInfo:
             iter(errs),
             "error input",
             callback=lambda e: e.sample_input,
+            set_seed=kwargs.get("set_seed", True),
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
 
