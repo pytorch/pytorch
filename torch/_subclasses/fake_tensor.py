@@ -1040,9 +1040,10 @@ class _SymIntOutputStub:
 class _DispatchCacheEntry:
     """
     Entry type for the FakeTensor dispatch cache. Accounts for two possibilities:
-    1) The op is inplace, and a hit means we need to alias the argument at a given
-    index. 2) We need to synthesize a new FakeTensor given tensor metadata. For view
-    ops, we further capture the index of the arg to alias.
+    1) The op is inplace, and a hit means we need to alias the argument at a
+       given index.
+    2) We need to synthesize a new FakeTensor given tensor metadata. For view
+       ops, we further capture the index of the arg to alias.
     """
 
     inplace_idx: Optional[int] = None
@@ -1083,6 +1084,13 @@ class _CacheKeyState:
 
     def __init__(self) -> None:
         self.sym_node_lookup = {}
+
+    def cache_on_shape_env(self) -> bool:
+        """
+        Returns true if the CacheKey needs to be cached on the ShapeEnv
+        rather than the global cache.
+        """
+        return bool(self.sym_node_lookup)
 
     def convert_sym_int(self, result: List[object], arg: SymInt) -> None:
         self.sym_node_lookup[id(arg.node)] = len(result)
@@ -1336,7 +1344,12 @@ class FakeTensorMode(TorchDispatchMode):
         try:
             state = _CacheKeyState()
             key = self._cache_key(state, func, args, kwargs)
-            entry = FakeTensorMode.cache.get(key, None)
+            if state.cache_on_shape_env():
+                assert self.shape_env is not None
+                cache = self.shape_env.fake_tensor_cache
+            else:
+                cache = FakeTensorMode.cache
+            entry = cache.get(key, None)
             if entry is not None:
                 output = self._output_from_cache_entry(entry, key, func, args)
                 FakeTensorMode.cache_hits += 1
@@ -1348,7 +1361,7 @@ class FakeTensorMode(TorchDispatchMode):
                 self._validate_cache_key(func, args, kwargs)
                 output = self._dispatch_impl(func, types, args, kwargs)
                 entry = self._make_cache_entry(state, key, func, args, kwargs, output)
-                FakeTensorMode.cache[key] = entry
+                cache[key] = entry
                 FakeTensorMode.cache_misses += 1
         except _BypassDispatchCache as e:
             FakeTensorMode.cache_bypasses[e.reason] += 1
@@ -2260,6 +2273,9 @@ class FakeTensorMode(TorchDispatchMode):
         )
 
 
+_StoragePointer = object
+
+
 # NB: returns fake tensors
 def run_fallback_kernel(
     fake_mode: FakeTensorMode,
@@ -2294,7 +2310,7 @@ def run_fallback_kernel(
 
         r = func(*args, **kwargs)
 
-    storages: Set[object] = set()
+    storages: Set[_StoragePointer] = set()
 
     for e in flat_args:
         if isinstance(e, Tensor):
