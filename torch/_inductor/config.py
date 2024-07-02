@@ -652,6 +652,9 @@ class cpp:
         == "1"
     )
 
+    # Use ftree-loop-vectorize when compiling
+    enable_tree_loop_vec_opt_flag = False
+
 
 # config specific to codegen/triton.py
 class triton:
