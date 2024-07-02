@@ -7,14 +7,21 @@ from typing import cast, List, Tuple
 import sympy
 
 import torch
-from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
+from ..ir import ExternKernel
 from ..runtime.runtime_utils import next_power_of_2
 from ..utils import ceildiv as cdiv
 
 log = logging.getLogger(__name__)
+
+
+
+def realize_inputs(*args):
+    if len(args) == 1:
+        return ExternKernel.require_stride1(ExternKernel.realize_input(args[0]))
+    return [realize_inputs(x) for x in args]
 
 
 def triton_config(num_stages, num_warps, **kwargs):

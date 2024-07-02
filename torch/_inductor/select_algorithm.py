@@ -1658,11 +1658,5 @@ def autotune_select_algorithm(*args, **kwargs):
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 
 
-def realize_inputs(*args):
-    if len(args) == 1:
-        return ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(args[0]))
-    return [realize_inputs(x) for x in args]
-
-
 # ensure lowering is imported so that `extern_kernels.*` is populated
 from . import lowering  # noqa: F401
