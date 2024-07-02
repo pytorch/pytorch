@@ -156,10 +156,18 @@ class FileManager:
                 env["generated_comment"] = comment
             template = _read_template(template_path)
             substitute_out = template.substitute(env)
+            # Add an extra blank line before class/function definitions if it is followed by a docstring
             return re.sub(
-                r'("""\n)( *(@.*\n)* *def)',
-                r"\g<1>\n\g<2>",  # add an extra blank line after function docstring
+                r'''
+                (""")\n+             # match triple quotes
+                (
+                    ([ ]*@.+\n)*     # match decorators if any
+                    [ ]*(class|def)  # match class/function definition
+                )
+                ''',
+                r"\g<1>\n\n\g<2>",
                 substitute_out,
+                flags=re.VERBOSE,
             )
         if isinstance(env, str):
             return env
