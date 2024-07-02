@@ -1,17 +1,22 @@
 # Owner(s): ["oncall: quantization"]
 
-import torch
 import unittest
+
+import torch
 from torch.ao.quantization.experimental.observer import APoTObserver
 from torch.ao.quantization.experimental.quantizer import quantize_APoT
 
+
 class TestQuantizedTensor(unittest.TestCase):
-    r""" Tests int_repr on APoTQuantizer with random tensor2quantize
+    r"""Tests int_repr on APoTQuantizer with random tensor2quantize
     and hard-coded values
     """
+
     def test_int_repr(self):
         # generate tensor with random fp values
-        tensor2quantize = tensor2quantize = torch.tensor([0, 0.0215, 0.1692, 0.385, 1, 0.0391])
+        tensor2quantize = tensor2quantize = torch.tensor(
+            [0, 0.0215, 0.1692, 0.385, 1, 0.0391]
+        )
 
         observer = APoTObserver(b=4, k=2)
 
@@ -20,11 +25,13 @@ class TestQuantizedTensor(unittest.TestCase):
         qparams = observer.calculate_qparams(signed=False)
 
         # get apot quantized tensor result
-        qtensor = quantize_APoT(tensor2quantize=tensor2quantize,
-                                alpha=qparams[0],
-                                gamma=qparams[1],
-                                quantization_levels=qparams[2],
-                                level_indices=qparams[3])
+        qtensor = quantize_APoT(
+            tensor2quantize=tensor2quantize,
+            alpha=qparams[0],
+            gamma=qparams[1],
+            quantization_levels=qparams[2],
+            level_indices=qparams[3],
+        )
 
         qtensor_data = qtensor.int_repr().int()
 
@@ -37,5 +44,6 @@ class TestQuantizedTensor(unittest.TestCase):
 
         self.assertTrue(torch.equal(qtensor_data, expected_qtensor_data))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
