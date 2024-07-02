@@ -45,6 +45,9 @@ class TestModule(TestCase):
         _check_module(module.named_buffers(), "Buffer")
 
     @modules(module_db)
+    @toleranceOverride({torch.float16: tol(1e-2, 0),
+                        torch.float32: tol(1e-5, 0),
+                        torch.float64: tol(1e-5, 0)})
     def test_forward(self, device, dtype, module_info, training):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
@@ -523,7 +526,8 @@ class TestModule(TestCase):
 
     @onlyCUDA
     @with_tf32_off  # Turn off TF32 to compute at full precision https://github.com/pytorch/pytorch/issues/86798
-    @toleranceOverride({torch.float32: tol(5e-2, 0),
+    @toleranceOverride({torch.float16: tol(1e-2, 0),
+                        torch.float32: tol(5e-2, 0),
                         torch.float64: tol(4e-4, 0)})
     @modules(module_db)
     def test_cpu_gpu_parity(self, device, dtype, module_info, training):
