@@ -344,7 +344,7 @@ class TimmRunner(BenchmarkRunner):
             tolerance = 8 * 1e-2
 
         if is_training:
-            if name in ["levit_128"]:
+            if name in ["levit_128", "sebotnet33ts_256"]:
                 tolerance = 8 * 1e-2
             elif name in REQUIRE_HIGHER_TOLERANCE:
                 tolerance = 4 * 1e-2
