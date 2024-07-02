@@ -356,6 +356,7 @@ class BaseSchedulerNode:
         # hacky check for if V.kernel is a real kernel or NullHandler
         if (
             hasattr(V.kernel, "args")
+            and config.allow_buffer_reuse
             and self.get_name() in V.kernel.inplace_update_buffers
         ):
             V.graph.wrapper_code.codegen_inplace_reuse(
