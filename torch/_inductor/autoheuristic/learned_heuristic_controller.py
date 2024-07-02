@@ -5,10 +5,8 @@ import pkgutil
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
-from torch._inductor.autoheuristic_utils import Choice, ContextDictT
-from torch._inductor.fx_passes.learned_heuristics.learnedheuristic_interface import (
-    LearnedHeuristic,
-)
+from torch._inductor.autoheuristic.autoheuristic_utils import Choice, ContextDictT
+from torch._inductor.autoheuristic.learnedheuristic_interface import LearnedHeuristic
 
 
 def find_and_instantiate_subclasses(
@@ -81,7 +79,7 @@ class LearnedHeuristicController:
 
         if not LearnedHeuristicController.heuristics_initialized:
             # learned heuristics are generated into the following package
-            learned_heuristics_package = "torch._inductor.fx_passes.learned_heuristics"
+            learned_heuristics_package = "torch._inductor.autoheuristic.artifacts"
 
             # learned heuristics have to be of type LearnedHeuristic
             base_class = LearnedHeuristic

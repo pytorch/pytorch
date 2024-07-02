@@ -1,10 +1,8 @@
 # flake8: noqa: B950
 from typing import Any, Tuple
 
-from torch._inductor.autoheuristic_utils import Choice, ContextDictT
-from torch._inductor.fx_passes.learned_heuristics.learnedheuristic_interface import (
-    LearnedHeuristic,
-)
+from torch._inductor.autoheuristic.autoheuristic_utils import Choice, ContextDictT
+from torch._inductor.autoheuristic.learnedheuristic_interface import LearnedHeuristic
 
 
 class PadMMA100(LearnedHeuristic):

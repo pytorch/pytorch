@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 
-from torch._inductor.autoheuristic_utils import (
+from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHOperation,
     Choice,
     CHOICE_COL,
@@ -13,7 +13,7 @@ from torch._inductor.autoheuristic_utils import (
     FEEDBACK_COL,
     Value,
 )
-from torch._inductor.fx_passes.learned_heuristics.learned_heuristic_controller import (
+from torch._inductor.autoheuristic.learned_heuristic_controller import (
     LearnedHeuristicController,
 )
 from torch._inductor.runtime.runtime_utils import cache_dir

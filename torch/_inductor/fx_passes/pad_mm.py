@@ -10,8 +10,12 @@ import torch._inductor.runtime.runtime_utils
 from torch import Tensor
 from torch._dynamo.utils import counters
 from torch._inductor import utils
-from torch._inductor.autoheuristic import AHContext, AutoHeuristic, LocalFeedback
-from torch._inductor.autoheuristic_utils import pad_mm_operations
+from torch._inductor.autoheuristic.autoheuristic import (
+    AHContext,
+    AutoHeuristic,
+    LocalFeedback,
+)
+from torch._inductor.autoheuristic.autoheuristic_utils import pad_mm_operations
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 

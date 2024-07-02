@@ -1,6 +1,6 @@
 from typing import Any, List, Optional, Tuple
 
-from torch._inductor.autoheuristic_utils import Choice, ContextDictT
+from torch._inductor.autoheuristic.autoheuristic_utils import Choice, ContextDictT
 
 
 class LearnedHeuristic:

@@ -6,7 +6,11 @@ import torch
 
 import torch._inductor.config as inductor_config
 
-from torch._inductor.autoheuristic import AHContext, AutoHeuristic, LocalFeedback
+from torch._inductor.autoheuristic.autoheuristic import (
+    AHContext,
+    AutoHeuristic,
+    LocalFeedback,
+)
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_gpu_shared_memory

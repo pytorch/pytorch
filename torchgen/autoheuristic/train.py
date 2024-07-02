@@ -12,7 +12,7 @@ from scipy.stats import gmean  # type: ignore[import-untyped]
 from sklearn.model_selection import train_test_split  # type: ignore[import-untyped]
 from sklearn.tree import DecisionTreeRegressor  # type: ignore[import-untyped]
 
-from torch._inductor.autoheuristic import deserialize_data
+from torch._inductor.autoheuristic.autoheuristic import deserialize_data
 
 # TODO (AlnisM): Fix these warnings
 warnings.filterwarnings(
@@ -30,7 +30,7 @@ class AHTrain:
     This class is responsible for generating a heuristic by using data collected with AutoHeuristic. It will learn a
     regression tree that predicts a score that represents how well a specific choice will perform given an input.
     A higher score means a better choice. The heuristic will be generated in a file named <heuristic_name>.py in the
-    torch/_inductor/fx_passes/learned_heuristics/ directory.
+    torch/_inductor/autoheuristic/artifacts/ directory.
     """
 
     def __init__(self):
@@ -409,8 +409,8 @@ class AHTrain:
         boiler_plate = f"""# flake8: noqa: B950
 from typing import Any, Tuple
 
-from torch._inductor.autoheuristic_utils import Choice, ContextDictT
-from torch._inductor.fx_passes.learned_heuristics.learnedheuristic_interface import (
+from torch._inductor.autoheuristic.autoheuristic_utils import Choice, ContextDictT
+from torch._inductor.autoheuristic.learnedheuristic_interface import (
     LearnedHeuristic,
 )
 
@@ -490,7 +490,7 @@ class {heuristic_name}(LearnedHeuristic):
         dt_to_python(0, 1)
 
         output_file = (
-            f"../../torch/_inductor/fx_passes/learned_heuristics/_{heuristic_name}.py"
+            f"../../torch/_inductor/autoheuristic/artifacts/_{heuristic_name}.py"
         )
         path = f"{output_file}"
         with open(path, "w") as f:
