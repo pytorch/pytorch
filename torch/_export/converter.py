@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import torch
 import torch.export._trace
 
+from torch.export import Dim
+from torch.export.dynamic_shapes import refine_dynamic_shapes_from_suggested_fixes
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     ConstantArgument,
@@ -19,6 +21,7 @@ from torch.export.graph_signature import (
 )
 from torch.fx import subgraph_rewriter
 from torch.onnx.utils import _create_jit_graph
+from torch.utils._pytree import tree_map
 
 log = logging.getLogger(__name__)
 
@@ -1009,12 +1012,45 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
         self, gm: torch.fx.GraphModule, tensor_constants: Dict[str, torch.Tensor]
     ):
         # TODO: adjust input orders to match GraphSignature convention
-        ep = torch.export._trace._export(
-            gm,
+
+        global_idx = 0
+
+        def _tree_map_helper_to_get_dynamic_shape(x):
+            nonlocal global_idx
+            if isinstance(x, torch.Tensor):
+                dynamic_shape = {}
+                for i, _ in enumerate(x.size()):
+                    dynamic_shape[i] = Dim(f"dim{global_idx}_{i}")
+                global_idx += 1
+                return dynamic_shape
+            return None
+
+        # Get dummy dynamic shapes only for tensors.
+        dynamic_shapes = tree_map(
+            _tree_map_helper_to_get_dynamic_shape,
             self.sample_args,
-            strict=False,
-            pre_dispatch=True,
         )
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            try:
+                ep = torch.export._trace._export(
+                    gm,
+                    self.sample_args,
+                    strict=False,
+                    pre_dispatch=True,
+                    dynamic_shapes=dynamic_shapes,
+                )
+            except torch._dynamo.exc.UserError as exc:
+                dynamic_shapes = refine_dynamic_shapes_from_suggested_fixes(
+                    exc.msg, dynamic_shapes
+                )
+                ep = torch.export._trace._export(
+                    gm,
+                    self.sample_args,
+                    strict=False,
+                    pre_dispatch=True,
+                    dynamic_shapes=dynamic_shapes,
+                )
 
         # Post-processing to make sure the ExportedProgram states are correct.
         # Because during conversion, we set tensor constants as GetAttr,
