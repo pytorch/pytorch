@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
-import pathlib
 import subprocess
 import textwrap
+from pathlib import Path
 from typing import Any
 
 import yaml
 
 
-REPO_ROOT = pathlib.Path(__file__).parent.parent.parent
+REPO_ROOT = Path(__file__).parent.parent.parent
 CONFIG_YML = REPO_ROOT / ".circleci" / "config.yml"
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 
