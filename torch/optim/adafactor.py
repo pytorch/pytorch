@@ -44,12 +44,14 @@ class Adafactor(Optimizer):
             eps=eps,
             d=d,
             weight_decay=weight_decay,
+            differentiable=False,
         )
         super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
+            group.setdefault("differentiable", False)
             for p in group["params"]:
                 p_state = self.state.get(p, [])
                 if len(p_state) != 0 and not torch.is_tensor(p_state["step"]):
@@ -236,7 +238,7 @@ def _single_tensor_adafactor(
 
         import math
 
-        beta2_t = 1 - torch.pow(step_t, 0.8)
+        beta2_t = 1 - step_t.item() ** 0.8
         step_size = min(0.01, 1 / math.sqrt(step_t))
         alpha = max(eps2, param.norm(2).item() / math.sqrt(param.numel())) * step_size
 

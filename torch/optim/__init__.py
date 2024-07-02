@@ -8,6 +8,7 @@ future.
 
 from torch.optim import lr_scheduler, swa_utils
 from torch.optim.adadelta import Adadelta
+from torch.optim.adafactor import Adafactor
 from torch.optim.adagrad import Adagrad
 from torch.optim.adam import Adam
 from torch.optim.adamax import Adamax
@@ -24,6 +25,7 @@ from torch.optim.sparse_adam import SparseAdam
 
 
 del adadelta  # type: ignore[name-defined] # noqa: F821
+del adafactor  # type: ignore[name-defined] # noqa: F821
 del adagrad  # type: ignore[name-defined] # noqa: F821
 del adam  # type: ignore[name-defined] # noqa: F821
 del adamw  # type: ignore[name-defined] # noqa: F821
