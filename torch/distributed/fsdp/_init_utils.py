@@ -371,7 +371,7 @@ def _init_device_handle(
     If a device is specified by ``device_id``,
     then returns device handle corresponds to that device type. Otherwise, If the
     module is already on a non-CPU device, then the device type is that non-CPU device type.
-    If the module is on CPU or meta, then the device type is the current cuda device.
+    If the module is on CPU or meta, then the device type is the current device.
 
     This method will be called once ignored paramters was determined, as the device handle maybe needed
     for other initialization.
@@ -395,9 +395,7 @@ def _init_device_handle(
                         f"FSDP does not support modules with different device types "
                         f"but got params on {determined_device.type} and {param.device.type}"
                     )
-        determined_device = determined_device or torch.device(
-            "cuda", torch.cuda.current_device()
-        )
+        determined_device = determined_device or torch._C._get_accelerator()
 
     state._device_handle = _FSDPDeviceHandle.from_device(determined_device)
     return state
@@ -552,7 +550,9 @@ def _init_param_handle_from_module(
 ) -> _FSDPState:
     """Initialize a ``FlatParamHandle`` from a module ``fully_sharded_module``."""
     _check_single_device_module(fully_sharded_module, state._ignored_params, device_id)
-    device_from_device_id = _get_device_from_device_id(device_id, state.rank)
+    device_from_device_id = _get_device_from_device_id(
+        device_id, state.rank, state._device_handle
+    )
     is_meta_module, is_torchdistX_deferred_init = _need_to_materialize_module(
         fully_sharded_module, state._ignored_params, state._ignored_modules
     )
@@ -563,7 +563,10 @@ def _init_param_handle_from_module(
         )
     elif is_meta_module:
         _materialize_meta_module(
-            fully_sharded_module, device_id, state._ignored_modules
+            fully_sharded_module,
+            device_id,
+            state._ignored_modules,
+            state._device_handle,
         )
     elif is_torchdistX_deferred_init:
         deferred_init.materialize_module(
@@ -589,6 +592,7 @@ def _init_param_handle_from_module(
         state._ignored_params,
         device_from_device_id,
         state.rank,
+        state._device_handle,
     )
 
     managed_params = list(_get_orig_params(fully_sharded_module, state._ignored_params))
@@ -795,6 +799,7 @@ def _check_single_device_module(
 def _get_device_from_device_id(
     device_id: Optional[Union[int, torch.device]],
     rank: int,
+    device_handle: _FSDPDeviceHandle,
 ) -> Optional[torch.device]:
     """
     Return a ``torch.device`` for the specified ``device_id``.
@@ -807,16 +812,16 @@ def _get_device_from_device_id(
     device = (
         device_id if isinstance(device_id, torch.device) else torch.device(device_id)
     )
-    if device == torch.device("cuda"):
+    if device.type != "cpu" and device.index is None:
         warnings.warn(
             f"FSDP got the argument `device_id` {device_id} on rank "
             f"{rank}, which does not have an explicit index. "
-            f"FSDP will use the current device {torch.cuda.current_device()}. "
-            "If this is incorrect, please explicitly call `torch.cuda.set_device()` "
+            f"FSDP will use the current device {device_handle.current_device()}. "
+            f"If this is incorrect, please explicitly call `torch.{device.type}.set_device()` "
             "before FSDP initialization or pass in the explicit device "
             "index as the `device_id` argument."
         )
-        device = torch.device("cuda", torch.cuda.current_device())
+        device = torch.device(device_handle.current_device())
     return device
 
 
@@ -868,10 +873,11 @@ def _materialize_meta_module(
     root_module: nn.Module,
     device_from_device_id: Optional[torch.device],
     ignored_modules: Set[nn.Module],
+    device_handle: _FSDPDeviceHandle,
 ):
     # Run default meta device initialization
     materialization_device = device_from_device_id or torch.device(
-        torch.cuda.current_device()
+        device_handle.current_device()
     )
     modules_to_materialize = _get_modules_to_materialize(root_module, ignored_modules)
     try:
@@ -1021,19 +1027,18 @@ def _get_compute_device(
     ignored_params: Set[nn.Parameter],
     device_from_device_id: Optional[torch.device],
     rank: int,
+    device_handle: _FSDPDeviceHandle,
 ) -> torch.device:
     """
     Determine and return this FSDP instance's compute device.
 
-    If a device is
-    specified by ``device_id``, then returns that device. Otherwise, If the
-    module is already on a non-CPU device, then the compute device is that non-CPU
+    If the module is already on a non-CPU device, then the compute device is that non-CPU
     device. If the module is on CPU, then the compute device is the current
     device.
 
     Since this method should be called after materializing the module, any
     non-CPU device should not be meta device. For now, the compute device is
-    always a CUDA GPU device with its explicit index.
+    always a CUDA or CUDA-like device with its explicit index.
 
     Precondition: ``_check_single_device_module()`` and
     ``_move_module_to_device()``.
@@ -1042,10 +1047,7 @@ def _get_compute_device(
     if param is not None and param.device.type != "cpu":
         compute_device = param.device  # Determined by model param placement
     else:
-        if device_from_device_id is not None and device_from_device_id.type != "cuda":
-            compute_device = device_from_device_id  # Determined by custom backend
-        else:
-            compute_device = torch.device("cuda", torch.cuda.current_device())
+        compute_device = torch.device(device_handle.current_device())
     if device_from_device_id is not None and compute_device != device_from_device_id:
         raise ValueError(
             f"Inconsistent compute device and `device_id` on rank {rank}: "
