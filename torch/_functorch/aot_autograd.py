@@ -1353,7 +1353,7 @@ def _aot_export_function(
 
     dynamic_shapes = False
     if len(flat_args) == 0:
-        dynamic_shapes = FakeTensorMode()
+        dynamic_shapes = True
     else:
         for x in flat_args:
             if isinstance(x, FakeTensor):
