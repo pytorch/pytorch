@@ -181,9 +181,11 @@ class ForeachKernel(Kernel):
     def grid(self):
         return (
             self.x_block_count,
-            ceildiv(int(self.sub_kernels[0].numels[0]), self.block_size_2d)
-            if self.blocking_2d
-            else 1,
+            (
+                ceildiv(int(self.sub_kernels[0].numels[0]), self.block_size_2d)
+                if self.blocking_2d
+                else 1
+            ),
             1,
         )
 

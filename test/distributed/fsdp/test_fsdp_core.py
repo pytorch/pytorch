@@ -434,7 +434,7 @@ class TestAutograd(FSDPTest):
             {
                 "sharding_strategy": [
                     ShardingStrategy.FULL_SHARD,
-                    ShardingStrategy.SHARD_GRAD_OP
+                    ShardingStrategy.SHARD_GRAD_OP,
                     # Skip testing `NO_SHARD` since it doubly uses
                     # `_use_unsharded_views()` for sharded views. Testing
                     # `FULL_SHARD` and `SHARD_GRAD_OP` provides good confidence

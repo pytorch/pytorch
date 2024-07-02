@@ -385,10 +385,12 @@ def gen_dispatchkey_nativefunc_headers(
     autograd_declarations = sorted(
         set(
             concatMap(
-                lambda f: []
-                if autograd_dispatch_key is None
-                else dest.compute_native_function_declaration(
-                    f, backend_indices[autograd_dispatch_key]
+                lambda f: (
+                    []
+                    if autograd_dispatch_key is None
+                    else dest.compute_native_function_declaration(
+                        f, backend_indices[autograd_dispatch_key]
+                    )
                 ),
                 grouped_native_functions,
             )
@@ -487,9 +489,9 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
         lambda: {
             "extra_cuda_headers": "",
             "external_backend_headers": external_backend_headers_str,
-            "ops_headers": "#include <ATen/Functions.h>"
-            if not per_operator_headers
-            else "",
+            "ops_headers": (
+                "#include <ATen/Functions.h>" if not per_operator_headers else ""
+            ),
             "DispatchKey": dispatch_key,
             "dispatch_namespace": dispatch_key.lower(),
             "dispatch_headers": dest.gen_registration_headers(

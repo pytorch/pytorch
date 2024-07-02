@@ -3762,9 +3762,9 @@ class TestQuantizeJit(QuantizationTestCase):
 
         model_eager = quantize(eager_model, test_only_eval_fn, [self.calib_data])
         qconfig_dict = {
-            "sub2.fc1": default_per_channel_qconfig
-            if qengine_is_fbgemm()
-            else default_qconfig,
+            "sub2.fc1": (
+                default_per_channel_qconfig if qengine_is_fbgemm() else default_qconfig
+            ),
             "fc3": default_qconfig,
         }
         model_traced = torch.jit.trace(script_model, self.calib_data[0][0])

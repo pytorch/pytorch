@@ -378,9 +378,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             var = tx.output.side_effects.track_object_new(
                 self.source,
                 self.value,
-                variables.UnspecializedNNModuleVariable
-                if issubclass(self.value, torch.nn.Module)
-                else UserDefinedObjectVariable,
+                (
+                    variables.UnspecializedNNModuleVariable
+                    if issubclass(self.value, torch.nn.Module)
+                    else UserDefinedObjectVariable
+                ),
                 {},
             )
             with do_not_convert_to_tracable_parameter():

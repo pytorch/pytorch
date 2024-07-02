@@ -154,9 +154,9 @@ class TestFSDPIgnoredModules(FSDPTest):
             # Unshare the output projection weight and embedding weight to be
             # able to auto wrap every linear correctly
             model.output_proj.weight = nn.Parameter(model.output_proj.weight.clone())
-            fsdp_kwargs[
-                "policy" if composable else "auto_wrap_policy"
-            ] = ModuleWrapPolicy({nn.Linear})
+            fsdp_kwargs["policy" if composable else "auto_wrap_policy"] = (
+                ModuleWrapPolicy({nn.Linear})
+            )
         if ignore_modules:
             fsdp_kwargs["ignored_modules"] = [model.transformer]
         else:

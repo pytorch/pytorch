@@ -96,15 +96,13 @@ T = TypeVar("T", torch.Tensor, PackedSequence)
 @overload
 def _recursive_to(
     inputs: S, target_device: torch.device, use_side_stream_for_tensor_copies: bool
-) -> List[S]:
-    ...
+) -> List[S]: ...
 
 
 @overload
 def _recursive_to(
     inputs: T, target_device: torch.device, use_side_stream_for_tensor_copies: bool
-) -> Tuple[T]:
-    ...
+) -> Tuple[T]: ...
 
 
 def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
@@ -214,13 +212,13 @@ R = TypeVar("R", dict, list, tuple, set, OrderedDict, PackedSequence, Any)
 
 
 @overload
-def _apply_to_tensors(fn: Callable[[torch.Tensor], Q], container: torch.Tensor) -> Q:
-    ...
+def _apply_to_tensors(
+    fn: Callable[[torch.Tensor], Q], container: torch.Tensor
+) -> Q: ...
 
 
 @overload
-def _apply_to_tensors(fn: Callable[[torch.Tensor], Any], container: R) -> R:
-    ...
+def _apply_to_tensors(fn: Callable[[torch.Tensor], Any], container: R) -> R: ...
 
 
 def _apply_to_tensors(fn, container):

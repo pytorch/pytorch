@@ -237,14 +237,12 @@ class IndexPropagation:
         name: Literal["indirect_indexing"],
         args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
-    ) -> IndexPropVar:
-        ...
+    ) -> IndexPropVar: ...
 
     @overload
     def fallback(
         self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> IndexPropResult:
-        ...
+    ) -> IndexPropResult: ...
 
     def fallback(
         self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]

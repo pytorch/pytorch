@@ -239,9 +239,9 @@ class CommDebugMode(TorchDispatchMode):
 
             # adds collective count to current module
             if self.advanced_module_tracker.name not in self.comm_module_counts:
-                self.comm_module_counts[
-                    self.advanced_module_tracker.name
-                ] = defaultdict(int)
+                self.comm_module_counts[self.advanced_module_tracker.name] = (
+                    defaultdict(int)
+                )
             self.comm_module_counts[self.advanced_module_tracker.name][func_packet] += 1
 
             # adds collective count to parent modules

@@ -181,11 +181,13 @@ def user_defined_kernel_grid_fn_code(
         sympy_grid = tuple(_convert_to_sympy_expr(g) for g in grid)
         return (
             wrapper.codegen_shape_tuple(sympy_grid),
-            wrapper.codegen_shape_tuple(
-                tuple(wrapper.generate_example_arg_value(g) for g in sympy_grid)
-            )
-            if config.triton.autotune_at_compile_time
-            else None,
+            (
+                wrapper.codegen_shape_tuple(
+                    tuple(wrapper.generate_example_arg_value(g) for g in sympy_grid)
+                )
+                if config.triton.autotune_at_compile_time
+                else None
+            ),
         )
 
     def writeline(line: str, example_grid: Optional[str] = None):
@@ -242,9 +244,9 @@ MAX_STACK_ALLOCATION_SIZE = 1024 * 100
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
-        self.reuse_pool: Dict[
-            ReuseKey, List[FreeIfNotReusedLine]
-        ] = collections.defaultdict(list)
+        self.reuse_pool: Dict[ReuseKey, List[FreeIfNotReusedLine]] = (
+            collections.defaultdict(list)
+        )
         self.total_allocated_buffer_size: int = 0
 
     def __contains__(self, key: ReuseKey) -> bool:

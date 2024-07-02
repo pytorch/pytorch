@@ -36,8 +36,7 @@ class ParallelStyle(ABC):
     """
 
     @abstractmethod
-    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        ...
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module: ...
 
 
 class ColwiseParallel(ParallelStyle):

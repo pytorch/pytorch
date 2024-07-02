@@ -138,9 +138,11 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo(
         "special.i1",
         aten_name="special_i1",
-        ref=np_unary_ufunc_integer_promotion_wrapper(scipy.special.i1)
-        if TEST_SCIPY
-        else None,
+        ref=(
+            np_unary_ufunc_integer_promotion_wrapper(scipy.special.i1)
+            if TEST_SCIPY
+            else None
+        ),
         dtypes=all_types_and(torch.bool),
         dtypesIfCUDA=all_types_and(torch.bool),
         sample_inputs_func=sample_inputs_i0_i1,

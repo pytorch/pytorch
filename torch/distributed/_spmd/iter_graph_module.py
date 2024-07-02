@@ -388,27 +388,35 @@ class IterGraph(fx.Graph):
             return super().call_function(the_function, args, kwargs, type_expr)
 
         setup_args = tree_map(
-            lambda arg: self._lookup_node(arg, self.setup_graph)
-            if isinstance(arg, fx.Node)
-            else arg,
+            lambda arg: (
+                self._lookup_node(arg, self.setup_graph)
+                if isinstance(arg, fx.Node)
+                else arg
+            ),
             args,
         )
         setup_kwargs = tree_map(
-            lambda arg: self._lookup_node(arg, self.setup_graph)
-            if isinstance(arg, fx.Node)
-            else arg,
+            lambda arg: (
+                self._lookup_node(arg, self.setup_graph)
+                if isinstance(arg, fx.Node)
+                else arg
+            ),
             kwargs,
         )
         cleanup_args = tree_map(
-            lambda arg: self._lookup_node(arg, self.cleanup_graph)
-            if isinstance(arg, fx.Node)
-            else arg,
+            lambda arg: (
+                self._lookup_node(arg, self.cleanup_graph)
+                if isinstance(arg, fx.Node)
+                else arg
+            ),
             args,
         )
         cleanup_kwargs = tree_map(
-            lambda arg: self._lookup_node(arg, self.cleanup_graph)
-            if isinstance(arg, fx.Node)
-            else arg,
+            lambda arg: (
+                self._lookup_node(arg, self.cleanup_graph)
+                if isinstance(arg, fx.Node)
+                else arg
+            ),
             kwargs,
         )
 
@@ -458,15 +466,19 @@ class IterGraph(fx.Graph):
 
         main_output = super().output(result, type_expr)
         setup_result = tree_map(
-            lambda _result: self._lookup_node(_result, self.setup_graph)
-            if isinstance(_result, fx.Node)
-            else _result,
+            lambda _result: (
+                self._lookup_node(_result, self.setup_graph)
+                if isinstance(_result, fx.Node)
+                else _result
+            ),
             result,
         )
         cleanup_result = tree_map(
-            lambda _result: self._lookup_node(_result, self.cleanup_graph)
-            if isinstance(_result, fx.Node)
-            else _result,
+            lambda _result: (
+                self._lookup_node(_result, self.cleanup_graph)
+                if isinstance(_result, fx.Node)
+                else _result
+            ),
             result,
         )
         self.setup_graph.output(setup_result, type_expr)

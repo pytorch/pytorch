@@ -349,9 +349,11 @@ def make_signal_windows_opinfo(
 op_db: List[OpInfo] = [
     make_signal_windows_opinfo(
         name="signal.windows.hamming",
-        ref=reference_signal_window(scipy.signal.windows.hamming)
-        if TEST_SCIPY
-        else None,
+        ref=(
+            reference_signal_window(scipy.signal.windows.hamming)
+            if TEST_SCIPY
+            else None
+        ),
         sample_inputs_func=sample_inputs_window,
         reference_inputs_func=reference_inputs_window,
         error_inputs_func=error_inputs_window,
@@ -365,45 +367,53 @@ op_db: List[OpInfo] = [
     ),
     make_signal_windows_opinfo(
         name="signal.windows.bartlett",
-        ref=reference_signal_window(scipy.signal.windows.bartlett)
-        if TEST_SCIPY
-        else None,
+        ref=(
+            reference_signal_window(scipy.signal.windows.bartlett)
+            if TEST_SCIPY
+            else None
+        ),
         sample_inputs_func=sample_inputs_window,
         reference_inputs_func=reference_inputs_window,
         error_inputs_func=error_inputs_window,
     ),
     make_signal_windows_opinfo(
         name="signal.windows.blackman",
-        ref=reference_signal_window(scipy.signal.windows.blackman)
-        if TEST_SCIPY
-        else None,
+        ref=(
+            reference_signal_window(scipy.signal.windows.blackman)
+            if TEST_SCIPY
+            else None
+        ),
         sample_inputs_func=sample_inputs_window,
         reference_inputs_func=reference_inputs_window,
         error_inputs_func=error_inputs_window,
     ),
     make_signal_windows_opinfo(
         name="signal.windows.cosine",
-        ref=reference_signal_window(scipy.signal.windows.cosine)
-        if TEST_SCIPY
-        else None,
+        ref=(
+            reference_signal_window(scipy.signal.windows.cosine) if TEST_SCIPY else None
+        ),
         sample_inputs_func=sample_inputs_window,
         reference_inputs_func=reference_inputs_window,
         error_inputs_func=error_inputs_window,
     ),
     make_signal_windows_opinfo(
         name="signal.windows.exponential",
-        ref=reference_signal_window(scipy.signal.windows.exponential)
-        if TEST_SCIPY
-        else None,
+        ref=(
+            reference_signal_window(scipy.signal.windows.exponential)
+            if TEST_SCIPY
+            else None
+        ),
         sample_inputs_func=partial(sample_inputs_window, tau=2.78),
         reference_inputs_func=partial(reference_inputs_exponential_window, tau=2.78),
         error_inputs_func=error_inputs_exponential_window,
     ),
     make_signal_windows_opinfo(
         name="signal.windows.gaussian",
-        ref=reference_signal_window(scipy.signal.windows.gaussian)
-        if TEST_SCIPY
-        else None,
+        ref=(
+            reference_signal_window(scipy.signal.windows.gaussian)
+            if TEST_SCIPY
+            else None
+        ),
         sample_inputs_func=partial(sample_inputs_window, std=1.92),
         reference_inputs_func=partial(reference_inputs_gaussian_window, std=1.92),
         error_inputs_func=error_inputs_gaussian_window,
@@ -417,18 +427,20 @@ op_db: List[OpInfo] = [
     ),
     make_signal_windows_opinfo(
         name="signal.windows.kaiser",
-        ref=reference_signal_window(scipy.signal.windows.kaiser)
-        if TEST_SCIPY
-        else None,
+        ref=(
+            reference_signal_window(scipy.signal.windows.kaiser) if TEST_SCIPY else None
+        ),
         sample_inputs_func=partial(sample_inputs_window, beta=12.0),
         reference_inputs_func=partial(reference_inputs_kaiser_window, beta=12.0),
         error_inputs_func=error_inputs_kaiser_window,
     ),
     make_signal_windows_opinfo(
         name="signal.windows.general_cosine",
-        ref=reference_signal_window(scipy.signal.windows.general_cosine)
-        if TEST_SCIPY
-        else None,
+        ref=(
+            reference_signal_window(scipy.signal.windows.general_cosine)
+            if TEST_SCIPY
+            else None
+        ),
         sample_inputs_func=partial(sample_inputs_window, a=[0.54, 0.46]),
         reference_inputs_func=partial(
             reference_inputs_general_cosine_window, a=[0.54, 0.46]
@@ -437,9 +449,11 @@ op_db: List[OpInfo] = [
     ),
     make_signal_windows_opinfo(
         name="signal.windows.general_hamming",
-        ref=reference_signal_window(scipy.signal.windows.general_hamming)
-        if TEST_SCIPY
-        else None,
+        ref=(
+            reference_signal_window(scipy.signal.windows.general_hamming)
+            if TEST_SCIPY
+            else None
+        ),
         sample_inputs_func=partial(sample_inputs_window, alpha=0.54),
         reference_inputs_func=partial(
             reference_inputs_general_hamming_window, alpha=0.54
@@ -448,9 +462,11 @@ op_db: List[OpInfo] = [
     ),
     make_signal_windows_opinfo(
         name="signal.windows.nuttall",
-        ref=reference_signal_window(scipy.signal.windows.nuttall)
-        if TEST_SCIPY
-        else None,
+        ref=(
+            reference_signal_window(scipy.signal.windows.nuttall)
+            if TEST_SCIPY
+            else None
+        ),
         sample_inputs_func=sample_inputs_window,
         reference_inputs_func=reference_inputs_window,
         error_inputs_func=error_inputs_window,

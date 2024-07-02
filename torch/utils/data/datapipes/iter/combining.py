@@ -127,15 +127,15 @@ class _ContainerTemplate(ABC):
 
     @abstractmethod
     def get_next_element_by_instance(self, instance_id: int):
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     def is_every_instance_exhausted(self) -> bool:
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     def reset(self) -> None:
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     def get_length_by_instance(self, instance_id: int):

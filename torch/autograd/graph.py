@@ -60,8 +60,7 @@ class Node(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def next_functions(self) -> Tuple[Tuple[Optional["Node"], int], ...]:
-        ...
+    def next_functions(self) -> Tuple[Tuple[Optional["Node"], int], ...]: ...
 
     @abc.abstractmethod
     def metadata(self) -> dict:
@@ -69,8 +68,7 @@ class Node(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def _register_hook_dict(self, tensor: torch.Tensor) -> None:
-        ...
+    def _register_hook_dict(self, tensor: torch.Tensor) -> None: ...
 
     @abc.abstractmethod
     def register_hook(self, fn: Callable[..., Any]) -> RemovableHandle:

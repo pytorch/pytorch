@@ -136,12 +136,14 @@ class ValueRanges(Generic[_T]):
         return f"VR[{self.lower}, {self.upper}]"
 
     @overload
-    def __init__(self: ValueRanges[sympy.Expr], lower: ExprIn, upper: ExprIn) -> None:
-        ...
+    def __init__(
+        self: ValueRanges[sympy.Expr], lower: ExprIn, upper: ExprIn
+    ) -> None: ...
 
     @overload
-    def __init__(self: ValueRanges[SympyBoolean], lower: BoolIn, upper: BoolIn) -> None:
-        ...
+    def __init__(
+        self: ValueRanges[SympyBoolean], lower: BoolIn, upper: BoolIn
+    ) -> None: ...
 
     def __init__(self, lower: AllIn, upper: AllIn) -> None:
         lower = simple_sympify(lower)
@@ -217,14 +219,12 @@ class ValueRanges(Generic[_T]):
     @overload
     def __and__(
         self: ValueRanges[sympy.Expr], other: ValueRanges[sympy.Expr]
-    ) -> ValueRanges[sympy.Expr]:
-        ...
+    ) -> ValueRanges[sympy.Expr]: ...
 
     @overload
     def __and__(
         self: ValueRanges[SympyBoolean], other: ValueRanges[SympyBoolean]
-    ) -> ValueRanges[SympyBoolean]:
-        ...
+    ) -> ValueRanges[SympyBoolean]: ...
 
     def __and__(self: AllVR, other: AllVR) -> AllVR:
         if other == ValueRanges.unknown():
@@ -247,14 +247,12 @@ class ValueRanges(Generic[_T]):
     @overload
     def __or__(
         self: ValueRanges[sympy.Expr], other: ValueRanges[sympy.Expr]
-    ) -> ValueRanges[sympy.Expr]:
-        ...
+    ) -> ValueRanges[sympy.Expr]: ...
 
     @overload
     def __or__(
         self: ValueRanges[SympyBoolean], other: ValueRanges[SympyBoolean]
-    ) -> ValueRanges[SympyBoolean]:
-        ...
+    ) -> ValueRanges[SympyBoolean]: ...
 
     def __or__(self: AllVR, other: AllVR) -> AllVR:
         if ValueRanges.unknown() in (self, other):
@@ -292,8 +290,7 @@ class ValueRanges(Generic[_T]):
 
     @overload
     @staticmethod
-    def wrap(arg: Union[BoolIn, BoolVR]) -> BoolVR:
-        ...
+    def wrap(arg: Union[BoolIn, BoolVR]) -> BoolVR: ...
 
     @staticmethod
     def wrap(arg: Union[AllIn, AllVR]) -> AllVR:
@@ -312,13 +309,11 @@ class ValueRanges(Generic[_T]):
 
     @overload
     @staticmethod
-    def decreasing_map(x: Union[ExprIn, ExprVR], fn: ExprFn) -> ExprVR:
-        ...
+    def decreasing_map(x: Union[ExprIn, ExprVR], fn: ExprFn) -> ExprVR: ...
 
     @overload
     @staticmethod
-    def decreasing_map(x: Union[BoolIn, BoolVR], fn: BoolFn) -> BoolVR:
-        ...
+    def decreasing_map(x: Union[BoolIn, BoolVR], fn: BoolFn) -> BoolVR: ...
 
     @staticmethod
     def decreasing_map(x: Union[AllIn, AllVR], fn: AllFn) -> AllVR:
@@ -348,15 +343,13 @@ class ValueRanges(Generic[_T]):
     @staticmethod
     def coordinatewise_increasing_map(
         x: Union[ExprIn, ExprVR], y: Union[ExprIn, ExprVR], fn: ExprFn2
-    ) -> ExprVR:
-        ...
+    ) -> ExprVR: ...
 
     @overload
     @staticmethod
     def coordinatewise_increasing_map(
         x: Union[BoolIn, BoolVR], y: Union[BoolIn, BoolVR], fn: BoolFn2
-    ) -> BoolVR:
-        ...
+    ) -> BoolVR: ...
 
     @staticmethod
     def coordinatewise_increasing_map(
@@ -1013,12 +1006,14 @@ def bound_sympy(
         "bound_sympy(%s)%s",
         expr,
         LazyString(
-            lambda: "\n"
-            + "\n".join(
-                f"  {k}: {r}" for k, r in ranges.items() if k in expr.free_symbols
+            lambda: (
+                "\n"
+                + "\n".join(
+                    f"  {k}: {r}" for k, r in ranges.items() if k in expr.free_symbols
+                )
+                if ranges
+                else ""
             )
-            if ranges
-            else ""
         ),
     )
     if isinstance(expr, sympy.Number):

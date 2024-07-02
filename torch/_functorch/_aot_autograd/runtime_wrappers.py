@@ -1779,14 +1779,16 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
                     assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
-                        AOTDispatchAutograd.coerce_runtime_tangent(
-                            t,
-                            CompiledFunction.metadata.traced_tangent_metas[
-                                i - tangents_start_idx
-                            ],
+                        (
+                            AOTDispatchAutograd.coerce_runtime_tangent(
+                                t,
+                                CompiledFunction.metadata.traced_tangent_metas[
+                                    i - tangents_start_idx
+                                ],
+                            )
+                            if tangents_start_idx <= i < tangents_end_idx
+                            else t
                         )
-                        if tangents_start_idx <= i < tangents_end_idx
-                        else t
                         for i, t in enumerate(all_args)
                     ]
                     all_args = unwrap_tensor_subclasses(
@@ -1798,9 +1800,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # Make the tangents contiguous. Note that we must do this after subclass desugaring
                 # because inputs to inductor have to be contiguous
                 all_args = [
-                    AOTDispatchAutograd._force_contiguous(t)
-                    if (tangents_start_idx <= i < tangents_end_idx)
-                    else t
+                    (
+                        AOTDispatchAutograd._force_contiguous(t)
+                        if (tangents_start_idx <= i < tangents_end_idx)
+                        else t
+                    )
                     for i, t in enumerate(all_args)
                 ]
 

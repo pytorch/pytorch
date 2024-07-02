@@ -109,12 +109,10 @@ class Sequential(Module):
     _modules: Dict[str, Module]  # type: ignore[assignment]
 
     @overload
-    def __init__(self, *args: Module) -> None:
-        ...
+    def __init__(self, *args: Module) -> None: ...
 
     @overload
-    def __init__(self, arg: "OrderedDict[str, Module]") -> None:
-        ...
+    def __init__(self, arg: "OrderedDict[str, Module]") -> None: ...
 
     def __init__(self, *args):
         super().__init__()
@@ -623,12 +621,10 @@ class ParameterList(Module):
         return str(idx)
 
     @overload
-    def __getitem__(self, idx: int) -> Any:
-        ...
+    def __getitem__(self, idx: int) -> Any: ...
 
     @overload
-    def __getitem__(self: T, idx: slice) -> T:
-        ...
+    def __getitem__(self: T, idx: slice) -> T: ...
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):

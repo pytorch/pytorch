@@ -113,9 +113,11 @@ def load_derivatives(
         # so we can generate derivatives for them separately.
         native_functions_with_view_groups = get_grouped_by_view_native_functions(funcs)
         native_functions = concatMap(
-            lambda g: [g]
-            if isinstance(g, NativeFunction)
-            else list(g.functions(include_copy=True)),
+            lambda g: (
+                [g]
+                if isinstance(g, NativeFunction)
+                else list(g.functions(include_copy=True))
+            ),
             native_functions_with_view_groups,
         )
         view_groups = [
@@ -128,9 +130,9 @@ def load_derivatives(
         # function schema is the complete declaration including mutability annotation / default value and etc.
         # signature is the canonical schema for a group of functions (in-place/out/functional variants)
         # that are semantically related.
-        functions_by_signature: dict[
-            FunctionSchema, list[NativeFunction]
-        ] = defaultdict(list)
+        functions_by_signature: dict[FunctionSchema, list[NativeFunction]] = (
+            defaultdict(list)
+        )
         functions_by_schema: dict[str, NativeFunction] = {}
         for function in native_functions:
             functions_by_signature[function.func.signature()].append(function)

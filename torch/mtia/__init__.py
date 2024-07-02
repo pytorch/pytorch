@@ -21,9 +21,9 @@ Event = torch.Event
 Stream = torch.Stream
 
 _initialized = False
-_queued_calls: List[
-    Tuple[Callable[[], None], List[str]]
-] = []  # don't invoke these until initialization occurs
+_queued_calls: List[Tuple[Callable[[], None], List[str]]] = (
+    []
+)  # don't invoke these until initialization occurs
 _tls = threading.local()
 _initialization_lock = threading.Lock()
 _lazy_seed_tracker = _LazySeedTracker()

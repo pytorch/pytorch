@@ -80,12 +80,16 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             torch.arange(0, NUM_DEVICES),
         )
         parallelize_plan = {
-            "net1": ColwiseParallel(input_layouts=Shard(0))
-            if is_seq_parallel
-            else ColwiseParallel(),
-            "net2": RowwiseParallel(output_layouts=Shard(0))
-            if is_seq_parallel
-            else RowwiseParallel(),
+            "net1": (
+                ColwiseParallel(input_layouts=Shard(0))
+                if is_seq_parallel
+                else ColwiseParallel()
+            ),
+            "net2": (
+                RowwiseParallel(output_layouts=Shard(0))
+                if is_seq_parallel
+                else RowwiseParallel()
+            ),
         }
         model_tp = parallelize_module(model_tp, device_mesh, parallelize_plan)
         if recompute_activation:

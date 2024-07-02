@@ -176,9 +176,9 @@ class default_args:
     tensor_class: str = "torch::lazy::LazyTensor"
     tensor_class_hdr: str = "torch/csrc/lazy/core/tensor.h"
     lazy_ir_generator: type[GenLazyIR] = GenLazyIR
-    native_func_definition_generator: type[
+    native_func_definition_generator: type[GenLazyNativeFuncDefinition] = (
         GenLazyNativeFuncDefinition
-    ] = GenLazyNativeFuncDefinition
+    )
     backend_name: str = "TorchScript"
 
 
@@ -257,9 +257,9 @@ def main() -> None:
     lazy_ir_generator: type[GenLazyIR] = default_args.lazy_ir_generator
     if options.gen_ts_lowerings:
         lazy_ir_generator = GenTSLazyIR
-    native_func_definition_generator: type[
-        GenLazyNativeFuncDefinition
-    ] = default_args.native_func_definition_generator
+    native_func_definition_generator: type[GenLazyNativeFuncDefinition] = (
+        default_args.native_func_definition_generator
+    )
 
     run_gen_lazy_tensor(
         aten_path,
@@ -539,9 +539,9 @@ def run_gen_lazy_tensor(
                     "vector",
                 ]
             ],
-            "lazy_ir_inc": [f'#include "{node_base_hdr}"']
-            if node_base_hdr is not None
-            else [],
+            "lazy_ir_inc": (
+                [f'#include "{node_base_hdr}"'] if node_base_hdr is not None else []
+            ),
             "ir_declarations": list(
                 concat_map_codegen(
                     lazy_ir_obj, grouped_native_functions, full_codegen + ir_gen

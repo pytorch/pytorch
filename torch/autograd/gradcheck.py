@@ -617,9 +617,13 @@ def _with_prepare_inputs(fn, inputs, input_idx, input_to_perturb, fast_mode=Fals
     # Wraps `fn` so that its inputs are already supplied
     def wrapped_fn():
         inp = tuple(
-            _prepare_input(a, input_to_perturb if i == input_idx else None, fast_mode)
-            if is_tensor_like(a)
-            else a
+            (
+                _prepare_input(
+                    a, input_to_perturb if i == input_idx else None, fast_mode
+                )
+                if is_tensor_like(a)
+                else a
+            )
             for i, a in enumerate(_as_tuple(inputs))
         )
         return tuple(a.clone() for a in _as_tuple(fn(*inp)))
@@ -1068,9 +1072,11 @@ def _test_batched_grad_forward_ad(func, inputs) -> bool:
             with fwAD.dual_level():
                 dual = fwAD.make_dual(current_input.detach(), tangent)
                 inputs_with_dual = tuple(
-                    dual
-                    if idx == input_idx
-                    else (inp.detach() if is_tensor_like(inp) else inp)
+                    (
+                        dual
+                        if idx == input_idx
+                        else (inp.detach() if is_tensor_like(inp) else inp)
+                    )
                     for idx, inp in enumerate(inputs)
                 )
                 dual_outputs = _as_tuple(func(*inputs_with_dual))
@@ -1133,9 +1139,13 @@ def _test_batched_grad(input, output, output_idx) -> bool:
     def vjp(v):
         results = grad(v)
         results = tuple(
-            grad
-            if grad is not None
-            else torch.zeros([], dtype=inp.dtype, device=inp.device).expand(inp.shape)
+            (
+                grad
+                if grad is not None
+                else torch.zeros([], dtype=inp.dtype, device=inp.device).expand(
+                    inp.shape
+                )
+            )
             for grad, inp in zip(results, diff_input_list)
         )
         return results
@@ -1347,9 +1357,11 @@ def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
             output_to_check = _differentiable_outputs(func(*inputs))
             outputs_to_check.append(
                 [
-                    torch._C._functions.UndefinedGrad()(o)
-                    if idx == undef_grad_idx
-                    else o
+                    (
+                        torch._C._functions.UndefinedGrad()(o)
+                        if idx == undef_grad_idx
+                        else o
+                    )
                     for idx, o in enumerate(output_to_check)
                 ]
             )
@@ -2207,9 +2219,9 @@ def gradgradcheck(
         tupled_grad_outputs = tuple(
             torch.testing.make_tensor(
                 x.shape,
-                dtype=x.dtype
-                if x.is_floating_point() or x.is_complex()
-                else torch.double,
+                dtype=(
+                    x.dtype if x.is_floating_point() or x.is_complex() else torch.double
+                ),
                 device=x.device,
                 low=-1,
                 high=1,

@@ -799,9 +799,9 @@ def transfer_parametrizations_and_params(
             # make values match, original values can be stored in either original or
             # original0, original1..., need to check both cases
             if hasattr(from_module.parametrizations[parameter_name], "original"):
-                to_module.parametrizations[
-                    parameter_name
-                ].original = from_module.parametrizations[parameter_name].original
+                to_module.parametrizations[parameter_name].original = (
+                    from_module.parametrizations[parameter_name].original
+                )
             else:
                 num = 0
                 orig_num = "original" + str(num)

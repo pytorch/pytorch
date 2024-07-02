@@ -50,6 +50,7 @@ class MixtureSameFamily(Distribution):
         component_distribution: `torch.distributions.Distribution`-like
             instance. Right-most batch dimension indexes component.
     """
+
     arg_constraints: Dict[str, constraints.Constraint] = {}
     has_rsample = False
 

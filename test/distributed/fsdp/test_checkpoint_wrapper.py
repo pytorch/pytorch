@@ -154,9 +154,11 @@ class CheckpointWrapperTest(TestCase):
                 self.use_reentrant = use_reentrant
                 wrp = partial(
                     checkpoint_wrapper,
-                    checkpoint_impl=CheckpointImpl.REENTRANT
-                    if use_reentrant
-                    else CheckpointImpl.NO_REENTRANT,
+                    checkpoint_impl=(
+                        CheckpointImpl.REENTRANT
+                        if use_reentrant
+                        else CheckpointImpl.NO_REENTRANT
+                    ),
                 )
                 for i in range(self.n):
                     l = nn.Sequential(

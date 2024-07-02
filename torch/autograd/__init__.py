@@ -272,9 +272,7 @@ def backward(
     inputs = (
         (inputs,)
         if isinstance(inputs, (torch.Tensor, graph.GradientEdge))
-        else tuple(inputs)
-        if inputs is not None
-        else tuple()
+        else tuple(inputs) if inputs is not None else tuple()
     )
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
@@ -449,9 +447,11 @@ def grad(
                 "materialize_grads cannot be used when the given input is a GradientEdge"
             )
         result = tuple(
-            output
-            if output is not None
-            else torch.zeros_like(input, requires_grad=True)
+            (
+                output
+                if output is not None
+                else torch.zeros_like(input, requires_grad=True)
+            )
             for (output, input) in zip(result, inputs)
         )
     return result

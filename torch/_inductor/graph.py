@@ -318,9 +318,9 @@ class GraphLowering(torch.fx.Interpreter):
         # you don't start adding new ones in the lowering process
         shape_env.freeze_runtime_asserts()
         # We're going to mutate ras_by_symbol as we finish generating them
-        self.ras_by_symbol: Dict[
-            sympy.Symbol, List[RuntimeAssert]
-        ] = shape_env.deferred_runtime_asserts.copy()
+        self.ras_by_symbol: Dict[sympy.Symbol, List[RuntimeAssert]] = (
+            shape_env.deferred_runtime_asserts.copy()
+        )
         self.bound_unbacked_symbols: Set[sympy.Symbol] = set()
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: List[str] = []
@@ -384,10 +384,9 @@ class GraphLowering(torch.fx.Interpreter):
             user_visible_outputs if user_visible_outputs is not None else {}
         )
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
-        self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
-        self.cache_linemap: List[
-            Tuple[int, str]
-        ] = (
+        # This is the path in the filesystem where the compiled artifact is stored
+        self.cache_path: str = ""
+        self.cache_linemap: List[Tuple[int, str]] = (
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported

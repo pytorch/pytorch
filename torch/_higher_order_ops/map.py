@@ -126,9 +126,11 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
             def fw_with_masks(*args):
                 fw_out = f(*args)
                 return fw_out, [
-                    True
-                    if isinstance(ret, torch.Tensor) and ret.requires_grad
-                    else False
+                    (
+                        True
+                        if isinstance(ret, torch.Tensor) and ret.requires_grad
+                        else False
+                    )
                     for ret in fw_out
                 ]
 

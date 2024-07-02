@@ -166,16 +166,22 @@ def verify_all_specified_present(
                 name=rule_name,
                 model_name=model_name,
                 expected_versions=model_versions,
-                expected_assets=model_assets
-                if model_assets
-                else "<All model assets present on specified versions>",
+                expected_assets=(
+                    model_assets
+                    if model_assets
+                    else "<All model assets present on specified versions>"
+                ),
                 name_warning=name_warning,
-                missing_versions=missing_versions
-                if len(missing_versions) > 0
-                else "<All specified versions had at least one asset>",
-                missing_assets=missing_assets
-                if len(missing_assets) > 0
-                else "<All specified assets are present on at least 1 version>",
+                missing_versions=(
+                    missing_versions
+                    if len(missing_versions) > 0
+                    else "<All specified versions had at least one asset>"
+                ),
+                missing_assets=(
+                    missing_assets
+                    if len(missing_assets) > 0
+                    else "<All specified assets are present on at least 1 version>"
+                ),
             )
         )
 

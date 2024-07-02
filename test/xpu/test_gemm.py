@@ -904,9 +904,11 @@ class TestBasicGEMM(TestCase):
             def call_torch_fn(*args, **kwargs):
                 return torchfn(
                     *tuple(
-                        torch.randn(shape, device=device)
-                        if isinstance(shape, tuple)
-                        else shape
+                        (
+                            torch.randn(shape, device=device)
+                            if isinstance(shape, tuple)
+                            else shape
+                        )
                         for shape in args
                     ),
                     **kwargs,
