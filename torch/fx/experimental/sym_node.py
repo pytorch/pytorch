@@ -112,6 +112,13 @@ class SymNode:
                 "Cannot create SymNode of type "
                 f"{pytype} with incompatible hint of type {type(hint)}"
             )
+        else:
+            # This occasionally gets exercised by, e.g.,
+            # convert_shape_to_symint.  It's just a nicety so you don't HAVE
+            # to have a correct hint on hand when making a SymNode.
+            hint = self.shape_env._maybe_evaluate_static(self.expr, compute_hint=True)
+            if hint is not None:
+                hint = self.pytype(hint) if not isinstance(hint, SymTypes) else hint
         self._hint = hint
         self.constant: Optional[Union[int, float, bool]] = constant
 
