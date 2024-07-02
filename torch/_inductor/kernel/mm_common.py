@@ -17,7 +17,6 @@ from ..utils import ceildiv as cdiv
 log = logging.getLogger(__name__)
 
 
-
 def realize_inputs(*args):
     if len(args) == 1:
         return ExternKernel.require_stride1(ExternKernel.realize_input(args[0]))
