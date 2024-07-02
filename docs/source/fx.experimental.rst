@@ -51,3 +51,14 @@ torch.fx.experimental.symbolic_shapes
     compute_unbacked_bindings
     rebind_unbacked
     resolve_unbacked_bindings
+
+torch.fx.experimental.proxy_tensor
+-------------------------------------
+.. currentmodule:: torch.fx.experimental.proxy_tensor
+.. automodule:: torch.fx.experimental.proxy_tensor
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    make_fx

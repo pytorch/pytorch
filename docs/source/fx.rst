@@ -1143,7 +1143,6 @@ API Reference
 .. py:module:: torch.fx.experimental.normalize
 .. py:module:: torch.fx.experimental.optimization
 .. py:module:: torch.fx.experimental.partitioner_utils
-.. py:module:: torch.fx.experimental.proxy_tensor
 .. py:module:: torch.fx.experimental.recording
 .. py:module:: torch.fx.experimental.refinement_types
 .. py:module:: torch.fx.experimental.rewriter
