@@ -132,6 +132,8 @@ TESTS = discover_tests(
         "distributed/elastic/utils/distributed_test",
         "distributed/elastic/multiprocessing/api_test",
         "doctests",
+        "test_autoload_enable",
+        "test_autoload_disable",
     ],
 )
 
