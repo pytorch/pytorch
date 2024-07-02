@@ -676,56 +676,6 @@ class TritonBenchmarkRequest(GPUDeviceBenchmarkRequest):
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
 
 
-class GroupedTritonBenchmarkRequest:
-    def __init__(self, choices):
-        super().__init__()
-        self.choices = choices
-
-    def benchmark(
-        self,
-        *input_tensors: torch.Tensor,
-        output_tensor: Optional[torch.Tensor] = None,
-    ) -> Dict[TritonTemplateCaller, float]:
-        choice_to_timing: Dict[TritonTemplateCaller, float] = {}
-
-        if self.choices == []:
-            return choice_to_timing
-
-        # generate inputs/output tensors using choices[0] as
-        # the default. every choice should take the same exact
-        # inputs/outputs
-        if output_tensor is None:
-            assert len(input_tensors) == 0
-            example_bmreq = self.choices[0].bmreq
-            input_tensors = tuple(
-                x.to_tensor() for x in example_bmreq.input_tensor_meta
-            )
-            output_tensor = example_bmreq.output_tensor_meta.to_tensor()
-
-        choice_and_callable = []
-        for choice in self.choices:
-            if not choice.valid:
-                choice_to_timing[choice] = float("inf")
-                continue
-
-            _callable = choice.bmreq.make_run_fn(
-                *input_tensors, output_tensor=output_tensor
-            )
-            try:
-                _callable()
-            except Exception:
-                choice_to_timing[choice] = float("inf")
-                continue
-
-            choice_and_callable.append((choice, _callable))
-
-        timings = do_bench_gpu([_callable for _, _callable in choice_and_callable], memory_warmup_iters=1000)
-        for (choice, _), timing in zip(choice_and_callable, timings):
-            choice_to_timing[choice] = timing
-
-        return choice_to_timing
-
-
 class CUDABenchmarkRequest(GPUDeviceBenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
