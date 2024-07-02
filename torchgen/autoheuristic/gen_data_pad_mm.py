@@ -1,15 +1,16 @@
-# mypy: ignore-errors
-
 import argparse
 import random
 import time
-from typing import Any, Tuple
+
+from typing import Tuple
+
+from tqdm import tqdm
 
 import torch
 
 torch.set_default_device("cuda")
-from triton.testing import do_bench
 
+from torch._inductor.fx_passes.pad_mm import get_alignment_size_dtype
 from torch._inductor.utils import fresh_inductor_cache
 
 # A100: 81920MiB
@@ -37,10 +38,10 @@ def benchmark(
     n: int,
     tranpose_left: bool,
     tranpose_right: bool,
-    dtype: Any,
+    dtype: torch.dtype,
     prepadded_left: bool,
     prepadded_right: bool,
-) -> Any:
+) -> None:
     if tranpose_left:
         a = torch.randn(k, m, dtype=dtype).t()
     else:
@@ -72,28 +73,16 @@ def benchmark(
             cf = torch.compile(mm_mat2_prepadded)
         else:
             cf = torch.compile(mm)
-        print(f"{do_bench(lambda: cf(a, b))} ms")
+        cf(a, b)
         torch.compiler.reset()
 
 
-def get_alignment_size(dtype: Any) -> int:
-    if dtype == torch.float16 or dtype == torch.half or dtype == torch.bfloat16:
-        return 8
-    elif dtype == torch.float32 or dtype == torch.float:
-        return 4
-    else:
-        return 0
-
-
-def fits_in_memory(dtype: Any, m: int, k: int, n: int):
-    if dtype == torch.float16 or dtype == torch.bfloat16:
-        return 2 * (m * k + k * n + m * n) < threshold_memory
-    elif dtype == torch.float32:
-        return 4 * (m * k + k * n + m * n) < threshold_memory
+def fits_in_memory(dtype: torch.dtype, m: int, k: int, n: int) -> bool:
+    return dtype.itemsize * (m * k + k * n + m * n) < threshold_memory
 
 
 def get_random_dim(min_power2: int = 1, max_power2: int = 16) -> int:
-    aligned = random.choices([True, False], [p_unaligned, 1 - p_unaligned])[0]
+    aligned = random.choices([True, False], [1 - p_unaligned, p_unaligned])[0]
     if aligned:
         return 2 ** random.randint(min_power2, max_power2)
     else:
@@ -104,7 +93,7 @@ def get_random_dim(min_power2: int = 1, max_power2: int = 16) -> int:
         return random.randint(lower, upper)
 
 
-def get_m_k_n(dtype: Any) -> Tuple[int, int, int]:
+def get_m_k_n(dtype: torch.dtype) -> Tuple[int, int, int]:
     uniform = random.choices([True, False], [0.5, 0.5])[0]
 
     # repeat until tensors fit in memory
@@ -130,13 +119,12 @@ def prepadded() -> bool:
     return random.choices([True, False], [p_prepadded, 1 - p_prepadded])[0]
 
 
-def get_dtype() -> Any:
+def get_dtype() -> torch.dtype:
     dtype_choices = [torch.float16, torch.bfloat16, torch.float32]
-    dtype_weights = [1, 1, 1]
-    return random.choices(dtype_choices, dtype_weights)[0]
+    return random.choices(dtype_choices)[0]
 
 
-def set_precision(dtype: Any) -> None:
+def set_precision(dtype: torch.dtype) -> None:
     if dtype == torch.float32:
         precisions = ["high", "highest"]
         weights = [1 - p_float32_prec_highest, p_float32_prec_highest]
@@ -146,13 +134,13 @@ def set_precision(dtype: Any) -> None:
     torch.set_float32_matmul_precision(precision)
 
 
-def main() -> None:
-    while True:
+def main(num_samples) -> None:
+    for i in tqdm(range(num_samples)):
         dtype = get_dtype()
         set_precision(dtype)
         m, k, n = get_m_k_n(dtype)
 
-        align_size = get_alignment_size(dtype)
+        align_size = get_alignment_size_dtype(dtype)
         if m % align_size == 0 and k % align_size == 0 and n % align_size == 0:
             # skip if already aligned
             continue
@@ -199,10 +187,17 @@ if __name__ == "__main__":
         default="a100_data.txt",
         help="Path to file where AutoHeuristic will log results.",
     )
+    parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=1000,
+        help="Number of samples to collect.",
+    )
+
     args = parser.parse_args()
     torch._inductor.config.autoheuristic_mode = args.autoheuristic_mode
     torch._inductor.config.autoheuristic_log_path = args.o
     if args.device is not None:
         torch.cuda.set_device(args.device)
     random.seed(time.time())
-    main()
+    main(args.num_samples)

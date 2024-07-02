@@ -52,9 +52,13 @@ def unwrap_fake_args(*arg_names):
 
 
 def get_alignment_size(x: Tensor) -> int:
-    if x.dtype == torch.float16 or x.dtype == torch.half or x.dtype == torch.bfloat16:
+    return get_alignment_size_dtype(x.dtype)
+
+
+def get_alignment_size_dtype(dtype: torch.dtype) -> int:
+    if dtype == torch.float16 or dtype == torch.half or dtype == torch.bfloat16:
         return 8
-    elif x.dtype == torch.float32 or x.dtype == torch.float:
+    elif dtype == torch.float32 or dtype == torch.float:
         return 4
     else:
         return 0
