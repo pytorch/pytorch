@@ -142,7 +142,7 @@ test_Hq_Hkv = [
     (32, 1),
 ]
 
-(Hq, Hkv) = (16, 8)
+(Hq, Hkv) = (16, 2)
 
 
 def query_key_value_clones(
