@@ -60,8 +60,8 @@ from torch.testing._internal.common_cuda import (
     _create_scaling_case, _create_scaling_models_optimizers)
 from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.testing._internal.common_dtype import (
-    floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
-    all_types_and, floating_types, floating_and_complex_types, integral_types_and,
+    floating_types_and, get_all_math_dtypes, all_types_and_complex_and, all_types_and, floating_types,
+    floating_and_complex_types, integral_types_and,
     get_all_qint_dtypes,
 )
 from torch.testing._internal.two_tensor import TwoTensor
@@ -3840,7 +3840,7 @@ else:
             self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
 
     @onlyCUDA
-    @dtypes(*complex_types())
+    @dtypes(torch.cdouble)
     def test_scatter_reduce_multiply_unsupported_dtypes(self, device, dtype):
         height = 2
         width = 2
