@@ -230,6 +230,10 @@ if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
+  export CMAKE_BUILD_TYPE=RelWithAssert
+fi
+
 # Do not change workspace permissions for ROCm CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
 if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
