@@ -10,7 +10,7 @@ import torch
 from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
 from torch.testing._internal.common_utils import run_tests
 
-from test_cudagraph_trees import CudaGraphTreeTests  # noqa: F401
+from inductor.test_cudagraph_trees import CudaGraphTreeTests  # noqa: F401
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
