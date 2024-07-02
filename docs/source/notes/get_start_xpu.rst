@@ -5,36 +5,10 @@ The support for Intel GPUs is released alongside PyTorch v2.4.
 
 This release only supports build from source for Intel GPUs.
 
-Hardware Prerequisites
-----------------------
+Prerequisites
+-------------
 
-.. list-table::
-   :header-rows: 1
-
-   * - Supported Hardware
-     - Intel® Data Center GPU Max Series
-   * - Supported OS
-     - Linux
-
-
-PyTorch for Intel GPUs is compatible with Intel® Data Center GPU Max Series and only supports OS Linux with release 2.4.
-
-Software Prerequisites
-----------------------
-
-As a prerequisite, install the driver and required packages by following the `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html>`_.
-
-Set up Environment
-------------------
-
-Before you begin, you need to set up the environment. This can be done by sourcing the ``setvars.sh`` script provided by the ``intel-for-pytorch-gpu-dev`` and  ``intel-pti-dev`` packages.
-
-.. code-block::
-
-   source ${ONEAPI_ROOT}/setvars.sh
-
-.. note::
-   The ``ONEAPI_ROOT`` is the folder you installed your ``intel-for-pytorch-gpu-dev`` and  ``intel-pti-dev`` packages. Typically, it is located at ``/opt/intel/oneapi/`` or ``~/intel/oneapi/``.
+To check hardware support, install Intel Data Center GPU drivers, install Intel support packages, and set up oneAPI environment variables, you would typically follow `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html>`_.
 
 Build from source
 -----------------
