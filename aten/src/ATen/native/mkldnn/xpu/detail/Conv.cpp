@@ -197,8 +197,9 @@ sycl::event convolution(
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   #if ONEDNN_SUPPORT_DETERMINISTIC
-    if(at::globalContext().deterministicAlgorithms())
+    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicMkldnn()){
         pattr.set_deterministic(true);
+    }
   #endif
 
   auto conv_fwd_pd = dnnl::convolution_forward::primitive_desc(
@@ -284,8 +285,9 @@ sycl::event convolution_backward_weights(
   dnnl::primitive_attr pattr;
 
   #if ONEDNN_SUPPORT_DETERMINISTIC
-    if(at::globalContext().deterministicAlgorithms())
+    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicMkldnn()){
         pattr.set_deterministic(true);
+    }
   #endif
 
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
@@ -381,8 +383,9 @@ sycl::event convolution_backward_data(
   dnnl::primitive_attr pattr;
 
   #if ONEDNN_SUPPORT_DETERMINISTIC
-    if(at::globalContext().deterministicAlgorithms())
+    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicMkldnn()){
         pattr.set_deterministic(true);
+    }
   #endif
 
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
