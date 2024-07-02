@@ -71,6 +71,7 @@ runs:
   using: composite
   steps:
     - name: Setup Linux
+      if: inputs.build-environment != 'linux-s390x-binary-manywheel'
       uses: ./.github/actions/setup-linux
 
     - name: configure aws credentials
@@ -98,6 +99,7 @@ runs:
         echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
     - name: Pull docker image
+      if: inputs.build-environment != 'linux-s390x-binary-manywheel'
       uses: pytorch/test-infra/.github/actions/pull-docker-image@main
       with:
         docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -184,6 +186,13 @@ runs:
         )
         docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
 
+        # on s390x stop the container for clean worker stop
+        if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+        fi
+
     - name: Archive artifacts into zip
       if: inputs.build-generates-artifacts == 'true' && steps.build.outcome != 'skipped'
       shell: bash
@@ -223,4 +232,13 @@ runs:
 
     - name: Teardown Linux
       uses: pytorch/test-infra/.github/actions/teardown-linux@main
-      if: always()
+      if: always() && inputs.build-environment != 'linux-s390x-binary-manywheel'
+
+    - name: Cleanup docker
+      if: always() && inputs.build-environment == 'linux-s390x-binary-manywheel'
+      shell: bash
+      run: |
+        # on s390x stop the container for clean worker stop
+        # ignore expansion of "docker ps -q" since it could be empty
+        # shellcheck disable=SC2046
+        docker stop $(docker ps -q) || true

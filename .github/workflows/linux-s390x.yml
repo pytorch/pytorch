@@ -1,0 +1,29 @@
+name: linux-s390x
+
+on:
+  pull_request:
+    branches-ignore:
+      - nightly
+  push:
+    branches:
+      - main
+      - release/*
+      - landchecks/*
+    tags:
+      - ciflow/linux-s390x/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }} but found ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+jobs:
+  linux-ubuntu-24_04-py3-cpu-s390x-build:
+    # don't run build twice on main
+    if: github.event_name == 'pull_request'
+    name: linux-ubuntu-24_04-py3-cpu-s390x
+    uses: ./.github/workflows/_linux-build-s390x.yml
+    with:
+      build-environment: linux-s390x-binary-manywheel
+      docker-image-name: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      runner: linux.s390x
