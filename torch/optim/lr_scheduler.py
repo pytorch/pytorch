@@ -129,7 +129,7 @@ class LRScheduler:
                 opt_ref = ref(self.optimizer)
                 func = step_fn.__func__
 
-                @wraps(func)
+                @functools.wraps(func)
                 def wrapper(*args, **kwargs):
                     opt = opt_ref()
                     opt._opt_called = True  # type: ignore[union-attr]
