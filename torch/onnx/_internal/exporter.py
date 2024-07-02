@@ -1502,9 +1502,7 @@ def dynamo_export(
 
     try:
         from torch._dynamo import config as _dynamo_config
-        with _dynamo_config.patch(
-            do_not_emit_runtime_asserts=True
-        ):
+        with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
             return Exporter(
                 options=resolved_export_options,
                 model=model,

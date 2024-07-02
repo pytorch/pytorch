@@ -528,8 +528,7 @@ class TestPasses(TestCase):
         ep = export(mod, (x,))
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression u[\d+] \<\= 5"
+            RuntimeError, r"Runtime assertion failed for expression u[\d+] \<\= 5"
         ):
             ep.module()(torch.tensor([6]))
 

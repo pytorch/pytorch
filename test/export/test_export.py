@@ -6024,6 +6024,7 @@ def forward(self, x, y):
         for param in ["alpha", "beta", "gamma"]:
             self.assertTrue(param in unep.state_dict())
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # nn_module_stack replacement when we do sympy_interp()
     def test_intermediate_shape_comp(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):

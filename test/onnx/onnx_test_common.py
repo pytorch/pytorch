@@ -276,9 +276,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             self.model_type
             == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
         ):
-            with _dynamo_config.patch(
-                do_not_emit_runtime_asserts=True
-            ):
+            with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
                 ref_model = torch.export.export(ref_model, args=ref_input_args)
             if (
                 self.dynamic_shapes
@@ -293,9 +291,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         # since ONNX doesn't represent kwargs.
         export_error: Optional[torch.onnx.OnnxExporterError] = None
         try:
-            with _dynamo_config.patch(
-                do_not_emit_runtime_asserts=True
-            ):
+            with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
                 onnx_program = torch.onnx.dynamo_export(
                     ref_model,
                     *ref_input_args,

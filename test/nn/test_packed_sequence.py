@@ -5,7 +5,7 @@ import random
 
 import torch
 import torch.nn.utils.rnn as rnn_utils
-from torch.testing._internal.common_utils import run_tests, TestCase, xfailIfTorchDynamo
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class PackedSequenceTest(TestCase):

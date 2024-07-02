@@ -119,6 +119,19 @@ def insert_deferred_runtime_asserts(
         else:
             placeholders.add(node)
 
+    def _contains_sympy_function(expr):
+        """
+        Checks if sympy expression is or contains any args that are sympy.Functions
+        TODO(pianpwk): remove this eventually
+        """
+        if not isinstance(expr, sympy.Expr):
+            return False
+        if isinstance(expr, sympy.Function):
+            return True
+        if hasattr(expr, "args"):
+            return any(_contains_sympy_function(arg) for arg in expr.args)
+        return False
+
     def _is_intermediate_tensor_sym_call(node: fx.Node) -> bool:
         """
         If a size/stride/storage offset call on an intermediate tensor,
@@ -127,7 +140,7 @@ def insert_deferred_runtime_asserts(
         return (
             (val := _get_sym_val(node)) is not None
             and not isinstance(val, sympy.Number)
-            and not isinstance(val, sympy.Function)
+            and not _contains_sympy_function(val)
             # this holds back from reifying anything in torch.utils._sympy.functions.py from input shapes.
             # TODO: figure out missing parts, too many failures on TruncToInt, CeilToInt, etc.
             # see for example:
@@ -280,7 +293,7 @@ def insert_deferred_runtime_asserts(
                 torch.ops.aten._assert_scalar.default,
             ):
                 if (
-                    node.args[0] == True  # type: ignore[arg-type]
+                    node.args[0] == True  # noqa: E712
                     or (assert_expr := _get_sym_val(node.args[0])) in expr_to_proxy
                     or (
                         assert_expr is not None
@@ -300,37 +313,44 @@ def insert_deferred_runtime_asserts(
                 node.op != "placeholder"
                 and (sym_expr := _get_sym_val(node)) is not None
             ):
-                # this guards against calls like item() that produce new untracked symbols
+                # this guards against deleting calls like item() that produce new untracked symbols
                 new_untracked_symbols = sym_expr.free_symbols - expr_to_proxy.keys()
-                # this guards against hash consing calls that produce unbacked bindings we haven't yet seen.
+                # this guards against deleting calls that produce unbacked bindings we haven't yet seen.
                 # in this case looking at sym_expr.free_symbols might not be enough, if the example value has a hint
                 # (is backed), but produces an unbacked symbol. In this case keep the node alive.
-                new_unbacked_bindings = resolve_unbacked_bindings(
-                    shape_env, node.meta.get("unbacked_bindings", {})
-                ).keys() - expr_to_proxy.keys()
+                new_unbacked_bindings = (
+                    resolve_unbacked_bindings(
+                        shape_env, node.meta.get("unbacked_bindings", {})
+                    ).keys()
+                    - expr_to_proxy.keys()
+                )
 
+                # maybe re-reify expression, replace current node
                 if (
-                    sym_expr in expr_to_proxy or (  # example value is redundant
+                    sym_expr in expr_to_proxy
+                    or (  # example value is redundant
                         _is_intermediate_tensor_sym_call(node)
                         # shape call on intermediate tensor, turn into computation on input shapes
                         and not new_untracked_symbols
                     )
-                ) and not new_unbacked_bindings:  # hash cons
-                    if _is_intermediate_tensor_sym_call(node):  # reify from input shapes
-                        expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)
+                ) and not new_unbacked_bindings:
+                    if _is_intermediate_tensor_sym_call(
+                        node
+                    ):  # reify from input shapes
+                        expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)  # type: ignore[arg-type]
                         # won't try DCE-ing tensor compute here
-                    hash_node = expr_to_proxy[sym_expr].node
+                    hash_node = expr_to_proxy[sym_expr].node  # type: ignore[arg-type]
                     node.replace_all_uses_with(hash_node)
                     gm.graph.erase_node(node)
                     log.debug(
                         "CSE node %s -> %s for expr %s", node, hash_node, sym_expr
                     )
-                    
-                elif (
-                    sym_expr not in expr_to_proxy
-                    and not isinstance(sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom))  # don't hash cons primitives
-                ):
-                    expr_to_proxy[sym_expr] = fx.Proxy(node)
+
+                # store node in hash cons, don't delete/replace
+                elif sym_expr not in expr_to_proxy and not isinstance(
+                    sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
+                ):  # don't hash cons primitives
+                    expr_to_proxy[sym_expr] = fx.Proxy(node)  # type: ignore[arg-type]
 
             # We add sym_constrain_range calls for symbols later in any case if they're size-like or range-constrained,
             # so calls before that are redundant.
