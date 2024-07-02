@@ -727,7 +727,9 @@ class OpInfo:
     # dtypes this function is expected to work with on ROCM
     dtypesIfROCM: _dispatch_dtypes = None
 
-    # dtypes this function is expected to work with on XPU
+    dtypesIfHpu: _dispatch_dtypes = None
+
+      # dtypes this function is expected to work with on XPU
     dtypesIfXPU: _dispatch_dtypes = None
 
     # backward dtypes this function is expected to work with
@@ -738,6 +740,8 @@ class OpInfo:
 
     # backward dtypes this function is expected to work with on ROCM
     backward_dtypesIfROCM: _dispatch_dtypes = None
+
+    backward_dtypesIfHpu: _dispatch_dtypes = None
 
     # the following metadata describes the operators out= support
 
@@ -954,6 +958,16 @@ class OpInfo:
                 else self.dtypes
             )
         )
+        self.backward_dtypesIfHpu = (
+            set(self.backward_dtypesIfHpu)
+            if self.backward_dtypesIfHpu is not None
+            else (
+                self.backward_dtypes
+                if self.backward_dtypes is not None
+                else self.dtypes
+            )
+        )
+
         self.backward_dtypes = (
             set(self.backward_dtypes)
             if self.backward_dtypes is not None
@@ -970,6 +984,10 @@ class OpInfo:
         )
         self.dtypesIfXPU = (
             set(self.dtypesIfXPU) if self.dtypesIfXPU is not None else self.dtypesIfCUDA
+        )
+
+        self.dtypesIfHpu = (
+            set(self.dtypesIfHpu) if self.dtypesIfHpu is not None else self.dtypes
         )
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
@@ -1357,9 +1375,12 @@ class OpInfo:
         device_type = torch.device(device_type).type
         if device_type == "cuda":
             return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
+        if device_type == "hpu":
+            return self.dtypesIfHpu
         if device_type == "xpu":
             return self.dtypesIfXPU
-        return self.dtypes
+
+          return self.dtypes
 
     def supported_backward_dtypes(self, device_type):
         if not self.supports_autograd:
@@ -1375,6 +1396,8 @@ class OpInfo:
                 if TEST_WITH_ROCM
                 else self.backward_dtypesIfCUDA
             )
+        elif device_type == "hpu":
+            backward_dtype = self.backward_dtypesIfHpu
         else:
             backward_dtypes = self.backward_dtypes
 
