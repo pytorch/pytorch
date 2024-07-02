@@ -578,16 +578,19 @@ double LegacyEvent::cudaElapsedUs(const LegacyEvent& e) const {
       &cuda_event, &e.cuda_event);
 }
 
-static const at::jit::CodeTemplate event_template(R"(
-{
-  "name": "${name}",
-  "ph": "X",
-  "ts": ${ts},
-  "dur": ${dur},
-  "tid": ${tid},
-  "pid": "CPU Functions",
-  "args": {}
-})");
+at::jit::CodeTemplate& getEventTemplate() {
+  static  at::jit::CodeTemplate event_template(R"(
+  {
+    "name": "${name}",
+    "ph": "X",
+    "ts": ${ts},
+    "dur": ${dur},
+    "tid": ${tid},
+    "pid": "CPU Functions",
+    "args": {}
+  })");
+  return event_template;
+}
 
 void writeProfilerEventsToStream(
     std::ostream& out,
@@ -634,7 +637,7 @@ void writeProfilerEventsToStream(
       env.d("ts", profiler_start->cpuElapsedUs(*evt_start));
       env.d("dur", evt_start->cpuElapsedUs(*evt));
       env.d("tid", evt_start->threadId());
-      out << event_template.format(env);
+      out << getEventTemplate().format(env);
     }
   }
   out << "]\n";
