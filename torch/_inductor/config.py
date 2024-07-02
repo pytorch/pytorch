@@ -308,6 +308,11 @@ coordinate_descent_search_radius = int(
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
 )
 
+# AutoHeuristic is a framework that allows one to collect data from autotuning, use the data to learn a heuristic, and
+# generate the learned heursitic to code which is shipped with the compiler. For now, this is only enabled for pad_mm.
+# If set to "OFF", this will not run AutoHeuristic.
+# If set to "COLLECT_DATA", this will store data about the inputs and autotuning results.
+# If set to "USE_HEURISTIC", this will use the learned heuristic to make a choice in pad_mm.
 autoheuristic_mode = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_MODE", "USE_HEURISTIC")
 autoheuristic_log_path = os.environ.get(
     "TORCHINDUCTOR_AUTOHEURISTIC_LOG_PATH", "DEFAULT"
