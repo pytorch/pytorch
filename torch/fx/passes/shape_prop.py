@@ -9,6 +9,7 @@ from torch.fx.node import Node, map_aggregate
 from typing import Any, Tuple, NamedTuple, Optional, Dict
 from torch.fx._compatibility import compatibility
 from torch._guards import detect_fake_mode
+from torch._subclasses.meta_utils import is_sparse_any
 
 __all__ = ['TensorMetadata', 'ShapeProp']
 
@@ -35,11 +36,11 @@ def _extract_tensor_metadata(result : torch.Tensor, include_contiguity=True) -> 
     shape = result.shape
     dtype = result.dtype
     requires_grad = result.requires_grad
-    stride = result.stride()
+    stride = result.stride() if not is_sparse_any(result) else None
 
     memory_format = None
 
-    if include_contiguity:
+    if include_contiguity and not is_sparse_any(result):
         memory_formats = {
             torch.contiguous_format,
             torch.channels_last,
