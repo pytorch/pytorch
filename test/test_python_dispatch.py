@@ -1606,6 +1606,24 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             with A() as mode2:
                 self.assertEqual(_get_current_dispatch_mode_stack(), [mode1, mode2])
 
+    def test_get_mode_stack_compiling(self):
+        @torch.compile()
+        def f():
+            return _get_current_dispatch_mode_stack()
+
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                pass
+
+        self.assertEqual(f(), [])
+
+        with A() as mode1:
+            self.assertEqual(f(), [])
+
+        with mode1:
+            with A() as mode2:
+                self.assertEqual(f(), [])
+
     def test_all_same_mode(self):
         x = LoggingTensorMode()
         y = LoggingTensorMode()
