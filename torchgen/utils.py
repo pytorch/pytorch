@@ -17,12 +17,11 @@ from typing import (
     Iterable,
     Iterator,
     Literal,
-    NoReturn,
     Sequence,
     TYPE_CHECKING,
     TypeVar,
 )
-from typing_extensions import Self
+from typing_extensions import assert_never, Self
 
 from torchgen.code_template import CodeTemplate
 
@@ -101,13 +100,6 @@ def context(msg_fn: Callable[[], str]) -> Iterator[None]:
         msg = f"{e.args[0]}\n{msg}" if e.args else msg
         e.args = (msg,) + e.args[1:]
         raise
-
-
-# A little trick from https://github.com/python/mypy/issues/6366
-# for getting mypy to do exhaustiveness checking
-# TODO: put this somewhere else, maybe
-def assert_never(x: Any) -> NoReturn:
-    raise AssertionError(f"Unhandled type: {type(x).__name__}")
 
 
 @functools.lru_cache(maxsize=None)
