@@ -332,6 +332,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and hasattr(
                 self.value, "__exit__"
             )  # TODO(voz): These can invoke user code!
+            # and check_constant_args(args, kwargs)
+            # and self.value.__init__ == object.__init__
+            # and len(kwargs) == 0
             and self.value.__new__ == object.__new__
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source is not None
@@ -342,6 +345,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             cm_obj = tx.output.side_effects.track_object_new(
                 self.source, self.value, GenericContextWrappingVariable, {}
             )
+            # unwrap constant args
+            cm_obj.target_values = map(torch._dynamo.utils.guard_if_dyn, args)
             cm_obj.call_method(tx, "__init__", args, kwargs)
             return cm_obj
 
