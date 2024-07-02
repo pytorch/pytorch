@@ -236,7 +236,8 @@ void dictIndex(Stack& stack) {
   push(stack, value->value());
 }
 
-static const C10_UNUSED std::array<mobile::prim_op_fn_register, 16> op_reg = {
+C10_UNUSED std::array<mobile::prim_op_fn_register, 16>& getOpReg() {
+  static C10_UNUSED std::array<mobile::prim_op_fn_register, 16> op_reg = {
     mobile::prim_op_fn_register("prim::TupleIndex", tupleIndex),
     mobile::prim_op_fn_register("aten::Bool.Tensor", boolTensor),
     mobile::prim_op_fn_register("aten::format", aten_format),
@@ -258,7 +259,9 @@ static const C10_UNUSED std::array<mobile::prim_op_fn_register, 16> op_reg = {
     // TODO: (@pavithran) size is overloaded with int[] and Tensor
     // so this throws error expecting int not Tensor
     // mobile::prim_op_fn_register("aten::size", size)
-};
+  };
+  return op_reg;
+}
 
 } // namespace jit
 } // namespace torch
