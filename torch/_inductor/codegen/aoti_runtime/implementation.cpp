@@ -13,16 +13,26 @@ void convert_output_to_handle(
   handle = output.expensiveCopyToTensor();
 }
 
+
+template<typename T,
+    typename = std::enable_if_t<std::is_scalar<T>::value>>
+    inline void convert_output_to_handle(
+      const T& output,
+      AtenTensorHandle& handle) {
+      RAIIAtenTensorHandle scalar_to_tensor_0 = scalar_to_tensor_handle(output);
+      handle = scalar_to_tensor_0.release();
+    }
+
 template <typename... Ts, std::size_t... Is>
 void convert_outputs_to_handles_helper(
-    const std::tuple<ArrayRefTensor<Ts>...>& outputs,
+    const std::tuple<Ts...>& outputs,
     AtenTensorHandle* output_handles,
     std::index_sequence<Is...>) {
   (convert_output_to_handle(std::get<Is>(outputs), output_handles[Is]), ...);
 }
 template <typename... Ts>
 void convert_outputs_to_handles(
-    const std::tuple<ArrayRefTensor<Ts>...>& outputs,
+    const std::tuple<Ts...>& outputs,
     AtenTensorHandle* output_handles) {
   convert_outputs_to_handles_helper(
       outputs, output_handles, std::make_index_sequence<sizeof...(Ts)>());

@@ -277,6 +277,17 @@ class CppWrapperCpu(WrapperCodeGen):
             return DTYPE_TO_CPP[dtype]
         return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
 
+    @staticmethod
+    def get_output_cpp_type(output):
+        assert config.use_minimal_arrayref_interface
+        if isinstance(output, ir.ShapeAsConstantBuffer) and (output.shape, sympy.Expr):
+            from ..graph import may_get_constant_buffer_dtype
+
+            dtype = may_get_constant_buffer_dtype(output.shape)
+            assert dtype is not None, f"Failed to get the dtype of sympy.Expr: {output}"
+            return DTYPE_TO_CPP[dtype]
+        return f"ArrayRefTensor<{DTYPE_TO_CPP[output.get_dtype()]}>"
+
     def generate_input_output_runtime_checks(self):
         # In debug_compile mode, we generate checks to ensure the dtype/shape/stride of each
         # real input/output tensor match ones provided at compile time via sample
@@ -382,15 +393,15 @@ class CppWrapperCpu(WrapperCodeGen):
                     f"{CppWrapperCpu.get_input_cpp_type(x)}"
                     for x in V.graph.graph_inputs.values()
                 )
-                output_arrayref_types = ", ".join(
-                    f"ArrayRefTensor<{DTYPE_TO_CPP[x.get_dtype()]}>"
+                output_cpp_types = ", ".join(
+                    f"{CppWrapperCpu.get_output_cpp_type(x)}"
                     for x in V.graph.graph_outputs
                 )
 
                 self.prefix.splice(
                     f"""
                     using AOTInductorModelInputs = std::tuple<{input_cpp_types}>;
-                    using AOTInductorModelOutputs = std::tuple<{output_arrayref_types}>;
+                    using AOTInductorModelOutputs = std::tuple<{output_cpp_types}>;
                     """
                 )
 
@@ -997,11 +1008,16 @@ class CppWrapperCpu(WrapperCodeGen):
 
             if config.abi_compatible:
                 if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
-                    # Need to wrap scalar into tensor as the main function returns a vector of tensors
-                    output_tensor = self.codegen_scalar_to_tensor(output)
-                    self.wrapper_call.writeline(
-                        f"output_handles[{idx}] = {output_tensor}.release();"
-                    )
+                    if config.use_minimal_arrayref_interface:
+                        self.wrapper_call.writeline(
+                            f"std::get<{idx}>(output_arrayref_tensors) = {output};"
+                        )
+                    else:
+                        # Need to wrap scalar into tensor as the main function returns a vector of tensors
+                        output_tensor = self.codegen_scalar_to_tensor(output)
+                        self.wrapper_call.writeline(
+                            f"output_handles[{idx}] = {output_tensor}.release();"
+                        )
                     continue
 
                 output_is_tensor_handle_expr = (
