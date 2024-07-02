@@ -1257,10 +1257,6 @@ if(BUILD_TEST)
   endif()
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  include(../cmake/CheckAbi.cmake)
-endif()
-
 # CMake config for external projects.
 configure_file(
   ${PROJECT_SOURCE_DIR}/cmake/TorchConfigVersion.cmake.in
