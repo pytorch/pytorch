@@ -257,7 +257,8 @@ def produce_guards_and_solve_constraints(
         _disable_forced_specializations: if True, avoids forced specializations
     """
     shape_env = fake_mode.shape_env
-    assert shape_env is not None and shape_env.tracked_fakes is not None
+    assert shape_env is not None
+    assert shape_env.tracked_fakes is not None
 
     placeholders = [tf.fake for tf in shape_env.tracked_fakes]
     sources = [tf.source for tf in shape_env.tracked_fakes]
