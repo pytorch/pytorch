@@ -876,8 +876,8 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         is_inference=t.is_inference(),
         is_sparse=t.is_sparse,
         is_coalesced=t.is_coalesced() if t.is_sparse else None,
-        dense_dim=t.dense_dim() if t.is_sparse else None,
-        sparse_dim=t.sparse_dim() if t.is_sparse else None,
+        dense_dim=t.dense_dim() if is_sparse_any(t) else None,
+        sparse_dim=t.sparse_dim() if is_sparse_any(t) else None,
     )
 
 

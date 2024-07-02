@@ -101,17 +101,19 @@ bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
   if (ndim != dim_) {
     return false;
   }
+  const auto& sizes = v.sym_sizes();
+  for (auto i : c10::irange(ndim)) {
+    auto known_size = sizes_[i];
+    if (known_size.has_value()) {
+      if (known_size.value() != sizes[i]) {
+        return false;
+      }
+    }
+  }
   if (!v.is_sparse() && !at::sparse_csr::is_sparse_compressed(v)) {
-    const auto& sizes = v.sym_sizes();
     const auto& strides = v.sym_strides();
     for (auto i : c10::irange(ndim)) {
-      auto known_size = sizes_[i];
       auto known_stride = strides_[i];
-      if (known_size.has_value()) {
-        if (known_size.value() != sizes[i]) {
-          return false;
-        }
-      }
       if (known_stride.has_value()) {
         if (known_stride.value() != strides[i]) {
           return false;
@@ -160,17 +162,19 @@ std::string TensorCheck::check_verbose(
                 << ndim;
     return fail_reason.str();
   }
+  const auto& sizes = v.sym_sizes();
+  for (auto i : c10::irange(ndim)) {
+    auto known_size = sizes_[i];
+    if (known_size.has_value() && (known_size.value() != sizes[i])) {
+      fail_reason << "size mismatch at index " << i << ". expected "
+                  << known_size.value() << ", actual " << sizes[i];
+      return fail_reason.str();
+    }
+  }
   if (!v.is_sparse() && !at::sparse_csr::is_sparse_compressed(v)) {
-    const auto& sizes = v.sym_sizes();
     const auto& strides = v.sym_strides();
     for (auto i : c10::irange(ndim)) {
-      auto known_size = sizes_[i];
       auto known_stride = strides_[i];
-      if (known_size.has_value() && (known_size.value() != sizes[i])) {
-        fail_reason << "size mismatch at index " << i << ". expected "
-                    << known_size.value() << ", actual " << sizes[i];
-        return fail_reason.str();
-      }
       if (known_stride.has_value() && known_stride.value() != strides[i]) {
         fail_reason << "stride mismatch at index " << i << ". expected "
                     << known_stride.value() << ", actual " << strides[i];
