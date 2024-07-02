@@ -215,7 +215,12 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
 
 
 def _get_cache_or_reload(
-    github, force_reload, trust_repo, calling_fn, verbose=True, skip_validation=False
+    github,
+    force_reload,
+    trust_repo,
+    calling_fn,
+    verbose=True,
+    skip_validation=False,
 ):
     # Setup hub_dir to save downloaded files
     hub_dir = get_dir()
@@ -294,7 +299,11 @@ def _get_cache_or_reload(
 
 
 def _check_repo_is_trusted(
-    repo_owner, repo_name, owner_name_branch, trust_repo, calling_fn="load"
+    repo_owner,
+    repo_name,
+    owner_name_branch,
+    trust_repo,
+    calling_fn="load",
 ):
     hub_dir = get_dir()
     filepath = os.path.join(hub_dir, "trusted_list")
@@ -411,7 +420,11 @@ def set_dir(d):
 
 
 def list(
-    github, force_reload=False, skip_validation=False, trust_repo=None, verbose=True
+    github,
+    force_reload=False,
+    skip_validation=False,
+    trust_repo=None,
+    verbose=True,
 ):
     r"""
     List all callable entrypoints available in the repo specified by ``github``.
@@ -664,7 +677,10 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
 
 
 def download_url_to_file(
-    url: str, dst: str, hash_prefix: Optional[str] = None, progress: bool = True
+    url: str,
+    dst: str,
+    hash_prefix: Optional[str] = None,
+    progress: bool = True,
 ) -> None:
     r"""Download object at the given URL to a local path.
 
