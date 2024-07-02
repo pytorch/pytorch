@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: cpu inductor"]
+import contextlib
 import functools
 
 import sys
@@ -12,7 +13,7 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 from torch._dynamo.utils import counters
-from torch._inductor.codecache import VecAMX
+from torch._inductor.cpu_vec_isa import VecAMX
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -69,6 +70,18 @@ def patches(fn):
         return fn(*args, **kwargs)
 
     return wrapped
+
+
+@contextlib.contextmanager
+def verify(dtype):
+    # For bfloat16 and half, we have to relax the tolerance
+    # due to the difference associave orders in different
+    # kernel implementations
+    atol, rtol = 1e-4, 1e-4
+    if dtype == torch.half or dtype == torch.bfloat16:
+        atol, rtol = 1e-2, 1e-2
+    with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+        yield atol, rtol
 
 
 def _get_epilogue(epilogue: str, other: Optional[torch.Tensor] = None):
@@ -130,13 +143,7 @@ class TestSelectAlgorithm(TestCase):
         mod = M(bias=bias).to(dtype=dtype).eval()
         B = (2, batch_size) if input_3d else (batch_size,)
         v = torch.randn(*B, in_features).to(dtype=dtype)
-        # For bfloat16 and half, we have to relax the tolerance
-        # due to the difference associave orders in different
-        # kernel implementations
-        atol, rtol = 1e-4, 1e-4
-        if dtype == torch.half or dtype == torch.bfloat16:
-            atol, rtol = 1e-2, 1e-2
-        with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+        with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         if (
             counters["inductor"]["decompose_mm"] > 0
@@ -216,10 +223,7 @@ class TestSelectAlgorithm(TestCase):
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         u = torch.randn(batch_size, out_features).to(dtype=dtype)
         mod = M(bias=bias, epilogue=epilogue, other=u).to(dtype=dtype).eval()
-        atol, rtol = 1e-4, 1e-4
-        if dtype == torch.half or dtype == torch.bfloat16:
-            atol, rtol = 1e-2, 1e-2
-        with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+        with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         if (
@@ -280,10 +284,7 @@ class TestSelectAlgorithm(TestCase):
         u = torch.randn(out_features, batch_size).to(dtype=dtype)
         other = torch.randn(batch_size, out_features).to(dtype=dtype)
         mod = M(bias=bias, epilogue=epilogue, other=other).to(dtype=dtype).eval()
-        atol, rtol = 1e-4, 1e-4
-        if dtype == torch.half or dtype == torch.bfloat16:
-            atol, rtol = 1e-2, 1e-2
-        with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+        with verify(dtype) as (atol, rtol):
             self.common(mod, (v, u), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
@@ -326,10 +327,7 @@ class TestSelectAlgorithm(TestCase):
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         u = torch.randn(batch_size, out_features).to(dtype=dtype)
         mod = M(bias=bias, unary=unary, binary=binary, other=u).to(dtype=dtype).eval()
-        atol, rtol = 1e-4, 1e-4
-        if dtype == torch.half or dtype == torch.bfloat16:
-            atol, rtol = 1e-2, 1e-2
-        with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+        with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
@@ -355,8 +353,7 @@ class TestSelectAlgorithm(TestCase):
         counters.clear()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         mod = M(bias=bias).to(dtype=dtype).eval()
-        atol, rtol = 1e-2, 1e-2
-        with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+        with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         vec_amx = VecAMX()
@@ -364,6 +361,35 @@ class TestSelectAlgorithm(TestCase):
             self.assertTrue(counters["inductor"]["cpp_micro_gemm_amx_counter"] > 0)
         else:
             self.assertEqual(counters["inductor"]["cpp_micro_gemm_amx_counter"], 0)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @parametrize("bias", (True, False))
+    def test_linear_with_embedding(self, bias):
+        batch_size = 384
+        in_features = 196
+        out_features = 384
+        dtype = torch.bfloat16
+
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias).to(
+                    dtype=dtype
+                )
+                self.emb = torch.nn.Embedding(64, out_features)
+
+            def forward(self, idx, x):
+                return self.emb(idx) + self.linear(x)
+
+        idx = torch.randint(0, 64, (batch_size,))
+        x = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M(bias=bias).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (idx, x), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
@@ -384,6 +410,9 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         TestSelectAlgorithm.test_linear_with_unary_binary
     )
     test_linear_amx_dynamic_shapes = TestSelectAlgorithm.test_linear_amx
+    test_linear_with_embedding_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_with_embedding
+    )
 
 
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")

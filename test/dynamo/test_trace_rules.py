@@ -227,9 +227,8 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
             "torch.serialization",
             "torch.storage",
             "torch.utils",
+            "torch.distributed.",
         ]
-        if config.trace_distributed:
-            disallowed_modules.append("torch.distributed.")
 
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)
