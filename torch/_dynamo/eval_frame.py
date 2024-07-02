@@ -382,6 +382,7 @@ class _TorchDynamoContext:
                 not in ["_call_impl", "_wrapped_call_impl", "_lazy_forward"]
             )
             and filename not in DONT_WRAP_FILES
+            and not (hasattr(fn, "__code__") and fn.__code__.co_filename == "<string>")
         ):
             # call to a builtin without a frame for us to capture
             fn = external_utils.wrap_inline(fn)
