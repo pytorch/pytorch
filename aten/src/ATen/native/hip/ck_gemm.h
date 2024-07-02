@@ -15,10 +15,6 @@ void gemm_internal_ck<double>(CUDABLAS_GEMM_ARGTYPES(double));
 template <>
 void gemm_internal_ck<float>(CUDABLAS_GEMM_ARGTYPES(float));
 template <>
-void gemm_internal_ck<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
-template <>
-void gemm_internal_ck<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
-template <>
 void gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 template <>
 void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));

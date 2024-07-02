@@ -1039,11 +1039,6 @@ void gemm_internal<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<dou
     gemm_internal_cublaslt<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>));
 #endif
   }
-#ifdef USE_ROCM
-  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    at::native::gemm_internal_ck<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>));
-  }
-#endif
   else {
     gemm_internal_cublas<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>));
   }
@@ -1060,11 +1055,6 @@ void gemm_internal<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<floa
     gemm_internal_cublaslt<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
 #endif
   }
-#ifdef USE_ROCM
-  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    at::native::gemm_internal_ck<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
-  }
-#endif
   else {
     gemm_internal_cublas<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
   }

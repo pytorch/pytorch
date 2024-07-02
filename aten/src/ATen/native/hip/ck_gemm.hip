@@ -52,16 +52,6 @@ void gemm_internal_ck<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
 }
 
 template <>
-void gemm_internal_ck<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
-  return;
-}
-
-template <>
-void gemm_internal_ck<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
-  return;
-}
-
-template <>
 void gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   return;
 }
@@ -71,29 +61,24 @@ void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   return;
 }
 
-/*
-TODO - Remove this blurb
-Parameters traditionally being passed to gemms
-- char transa
-- char transb
-- int64 m
-- int64 n
-- int64 k
-- opMath_type alpha
+template <typename T>
+struct CkMathType {
+  using dtype = T;
+};
 
-- const dtype * a
-- int64 lda
-- const dtype * b
-- int64 ldb
-- opMath_type beta
-- dtype * c
-- ldc
+template <>
+struct CkMathType<at::BFloat16> {
+  using dtype = ck::bhalf_t;
+};
 
-*/
-
+template <>
+struct CkMathType<at::Half> {
+  using dtype = ck::half_t;
+};
 
 
 template <
+    typename Dtype,
     int BLOCK_SIZE,
     int MBLOCK,
     int NBLOCK,
@@ -104,7 +89,7 @@ template <
     int NPER_WAVE,
     int CNPER_WAVE = 1,
     bool PADDING = false>
-void float_gemm_impl(CUDABLAS_GEMM_ARGTYPES(float)) {
+void float_gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   // Get input information.
   int M = m;
   int N = n;
@@ -114,19 +99,20 @@ void float_gemm_impl(CUDABLAS_GEMM_ARGTYPES(float)) {
   int StrideB = ldb;
   int StrideC = ldc;
 
-  using ADataType = float;
-  using BDataType = float;
-  using DDataType = float;
+  using ADataType = typename CkMathType<Dtype>::dtype;
+  using BDataType = typename CkMathType<Dtype>::dtype;
+  using DDataType = typename CkMathType<Dtype>::dtype;
   using DsDataType = ck::Tuple<>;
   using AccDataType = float;
-  using CShuffleDataType = float;
-  using CDataType = float;
+  using CShuffleDataType = typename CkMathType<Dtype>::dtype;;
+  using CDataType = typename CkMathType<Dtype>::dtype;;
 
 #if 0
   using ALayout = Row;
   using BLayout = Col;
   using DLayout = Row;
   using DsLayout = ck::Tuple<>;
+  using DsDataType = ck::Tuple<>;
   using CLayout = Row;
 #else
   using ALayout = Col;
@@ -250,24 +236,24 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
   // Dispatch to best implementation. TODO add more configurations.
   if (use_padding) {
     if (m <= 128) {
-      float_gemm_impl<256, 128, 64, 32, 32, 32, 2, 1, 1, true>(CUDABLAS_GEMM_ARGS(float));
+      float_gemm_impl<float, 256, 128, 64, 32, 32, 32, 2, 1, 1, true>(CUDABLAS_GEMM_ARGS(float));
 #if 0
     // as float type, get error: local memory (98304) exceeds limit (65536)
     } else if ((m >= 8192 && n >= 4096) || (n >= 8192 && m >= 4096)) {
-      float_gemm_impl<256, 256, 128, 64, 16, 16, 8, 4, 2, true>(CUDABLAS_GEMM_ARGS(float));
+      float_gemm_impl<float, 256, 256, 128, 64, 16, 16, 8, 4, 2, true>(CUDABLAS_GEMM_ARGS(float));
 #endif
     } else {
-      float_gemm_impl<256, 128, 128, 64, 16, 16, 4, 4, 2, true>(CUDABLAS_GEMM_ARGS(float));
+      float_gemm_impl<float, 256, 128, 128, 64, 16, 16, 4, 4, 2, true>(CUDABLAS_GEMM_ARGS(float));
     }
   } else {
 #if 0
     // as float type, get error: local memory (98304) exceeds limit (65536)
     if ((m >= 8192 && n >= 4096) || (n >= 8192 && m >= 4096)) {
-      float_gemm_impl<256, 256, 128, 64, 16, 16, 8, 4, 2, false>(CUDABLAS_GEMM_ARGS(float));
+      float_gemm_impl<float, 256, 256, 128, 64, 16, 16, 8, 4, 2, false>(CUDABLAS_GEMM_ARGS(float));
     } else
 #endif
     {
-      float_gemm_impl<256, 128, 128, 64, 16, 16, 4, 4, 2, false>(CUDABLAS_GEMM_ARGS(float));
+      float_gemm_impl<float, 256, 128, 128, 64, 16, 16, 4, 4, 2, false>(CUDABLAS_GEMM_ARGS(float));
     }
   }
 }
