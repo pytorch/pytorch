@@ -2116,21 +2116,22 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // entry if it hasn't been yet rather than untangling the
   // conditions that might have resulted in a split above.
   if (!ncclComm) {
-    // For point-to-point communication, lower rank of the two will get unique id.
+    // For point-to-point communication, lower rank of the two will get unique
+    // id.
     if (rank_ == 0 || (singleP2POp && p2pRank == 0)) {
-        C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), c10::nullopt);
+      C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), c10::nullopt);
     }
 
     if (shouldBroadcastNCCLUniqueID(isSendRecvSelf)) {
-        // Broadcast so that each process can have a unique NCCL ID
-        auto timeStarted = std::chrono::steady_clock::now();
-        broadcastUniqueNCCLID(&ncclID, singleP2POp, deviceKey, p2pRank);
-        auto timerDeltaMs =
-            std::chrono::duration_cast<std::chrono::duration<double>>(
-                std::chrono::steady_clock::now() - timeStarted)
-                .count() *
-            1000;
-        LOG(INFO) << logPrefix()
+      // Broadcast so that each process can have a unique NCCL ID
+      auto timeStarted = std::chrono::steady_clock::now();
+      broadcastUniqueNCCLID(&ncclID, singleP2POp, deviceKey, p2pRank);
+      auto timerDeltaMs =
+          std::chrono::duration_cast<std::chrono::duration<double>>(
+              std::chrono::steady_clock::now() - timeStarted)
+              .count() *
+          1000;
+      LOG(INFO) << logPrefix()
                 << "ProcessGroupNCCL broadcast unique ID through store took "
                 << timerDeltaMs << " ms";
     }
