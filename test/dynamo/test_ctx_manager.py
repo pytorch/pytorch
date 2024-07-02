@@ -466,6 +466,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             raise unittest.SkipTest("requires bf16")
 
         class MyModule(torch.nn.Module):
+            @torch.autocast(device_type="cuda")
             def forward(self, x):
                 a_float32 = torch.rand((8, 8), device="cuda")
                 b_float32 = torch.rand((8, 8), device="cuda")
@@ -493,6 +494,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_amp_autocast(self):
         class MyModule(torch.nn.Module):
+            @torch.autocast(device_type="cuda")
             def forward(self, x):
                 a_float32 = torch.rand((8, 8), device="cuda")
                 b_float32 = torch.rand((8, 8), device="cuda")
@@ -514,7 +516,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.type, "cuda")
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.float64)
-
+  
     def test_is_autocast_cpu_enabled(self):
         def fn(a_float32, b_float32):
             with torch.cpu.amp.autocast(dtype=torch.bfloat16):
@@ -536,6 +538,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     )
     def test_autocast_sdpa(self):
         class MyModule(torch.nn.Module):
+            @torch.autocast
             def forward(self, query, key, value):
                 with torch.autocast("cpu"):
                     with torch.autocast("cuda", dtype=torch.float32):
@@ -600,6 +603,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_autocast_cpu_graph_break(self):
         class MyModule(torch.nn.Module):
+            @torch.autocast(device_type="cpu")
             def forward(self, x):
                 a_float32 = torch.rand((8, 8), device="cpu")
                 b_float32 = torch.rand((8, 8), device="cpu")
@@ -649,7 +653,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             def mm_breaks(x, y):
                 torch._dynamo.graph_break()
                 return torch.mm(x, y)
-
+            @torch.autocast(device_type="cpu")
             def forward(self, x):
                 a_float32 = torch.rand((8, 8), device="cpu")
                 b_float32 = torch.rand((8, 8), device="cpu")
@@ -702,7 +706,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             def mm_breaks(self, x, y):
                 torch._dynamo.graph_break()
                 return torch.mm(x, y) + self.bias
-
+            @torch.autocast(device_type="cpu")
             def forward(self, x):
                 a_float32 = torch.rand((8, 8), device="cpu")
                 b_float32 = torch.rand((8, 8), device="cpu")
@@ -749,6 +753,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_float64(self):
         class MyModule(torch.nn.Module):
+            @torch.autocast
             def forward(self, x):
                 a_float32 = torch.rand((8, 8), device="cuda")
                 b_float32 = torch.rand((8, 8), device="cuda")
@@ -775,6 +780,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_device(self):
         class MyModule(torch.nn.Module):
+            @torch.autocast
             def forward(self, x):
                 a_float32 = torch.rand((8, 8), device="cuda")
                 b_float32 = torch.rand((8, 8), device="cuda")
