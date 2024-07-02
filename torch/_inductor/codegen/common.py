@@ -154,7 +154,6 @@ class BackendFeature(Enum):
     TUPLE_REDUCTION = auto()
     PREFER_STORE_LOOP_ORDER = auto()
     TRITON_TEMPLATES = auto()
-    REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
 def get_backend_features(device: Union[torch.device, str]):
@@ -431,8 +430,8 @@ class ExprPrinter(Printer):
 
         if (
             isinstance(string, CSEVariable)
-            or re.match(r"^[a-z0-9_.]+$", string, re.I)
-            or re.match(r"^\([^)]*\)$", string, re.I)
+            or re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
+            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
             or string == ""
         ):
             return string

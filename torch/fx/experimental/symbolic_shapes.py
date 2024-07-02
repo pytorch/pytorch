@@ -1398,6 +1398,7 @@ SYMPY_INTERP = {
     'floor': math.floor,
     'ceiling': math.ceil,
     'FloorToInt': math.floor,
+    'FloatPow': math.pow,
     'CeilToInt': math.ceil,
     'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
     'RoundToInt': builtins.round,
@@ -2805,17 +2806,17 @@ class ShapeEnv:
             if not (min <= int(a) <= max):
                 raise ValueRangeError(f"Invalid value {int(a)} for range [{min}:{max}]")
             return
-        assert isinstance(a, sympy.Symbol), "constraining non-Symbols NYI"
 
         # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
         # semantics that this is an "unchecked" assert (but it this actually
         # something useful?  Might be better to restrict only for unbacked
         # SymInt).
-        self.constrain_symbol_range(
-            a,
-            compiler_min=min,
-            compiler_max=max,
-        )
+        if isinstance(a, sympy.Symbol):
+            self.constrain_symbol_range(
+                a,
+                compiler_min=min,
+                compiler_max=max,
+            )
 
     @record_shapeenv_event()
     def _constrain_unify(self, a, b):
@@ -3440,12 +3441,6 @@ class ShapeEnv:
     ) -> "sympy.Expr":
         """Create a new symbol which is tracked by this ShapeEnv
         """
-        if dynamic_dim is DimDynamic.SIZE_LIKE_UNBACKED:
-            r = self.create_unbacked_symint().node.expr
-            self._constrain_range_for_size(r)
-            # TODO: maybe put the hint somewhere
-            return r
-
         # check if constraint_dim is actually static integer
         if isinstance(constraint_dim, StrictMinMaxConstraint) and constraint_dim.vr.lower == constraint_dim.vr.upper:
             dynamic_dim = DimDynamic.STATIC
@@ -3469,6 +3464,14 @@ class ShapeEnv:
                 and source_name
                 and (source_name in symbolic_context.shape_env_to_source_to_symbol_cache[id(self)])):
             return symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name]
+
+        if dynamic_dim is DimDynamic.SIZE_LIKE_UNBACKED:
+            out = self.create_unbacked_symint().node.expr
+            self._constrain_range_for_size(out)
+            # TODO: maybe put the hint somewhere
+            if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
+                symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name] = out
+            return out
 
         if do_not_specialize_zero_one:
             specialize_zero_one = False
