@@ -42,6 +42,9 @@ autotune_local_cache = True
 # enable autotune remote cache
 autotune_remote_cache = os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1"
 
+# locally cache benchmarking results
+benchmark_local_cache = os.environ.get("TORCHINDUCTOR_BENCHMARK_LOCAL_CACHE", "1") == "1"
+
 # Force disabled all inductor level caching -- This will override any other caching flag
 force_disable_caches = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
 

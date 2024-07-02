@@ -29,12 +29,12 @@ from .hints import (
     TileHint,
     TRITON_MAX_BLOCK,
 )
+from .benchmarking import benchmarker
 from .runtime_utils import (
     cache_dir,
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
-    do_bench_gpu,
     dynamo_timed,
     get_first_attr,
     get_max_y_grid,
@@ -661,7 +661,7 @@ class CachingAutotuner(KernelInterface):
             return callable
         
         launchers_to_benchmark = [launcher for launcher in launchers if launcher not in launcher_to_timing]
-        timings = do_bench_gpu([make_callable(launcher) for launcher in launchers_to_benchmark], memory_warmup_iters=1000)
+        timings = benchmarker.benchmark_many_gpu([make_callable(launcher) for launcher in launchers_to_benchmark], memory_warmup_iters=1000)
         for launcher, timing in zip(launchers_to_benchmark, timings):
             launcher_to_timing[launcher] = timing
         
