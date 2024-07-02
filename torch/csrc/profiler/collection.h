@@ -87,6 +87,16 @@ struct TORCH_API TensorMetadata : public RawTensorMetadataBase {
   std::optional<AllocationID> allocation_id_;
 };
 
+// Used during post processing.
+struct TORCH_API ProfilerStepInfo {
+  int64_t start_time_ns;
+  int64_t end_time_ns;
+  uint64_t out_idx;
+
+  ProfilerStepInfo(int64_t start, int64_t end, uint64_t out_idx)
+      : start_time_ns(start), end_time_ns(end), out_idx(out_idx) {}
+};
+
 using op_input_t = std::variant<
     TensorMetadata,
     std::vector<TensorMetadata>,
@@ -554,6 +564,7 @@ class TORCH_API ThreadLocalSubqueue {
     // NB: This is a destructive operation.
     void materialize(
         std::vector<std::shared_ptr<Result>>& out,
+        std::vector<ProfilerStepInfo>& step_info,
         const std::function<c10::time_t(c10::approx_time_t)>& time_converter,
         const uint64_t tid,
         const kineto::DeviceAndResource& kineto_info);

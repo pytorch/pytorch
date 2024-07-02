@@ -397,8 +397,11 @@ struct StealOrDefault {
 };
 } // namespace
 
+std::string profilerStepString = "ProfilerStep#";
+
 void ThreadLocalSubqueue::TorchOpStorage::materialize(
     std::vector<std::shared_ptr<Result>>& out,
+    std::vector<ProfilerStepInfo>& step_info,
     const std::function<c10::time_t(c10::approx_time_t)>& time_converter,
     const uint64_t tid,
     const kineto::DeviceAndResource& kineto_info) {
@@ -455,6 +458,12 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         event->allow_tf32_cublas_,
         std::move(event->counters_)};
 
+    if (e.name_.find(profilerStepString) != std::string::npos) {
+      step_info.emplace_back(
+          time_converter(event->start_time_),
+          time_converter(event->end_time_),
+          out.size());
+    }
     out.emplace_back(Result::create(
         time_converter(event->start_time_), tid, kineto_info, std::move(e)));
   }
@@ -1363,8 +1372,18 @@ RecordQueue::getRecords(
         ? std::numeric_limits<c10::time_t>::min()
         : time_converter(t);
   };
+
+  // Lambda that checks that only the right side of the base intersects with
+  // ev_start and ev_end
+  auto right_intersection_only =
+      [&](ProfilerStepInfo base, int64_t ev_start, int64_t ev_end) {
+        return (base.start_time_ns < ev_start) &&
+            (base.end_time_ns <= ev_end && base.end_time_ns > ev_start);
+      };
   std::vector<std::shared_ptr<Result>> out;
   std::vector<python_tracer::CompressedEvent> python_enters;
+  std::vector<ProfilerStepInfo> step_info;
+  long unsigned int step_idx = 0;
   for (auto& subqueue_it : sub_queues_) {
     auto& queue = *subqueue_it.second;
     auto materialize = [&](auto& events) {
@@ -1387,7 +1406,7 @@ RecordQueue::getRecords(
     };
 
     queue.torch_ops_.materialize(
-        out, converter, queue.tid(), queue.kineto_info());
+        out, step_info, converter, queue.tid(), queue.kineto_info());
     materialize(queue.backend_events_);
     materialize_vulkan(
         out, queue.vulkan_events_, converter, queue.tid(), queue.kineto_info());
@@ -1419,7 +1438,26 @@ RecordQueue::getRecords(
       torch::profiler::impl::kineto::stopTrace();
       throw;
     }
+    // Placeholder for if we run out of ProfilerStep annotations
+    ProfilerStepInfo defaultStep = {LLONG_MAX, LLONG_MAX, 0};
+    ProfilerStepInfo step =
+        step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
     for (const auto& i : ev) {
+      // If event has start time after step end time we can continue to the next
+      // step
+      while (i->start_time_ns_ > step.end_time_ns) {
+        step_idx++;
+        step = step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
+      }
+      // If Step annotation starts before event and ends before event ends with
+      // intersection then we move the lefthand side of the step annotation to
+      // the event start time
+      if (right_intersection_only(step, i->start_time_ns_, i->endTimeNS())) {
+        auto currStepRes = out[step.out_idx];
+        currStepRes->start_time_ns_ = i->start_time_ns_ + 1;
+        step_idx++;
+        step = step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
+      }
       out.push_back(i);
     }
     python_tracer_.reset();
