@@ -8,7 +8,12 @@ This release only supports build from source for Intel GPUs.
 Prerequisites
 -------------
 
-To check hardware support, install Intel Data Center GPU drivers, install Intel support packages, and set up oneAPI environment variables, you would typically follow `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html>`_.
+Visit `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html>`_ for more detailed information regarding:
+
+#. Supported hardware.
+#. Intel GPU driver installation
+#. Intel support package installation
+#. compilation environment setup
 
 Build from source
 -----------------
