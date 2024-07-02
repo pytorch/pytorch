@@ -21,19 +21,17 @@ concurrency:
 permissions: read-all
 
 jobs:
-  # Often fails due to conda availability issues
-  # See https://github.com/pytorch/pytorch/issues/129717
-  # llm-td:
-  #   name: before-test
-  #   uses: ./.github/workflows/llm_td_retrieval.yml
-  #   permissions:
-  #     id-token: write
-  #     contents: read
+  llm-td:
+    name: before-test
+    uses: ./.github/workflows/llm_td_retrieval.yml
+    permissions:
+      id-token: write
+      contents: read
 
   target-determination:
     name: before-test
     uses: ./.github/workflows/target_determination.yml
-    # needs: llm-td
+    needs: llm-td
     permissions:
       id-token: write
       contents: read
