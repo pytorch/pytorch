@@ -1,6 +1,5 @@
 #include <torch/csrc/python_headers.h>
 
-#include <ATen/CachedTensorUtils.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
 #include <ATen/SequenceNumber.h>
@@ -587,57 +586,6 @@ static PyObject* is_autocast_available(
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device_type = at::Device(r.string(0)).type();
   if (at::autocast::is_autocast_available(device_type)) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* set_cached_tensors_enabled(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK_TYPE(
-      PyBool_Check(arg),
-      "set_cached_tensors_enabled expect a bool as input (got ",
-      Py_TYPE(arg)->tp_name,
-      ")");
-  at::caching::set_cached_tensors_enabled(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* add_cached_tensor(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPVariable_Check(arg),
-      "add_cached_tensor expect a Tensor as input (got ",
-      Py_TYPE(arg)->tp_name,
-      ")");
-  at::caching::add_cached_tensor(THPVariable_Unpack(arg));
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* remove_cached_tensor(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPVariable_Check(arg),
-      "remove_cached_tensor expect a Tensor as input (got ",
-      Py_TYPE(arg)->tp_name,
-      ")");
-  at::caching::remove_cached_tensor(THPVariable_Unpack(arg));
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* is_cached_tensor(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPVariable_Check(arg),
-      "is_cached_tensor expect a Tensor as input (got ",
-      Py_TYPE(arg)->tp_name,
-      ")");
-  if (at::caching::is_cached_tensor((THPVariable_Unpack(arg)))) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -1302,13 +1250,6 @@ static PyMethodDef methods[] = { // NOLINT
      castPyCFunctionWithKeywords(is_autocast_available),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {"_set_cached_tensors_enabled",
-     set_cached_tensors_enabled,
-     METH_O,
-     nullptr},
-    {"_add_cached_tensor", add_cached_tensor, METH_O, nullptr},
-    {"_remove_cached_tensor", remove_cached_tensor, METH_O, nullptr},
-    {"_is_cached_tensor", is_cached_tensor, METH_O, nullptr},
     {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
     {"set_autocast_cpu_enabled", set_autocast_cpu_enabled, METH_O, nullptr},
     {"is_autocast_cpu_enabled", is_autocast_cpu_enabled, METH_NOARGS, nullptr},
