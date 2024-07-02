@@ -17,6 +17,8 @@ import types
 import weakref
 from typing import Any, List, NamedTuple, Optional, Union
 
+from torch._utils_internal import justknobs_check
+
 from torch.utils._sympy.value_ranges import ValueRanges
 
 try:
@@ -340,6 +342,20 @@ class VariableBuilder:
         ]:
             return True
         return False
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def _common_constants():
+        return {
+            # We zero-one specialize shapes, so specialize these constants
+            # too
+            0,
+            1,
+            # NB: There used to be more constants here, but honestly it was
+            # pretty confusing.  Note we specialize floats by default, and
+            # DON'T specialize ints by default.  This all only matters with
+            # dynamic_shapes
+        }
 
     def get_source(self):
         return self.source
@@ -1242,6 +1258,14 @@ class VariableBuilder:
                 or self.source.guard_source().is_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
+                # TODO: Delete this condition when rollout is done.  NB: this
+                # condition never evaluates True in open source
+                or (
+                    not justknobs_check(
+                        "pytorch/dynamo:enable_unspecialize_zero_one_plain_int"
+                    )
+                    and value in self._common_constants()
+                )
             ):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
