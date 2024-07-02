@@ -2,9 +2,16 @@
 
 from copy import deepcopy
 
+from typing import Any
+
+from torchrec.optim.clipping import GradientClipping, GradientClippingOptimizer
+
+from torchrec.optim.keyed import KeyedOptimizer
+
 import torch
 
 import torch.nn as nn
+from torch.autograd import Variable
 
 from torch.distributed._tensor import (
     DeviceMesh,
@@ -21,7 +28,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     MLPModule,
     with_comms,
 )
-
 
 # shard function to do full sharding on all parameters of a module
 def shard_fn(name, module, device_mesh):
@@ -48,6 +54,16 @@ def input_fn(mod, inputs, device_mesh):
 def output_fn(mod, outputs, device_mesh):
     assert isinstance(outputs, DTensor)
     return outputs.redistribute(placements=[Replicate()] * device_mesh.ndim).to_local()
+
+
+# A do-nothing optimizer for testing gradient clipping.
+class DummyKeyedOptimizer(KeyedOptimizer):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+
+    # pyre-ignore[2]
+    def step(self, closure: Any) -> None:
+        pass  # Override NotImplementedError.
 
 
 class TestDTensorOptimizer(DTensorTestBase):
@@ -608,6 +624,41 @@ class TestDTensorOptimizer(DTensorTestBase):
             self._assert_optimizer(
                 mesh, mod, opt, dist_mod, dist_opt, inp, atol=1.3e-5, rtol=1e-4
             )
+
+    @with_comms
+    def test_clip_gradients_norm(self):
+        # set up parameters and their gradients as DTensors.
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        param = Variable(
+            torch.tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], device="cuda"),
+            requires_grad=True,
+        )
+        param.grad = torch.tensor(
+            [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0], device="cuda"
+        )
+        dist_spec = [Shard(0)]
+        dist_param = torch.nn.Parameter(
+            distribute_tensor(param, device_mesh, dist_spec)
+        )
+        self.assertTrue(isinstance(dist_param, DTensor))
+        dist_param.grad = distribute_tensor(param.grad, device_mesh, dist_spec)
+        self.assertTrue(isinstance(dist_param.grad, DTensor))
+
+        # create a dummy optimizer with gradient clipping.
+        dummy_optimizer = DummyKeyedOptimizer(
+            {"param_1": dist_param}, {}, [{"params": [dist_param]}]
+        )
+        gradient_clipping_optimizer = GradientClippingOptimizer(
+            optimizer=dummy_optimizer,
+            max_gradient=0.0,
+            clipping=GradientClipping.NORM,
+            use_dtensors=True,
+        )
+        gradient_clipping_optimizer.step()
+
+        # assert that all the elements in dist_param.grad are zeros after the gradient clipping.
+        num_nonzeros = torch.count_nonzero(dist_param.grad._local_tensor)
+        self.assertFalse(torch.is_nonzero(num_nonzeros))
 
 
 if __name__ == "__main__":
