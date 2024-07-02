@@ -1,19 +1,18 @@
 # mypy: allow-untyped-defs
-from abc import ABC, abstractmethod
 import inspect
+from abc import ABC, abstractmethod
 from typing import Dict, Type
 
+from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import allreduce_hook
+from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
+    _hook_then_optimizer,
+    _OptimizerHookState,
+)
 from torch.distributed.fsdp import FullyShardedDataParallel
+from torch.distributed.optim import as_functional_optim
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import Optimizer
-from torch.distributed.optim import as_functional_optim
 
-from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import allreduce_hook
-
-from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
-    _OptimizerHookState,
-    _hook_then_optimizer
-)
 
 # Contains the mappings between the regular and overlapped optimizer types.
 _registered_overlapped_optims: Dict[Type, Type] = {}
@@ -29,6 +28,7 @@ def register_overlapped(optim_cls):
             )
         _registered_overlapped_optims[optim_cls] = target_overlapped_optim_cls
         return target_overlapped_optim_cls
+
     return decorator
 
 
@@ -71,7 +71,7 @@ class _OverlappedStandardOptimizer(OverlappedOptimizer):
         # yet supported.
         ddp_inst.register_comm_hook(  # type: ignore[operator]
             None,  # wrapped hook state
-            _hook_then_optimizer(allreduce_hook, self._opt_hook_state)
+            _hook_then_optimizer(allreduce_hook, self._opt_hook_state),
         )
 
     # TODO: register_fsdp once FSDP supports communication hook.
@@ -81,11 +81,14 @@ class _OverlappedStandardOptimizer(OverlappedOptimizer):
             f"{self.__class__.__name__} does not support overlapped FSDP."
         )
 
+
 def _as_overlapped_optim(optim_cls: Type, params, *args, **kwargs):
     """Return a new ``OverlappedOptimizer`` instance that supports ``optim_cls``."""
     for clz in inspect.getmro(optim_cls):
         try:
-            return _registered_overlapped_optims[clz](optim_cls, params, *args, **kwargs)
+            return _registered_overlapped_optims[clz](
+                optim_cls, params, *args, **kwargs
+            )
         except KeyError:
             pass
 

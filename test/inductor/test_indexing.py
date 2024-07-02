@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._sympy.functions import (
     FloorDiv,
     ModularIndexing,
@@ -220,7 +220,7 @@ class TestIndexingSimplification(InductorTestCase):
         expected = FloorDiv(x * 15 + y, 3)
         self.assertEqual(expected, FloorDiv(actual, denominator))
 
-    @unittest.skipUnless(HAS_CUDA, "Need GPU for this test")
+    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_int8_unpack(self):
         @torch.compile
         def f(x):
@@ -231,7 +231,7 @@ class TestIndexingSimplification(InductorTestCase):
             )
             return unpacked * 2
 
-        x = torch.randint(0, 255, (2, 4096, 5504), dtype=torch.uint8, device="cuda")
+        x = torch.randint(0, 255, (2, 4096, 5504), dtype=torch.uint8, device=GPU_TYPE)
 
         triton_code = run_and_get_triton_code(f, x)
         # Make sure the 2 load uses simpified indexing rather than something like
@@ -336,19 +336,21 @@ class ExprPrinterTests(InductorTestCase):
 
     def test_print_Min_Max(self):
         cases = (
-            (sympy.Min, "min"),
-            (sympy.Max, "max"),
+            (sympy.Min, "min", "<"),
+            (sympy.Max, "max", ">"),
         )
-        for f, s in cases:
+        for f, s, cmp in cases:
             x = sympy.Symbol("x", integer=True)
             expr = f(-2, x)
-            self.assertEqual(texpr(expr), f"tl.{s}imum(-2, x)")
+            self.assertEqual(
+                texpr(expr), f"((-2) * ((-2) {cmp}= (x)) + (x) * ((x) {cmp} (-2)))"
+            )
             self.assertEqual(cexpr(expr), f"std::{s}(-2L, x)")
 
             expr = f(x, 2 * x, 3 * x)
             self.assertEqual(
                 texpr(expr),
-                f"tl.{s}imum(x, tl.{s}imum(2*x, 3*x))",
+                f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",  # noqa: B950 line too long
             )
             self.assertEqual(cexpr(expr), f"std::{s}({{x, 2L*x, 3L*x}})")
 
@@ -359,5 +361,5 @@ instantiate_parametrized_tests(ExprPrinterTests)
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU:
         run_tests("sympy")

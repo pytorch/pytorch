@@ -21,6 +21,11 @@ def ceildiv(numer: int, denom: int) -> int:
     return -(numer // -denom)
 
 
+def is_power_of_2(n: int) -> bool:
+    """Returns whether n = 2 ** m for some integer m."""
+    return n > 0 and n & n - 1 == 0
+
+
 def next_power_of_2(n: int) -> int:
     """Return the smallest power of 2 greater than or equal to n"""
     n -= 1
@@ -147,11 +152,13 @@ def default_cache_dir():
     )
 
 
-HAS_COLORAMA = True
 try:
     import colorama
-except ImportError:
+
+    HAS_COLORAMA = True
+except ModuleNotFoundError:
     HAS_COLORAMA = False
+    colorama = None  # type: ignore[assignment]
 
 
 def _color_text(msg, color):
