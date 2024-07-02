@@ -1256,18 +1256,12 @@ class TestSymNumberMagicMethods(TestCase):
     def test_symnode_hashing(self):
         shape_env = ShapeEnv()
 
-        # SymInt, SymBool, SymFloat are unhashable
-        unhashable = (
-            create_symint(shape_env, 3),
-            create_symbool(shape_env, True),
-            # We should be passing in float here, but create_symbol currently
-            # only supports int
-            create_symfloat(shape_env, 3.0),
-        )
-
-        for x in unhashable:
-            with self.assertRaisesRegex(TypeError, "unhashable"):
-                hash(x)
+        # These all trigger specialization when hashed
+        hash(create_symint(shape_env, 3))
+        hash(create_symbool(shape_env, True))
+        # We should be passing in float here, but create_symbol currently
+        # only supports int
+        hash(create_symfloat(shape_env, 3.0))
 
         # NestedInt (SymInt), constant SymBool, SymNode are hashable
         j1 = torch._C._get_nested_int(1, 1)

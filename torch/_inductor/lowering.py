@@ -764,7 +764,12 @@ def squeeze(x, dim=None):
     if dim is None:
         return TensorBox(SqueezeView.create(x.data))
 
-    dim = canonicalize_dims(len(x.get_size()), dim)
+    dim = (
+        V.graph.sizevars.evaluate_static_shape(dim)
+        if isinstance(dim, (int, sympy.Expr))
+        else tuple(V.graph.sizevars.evaluate_static_shape(d) for d in dim)
+    )
+    dim = canonicalize_dims(len(x.get_size()), dim)  # type: ignore[call-overload]
     dims = set((dim,) if not isinstance(dim, tuple) else dim)
 
     new_shape = []
@@ -1589,7 +1594,7 @@ def unsqueeze_(x, dim):
 
 
 def _validate_dim(x, dim, offset=0):
-    assert isinstance(dim, int)
+    dim = V.graph.sizevars.shape_env.evaluate_expr(sympy.sympify(dim))
     ndim = len(x.get_size())
     if dim < 0:
         dim += ndim + offset
