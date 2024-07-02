@@ -5603,7 +5603,7 @@ def _in_projection(
 scaled_dot_product_attention = _add_docstr(
     torch._C._nn.scaled_dot_product_attention,
     r"""
-scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None) -> Tensor:
+scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None, enable_gqa=False) -> Tensor:
 
 Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
@@ -5627,6 +5627,11 @@ greater than 0.0 is specified. The optional scale argument can only be specified
                 attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
             else:
                 attn_bias += attn_mask
+
+        if enable_gqa:
+            key = key.repeat_interleave(query.size(-3)//key.size(-3), -3)
+            value = value.repeat_interleave(query.size(-3)//value.size(-3), -3)
+
         attn_weight = query @ key.transpose(-2, -1) * scale_factor
         attn_weight += attn_bias
         attn_weight = torch.softmax(attn_weight, dim=-1)
@@ -5684,6 +5689,11 @@ Note:
     The c++ implementation supports torch.float64 and can be used when higher precision is required.
     For more information please see :doc:`/notes/numerical_accuracy`
 
+    Grouped Query Attention (GQA) is an experimental feature. It currently works only for Flash_attention and math kernel on CUDA tensor, and does not support Nested tensor.
+    Constraints for GQA: 
+        number_of_heads_query % number_of_heads_key_value == 0 and,
+        number_of_heads_key == number_of_heads_value
+
 Note:
     {cudnn_reproducibility_note}
 """.format(
@@ -5691,9 +5701,9 @@ Note:
     )
     + r"""
 Args:
-    query (Tensor): Query tensor; shape :math:`(N, ..., L, E)`.
-    key (Tensor): Key tensor; shape :math:`(N, ..., S, E)`.
-    value (Tensor): Value tensor; shape :math:`(N, ..., S, Ev)`.
+    query (Tensor): Query tensor; shape :math:`(N, ..., Hq, L, E)`.
+    key (Tensor): Key tensor; shape :math:`(N, ..., H, S, E)`.
+    value (Tensor): Value tensor; shape :math:`(N, ..., H, S, Ev)`.
     attn_mask (optional Tensor): Attention mask; shape must be broadcastable to the shape of attention weights,
         which is :math:`(N,..., L, S)`. Two types of masks are supported.
         A boolean mask where a value of True indicates that the element *should* take part in attention.
@@ -5705,10 +5715,11 @@ Args:
         An error is thrown if both attn_mask and is_causal are set.
     scale (optional float, keyword-only): Scaling factor applied prior to softmax. If None, the default value is set
         to :math:`\frac{1}{\sqrt{E}}`.
+    enable_gqa (bool): If set to True, Grouped Query Attention (GQA) is enabled, by default it is set to False.
 
 
 Returns:
-    output (Tensor): Attention output; shape :math:`(N, ..., L, Ev)`.
+    output (Tensor): Attention output; shape :math:`(N, ..., Hq, L, Ev)`.
 
 Shape legend:
     - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
@@ -5716,6 +5727,8 @@ Shape legend:
     - :math:`L: \text{Target sequence length}`
     - :math:`E: \text{Embedding dimension of the query and key}`
     - :math:`Ev: \text{Embedding dimension of the value}`
+    - :math:`Hq: \text{Number of heads of query}`
+    - :math:`H: \text{Number of heads of key and value}`
 
 Examples:
 
@@ -5727,11 +5740,20 @@ Examples:
     >>>     F.scaled_dot_product_attention(query,key,value)
 
 
+    >>> # Sample for GQA for llama3
+    >>> query = torch.rand(32, 32, 128, 64, dtype=torch.float16, device="cuda")
+    >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+    >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+    >>> with sdpa_kernel(backends=[SDPBackend.MATH]):
+    >>>     F.scaled_dot_product_attention(query,key,value, enable_gqa=True)
+
+
 .. _FlashAttention-2\: Faster Attention with Better Parallelism and Work Partitioning:
     https://arxiv.org/abs/2307.08691
 .. _Memory-Efficient Attention:
     https://github.com/facebookresearch/xformers
-
+.. _Grouped-Query Attention:
+    https://arxiv.org/pdf/2305.13245
 """,
 )
 
