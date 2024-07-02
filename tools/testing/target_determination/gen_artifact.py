@@ -5,8 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
 def gen_ci_artifact(included: list[Any], excluded: list[Any]) -> None:
