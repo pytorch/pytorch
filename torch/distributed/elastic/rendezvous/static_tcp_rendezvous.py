@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # mypy: allow-untyped-defs
 
+# pyre-unsafe
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -11,6 +13,9 @@ import datetime
 import logging
 from typing import cast, Optional
 
+# pyre-fixme[21]: Could not find name `PrefixStore` in `torch.distributed`.
+# pyre-fixme[21]: Could not find name `Store` in `torch.distributed`.
+# pyre-fixme[21]: Could not find name `TCPStore` in `torch.distributed`.
 from torch.distributed import PrefixStore, Store, TCPStore
 from torch.distributed.elastic.rendezvous import (
     RendezvousHandler,
@@ -51,6 +56,7 @@ class StaticTCPRendezvous(RendezvousHandler):
         self.world_size = world_size
         self.run_id = run_id
         self.timeout = datetime.timedelta(seconds=timeout)
+        # pyre-fixme[11]: Annotation `Store` is not defined as a type.
         self._store: Optional[Store] = None
 
     def get_backend(self) -> str:
@@ -72,6 +78,7 @@ class StaticTCPRendezvous(RendezvousHandler):
                 self.timeout,
                 multi_tenant=True,
             )
+        # pyre-fixme[16]: Module `distributed` has no attribute `PrefixStore`.
         store = PrefixStore(self.run_id, self._store)
         # TCPStore server instance is used by trainer code
         bootstrap_store_info = RendezvousStoreInfo(self.master_addr, self.master_port)

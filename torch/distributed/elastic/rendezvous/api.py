@@ -5,12 +5,16 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+# pyre-unsafe
+
 import socket
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, ClassVar, Dict, Optional
 
+# pyre-fixme[21]: Could not find name `Store` in `torch.distributed`.
 from torch.distributed import Store
+# pyre-fixme[21]: Could not find module `torch.distributed.elastic.utils.distributed`.
 from torch.distributed.elastic.utils.distributed import get_free_port as _get_free_port
 
 
@@ -68,6 +72,7 @@ class RendezvousStoreInfo:
     master_port: int
 
     @staticmethod
+    # pyre-fixme[11]: Annotation `Store` is not defined as a type.
     def build(rank: int, store: Store) -> "RendezvousStoreInfo":
         """Factory method, finds unused new port on rank0 host and addr/port info with all ranks.
 
@@ -76,6 +81,7 @@ class RendezvousStoreInfo:
         # TODO swap to collectives comms API
         if rank == 0:
             addr = socket.getfqdn()
+            # pyre-fixme[16]: Module `elastic` has no attribute `utils`.
             port = _get_free_port()
             store.set(RendezvousStoreInfo.MASTER_ADDR_KEY, addr.encode(encoding="UTF-8"))  # type: ignore[arg-type]
             store.set(RendezvousStoreInfo.MASTER_PORT_KEY, str(port).encode(encoding="UTF-8"))  # type: ignore[arg-type]

@@ -5,6 +5,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+# pyre-unsafe
+
 import binascii
 from base64 import b64decode, b64encode
 from typing import cast, Optional, Tuple
@@ -19,6 +21,7 @@ from etcd import (  # type: ignore[import]
     EtcdResult,
 )
 
+# pyre-fixme[21]: Could not find name `Store` in `torch.distributed`.
 from torch.distributed import Store
 
 from .api import RendezvousConnectionError, RendezvousParameters, RendezvousStateError
@@ -43,6 +46,7 @@ class EtcdRendezvousBackend(RendezvousBackend):
 
     _DEFAULT_TTL = 7200  # 2 hours
 
+    # pyre-fixme[11]: Annotation `EtcdClient` is not defined as a type.
     _client: EtcdClient
     _key: str
     _ttl: int
@@ -130,6 +134,7 @@ class EtcdRendezvousBackend(RendezvousBackend):
         tmp = *self._decode_state(result), True
         return tmp
 
+    # pyre-fixme[11]: Annotation `EtcdResult` is not defined as a type.
     def _decode_state(self, result: EtcdResult) -> Tuple[bytes, Token]:
         base64_state = result.value.encode()
 
@@ -184,6 +189,7 @@ def _create_etcd_client(params: RendezvousParameters) -> EtcdClient:
         ) from exc
 
 
+# pyre-fixme[11]: Annotation `Store` is not defined as a type.
 def create_backend(params: RendezvousParameters) -> Tuple[EtcdRendezvousBackend, Store]:
     """Create a new :py:class:`EtcdRendezvousBackend` from the specified parameters.
 
