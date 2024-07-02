@@ -184,9 +184,13 @@ REQUIRE_HIGHER_TOLERANCE_TRAINING = {
     # AlbertForQuestionAnswering fails in CI GCP A100 but error does not seem
     # harmful.
     "AlbertForQuestionAnswering",
+}
+
+REQUIRE_HIGHER_TOLERANCE_MAX_AUTOTUNE_TRAINING = {
     # DebertaForQuestionAnswering needs higher tolerance in Max-Autotune mode
     "DebertaForQuestionAnswering",
 }
+
 REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
     "GPT2ForSequenceClassification",
     "RobertaForQuestionAnswering",
@@ -561,7 +565,12 @@ class HuggingfaceRunner(BenchmarkRunner):
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         if is_training:
-            if name in REQUIRE_HIGHER_TOLERANCE_TRAINING:
+            from torch._inductor import config as inductor_config
+
+            if (name in REQUIRE_HIGHER_TOLERANCE_TRAINING) or (
+                inductor_config.max_autotune
+                and name in REQUIRE_HIGHER_TOLERANCE_MAX_AUTOTUNE_TRAINING
+            ):
                 return 2e-2, cosine
             else:
                 return 1e-2, cosine
