@@ -1891,10 +1891,6 @@ def wrap_fx_proxy_cls(
             pass
 
         elif isinstance(example_value, torch.Tensor):
-            # Check if the value is already tracked
-            if example_value in tx.output.side_effects:
-                return tx.output.side_effects[example_value]
-
             if tx.export:
                 # The legacy behavior for real value cache with subclasses was
                 # to perform a clone WITHOUT preserving the subclass.  It's
