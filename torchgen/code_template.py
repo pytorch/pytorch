@@ -41,8 +41,8 @@ class CodeTemplate:
             return kwargs[v] if v in kwargs else env[v]
 
         def indent_lines(indent: str, v: Sequence[object]) -> str:
-            return "\n".join(
-                [(indent + l).rstrip() for e in v for l in str(e).splitlines()]
+            return "".join(
+                [indent + l + "\n" for e in v for l in str(e).splitlines()]
             ).rstrip()
 
         def replace(match: re.Match[str]) -> str:

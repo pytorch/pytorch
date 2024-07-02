@@ -2,21 +2,63 @@
 import os
 import pathlib
 from collections import defaultdict
-from typing import Dict, List, Set, Tuple, Union
+from typing import Any, Dict, List, Set, Tuple, Union
+from typing_extensions import deprecated
 
 try:
-    from torchgen.api.python import format_function_signature
-    from torchgen.utils import FileManager
+    from torchgen.api.python import (
+        format_function_signature as _format_function_signature,
+    )
+    from torchgen.utils import FileManager as _FileManager
 except ImportError:
     import sys
 
     REPO_ROOT = pathlib.Path(__file__).absolute().parents[4]
     sys.path.insert(0, str(REPO_ROOT))
 
-    from torchgen.api.python import format_function_signature
-    from torchgen.utils import FileManager
+    from torchgen.api.python import (
+        format_function_signature as _format_function_signature,
+    )
+    from torchgen.utils import FileManager as _FileManager
 
     sys.path.remove(str(REPO_ROOT))
+
+
+@deprecated(
+    "`torch.utils.data.datapipes.gen_pyi.materialize_lines` is deprecated and will be removed in the future.",
+    category=FutureWarning,
+)
+def materialize_lines(lines: List[str], indentation: int) -> str:
+    output = ""
+    new_line_with_indent = "\n" + " " * indentation
+    for i, line in enumerate(lines):
+        if i != 0:
+            output += new_line_with_indent
+        output += line.replace("\n", new_line_with_indent)
+    return output
+
+
+@deprecated(
+    "`torch.utils.data.datapipes.gen_pyi.gen_from_template` is deprecated and will be removed in the future.",
+    category=FutureWarning,
+)
+def gen_from_template(
+    dir: str,
+    template_name: str,
+    output_name: str,
+    replacements: List[Tuple[str, Any, int]],
+):
+    template_path = os.path.join(dir, template_name)
+    output_path = os.path.join(dir, output_name)
+
+    with open(template_path, encoding="utf-8") as f:
+        content = f.read()
+    for placeholder, lines, indentation in replacements:
+        with open(output_path, "w", encoding="utf-8") as f:
+            content = content.replace(
+                placeholder, materialize_lines(lines, indentation)
+            )
+            f.write(content)
 
 
 def find_file_paths(dir_paths: List[str], files_to_exclude: Set[str]) -> Set[str]:
@@ -101,7 +143,7 @@ def parse_datapipe_file(
                         "open parenthesis count < 0. This shouldn't be possible."
                     )
                 else:
-                    signature += line.strip("\n").strip(" ")
+                    signature += line.strip()
     return (
         method_to_signature,
         method_to_class_name,
@@ -222,7 +264,7 @@ def get_method_definitions(
             doc_string = " ..."
         else:
             doc_string = "\n" + doc_string
-        definition = format_function_signature(method_name, arguments, output_type)
+        definition = _format_function_signature(method_name, arguments, output_type)
         method_definitions.append(
             f"# Functional form of '{class_name}'\n"
             + definition[:-3].rstrip()  # remove "..."
@@ -274,7 +316,7 @@ def main() -> None:
     )
 
     path = pathlib.Path(__file__).parent.resolve()
-    fm = FileManager(install_dir=path, template_dir=path, dry_run=False)
+    fm = _FileManager(install_dir=path, template_dir=path, dry_run=False)
     fm.write_with_template(
         "datapipe.pyi",
         "datapipe.pyi.in",
