@@ -1,6 +1,7 @@
 import functools
 import time
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Self, Tuple, Union
 
 import torch
 from torch._inductor import config as inductor_config
@@ -8,12 +9,53 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import is_cpu_device
 
 
-class Benchmarker:
-    def __init__(self):
-        self.futures_gpu = {}
-        self.kwargs_hash_to_kwargs = {}
+class LazyBenchmark:
+    def __init__(self, evaluate: Callable[[], float]) -> None:
+        self.evaluate = evaluate
+        self.value = None
     
-    def benchmark(self, fn, fn_args, fn_kwargs, **kwargs):
+    def __finalize__(self) -> None:
+        if self.value == None:
+            self.value = self.evaluate()
+        
+    def __float__(self) -> float:
+        self.__finalize__()
+        return self.value
+
+    def __lt__(self, other: Any) -> bool:
+        self.__finalize__()
+        return other > self.value
+    
+    def __le__(self, other: Any) -> bool:
+        self.__finalize__()
+        return other >= self.value
+    
+    def __gt__(self, other: Any) -> bool:
+        self.__finalize__()
+        return other < self.value
+    
+    def __ge__(self, other: Any) -> bool:
+        self.__finalize__()
+        return other <= self.value
+
+    def __add__(self, other: Any) -> Self:
+        return LazyBenchmark(lambda: self.finalize() + other)
+    
+    def __radd__(self, other: Any) -> Self:
+        return LazyBenchmark(lambda: other + self.finalize())
+
+    def __sub__(self, other: Any) -> Self:
+        return LazyBenchmark(lambda: self.finalize() - other)
+    
+    def __rsub__(self, other: Any) -> Self:
+        return LazyBenchmark(lambda: other - self.finalize())
+
+
+class Benchmarker:
+    def __init__(self) -> None:
+        self.futures_gpu = {}
+    
+    def benchmark(self, fn: Callable[..., Any], fn_args: List[Any], fn_kwargs: Dict[str, Any], **kwargs: Dict[str, Any]) -> float:
         _callable = lambda: fn(*fn_args, **fn_kwargs)
 
         fn_args_and_kwargs = list(fn_args) + list(fn_kwargs.values())
@@ -22,7 +64,7 @@ class Benchmarker:
         else:
             return self.benchmark_gpu(_callable, **kwargs)
     
-    def benchmark_cpu(self, _callable, key=None, warmup_iters=5, benchmark_iters=20):
+    def benchmark_cpu(self, _callable: Callable[[], Any], key: str = None, warmup_iters: int = 5, benchmark_iters: int = 20) -> float:
         cached_benchmark = self.get_cached_benchmark(key)
         if cached_benchmark != None:
             return cached_benchmark
@@ -50,7 +92,7 @@ class Benchmarker:
         
         return benchmark
     
-    def benchmark_many_cpu(self, callables, keys=[], warmup_iters=5, benchmark_iters=20):
+    def benchmark_many_cpu(self, callables: List[Callable[[], Any]], keys: List[str] = [], warmup_iters: int = 5, benchmark_iters: int = 20) -> float:
         if keys == []:
             benchmarks = [self.benchmark_cpu(_callable, warmup_iters=warmup_iters, benchmark_iters=benchmark_iters) for _callable in callables]
         else:
@@ -60,9 +102,7 @@ class Benchmarker:
                 benchmarks.append(self.benchmark_cpu(_callable, warmup_iters=warmup_iters, benchmark_iters=benchmark_iters, key=key))
         return benchmarks
     
-    def benchmark_gpu(self, _callable, key=None, estimation_iters=5, groups=5, memory_warmup_iters=1000, benchmark_iters=100, max_benchmark_duration=25):
-        print("benchmarking single callable")
-        
+    def benchmark_gpu(self, _callable: Callable[[], Any], key: str = None, estimation_iters: int = 5, groups: int = 5, memory_warmup_iters: int = 1000, benchmark_iters: int = 100, max_benchmark_duration: int = 25) -> float:        
         cached_benchmark = self.get_cached_benchmark(key)
         if cached_benchmark != None:
             return cached_benchmark
@@ -97,9 +137,7 @@ class Benchmarker:
 
         return benchmark
     
-    def benchmark_many_gpu(self, callables, keys=[], estimation_iters=5, groups=5, memory_warmup_iters=1000, benchmark_iters=100, max_benchmark_duration=25):
-        print(f"benchmarking {len(callables)} callables")
-        
+    def benchmark_many_gpu(self, callables: List[Callable[[], Any]], keys: List[str] = [], estimation_iters: int = 5, groups: int = 5, memory_warmup_iters: int = 1000, benchmark_iters: int = 100, max_benchmark_duration: int = 25) -> float:        
         if keys != []:
             assert len(callables) == len(keys)
             cached_benchmarks = [self.get_cached_benchmark(key) for key in keys]
@@ -114,7 +152,7 @@ class Benchmarker:
                 return cached_benchmarks
 
         def time_interleaved(buffer, callables, iters):
-            interleaved_event_pairs = self.get_interleaved_event_pairs(callables, iters)
+            interleaved_event_pairs = self.get_interleaved_event_pairs(len(callables), iters)
             for event_pairs in interleaved_event_pairs:
                 for _callable, (start_event, end_event) in zip(callables, event_pairs):
                     buffer.zero_()
@@ -152,7 +190,7 @@ class Benchmarker:
 
         return benchmarks
     
-    def lazy_benchmark(self, fn, fn_args, fn_kwargs, **kwargs):
+    def lazy_benchmark(self, fn: Callable[..., Any], fn_args: List[Any], fn_kwargs: Dict[str, Any], **kwargs: Dict[str, Any]) -> Union[LazyBenchmark, float]:
         _callable = lambda: fn(*fn_args, **fn_kwargs)
 
         fn_args_and_kwargs = list(fn_args) + list(fn_kwargs.values())
@@ -161,7 +199,7 @@ class Benchmarker:
         else:
             return self.lazy_benchmark_gpu(_callable, **kwargs)
     
-    def lazy_benchmark_gpu(self, _callable, key=None, **kwargs):
+    def lazy_benchmark_gpu(self, _callable: Callable[[], Any], key: str = None, **kwargs: Dict[str, Any]) -> LazyBenchmark:
         kwargs_hash = hash(tuple(sorted(kwargs.items())))
 
         if key == None:
@@ -171,7 +209,7 @@ class Benchmarker:
         if key not in list(zip(*self.futures_gpu[kwargs_hash])): 
             self.futures_gpu[kwargs_hash].append((_callable, key))
 
-        def finalize():
+        def evaluate():
             benchmark = benchmarker.get_cached_benchmark(key, bypass_cache_configs=True)
             if benchmark != None:
                 return benchmark
@@ -185,16 +223,16 @@ class Benchmarker:
 
             return benchmark
 
-        return LazyBenchmark(finalize)
+        return LazyBenchmark(evaluate)
 
-    def get_local_cache_dir(self):
+    def get_local_cache_dir(self) -> Path:
         cache_path = Path(cache_dir()) / "benchmarks"
         cache_path.mkdir(parents=True, exist_ok=True)
         if cache_path == "/tmp/torchinductor_nmacchioni":
             breakpoint()
         return cache_path
     
-    def get_cached_benchmark(self, key, bypass_cache_configs=False):
+    def get_cached_benchmark(self, key: str, bypass_cache_configs: bool = False) -> Union[float, None]:
         if (not inductor_config.benchmark_local_cache or inductor_config.force_disable_caches) and not bypass_cache_configs:
             return None
 
@@ -210,19 +248,19 @@ class Benchmarker:
         
         return cached_benchmark
     
-    def put_cached_benchmark(self, key, benchmark):
+    def put_cached_benchmark(self, key: str, benchmark: float) -> None:
         if key != None:        
             cache_path = self.get_local_cache_dir() / str(key)
             with open(cache_path, "w") as fp:
                 fp.write(str(benchmark))
 
     @functools.lru_cache(None)
-    def get_cache_size(self):
+    def get_cache_size(self) -> int:
         device = torch.cuda.current_device()
         properties = torch.cuda.get_device_properties(device)
         return properties.l2CacheSize
 
-    def get_event_pairs(self, iters):
+    def get_event_pairs(self, iters: int) -> List[Tuple(torch.cuda.Event, torch.cuda.Event)]:
         return [
             (
                 torch.cuda.Event(enable_timing=True),
@@ -231,55 +269,14 @@ class Benchmarker:
             for _ in range(iters)
         ]
 
-    def get_interleaved_event_pairs(self, fns, iters):
-        return [self.get_event_pairs(len(fns)) for _ in range(iters)]
+    def get_interleaved_event_pairs(self, num_callables: int, iters: int) -> List[List[Tuple(torch.cuda.Event, torch.cuda.Event)]]:
+        return [self.get_event_pairs(num_callables) for _ in range(iters)]
 
-    def get_min_timing(self, event_pairs):
+    def get_min_timing(self, event_pairs: List[Tuple(torch.cuda.Event, torch.cuda.Event)]) -> float:
         return min([start_event.elapsed_time(end_event) for start_event, end_event in event_pairs])
 
-    def get_interleaved_min_timing(self, interleaved_event_pairs):
+    def get_interleaved_min_timing(self, interleaved_event_pairs: List[List[Tuple(torch.cuda.Event, torch.cuda.Event)]]) -> float:
         return [self.get_min_timing(event_pairs) for event_pairs in zip(*interleaved_event_pairs)]
-
-class LazyBenchmark:
-    def __init__(self, finalize):
-        self.finalize = finalize
-        self.value = None
-    
-    def __finalize__(self):
-        if self.value == None:
-            self.value = self.finalize()
-        
-    def __float__(self):
-        self.__finalize__()
-        return self.value
-
-    def __lt__(self, other):
-        self.__finalize__()
-        return other > self.value
-    
-    def __le__(self, other):
-        self.__finalize__()
-        return other >= self.value
-    
-    def __gt__(self, other):
-        self.__finalize__()
-        return other < self.value
-    
-    def __ge__(self, other):
-        self.__finalize__()
-        return other <= self.value
-
-    def __add__(self, other):
-        return LazyBenchmark(lambda: self.finalize() + other)
-    
-    def __radd__(self, other):
-        return LazyBenchmark(lambda: other + self.finalize())
-
-    def __sub__(self, other):
-        return LazyBenchmark(lambda: self.finalize() - other)
-    
-    def __rsub__(self, other):
-        return LazyBenchmark(lambda: other - self.finalize())
             
     
 benchmarker = Benchmarker()
