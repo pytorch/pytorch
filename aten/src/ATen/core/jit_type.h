@@ -1427,19 +1427,26 @@ struct TORCH_API IntType : public NumberType {
 struct BoolType;
 using BoolTypePtr = SingletonTypePtr<BoolType>;
 // This node represents a Python bool value
-struct TORCH_API BoolType : public Type {
+struct TORCH_API BoolType : public NumberType {
   bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
     return "bool";
   }
+  bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override {
+    // NOLINTNEXTLINE(bugprone-parent-virtual-call)
+    return rhs.kind() == TypeKind::NumberType || Type::isSubtypeOfExt(rhs, why_not);
+  }
   static const TypeKind Kind = TypeKind::BoolType;
   // global singleton
   static BoolTypePtr get();
 
  private:
-  BoolType() : Type(TypeKind::BoolType) {}
+  BoolType() : NumberType(TypeKind::BoolType) {}
+  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
+    return "bool";
+  }
 };
 
 struct StringType;

@@ -16,6 +16,7 @@ constexpr DynamicTypeBits kDynamicCovariantTypeBit = DYNAMIC_TYPE_BIT(31);
 constexpr DynamicTypeBits kDynamicAnyTypeBit = DYNAMIC_TYPE_BIT(30);
 
 constexpr DynamicTypeBits kDynamicNoneTypeBit = DYNAMIC_TYPE_BIT(1);
+constexpr DynamicTypeBits kDynamicBoolTypeBit = DYNAMIC_TYPE_BIT(2);
 constexpr DynamicTypeBits kDynamicIntTypeBit = DYNAMIC_TYPE_BIT(3);
 constexpr DynamicTypeBits kDynamicFloatTypeBit = DYNAMIC_TYPE_BIT(4);
 constexpr DynamicTypeBits kDynamicComplexTypeBit = DYNAMIC_TYPE_BIT(5);
@@ -26,12 +27,13 @@ constexpr DynamicTypeBits kDynamicClassTypeBit = DYNAMIC_TYPE_BIT(10);
 #define FORALL_DYNAMIC_TYPES(_)                                              \
   _(Tensor, DYNAMIC_TYPE_BIT(0), 1)                                          \
   _(None, kDynamicNoneTypeBit, 1)                                            \
-  _(Bool, DYNAMIC_TYPE_BIT(2), 1)                                            \
+  _(Bool, kDynamicBoolTypeBit, 1)                                            \
   _(Int, kDynamicIntTypeBit, 1)                                              \
   _(Float, kDynamicFloatTypeBit, 1)                                          \
   _(Complex, kDynamicComplexTypeBit, 1)                                      \
   _(Number,                                                                  \
-    (kDynamicIntTypeBit | kDynamicFloatTypeBit | kDynamicComplexTypeBit),    \
+    (kDynamicBoolTypeBit | kDynamicIntTypeBit | kDynamicFloatTypeBit         \
+     | kDynamicComplexTypeBit),                                              \
     1)                                                                       \
   _(String, DYNAMIC_TYPE_BIT(6), 1)                                          \
   _(List, kDynamicListTypeBit, 0)                                            \
