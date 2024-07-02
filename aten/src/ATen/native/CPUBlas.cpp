@@ -10,7 +10,7 @@
 #include <climits>
 
 #if AT_BUILD_WITH_BLAS()
-#if C10_IOS
+#if true || C10_IOS
 #include <Accelerate/Accelerate.h>
 #else
 extern "C" void dgemm_(char *transa, char *transb, int *m, int *n, int *k, double *alpha, const double *a, int *lda, const double *b, int *ldb, double *beta, double *c, int *ldc);
@@ -143,8 +143,8 @@ void gemm(
         &transa_, &transb_,
         &m_, &n_, &k_,
         &alpha_,
-        a, &lda_,
-        b, &ldb_,
+        const_cast<double*>(a), &lda_,
+        const_cast<double*>(b), &ldb_,
         &beta_,
         c, &ldc_);
     #endif
@@ -191,8 +191,8 @@ void gemm(
         &transa_, &transb_,
         &m_, &n_, &k_,
         &alpha_,
-        a, &lda_,
-        b, &ldb_,
+        const_cast<float*>(a), &lda_,
+        const_cast<float*>(b), &ldb_,
         &beta_,
         c, &ldc_);
     #endif
@@ -234,10 +234,10 @@ void gemm(
         &transa_, &transb_,
         &m_, &n_, &k_,
         &alpha_,
-        a, &lda_,
-        b, &ldb_,
+        (void*)(a), &lda_,
+        (void*)(b), &ldb_,
         &beta_,
-        c, &ldc_);
+        (void*)(c), &ldc_);
     #endif
     return;
   }
@@ -277,10 +277,10 @@ void gemm(
         &transa_, &transb_,
         &m_, &n_, &k_,
         &alpha_,
-        a, &lda_,
-        b, &ldb_,
+        (void*)(a), &lda_,
+        (void*)(b), &ldb_,
         &beta_,
-        c, &ldc_);
+        (void*)(c), &ldc_);
     #endif
     return;
   }
@@ -344,6 +344,46 @@ void gemm(
      return;
    }
 #endif
+   // XXX: MUST GATE BNNS USAGE
+   BNNSNDArrayDescriptor a_desc;
+   std::memset(&a_desc, 0, sizeof(a_desc));
+   a_desc.data_type = BNNSDataTypeFloat16;
+   a_desc.size[0] = m;
+   a_desc.size[1] = k;
+   a_desc.stride[0] = 1;
+   a_desc.stride[1] = lda;
+   a_desc.layout = BNNSDataLayoutColumnMajorMatrix;
+   a_desc.data_scale = 1.0f;
+   a_desc.data_bias = 0.0f;
+   a_desc.data = (void*)a;
+   BNNSNDArrayDescriptor b_desc;
+   std::memset(&b_desc, 0, sizeof(b_desc));
+   b_desc.data_type = BNNSDataTypeFloat16;
+   b_desc.size[0] = k;
+   b_desc.size[1] = n;
+   b_desc.stride[0] = 1;
+   b_desc.stride[1] = ldb;
+   b_desc.layout = BNNSDataLayoutColumnMajorMatrix;
+   b_desc.data_scale = 1.0f;
+   b_desc.data_bias = 0.0f;
+   b_desc.data = (void*)b;
+   BNNSNDArrayDescriptor c_desc;
+   std::memset(&c_desc, 0, sizeof(c_desc));
+   c_desc.data_type = BNNSDataTypeFloat16;
+   c_desc.size[0] = m;
+   c_desc.size[1] = n;
+   c_desc.stride[0] = 1;
+   c_desc.stride[1] = ldc;
+   c_desc.layout = BNNSDataLayoutColumnMajorMatrix;
+   c_desc.data_scale = 1.0f;
+   c_desc.data_bias = 0.0f;
+   c_desc.data = (void*)c;
+
+   int result = BNNSMatMul(transa == TransposeType::Transpose, transb == TransposeType::Transpose, alpha, &a_desc, &b_desc, &c_desc, nullptr, nullptr);
+   if (result != 0) {
+     throw std::runtime_error ("BNNS FAIL!");
+   }
+   return;
    gemm_stub(
       at::kCPU, at::kHalf,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
@@ -639,7 +679,7 @@ void axpy(int64_t n, double a, const double *x, int64_t incx, double *y, int64_t
     #if C10_IOS
     cblas_daxpy(i_n, a, x, i_incx, y, i_incy);
     #else
-    daxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
+    daxpy_(&i_n, &a, const_cast<double*>(x), &i_incx, const_cast<double*>(y), &i_incy);
     #endif
     return;
   }
@@ -664,7 +704,7 @@ void axpy(int64_t n, float a, const float *x, int64_t incx, float *y, int64_t in
     #if C10_IOS
     cblas_saxpy(i_n, a, x, i_incx, y, i_incy);
     #else
-    saxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
+    saxpy_(&i_n, &a,const_cast<float*>(x), &i_incx, const_cast<float*>(y), &i_incy);
     #endif
     return;
   }
@@ -689,7 +729,7 @@ void axpy(int64_t n, c10::complex<double> a, const c10::complex<double> *x, int6
     #if C10_IOS
     cblas_zaxpy(i_n, &a, x, i_incx, y, i_incy);
     #else
-    zaxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
+    zaxpy_(&i_n, &a, (void*)x, &i_incx, (void*)y, &i_incy);
     #endif
     return;
   }
@@ -714,7 +754,7 @@ void axpy(int64_t n, c10::complex<float> a, const c10::complex<float> *x, int64_
     #if C10_IOS
     cblas_caxpy(i_n, &a, x, i_incx, y, i_incy);
     #else
-    caxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
+    caxpy_(&i_n, &a, (void*)x, &i_incx, (void*)y, &i_incy);
     #endif
     return;
   }
@@ -740,7 +780,7 @@ void copy(int64_t n, const double *x, int64_t incx, double *y, int64_t incy) {
     #if C10_IOS
     cblas_dcopy(i_n, x, i_incx, y, i_incy);
     #else
-    dcopy_(&i_n, x, &i_incx, y, &i_incy);
+    dcopy_(&i_n, const_cast<double*>(x), &i_incx, const_cast<double*>(y), &i_incy);
     #endif
     return;
   }
@@ -764,7 +804,7 @@ void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy) {
     #if C10_IOS
     cblas_scopy(i_n, x, i_incx, y, i_incy);
     #else
-    scopy_(&i_n, x, &i_incx, y, &i_incy);
+    scopy_(&i_n, const_cast<float*>(x), &i_incx, const_cast<float*>(y), &i_incy);
     #endif
     return;
   }
@@ -788,7 +828,7 @@ void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<d
     #if C10_IOS
     cblas_zcopy(i_n, x, i_incx, y, i_incy);
     #else
-    zcopy_(&i_n, x, &i_incx, y, &i_incy);
+    zcopy_(&i_n, (void*)x, &i_incx, (void*)y, &i_incy);
     #endif
     return;
   }
@@ -812,7 +852,7 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
     #if C10_IOS
     cblas_ccopy(i_n, &x, i_incx, y, i_incy);
     #else
-    ccopy_(&i_n, x, &i_incx, y, &i_incy);
+    ccopy_(&i_n, (void*)x, &i_incx, (void*)y, &i_incy);
     #endif
     return;
   }
