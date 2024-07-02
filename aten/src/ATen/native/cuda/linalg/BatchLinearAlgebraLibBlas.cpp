@@ -109,7 +109,7 @@ static void apply_lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots
   // This function just works with square matrices
   TORCH_INTERNAL_ASSERT(A.size(-2) == A.size(-1));
 
-  auto batch_size = cuda_int_cast(batchCount(A), "batch_size");;
+  auto batch_size = cuda_int_cast(batchCount(A), "batch_size");
   auto n = cuda_int_cast(A.size(-2), "n");
   auto lda = cuda_int_cast(std::max<int>(1, n), "lda");
 
@@ -134,7 +134,7 @@ static void apply_lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots
   const auto trans = to_cublas(transpose);
 
   auto pivots_data = pivots.const_data_ptr<int>();
-  auto batch_size = cuda_int_cast(batchCount(LU), "batch_size");;
+  auto batch_size = cuda_int_cast(batchCount(LU), "batch_size");
   auto m = cuda_int_cast(LU.size(-2), "m");
   auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
   auto lda = cuda_int_cast(std::max<int>(1, m), "lda");
