@@ -307,6 +307,7 @@
   - d4l3k
   - shuqiangzhang
   - weifengpy
+  - dsjohns2
   mandatory_checks_name:
   - EasyCLA
   - Lint
