@@ -1008,11 +1008,16 @@ class CppWrapperCpu(WrapperCodeGen):
 
             if config.abi_compatible:
                 if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
-                    # Need to wrap scalar into tensor as the main function returns a vector of tensors
-                    output_tensor = self.codegen_scalar_to_tensor(output)
-                    self.wrapper_call.writeline(
-                        f"output_handles[{idx}] = {output_tensor}.release();"
-                    )
+                    if config.use_minimal_arrayref_interface:
+                        self.wrapper_call.writeline(
+                            f"std::get<{idx}>(output_arrayref_tensors) = {output};"
+                        )
+                    else:
+                        # Need to wrap scalar into tensor as the main function returns a vector of tensors
+                        output_tensor = self.codegen_scalar_to_tensor(output)
+                        self.wrapper_call.writeline(
+                            f"output_handles[{idx}] = {output_tensor}.release();"
+                        )
                     continue
 
                 output_is_tensor_handle_expr = (
