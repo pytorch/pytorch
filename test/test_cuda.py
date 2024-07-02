@@ -3074,13 +3074,25 @@ exit(2)
                 ).cuda()
 
             def forward(self, x):
-                return {"output": self.net_2(self.net_1(x))}
+                return self.net_2(self.net_1(x))
+
+        class ParameterlessModule(torch.nn.Module):
+            def forward(self, x):
+                idx = (
+                    torch.arange(x.size(0), device=x.device)
+                    .view(-1, 1)
+                    .repeat(1, x.size(1))
+                )
+                return {"output": torch.gather(x, 0, idx)}
 
         models = []
         for _ in range(2):
             model_section1 = MLP1(D_in, H, H).cuda()
             model_section2 = MLP2(H, H, D_out).cuda()
-            models.append(torch.nn.Sequential(model_section1, model_section2))
+            model_section3 = ParameterlessModule().cuda()
+            models.append(
+                torch.nn.Sequential(model_section1, model_section2, model_section3)
+            )
 
         model_graphed = models[0]
         model_control = models[1]
@@ -3092,6 +3104,7 @@ exit(2)
 
         x = torch.randn(N, D_in, device="cuda")
         h = torch.randn(N, H, device="cuda", requires_grad=True)
+        h2 = torch.randn(N, D_out, device="cuda", requires_grad=True)
         unused_input = torch.randn(N, H, device="cuda", requires_grad=True)
         y_pred = torch.randn(N, D_out, device="cuda", requires_grad=True)
         y = torch.randn(N, D_out, device="cuda")
@@ -3104,13 +3117,21 @@ exit(2)
             (
                 model_graphed[0],
                 model_graphed[1],
+                model_graphed[2],
                 relu_graphed,
                 loss_fn_graphed,
             ) = torch.cuda.make_graphed_callables(
-                (model_graphed[0], model_graphed[1], relu_control, loss_fn_control),
+                (
+                    model_graphed[0],
+                    model_graphed[1],
+                    model_graphed[2],
+                    relu_control,
+                    loss_fn_control,
+                ),
                 (
                     ({"x": x, "unused_input": unused_input},),
                     (h,),
+                    (h2,),
                     (y_pred,),
                     (y_pred, y),
                 ),
@@ -3141,6 +3162,84 @@ exit(2)
 
         for p, pc in zip(model_graphed.parameters(), model_control.parameters()):
             self.assertEqual(p, pc)
+
+        # We graphed the models in training mode. Eval should still run ungraphed.
+        model_graphed.eval()
+        model_control.eval()
+        self.assertEqual(
+            model_graphed({"x": real_inputs[0]}), model_control({"x": real_inputs[0]})
+        )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @parametrize(
+        "with_amp,cache_enabled,allow_unused_input",
+        [
+            subtest((False, False, True), decorators=[skipIfRocm]),
+            subtest((True, False, True), decorators=[skipIfRocm]),
+            subtest((True, True, True), decorators=[unittest.expectedFailure]),
+            subtest((False, False, False), decorators=[skipIfRocm]),
+        ],
+        name_fn=lambda x, y, z: "{}{}{}".format(
+            {True: "with_amp", False: "without_amp"}[x],
+            {True: "_cache_enabled", False: "_cache_disabled"}[y] if x else "",
+            {True: "_allow_unused_input", False: "_not_allow_unused_input"}[z],
+        ),
+    )
+    @serialTest()
+    def test_graph_make_graphed_callables_parameterless_nograd_module(
+        self, with_amp, cache_enabled, allow_unused_input
+    ):
+        torch.manual_seed(5)
+        torch.cuda.manual_seed(5)
+
+        N, D_in, H, D_out = 640, 4096, 2048, 1024
+
+        class ParameterlessModule(torch.nn.Module):
+            def forward(self, input_dict: dict):
+                x = input_dict["x"]
+                idx = (
+                    torch.arange(x.size(0), device=x.device)
+                    .view(-1, 1)
+                    .repeat(1, x.size(1))
+                )
+                return {"output": torch.gather(x, 0, idx)}
+
+        models = []
+        for _ in range(2):
+            model_section1 = ParameterlessModule().cuda()
+            models.append(torch.nn.Sequential(model_section1))
+
+        model_graphed = models[0]
+        model_control = models[1]
+
+        model_graphed.load_state_dict(model_control.state_dict())
+
+        x = torch.randn(N, D_in, device="cuda", requires_grad=False)
+        unused_input = torch.randn(N, H, device="cuda", requires_grad=False)
+        y_pred = torch.randn(N, D_in, device="cuda", requires_grad=False)
+        y = torch.randn(N, D_in, device="cuda")
+
+        # This is a good stress test. It graphs four callables: two Modules and two python functions.
+        with torch.cuda.amp.autocast(with_amp, cache_enabled=cache_enabled):
+            model_graphed[0] = torch.cuda.make_graphed_callables(
+                model_graphed[0],
+                ({"x": x, "unused_input": unused_input},),
+                allow_unused_input=allow_unused_input,
+            )
+
+        real_inputs = [torch.rand_like(x, requires_grad=True) for _ in range(10)]
+        real_targets = [torch.rand_like(y) for _ in range(10)]
+
+        for m in (model_graphed, model_control):
+            # Resets RNC states before iterations for graphed and ungraphed models,
+            # so dropout math should be bitwise identical for both.
+            torch.manual_seed(5)
+            torch.cuda.manual_seed(5)
+            for data, target in zip(real_inputs, real_targets):
+                with torch.cuda.amp.autocast(with_amp, cache_enabled=cache_enabled):
+                    out = m({"x": data, "unused_input": unused_input})["output"]
 
         # We graphed the models in training mode. Eval should still run ungraphed.
         model_graphed.eval()
