@@ -49,7 +49,7 @@ jobs:
   build:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, windows.4xlarge.nonephemeral]
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 240
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
