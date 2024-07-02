@@ -23,48 +23,23 @@ namespace c10 {
 // nullptr DataPtrs can still have a nontrivial device; this allows
 // us to treat zero-size allocations uniformly with non-zero allocations.
 //
-class C10_API DataPtr {
+class C10_API DataPtr : public c10::detail::UniqueVoidPtr {
  private:
-  c10::detail::UniqueVoidPtr ptr_;
-  Device device_;
-
- public:
   // Choice of CPU here is arbitrary; if there's an "undefined" device
   // we could use that too
-  DataPtr() : ptr_(), device_(DeviceType::CPU) {}
-  DataPtr(void* data, Device device) : ptr_(data), device_(device) {}
+  Device device_{DeviceType::CPU};
+
+ public:
+  DataPtr() = default;
+  DataPtr(void* data, Device device)
+      : c10::detail::UniqueVoidPtr(data), device_(device) {}
   DataPtr(void* data, void* ctx, DeleterFnPtr ctx_deleter, Device device)
-      : ptr_(data, ctx, ctx_deleter), device_(device) {}
-  void* operator->() const {
-    return ptr_.get();
-  }
-  void clear() {
-    ptr_.clear();
-  }
-  void* get() const {
-    return ptr_.get();
-  }
+      : c10::detail::UniqueVoidPtr(data, ctx, ctx_deleter), device_(device) {}
   void* mutable_get() {
-    return ptr_.get();
-  }
-  void* get_context() const {
-    return ptr_.get_context();
-  }
-  void* release_context() {
-    return ptr_.release_context();
-  }
-  std::unique_ptr<void, DeleterFnPtr>&& move_context() {
-    return ptr_.move_context();
+    return get();
   }
   operator bool() const {
-    return static_cast<bool>(ptr_);
-  }
-  template <typename T>
-  T* cast_context(DeleterFnPtr expected_deleter) const {
-    return ptr_.cast_context<T>(expected_deleter);
-  }
-  DeleterFnPtr get_deleter() const {
-    return ptr_.get_deleter();
+    return c10::detail::UniqueVoidPtr::operator bool();
   }
   /**
    * Compare the deleter in a DataPtr to expected_deleter.
@@ -106,7 +81,8 @@ class C10_API DataPtr {
   C10_NODISCARD bool compare_exchange_deleter(
       DeleterFnPtr expected_deleter,
       DeleterFnPtr new_deleter) {
-    return ptr_.compare_exchange_deleter(expected_deleter, new_deleter);
+    return c10::detail::UniqueVoidPtr::compare_exchange_deleter(
+        expected_deleter, new_deleter);
   }
   Device device() const {
     return device_;
