@@ -222,6 +222,18 @@ def init_backend_registration():
     if get_scheduling_for_device("xpu") is None:
         register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
 
+    private_backend = torch._C._get_privateuse1_backend_name()                                                                                                                                                        
+    if private_backend != "privateuseone":
+        if get_scheduling_for_device(private_backend) is None:
+            from torch.utils.backend_registration import _get_custom_mod_func
+            try:    
+                triton_scheduling = _get_custom_mod_func("TritonScheduling")
+                wrapper_codegen = _get_custom_mod_func("WrapperCodeGen")
+                if triton_scheduling and wrapper_codegen:
+                    register_backend_for_device(private_backend, triton_scheduling, wrapper_codegen)
+            except RuntimeError:
+                pass
+
 
 def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
     from ..ir import FlexibleLayout
