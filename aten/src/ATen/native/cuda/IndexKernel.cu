@@ -2,6 +2,7 @@
 #include <ATen/native/cuda/IndexKernel.h>
 #include <ATen/native/IndexKernel.h>
 
+#include <array>
 #include <type_traits>
 #include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
@@ -68,9 +69,9 @@ void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, co
     return;
   }
 
-  auto sizes = at::detail::Array<int64_t, MAX_DIMS>(0);
-  auto strides = at::detail::Array<int64_t, MAX_DIMS>(0);
-  auto index_ptrs = at::detail::Array<char*, MAX_DIMS>(nullptr);
+  auto sizes = std::array<int64_t, MAX_DIMS>{};
+  auto strides = std::array<int64_t, MAX_DIMS>{};
+  auto index_ptrs = std::array<char*, MAX_DIMS>{};
   for (unsigned i = 0; i < num_indices; i++) {
     sizes[i] = index_size[i];
     strides[i] = index_stride[i];
