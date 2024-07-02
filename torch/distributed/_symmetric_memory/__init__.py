@@ -253,6 +253,11 @@ lib.define(
     "fused_all_gather_matmul(Tensor A, Tensor[] Bs, int gather_dim, str group_name) -> (Tensor, Tensor[])"
 )
 lib.define(
+    "fused_all_gather_scaled_matmul("
+    "Tensor A, Tensor[] Bs, Tensor A_scale, Tensor[] B_scales, int gather_dim, str group_name"
+    ") -> (Tensor, Tensor[])"
+)
+lib.define(
     "fused_matmul_reduce_scatter(Tensor A, Tensor B, str reduce_op, int scatter_dim, str group_name) -> Tensor"
 )
 
@@ -288,10 +293,9 @@ def _fused_all_gather_matmul(
 
         all_gather_tensor(A_shard, gather_dim, group_name) @ B
 
-    Optimal stride order for A_shard - if A_shard.movedim(scatter_dim, 0) is
+    Optimal stride order for A_shard - if A_shard.movedim(gather_dim, 0) is
     contiguous, no extra copy is required for input layout transformation.
     Otherwise A_shard needs to be copied once.
-
     """
     if _is_test_mode:
         return _fused_all_gather_matmul_fallback(A_shard, Bs, gather_dim, group_name)
@@ -360,14 +364,14 @@ def make_contiguous_for_perm(
 
 def restride_A_shard_for_fused_all_gather_matmul(
     t: torch.Tensor,
-    scatter_dim: int,
+    gather_dim: int,
 ) -> torch.Tensor:
     """
     Restride the `A_shard` arg of `fused_all_gather_matmul` for optimal perf.
     See the doc for `fused_all_gather_matmul` for detail.
     """
     perm = list(range(len(t.shape)))
-    perm.insert(0, perm.pop(scatter_dim))
+    perm.insert(0, perm.pop(gather_dim))
     return make_contiguous_for_perm(t, perm)
 
 
@@ -467,3 +471,108 @@ def restride_A_for_fused_matmul_reduce_scatter(
     perm = list(range(len(t.shape)))
     perm.insert(0, perm.pop(gather_dim))
     return make_contiguous_for_perm(t, perm)
+
+
+@torch.library.impl(lib, "fused_all_gather_scaled_matmul", "Meta")
+def _fused_all_gather_scaled_matmul_fallback(
+    A_shard: torch.Tensor,
+    Bs: List[torch.Tensor],
+    A_scale: torch.Tensor,
+    B_scales: List[torch.Tensor],
+    gather_dim: int,
+    group_name: str,
+) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+    group_size = c10d._get_group_size_by_name(group_name)
+    A = torch.ops._c10d_functional.all_gather_into_tensor(
+        A_shard.contiguous(), group_size, group_name
+    )
+    A = torch.ops._c10d_functional.wait_tensor(A)
+    A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
+
+    def scaled_matmul(
+        A: torch.Tensor, B: torch.Tensor, A_scale: torch.Tensor, B_scale: torch.Tensor
+    ) -> torch.Tensor:
+        leading_dims = A.shape[:-1]
+        res = torch.ops.aten._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale)
+        return res.unflatten(0, leading_dims)
+
+    return A.movedim(0, gather_dim), [
+        scaled_matmul(A, B, A_scale, B_scale).movedim(0, gather_dim)
+        for B, B_scale in zip(Bs, B_scales)
+    ]
+
+
+@torch.library.impl(lib, "fused_all_gather_scaled_matmul", "CUDA")
+def _fused_all_gather_scaled_matmul(
+    A_shard: torch.Tensor,
+    Bs: List[torch.Tensor],
+    A_scale: torch.Tensor,
+    B_scales: torch.Tensor,
+    gather_dim: int,
+    group_name: str,
+) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+    """
+    Perform the following logic with micro-pipelined computation and
+    communication:
+
+        A = all_gather_tensor(A_shard, gather_dim, group_name)
+        leading_dims = A.shape[:-1]
+        res = torch.ops.aten._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale)
+        res = res.unflatten(0, leading_dims)
+
+    Optimal stride order for A_shard - if A_shard.movedim(gather_dim, 0) is
+    contiguous, no extra copy is required for input layout transformation.
+    Otherwise A_shard needs to be copied once.
+    """
+    if _is_test_mode:
+        return _fused_all_gather_matmul_fallback(A_shard, Bs, gather_dim, group_name)
+    if A_shard.dim() < 2:
+        raise ValueError("A_shard must be a matrix")
+    for B in Bs:
+        if B.dim() != 2:
+            raise ValueError("B must be a matrix")
+    if gather_dim < 0 or gather_dim >= A_shard.dim():
+        raise ValueError("Invalid gather_dim")
+
+    group = c10d._resolve_process_group(group_name)
+
+    with torch.profiler.record_function("fused_all_gather_scaled_matmul"):
+        # Move the gather_dim to the front and flatten the tensor into a 2D matrix.
+        # The flattened tensor doesn't need to be contiguous (for computation
+        # efficiency), as _pipelined_all_gather_and_consume guarantees that shards
+        # passed to shard_consumer are contiguous.
+        x = A_shard.movedim(gather_dim, 0)
+        leading_dims = [group.size()] + list(x.shape[:-1])
+        x = x.flatten(0, -2)
+
+        # Helper function for reverting the above transformation
+        def unflatten(t: torch.Tensor) -> torch.Tensor:
+            return t.view(*leading_dims, -1).flatten(0, 1).movedim(0, gather_dim)
+
+        ag_out = x.new_empty(
+            x.shape[0] * group.size(),
+            x.shape[1],
+        )
+        outputs = [
+            x.new_empty(
+                x.shape[0] * group.size(),
+                B.shape[1],
+            )
+            for B in Bs
+        ]
+        output_shards = [output.chunk(group.size()) for output in outputs]
+
+        # Computing block-wise matmul along the first dim of A
+        def shard_consumer(shard: torch.Tensor, rank: int) -> None:
+            for idx, (B, B_scale) in enumerate(zip(Bs, B_scales)):
+                torch.ops.aten._scaled_mm(
+                    shard, B, A_scale, B_scale, out=output_shards[idx][rank]
+                )
+
+        _pipelined_all_gather_and_consume(
+            x,
+            shard_consumer,
+            ag_out,
+            group_name,
+        )
+        return unflatten(ag_out), [unflatten(output) for output in outputs]
