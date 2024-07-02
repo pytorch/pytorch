@@ -133,9 +133,15 @@ class GenericContextWrappingVariable(
         )
         self.cm_obj = cm_obj
 
+    def module_name(self):
+        return self.cm_obj.__module__
+
+    def fn_name(self):
+        return type(self.cm_obj).__name__
+
     def reconstruct(self, codegen):
         # throw NotImplementedError
-        UserDefinedObjectVariable.reconstruct(self, codegen)
+        super(UserDefinedObjectVariable, self).reconstruct(codegen)
 
     def enter(self, tx):
         source = None if self.source is None else AttrSource(self.source, "__enter__")

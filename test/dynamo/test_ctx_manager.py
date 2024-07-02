@@ -872,6 +872,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_generic_ctx_manager_with_graph_break(self):
         def fn(x):
             with CustomizedCtxManagerWithGraphBreak(False):
+                # body runs on eager
                 y = x * 2
                 z = y.sin() + 3
             return z
@@ -879,6 +880,32 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 3)
         opt_fn = torch.compile(backend="eager", fullgraph=False)(fn)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_return_context_manager(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            cm = CustomizedCtxManager(False)
+            with cm:
+                pass
+            return cm
+
+        x = torch.randn(2, 3)
+        cm = f(x)
+        self.assertFalse(cm.mode)
+
+    # @unittest.expectedFailure
+    def test_return_context_manager_with_graph_break(self):
+        @torch.compile(backend="eager", fullgraph=False)
+        def f(x):
+            cm = CustomizedCtxManager(False)
+            torch._dynamo.graph_break()
+            with cm:
+                pass
+            return cm
+
+        x = torch.randn(2, 3)
+        cm = f(x)
+        self.assertFalse(cm.mode)
 
     def test_generic_context_manager(self):
         def fn(x):
