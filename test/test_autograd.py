@@ -6982,6 +6982,31 @@ for shape in [(1,), ()]:
                 out += a
                 out.sum().backward()
 
+    def test_checkpointing_without_reentrant_saved_object_identity(self):
+        x_backward = None
+
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(y)
+                return x
+
+            @staticmethod
+            def backward(ctx, x):
+                nonlocal x_backward
+                (x_backward,) = ctx.saved_tensors
+                return x, None
+
+        a = torch.tensor(1.0, requires_grad=True)
+        b = torch.tensor(1.0, requires_grad=False)
+
+        Test.apply(a, b).backward()
+        self.assertIs(b, x_backward)
+
+        x_backward = None
+        checkpoint(Test.apply, a, b, use_reentrant=False).backward()
+        self.assertIs(b, x_backward)
+
     def test_checkpointing_without_reentrant_correct_grad(self):
         """
         Verifies that correct gradients are calculated for checkpoint
@@ -13210,7 +13235,7 @@ class TestNestedCheckpoint(TestCase):
 
         # With early stopping (enabled by default)
         a = torch.tensor(1.0, requires_grad=True)
-        with SinCounterMode() as python_dispatch_counter:
+        with SinCounterMode() as python_dispatch_counter:  # noqa: F811
             out = checkpoint(fn, a, use_reentrant=False)
             out.backward()
         self.assertEqual(counter[0], 2)

@@ -23,7 +23,7 @@ from torch.nn import Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, IS_CI,
-     NoTest, skipIfSlowGradcheckEnv, suppress_warnings)
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
@@ -1199,6 +1199,29 @@ class MpsMemoryLeakCheck:
 
             raise RuntimeError(msg)
 
+class TestAutocastMPS(TestCase):
+
+    def test_matmul_autocast(self):
+        autocast_tensor_A = torch.rand((8, 8), device="mps")
+        autocast_tensor_B = torch.rand((8, 8), device="mps")
+        tensor_A = autocast_tensor_A.clone().detach()
+        tensor_B = autocast_tensor_B.clone().detach()
+        autocast_output_tensor = torch.empty(8, 8)
+        output_tensor = autocast_output_tensor.clone().detach()
+
+        with torch.autocast(device_type="mps"):
+            autocast_output_tensor = torch.mm(autocast_tensor_A, autocast_tensor_B)
+            autocast_output_tensor = torch.mm(autocast_tensor_A, autocast_output_tensor)
+
+        output_tensor = torch.mm(tensor_A, tensor_B)
+        output_tensor = torch.mm(tensor_A, output_tensor)
+
+        self.assertEqual(autocast_output_tensor.dtype, torch.float16, "Autocast output tensor was not expected type float16")
+        self.assertEqual(autocast_output_tensor,
+                         output_tensor.to(torch.float16),
+                         f"Autocast & non-autocast tensors did not match, \
+                         got:\n{autocast_output_tensor} \n{output_tensor.to(torch.float16)}")
+
 # Expand TestCase class with Memory Leak Detection on MPS device
 class TestCaseMPS(TestCase):
     _do_mps_memory_leak_check = True
@@ -1590,6 +1613,13 @@ class TestMPS(TestCaseMPS):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
             a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
+
+    def test_conv_raises_error(self, device='mps', dtype=torch.float):
+        conv = nn.Conv1d(1, 65537, 3, padding=1).to('mps')
+
+        x = torch.ones([1, 1, 3])
+        with self.assertRaises(NotImplementedError):
+            y = conv(x.to("mps"))
 
     def test_triu_inf(self, device="mps", dtype=torch.float):
         for diag in [-1, 0, 1]:
@@ -7829,7 +7859,7 @@ class TestMPS(TestCaseMPS):
         x.backward(torch.randn_like(x))
         torch.mps.synchronize()
 
-    @unittest.expectedFailure
+    @serialTest()
     def test_mps_allocator_module(self):
         # first garbage collect and empty the cached blocks
         gc.collect()
@@ -9153,10 +9183,11 @@ class TestLinalgMPS(TestCaseMPS):
                     raise e
 
     @parametrize("m", [1, 32, 64])
-    @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
-    def test__int4_mm(self, m, k, n):
-        q_group = 32
+    @parametrize("q_group", [32, 64, 128, 256])
+    @parametrize("num_groups", [1, 2])
+    def test__int4_mm(self, m, n, q_group, num_groups):
+        k = q_group * num_groups
         inner_k_tiles = 2
 
         torch.manual_seed(1)
