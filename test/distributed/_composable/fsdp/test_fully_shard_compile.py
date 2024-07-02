@@ -243,6 +243,13 @@ class TestFullyShardCompile(FSDPTest):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_simple_mlp_fullgraph_backend_inductor(self):
+        # TODO: use combination of:
+        # 1. torch.fx.passes.split_module (in post_grad pass)
+        #     - OK, bad thing is that split_module has to slice the FX module into multiple submodules,
+        #       how do we avoid that and only carve out just the ops we want into a submodule?
+        #       do we have to use split_module? can't we write our own submodule extraction function?
+        # 2. HOP.grouped_node(submod) to wrap the call (in post_grad pass)
+        # 3. Inductor lower that HOP to a dedicated Inductor IR (maybe ir.GroupedNode or ir.CollectiveSubgraph)?
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
         )
