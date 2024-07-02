@@ -1276,6 +1276,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     xfail(
         "unsqueeze_copy",
         reason="OnnxExporterError: Failed to export model",
+        dtypes=(torch.bool, torch.int8, torch.uint8, torch.int16),
     ),
     xfail(
         "where",
