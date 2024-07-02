@@ -331,6 +331,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Tensors used for barrier op
     at::Tensor barrierTensor_;
+    at::cuda::CUDAStream barrierStream_ = at::cuda::getCurrentCUDAStream();
 
     // Clone of blockingWait_ from ProcessGroupNCCL.
     bool blockingWait_ = false;
@@ -769,6 +770,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   c10::intrusive_ptr<Work> allreduce_impl(
       at::Tensor& tensor,
+      at::cuda::CUDAStream& usedStream,
       const AllreduceOptions& opts = AllreduceOptions());
 
   // Checks for NCCL errors on each of the communicators and returns an

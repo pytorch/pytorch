@@ -684,17 +684,13 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
     // If we use the work to do barrier, we should block here
     // `dist.barrier()` only requires all CPU processes to enter this
     // function, hence we only need to make sure the dummy all-reduce has
-    // completed. So we would only need to sync the **current stream** back to
+    // completed. So we would only need to sync the **barrier's stream** back to
     // host, and do not need to synchronize the entire device (which may have
     // kernels running on other streams).
     // Using `cudaStreamSynchronize` instead of `cudaDeviceSynchronize` can:
     // - lower chance of hang;
-    // - CurrentCUDAStream is usually the context of the next operation in
-    // Python, thus blocking current stream would already block the next
-    // compute kernel;
     // - achieve better barrier performance.
-    auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
-    AT_CUDA_CHECK(cudaStreamSynchronize(currentStream));
+    AT_CUDA_CHECK(cudaStreamSynchronize(barrierStream_));
   }
 }
 
@@ -3213,6 +3209,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
     at::Tensor& tensor,
+    at::cuda::CUDAStream& barrierStream,
     const AllreduceOptions& opts) {
   return collective(
       tensor,
@@ -3224,6 +3221,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
+           barrierStream = stream;
         return ncclAllReduce(
             input.data_ptr(),
             output.data_ptr(),
@@ -3282,7 +3280,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
-  return allreduce_impl(tensor, opts);
+  at::cuda::CUDAStream throwawayCUDAStream = at::cuda::getCurrentCUDAStream();
+  return allreduce_impl(tensor, throwawayCUDAStream, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
@@ -3922,12 +3921,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   at::Tensor barrierTensor =
       at::empty({1}, at::TensorOptions().device(device).dtype(at::kByte));
   // All reduce to achieve the barrier
-  auto work = allreduce_impl(barrierTensor);
+  at::cuda::CUDAStream barrierStream = at::cuda::getCurrentCUDAStream();
+  auto work = allreduce_impl(barrierTensor, barrierStream, AllreduceOptions());
 
   // Work will take over barrierTensors
   auto ncclWork = dynamic_cast<ProcessGroupNCCL::WorkNCCL*>(work.get());
   TORCH_CHECK(ncclWork);
   ncclWork->barrierTensor_ = std::move(barrierTensor);
+  ncclWork->barrierStream_ = barrierStream;
   return work;
 }
 
