@@ -83,7 +83,7 @@ if __name__ == "__main__":
     args.cuda_version = None if args.cuda_version == "" else args.cuda_version
     args.hip_version = None if args.hip_version == "" else args.hip_version
 
-    pytorch_root = Path(__file__).parent.parent
+    pytorch_root = Path(__file__).absolute().parent.parent
     version_path = pytorch_root / "torch" / "version.py"
     # Attempt to get tag first, fall back to sha if a tag was not found
     tagged_version = get_tag(pytorch_root)

@@ -7,7 +7,7 @@ from subprocess import check_call
 from tempfile import TemporaryDirectory
 from typing import Optional
 
-SCRIPT_DIR = Path(__file__).parent
+SCRIPT_DIR = Path(__file__).absolute().parent
 REPO_DIR = SCRIPT_DIR.parent.parent
 
 

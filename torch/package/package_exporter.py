@@ -1012,7 +1012,7 @@ class PackageExporter:
 
     def _write_mock_file(self):
         if "_mock.py" not in self._written_files:
-            mock_file = str(Path(__file__).parent / "_mock.py")
+            mock_file = str(Path(__file__).absolute().parent / "_mock.py")
             self._write_source_string("_mock", _read_file(mock_file), is_package=False)
 
     def _execute_dependency_graph(self):

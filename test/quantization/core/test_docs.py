@@ -43,7 +43,7 @@ class TestQuantizationDocs(QuantizationTestCase):
             Current working directory when CI is running test seems to vary, this function
             looks for docs relative to this test file.
             """
-            core_dir = Path(__file__).parent
+            core_dir = Path(__file__).absolute().parent
             assert core_dir.match("test/quantization/core/"), (
                 "test_docs.py is in an unexpected location. If you've been "
                 "moving files around, ensure that the test and build files have "

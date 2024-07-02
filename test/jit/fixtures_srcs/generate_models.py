@@ -111,7 +111,7 @@ Get the path to `test/jit/fixtures`, where all test models for operator changes
 
 
 def get_fixtures_path() -> Path:
-    pytorch_dir = Path(__file__).resolve().parents[3]
+    pytorch_dir = Path(__file__).absolute().parents[3]
     fixtures_path = pytorch_dir / "test" / "jit" / "fixtures"
     return fixtures_path
 

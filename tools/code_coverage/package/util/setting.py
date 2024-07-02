@@ -8,7 +8,7 @@ from typing import Dict, List, Set
 
 # <project folder>
 HOME_DIR = os.environ["HOME"]
-TOOLS_FOLDER = str(Path(__file__).resolve().parents[2])
+TOOLS_FOLDER = str(Path(__file__).absolute().parents[2])
 
 
 # <profile folder>

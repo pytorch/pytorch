@@ -9,7 +9,7 @@ from typing import Any
 from unittest import mock
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).absolute().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.upload_metrics import add_global_metric, emit_metric
