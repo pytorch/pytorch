@@ -673,6 +673,11 @@ class TestCustomOp(CustomOpTestCaseBase):
             """(Tensor(a0!) x, Tensor[] y, Tensor(a2!)[] z, Tensor(a3!)?[] w) -> ()""",
         )
 
+        self.assertExpectedInline(
+            infer_schema(g, mutates_args="unknown"),
+            """(Tensor(a0!) x, Tensor(a1!)[] y, Tensor(a2!)[] z, Tensor(a3!)?[] w) -> ()""",
+        )
+
     def test_infer_schema_unsupported(self):
         with self.assertRaisesRegex(ValueError, "varargs"):
 
@@ -2499,6 +2504,54 @@ class TestCustomOpAPI(TestCase):
             if prev is None and after is None:
                 continue
             self.assertGreater(after, prev)
+
+    def test_mutated_unknown(self):
+        @torch.library.custom_op(
+            "_torch_testing::f", mutates_args="unknown", device_types="cpu"
+        )
+        def f(x: Tensor) -> None:
+            x_np = x.numpy()
+            np.sin(x_np, out=x_np)
+
+        x = torch.randn(3)
+        version = x._version
+        expected = x.sin()
+        f(x)
+        self.assertEqual(x, expected)
+        self.assertGreater(x._version, version)
+
+        @torch.library.custom_op("_torch_testing::f2", mutates_args="unknown")
+        def f2(
+            x: Tensor, y: Optional[Tensor], z: List[Tensor], w: List[Optional[Tensor]]
+        ) -> None:
+            return
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        z = [torch.randn(3), torch.randn(3)]
+        w = [torch.randn(3), None, torch.randn(3)]
+        initial_versions = pytree.tree_map_only(
+            torch.Tensor, lambda x: x._version, (x, y, z, w)
+        )
+        f2(x, y, z, w)
+        new_versions = pytree.tree_map_only(
+            torch.Tensor, lambda x: x._version, (x, y, z, w)
+        )
+
+        initial_versions, _ = pytree.tree_flatten(initial_versions)
+        new_versions, _ = pytree.tree_flatten(new_versions)
+        for prev, after in zip(initial_versions, new_versions):
+            if prev is None and after is None:
+                continue
+            self.assertGreater(after, prev)
+
+        with self.assertRaisesRegex(ValueError, "string"):
+
+            @torch.library.custom_op("_torch_testing::f3", mutates_args="x")
+            def f3(
+                x: Tensor,
+            ) -> None:
+                return
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @parametrize("idx", [0, 1, 2, 3, 4, 5])
