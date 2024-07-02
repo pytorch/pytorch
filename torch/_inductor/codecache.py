@@ -26,6 +26,7 @@ import textwrap
 import threading
 import warnings
 from bisect import bisect_right
+from collections import OrderedDict
 from copy import copy
 from ctypes import c_void_p, cdll, CDLL
 from functools import partial
@@ -1615,6 +1616,7 @@ def cpp_compile_command(
     use_absolute_path: bool = False,
     use_mmap_weights: bool = False,
     extra_flags: Sequence[str] = (),
+    save_flags_to_file=None,
 ) -> str:
     ipaths, lpaths, libs, macros, build_arch_flags = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
@@ -1650,24 +1652,43 @@ def cpp_compile_command(
     if use_mmap_weights:
         macros += " -D USE_MMAP_SELF"
 
-    return re.sub(
-        r"[ \n]+",
-        " ",
-        f"""
-            {cpp_compiler()} {inp_name_str} {get_shared(shared, compile_only)}
-            {get_warning_all_flag(warning_all)} {cpp_flags()}
-            {get_glibcxx_abi_build_flags()}
-            {ipaths_str} {lpaths} {libs} {build_arch_flags}
-            {macros} {linker_paths} {clang_flags}
-            {optimization_flags()} {cpp_wrapper_flags()}
-            {use_custom_generated_macros()}
-            {use_fb_internal_macros()}
-            {use_standard_sys_dir_headers()}
-            {get_compile_only(compile_only)}
-            {' '.join(extra_flags)}
-            -o {out_name}
-        """,
-    ).strip()
+    cpp_command_flags = OrderedDict(
+        [
+            ("CPP_COMPILER", cpp_compiler()),
+            ("INP_NAME", inp_name_str),
+            ("SHARED", get_shared(shared, compile_only)),
+            ("WARNING_ALL_FLAG", get_warning_all_flag(warning_all)),
+            ("CPP_FLAGS", cpp_flags()),
+            ("GLIBCXX_ABI_BUILD_FLAGS", get_glibcxx_abi_build_flags()),
+            ("IPATHS", ipaths_str),
+            ("LPATHS", lpaths),
+            ("LIBS", libs),
+            ("BUILD_ARCH_FLAGS", build_arch_flags),
+            ("MACROS", macros),
+            ("LINKER_PATHS", linker_paths),
+            ("CLANG_FLAGS", clang_flags),
+            ("OPTIMIZATION_FLAGS", optimization_flags()),
+            ("CPP_WRAPPER_FLAGS", cpp_wrapper_flags()),
+            ("CUSTOM_GENERATED_MACROS", use_custom_generated_macros()),
+            ("FB_INTERNAL_MACROS", use_fb_internal_macros()),
+            ("STANDARD_SYS_DIR_HEADERS", use_standard_sys_dir_headers()),
+            ("COMPILE_ONLY", get_compile_only(compile_only)),
+            ("EXTRA_FLAGS", " ".join(extra_flags)),
+        ]
+    )
+
+    cpp_command = " ".join(cpp_command_flags.values()) + f" -o {out_name}"
+    cpp_command = re.sub(r"[ \n]+", " ", cpp_command).strip()
+
+    if save_flags_to_file:
+        with open(save_flags_to_file, "w") as f:
+            f.write(
+                "\n".join(
+                    f'{key} = "{value}"' for key, value in cpp_command_flags.items()
+                )
+            )
+
+    return cpp_command
 
 
 def run_command_and_check(cmd: str):
@@ -1916,6 +1937,8 @@ class AotCodeCompiler:
             use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
+
+            compile_flags = os.path.splitext(input_path)[0] + "_compile_flags"
             compile_cmd = cpp_compile_command(
                 input=input_path,
                 output=output_o,
@@ -1925,13 +1948,10 @@ class AotCodeCompiler:
                 compile_only=True,
                 use_absolute_path=use_absolute_path,
                 use_mmap_weights=use_mmap_weights,
+                save_flags_to_file=compile_flags
+                if config.aot_inductor.package
+                else None,
             )
-            log.debug("aot compilation command: %s", compile_cmd)
-            if fbcode_aot_cpu_re:
-                compile_file(input_path, output_o, compile_cmd.split())
-                os.chmod(output_o, 0o644)
-            else:
-                run_command_and_check(compile_cmd)
 
             def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
                 def _pad_to_alignment(raw_bytes):
@@ -1981,11 +2001,13 @@ class AotCodeCompiler:
                     int, torch.randint(0, torch.iinfo(torch.int64).max, (1,)).item()
                 )
                 aot_constants = struct.pack("qq", consts_size + 8, magic_number)
+
             consts_o = {
                 "linux": _compile_consts_linux,
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
 
+            linker_flags = os.path.splitext(input_path)[0] + "_linker_flags"
             link_cmd = cpp_compile_command(
                 input=[output_o, consts_o],
                 output=output_so,
@@ -1993,7 +2015,31 @@ class AotCodeCompiler:
                 cuda=cuda,
                 aot_mode=graph.aot_mode,
                 use_absolute_path=use_absolute_path,
+                save_flags_to_file=linker_flags
+                if config.aot_inductor.package
+                else None,
             )
+
+            if config.aot_inductor.package:
+                from torch._inductor.package import package_aoti
+
+                package_constants = {
+                    name: graph.get_original_value_of_constant(name)
+                    for name in graph.constants.keys()
+                    if name not in graph.folded_constants
+                }
+                archive_path = package_aoti(
+                    os.path.split(input_path)[0], package_constants
+                )
+                return archive_path
+
+            log.debug("aot compilation command: %s", compile_cmd)
+            if fbcode_aot_cpu_re:
+                compile_file(input_path, output_o, compile_cmd.split())
+                os.chmod(output_o, 0o644)
+            else:
+                run_command_and_check(compile_cmd)
+
             log.debug("aot linkage command: %s", link_cmd)
             if fbcode_aot_cpu_re:
                 compile_file([output_o, consts_o], output_so, link_cmd.split())

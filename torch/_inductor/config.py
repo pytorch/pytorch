@@ -797,6 +797,8 @@ class aot_inductor:
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
 
+    package: bool = False
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
