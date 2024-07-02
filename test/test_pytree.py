@@ -260,7 +260,7 @@ class TestGenericPytree(TestCase):
                     py_pytree,
                     lambda dct: py_pytree.TreeSpec(
                         dict,
-                        list(dct.keys()),
+                        [sorted(dct), dict.fromkeys(dct)],
                         [py_pytree.LeafSpec() for _ in dct.values()],
                     ),
                 ),
@@ -280,18 +280,26 @@ class TestGenericPytree(TestCase):
             expected_spec = gen_expected_fn(dct)
             values, treespec = pytree_impl.tree_flatten(dct)
             self.assertIsInstance(values, list)
-            self.assertEqual(values, list(dct.values()))
+            self.assertEqual(values, [dct[k] for k in sorted(dct)])
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, dct)
             self.assertIsInstance(unflattened, dict)
+            self.assertEqual(list(unflattened.keys()), list(dct.keys()))
+            self.assertEqual(list(unflattened.values()), list(dct.values()))
+            self.assertEqual(list(unflattened.items()), list(dct.items()))
+
+            reordered_dct = {k: dct[k] for k in reversed(dct)}
+            reordered_values, reordered_spec = pytree_impl.tree_flatten(reordered_dct)
+            self.assertEqual(reordered_values, values)
+            self.assertEqual(reordered_spec, treespec)
 
         run_test({})
         run_test({"a": 1})
         run_test({"abcdefg": torch.randn(2, 3)})
         run_test({1: torch.randn(2, 3)})
-        run_test({"a": 1, "b": 2, "c": torch.randn(2, 3)})
+        run_test({"a": 1, "c": torch.randn(2, 3), "b": 2})
 
     @parametrize(
         "pytree_impl,gen_expected_fn",
@@ -329,6 +337,9 @@ class TestGenericPytree(TestCase):
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, odict)
             self.assertIsInstance(unflattened, OrderedDict)
+            self.assertEqual(list(unflattened.keys()), list(odict.keys()))
+            self.assertEqual(list(unflattened.values()), list(odict.values()))
+            self.assertEqual(list(unflattened.items()), list(odict.items()))
 
         od = OrderedDict()
         run_test(od)
@@ -345,7 +356,7 @@ class TestGenericPytree(TestCase):
                     py_pytree,
                     lambda ddct: py_pytree.TreeSpec(
                         defaultdict,
-                        [ddct.default_factory, list(ddct.keys())],
+                        [ddct.default_factory, [sorted(ddct), dict.fromkeys(ddct)]],
                         [py_pytree.LeafSpec() for _ in ddct.values()],
                     ),
                 ),
@@ -367,19 +378,30 @@ class TestGenericPytree(TestCase):
             expected_spec = gen_expected_fn(ddct)
             values, treespec = pytree_impl.tree_flatten(ddct)
             self.assertIsInstance(values, list)
-            self.assertEqual(values, list(ddct.values()))
+            self.assertEqual(values, [ddct[k] for k in sorted(ddct)])
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, ddct)
             self.assertEqual(unflattened.default_factory, ddct.default_factory)
             self.assertIsInstance(unflattened, defaultdict)
+            self.assertEqual(list(unflattened.keys()), list(ddct.keys()))
+            self.assertEqual(list(unflattened.values()), list(ddct.values()))
+            self.assertEqual(list(unflattened.items()), list(ddct.items()))
+
+            reordered_ddct = defaultdict(
+                ddct.default_factory,
+                {k: ddct[k] for k in reversed(ddct)},
+            )
+            reordered_values, reordered_spec = pytree_impl.tree_flatten(reordered_ddct)
+            self.assertEqual(reordered_values, values)
+            self.assertEqual(reordered_spec, treespec)
 
         run_test(defaultdict(list, {}))
         run_test(defaultdict(int, {"a": 1}))
         run_test(defaultdict(int, {"abcdefg": torch.randn(2, 3)}))
         run_test(defaultdict(int, {1: torch.randn(2, 3)}))
-        run_test(defaultdict(int, {"a": 1, "b": 2, "c": torch.randn(2, 3)}))
+        run_test(defaultdict(int, {"a": 1, "c": torch.randn(2, 3), "b": 2}))
 
     @parametrize(
         "pytree_impl,gen_expected_fn",
@@ -795,7 +817,7 @@ TreeSpec(tuple, None, [*,
             # py_pytree.tree_structure(())
             py_pytree.TreeSpec(tuple, None, []),
             # py_pytree.tree_structure({})
-            py_pytree.TreeSpec(dict, [], []),
+            py_pytree.TreeSpec(dict, [[], {}], []),
             # py_pytree.tree_structure([0])
             py_pytree.TreeSpec(list, None, [py_pytree.LeafSpec()]),
             # py_pytree.tree_structure([0, 1])
@@ -820,7 +842,7 @@ TreeSpec(tuple, None, [*,
             # py_pytree.tree_structure({"a": 0, "b": 1, "c": 2})
             py_pytree.TreeSpec(
                 dict,
-                ["a", "b", "c"],
+                [["a", "b", "c"], {"a": None, "b": None, "c": None}],
                 [
                     py_pytree.LeafSpec(),
                     py_pytree.LeafSpec(),
@@ -843,7 +865,7 @@ TreeSpec(tuple, None, [*,
                     py_pytree.LeafSpec(),
                     py_pytree.TreeSpec(
                         dict,
-                        ["a", "b", "c"],
+                        [["a", "b", "c"], {"a": None, "b": None, "c": None}],
                         [
                             py_pytree.LeafSpec(),
                             py_pytree.LeafSpec(),
@@ -878,7 +900,7 @@ TreeSpec(tuple, None, [*,
             # py_pytree.tree_structure(defaultdict(list, {"a": [0, 1], "b": [1, 2], "c": {}}))
             py_pytree.TreeSpec(
                 defaultdict,
-                [list, ["a", "b", "c"]],
+                [list, [["a", "b", "c"], {"a": None, "b": None, "c": None}]],
                 [
                     py_pytree.TreeSpec(
                         list,
@@ -896,7 +918,7 @@ TreeSpec(tuple, None, [*,
                             py_pytree.LeafSpec(),
                         ],
                     ),
-                    py_pytree.TreeSpec(dict, [], []),
+                    py_pytree.TreeSpec(dict, [[], {}], []),
                 ],
             ),
         ],
@@ -1071,7 +1093,7 @@ TreeSpec(tuple, None, [*,
                 py_pytree.LeafSpec(),
                 py_pytree.TreeSpec(
                     dict,
-                    [4, 5, 6],
+                    [[4, 5, 6], {4: None, 5: None, 6: None}],
                     [
                         py_pytree.LeafSpec(),
                         py_pytree.LeafSpec(),
@@ -1098,7 +1120,7 @@ TreeSpec(tuple, None, [*,
             '"children_spec": []}, {"type": null, "context": null, '
             '"children_spec": []}]}, {"type": null, "context": null, '
             '"children_spec": []}, {"type": "builtins.dict", "context": '
-            '"[4, 5, 6]", "children_spec": [{"type": null, "context": null, '
+            '{"sorted_keys": [4, 5, 6], "original_keys": [4, 5, 6]}, "children_spec": [{"type": null, "context": null, '
             '"children_spec": []}, {"type": null, "context": null, "children_spec": '
             '[]}, {"type": null, "context": null, "children_spec": []}]}]}]'
         )
