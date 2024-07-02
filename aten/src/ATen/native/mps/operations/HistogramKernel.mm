@@ -247,10 +247,10 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       id<MTLComputePipelineState> stridedIndicesPSO = lib.getPipelineStateForFunc("kernel_index_offset");
 
       [computeEncoder setComputePipelineState:stridedIndicesPSO];
-      [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim atIndex:0];
+      mtl_setBytes(computeEncoder, strides, 0);
       [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:1];
-      [computeEncoder setBytes:inputShapeData.data() length:sizeof(uint32_t) * inputShape.size() atIndex:2];
-      [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
+      mtl_setBytes(computeEncoder, inputShapeData, 2);
+      mtl_setBytes(computeEncoder, nDim, 3);
 
       mtl_dispatch1DJob(computeEncoder, stridedIndicesPSO, stridedIndicesNumThreads);
 
@@ -267,16 +267,14 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       }
       mtl_setBuffer(computeEncoder, thread_histograms, 2);
       [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:3];
-      [computeEncoder setBytes:&D length:sizeof(int64_t) atIndex:4];
+      mtl_setBytes(computeEncoder, D, 4);
       [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset atIndex:5];
-      [computeEncoder setBytes:num_bin_edges.data() length:sizeof(int64_t) * D atIndex:6];
-      [computeEncoder setBytes:leftmost_edge.data() length:sizeof(input_t) * D atIndex:7];
-      [computeEncoder setBytes:rightmost_edge.data() length:sizeof(input_t) * D atIndex:8];
-      [computeEncoder setBytes:thread_histograms.strides().data()
-                        length:sizeof(int64_t) * thread_hist_sizes.size()
-                       atIndex:9];
-      [computeEncoder setBytes:&bin_selection_algorithm length:sizeof(uint8_t) atIndex:10];
-      [computeEncoder setBytes:&has_weight length:sizeof(uint8_t) atIndex:11];
+      mtl_setBytes(computeEncoder, num_bin_edges, 6);
+      mtl_setBytes(computeEncoder, leftmost_edge, 7);
+      mtl_setBytes(computeEncoder, rightmost_edge, 8);
+      mtl_setBytes(computeEncoder, thread_histograms.strides(), 9);
+      mtl_setBytes(computeEncoder, bin_selection_algorithm, 10);
+      mtl_setBytes(computeEncoder, has_weight, 11);
 
       mtl_dispatch1DJob(computeEncoder, histogramPSO, numThreads);
 

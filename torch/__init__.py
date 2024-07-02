@@ -26,13 +26,15 @@ from typing import (
     Callable as _Callable,
     Dict as _Dict,
     Optional as _Optional,
+    overload as _overload,
     Set as _Set,
     Tuple as _Tuple,
     Type as _Type,
     TYPE_CHECKING,
+    TypeVar as _TypeVar,
     Union as _Union,
 )
-from typing_extensions import TypeGuard as _TypeGuard
+from typing_extensions import ParamSpec as _ParamSpec, TypeGuard as _TypeGuard
 
 
 # multipy/deploy is setting this import before importing torch, this is the most
@@ -738,12 +740,33 @@ def sym_max(a, b):
         # max(1, 1.0) === max(1.0, 1) === 1.0
         return b.__sym_max__(a)
     # TODO: Probably can make bool work too, just lazy
-    assert isinstance(a, (builtins.int, builtins.float)), type(a)
-    assert isinstance(b, (builtins.int, builtins.float)), type(b)
-    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+
+    all_types, float_types = __all_and_float_types()
+
+    assert isinstance(a, all_types), type(a)
+    assert isinstance(b, all_types), type(b)
+    if isinstance(a, float_types) or isinstance(b, float_types):
         return builtins.float(builtins.max(a, b))
     else:
         return builtins.max(a, b)
+
+
+def __all_and_float_types() -> _Tuple[_Tuple[_Type, ...], _Tuple[_Type, ...]]:
+    try:
+        import numpy as np
+
+        all_types: _Tuple[_Type, ...] = (
+            np.integer,
+            np.floating,
+            builtins.int,
+            builtins.float,
+        )
+        float_types: _Tuple[_Type, ...] = (np.floating, builtins.float)
+    except ModuleNotFoundError:
+        all_types = (builtins.int, builtins.float)
+        float_types = (builtins.float,)
+
+    return all_types, float_types
 
 
 def sym_min(a, b):
@@ -754,9 +777,12 @@ def sym_min(a, b):
         return a.__sym_min__(b)
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
-    assert isinstance(a, (builtins.int, builtins.float)), type(a)
-    assert isinstance(b, (builtins.int, builtins.float)), type(b)
-    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+
+    all_types, float_types = __all_and_float_types()
+
+    assert isinstance(a, all_types), type(a)
+    assert isinstance(b, all_types), type(b)
+    if isinstance(a, float_types) or isinstance(b, float_types):
         return builtins.float(builtins.min(a, b))
     else:
         return builtins.min(a, b)
@@ -2190,6 +2216,38 @@ class _TorchCompileWrapper:
             self.compiler_fn.reset()
 
 
+_InputT = _ParamSpec("_InputT")
+_RetT = _TypeVar("_RetT")
+
+
+@_overload
+def compile(
+    model: _Callable[_InputT, _RetT],
+    *,
+    fullgraph: builtins.bool = False,
+    dynamic: _Optional[builtins.bool] = None,
+    backend: _Union[str, _Callable] = "inductor",
+    mode: _Union[str, None] = None,
+    options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    disable: builtins.bool = False,
+) -> _Callable[_InputT, _RetT]:
+    ...
+
+
+@_overload
+def compile(
+    model: None = None,
+    *,
+    fullgraph: builtins.bool = False,
+    dynamic: _Optional[builtins.bool] = None,
+    backend: _Union[str, _Callable] = "inductor",
+    mode: _Union[str, None] = None,
+    options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    disable: builtins.bool = False,
+) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]:
+    ...
+
+
 def compile(
     model: _Optional[_Callable] = None,
     *,
@@ -2199,7 +2257,10 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
-) -> _Callable:
+) -> _Union[
+    _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
+    _Callable[_InputT, _RetT],
+]:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
     If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
@@ -2291,7 +2352,7 @@ def compile(
     # Decorator mode
     if model is None:
 
-        def fn(model: _Callable):
+        def fn(model: _Callable[_InputT, _RetT]) -> _Callable[_InputT, _RetT]:
             if model is None:
                 raise RuntimeError("Model can't be None")
             return compile(
@@ -2322,7 +2383,9 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
-    )(model)
+    )(
+        model
+    )  # type: ignore[return-value]
 
 
 def _register_device_module(device_type, module):
