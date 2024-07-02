@@ -583,7 +583,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         name: Download Build Artifacts
         with:
           name: manywheel-py3_8-rocm6_0
@@ -686,7 +686,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         name: Download Build Artifacts
         with:
           name: manywheel-py3_8-rocm6_1
@@ -1297,7 +1297,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         name: Download Build Artifacts
         with:
           name: manywheel-py3_9-rocm6_0
@@ -1400,7 +1400,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         name: Download Build Artifacts
         with:
           name: manywheel-py3_9-rocm6_1
@@ -2011,7 +2011,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-rocm6_0
@@ -2114,7 +2114,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-rocm6_1
@@ -2725,7 +2725,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         name: Download Build Artifacts
         with:
           name: manywheel-py3_11-rocm6_0
@@ -2828,7 +2828,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         name: Download Build Artifacts
         with:
           name: manywheel-py3_11-rocm6_1
@@ -3439,7 +3439,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         name: Download Build Artifacts
         with:
           name: manywheel-py3_12-rocm6_0
@@ -3542,7 +3542,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         name: Download Build Artifacts
         with:
           name: manywheel-py3_12-rocm6_1
