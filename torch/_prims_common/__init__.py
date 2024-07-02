@@ -257,14 +257,16 @@ def is_channels_last_contiguous_2d(a: Tensor) -> bool:
     if a.ndim != 4:
         return False
 
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     expected_stride = 1
     for idx in (1, 3, 2, 0):
         length = a.shape[idx]
-        if length == 1:
+        if guard_size_oblivious(length == 1):
             continue
 
         stride = a.stride()[idx]
-        if stride != expected_stride:
+        if guard_size_oblivious(stride != expected_stride):
             return False
 
         expected_stride *= length
@@ -1819,6 +1821,8 @@ def check(
 def are_strides_like_channels_last(
     shape: Sequence[int], strides: Sequence[int]
 ) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     ndim = len(shape)
 
     if ndim == 4:
@@ -1830,19 +1834,19 @@ def are_strides_like_channels_last(
     else:
         return False
 
-    if strides[1] == 0:
+    if guard_size_oblivious(strides[1] == 0):
         return False
 
     min = 0
     for d in dim_order:
-        if shape[d] == 0:
+        if guard_size_oblivious(shape[d] == 0):
             return False
         if strides[d] < min:
             return False
         if d == 0 and min == strides[1]:
             return False
         min = strides[d]
-        if strides[d] > 1:
+        if guard_size_oblivious(strides[d] > 1):
             min *= shape[d]
     return True
 
