@@ -2004,12 +2004,22 @@ def sample_inputs_bernoulli(self, device, dtype, requires_grad, **kwargs):
                         requires_grad=requires_grad)
         yield SampleInput(t)
 
+    if device == 'mps:0':
+        # bernoulli uses random_mps_impl under the hood and random_mps_impl support more than one element of the written-to
+        # tensor referring to a single memory location by copying the results as a workaround.
+        x = torch.rand((1,), device=device).expand((6,))
+        yield SampleInput(torch.rand_like(x), kwargs={'out': x})
+
 def error_inputs_bernoulli(op_info, device, **kwargs):
-    # more than one element of the written-to tensor refers to a single memory location
-    x = torch.rand((1,), device=device).expand((6,))
-    err_msg = 'unsupported operation'
-    yield ErrorInput(SampleInput(torch.rand_like(x), kwargs={'out': x}),
-                     error_regex=err_msg)
+    if device == 'mps:0':
+        # TODO: Find a better way to skip error inputs for mps
+        yield ErrorInput()
+    else:
+        # more than one element of the written-to tensor refers to a single memory location
+        x = torch.rand((1,), device=device).expand((6,))
+        err_msg = 'unsupported operation'
+        yield ErrorInput(SampleInput(torch.rand_like(x), kwargs={'out': x}),
+                        error_regex=err_msg)
 
 def sample_inputs_logcumsumexp(self, device, dtype, requires_grad, **kwargs):
     inputs = (

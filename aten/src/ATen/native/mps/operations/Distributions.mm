@@ -58,6 +58,12 @@ Tensor& random_mps_impl(Tensor& self,
   if (self.numel() == 0) {
     return self;
   }
+
+  bool executeGatherOp =
+      !(self.is_contiguous(MemoryFormat::Contiguous) || self.is_contiguous(MemoryFormat::ChannelsLast) ||
+        self.is_contiguous(MemoryFormat::ChannelsLast3d));
+  Tensor output_ = at::empty_like(self, executeGatherOp ? MemoryFormat::Contiguous : MemoryFormat::Preserve);
+
   auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
   MPSStream* stream = getCurrentMPSStream();
 
@@ -132,8 +138,14 @@ Tensor& random_mps_impl(Tensor& self,
       feeds[meanPlaceholder.getMPSGraphTensor()] = meanPlaceholder.getMPSGraphTensorData();
     }
 
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->resultTensor, self);
+    Placeholder outputPlaceholder =
+        Placeholder(cachedGraph->resultTensor, executeGatherOp ? output_ : self, nil, executeGatherOp);
+
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+
+  if (executeGatherOp) {
+    self.copy_(output_);
   }
 
   return self;
