@@ -1001,6 +1001,16 @@ def trace(
         log_torchscript_usage,
     )
 
+    # Preserve a copy of module and inputs before tracing.
+    func_copy, example_inputs_copy, example_kwarg_inputs_copy = None, None, None
+    if check_if_torch_exportable():
+        if isinstance(func, torch.nn.Module):
+            func_copy = copy.deepcopy(func)
+        else:
+            func_copy = func
+        example_inputs_copy = copy.deepcopy(example_inputs)
+        example_kwarg_inputs_copy = copy.deepcopy(example_kwarg_inputs)
+
     log_torchscript_usage("trace")
     traced_func = _trace_impl(
         func,
@@ -1025,8 +1035,8 @@ def trace(
         )
 
         traced_func_for_export = _trace_impl(
-            func,
-            example_inputs=example_inputs,
+            func_copy,
+            example_inputs=example_inputs_copy,
             optimize=optimize,
             check_trace=False,
             check_inputs=check_inputs,
@@ -1035,12 +1045,12 @@ def trace(
             _force_outplace=_force_outplace,
             _module_class=_module_class,
             _compilation_unit=_compilation_unit,
-            example_kwarg_inputs=example_kwarg_inputs,
+            example_kwarg_inputs=example_kwarg_inputs_copy,
             _store_inputs=_store_inputs,
         )
 
-        export_args, _ = _process_jit_trace_inputs_for_export(
-            example_inputs, example_kwarg_inputs
+        export_args_copy, _ = _process_jit_trace_inputs_for_export(
+            example_inputs_copy, example_kwarg_inputs_copy
         )
 
         def _log_exportability(func_to_export, export_func, export_args, export_type):
@@ -1096,20 +1106,20 @@ def trace(
             _log_exportability(
                 traced_func_for_export,
                 _direct_export_and_lower,
-                export_args,
+                export_args_copy,
                 _ExportType.DIRECT_EXPORT,
             )
 
         _log_exportability(
             traced_func_for_export,
             _convert_ts_to_export_experimental,
-            export_args,
+            export_args_copy,
             _ExportType.TRACE_AND_EXPORT,
         )
         _log_exportability(
             traced_func_for_export,
             _convert_ts_to_export_source_to_source,
-            export_args,
+            export_args_copy,
             _ExportType.SOURCE_TO_SOURCE,
         )
 
