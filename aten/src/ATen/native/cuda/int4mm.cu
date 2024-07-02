@@ -151,7 +151,11 @@ static bool isCDNA2orLater(int index) {
 constexpr int32_t kWarpSize = 32;
 #endif
 
-#define CDNA2_OR_LATER() (defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__))
+#if defined (__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+#define CDNA2_OR_LATER 1
+#else
+#define CDNA2_OR_LATER 0
+#endif
 
 #if (defined(USE_ROCM) && ROCM_VERSION >= 50700) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
 
@@ -275,8 +279,13 @@ inline __device__ bf16x2x4 convert_i4x8_to_bf16x2x4(uint32_t source) {
 
   // This is the BF16 {-136, -136} represented as an integer.
 #if defined(USE_ROCM)
+#if ROCM_VERSION >= 60200
   auto BF16_BIAS = __bfloat162bfloat162(__hip_bfloat16(__hip_bfloat16_raw{0xC308}));
   auto BF16_ONE = __bfloat162bfloat162(__hip_bfloat16(__hip_bfloat16_raw{0x3F80}));
+#else
+  auto BF16_BIAS = __bfloat162bfloat162(__hip_bfloat16{0xC308});
+  auto BF16_ONE = __bfloat162bfloat162(__hip_bfloat16{0x3F80});
+#endif
 #else
   static constexpr uint32_t BF16_BIAS = 0xC308C308;
   static constexpr uint32_t BF16_ONE = 0x3F803F80;
@@ -625,7 +634,7 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
 #endif
   constexpr int32_t kKTileSize = 16;
 
-#if !defined(USE_ROCM) || CDNA2_OR_LATER()
+#if !defined(USE_ROCM) || CDNA2_OR_LATER
 
   static_assert(
       ALayout::kMTileSize == kMTileSize && ALayout::kNTileSize == kNTileSize &&
