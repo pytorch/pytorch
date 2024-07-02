@@ -53,7 +53,7 @@ add_custom_command(
 
 target_link_libraries(test_aoti_inference PRIVATE
   torch
-  gtest
+  GTest::gtest
   -Wl,--no-as-needed aoti_custom_class
 )
 
