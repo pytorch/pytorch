@@ -503,6 +503,9 @@ main()
         finally:
             handle.remove()
 
+    # Seems like a test that relies on a broken behavior of LoggingTensor
+    # mapping to UserDefinedObject and causing a graph break.
+    @unittest.expectedFailure
     def test_inputs_aliasing_bytecode_stack_restore(self):
         logging.getLogger().setLevel(logging.WARNING)
         from torch.testing._internal.logging_tensor import LoggingTensor
