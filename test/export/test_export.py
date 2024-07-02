@@ -5063,16 +5063,19 @@ def forward(self, x, b_t, y):
                 b = x.T @ torch.randn(4, 4)  # s0 == 4
                 torch._check(y.shape[0] >= 8)
                 torch._check(y.shape[0] <= 16)  # 8 <= s2 <= 16
+                return a, b
 
         inputs = (
             torch.randn(4, 8),
             torch.randn(9, 8),
         )
+        d1 = Dim("d1")
         dynamic_shapes = {
-            "x": {0: Dim("dx0"), 1: Dim("dx1")},
-            "y": {0: Dim("dy0"), 1: Dim("dy1")},
+            "x": {0: 4, 1: d1},
+            "y": {0: Dim("dy0", min=8, max=16), 1: d1},
         }
-        export(Model(), inputs, dynamic_shapes=dynamic_shapes)
+        ep = export(Model(), inputs, dynamic_shapes=dynamic_shapes)
+        print(ep.range_constraints)
 
     def test_predispatch_grad_wrappers(self):
         class Model(torch.nn.Module):

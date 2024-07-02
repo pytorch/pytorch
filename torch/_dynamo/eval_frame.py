@@ -1363,8 +1363,10 @@ def export(
             assume_static_by_default = True
         with config.patch(
             specialize_int=True,
-            assume_static_by_default=assume_static_by_default,
-            automatic_dynamic_shapes=False,
+            # assume_static_by_default=assume_static_by_default,
+            assume_static_by_default=False,
+            # automatic_dynamic_shapes=False,
+            automatic_dynamic_shapes=True,
             capture_dynamic_output_shape_ops=True,
             capture_scalar_outputs=True,
             prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
@@ -1506,6 +1508,8 @@ def export(
             if constraints
             else []
         )
+        print(graph)
+        print(fake_mode.shape_env.var_to_range)
 
         return ExportResult(graph, out_guards)
 
