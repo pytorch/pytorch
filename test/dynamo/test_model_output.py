@@ -242,7 +242,12 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
         class BertPooler(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.dense = torch.nn.Linear(768, 768).to("cuda")
+                device = (
+                    torch.device("cuda")
+                    if torch.cuda.is_available()
+                    else torch.device("cpu")
+                )
+                self.dense = torch.nn.Linear(768, 768).to(device)
                 self.activation = torch.nn.Tanh()
 
             def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -300,7 +305,10 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
                 result["pooler_output"] = pooled_output
                 return result
 
-        sequence_output = torch.rand(1, 12, 768).to("cuda")
+        device = (
+            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        )
+        sequence_output = torch.rand(1, 12, 768).to(device)
         model = BertModel()
         orig_result = model(sequence_output)
         compiled_model = torch.compile(model, backend="eager")
