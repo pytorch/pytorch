@@ -28,6 +28,7 @@ extern "C" {
 
 DECLARE_PYTORCH_Q8VADD_UKERNEL_FUNCTION(pytorch_q8vadd_ukernel__neon)
 DECLARE_PYTORCH_Q8VADD_UKERNEL_FUNCTION(pytorch_q8vadd_ukernel__sse2)
+DECLARE_PYTORCH_Q8VADD_UKERNEL_FUNCTION(pytorch_q8vadd_ukernel__vsx)
 
 #ifdef __cplusplus
 } /* extern "C" */

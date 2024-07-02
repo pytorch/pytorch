@@ -69,3 +69,31 @@ TEST(U8RMAX__SSE2, n_gt_16) {
   }
 }
 #endif /* CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64 */
+
+#if CPUINFO_ARCH_PPC64
+TEST(U8RMAX__VSX, n_lt_16) {
+  TEST_REQUIRES_VSX;
+  for (size_t n = 1; n < 16; n++) {
+    RMaxMicrokernelTester().n(n).test(pytorch_u8rmax_ukernel__vsx);
+  }
+}
+
+TEST(U8RMAX__VSX, n_eq_16) {
+  TEST_REQUIRES_VSX;
+  RMaxMicrokernelTester().n(16).test(pytorch_u8rmax_ukernel__vsx);
+}
+
+TEST(U8RMAX__VSX, n_div_16) {
+  TEST_REQUIRES_VSX;
+  for (size_t n = 16; n < 128; n += 16) {
+    RMaxMicrokernelTester().n(n).test(pytorch_u8rmax_ukernel__vsx);
+  }
+}
+
+TEST(U8RMAX__VSX, n_gt_16) {
+  TEST_REQUIRES_VSX;
+  for (size_t n = 17; n < 32; n++) {
+    RMaxMicrokernelTester().n(n).test(pytorch_u8rmax_ukernel__vsx);
+  }
+}
+#endif /* CPUINFO_ARCH_PPC64 */

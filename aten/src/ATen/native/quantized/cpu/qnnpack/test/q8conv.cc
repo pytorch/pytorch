@@ -1082,3 +1082,236 @@ TEST(Q8CONV_4x4c2__SSE2, k_div_8_subtile) {
   }
 }
 #endif
+
+#if CPUINFO_ARCH_PPC64
+TEST(Q8CONV_4x4c2__VSX, k_eq_16) {
+  TEST_REQUIRES_VSX;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(16)
+      .aStride(37)
+      .test(pytorch_q8conv_ukernel_4x4c2__vsx);
+}
+
+TEST(Q8CONV_4x4c2__VSX, k_eq_16_strided_c) {
+  TEST_REQUIRES_VSX;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(16)
+      .aStride(37)
+      .cStride(17)
+      .test(pytorch_q8conv_ukernel_4x4c2__vsx);
+}
+
+TEST(Q8CONV_4x4c2__VSX, k_eq_16_qmin128) {
+  TEST_REQUIRES_VSX;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(16)
+      .qmin(128)
+      .test(pytorch_q8conv_ukernel_4x4c2__vsx);
+}
+
+TEST(Q8CONV_4x4c2__VSX, k_eq_16_qmax128) {
+  TEST_REQUIRES_VSX;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(16)
+      .qmax(128)
+      .test(pytorch_q8conv_ukernel_4x4c2__vsx);
+}
+
+TEST(Q8CONV_4x4c2__VSX, k_eq_16_azp_only) {
+  TEST_REQUIRES_VSX;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(16)
+      .aZeroPoint(255)
+      .bZeroPoint(0)
+      .test(pytorch_q8conv_ukernel_4x4c2__vsx);
+}
+
+TEST(Q8CONV_4x4c2__VSX, k_eq_16_bzp_only) {
+  TEST_REQUIRES_VSX;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(16)
+      .aZeroPoint(0)
+      .bZeroPoint(255)
+      .test(pytorch_q8conv_ukernel_4x4c2__vsx);
+}
+
+TEST(Q8CONV_4x4c2__VSX, k_gt_16) {
+  TEST_REQUIRES_VSX;
+  for (size_t k = 17; k < 31; k++) {
+    GemmMicrokernelTester()
+        .mr(4)
+        .nr(4)
+        .np(4)
+        .kr(2)
+        .m(4)
+        .n(4)
+        .k(k)
+        .aStride(37)
+        .test(pytorch_q8conv_ukernel_4x4c2__vsx);
+  }
+}
+
+TEST(Q8CONV_4x4c2__VSX, k_gt_16_strided_c) {
+  TEST_REQUIRES_VSX;
+  for (size_t k = 17; k < 31; k++) {
+    GemmMicrokernelTester()
+        .mr(4)
+        .nr(4)
+        .np(4)
+        .kr(2)
+        .m(4)
+        .n(4)
+        .k(k)
+        .aStride(37)
+        .cStride(17)
+        .test(pytorch_q8conv_ukernel_4x4c2__vsx);
+  }
+}
+
+TEST(Q8CONV_4x4c2__VSX, k_gt_16_azp_only) {
+  TEST_REQUIRES_VSX;
+  for (size_t k = 17; k < 31; k++) {
+    GemmMicrokernelTester()
+        .mr(4)
+        .nr(4)
+        .np(4)
+        .kr(2)
+        .m(4)
+        .n(4)
+        .k(k)
+        .aStride(37)
+        .aZeroPoint(255)
+        .bZeroPoint(0)
+        .test(pytorch_q8conv_ukernel_4x4c2__vsx);
+  }
+}
+
+TEST(Q8CONV_4x4c2__VSX, k_gt_16_bzp_only) {
+  TEST_REQUIRES_VSX;
+  for (size_t k = 17; k < 31; k++) {
+    GemmMicrokernelTester()
+        .mr(4)
+        .nr(4)
+        .np(4)
+        .kr(2)
+        .m(4)
+        .n(4)
+        .k(k)
+        .aStride(37)
+        .aZeroPoint(0)
+        .bZeroPoint(255)
+        .test(pytorch_q8conv_ukernel_4x4c2__vsx);
+  }
+}
+
+TEST(Q8CONV_4x4c2__VSX, k_gt_16_subtile) {
+  TEST_REQUIRES_VSX;
+  for (size_t k = 17; k < 31; k++) {
+    for (uint32_t m = 1; m <= 4; m++) {
+      for (uint32_t n = 1; n <= 4; n++) {
+        GemmMicrokernelTester()
+            .mr(4)
+            .nr(4)
+            .np(4)
+            .kr(2)
+            .m(m)
+            .n(n)
+            .k(k)
+            .aStride(37)
+            .iterations(3)
+            .test(pytorch_q8conv_ukernel_4x4c2__vsx);
+      }
+    }
+  }
+}
+
+TEST(Q8CONV_4x4c2__VSX, k_div_16) {
+  TEST_REQUIRES_VSX;
+  for (size_t k = 16; k < 128; k += 8) {
+    GemmMicrokernelTester()
+        .mr(4)
+        .nr(4)
+        .np(4)
+        .kr(2)
+        .m(4)
+        .n(4)
+        .k(k)
+        .aStride(171)
+        .test(pytorch_q8conv_ukernel_4x4c2__vsx);
+  }
+}
+
+TEST(Q8CONV_4x4c2__VSX, k_div_16_strided_c) {
+  TEST_REQUIRES_VSX;
+  for (size_t k = 16; k < 128; k += 8) {
+    GemmMicrokernelTester()
+        .mr(4)
+        .nr(4)
+        .np(4)
+        .kr(2)
+        .m(4)
+        .n(4)
+        .k(k)
+        .aStride(171)
+        .cStride(17)
+        .test(pytorch_q8conv_ukernel_4x4c2__vsx);
+  }
+}
+
+TEST(Q8CONV_4x4c2__VSX, k_div_16_subtile) {
+  TEST_REQUIRES_VSX;
+  for (size_t k = 16; k < 128; k += 24) {
+    for (uint32_t m = 1; m <= 4; m++) {
+      for (uint32_t n = 1; n <= 4; n++) {
+        GemmMicrokernelTester()
+            .mr(4)
+            .nr(4)
+            .np(4)
+            .kr(2)
+            .m(m)
+            .n(n)
+            .k(k)
+            .aStride(171)
+            .iterations(3)
+            .test(pytorch_q8conv_ukernel_4x4c2__vsx);
+      }
+    }
+  }
+}
+#endif

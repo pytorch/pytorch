@@ -27,6 +27,7 @@ extern "C" {
 
 DECLARE_PYTORCH_U8CLAMP_UKERNEL_FUNCTION(pytorch_u8clamp_ukernel__neon)
 DECLARE_PYTORCH_U8CLAMP_UKERNEL_FUNCTION(pytorch_u8clamp_ukernel__sse2)
+DECLARE_PYTORCH_U8CLAMP_UKERNEL_FUNCTION(pytorch_u8clamp_ukernel__vsx)
 
 #ifdef __cplusplus
 } /* extern "C" */

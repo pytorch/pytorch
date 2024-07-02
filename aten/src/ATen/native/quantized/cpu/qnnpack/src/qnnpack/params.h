@@ -162,6 +162,16 @@ union pytorch_qnnp_conv_quantization_params {
     PYTORCH_QNNP_ALIGN(16) uint8_t output_min[16];
   } sse2;
 #endif /* CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64 */
+#if CPUINFO_ARCH_PPC64
+  struct {
+    const uint8_t* kernel_zero_points;
+    int16_t input_zero_point;
+    const float* requantization_scales;
+    int16_t output_zero_point;
+    uint8_t output_max;
+    uint8_t output_min;
+  } vsx;
+#endif /* CPUINFO_ARCH_PPC64 */
 };
 
 struct pytorch_qnnp_conv_dynamic_quantization_params {
@@ -217,6 +227,19 @@ union pytorch_qnnp_add_quantization_params {
     uint32_t b_multiplier;
   } sse2;
 #endif
+#if CPUINFO_ARCH_PPC64
+  struct {
+    int32_t zero_point_product;
+    int32_t remainder_mask;
+    int32_t remainder_threshold;
+    int16_t y_zero_point;
+    uint32_t a_multiplier;
+    uint32_t b_multiplier;
+    uint8_t y_max;
+    uint8_t y_min;
+    uint32_t shift;
+  } vsx;
+#endif
 };
 
 union pytorch_qnnp_avgpool_quantization_params {
@@ -252,6 +275,15 @@ union pytorch_qnnp_avgpool_quantization_params {
     PYTORCH_QNNP_ALIGN(16) uint8_t output_min[16];
   } sse2;
 #endif
+#if CPUINFO_ARCH_PPC64
+  struct {
+    int32_t bias;
+    float scale;
+    int16_t output_zero_point;
+    uint8_t output_max;
+    uint8_t output_min;
+  } vsx;
+#endif
 };
 
 union pytorch_qnnp_u8_clamping_params {
@@ -271,6 +303,12 @@ union pytorch_qnnp_u8_clamping_params {
     PYTORCH_QNNP_ALIGN(16) uint8_t output_min[16];
   } sse2;
 #endif /* CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64 */
+#if CPUINFO_ARCH_PPC64
+  struct {
+    uint8_t output_max;
+    uint8_t output_min;
+  } vsx;
+#endif /* CPUINFO_ARCH_PPC64 */
 };
 
 typedef void (*pytorch_q8gemm_ukernel_function)(
