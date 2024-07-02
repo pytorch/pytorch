@@ -21411,10 +21411,6 @@ python_ref_db = [
         "_refs.view_copy",
         torch_opinfo_name="view_copy",
         supports_out=True,
-        skips=(
-            # The view function this decompose into does not have a ref
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
-        ),
     ),
     PythonRefInfo(
         "_refs.ones",
@@ -23427,10 +23423,6 @@ python_ref_db = [
         "_refs.alias_copy",
         torch_opinfo_name="alias_copy",
         supports_out=True,
-        skips=(
-            # The view function this decompose into does not have a ref
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
-        ),
     ),
     PythonRefInfo(
         "_refs.atleast_1d",
@@ -23560,10 +23552,6 @@ python_ref_db = [
         "_refs.diagonal_copy",
         torch_opinfo_name="diagonal_copy",
         supports_out=True,
-        skips=(
-            # The view function this decompose into does not have a ref
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
-        ),
     ),
     PythonRefInfo(
         "_refs.diagonal_scatter",
@@ -23704,10 +23692,6 @@ python_ref_db = [
         "_refs.squeeze_copy",
         torch_opinfo_name="squeeze_copy",
         supports_out=True,
-        skips=(
-            # The view function this decompose into does not have a ref
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
-        ),
     ),
     PythonRefInfo(
         "_refs.squeeze",
@@ -23750,7 +23734,6 @@ python_ref_db = [
         # .conj() does not set ._is_view() correctly in ATen
         validate_view_consistency=False,
         skips=(
-            # RuntimeError: no _refs support for torch.Tensor.is_conj
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', dtypes=[torch.complex64, torch.complex128]),
         ),
     ),
@@ -23761,11 +23744,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.transpose_copy",
         torch_opinfo_name="transpose_copy",
-        supports_out=True,
         skips=(
-            # The view function this decompose into does not have a ref
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+            # RuntimeError: no _refs support for torch.Tensor.is_conj
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
         ),
+        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.t",
@@ -23775,10 +23758,6 @@ python_ref_db = [
         "_refs.t_copy",
         torch_opinfo_name="t_copy",
         supports_out=True,
-        skips=(
-            # The view function this decompose into does not have a ref
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
-        ),
     ),
     PythonRefInfo(
         "_refs.T",
@@ -23793,10 +23772,6 @@ python_ref_db = [
         "_refs.unfold_copy",
         torch_opinfo_name="unfold_copy",
         supports_out=True,
-        skips=(
-            # The view function this decompose into does not have a ref
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
-        ),
     ),
     PythonRefInfo(
         "_refs.unsqueeze",
@@ -23806,10 +23781,6 @@ python_ref_db = [
         "_refs.unsqueeze_copy",
         torch_opinfo_name="unsqueeze_copy",
         supports_out=True,
-        skips=(
-            # The view function this decompose into does not have a ref
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
-        ),
     ),
     PythonRefInfo(
         "_refs.view",
@@ -24288,7 +24259,8 @@ python_ref_db = [
         # empty_strided
         skips=(
             # no _refs support for Tensor.__setitem__
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),)
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+        ),
     ),
     #
     # Test-related functions

@@ -128,15 +128,12 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         # implementations.
         # There're other ways to implement this functionality,
         # see https://github.com/pytorch/pytorch/pull/82657#discussion_r939776417
-        if func is None:
-            if isinstance(orig_func, torch._ops.OpOverload):
-                ofunc = orig_func
-            elif isinstance(orig_func, torch._ops.OpOverloadPacket):
-                ofunc = orig_func.default
-            else:
-                ofunc = None
-            if ofunc is not None:
-                func = torch._decomp.decomposition_table.get(ofunc, None)
+        if func is None and isinstance(orig_func, torch._ops.OpOverload):
+            func = torch._decomp.decomposition_table.get(orig_func, None)
+        elif func is None and isinstance(orig_func, torch._ops.OpOverloadPacket):
+            default = getattr(orig_func, 'default', None)
+            if default is not None:
+                func = torch._decomp.decomposition_table.get(default, None)
 
         if func is not None:
             # If the ref exists query whether we should use it or not
