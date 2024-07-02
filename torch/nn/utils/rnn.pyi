@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Iterable, NamedTuple, Optional, overload, Sequence, Tuple, Union
+from typing import Any, Iterable, NamedTuple, overload, Sequence
 from typing_extensions import Self
 
 from torch import Tensor
@@ -9,8 +9,8 @@ from torch.types import _dtype
 class PackedSequence_(NamedTuple):
     data: Tensor
     batch_sizes: Tensor
-    sorted_indices: Optional[Tensor]
-    unsorted_indices: Optional[Tensor]
+    sorted_indices: Tensor | None
+    unsorted_indices: Tensor | None
 
 def bind(optional: Any, fn: Any): ...
 
@@ -18,9 +18,9 @@ class PackedSequence(PackedSequence_):
     def __new__(
         cls,
         data: Tensor,
-        batch_sizes: Optional[Tensor] = ...,
-        sorted_indices: Optional[Tensor] = ...,
-        unsorted_indices: Optional[Tensor] = ...,
+        batch_sizes: Tensor | None = ...,
+        sorted_indices: Tensor | None = ...,
+        unsorted_indices: Tensor | None = ...,
     ) -> Self: ...
     def pin_memory(self: Self) -> Self: ...
     def cuda(self: Self, *args: Any, **kwargs: Any) -> Self: ...
@@ -43,8 +43,8 @@ class PackedSequence(PackedSequence_):
     @overload
     def to(
         self: Self,
-        device: Optional[DeviceLikeType] = None,
-        dtype: Optional[_dtype] = None,
+        device: DeviceLikeType | None = None,
+        dtype: _dtype | None = None,
         non_blocking: bool = False,
         copy: bool = False,
     ) -> Self: ...
@@ -59,7 +59,7 @@ class PackedSequence(PackedSequence_):
     def is_cuda(self) -> bool: ...
     def is_pinned(self) -> bool: ...
 
-def invert_permutation(permutation: Optional[Tensor]): ...
+def invert_permutation(permutation: Tensor | None): ...
 def pack_padded_sequence(
     input: Tensor,
     lengths: Tensor,
@@ -70,10 +70,10 @@ def pad_packed_sequence(
     sequence: PackedSequence,
     batch_first: bool = ...,
     padding_value: float = ...,
-    total_length: Optional[int] = ...,
-) -> Tuple[Tensor, ...]: ...
+    total_length: int | None = ...,
+) -> tuple[Tensor, ...]: ...
 def pad_sequence(
-    sequences: Union[Tensor, Iterable[Tensor]],
+    sequences: Tensor | Iterable[Tensor],
     batch_first: bool = False,
     padding_value: float = ...,
 ) -> Tensor: ...
@@ -83,7 +83,7 @@ def pack_sequence(
 ) -> PackedSequence: ...
 def get_packed_sequence(
     data: Tensor,
-    batch_sizes: Optional[Tensor],
-    sorted_indices: Optional[Tensor],
-    unsorted_indices: Optional[Tensor],
+    batch_sizes: Tensor | None,
+    sorted_indices: Tensor | None,
+    unsorted_indices: Tensor | None,
 ) -> PackedSequence: ...
