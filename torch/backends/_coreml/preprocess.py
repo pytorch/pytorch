@@ -101,7 +101,7 @@ def preprocess(script_module: torch._C.ScriptObject, compile_spec: Dict[str, Tup
         ml_type = _convert_to_mil_type(shape, dtype, name)
         mil_inputs.append(ml_type)
     model = torch.jit.RecursiveScriptModule._construct(script_module, lambda x: None)
-    mlmodel = ct.convert(model, inputs=mil_inputs)
+    mlmodel = ct.convert(model, inputs=mil_inputs, convert_to="neuralnetwork")
 
     if quantization_mode != CoreMLQuantizationMode.NONE:
         quant_model_spec = quantization_utils.quantize_weights(
