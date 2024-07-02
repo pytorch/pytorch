@@ -74,6 +74,7 @@ namespace impl {
   // Additionally, we support lists, dicts and optionals containing these types.
   using supported_primitive_arg_types = guts::typelist::typelist<
     int64_t,
+    int8_t, // For backwards compatibility, because DeviceIndex is now int16_t
     double,
     bool,
     c10::string_view,
