@@ -113,8 +113,26 @@ constexpr const char* _cusolver_backend_suggestion =            \
     }                                                                   \
   } while (0)
 
+#define TORCH_CUDSS_CHECK(EXPR)                                      \
+  do {                                                                  \
+    cudssStatus_t __err = EXPR;                                      \
+    if (__err == CUDSS_STATUS_EXECUTION_FAILED) {                     \
+      TORCH_CHECK_LINALG(                                               \
+          false,                                                        \
+          "cudss error: ",                                           \
+          ", when calling `" #EXPR "`",                                 \
+          ". This error may appear if the input matrix contains NaN. ");              \
+    } else {                                                            \
+      TORCH_CHECK(                                                      \
+          __err == CUDSS_STATUS_SUCCESS,                             \
+          "cudss error: ",                                           \
+          ", when calling `" #EXPR "`. ");              \
+    }                                                                   \
+  } while (0)
+
 #else
 #define TORCH_CUSOLVER_CHECK(EXPR) EXPR
+#define TORCH_CUDSS_CHECK(EXPR) EXPR
 #endif
 
 #define AT_CUDA_CHECK(EXPR) C10_CUDA_CHECK(EXPR)
