@@ -30,7 +30,7 @@ command = [
     'python3',
     'tools/linter/adapters/flake8_linter.py',
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 init_command = [
     'python3',
@@ -99,7 +99,7 @@ command = [
     'tools/linter/adapters/clangformat_linter.py',
     '--binary=.lintbin/clang-format',
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 is_formatter = true
 
@@ -121,15 +121,13 @@ include_patterns = [
     'test/test_type_info.py',
     'test/test_utils.py',
 ]
-exclude_patterns = [
-    '**/fb/**',
-]
+exclude_patterns = ['**/fb/**']
 command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
     '--config=mypy.ini',
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 init_command = [
     'python3',
@@ -183,7 +181,7 @@ command = [
     '--config=mypy-strict.ini',
     '--code=MYPYSTRICT',
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
@@ -249,17 +247,13 @@ command = [
     '--binary=.lintbin/clang-tidy',
     '--build_dir=./build',
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
 code = 'TYPEIGNORE'
 include_patterns = ['**/*.py', '**/*.pyi']
-exclude_patterns = [
-    'fb/**',
-    '**/fb/**',
-    'test/test_jit.py',
-]
+exclude_patterns = ['fb/**', '**/fb/**', 'test/test_jit.py']
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
@@ -271,7 +265,7 @@ command = [
         please convert it to `type: ignore[xxxx]`\
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
@@ -291,17 +285,13 @@ command = [
         at use sites or define a pyi type stub with more relaxed types. \
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
 code = 'NOQA'
 include_patterns = ['**/*.py', '**/*.pyi']
-exclude_patterns = [
-    'caffe2/**',
-    'fb/**',
-    '**/fb/**'
-    ]
+exclude_patterns = ['caffe2/**', 'fb/**', '**/fb/**']
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
@@ -313,12 +303,12 @@ command = [
         please convert it to `noqa: XXXX`\
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
 code = 'NATIVEFUNCTIONS'
-include_patterns=['aten/src/ATen/native/native_functions.yaml']
+include_patterns = ['aten/src/ATen/native/native_functions.yaml']
 command = [
     'python3',
     'tools/linter/adapters/nativefunctions_linter.py',
@@ -334,8 +324,8 @@ is_formatter = true
 
 [[linter]]
 code = 'NEWLINE'
-include_patterns=['**']
-exclude_patterns=[
+include_patterns = ['**']
+exclude_patterns = [
     '**/contrib/**',
     'third_party/**',
     '**/*.bat',
@@ -361,7 +351,7 @@ is_formatter = true
 
 [[linter]]
 code = 'CONSTEXPR'
-include_patterns=['aten/src/ATen/native/cuda/*.cu']
+include_patterns = ['aten/src/ATen/native/cuda/*.cu']
 command = [
     'python3',
     'tools/linter/adapters/constexpr_linter.py',
@@ -395,7 +385,7 @@ command = [
         This line has trailing spaces; please remove them.\
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
@@ -427,16 +417,12 @@ command = [
         This line has tabs; please replace them with spaces.\
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
 code = 'INCLUDE'
-include_patterns = [
-    'c10/**',
-    'aten/**',
-    'torch/csrc/**',
-]
+include_patterns = ['c10/**', 'aten/**', 'torch/csrc/**']
 exclude_patterns = [
     'aten/src/ATen/native/quantized/cpu/qnnpack/**',
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
@@ -456,15 +442,12 @@ command = [
         This #include uses quotes; please convert it to #include <xxxx>\
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
 code = 'PYBIND11_INCLUDE'
-include_patterns = [
-    '**/*.cpp',
-    '**/*.h',
-]
+include_patterns = ['**/*.cpp', '**/*.h']
 exclude_patterns = [
     'torch/csrc/utils/pybind.h',
     'torch/utils/benchmark/utils/valgrind_wrapper/compat_bindings.cpp',
@@ -489,7 +472,7 @@ command = [
         specializations may not be included.\
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
@@ -501,9 +484,7 @@ include_patterns = [
     'torch/_decomp/**/*.py',
     'torch/_meta_registrations.py',
 ]
-exclude_patterns = [
-    '**/fb/**',
-]
+exclude_patterns = ['**/fb/**']
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
@@ -521,15 +502,12 @@ command = [
         meant to exclude symbolic numbers.
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
 code = 'PYBIND11_SPECIALIZATION'
-include_patterns = [
-    '**/*.cpp',
-    '**/*.h',
-]
+include_patterns = ['**/*.cpp', '**/*.h']
 exclude_patterns = [
     # The place for all orphan specializations
     'torch/csrc/utils/pybind.h',
@@ -557,19 +535,13 @@ command = [
         information see https://github.com/pybind/pybind11/issues/4099 \
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
 code = 'PYPIDEP'
 include_patterns = ['.github/**']
-exclude_patterns = [
-    '**/*.rst',
-    '**/*.py',
-    '**/*.md',
-    '**/*.diff',
-    '**/fb/**',
-]
+exclude_patterns = ['**/*.rst', '**/*.py', '**/*.md', '**/*.diff', '**/fb/**']
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
@@ -584,7 +556,7 @@ command = [
         please pin them to a specific version: e.g. 'thepackage==1.2'\
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
@@ -613,10 +585,7 @@ command = [
 [[linter]]
 code = 'CUBINCLUDE'
 include_patterns = ['aten/**']
-exclude_patterns = [
-    'aten/src/ATen/cuda/cub*.cuh',
-    '**/fb/**',
-]
+exclude_patterns = ['aten/src/ATen/cuda/cub*.cuh', '**/fb/**']
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
@@ -629,15 +598,12 @@ command = [
         at::native namespace if necessary.
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
 code = 'RAWCUDA'
-include_patterns = [
-    'aten/**',
-    'c10/**',
-]
+include_patterns = ['aten/**', 'c10/**']
 exclude_patterns = [
     'aten/src/ATen/test/**',
     'c10/cuda/CUDAFunctions.h',
@@ -654,16 +620,12 @@ command = [
         This line calls raw CUDA APIs directly; please use at::cuda wrappers instead.
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
 code = 'RAWCUDADEVICE'
-include_patterns = [
-    'aten/**',
-    'c10/**',
-    'torch/csrc/**',
-]
+include_patterns = ['aten/**', 'c10/**', 'torch/csrc/**']
 exclude_patterns = [
     'aten/src/ATen/cuda/CUDAContext.cpp',
     'aten/src/ATen/cuda/CUDAGeneratorImpl.cpp',
@@ -686,14 +648,12 @@ command = [
         This line calls raw CUDA APIs directly; please use c10::cuda wrappers instead.
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
 code = 'ROOT_LOGGING'
-include_patterns = [
-    '**/*.py',
-]
+include_patterns = ['**/*.py']
 # These are not library code, but scripts in their own right, and so
 # therefore are permitted to use logging
 exclude_patterns = [
@@ -719,14 +679,12 @@ command = [
         define 'log = logging.getLogger(__name__)' and call, e.g., log.info().
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
 code = 'DEPLOY_DETECTION'
-include_patterns = [
-    '**/*.py',
-]
+include_patterns = ['**/*.py']
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
@@ -738,16 +696,12 @@ command = [
         Do not use sys.executable to detect if running within deploy/multipy, use torch._running_with_deploy().
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
 code = 'CMAKE'
-include_patterns = [
-    "**/*.cmake",
-    "**/*.cmake.in",
-    "**/CMakeLists.txt",
-]
+include_patterns = ["**/*.cmake", "**/*.cmake.in", "**/CMakeLists.txt"]
 exclude_patterns = [
     'cmake/Modules/**',
     'cmake/Modules_CUDA_fix/**',
@@ -775,12 +729,8 @@ init_command = [
 
 [[linter]]
 code = 'SHELLCHECK'
-include_patterns = [
-    '.ci/pytorch/**/*.sh'
-]
-exclude_patterns = [
-    '**/fb/**',
-]
+include_patterns = ['.ci/pytorch/**/*.sh']
+exclude_patterns = ['**/fb/**']
 command = [
     'python3',
     'tools/linter/adapters/shellcheck_linter.py',
@@ -803,9 +753,7 @@ include_patterns = [
     # '.github/actions/**/*.yml',
     # '.github/actions/**/*.yaml',
 ]
-exclude_patterns = [
-    '**/fb/**',
-]
+exclude_patterns = ['**/fb/**']
 command = [
     'python3',
     'tools/linter/adapters/actionlint_linter.py',
@@ -825,14 +773,8 @@ init_command = [
 
 [[linter]]
 code = 'TESTOWNERS'
-include_patterns = [
-    'test/**/test_*.py',
-    'test/**/*_test.py',
-]
-exclude_patterns = [
-    'test/run_test.py',
-    '**/fb/**',
-]
+include_patterns = ['test/**/test_*.py', 'test/**/*_test.py']
+exclude_patterns = ['test/run_test.py', '**/fb/**']
 command = [
     'python3',
     'tools/linter/adapters/testowners_linter.py',
@@ -842,18 +784,16 @@ command = [
 
 [[linter]]
 code = 'TEST_HAS_MAIN'
-include_patterns = [
-    'test/**/test_*.py',
-]
+include_patterns = ['test/**/test_*.py']
 exclude_patterns = [
     'test/run_test.py',
     '**/fb/**',
-    'test/quantization/**',  # should be run through test/test_quantization.py
-    'test/jit/**',  # should be run through test/test_jit.py
-    'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
-    'test/fx/**',  # should be run through test/test_fx.py
-    'test/bottleneck_test/**',  # excluded by test/run_test.py
-    'test/package/**',  # excluded by test/run_test.py
+    'test/quantization/**',                                                   # should be run through test/test_quantization.py
+    'test/jit/**',                                                            # should be run through test/test_jit.py
+    'test/ao/sparsity/**',                                                    # should be run through test/test_ao_sparsity.py
+    'test/fx/**',                                                             # should be run through test/test_fx.py
+    'test/bottleneck_test/**',                                                # excluded by test/run_test.py
+    'test/package/**',                                                        # excluded by test/run_test.py
     'test/distributed/argparse_util_test.py',
     'test/distributed/bin/test_script.py',
     'test/distributed/elastic/agent/server/test/local_elastic_agent_test.py',
@@ -912,15 +852,8 @@ command = [
 
 [[linter]]
 code = 'CALL_ONCE'
-include_patterns = [
-    'c10/**',
-    'aten/**',
-    'torch/csrc/**',
-]
-exclude_patterns = [
-    'c10/util/CallOnce.h',
-    '**/fb/**',
-]
+include_patterns = ['c10/**', 'aten/**', 'torch/csrc/**']
+exclude_patterns = ['c10/util/CallOnce.h', '**/fb/**']
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
@@ -932,19 +865,13 @@ command = [
         Use of std::call_once is forbidden and should be replaced with c10::call_once\
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
 code = 'ONCE_FLAG'
-include_patterns = [
-    'c10/**',
-    'aten/**',
-    'torch/csrc/**',
-]
-exclude_patterns = [
-    '**/fb/**',
-]
+include_patterns = ['c10/**', 'aten/**', 'torch/csrc/**']
+exclude_patterns = ['**/fb/**']
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
@@ -956,7 +883,7 @@ command = [
         Use of std::once_flag is forbidden and should be replaced with c10::once_flag\
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
@@ -972,7 +899,7 @@ command = [
     'python3',
     'tools/linter/adapters/workflow_consistency_linter.py',
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 init_command = [
     'python3',
@@ -984,15 +911,12 @@ init_command = [
 # Black + usort
 [[linter]]
 code = 'UFMT'
-include_patterns = [
-    '**/*.py',
-    '**/*.pyi',
-]
+include_patterns = ['**/*.py', '**/*.pyi']
 command = [
     'python3',
     'tools/linter/adapters/ufmt_linter.py',
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 exclude_patterns = [
     'tools/gen_vulkan_spv.py',
@@ -1076,8 +1000,6 @@ exclude_patterns = [
     'test/test_jiterator.py',
     'test/test_kernel_launch_checks.py',
     'test/test_linalg.py',
-    'test/test_masked.py',
-    'test/test_maskedtensor.py',
     'test/test_matmul_cuda.py',
     'test/test_meta.py',
     'test/test_metal.py',
@@ -1382,7 +1304,7 @@ exclude_patterns = [
     'torch/contrib/__init__.py',
     'torch/contrib/_tensorboard_vis.py',
     "torch/cuda/_gpu_trace.py",
-    'torch/cuda/_memory_viz.py',  # mypy: Value of type "object" is not indexable
+    'torch/cuda/_memory_viz.py',                                                                   # mypy: Value of type "object" is not indexable
     'torch/fft/__init__.py',
     'torch/func/__init__.py',
     'torch/futures/__init__.py',
@@ -1704,11 +1626,7 @@ is_formatter = true
 [[linter]]
 code = 'COPYRIGHT'
 include_patterns = ['**']
-exclude_patterns = [
-    '.lintrunner.toml',
-    'fb/**',
-    '**/fb/**',
-]
+exclude_patterns = ['.lintrunner.toml', 'fb/**', '**/fb/**']
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
@@ -1720,7 +1638,7 @@ command = [
         should not be contributed to PyTorch codebase\
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 
 [[linter]]
@@ -1731,7 +1649,7 @@ command = [
     'tools/linter/adapters/bazel_linter.py',
     '--binary=.lintbin/bazel',
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 init_command = [
     'python3',
@@ -1747,14 +1665,8 @@ is_formatter = true
 [[linter]]
 code = 'LINTRUNNER_VERSION'
 include_patterns = ['**']
-exclude_patterns = [
-    'fb/**',
-    '**/fb/**',
-]
-command = [
-    'python3',
-    'tools/linter/adapters/lintrunner_version_linter.py'
-]
+exclude_patterns = ['fb/**', '**/fb/**']
+command = ['python3', 'tools/linter/adapters/lintrunner_version_linter.py']
 
 [[linter]]
 code = 'RUFF'
@@ -1775,7 +1687,7 @@ command = [
     '--config=pyproject.toml',
     '--show-disable',
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 init_command = [
     'python3',
@@ -1795,7 +1707,7 @@ command = [
     'python3',
     'tools/linter/adapters/no_merge_conflict_csv_linter.py',
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 is_formatter = true
 
@@ -1869,7 +1781,7 @@ exclude_patterns = [
     "aten/src/ATen/native/quantized/ConvUtils.h",
     "aten/src/ATen/native/sparse/SparseBlasImpl.cpp",  # triton implementation
     "aten/src/ATen/native/transformers/attention.cpp",
-    "aten/src/ATen/native/**/cudnn/**",  # cudnn is cuda specific
+    "aten/src/ATen/native/**/cudnn/**",                # cudnn is cuda specific
 ]
 command = [
     'python3',
@@ -1884,6 +1796,6 @@ command = [
         between different GPU backends \
     """,
     '--',
-    '@{{PATHSFILE}}'
+    '@{{PATHSFILE}}',
 ]
 is_formatter = true
