@@ -34,6 +34,9 @@
 #if INDUCTOR_USE_VECTOR_TYPES()
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
+#else
+// For calc_erfinv
+#include <ATen/native/Math.h>
 #endif
 
 typedef at::Half half;
@@ -47,7 +50,7 @@ struct Welford {
   T mean = T(0);
   T m2 = T(0);
   T weight = T(0);
-  int64_t index = 0;
+  uint64_t index = 0;
 };
 
 
@@ -61,65 +64,40 @@ struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
 
 template <typename T>
 struct WeightRecp {
-  int64_t outer_size;
-  int64_t main_size;
-  int64_t tail_size;
-  std::vector<T> weight_recps;
-
-  // For masked vectorized welford reduction
-  WeightRecp(int64_t outer_size, int64_t main_size, int64_t tail_size) : outer_size(outer_size), main_size(main_size), tail_size(tail_size) {
-    auto weight = T(0);
-    auto ones =  T(1);
-    auto masked_ones = T::set(weight, ones, tail_size);
-    weight_recps.reserve(outer_size * (main_size / T::size() + tail_size > 0 ? 1 : 0) + 1);
-    weight_recps.push_back(ones);
-    for (const auto o : c10::irange(outer_size)) {
-      for (int64_t m = 0; m < main_size; m += T::size()) {
-        weight += ones;
-        weight_recps.push_back(ones / weight);
-      }
-      for (int64_t t = 0; t < tail_size; t += T::size()) {
-        weight += masked_ones;
-        weight_recps.push_back(ones / weight);
-      }
-    }
-  }
-
-  // For vectorized welford reduction
-  WeightRecp(int64_t main_size) : main_size(main_size){
-    auto weight = T(0);
-    auto ones =  T(1);
-    weight_recps.reserve(outer_size * main_size + 1);
-    // first element is not used
-    weight_recps.push_back(ones);
-    for (int64_t m = 0; m < main_size; m += 1) {
-      weight += ones;
-      weight_recps.push_back(ones / weight);
+  using scalar_t = typename T::value_type;
+  std::vector<scalar_t> weight_recps;
+  WeightRecp(uint64_t N) {
+    weight_recps.reserve(N);
+    for (const auto i : c10::irange(N)) {
+      weight_recps.push_back(
+          scalar_t(static_cast<double>(1) / static_cast<double>(i + 1)));
     }
   }
 };
 
 template <typename T>
-Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b) {
-  if constexpr (!IsVecType<T>::value) {
-    if (a.weight == 0) {
-      return b;
-    }
-    if (b.weight == 0) {
-      return a;
-    }
+Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_index=false) {
+  if (a.index == 0) {
+    return b;
+  }
+  if (b.index == 0) {
+    return a;
   }
   auto delta = b.mean - a.mean;
-  auto new_weight = a.weight + b.weight;
-  auto wb_over_w = b.weight / new_weight;
+  auto a_weight = use_index ? T(a.index) : a.weight;
+  auto b_weight = use_index ? T(b.index) : b.weight;
+  auto new_weight = a_weight + b_weight;
+  auto new_index = a.index + b.index;
+  auto wb_over_w = b_weight / new_weight;
   if constexpr (IsVecType<T>::value) {
     // Guard against division by zero
     wb_over_w = T::blendv(wb_over_w, T(0), new_weight == T(0));
   }
   auto result = Welford<T>{
     a.mean + delta * wb_over_w,
-    a.m2 + b.m2 + delta * delta * a.weight * wb_over_w,
+    a.m2 + b.m2 + delta * delta * a_weight * wb_over_w,
     new_weight,
+    new_index
   };
   return result;
 }
@@ -127,7 +105,7 @@ Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b) {
 template <typename T>
 Welford<T> welford_combine(const Welford<T>& acc, const T& data, const WeightRecp<T>* w=nullptr) {
   // Add a single data point
-  int64_t new_index = acc.index + 1;
+  uint64_t new_index = acc.index + 1;
   auto new_weight = acc.weight + T(1);
   auto delta = data - acc.mean;
   T new_mean;
@@ -136,9 +114,9 @@ Welford<T> welford_combine(const Welford<T>& acc, const T& data, const WeightRec
   } else {
     // use new_index to fecth 1 / new_weight to avoid divisions
     new_mean = acc.mean +
-      ((w == nullptr || new_index <= 0 || new_index >= w->weight_recps.size())
+      ((w == nullptr || acc.index >= w->weight_recps.size())
             ? delta / new_weight
-            : delta * w->weight_recps[new_index]);
+            : delta * T(w->weight_recps[acc.index]));
   }
   auto new_delta = data - new_mean;
   auto result = Welford<T>{
@@ -158,6 +136,7 @@ Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, const int64
     T::set(a.mean, out.mean, tail_size),
     T::set(a.m2, out.m2, tail_size),
     T::set(a.weight, out.weight, tail_size),
+    out.index
   };
 }
 
@@ -282,13 +261,16 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
 template <typename scalar_t>
 Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc) {
   using Vec = at::vec::Vectorized<scalar_t>;
+  // if all values of acc.weight are same as index,
+  // use index to reduce to save the overhead of vec_shuffle_down for acc.weight
+  bool use_index = (acc.weight - Vec(acc.index)).zero_mask() == 0xFFFF;
   for (size_t n = 1; n < Vec::size(); n *= 2) {
     auto shuffled = Welford<Vec>{
       vec_shuffle_down(acc.mean, n),
       vec_shuffle_down(acc.m2, n),
-      vec_shuffle_down(acc.weight, n),
-    };
-    acc = welford_combine(acc, shuffled);
+      use_index ? Vec(0) : vec_shuffle_down(acc.weight, n),
+      acc.index};
+    acc = welford_combine(acc, shuffled, use_index);
   }
 
   Welford<scalar_t> result;
@@ -301,6 +283,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
 
   acc.weight.store(array);
   result.weight = array[0];
+  result.index = result.weight;
 
   return result;
 }
@@ -502,3 +485,65 @@ inline void mm_get_thread_blocks(
   m_block_start = std::min(thread_id * Mt_blocks, M_blocks);
   m_block_end = std::min(m_block_start + Mt_blocks, M_blocks);
 }
+
+struct amx_tilecfg {
+  uint8_t palette_id;
+  uint8_t start_row;
+  uint8_t reserved_0[14];
+  uint16_t colsb[16];
+  uint8_t rows[16];
+};
+
+class AMXState {
+ private:
+  amx_tilecfg tilecfg_;
+  uint8_t rows_;
+  uint16_t colsb_;
+  uint8_t num_tile_rows_;
+  uint8_t num_tile_columns_;
+
+ public:
+  AMXState() : rows_(0), colsb_(0), num_tile_rows_(0), num_tile_columns_(0) {
+    memset(&tilecfg_, 0, sizeof(tilecfg_));
+  }
+
+  inline void configure(
+      uint8_t rows,
+      uint16_t colsb,
+      uint8_t num_tile_rows,
+      uint8_t num_tile_columns,
+      void (*loadconfig)(const amx_tilecfg&)) {
+    if (tilecfg_.palette_id == 1 && rows_ == rows && colsb_ == colsb &&
+        num_tile_rows_ == num_tile_rows &&
+        num_tile_columns_ == num_tile_columns) {
+      return;
+    }
+    tilecfg_.palette_id = 1;
+    rows_ = rows;
+    colsb_ = colsb;
+    num_tile_rows_ = num_tile_rows;
+    num_tile_columns_ = num_tile_columns;
+    const auto num_c_tiles = num_tile_rows * num_tile_columns;
+    // For C
+    for (int i = 0; i < num_c_tiles; i++) {
+      tilecfg_.rows[i] = rows;
+      tilecfg_.colsb[i] = 64;
+    }
+    // For A
+    for (int i = 0; i < num_tile_rows; i++) {
+      tilecfg_.rows[i + num_c_tiles] = rows;
+      tilecfg_.colsb[i + num_c_tiles] = colsb;
+    }
+    // For B
+    for (int i = 0; i < num_tile_columns; i++) {
+      tilecfg_.rows[i + num_c_tiles + num_tile_rows] = colsb / 4;
+      tilecfg_.colsb[i + num_c_tiles + num_tile_rows] = 64;
+    }
+    loadconfig(tilecfg_);
+  }
+
+  inline void release(void (*tile_release)()) {
+    tilecfg_.palette_id = 0;
+    tile_release();
+  }
+};

@@ -689,6 +689,7 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(PreDispatch)
       DEF_ONE(Functionalize)
       DEF_ONE(AutocastCPU)
+      DEF_ONE(AutocastMPS)
       DEF_ONE(AutocastXPU)
       DEF_ONE(AutocastHPU)
       DEF_ONE(AutocastIPU)
@@ -716,7 +717,6 @@ void initDispatchBindings(PyObject* module) {
       .def("__or__", &c10::DispatchKeySet::operator|)
       .def("__sub__", &c10::DispatchKeySet::operator-)
       .def("__and__", &c10::DispatchKeySet::operator&)
-      .def("raw_repr", &c10::DispatchKeySet::raw_repr)
       .def("highestPriorityTypeId", &c10::DispatchKeySet::highestPriorityTypeId)
       .def(
           "remove",

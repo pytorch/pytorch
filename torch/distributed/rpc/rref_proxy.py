@@ -1,19 +1,21 @@
 # mypy: allow-untyped-defs
 from functools import partial
 
-from . import functions
-from . import rpc_async
-
 import torch
-from .constants import UNSET_RPC_TIMEOUT
 from torch.futures import Future
+
+from . import functions, rpc_async
+from .constants import UNSET_RPC_TIMEOUT
+
 
 def _local_invoke(rref, func_name, args, kwargs):
     return getattr(rref.local_value(), func_name)(*args, **kwargs)
 
+
 @functions.async_execution
 def _local_invoke_async_execution(rref, func_name, args, kwargs):
     return getattr(rref.local_value(), func_name)(*args, **kwargs)
+
 
 def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
     def _rref_type_cont(rref_fut):
@@ -33,7 +35,7 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
             rref.owner(),
             _invoke_func,
             args=(rref, func_name, args, kwargs),
-            timeout=timeout
+            timeout=timeout,
         )
 
     rref_fut = rref._get_type(timeout=timeout, blocking=False)
@@ -63,6 +65,7 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
         rref_fut.then(_wrap_rref_type_cont)
         return result
 
+
 # This class manages proxied RPC API calls for RRefs. It is entirely used from
 # C++ (see python_rpc_handler.cpp).
 class RRefProxy:
@@ -72,4 +75,6 @@ class RRefProxy:
         self.rpc_timeout = timeout
 
     def __getattr__(self, func_name):
-        return partial(_invoke_rpc, self.rref, self.rpc_api, func_name, self.rpc_timeout)
+        return partial(
+            _invoke_rpc, self.rref, self.rpc_api, func_name, self.rpc_timeout
+        )
