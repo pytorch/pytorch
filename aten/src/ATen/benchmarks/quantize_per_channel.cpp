@@ -41,7 +41,44 @@ static void quantize_per_channel_4d_channels_last(benchmark::State& state) {
   }
 }
 
+static void quantize_per_channel_5d_channels_last(benchmark::State& state) {
+  const size_t batches = static_cast<size_t>(state.range(0));
+  const size_t channels = static_cast<size_t>(state.range(1));
+  const size_t depth = static_cast<size_t>(state.range(2));
+  const size_t height = static_cast<size_t>(state.range(3));
+  const size_t width = static_cast<size_t>(state.range(4));
+
+  at::Tensor a = at::rand(
+      {batches, channels, depth, height, width},
+      at::TensorOptions().memory_format(at::MemoryFormat::ChannelsLast3d));
+  at::Tensor scales = at::rand({channels});
+  at::Tensor zero_points = at::randint(
+      0, 10, {channels}, at::TensorOptions().dtype(at::ScalarType::Int));
+
+  at::Tensor qa;
+  for (auto _ : state) {
+    qa = at::native::quantize_per_channel(
+        a, scales, zero_points, 1, at::ScalarType::QUInt8);
+  }
+}
+
 static void quantize_per_channel_2d(benchmark::State& state) {
+  const size_t channels = static_cast<size_t>(state.range(0));
+  const size_t nelem = static_cast<size_t>(state.range(1));
+
+  at::Tensor a = at::rand({channels, nelem});
+  at::Tensor scales = at::rand({channels});
+  at::Tensor zero_points = at::randint(
+      0, 10, {channels}, at::TensorOptions().dtype(at::ScalarType::Int));
+
+  at::Tensor qa;
+  for (auto _ : state) {
+    qa = at::native::quantize_per_channel(
+        a, scales, zero_points, 0, at::ScalarType::QUInt8);
+  }
+}
+
+static void quantize_per_channel_3d(benchmark::State& state) {
   const size_t channels = static_cast<size_t>(state.range(0));
   const size_t nelem = static_cast<size_t>(state.range(1));
 
@@ -69,6 +106,20 @@ static void GenerateSizes4d(benchmark::internal::Benchmark* b) {
   }
 }
 
+static void GenerateSizes5d(benchmark::internal::Benchmark* b) {
+  b->ArgNames({"N", "C", "D", "H", "W"});
+
+  for (size_t n = 16; n < 256; n *= 2) {
+    for (size_t c = 4; c < 256; c *= 2) {
+      for (size_t d = 4; c < 256; d *= 2) {
+        for (size_t hw = 4; hw < 256; hw *= 2) {
+          b->Args({n, c, d, hw, hw});
+        }
+      }
+    }
+  }
+}
+
 static void GenerateSizes2d(benchmark::internal::Benchmark* b) {
   b->ArgNames({"C", "N"});
 
@@ -79,7 +130,10 @@ static void GenerateSizes2d(benchmark::internal::Benchmark* b) {
   }
 }
 
+
 BENCHMARK(quantize_per_channel_2d)->Apply(GenerateSizes2d);
 BENCHMARK(quantize_per_channel_4d_contiguous)->Apply(GenerateSizes4d);
+BENCHMARK(quantize_per_channel_5d_contiguous)->Apply(GenerateSizes5d);
 BENCHMARK(quantize_per_channel_4d_channels_last)->Apply(GenerateSizes4d);
+BENCHMARK(quantize_per_channel_5d_channels_last)->Apply(GenerateSizes5d);
 BENCHMARK_MAIN();
