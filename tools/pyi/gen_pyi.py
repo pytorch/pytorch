@@ -39,10 +39,17 @@ from tools.autograd.gen_python_functions import (
 )
 
 from torchgen.api.python import (
+    all_ops,
+    binary_ops,
+    comparison_ops,
     format_function_signature as defs,
+    inplace_binary_ops,
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
     returns_structseq_pyi,
+    symmetric_comparison_ops,
+    to_py_type_ops,
+    unary_ops,
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
 from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
@@ -182,50 +189,6 @@ blocklist = [
     "copy_",
 ]
 
-binary_ops = (
-    "add",
-    "sub",
-    "mul",
-    "div",
-    "pow",
-    "lshift",
-    "rshift",
-    "mod",
-    "truediv",
-    "matmul",
-    "floordiv",
-    "radd",
-    "rsub",
-    "rmul",
-    "rtruediv",
-    "rfloordiv",
-    "rpow",  # reverse arithmetic
-    "and",
-    "or",
-    "xor",
-    "rand",
-    "ror",
-    "rxor",  # logic
-    "iadd",
-    "iand",
-    "idiv",
-    "ilshift",
-    "imul",
-    "ior",
-    "irshift",
-    "isub",
-    "ixor",
-    "ifloordiv",
-    "imod",  # inplace ops
-)
-symmetric_comparison_ops = ("eq", "ne")
-asymmetric_comparison_ops = ("ge", "gt", "lt", "le")
-comparison_ops = symmetric_comparison_ops + asymmetric_comparison_ops
-
-unary_ops = ("neg", "abs", "invert")
-to_py_type_ops = ("bool", "float", "complex", "long", "index", "int", "nonzero")
-all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
-
 
 def sig_for_ops(opname: str) -> list[str]:
     """sig_for_ops(opname : str) -> list[str]
@@ -237,17 +200,25 @@ def sig_for_ops(opname: str) -> list[str]:
     assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
 
     name = opname[2:-2]
-    if name in binary_ops:
+    if name in symmetric_comparison_ops:
+        # e.g.: `__eq__`, `__ne__`
+        # unsafe override https://github.com/python/mypy/issues/5704
+        # PYI032 any-eq-ne-annotation https://docs.astral.sh/ruff/rules/any-eq-ne-annotation
+        return [
+            f"def {opname}(self, other: Any) -> Tensor: ...  # type: ignore[override] # noqa: PYI032"
+        ]
+    if name in inplace_binary_ops:
+        # e.g.: `__iadd__`, `__imul__`
+        # Use `Self` as return type instead of `Tensor` to allow for subclasses
+        return [f"def {opname}(self, other: Any) -> Self: ..."]
+    if name in binary_ops or name in comparison_ops:
+        # e.g.: `__add__`, `__mul__` and `__le__`, `__gt__`
         return [f"def {opname}(self, other: Any) -> Tensor: ..."]
-    if name in comparison_ops:
-        sig = f"def {opname}(self, other: Any) -> Tensor: ..."
-        if name in symmetric_comparison_ops:
-            # unsafe override https://github.com/python/mypy/issues/5704
-            sig += "  # type: ignore[override]"
-        return [sig]
     if name in unary_ops:
+        # e.g.: `__pos__`, `__neg__`, `__abs__`
         return [f"def {opname}(self) -> Tensor: ..."]
     if name in to_py_type_ops:
+        # e.g.: `__int__`, `__index__`, `__float__`, `__bool__`
         if name in {"bool", "float", "complex"}:
             tname = name
         elif name == "nonzero":
