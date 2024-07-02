@@ -2805,21 +2805,17 @@ class ShapeEnv:
             if not (min <= int(a) <= max):
                 raise ValueRangeError(f"Invalid value {int(a)} for range [{min}:{max}]")
             return
-        if isinstance(a, sympy.Expr) and a in self.replacements.values():
-            # We're trying to constrain the range of a replacement. However,
-            # the range constraint should already be set during _set_replacement.
-            return
-        assert isinstance(a, sympy.Symbol), f"constraining non-Symbols NYI, {a} is {type(a)}"
 
         # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
         # semantics that this is an "unchecked" assert (but it this actually
         # something useful?  Might be better to restrict only for unbacked
         # SymInt).
-        self.constrain_symbol_range(
-            a,
-            compiler_min=min,
-            compiler_max=max,
-        )
+        if isinstance(a, sympy.Symbol):
+            self.constrain_symbol_range(
+                a,
+                compiler_min=min,
+                compiler_max=max,
+            )
 
     @record_shapeenv_event()
     def _constrain_unify(self, a, b):
