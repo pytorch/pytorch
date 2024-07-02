@@ -3851,12 +3851,16 @@ class CommonTemplate:
         w = torch.randn([1, 1, 5, 5])
 
         torch._dynamo.mark_dynamic(x, 0)
-        check_lowp = True
-        # TODO: fix this. OneDNN convolution with output channel == 1
-        # and dtype == fp16 has accuracy issue.
+
+        atol = None
+        rtol = None
         if self.device == "xpu":
-            check_lowp = False
-        self.common(fn, (x, w), check_lowp=check_lowp)
+            # set to float32 default tolerance,
+            # check_model_gpu with update rotl to 2e-3 for fp16.
+            # fix issue #129974
+            atol = 1e-05
+            rtol = 1.3e-06
+        self.common(fn, (x, w), atol=atol, rtol=rtol)
 
     def test_conv2d_channels_last(self):
         if self.device == GPU_TYPE:
