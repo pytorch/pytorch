@@ -224,3 +224,31 @@ def compute_local_stride(
     return tuple(
         global_stride[i] // stride_divisors[i] for i in range(len(global_stride))
     )
+
+
+def compute_global_padding(
+    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
+) -> List[int]:
+    """
+    Compute the list of padding needed to make the tensor evenly shardable.
+    """
+    num_shard_by_dim = [-1 for _ in range(len(global_shape))]
+    for mesh_idx, placement in enumerate(placements):
+        if placement.is_shard():
+            tensor_shard_dim = placement.dim  # type: ignore[attr-defined]
+            mesh_dim_size = mesh.size(mesh_idx)
+            if num_shard_by_dim[tensor_shard_dim] == -1:
+                num_shard_by_dim[tensor_shard_dim] = mesh_dim_size
+            else:
+                num_shard_by_dim[tensor_shard_dim] *= mesh_dim_size
+
+    pad_sizes = [0 for _ in range(len(global_shape))]
+    for tensor_dim, num_shard in enumerate(num_shard_by_dim):
+        if num_shard != -1:
+            tensor_dim_size = global_shape[tensor_dim]
+            padded_tensor_dim_size = (tensor_dim_size + num_shard) - (
+                tensor_dim_size % num_shard
+            )
+            pad_sizes[tensor_dim] = padded_tensor_dim_size - tensor_dim_size
+
+    return pad_sizes

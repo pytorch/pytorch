@@ -5,6 +5,7 @@ import itertools
 import torch
 from torch.distributed._tensor import distribute_tensor, DTensor
 from torch.distributed._tensor._utils import (
+    compute_global_padding,
     compute_local_shape,
     compute_local_shape_and_global_offset,
 )
@@ -126,6 +127,17 @@ class UtilTest(DTensorTestBase):
                     dtensor.to_local(),
                     global_tensor[dim0_start:dim0_end, dim1_start:dim1_end],
                 )
+
+    @with_comms
+    def test_compute_global_padding(self):
+        local_tensor = torch.randn(7, 8, requires_grad=True)
+        mesh = init_device_mesh(self.device_type, (3, 2))
+        dist_tensor = distribute_tensor(local_tensor, mesh, [Shard(0), Shard(0)])
+        padding = compute_global_padding(
+            dist_tensor.shape, dist_tensor.device_mesh, dist_tensor.placements
+        )
+        self.assertEqual(len(padding), dist_tensor.ndim)
+        self.assertEqual(padding, [5, 0])
 
 
 class Test2DStridedLocalShard(DTensorTestBase):
