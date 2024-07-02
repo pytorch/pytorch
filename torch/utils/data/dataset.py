@@ -314,12 +314,7 @@ class ConcatDataset(Dataset[T_co]):
 
     @staticmethod
     def cumsum(sequence):
-        r, s = [], 0
-        for e in sequence:
-            l = len(e)
-            r.append(l + s)
-            s += l
-        return r
+        return list(itertools.accumulate(map(len, self.datasets)))
 
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super().__init__()
