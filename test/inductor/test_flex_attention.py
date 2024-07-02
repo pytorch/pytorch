@@ -935,7 +935,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         q, k, v = (torch.randn(1, 8, 1024, 64, device="cuda") for _ in range(3))
         metrics.reset()
         _, code = run_and_get_code(f, q, k, v)
-        # Check that buf1 (the attention output) is not allocated
+        # Check the attention output is not allocated
         fc = FileCheck()
         fc.check("buf0 = empty_strided_cuda((1, 1, 1)")  # SPARSE_KV_NUM_BLKS
         fc.check("buf1 = empty_strided_cuda((1, 1, 1, 1)")  # SPARSE_KV_IDX
