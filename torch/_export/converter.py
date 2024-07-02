@@ -1013,15 +1013,15 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
     ):
         # TODO: adjust input orders to match GraphSignature convention
 
-        global_idx = 0
+        dim_global_idx = 0
 
         def _tree_map_helper_to_get_dynamic_shape(x):
-            nonlocal global_idx
+            nonlocal dim_global_idx
             if isinstance(x, torch.Tensor):
                 dynamic_shape = {}
                 for i, _ in enumerate(x.size()):
-                    dynamic_shape[i] = Dim(f"dim{global_idx}_{i}")
-                global_idx += 1
+                    dynamic_shape[i] = Dim(f"dim{dim_global_idx}_{i}")
+                dim_global_idx += 1
                 return dynamic_shape
             return None
 
