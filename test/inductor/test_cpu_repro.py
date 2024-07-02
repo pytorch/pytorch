@@ -2064,6 +2064,52 @@ class CPUReproTests(TestCase):
                 check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
+    def test_vec_bitwise(self):
+        for dtype in [
+            torch.bool,
+            torch.uint8,
+            torch.int8,
+            torch.int32,
+            torch.int64,
+        ]:
+            x = torch.randn(64, dtype=torch.float32)
+            y = torch.randn(64, dtype=torch.float32)
+            if dtype == torch.bool:
+                x = x > 0
+                y = y > 0
+            else:
+                x = x.to(dtype)
+                y = y.to(dtype)
+            bitwise_fns = [
+                torch.bitwise_and,
+                torch.bitwise_not,
+                torch.bitwise_or,
+                torch.bitwise_xor,
+                torch.bitwise_left_shift,
+                torch.bitwise_right_shift,
+            ]
+            for bitwise_fn in bitwise_fns:
+                if (
+                    bitwise_fn
+                    in [
+                        torch.bitwise_left_shift,
+                        torch.bitwise_right_shift,
+                    ]
+                    and dtype == torch.bool
+                ):
+                    # Eager doesn't support bool
+                    # https://pytorch.org/docs/stable/generated/torch.bitwise_left_shift.html
+                    continue
+                torch._dynamo.reset()
+                metrics.reset()
+                if bitwise_fn == torch.bitwise_not:
+                    _args = (x,)
+                else:
+                    _args = (x, y)
+                self.common(bitwise_fn, _args)
+                check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
         def fn(x):

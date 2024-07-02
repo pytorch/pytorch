@@ -219,9 +219,12 @@ class SizeVarAllocator:
                     # approximate test passed, try sound version
                     va = index_vars[a]
                     vb = index_vars[b]
-                    v = sympy_index_symbol("_merge_tester")
-                    expr1 = sympy_subs(index_formulas[k], {va: v * sizes[a], vb: 0})
-                    expr2 = sympy_subs(index_formulas[k], {va: 0, vb: v})
+                    m1 = sympy_index_symbol("_merge_tester1")
+                    m2 = sympy_index_symbol("_merge_tester2")
+                    # NOTE: can't sub vb=0 here in case va * vb appears in the expression,
+                    # in which case both expr1 and expr2 would be zero!
+                    expr1 = sympy_subs(index_formulas[k], {va: m1 * sizes[a], vb: m2})
+                    expr2 = sympy_subs(index_formulas[k], {va: 0, vb: (m1 + m2)})
                     if self.simplify(expr1) == self.simplify(expr2):
                         continue
                 return False
