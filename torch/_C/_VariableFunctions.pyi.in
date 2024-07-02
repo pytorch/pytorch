@@ -1,7 +1,7 @@
 # ${generated_comment}
 # mypy: disable-error-code="type-arg"
 # mypy: allow-untyped-defs
-# ruff: noqa: F401
+# ruff: noqa: F401,PYI054
 
 from types import EllipsisType
 from typing import Any, Callable, Literal, overload, Sequence, TypeVar

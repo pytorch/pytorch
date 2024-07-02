@@ -4975,11 +4975,11 @@
     CUDA: round_decimals_out
   tags: pointwise
 
-- func: rrelu(Tensor self, Scalar lower=1.0 / 8.0, Scalar upper=1.0 / 3.0, bool training=False, Generator? generator=None) -> Tensor
+- func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   device_check: NoCheck   # TensorIterator
   tags: nondeterministic_seeded
 
-- func: rrelu_(Tensor(a!) self, Scalar lower=1.0 / 8.0, Scalar upper=1.0 / 3.0, bool training=False, Generator? generator=None) -> Tensor(a!)
+- func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   tags: nondeterministic_seeded
   device_check: NoCheck   # TensorIterator
 
@@ -11927,14 +11927,14 @@
     CUDA: log_sigmoid_backward_cuda
     MPS: log_sigmoid_backward_mps
 
-- func: rrelu_with_noise.out(Tensor self, Tensor noise, Scalar lower=1.0 / 8.0, Scalar upper=1.0 / 3.0, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: rrelu_with_noise.out(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   tags: nondeterministic_seeded
   dispatch:
     CPU: rrelu_with_noise_out_cpu
     CUDA: rrelu_with_noise_out_cuda
 
-- func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=1.0 / 8.0, Scalar upper=1.0 / 3.0, bool training=False, Generator? generator=None) -> Tensor
+- func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   python_module: nn
   dispatch:
     CPU: rrelu_with_noise_cpu
@@ -11947,7 +11947,7 @@
     CompositeExplicitAutograd: rrelu_with_noise_backward
   autogen: rrelu_with_noise_backward.out
 
-- func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=1.0 / 8.0, Scalar upper=1.0 / 3.0, bool training=False, Generator? generator=None) -> Tensor(a!)
+- func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   python_module: nn
   tags: nondeterministic_seeded
   dispatch:
