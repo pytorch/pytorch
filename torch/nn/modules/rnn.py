@@ -7,7 +7,7 @@ from typing import List, Optional, overload, Tuple
 from typing_extensions import deprecated
 
 import torch
-from torch import _VF, Tensor
+from torch import _jit_internal, _VF, Tensor
 from torch.nn import init
 from torch.nn.parameter import Parameter
 from torch.nn.utils.rnn import PackedSequence
@@ -633,14 +633,14 @@ class RNN(RNNBase):
         super().__init__(mode, *args, **kwargs)
 
     @overload
-    @torch._jit_internal._overload_method  # noqa: F811
+    @_jit_internal._overload_method  # noqa: F811
     def forward(
         self, input: Tensor, hx: Optional[Tensor] = None
     ) -> Tuple[Tensor, Tensor]:
         pass
 
     @overload
-    @torch._jit_internal._overload_method  # noqa: F811
+    @_jit_internal._overload_method  # noqa: F811
     def forward(
         self, input: PackedSequence, hx: Optional[Tensor] = None
     ) -> Tuple[PackedSequence, Tensor]:
@@ -1022,7 +1022,7 @@ class LSTM(RNNBase):
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     @overload  # type: ignore[override]
-    @torch._jit_internal._overload_method  # noqa: F811
+    @_jit_internal._overload_method  # noqa: F811
     def forward(
         self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None
     ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:  # noqa: F811
@@ -1030,7 +1030,7 @@ class LSTM(RNNBase):
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     @overload
-    @torch._jit_internal._overload_method  # noqa: F811
+    @_jit_internal._overload_method  # noqa: F811
     def forward(
         self, input: PackedSequence, hx: Optional[Tuple[Tensor, Tensor]] = None
     ) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]:  # noqa: F811
@@ -1314,14 +1314,14 @@ class GRU(RNNBase):
         super().__init__("GRU", *args, **kwargs)
 
     @overload  # type: ignore[override]
-    @torch._jit_internal._overload_method  # noqa: F811
+    @_jit_internal._overload_method  # noqa: F811
     def forward(
         self, input: Tensor, hx: Optional[Tensor] = None
     ) -> Tuple[Tensor, Tensor]:  # noqa: F811
         pass
 
     @overload
-    @torch._jit_internal._overload_method  # noqa: F811
+    @_jit_internal._overload_method  # noqa: F811
     def forward(
         self, input: PackedSequence, hx: Optional[Tensor] = None
     ) -> Tuple[PackedSequence, Tensor]:  # noqa: F811

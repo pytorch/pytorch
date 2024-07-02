@@ -4,8 +4,6 @@ import warnings
 from typing_extensions import deprecated
 
 import torch
-import torch.cuda
-
 from torch.autograd import (
     _disable_profiler_legacy,
     _enable_profiler_legacy,
@@ -21,6 +19,7 @@ from torch.autograd.profiler_util import (
     FunctionEvent,
     MEMORY_EVENT_NAME,
 )
+
 
 __all__ = ["profile"]
 
