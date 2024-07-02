@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
+import csv
 import logging
+import re
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from enum import Enum
@@ -19,6 +21,7 @@ __all__ = [
     "PipelineScheduleSingle",
     "PipelineScheduleMulti",
     "Schedule1F1B",
+    "ScheduleFlexibleInterleaved1F1B",
     "ScheduleGPipe",
     "ScheduleInterleaved1F1B",
     "ScheduleLoopedBFS",
@@ -40,6 +43,25 @@ class _ComputationType(Enum):
         }
         return str_map[self]
 
+    @staticmethod
+    def from_str(action):
+        if action == "F":
+            return _ComputationType.FORWARD
+        elif action == "B":
+            return _ComputationType.BACKWARD
+        elif action == "W":
+            return _ComputationType.WEIGHT
+        else:
+            raise RuntimeError(f"Invalid computation type {action}")
+
+
+F = _ComputationType.FORWARD
+B = _ComputationType.BACKWARD
+W = _ComputationType.WEIGHT
+
+
+_action_regex = re.compile(r"(\d+)([F,B,W])(\d+)")
+
 
 class _Action(NamedTuple):
     computation_type: _ComputationType
@@ -47,7 +69,27 @@ class _Action(NamedTuple):
     stage_index: int
 
     def __repr__(self):
-        return f"{self.computation_type}{self.microbatch_index}_s{self.stage_index}"
+        return f"{self.stage_index}{self.computation_type}{self.microbatch_index}"
+
+    @staticmethod
+    def from_str(str):
+        """
+        Reverse of __repr__
+
+        String should be formatted as [stage][action type][microbatch] e.g. `2F0`
+        """
+        if match := _action_regex.match(str):
+            stage_index, computation_type, microbatch_index = match.groups()
+            return _Action(
+                _ComputationType.from_str(computation_type),
+                int(microbatch_index),
+                int(stage_index),
+            )
+        elif str == "":
+            return None
+        raise RuntimeError(
+            f"Invalid action string: {str}, should be formatted as [stage][action type][microbatch] e.g. 2F0"
+        )
 
 
 class _PipelineSchedule(ABC):
@@ -612,6 +654,88 @@ class PipelineScheduleMulti(_PipelineSchedule):
             if self._has_backward:
                 stage._prepare_backward_infra(n_microbatches)
 
+    def _dump_csv(self, filename):
+        """Dump a CSV representation of the schedule into a file with the provided filename.
+        This API will most likely get renamed/refactored so is marked as internal for now.
+        """
+        with open(filename, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            for rank in self.pipeline_order:
+                writer.writerow(self.pipeline_order[rank])
+
+    def _validate_schedule(self):
+        # TODO(whc) this should be merged with the logic in test_schedule.py#L453-L554
+        def _validate_rank_actions(
+            actions: Dict[int, List[_Action | None]],
+            num_stages: int,
+            num_microbatches: int,
+        ):
+            # We will count all the actions per stage and ensure they happen in a valid order
+            # (e.g. F before B before W for a given microbatch)
+            stage_actions: Dict[int, Dict[_ComputationType, Set]] = {
+                stage_id: {
+                    F: set(),
+                    B: set(),
+                    W: set(),
+                }
+                for stage_id in range(num_stages)
+            }
+            for rank in actions:
+                for action in actions[rank]:
+                    if action is None:
+                        continue
+                    assert isinstance(
+                        action, _Action
+                    ), f"Got an invalid action: {action}, expected instance of _Action"
+                    s_id = action.stage_index
+                    ctype = action.computation_type
+                    mb_id = action.microbatch_index
+                    if ctype == F:
+                        stage_actions[s_id][F].add(mb_id)
+                    elif ctype == B:
+                        assert (
+                            mb_id in stage_actions[s_id][F]
+                        ), f"Running Backward for stage {s_id}, microbatch {mb_id} without first running Forward"
+                        stage_actions[s_id][B].add(mb_id)
+                    elif ctype == W:
+                        assert (
+                            not self.use_full_backward
+                        ), "Schedule contains 'W' actions, but is configured to use full backward"
+                        assert (
+                            mb_id in stage_actions[s_id][B]
+                        ), f"Running Weight for stage {s_id}, microbatch {mb_id} without first running Backward"
+                        stage_actions[s_id][W].add(mb_id)
+
+            for s_id in stage_actions:
+                for ctype in (F, B, W):
+                    stage_mb = len(stage_actions[s_id][ctype])
+                    assert (
+                        stage_mb == num_microbatches
+                    ), f"Got {stage_mb} {ctype} microbatches for stage {s_id}, expected {num_microbatches}"
+
+        assert (
+            len(self.pipeline_order) == self.pp_group_size
+        ), f"Schedule has incorrect number of ranks - expected {self.pp_group_size}, actual {len(self.pipeline_order)}"
+        for rank in range(self.pp_group_size):
+            assert (
+                rank in self.pipeline_order
+            ), f"Schedule is missing actions for rank {rank}"
+        _validate_rank_actions(
+            self.pipeline_order,
+            self._num_stages,
+            self._n_microbatches,
+        )
+
+    def _load_csv(self, filename):
+        """Load a CSV representation of the schedule from a file with the provided filename.
+        This API will most likely get renamed/refactored so is marked as internal for now.
+        """
+        with open(filename, newline="") as csvfile:
+            reader = csv.reader(csvfile)
+            for rank, row in enumerate(reader):
+                self.pipeline_order[rank] = [_Action.from_str(s) for s in row]
+        self._validate_schedule()
+
     def step(self, *args, target=None, losses: Optional[List] = None, **kwargs):
         """
         Run one iteration of the pipeline schedule with *whole-batch* input.
@@ -832,6 +956,82 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         return rank_ops
 
 
+def _get_1f1b_rank_ops(
+    n_local_stages,
+    pp_group_size,
+    warmup_ops,
+    fwd_bwd_ops,
+    cooldown_ops,
+    rank,
+    forward_stage_index,
+    backward_stage_index,
+):
+    # All stages start with handling microbatch 0
+    fwd_stage_mb_index: Dict[int, int] = defaultdict(int)
+    bwd_stage_mb_index: Dict[int, int] = defaultdict(int)
+    # Store the list of operations used for that rank
+    rank_ops: List[Optional[_Action]] = []
+    # Pre-padding, rank starts with no-ops based on the warmup.
+    for _ in range(rank):
+        rank_ops.append(None)
+    # These are used to calculate the number of slots to fill with no-ops, to account for the delay in warmup
+    # when we want to wait for the backward to trickle back up and start 1f1b to align all ranks.
+    # Formula:
+    # pre-padding + warmup_ops + post_warmup_ops = earliest time step of first backward
+    # post_warmup_ops = [earliest time step of first backward] - (warmup_ops + pre-padding)
+    # earliest time step of first backward = [local_stages * group_size + 2 * (group_size - 1 - rank)]
+    # warmup_ops = calculated above
+    post_warmup_ops = (
+        n_local_stages * pp_group_size + 2 * (pp_group_size - 1 - rank)
+    ) - (warmup_ops + rank)
+
+    total_ops = warmup_ops + fwd_bwd_ops + cooldown_ops
+
+    for op in range(total_ops):
+        # Warmup phase
+        if op < warmup_ops:
+            fwd_stage_index = forward_stage_index(op)
+            # This will assign the current microbatch index and update it as well
+            fwd_stage_mb_index[fwd_stage_index] = (
+                mb_index := fwd_stage_mb_index[fwd_stage_index]
+            ) + 1
+            rank_ops.append(
+                _Action(_ComputationType.FORWARD, mb_index, fwd_stage_index)
+            )
+            if op == warmup_ops - 1:
+                # This is the last step in the warmup phase, so we need to wait for the backward to trickle back up
+                rank_ops.extend([None] * post_warmup_ops)
+        # 1F1B Phase (forward and backward)
+        elif warmup_ops <= op < warmup_ops + fwd_bwd_ops:
+            fwd_stage_index = forward_stage_index(op)
+            fwd_stage_mb_index[fwd_stage_index] = (
+                fwd_mb_index := fwd_stage_mb_index[fwd_stage_index]
+            ) + 1
+            rank_ops.append(
+                _Action(_ComputationType.FORWARD, fwd_mb_index, fwd_stage_index)
+            )
+            bwd_stage_index = backward_stage_index(op)
+            bwd_stage_mb_index[bwd_stage_index] = (
+                bwd_mb_index := bwd_stage_mb_index[bwd_stage_index]
+            ) + 1
+            rank_ops.append(
+                _Action(_ComputationType.BACKWARD, bwd_mb_index, bwd_stage_index)
+            )
+        # Cooldown phase
+        else:
+            # During cooldown phase, we need steps to align with 1f1b happening in other ranks
+            # TODO: we don't need to always append, after all 1f1b are finished we can stop appending None
+            rank_ops.append(None)
+            bwd_stage_index = backward_stage_index(op)
+            bwd_stage_mb_index[bwd_stage_index] = (
+                bwd_mb_index := bwd_stage_mb_index[bwd_stage_index]
+            ) + 1
+            rank_ops.append(
+                _Action(_ComputationType.BACKWARD, bwd_mb_index, bwd_stage_index)
+            )
+    return rank_ops
+
+
 class ScheduleInterleaved1F1B(PipelineScheduleMulti):
     """
     The Interleaved 1F1B schedule.
@@ -923,74 +1123,119 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             )
             return (local_index * self.pp_group_size) + rank
 
-        # Dictionary for tracking {stage index : current microbatch index}
-        # All stages start with handling microbatch 0
-        fwd_stage_mb_index: Dict[int, int] = defaultdict(int)
-        bwd_stage_mb_index: Dict[int, int] = defaultdict(int)
+        return _get_1f1b_rank_ops(
+            self.n_local_stages,
+            self.pp_group_size,
+            warmup_ops,
+            fwd_bwd_ops,
+            cooldown_ops,
+            rank,
+            forward_stage_index,
+            backward_stage_index,
+        )
 
-        # Store the list of operations used for that rank
-        rank_ops: List[Optional[_Action]] = []
-        # Pre-padding, rank starts with no-ops based on the warmup.
-        for _ in range(rank):
-            rank_ops.append(None)
 
-        # These are used to calculate the number of slots to fill with no-ops, to account for the delay in warmup
-        # when we want to wait for the backward to trickle back up and start 1f1b to align all ranks.
-        # Formula:
-        # pre-padding + warmup_ops + post_warmup_ops = earliest time step of first backward
-        # post_warmup_ops = [earliest time step of first backward] - (warmup_ops + pre-padding)
-        # earliest time step of first backward = [local_stages * group_size + 2 * (group_size - 1 - rank)]
-        # warmup_ops = calculated above
-        post_warmup_ops = (
-            self.n_local_stages * self.pp_group_size
-            + 2 * (self.pp_group_size - 1 - rank)
-        ) - (warmup_ops + rank)
+class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
+    """
+    The Flexible Interleaved 1F1B schedule.
 
-        for op in range(total_ops):
-            # Warmup phase
-            if op < warmup_ops:
-                fwd_stage_index = forward_stage_index(op)
-                # This will assign the current microbatch index and update it as well
-                fwd_stage_mb_index[fwd_stage_index] = (
-                    mb_index := fwd_stage_mb_index[fwd_stage_index]
-                ) + 1
-                rank_ops.append(
-                    _Action(_ComputationType.FORWARD, mb_index, fwd_stage_index)
-                )
-                if op == warmup_ops - 1:
-                    # This is the last step in the warmup phase, so we need to wait for the backward to trickle back up
-                    rank_ops.extend([None] * post_warmup_ops)
-            # 1F1B Phase (forward and backward)
-            elif warmup_ops <= op < warmup_ops + fwd_bwd_ops:
-                fwd_stage_index = forward_stage_index(op)
-                fwd_stage_mb_index[fwd_stage_index] = (
-                    fwd_mb_index := fwd_stage_mb_index[fwd_stage_index]
-                ) + 1
-                rank_ops.append(
-                    _Action(_ComputationType.FORWARD, fwd_mb_index, fwd_stage_index)
-                )
+    This schedule is mostly similar to the interleaved 1F1B schedule.
+    It differs by being relaxing the requirement of num_microbatch % pp_size == 0.
+    Using the flex_pp schedule, we will have num_rounds = max(1, n_microbatches // pp_group_size) and
+    it works as long as n_microbatches % num_rounds is 0. As a few examples, support
 
-                bwd_stage_index = backward_stage_index(op)
-                bwd_stage_mb_index[bwd_stage_index] = (
-                    bwd_mb_index := bwd_stage_mb_index[bwd_stage_index]
-                ) + 1
-                rank_ops.append(
-                    _Action(_ComputationType.BACKWARD, bwd_mb_index, bwd_stage_index)
-                )
-            # Cooldown phase
-            else:
-                # During cooldown phase, we need steps to align with 1f1b happening in other ranks
-                # TODO: we don't need to always append, after all 1f1b are finished we can stop appending None
-                rank_ops.append(None)
-                bwd_stage_index = backward_stage_index(op)
-                bwd_stage_mb_index[bwd_stage_index] = (
-                    bwd_mb_index := bwd_stage_mb_index[bwd_stage_index]
-                ) + 1
-                rank_ops.append(
-                    _Action(_ComputationType.BACKWARD, bwd_mb_index, bwd_stage_index)
-                )
+    1. pp_group_size = 4, n_microbatches = 10. We will have num_rounds = 2 and n_microbatches % 2 is 0.
+    2. pp_group_size = 4, n_microbatches = 3. We will have num_rounds = 1 and n_microbatches % 1 is 0.
+    """
 
-        # Post padding
-        for _ in range(self.pp_group_size - rank - 1):
-            rank_ops.append(None)
-        return rank_ops
+    def __init__(
+        self,
+        stages: List[_PipelineStageBase],
+        n_microbatches: int,
+        loss_fn: Optional[Callable] = None,
+        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+    ):
+        self.pp_group_size = stages[0].group_size
+        super().__init__(
+            stages=stages,
+            n_microbatches=n_microbatches,
+            loss_fn=loss_fn,
+            args_chunk_spec=args_chunk_spec,
+            kwargs_chunk_spec=kwargs_chunk_spec,
+            output_merge_spec=output_merge_spec,
+        )
+        self.n_local_stages = len(stages)
+        self.rank = stages[0].group_rank
+        self.number_of_rounds = max(1, n_microbatches // self.pp_group_size)
+        self.microbatches_per_round = n_microbatches // self.number_of_rounds
+        if n_microbatches % self.number_of_rounds != 0:
+            raise ValueError(
+                "Flexible Interleaved 1F1B requires the number of microbatches to be a "
+                f"multiple of the number of rounds ({self.number_of_rounds}), "
+                f"but got {n_microbatches}."
+            )
+        # 1. Create the pipeline_order (all ranks do this calculation)
+        # This will be used to keep track of the current state of the entire pipeline
+        # pipeline_order[rank] = [Action(computation_type, microbatch_index, stage_index), ...]
+        self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
+        for rank in range(self.pp_group_size):
+            rank_ops = self._calculate_single_rank_operations(rank)
+            self.pipeline_order[rank] = rank_ops
+
+    def _calculate_single_rank_operations(self, rank) -> List[Optional[_Action]]:
+        def get_rank_warmup_ops(rank):
+            # Warms up operations for last stage
+            warmups_ops_last_stage = (
+                self.n_local_stages - 1
+            ) * self.microbatches_per_round
+            # Increment warmup operations by 2 for each hop away from the last stage
+            warmup_ops = warmups_ops_last_stage + 2 * ((self.pp_group_size - 1) - rank)
+            # We cannot have more warmup operations than there are number of microbatches, so cap it there
+            return min(warmup_ops, self._n_microbatches * self.n_local_stages)
+
+        warmup_ops = get_rank_warmup_ops(rank)
+        microbatch_ops = self.n_local_stages * self._n_microbatches
+        # fwd_bwd_ops should encompass the remaining forwards
+        fwd_bwd_ops = microbatch_ops - warmup_ops
+        # cooldown_ops should encompass the remaining backwards
+        cooldown_ops = microbatch_ops - fwd_bwd_ops
+        # total ops encompass both forward and backward ops
+        total_ops = warmup_ops + fwd_bwd_ops + cooldown_ops
+        # warmup_ops + fwd_bwd_ops * 2 + cooldown_ops == microbatch_ops * 2
+        logger.debug(
+            "rank %s, warmup_ops %s, 1f1b %s, cooldown_ops %s total_ops %s",
+            rank,
+            warmup_ops,
+            fwd_bwd_ops,
+            cooldown_ops,
+            total_ops,
+        )
+
+        # Calculates the stage index based on step and pp_group_size
+
+        def forward_stage_index(step):
+            # Get the local index from 0 to n_local_stages-1
+            local_index = (step // self.microbatches_per_round) % self.n_local_stages
+            return (local_index * self.pp_group_size) + rank
+
+        def backward_stage_index(step):
+            local_index = (
+                self.n_local_stages
+                - 1
+                - ((step - warmup_ops) // self.microbatches_per_round)
+                % self.n_local_stages
+            )
+            return (local_index * self.pp_group_size) + rank
+
+        return _get_1f1b_rank_ops(
+            self.n_local_stages,
+            self.pp_group_size,
+            warmup_ops,
+            fwd_bwd_ops,
+            cooldown_ops,
+            rank,
+            forward_stage_index,
+            backward_stage_index,
+        )

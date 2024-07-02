@@ -696,7 +696,7 @@ class Reduction(Loops):
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
         should_split = (
-            not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
+            is_gpu(get_device_type(device))
             and reduction_type
             not in {
                 "argmax",
@@ -5342,6 +5342,7 @@ has_c_shim = {
     aten._fft_c2c.default,
     aten._scaled_dot_product_efficient_attention.default,
     aten._scaled_dot_product_flash_attention.default,
+    aten._scaled_dot_product_cudnn_attention.default,
     aten._scaled_mm.default,
     aten.addmm.out,
     aten.bmm.out,
