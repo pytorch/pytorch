@@ -2,6 +2,9 @@
 # pyre-strict
 from __future__ import annotations
 
+import heapq
+
+import sys
 from collections import defaultdict
 from typing import Dict, List, Set, Tuple, TYPE_CHECKING
 
@@ -17,61 +20,116 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode
 
 
-def sink_waits(
-    snodes: List[BaseSchedulerNode],
-    node_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
-    inverse_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
-) -> List[BaseSchedulerNode]:
+def sink_waits(snodes: List[BaseSchedulerNode], *args) -> List[BaseSchedulerNode]:
     """
-    Greedily moves waits as late as possible (i.e. until we reach a use). Optimal in terms of
-    communication overlap.
-    """
-    new_order = []
-    cur_waits = set()
-    for snode in snodes:
-        if is_wait(snode.node):
-            cur_waits.add(snode)
-        else:
-            for wait in tuple_sorted(cur_waits):
-                if snode in node_users[wait]:
-                    new_order.append(wait)
-                    cur_waits.remove(wait)
-            new_order.append(snode)
-    new_order.extend(tuple_sorted(cur_waits))
-    return new_order
-
-
-def raise_comms(
-    snodes: List[BaseSchedulerNode],
-    node_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
-    inverse_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
-) -> List[BaseSchedulerNode]:
-    """
-    Greedily moves comms as early as possible (i.e. until we reach an input).
+    Greedily moves waits as late as possible.
     Optimal in terms of communication overlap.
-
-    TODO: We might want to adjust this in the future to account for memory limitations.
-    e.g. when we are compiling FSDP, this heuristics will cause the all-gathers to be prefetched as soon as possible,
-    which is the beginning of the forwards pass. We'll have to either do a special pass for FSDP,
-    or we'll want to redo this pass with memory considerations so we handle the FSDP case in a general way.
     """
-    new_order_reversed: List[BaseSchedulerNode] = []
-    cur_comms: List[BaseSchedulerNode] = []
-    for snode in reversed(snodes):
-        if is_collective(snode.node):
-            cur_comms.append(snode)
-        else:
-            for comm in cur_comms:
-                assert len(inverse_users[comm]) > 0
-            while len(cur_comms) > 0 and any(
-                snode in inverse_users[comm] for comm in cur_comms
-            ):
-                comm = cur_comms.pop(0)
-                new_order_reversed.append(comm)
-            new_order_reversed.append(snode)
-    assert len(cur_comms) <= 1
-    new_order_reversed.extend(tuple_sorted(cur_comms))
-    return new_order_reversed[::-1]
+    return raise_comms_and_sink_waits(snodes, raise_comms=False, sink_waits=True)
+
+
+def raise_comms(snodes: List[BaseSchedulerNode], *args) -> List[BaseSchedulerNode]:
+    """
+    Greedily moves comms as early as possible.
+    Optimal in terms of communication overlap.
+    """
+    return raise_comms_and_sink_waits(snodes, raise_comms=True, sink_waits=False)
+
+
+def raise_comms_and_sink_waits(
+    snodes: List[BaseSchedulerNode],
+    *args,
+    raise_comms: bool = True,
+    sink_waits: bool = True,
+) -> List[BaseSchedulerNode]:
+    # We assign each node a tuple of scores (score_0, score_1, score_2),
+    # decreasing in importance, with a lower value indicating a higher ranking:
+    #
+    # - score_0: the lowest comm_idx among the comm nodes that the node blocks.
+    # If a node doesn't block any comm nodes, its score_0 is set to
+    # sys.maxsize. This score ensures that comm nodes get scheduled as early as
+    # possible.
+    # - score_1: 1 if the node is a wait node, 0 otherwise. This score ensures
+    # that wait nodes are deferred as late as possible.
+    # - score_2: the index of the node in the original topological order. This
+    # score provides stability in case of ties.
+    #
+    # When only raise_comms is True, only score_0 and score_2 are considered.
+    # When only sink_waits is True, only score_1 and score_2 are considered.
+    # When neither is True, the original order is yielded.
+    name_to_snode = {}
+    scores_0, scores_1, scores_2 = {}, {}, {}
+    for idx, snode in enumerate(snodes):
+        for name in snode.get_names():
+            name_to_snode[name] = snode
+            scores_0[name] = sys.maxsize
+            scores_1[name] = 0
+            scores_2[name] = idx
+
+    comm_idx = 0
+    for snode in snodes:
+        if raise_comms and is_collective(snode.node):
+            scores_0[snode.get_name()] = comm_idx
+            for anc in snode.ancestors:
+                scores_0[anc] = min(scores_0[anc], comm_idx)
+            comm_idx += 1
+        elif sink_waits and is_wait(snode.node):
+            scores_1[snode.get_name()] = 1
+
+    class Runnable:
+        def __init__(self, snode):
+            self.snode = snode
+            name = next(iter(snode.get_names()))
+            self.score = (
+                scores_0[name],
+                scores_1[name],
+                scores_2[name],
+            )
+
+        def __lt__(self, other):
+            return self.score < other.score
+
+    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {}
+    for snode in snodes:
+        # A mutating node's unmet_dependencies doesn't cover the dependencies
+        # caused by the mutation. Instead, they are described by associated
+        # MutationOutput node. Thus, to safely schedule a mutating node, we
+        # have to add the unmet_dependencies of the associated MutationOutput
+        # nodes to the mutating node.
+        if isinstance(snode.node, ir.MutationOutput):
+            src_name = snode.node.node_doing_mutating.get_name()
+            src_snode = name_to_snode[src_name]
+            assert src_snode in unmet_deps
+            unmet_deps[src_snode] |= {
+                dep.name for dep in snode.unmet_dependencies if dep.name != src_name
+            }
+        assert snode not in unmet_deps
+        unmet_deps[snode] = {dep.name for dep in snode.unmet_dependencies}
+
+    ready: List[Runnable] = []
+    snode_num_deps: Dict[BaseSchedulerNode, int] = {}
+    buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(set)
+
+    for snode, deps in unmet_deps.items():
+        snode_num_deps[snode] = len(deps)
+        if len(deps) == 0:
+            heapq.heappush(ready, Runnable(snode))
+        for dep in deps:
+            buffer_users[dep].add(snode)
+
+    scheduled = []
+    while len(ready):
+        curr = heapq.heappop(ready).snode
+        scheduled.append(curr)
+        for curr_name in curr.get_names():
+            for snode in buffer_users[curr_name]:
+                snode_num_deps[snode] -= 1
+                if snode_num_deps[snode] == 0:
+                    heapq.heappush(ready, Runnable(snode))
+
+    for snode, num_deps in snode_num_deps.items():
+        assert num_deps == 0, "Unscheduled nodes"
+    return scheduled
 
 
 def get_ancestors(node, inverse_users):
