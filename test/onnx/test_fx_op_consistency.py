@@ -171,6 +171,26 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
+        "_unsafe_masked_index",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Where", "bool"),
+    ),
+    xfail(
+        "_unsafe_masked_index",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("_unsafe_masked_index", "complex64"),
+    ),
+    xfail(
+        "_unsafe_masked_index_put_accumulate",
+        reason="fixme: Status Message: updates tensor should have shape equal to "
+               "indices.shape[:-1] + data.shape[indices.shape[-1]:]",
+    ),
+    xfail(
+        "_unsafe_masked_index_put_accumulate",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Where", "bool"),
+    ),
+    xfail(
         "add", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Add")
     ),
@@ -220,6 +240,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "alias_copy",
+        dtypes=(torch.int8, torch.uint8, torch.int16, torch.float64),
         reason="OnnxExporterError: Failed to export model",
     ),
     xfail(
@@ -1184,6 +1205,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "squeeze_copy",
+        dtypes=(torch.int8, torch.uint8, torch.int16),
         reason="OnnxExporterError: Failed to export model",
     ),
     xfail(
@@ -1250,6 +1272,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         "unravel_index",
         dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_script_does_not_support("Floor", "bool, int"),
+    ),
+    xfail(
+        "unsqueeze_copy",
+        reason="OnnxExporterError: Failed to export model",
+        dtypes=(torch.int8, torch.uint8, torch.int16),
     ),
     xfail(
         "where",
