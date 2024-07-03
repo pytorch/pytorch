@@ -436,6 +436,7 @@ def with_fresh_cache_if_config(fn):
 
 
 def cudagraph_post_compile(
+    cudagraphs: BoxedBool,
     compiled_graph: CompiledFxGraph,
     cudagraph_fail_reasons: List[str],
     inputs_to_check: Sequence[int],
@@ -444,10 +445,14 @@ def cudagraph_post_compile(
     is_backward: bool,
     stack_traces: List[Optional[str]],
     placeholders: Sequence[torch.fx.Node],
-    cudagraphs: BoxedBool,
     example_inputs: List[Any],
     static_input_idxs: Sequence[int],
 ):
+    """
+    Checks for any reasons not to run cudagraphs and then
+    runs it on compiled_graph.
+    Mutates the `compiled_graph.current_callable` and `cudagraphs`
+    """
     assert compiled_graph.current_callable is not None
     if not cudagraph_fail_reasons:
         if not config.triton.cudagraph_trees:
@@ -475,6 +480,7 @@ def cudagraph_post_compile(
             placeholders=placeholders,
             mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
         )
+
     else:
         BoxedBool.disable(cudagraphs)
 
@@ -509,7 +515,26 @@ def cudagraph_post_compile(
                 log_cudagraph_skip_and_bump_counter(
                     f"skipping cudagraphs due to {cudagraph_fail_reasons}"
                 )
-    return compiled_graph
+
+
+def maybe_realign_inputs(
+    ran_cudagraphs: BoxedBool,
+    compiled_graph: CompiledFxGraph,
+    inputs_to_check: Sequence[int],
+):
+    """
+    Realigns input strides from inputs_to_check if
+    we didn't end up running cudagraphs. Mutates
+    `compiled_graph.current_callable` if cudagraphs
+    was run. Otherwise, does nothing.
+    """
+    if not ran_cudagraphs:
+        assert compiled_graph.current_callable is not None
+        new_callable = align_inputs_from_check_idxs(
+            compiled_graph.current_callable, inputs_to_check
+        )
+        if new_callable is not compiled_graph.current_callable:
+            compiled_graph.current_callable = new_callable
 
 
 @DebugContext.wrap
@@ -626,16 +651,6 @@ def compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
-    # check cudagraph disabling reasons from inductor lowering
-    if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
-        if "cuda" in compiled_graph.device_types:
-            log_cudagraph_skip_and_bump_counter(
-                f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
-            )
-        else:
-            counters["inductor"]["cudagraph_skips"] += 1
-        BoxedBool.disable(cudagraphs)
-
     # Return the output strides to the caller via TracingContext
     context = torch._guards.TracingContext.try_get()
     if context is not None and context.output_strides is not None:
@@ -660,74 +675,81 @@ def compile_fx_inner(
         return compiled_graph
 
     if cudagraphs:
-        complex_memory_overlap_inputs = any(
-            complex_memory_overlap(t)
-            for t in example_inputs
-            if isinstance(t, torch.Tensor)
-        )
-
-        if not config.triton.cudagraph_support_input_mutation:
-            # Skip supports for cudagraph-managed tensors
-            from torch._inductor.cudagraph_utils import (
-                check_for_mutation_ignore_cuda_graph_managed_tensor,
-            )
-
-            has_mutation_str = check_for_mutation_ignore_cuda_graph_managed_tensor(
-                gm, compiled_graph, static_input_idxs
-            )
-            has_mutation = has_mutation_str is not None
-
-            if has_mutation:
-                compiled_graph.disabled_cudagraphs_reason = has_mutation_str
+        # check cudagraph disabling reasons from inductor lowering
+        if compiled_graph.disabled_cudagraphs_reason:
+            if "cuda" in compiled_graph.device_types:
+                log_cudagraph_skip_and_bump_counter(
+                    f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
+                )
+            else:
+                counters["inductor"]["cudagraph_skips"] += 1
+            BoxedBool.disable(cudagraphs)
         else:
-            # Check mutation later to support cudagraph-managed tensors
-            has_mutation = None
+            complex_memory_overlap_inputs = any(
+                complex_memory_overlap(t)
+                for t in example_inputs
+                if isinstance(t, torch.Tensor)
+            )
 
-        cudagraph_tests = [
-            (not has_mutation, "mutated inputs"),
-            (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
-            (not complex_memory_overlap_inputs, "complex memory overlap"),
-            (
-                all(
-                    isinstance(t, (torch.Tensor, torch.SymInt)) for t in example_inputs
+            if not config.triton.cudagraph_support_input_mutation:
+                # Skip supports for cudagraph-managed tensors
+                from torch._inductor.cudagraph_utils import (
+                    check_for_mutation_ignore_cuda_graph_managed_tensor,
+                )
+
+                has_mutation_str = check_for_mutation_ignore_cuda_graph_managed_tensor(
+                    gm, compiled_graph, static_input_idxs
+                )
+                has_mutation = has_mutation_str is not None
+
+                if has_mutation:
+                    compiled_graph.disabled_cudagraphs_reason = has_mutation_str
+            else:
+                # Check mutation later to support cudagraph-managed tensors
+                has_mutation = None
+
+            cudagraph_tests = [
+                (not has_mutation, "mutated inputs"),
+                (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
+                (not complex_memory_overlap_inputs, "complex memory overlap"),
+                (
+                    all(
+                        isinstance(t, (torch.Tensor, torch.SymInt))
+                        for t in example_inputs
+                    ),
+                    "non-Tensor inputs",
                 ),
-                "non-Tensor inputs",
-            ),
-        ]
-        output = output_node(gm)
-        # output args are tuple of first argument
-        assert len(output.args) == 1
-        stack_traces = [
-            (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
-            for arg in output.args[0]
-        ]
-        cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
-        placeholders = tuple(get_placeholders(gm.graph))
-        cudagraph_post_compile(
-            compiled_graph,
-            cudagraph_fail_reasons,
-            inputs_to_check,
-            boxed_forward_device_index,
-            is_inference,
-            is_backward,
-            stack_traces,
-            placeholders,
-            cudagraphs,
-            example_inputs,
-            static_input_idxs,
-        )
+            ]
+            output = output_node(gm)
+            # output args are tuple of first argument
+            assert len(output.args) == 1
+            stack_traces = [
+                (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
+                for arg in output.args[0]
+            ]
+            cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
+            placeholders = tuple(get_placeholders(gm.graph))
+            cudagraph_post_compile(
+                cudagraphs,
+                compiled_graph,
+                cudagraph_fail_reasons,
+                inputs_to_check,
+                boxed_forward_device_index,
+                is_inference,
+                is_backward,
+                stack_traces,
+                placeholders,
+                example_inputs,
+                static_input_idxs,
+            )
 
-    # cudagraphs does its own aligning of inputs
-    # TODO: will need to refactor into post compile step
-    # for AOTAutogradCache
-    if not cudagraphs:
-        assert compiled_graph.current_callable is not None
-        new_callable = align_inputs_from_check_idxs(
-            compiled_graph.current_callable, inputs_to_check
-        )
-        if new_callable is not compiled_graph.current_callable:
-            compiled_graph.current_callable = new_callable
-
+    # cudagraphs could have been disabled from the earlier conditions
+    # so we still need to realign inputs if that happens
+    maybe_realign_inputs(
+        cudagraphs,
+        compiled_graph,
+        inputs_to_check,
+    )
     _step_logger()(
         logging.INFO,
         "torchinductor done compiling "

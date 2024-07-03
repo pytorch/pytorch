@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
 from torch._dynamo.utils import counters
@@ -144,7 +144,7 @@ class BoxedDeviceIndex:
 
 
 def check_for_mutation_ignore_cuda_graph_managed_tensor(
-    gm: torch.fx.GraphModule, compiled_graph, static_input_idxs: List[int]
+    gm: torch.fx.GraphModule, compiled_graph, static_input_idxs: Sequence[int]
 ) -> Optional[str]:
     default_msg = format_default_skip_message("mutated inputs")
 
