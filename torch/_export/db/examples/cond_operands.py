@@ -26,7 +26,7 @@ class CondOperands(torch.nn.Module):
 
         return cond(x.shape[0] > 2, true_fn, false_fn, [x, y])
 
-example_inputs = (x, y)
+example_args = (x, y)
 tags = {
     "torch.cond",
     "torch.dynamic-shape",

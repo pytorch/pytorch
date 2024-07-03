@@ -21,6 +21,7 @@ from typing import List, Tuple, Optional
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
     TEST_WITH_ROCM,
     skipIfRocm,
     skipIfTorchDynamo,
@@ -50,10 +51,11 @@ from torch.testing._internal.common_cuda import (
     tf32_on_and_off
 )
 
-from test_cpp_extensions_open_device_registration import (
-    remove_build_path,
-    generate_faked_module
-)
+if not IS_FBCODE:
+    from test_cpp_extensions_open_device_registration import (
+        remove_build_path,
+        generate_faked_module
+    )
 
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
@@ -3632,6 +3634,7 @@ class TestAttnBias(NNTestCase):
         with self.assertRaisesRegex(ValueError, "CausalBias should not be used with causal=True"):
             scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)
 
+@unittest.skipIf(IS_FBCODE, "Ninja is required to load C++ extensions and it's not compatible with Buck ")
 class TestSDPAPrivateUse1Only(NNTestCase):
     @classmethod
     def setUpClass(cls):
