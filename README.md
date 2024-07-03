@@ -298,7 +298,7 @@ Choose Correct Visual Studio Version.
 
 PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
 Professional, or Community Editions. You can also install the build tools from
-<https://visualstudio.microsoft.com/visual-cpp-build-tools/>. The build tools _do not_
+<https://visualstudio.microsoft.com/visual-cpp-build-tools/>. The build tools *do not*
 come with Visual Studio Code by default.
 
 If you want to build legacy python code, please refer to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
