@@ -278,8 +278,8 @@ def aot_dispatch_autograd_graph(
     )
 
     fx_g = _create_graph(joint_fn_to_trace, updated_joint_inputs, aot_config=aot_config)
-    move_resize_zero_to_end_of_graph(fx_g.graph)
     refunctionalize_set(fx_g.graph)
+    move_resize_zero_to_end_of_graph(fx_g.graph)
 
     # There should be *NO* mutating ops in the graph at this point.
     assert_functional_graph(fx_g.graph)

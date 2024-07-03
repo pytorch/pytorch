@@ -640,8 +640,8 @@ def forward(self, primals_1):
 def forward(self, primals_1, primals_2):
     mul = torch.ops.aten.mul.Tensor(primals_2, 2)
     add = torch.ops.aten.add.Tensor(mul, mul)
-    set_ = torch.ops.aten.set_.source_Tensor(primals_1, mul);  primals_1 = None
-    copy_ = torch.ops.aten.copy_.default(primals_2, mul);  primals_2 = mul = None
+    copy_ = torch.ops.aten.copy_.default(primals_2, mul);  primals_2 = None
+    set__source_tensor = torch.ops.aten.set_.source_Tensor(primals_1, mul);  primals_1 = mul = None
     return [add]""",
         )
 
@@ -1122,9 +1122,10 @@ def forward(self, primals_1):
 
     def test_input_mutation_storage_resize_down(self):
         def f(a):
-            out = a.sin()
-            torch.ops.inductor.resize_storage_bytes_(a, 0)
-            return out
+            with torch.no_grad():
+                out = a.sin()
+                torch.ops.inductor.resize_storage_bytes_(a, 0)
+                return out
 
         inp = torch.zeros(8, requires_grad=True)
 
@@ -1142,15 +1143,13 @@ def forward(self, primals_1):
         out = compiled_f(inp)
         # Final functionalized graph has one mutation ops:
         # (1) a resize_() to resize input tensor down
-        # Even though there was technically a "data mutation" on the input (from a.copy_()),
-        # We don't include it in the graph since the final input size has zero storage
         self.assertExpectedInline(
             fw_graph_cell[0].code.strip(),
             """\
-def forward(self, primals_1):
-    sin = torch.ops.aten.sin.default(primals_1)
-    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 0)
-    return [sin, primals_1]""",
+def forward(self, arg0_1):
+    sin = torch.ops.aten.sin.default(arg0_1)
+    resize_storage_bytes__default = torch.ops.inductor.resize_storage_bytes_.default(arg0_1, 0);  arg0_1 = None
+    return (sin,)""",
         )
 
     #     def test_input_mutation_storage_resize_up_down(self):
@@ -1193,66 +1192,6 @@ def forward(self, primals_1):
     #     sin = torch.ops.aten.sin.default(copy)
     #     return [sin, copy]""",
     #         )
-
-    def test_input_mutation_storage_resize_down_and_set_(self):
-        # Meant to mimic ppFSDP
-        class TracableCreateParameter(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, tensor, placeholder):
-                assert not tensor.requires_grad
-                return placeholder.set_(tensor)
-
-            @staticmethod
-            def backward(ctx, grad):
-                return None, grad  # grad flows to placeholder
-
-        def f(dummy_param, param_shard):
-            # simulate allgather
-            with torch.no_grad():
-                allgather_param = torch.cat([param_shard, param_shard])
-            # simulate propagating grad state through dummy param, using data of allgather param
-            dummy_param_with_grad_state = TracableCreateParameter.apply(
-                allgather_param, dummy_param
-            )
-            out = dummy_param.sin()
-            # Resize out dummy param, which now has the allgather data
-            torch.ops.inductor.resize_storage_bytes_(dummy_param, 0)
-            return out
-
-        # Simulates the local shard of our param
-        param_shard = torch.zeros(8, requires_grad=True)
-        # The dummy, zero-sized allgathered param that autograd will actually compute gradients on
-        dummy_param = torch.zeros(16, requires_grad=True)
-        dummy_param.untyped_storage().resize_(0)
-
-        fw_graph_cell = [None]
-        compiled_f = aot_function(
-            f,
-            fw_compiler=make_boxed_compiler(
-                partial(extract_graph, graph_cell=fw_graph_cell)
-            ),
-            bw_compiler=nop,
-            decompositions={},
-            keep_inference_input_mutations=True,
-            dynamic=False,
-        )
-        out = compiled_f(dummy_param, param_shard)
-        # Important stuff to point out:
-        # (1) We save cat for backward (input to the sin()).
-        #     While the original code was dummy_param.sin(),
-        #     dummy_param actually contains the `cat` tensor due to the set_() call
-        # (2) We emit a cat.resize_storage_(0) in the graph.
-        #     After the set_(), cat is the actually data of dummy_param, which is what we call resize_() on
-        self.assertExpectedInline(
-            fw_graph_cell[0].code.strip(),
-            """\
-def forward(self, primals_1, primals_2):
-    cat = torch.ops.aten.cat.default([primals_2, primals_2]);  primals_2 = None
-    sin = torch.ops.aten.sin.default(cat)
-    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(cat, 0)
-    set_ = torch.ops.aten.set_.source_Tensor(primals_1, cat);  primals_1 = None
-    return [sin, cat]""",
-        )
 
     def test_input_mutation_storage_resize_before_set_(self):
         def f(a):

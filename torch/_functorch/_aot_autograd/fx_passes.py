@@ -26,12 +26,41 @@ def move_resize_zero_to_end_of_graph(graph: fx.Graph) -> None:
             args_flat = pytree.arg_tree_leaves(*n.args, **n.kwargs)
             for arg in args_flat:
                 node_to_usage_map[arg].append(i)
-    for resize_node, resize_node_idx in resize_nodes_to_insert_at_end:
-        assert resize_node_idx == node_to_usage_map[resize_node.args[0]][-1], (
-            "Input to .resize_storage_bytes_(X, 0) is used after the resize-to-0 op, "
-            "which violates assumption on FSDP2 implementation. Please report a bug to PyTorch."
-        )
-        with graph.inserting_before(return_node):
+    # Assumptions: the size-0 tensor X can then be used only in the following ops:
+    # 1. `aten.set_(X, ...)`
+    # 2. `aten.set_(..., X)`
+    # 3. `inductor.resize_storage_bytes_(X, 0)`
+    # 4. graph output
+    for resize_node, resize_node_idx in reversed(resize_nodes_to_insert_at_end):
+        usage_idx_list = node_to_usage_map[resize_node.args[0]]
+        pos_in_usage_idx_list = usage_idx_list.index(resize_node_idx)
+        for i in range(pos_in_usage_idx_list + 1, len(usage_idx_list)):
+            node = node_list[usage_idx_list[i]]
+            if node.target is torch.ops.aten.set_.source_Tensor and (
+                node.args[0] == resize_node.args[0]
+                or node.args[1] == resize_node.args[0]
+            ):
+                continue
+            if (
+                node.target is torch.ops.inductor.resize_storage_bytes_.default
+                and node.args[0] == resize_node.args[0]
+                and node.args[1] == 0
+            ):
+                continue
+            if node.target == "output":
+                continue
+            raise RuntimeError(
+                f"Input to .resize_storage_bytes_(X, 0) is used after the resize-to-0 op by `{node}`. "
+                f"Violating graph: {graph}"
+            )
+        if pos_in_usage_idx_list == len(usage_idx_list) - 1:
+            # If `.resize_(X, 0)` node is the last usage of X, we move the resize node to the end of the graph.
+            next_valid_usage_of_resized_tensor = return_node
+        else:
+            next_valid_usage_of_resized_tensor = node_list[
+                usage_idx_list[pos_in_usage_idx_list + 1]
+            ]
+        with graph.inserting_before(next_valid_usage_of_resized_tensor):
             new_resize_node = graph.call_function(
                 torch.ops.inductor.resize_storage_bytes_.default, resize_node.args
             )
