@@ -93,6 +93,7 @@ def _run_on_profiler_stop():
 @dataclass
 class _ProfilerStats:
     "Profiler timing and stats used by developers to catch issues/regressions"
+
     profiling_window_duration_sec: float = 0
     number_of_events: int = 0
     profiler_prepare_call_duration_us: int = 0

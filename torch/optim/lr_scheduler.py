@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Learning Rate Scheduler."""
+
 import math
 import types
 import warnings
@@ -2144,8 +2145,6 @@ class OneCycleLR(LRScheduler):
                 if self.use_beta1:
                     group["betas"] = (computed_momentum, *group["betas"][1:])  # type: ignore[possibly-undefined]
                 else:
-                    group[
-                        "momentum"
-                    ] = computed_momentum  # type: ignore[possibly-undefined]
+                    group["momentum"] = computed_momentum  # type: ignore[possibly-undefined]
 
         return lrs

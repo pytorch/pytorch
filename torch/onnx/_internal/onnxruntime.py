@@ -300,7 +300,7 @@ def _get_onnx_devices(
             torch.Tensor, torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool
         ],
         ...,
-    ]
+    ],
 ) -> Tuple["ORTC.OrtDevice", ...]:
     def _device_id_or_zero(device_id: int) -> int:
         return device_id or 0
