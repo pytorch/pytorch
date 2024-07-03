@@ -374,11 +374,11 @@ _h100_default_config = {
     (torch.float32, 64): (128, 32, 4, 3),
     (torch.float32, 128): (32, 64, 4, 3),
     (torch.float32, 256): (32, 32, 4, 3),
-    (torch.bfloat16, 64): (128, 64, 4, 3),
-    (torch.bfloat16, 128): (64, 32, 4, 3),
+    (torch.bfloat16, 64): (128, 128, 4, 3),
+    (torch.bfloat16, 128): (128, 64, 8, 3),
     (torch.bfloat16, 256): (64, 32, 4, 3),
-    (torch.float16, 64): (128, 64, 4, 3),
-    (torch.float16, 128): (64, 32, 4, 3),
+    (torch.float16, 64): (128, 128, 4, 3),
+    (torch.float16, 128): (128, 128, 8, 3),
     (torch.float16, 256): (64, 32, 4, 3),
 }
 
@@ -428,7 +428,12 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
     if dtype == torch.float32:
         return (16, 16, 4, 1)
     if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
-        return (32, 128, 4, 3)
+        if head_dim == 64:
+            return (64, 64, 4, 3)
+        elif head_dim == 128:
+            return (64, 128, 8, 3)
+        else:
+            return (64, 64, 4, 2)
     elif torch.cuda.get_device_capability() >= (8, 0):  # A100
         if head_dim == 64:
             return (32, 128, 4, 3)
@@ -438,6 +443,37 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
             return (64, 64, 4, 2)
     else:  # modest hardware or extremely large head_dim
         return (16, 16, 4, 1)
+
+
+def create_num_blocks_fake_generator(sparse_indices):
+    # The idea here is that we need to create a real tensor with real data
+    # that's representative for benchmarking.
+    # For example, returning all zeros for the `kv_num_blocks` input would mean
+    # that we are computing 0 blocks for each row, which would provide bogus
+    # autotuning results.
+    #
+    # In this case, we choose to use min(16, max_block) blocks, because I
+    # (Horace) think it'll probably result in pretty representative performance.
+    # If it's too short then prefetching won't help. If it's too long then
+    # autotuning will take longer for no good reason.
+    def create_num_blocks_fake(x) -> torch.Tensor:
+        num_blocks_for_autotuning = min(16, sparse_indices.shape[-1])
+        return torch.full(
+            x.get_size(),
+            int(num_blocks_for_autotuning),
+            dtype=x.get_dtype(),
+            device=x.get_device(),
+        )
+
+    return create_num_blocks_fake
+
+
+def create_indices_fake(x) -> torch.Tensor:
+    indices = torch.arange(
+        0, int(x.get_size()[-1]), dtype=x.get_dtype(), device=x.get_device()
+    )
+    indices = indices.expand(x.get_size()).contiguous()
+    return indices
 
 
 # TODO: We probably also need a layout constraint?
@@ -557,9 +593,17 @@ def flex_attention(*args, **kwargs):
         sparse_kv_num_blocks,
         sparse_kv_indices,
     ] + list(other_buffers)
+    input_gen_fns = {
+        4: create_num_blocks_fake_generator(sparse_kv_indices),  # sparse_kv_num_blocks
+        5: create_indices_fake,  # sparse_kv_indices
+    }
     return (
         autotune_select_algorithm(
-            "flex_attention", choices, inputs_for_autotuning, layout
+            "flex_attention",
+            choices,
+            inputs_for_autotuning,
+            layout,
+            input_gen_fns=input_gen_fns,
         ),
         logsumexp,
     )
@@ -1028,9 +1072,19 @@ def flex_attention_backward(*args, **kwargs):
         sparse_q_num_blocks,
         sparse_q_indices,
     ] + list(other_buffers)
+    input_gen_fns = {
+        9: create_num_blocks_fake_generator(sparse_kv_indices),  # sparse_kv_num_blocks
+        10: create_indices_fake,
+        11: create_num_blocks_fake_generator(sparse_q_indices),  # sparse_q_num_blocks
+        12: create_indices_fake,
+    }
 
     grad_key = autotune_select_algorithm(
-        "flex_attention_backward", choices, inputs_for_autotuning, layout_k
+        "flex_attention_backward",
+        choices,
+        inputs_for_autotuning,
+        layout_k,
+        input_gen_fns=input_gen_fns,
     )
     return (
         grad_query,
