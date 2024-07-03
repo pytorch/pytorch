@@ -22,6 +22,10 @@ class LazyBenchmark:
     def __float__(self) -> float:
         self.__finalize__()
         return self.value
+    
+    def __format__(self, format_spec: str) -> str:
+        self.__finalize__()
+        return self.value.__format__(format_spec)
 
     def __lt__(self, other: Any) -> bool:
         self.__finalize__()
