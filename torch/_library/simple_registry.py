@@ -1,5 +1,8 @@
 # mypy: allow-untyped-defs
+from typing import Callable, Optional
+
 from .fake_impl import FakeImplHolder
+from .utils import RegistrationHandle
 
 __all__ = ["SimpleLibraryRegistry", "SimpleOperatorEntry", "singleton"]
 
@@ -42,8 +45,39 @@ class SimpleOperatorEntry:
     def __init__(self, qualname: str):
         self.qualname: str = qualname
         self.fake_impl: FakeImplHolder = FakeImplHolder(qualname)
+        self.torch_dispatch_rules: GenericTorchDispatchRuleHolder = (
+            GenericTorchDispatchRuleHolder()
+        )
 
     # For compatibility reasons. We can delete this soon.
     @property
     def abstract_impl(self):
         return self.fake_impl
+
+
+class GenericTorchDispatchRuleHolder:
+    def __init__(self):
+        self._data = {}
+
+    def register(
+        self, torch_dispatch_class: type, func: Callable
+    ) -> RegistrationHandle:
+        if self.find(torch_dispatch_class):
+            raise RuntimeError(
+                f"{torch_dispatch_class} already has a `__torch_dispatch__` rule registered"
+            )
+        self._data[torch_dispatch_class] = func
+
+        def deregister():
+            del self._data[torch_dispatch_class]
+
+        return RegistrationHandle(deregister)
+
+    def find(self, torch_dispatch_class):
+        return self._data.get(torch_dispatch_class, None)
+
+
+def find_torch_dispatch_rule(op, torch_dispatch_class: type) -> Optional[Callable]:
+    return singleton.find(op.__qualname__).torch_dispatch_rules.find(
+        torch_dispatch_class
+    )
