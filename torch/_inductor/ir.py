@@ -11,6 +11,7 @@ import re
 import textwrap
 import traceback
 from contextlib import nullcontext
+from copy import deepcopy
 from functools import partial
 from typing import (
     Any,
@@ -2536,14 +2537,8 @@ class DtypeView(BaseView):
     @property
     def layout(self):
         old_layout = self.data.get_layout()
-        layout_class = type(old_layout)
-        new_layout = layout_class(
-            old_layout.device,
-            self.target_dtype,
-            old_layout.size,
-            old_layout.stride,
-            old_layout.offset,
-        )
+        new_layout = deepcopy(old_layout)
+        new_layout.dtype = self.target_dtype
         return new_layout
 
     def get_size(self):
