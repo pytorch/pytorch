@@ -3,10 +3,11 @@
 import os
 import shutil
 import subprocess
+from unittest import skipIf
 
 import torch
 import torch.utils.cpp_extension
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase, serialTest
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
 
 def remove_build_path():
@@ -191,7 +192,10 @@ class CppThreadTest(TestCase):
             }
         )
 
-    @serialTest()
+    @skipIf(
+        IS_WINDOWS,
+        "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
+    )
     def test_profile_memory(self) -> None:
         self.start_profiler(True)
         cpp.start_threads(self.ThreadCount, IterationCount, True)
