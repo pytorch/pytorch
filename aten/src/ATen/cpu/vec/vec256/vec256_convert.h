@@ -79,15 +79,15 @@ struct VecConvert<int64_t, 2, float, 1> {
     src.store(buffer);
     at::vec::VectorizedN<int64_t, 2> result;
     result[0] = Vectorized<int64_t>(
-      static_cast<int64_t>(buffer[3]),
-      static_cast<int64_t>(buffer[2]),
+      static_cast<int64_t>(buffer[0]),
       static_cast<int64_t>(buffer[1]),
-      static_cast<int64_t>(buffer[0]));
+      static_cast<int64_t>(buffer[2]),
+      static_cast<int64_t>(buffer[3]));
     result[1] = Vectorized<int64_t>(
-      static_cast<int64_t>(buffer[7]),
-      static_cast<int64_t>(buffer[6]),
+      static_cast<int64_t>(buffer[4]),
       static_cast<int64_t>(buffer[5]),
-      static_cast<int64_t>(buffer[4]));
+      static_cast<int64_t>(buffer[6]),
+      static_cast<int64_t>(buffer[7]));
     return result;
   }
 };
