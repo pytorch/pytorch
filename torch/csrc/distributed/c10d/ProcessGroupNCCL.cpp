@@ -684,17 +684,13 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
     // If we use the work to do barrier, we should block here
     // `dist.barrier()` only requires all CPU processes to enter this
     // function, hence we only need to make sure the dummy all-reduce has
-    // completed. So we would only need to sync the **current stream** back to
+    // completed. So we would only need to sync the **barrier's event** back to
     // host, and do not need to synchronize the entire device (which may have
     // kernels running on other streams).
-    // Using `cudaStreamSynchronize` instead of `cudaDeviceSynchronize` can:
+    // Using `cudaEventSynchronize` instead of `cudaDeviceSynchronize` can:
     // - lower chance of hang;
-    // - CurrentCUDAStream is usually the context of the next operation in
-    // Python, thus blocking current stream would already block the next
-    // compute kernel;
     // - achieve better barrier performance.
-    auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
-    AT_CUDA_CHECK(cudaStreamSynchronize(currentStream));
+    barrierEvent_->synchronize();
   }
 }
 
@@ -3928,6 +3924,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   auto ncclWork = dynamic_cast<ProcessGroupNCCL::WorkNCCL*>(work.get());
   TORCH_CHECK(ncclWork);
   ncclWork->barrierTensor_ = std::move(barrierTensor);
+  ncclWork->barrierEvent_ = std::make_shared<at::cuda::CUDAEvent>(cudaEventDefault);
+  ncclWork->barrierEvent_->record(ncclStreams_.at(getKeyFromDevice(device)));
   return work;
 }
 

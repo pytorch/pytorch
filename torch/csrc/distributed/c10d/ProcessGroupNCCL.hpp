@@ -332,6 +332,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Tensors used for barrier op
     at::Tensor barrierTensor_;
 
+    // Event used to sync to allreduce
+    std::shared_ptr<at::cuda::CUDAEvent> barrierEvent_;
+
     // Clone of blockingWait_ from ProcessGroupNCCL.
     bool blockingWait_ = false;
 
