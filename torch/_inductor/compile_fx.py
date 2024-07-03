@@ -503,16 +503,6 @@ def cudagraph_post_compile(
                 log_cudagraph_skip_and_bump_counter(
                     f"skipping cudagraphs due to {cudagraph_fail_reasons}"
                 )
-
-    # cudagraphs does its own aligning of inputs
-    if not cudagraphs:
-        assert compiled_graph.current_callable is not None
-        new_callable = align_inputs_from_check_idxs(
-            compiled_graph.current_callable, inputs_to_check
-        )
-        if new_callable is not compiled_graph.current_callable:
-            compiled_graph.current_callable = new_callable
-
     return compiled_graph
 
 
@@ -707,7 +697,7 @@ def compile_fx_inner(
         ]
         cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
         placeholders = tuple(get_placeholders(gm.graph))
-        compiled_graph = cudagraph_post_compile(
+        cudagraph_post_compile(
             compiled_graph,
             cudagraph_fail_reasons,
             inputs_to_check,
@@ -720,6 +710,18 @@ def compile_fx_inner(
             example_inputs,
             static_input_idxs,
         )
+
+    # cudagraphs does its own aligning of inputs
+    # TODO: will need to refactor into post compile step
+    # for AOTAutogradCache
+    if not cudagraphs:
+        assert compiled_graph.current_callable is not None
+        new_callable = align_inputs_from_check_idxs(
+            compiled_graph.current_callable, inputs_to_check
+        )
+        if new_callable is not compiled_graph.current_callable:
+            compiled_graph.current_callable = new_callable
+
     _step_logger()(
         logging.INFO,
         "torchinductor done compiling "
