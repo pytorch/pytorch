@@ -4942,7 +4942,9 @@ def forward(self, arg0_1):
                 i0 = full.item()
                 return (torch.full((i0,), 0),)
 
-        gm, _ = aot_export_module(mod=M(), args=(), trace_joint=False)
+        gm, _ = aot_export_module(
+            mod=M(), args=(), trace_joint=False, dynamic_shapes=True
+        )
         self.assertExpectedInline(
             gm.code.strip(),
             """\
