@@ -7,16 +7,16 @@ with test_sym_bool)
 # Owner(s): ["oncall: export"]
 import copy
 import io
-import pathlib
 import tempfile
 import unittest
 import zipfile
+from pathlib import Path
 
 import torch
 import torch._dynamo as torchdynamo
 import torch.export._trace
 import torch.utils._pytree as pytree
-from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
+from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
     canonicalize,
@@ -38,7 +38,6 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TestCase,
 )
-
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
@@ -666,8 +665,6 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
-    # TODO: Failing due to "constraining non-Symbols NYI (Piecewise((1, Eq(u1, 1)), (0, True)), 1, 1)"
-    @unittest.expectedFailure
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -855,9 +852,8 @@ def forward(self, x):
     )
     def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
-        inputs = normalize_inputs(case.example_inputs)
         _check_meta = "map" not in name
-        self.check_graph(model, inputs.args, _check_meta=_check_meta)
+        self.check_graph(model, case.example_args, _check_meta=_check_meta)
 
     def test_constraints(self):
         class Module(torch.nn.Module):
@@ -1052,7 +1048,7 @@ class TestSaveLoad(TestCase):
         ep = export(f, inp)
 
         with TemporaryFileName() as fname:
-            path = pathlib.Path(fname)
+            path = Path(fname)
             save(ep, path)
             loaded_ep = load(path)
 
