@@ -26,4 +26,3 @@ If you find anything in this documentation that is missing, incorrect, or could 
    miscellaneous_environment_variables
    logging
    torch_nccl_environment_variables
-   privateuse1_environment_variables
