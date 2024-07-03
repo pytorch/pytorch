@@ -92,6 +92,7 @@ from ..utils import (
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
+    is_wrapper_or_member_descriptor,
     istype,
     odict_values,
     proxy_args_kwargs,
@@ -327,6 +328,7 @@ class VariableBuilder:
         if (
             self._can_lift_attrs_to_inputs(vt)
             and value not in self.tx.output.side_effects
+            and not is_wrapper_or_member_descriptor(value)
         ):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
 
