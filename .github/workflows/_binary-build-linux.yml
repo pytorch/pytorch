@@ -195,7 +195,7 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: atalman_numpy_conda
+          ref: mkl-include-patch
           submodules: recursive
           repository: pytorch/builder
           path: builder
