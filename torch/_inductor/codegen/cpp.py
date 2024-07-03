@@ -23,7 +23,7 @@ from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from ..._dynamo.utils import counters
 
-from .. import codecache, config, ir, metrics
+from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import (
@@ -2114,7 +2114,7 @@ class CppVecKernel(CppKernel):
         tiling_dtype=torch.float,
     ):
         super().__init__(args, num_threads)
-        self.vec_isa = codecache.pick_vec_isa()
+        self.vec_isa = cpu_vec_isa.pick_vec_isa()
         assert self.vec_isa
         if tiling_factor == 0:
             tiling_factor = self.vec_isa.nelements(dtype=tiling_dtype)
@@ -2293,7 +2293,7 @@ class CppVecKernel(CppKernel):
                     load_mask = f"{self._load_mask}.is_masked({itervar_inner})"
                 else:
                     load_mask = f"{self._load_mask} != 0"
-            if codecache.is_gcc():
+            if cpp_builder.is_gcc():
                 code.writeline(f"#pragma GCC unroll {self.tiling_factor}")
             else:
                 code.writeline(f"#pragma unroll {self.tiling_factor}")
@@ -3068,7 +3068,7 @@ class CppKernelProxy(CppKernel):
         self.kernel_group = kernel_group
         self.loop_nest = None
         self.call_ranges = None
-        self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+        self.picked_vec_isa: cpu_vec_isa.VecISA = cpu_vec_isa.pick_vec_isa()
 
     def data_type_propagation(self, nodes):
         for _node in nodes:
@@ -4080,15 +4080,15 @@ class LoopLevel:
     kernel: Optional[CppKernel] = None
 
     def __post_init__(self):
-        # Regarding the C++/OpenMP backend, `codecache.pick_vec_isa()` to check
+        # Regarding the C++/OpenMP backend, `cpu_vec_isa.pick_vec_isa()` to check
         # vectorization ISA is a time-consuming and one-shot operation. It leads
         # to taking a longer time to import `codegen.cpp` package because the
         # `LoopLevel` of the package is decorated by `@dataclasses.dataclass` while
-        # the decorator will invoke `codecache.pick_vec_isa()` to initialize the
+        # the decorator will invoke `cpu_vec_isa.pick_vec_isa()` to initialize the
         # `simd_nelements` of the `LoopLevel`. It might introduce additional compilation
         # overhead to the Triton backend. Therefore, we moved the `simd_nelements` to
         # `__post_init__`
-        picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+        picked_vec_isa: cpu_vec_isa.VecISA = cpu_vec_isa.pick_vec_isa()
         self.simd_nelements: int = picked_vec_isa.nelements() if picked_vec_isa else 0
 
     def get_kernels(self) -> List[CppKernel]:
@@ -4207,7 +4207,7 @@ class LoopLevel:
             line1 = ""
         elif self.simd_omp:
             line1 = f"#pragma omp {simd}"
-        elif not self.is_reduction and codecache.is_gcc():
+        elif not self.is_reduction and cpp_builder.is_gcc():
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
