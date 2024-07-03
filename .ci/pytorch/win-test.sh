@@ -42,12 +42,23 @@ python -m pip install z3-solver==4.12.2.0
 
 run_tests() {
     # Run nvidia-smi if available
+    has_nvidia_smi=0
     for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do
         if [[ -x "$path" ]]; then
             "$path" || echo "true";
+            if "$path" | grep -q 'Driver Version'; then
+                has_nvidia_smi=1
+            fi
             break
         fi
     done
+    if [[ "$BUILD_ENVIRONMENT" == *cuda* && $has_nvidia_smi -eq 0 ]]; then
+        echo "Failed to find nvidia-smi, failing"
+        exit 1
+    elif [[ "$BUILD_ENVIRONMENT" != *cuda* && $has_nvidia_smi -eq 1 ]]; then
+        echo "Found nvidia-smi, failing"
+        exit 1
+    fi
 
     if [[ $NUM_TEST_SHARDS -eq 1 ]]; then
         "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
