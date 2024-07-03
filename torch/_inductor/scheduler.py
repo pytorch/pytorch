@@ -10,6 +10,7 @@ import math
 import operator
 import os
 import pprint
+import sys
 import textwrap
 import typing
 from typing import (
@@ -1354,6 +1355,8 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         assert not any(isinstance(x, FusedSchedulerNode) for x in snodes)
         self.snodes = snodes
         self.scheduler = scheduler
+        for snode in snodes:
+            scheduler.name_to_fused_node[snode.get_name()] = self
         self.node = None
         self.ancestors = set.union(
             *[x.ancestors for x in snodes if x.ancestors is not None]
@@ -1368,6 +1371,9 @@ class GroupedSchedulerNode(BaseSchedulerNode):
             for dep in set.union(*[x.unmet_dependencies for x in snodes])
             if dep.name not in self.get_buffer_names()
         } - self.read_writes.writes
+
+        self.min_order = sys.maxsize
+        self.max_order = -sys.maxsize
 
     @cache_on_self
     def get_name(self) -> str:
@@ -1964,7 +1970,10 @@ class Scheduler:
         new_nodes = []
         for node in self.nodes:
             if isinstance(node, GroupedSchedulerNode):
+                for sub_node in node.snodes:
+                    self.name_to_fused_node[sub_node.get_name()] = sub_node
                 new_nodes.extend(self.fuse_nodes(node.snodes))
+                # new_nodes.extend(node.snodes)
             else:
                 new_nodes.append(node)
         self.nodes = new_nodes
@@ -2194,7 +2203,7 @@ class Scheduler:
         self, nodes: List[BaseSchedulerNode]
     ) -> List[BaseSchedulerNode]:
         """
-        Mutates self.nodes to combine nodes into FusedSchedulerNodes.
+        Combine eligible nodes into FusedSchedulerNodes.
 
         This relies on two key functions to control the logic:
             - self.can_fuse(): checks if a fusion is legal
@@ -2420,6 +2429,11 @@ class Scheduler:
 
         why = WhyNoFuse(node1, node2)
 
+        if isinstance(node1, GroupedSchedulerNode) or isinstance(
+            node2, GroupedSchedulerNode
+        ):
+            why("grouped node must not be fused with other nodes")
+            return False
         if (
             isinstance(node1, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
             and not node1.is_template()

@@ -46,11 +46,7 @@ def get_snode_runtime_for_reorder_compute_test(snode):
 
 
 def create_grouped_node_for_allreduce_and_its_deps(snodes):
-    name_to_snode = {snode.get_name(): snode for snode in snodes}
-
-    for snode in snodes:
-        print(f"before: snode: {snode}, snode.node: {snode.node}")
-
+    name_to_snode = {snode.node.name: snode for snode in snodes}
     all_reduce_snodes = [
         snode
         for snode in snodes
@@ -74,9 +70,6 @@ def create_grouped_node_for_allreduce_and_its_deps(snodes):
         if snode in grouped_snode.snodes:
             continue
         new_snode_order.append(snode)
-
-    for snode in new_snode_order:
-        print(f"after: snode: {snode}, snode.node: {snode.node}")
     return new_snode_order
 
 
@@ -320,13 +313,13 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     )
     def test_grouped_scheduler_node(self):
         def func(a, *, tag, ranks, group_size):
-            b = a + a
-            br = _functional_collectives.all_reduce(b, "sum", ranks, tag)
-            # Normally, we would fuse this into `b = a + a`,
-            # but here in this unit test, we intentionally put `b` and `br` computation into a GroupedSchedulerNode,
+            add = a + a
+            ar = _functional_collectives.all_reduce(add, "sum", ranks, tag)
+            # Normally, we would fuse this into `add = a + a`,
+            # but here in this unit test, we intentionally put `add` and `ar` computation into a GroupedSchedulerNode,
             # which prevents them from being fused with any other ops.
             c = a * a
-            d = torch.matmul(c, br)
+            d = torch.matmul(c, ar)
             return (d,)
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
