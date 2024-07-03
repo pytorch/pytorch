@@ -2444,15 +2444,19 @@ class CppVecKernel(CppKernel):
             f"{acc_type_vec} {acc_vec} = {self.reduction_init_vec(reduction_type, dtype)};"
         )
         if reduction_type == "welford_reduce":
+            # save the reciprocal of weights for welford reduce
             assert self.reduction_depth is not None
-            # save the reciprocal of weights for welford reduce if using static shape
+            # use masked acc_vec for tail vec kernel
+            self.reduction_prefix.writeline(
+                f"{acc_type_vec} masked_{acc_vec} = {self.reduction_init_vec(reduction_type, dtype)};"
+            )
             reduction_size = functools.reduce(
                 lambda x, y: x * y, self.ranges[self.reduction_depth :]
             )
             reduction_factor = (
                 self.tiling_factor if self.tiling_idx >= self.reduction_depth else 1
             )
-            self.weight_recp_vec_range = CeilDiv(reduction_size, reduction_factor)
+            self.weight_recp_vec_range = FloorDiv(reduction_size, reduction_factor)
             if self.weight_recp_vec_range not in self.weight_recps_cse.reduction_cache:
                 self.gen_weight_recps = True
                 self.weight_recps_val = self.weight_recps_cse.generate(
@@ -2465,8 +2469,10 @@ class CppVecKernel(CppKernel):
             else:
                 self.gen_weight_recps = False
                 self.weight_recps_val = self.weight_recps_cse.reduction_cache[self.weight_recp_vec_range]
+            # use masked acc_vec for tail vec kernel
+            acc_vec_ = f"masked_{acc_vec}" if self.tail_size else acc_vec
             self.stores.writeline(
-                f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value, True)};"
+                f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, True)};"
             )
         else:
             self.stores.writeline(
@@ -2485,8 +2491,18 @@ class CppVecKernel(CppKernel):
             dtype,
             reduction_combine_fn=self.reduction_combine_vec,
             reduction_init_fn=self.reduction_init_vec,
-            welford_weight_reciprocal_vec_fn=self.welford_weight_reciprocal_vec,
         )
+        if reduction_type == "welford_reduce":
+            # use masked acc_vec for tail vec kernel
+            self._gen_parallel_reduction_buffers(
+                f"masked_{acc_vec}",
+                acc_type_vec,
+                reduction_type,
+                dtype,
+                reduction_combine_fn=self.reduction_combine_vec,
+                reduction_init_fn=self.reduction_init_vec,
+                welford_weight_reciprocal_vec_fn=self.welford_weight_reciprocal_vec,
+            )
         tmpvar: Union[str, CSEVariable]
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
@@ -2495,6 +2511,10 @@ class CppVecKernel(CppKernel):
                     self._get_num_vectors(dtype) == 1
                 ), "Welford reduction does not support VectorizedN (N>1)"
                 next_value = f"welford_vec_reduce_all({acc_vec})"
+                masked_next_value = f"welford_vec_reduce_all(masked_{acc_vec})"
+                self.reduction_suffix.writeline(
+                    f"{acc} = {reduction_combine(reduction_type, acc, masked_next_value)};"
+                )
             else:
                 reduce_all_body = (
                     "{ return "
