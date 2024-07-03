@@ -87,7 +87,8 @@ class _BlockMask:
         Computes the percentage of blocks that are sparse (i.e. not computed)
         """
         dense_mask = self.to_dense()
-        return 100 * (1 - (dense_mask != 0).sum()) / dense_mask.numel()
+        dense_ratio = ((dense_mask != 0).sum()) / dense_mask.numel()
+        return 100 * (1 - dense_ratio)
 
     def to_dense(self) -> torch.Tensor:
         """
@@ -118,12 +119,22 @@ class _BlockMask:
         out = create_dense_one(self.kv_num_blocks[0, 0], self.kv_indices[0, 0])
         return out
 
-    def to_string(self, max_rows=20, max_cols=20):
+    def to_string(self, grid_size=(20, 20)):
         """
         Returns a string representation of the block mask. Quite nifty.
+
+        If grid_size is None, prints out an uncompressed version. Warning, it can be quite big!
         """
         dense_mask = self.to_dense()
         num_rows, num_cols = dense_mask.shape
+        if isinstance(grid_size, int):
+            max_rows = grid_size
+            max_cols = grid_size
+        elif grid_size is None:
+            max_rows = num_rows
+            max_cols = num_cols
+        else:
+            max_rows, max_cols = grid_size
         vis = ""
 
         def summarize_section(section):
@@ -389,7 +400,7 @@ def _flex_attention(
                     key,
                     value,
                     score_mod,
-                    block_mask,
+                    block_mask.as_tuple(),
                 )
                 return out
 

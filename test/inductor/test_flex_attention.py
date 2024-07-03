@@ -1222,7 +1222,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertExpectedInline(
             replace_non_printable(str(block_mask)),
             """\
-BlockMask(sparsity=-52.73%, mask=
+BlockMask(sparsity=46.88%, mask=
 @@
 @@@@
 @@@@@@
