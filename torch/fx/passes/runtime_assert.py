@@ -109,7 +109,7 @@ def insert_deferred_runtime_asserts(
     )
 
     # We are going to mutate the dict
-    expr_to_proxy: Dict[sympy.Symbol, fx.Proxy] = {}
+    expr_to_proxy: Dict[sympy.Expr, fx.Proxy] = {}
     placeholders = set()
     first_non_placeholder = None
     for node in graph.nodes:
@@ -515,26 +515,30 @@ def insert_deferred_runtime_asserts(
                         except TypeError:
                             return None
 
-                    if (min_val := convert(vr.lower)) is not None:
-                        ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
-                        graph.call_function(
-                            torch.ops.aten._assert_scalar.default,
-                            (
-                                ge,
-                                f"Runtime assertion failed for expression {i0 >= min_val} on node '{ge}'",
-                            ),
-                        )
-                        added_asserts.add(i0 >= min_val)
-                    if (max_val := convert(vr.upper)) is not None:
-                        le = _sympy_interp(expr_to_proxy, i0 <= max_val).node
-                        graph.call_function(
-                            torch.ops.aten._assert_scalar.default,
-                            (
-                                le,
-                                f"Runtime assertion failed for expression {i0 <= max_val} on node '{le}'",
-                            ),
-                        )
-                        added_asserts.add(i0 <= max_val)
+                    if expr_to_proxy[i0].node.target != cast_symbool_to_symint_guardless:
+                        # TODO(pianpwk): calling sym_constrain_range_for_size or adding bound asserts
+                        # raises AOTAutograd errors on cast_symbool_to_symint_guardless
+
+                        if (min_val := convert(vr.lower)) is not None:
+                            ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
+                            graph.call_function(
+                                torch.ops.aten._assert_scalar.default,
+                                (
+                                    ge,
+                                    f"Runtime assertion failed for expression {i0 >= min_val} on node '{ge}'",
+                                ),
+                            )
+                            added_asserts.add(i0 >= min_val)
+                        if (max_val := convert(vr.upper)) is not None:
+                            le = _sympy_interp(expr_to_proxy, i0 <= max_val).node
+                            graph.call_function(
+                                torch.ops.aten._assert_scalar.default,
+                                (
+                                    le,
+                                    f"Runtime assertion failed for expression {i0 <= max_val} on node '{le}'",
+                                ),
+                            )
+                            added_asserts.add(i0 <= max_val)
 
                 constrained_unbacked_symbols.add(i0)
                 add_runtime_asserts(ras)

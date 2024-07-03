@@ -3144,7 +3144,6 @@ def forward(self, x):
         capture_scalar_outputs=True,
         assume_static_by_default=False,
     )
-    @unittest.expectedFailure  # sym_constrain_range call on bool->int cast fails
     def test_sym_contains(self):
         def f(x, y):
             return x.size(0) in y
