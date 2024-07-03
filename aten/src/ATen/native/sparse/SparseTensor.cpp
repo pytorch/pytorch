@@ -226,6 +226,17 @@ SparseTensor new_with_dims_and_tensor_sparse_symint(
 /** Public creation API that dispatch to methods above **/
 
 /** Empty init **/
+Tensor empty_sparse_symint(
+    SymIntArrayRef size,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<MemoryFormat> optional_memory_format) {
+  // TODO: Don't specialize
+  return empty_sparse(C10_AS_INTARRAYREF_SLOW_ALLOC(size), dtype, layout, device, pin_memory, optional_memory_format);
+}
+
 Tensor empty_sparse(
     IntArrayRef size,
     std::optional<ScalarType> dtype,

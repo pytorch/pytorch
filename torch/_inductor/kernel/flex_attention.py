@@ -65,19 +65,14 @@ def index_to_other_buffers(cnt: int, graph_type: SubgraphType) -> int:
     #   key,
     #   value,
     #   score_mod,
-    #   sparse_kv_num_blocks,
-    #   sparse_kv_indices,
-    #   sparse_q_num_blocks,
-    #   sparse_q_indices,
-    #   SPARSE_KV_BLOCK_SIZE,
-    #   SPARSE_Q_BLOCK_SIZE,
+    #   block_mask,
     #   *other_buffers
     # ]
     # For fwd_graphs we have 5 dummy values this when the first lifted args
-    # is seen cnt = 5 and the start of the index_buffers is at args[10]
-    # thus we add 5 from the current cnt
+    # is seen cnt = 5 and the start of the index_buffers is at args[5]
+    # thus we add 0 from the current cnt
     if graph_type == SubgraphType.FWD:
-        return cnt + 5
+        return cnt + 0
 
     # Current bwd_args = [
     #   q,
@@ -88,21 +83,16 @@ def index_to_other_buffers(cnt: int, graph_type: SubgraphType) -> int:
     #   grad_out,
     #   fw_graph,
     #   joint_graph,
-    #   sparse_kv_num_blocks,
-    #   sparse_kv_indices,
-    #   sparse_q_num_blocks,
-    #   sparse_q_indices,
-    #   SPARSE_KV_BLOCK_SIZE,
-    #   SPARSE_Q_BLOCK_SIZE,
+    #   block_mask,
     #   *other_buffers
     # ]
-    # We have 5 dummy values but the start of other_buffers is at index 14
+    # We have 5 dummy values but the start of other_buffers is at index 9
     if graph_type == SubgraphType.JOINT_FWD:
-        return cnt + 9
+        return cnt + 4
 
-    # Same bwd args but now with 6 dummy values while other_buffers still start at 14
+    # Same bwd args but now with 6 dummy values while other_buffers still start at 9
     if graph_type == SubgraphType.JOINT_BWD:
-        return cnt + 8
+        return cnt + 3
 
 
 def build_subgraph_buffer(
@@ -177,7 +167,7 @@ def build_subgraph_buffer(
             )
             return subgraph_buffer
 
-    raise ValueError("TemplatedAttention was passed a subgraph with no output node!")
+    raise ValueError("FlexAttention was passed a subgraph with no output node!")
 
 
 flex_attention_template = TritonTemplate(
@@ -347,8 +337,8 @@ flex_attention_template = TritonTemplate(
         # update pointers
         indices_idx = start_n // SPARSE_KV_MULTIPLE
 
-        cur_block = tl.load(kv_indices + indices_idx)
-        next_block = tl.load(kv_indices + indices_idx + 1)
+        cur_block = tl.load(kv_indices + indices_idx, eviction_policy="evict_last")
+        next_block = tl.load(kv_indices + indices_idx + 1, eviction_policy="evict_last")
         needs_jump = (start_n + 1) % SPARSE_KV_MULTIPLE == 0
         jump_to_block = (next_block - cur_block ) * SPARSE_KV_BLOCK_SIZE - (SPARSE_KV_MULTIPLE - 1) * BLOCK_N
 
@@ -384,11 +374,11 @@ _h100_default_config = {
     (torch.float32, 64): (128, 32, 4, 3),
     (torch.float32, 128): (32, 64, 4, 3),
     (torch.float32, 256): (32, 32, 4, 3),
-    (torch.bfloat16, 64): (128, 64, 4, 3),
-    (torch.bfloat16, 128): (64, 32, 4, 3),
+    (torch.bfloat16, 64): (128, 128, 4, 3),
+    (torch.bfloat16, 128): (128, 64, 8, 3),
     (torch.bfloat16, 256): (64, 32, 4, 3),
-    (torch.float16, 64): (128, 64, 4, 3),
-    (torch.float16, 128): (64, 32, 4, 3),
+    (torch.float16, 64): (128, 128, 4, 3),
+    (torch.float16, 128): (128, 128, 8, 3),
     (torch.float16, 256): (64, 32, 4, 3),
 }
 
@@ -397,10 +387,10 @@ _a100_default_config = {
     (torch.float32, 128): (128, 32, 4, 3),
     (torch.float32, 256): (64, 16, 4, 3),
     (torch.bfloat16, 64): (128, 64, 4, 3),
-    (torch.bfloat16, 128): (128, 128, 8, 2),
+    (torch.bfloat16, 128): (128, 64, 8, 3),
     (torch.bfloat16, 256): (32, 64, 4, 3),
     (torch.float16, 64): (128, 64, 4, 3),
-    (torch.float16, 128): (128, 128, 8, 2),
+    (torch.float16, 128): (128, 64, 8, 3),
     (torch.float16, 256): (32, 64, 4, 3),
 }
 
@@ -438,7 +428,12 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
     if dtype == torch.float32:
         return (16, 16, 4, 1)
     if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
-        return (32, 128, 4, 3)
+        if head_dim == 64:
+            return (64, 64, 4, 3)
+        elif head_dim == 128:
+            return (64, 128, 8, 3)
+        else:
+            return (64, 64, 4, 2)
     elif torch.cuda.get_device_capability() >= (8, 0):  # A100
         if head_dim == 64:
             return (32, 128, 4, 3)
@@ -450,6 +445,37 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
         return (16, 16, 4, 1)
 
 
+def create_num_blocks_fake_generator(sparse_indices):
+    # The idea here is that we need to create a real tensor with real data
+    # that's representative for benchmarking.
+    # For example, returning all zeros for the `kv_num_blocks` input would mean
+    # that we are computing 0 blocks for each row, which would provide bogus
+    # autotuning results.
+    #
+    # In this case, we choose to use min(16, max_block) blocks, because I
+    # (Horace) think it'll probably result in pretty representative performance.
+    # If it's too short then prefetching won't help. If it's too long then
+    # autotuning will take longer for no good reason.
+    def create_num_blocks_fake(x) -> torch.Tensor:
+        num_blocks_for_autotuning = min(16, sparse_indices.shape[-1])
+        return torch.full(
+            x.get_size(),
+            int(num_blocks_for_autotuning),
+            dtype=x.get_dtype(),
+            device=x.get_device(),
+        )
+
+    return create_num_blocks_fake
+
+
+def create_indices_fake(x) -> torch.Tensor:
+    indices = torch.arange(
+        0, int(x.get_size()[-1]), dtype=x.get_dtype(), device=x.get_device()
+    )
+    indices = indices.expand(x.get_size()).contiguous()
+    return indices
+
+
 # TODO: We probably also need a layout constraint?
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
 def flex_attention(*args, **kwargs):
@@ -458,14 +484,17 @@ def flex_attention(*args, **kwargs):
         key,
         value,
         subgraph,
+        block_mask,
+        *other_buffers,
+    ) = args
+    (
         sparse_kv_num_blocks,
         sparse_kv_indices,
         sparse_q_num_blocks,
         sparse_q_indices,
         SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
-        *other_buffers,
-    ) = args
+    ) = block_mask
     for buf in [
         query,
         key,
@@ -522,6 +551,9 @@ def flex_attention(*args, **kwargs):
     for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
             continue
+        # Work around https://github.com/pytorch/pytorch/issues/129625
+        if num_stages == 2:
+            continue
 
         flex_attention_template.maybe_append_choice(
             choices=choices,
@@ -561,9 +593,17 @@ def flex_attention(*args, **kwargs):
         sparse_kv_num_blocks,
         sparse_kv_indices,
     ] + list(other_buffers)
+    input_gen_fns = {
+        4: create_num_blocks_fake_generator(sparse_kv_indices),  # sparse_kv_num_blocks
+        5: create_indices_fake,  # sparse_kv_indices
+    }
     return (
         autotune_select_algorithm(
-            "flex_attention", choices, inputs_for_autotuning, layout
+            "flex_attention",
+            choices,
+            inputs_for_autotuning,
+            layout,
+            input_gen_fns=input_gen_fns,
         ),
         logsumexp,
     )
@@ -897,14 +937,17 @@ def flex_attention_backward(*args, **kwargs):
         grad_out,
         fw_graph,
         joint_graph,
+        block_mask,
+        *other_buffers,
+    ) = args
+    (
         sparse_kv_num_blocks,
         sparse_kv_indices,
         sparse_q_num_blocks,
         sparse_q_indices,
         SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
-        *other_buffers,
-    ) = args
+    ) = block_mask
     for buf in [
         query,
         key,
@@ -1029,9 +1072,19 @@ def flex_attention_backward(*args, **kwargs):
         sparse_q_num_blocks,
         sparse_q_indices,
     ] + list(other_buffers)
+    input_gen_fns = {
+        9: create_num_blocks_fake_generator(sparse_kv_indices),  # sparse_kv_num_blocks
+        10: create_indices_fake,
+        11: create_num_blocks_fake_generator(sparse_q_indices),  # sparse_q_num_blocks
+        12: create_indices_fake,
+    }
 
     grad_key = autotune_select_algorithm(
-        "flex_attention_backward", choices, inputs_for_autotuning, layout_k
+        "flex_attention_backward",
+        choices,
+        inputs_for_autotuning,
+        layout_k,
+        input_gen_fns=input_gen_fns,
     )
     return (
         grad_query,
