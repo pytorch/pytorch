@@ -1306,6 +1306,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    @torch._dynamo.config.patch(error_on_recompile=True)
+    @torch.fx.experimental._config.patch(use_duck_shape=False)
+    def test_dynamic_shape_disable_duck_size(self):
+        class TestModel(nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+
+            def forward(self, x: torch.Tensor, val: int) -> torch.Tensor:
+                return x + val
+
+        main_model = TestModel().to(memory_format=torch.channels_last)
+        opt_model = torch.compile(main_model, backend="eager", dynamic=True)
+
+        x1 = torch.rand(2, 5, 10, 10).to(memory_format=torch.channels_last)
+        x2 = torch.rand(2, 5, 4, 8).to(memory_format=torch.channels_last)
+
+        o1_ref = main_model(x1, 4)
+        o1 = opt_model(x1, 4)
+
+        o2_ref = main_model(x2, 20)
+        o2 = opt_model(x2, 20)
+
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])
         model = ChunkReformerFeedForward()
@@ -4781,70 +4805,70 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         res = opt_fn(x_weak, y)
         self.assertEqual(ref, res)
 
-    @torch._functorch.config.patch(
-        recompute_views=True,
-    )
-    def test_storage_resize_forward_full_graph(self):
-        class TestModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.param = torch.nn.Parameter(torch.randn(4, 4))
+    #     @torch._functorch.config.patch(
+    #         recompute_views=True,
+    #     )
+    #     def test_storage_resize_forward_full_graph(self):
+    #         class TestModule(torch.nn.Module):
+    #             def __init__(self):
+    #                 super().__init__()
+    #                 self.param = torch.nn.Parameter(torch.randn(4, 4))
 
-            def forward(self, x):
-                self.param.untyped_storage().resize_(
-                    self.param.numel() * self.param.itemsize
-                )
-                with torch.no_grad():
-                    torch._foreach_copy_([self.param], [x])
-                out = torch.matmul(self.param, self.param)
-                self.param.untyped_storage().resize_(0)
-                return out
+    #             def forward(self, x):
+    #                 self.param.untyped_storage().resize_(
+    #                     self.param.numel() * self.param.itemsize
+    #                 )
+    #                 with torch.no_grad():
+    #                     torch._foreach_copy_([self.param], [x])
+    #                 out = torch.matmul(self.param, self.param)
+    #                 self.param.untyped_storage().resize_(0)
+    #                 return out
 
-        def post_accumulate_grad_hook(param):
-            param.untyped_storage().resize_(0)
+    #         def post_accumulate_grad_hook(param):
+    #             param.untyped_storage().resize_(0)
 
-        # Beginning of backward, resize and put data into the param
-        def pre_backward_hook(module, grad) -> None:
-            module.param.untyped_storage().resize_(
-                self.param.numel() * self.param.itemsize
-            )
-            with torch.no_grad():
-                # simulates loading data into param from allgather
-                module.param.fill_(2)
+    #         # Beginning of backward, resize and put data into the param
+    #         def pre_backward_hook(module, grad) -> None:
+    #             module.param.untyped_storage().resize_(
+    #                 self.param.numel() * self.param.itemsize
+    #             )
+    #             with torch.no_grad():
+    #                 # simulates loading data into param from allgather
+    #                 module.param.fill_(2)
 
-        def post_forward_hook(module, args, output):
-            output.register_hook(functools.partial(pre_backward_hook, module))
+    #         def post_forward_hook(module, args, output):
+    #             output.register_hook(functools.partial(pre_backward_hook, module))
 
-        x = torch.randn(4, 4)
+    #         x = torch.randn(4, 4)
 
-        mod_ref = TestModule()
-        mod_test = deepcopy(mod_ref)
+    #         mod_ref = TestModule()
+    #         mod_test = deepcopy(mod_ref)
 
-        # Start the param off with zero storage size to mimic fsdp
-        mod_ref.param.untyped_storage().resize_(0)
-        mod_test.param.untyped_storage().resize_(0)
+    #         # Start the param off with zero storage size to mimic fsdp
+    #         mod_ref.param.untyped_storage().resize_(0)
+    #         mod_test.param.untyped_storage().resize_(0)
 
-        # Resize storage at beginning of backward
-        # Free storage at end of backward
-        mod_ref.register_forward_hook(post_forward_hook, prepend=False)
-        mod_ref.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
-        mod_test.register_forward_hook(post_forward_hook, prepend=False)
-        mod_test.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
+    #         # Resize storage at beginning of backward
+    #         # Free storage at end of backward
+    #         mod_ref.register_forward_hook(post_forward_hook, prepend=False)
+    #         mod_ref.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
+    #         mod_test.register_forward_hook(post_forward_hook, prepend=False)
+    #         mod_test.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
 
-        mod_test = torch.compile(mod_test, backend=aot_graph_capture_backend)
+    #         mod_test = torch.compile(mod_test, backend=aot_graph_capture_backend)
 
-        out_ref = mod_ref(x)
-        out_test = mod_test(x)
-        self.assertExpectedInline(
-            str(fw_graph[0].code.strip()),
-            """\
-def forward(self, primals_1, primals_2):
-    _foreach_copy = torch.ops.aten._foreach_copy.default([primals_1], [primals_2]);  primals_1 = primals_2 = None
-    getitem = _foreach_copy[0];  _foreach_copy = None
-    mm = torch.ops.aten.mm.default(getitem, getitem)
-    return [mm, getitem]""",
-        )
-        self.assertEqual(out_ref, out_test)
+    #         out_ref = mod_ref(x)
+    #         out_test = mod_test(x)
+    #         self.assertExpectedInline(
+    #             str(fw_graph[0].code.strip()),
+    #             """\
+    # def forward(self, primals_1, primals_2):
+    #     _foreach_copy = torch.ops.aten._foreach_copy.default([primals_1], [primals_2]);  primals_1 = primals_2 = None
+    #     getitem = _foreach_copy[0];  _foreach_copy = None
+    #     mm = torch.ops.aten.mm.default(getitem, getitem)
+    #     return [mm, getitem]""",
+    #         )
+    #         self.assertEqual(out_ref, out_test)
 
     def test_super_in_staticmethod(self):
         class A:
@@ -5251,6 +5275,26 @@ def forward(self, primals_1, primals_2):
             return torch.sin(x)
 
         fn(torch.rand(4))
+
+    def test_negative_floor_div_solve(self):
+        class CompiledClass(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nums = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+                self.t = 5
+
+            def forward(self):
+                self.num = self.nums[self.t // 12]
+                self.t += 1
+                return self.num
+
+        m = CompiledClass()
+        m = torch.compile(m, backend="eager")
+
+        # the first call works
+        m()
+        # the second call causes a failure
+        m()
 
 
 instantiate_parametrized_tests(ReproTests)

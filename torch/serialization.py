@@ -5,6 +5,7 @@ import functools
 import io
 import os
 import pickle
+import re
 import shutil
 import struct
 import sys
@@ -203,10 +204,28 @@ def get_safe_globals() -> List[Any]:
 
 def add_safe_globals(safe_globals: List[Any]) -> None:
     """
-    Marks the given globals as safe for ``weights_only`` load.
+    Marks the given globals as safe for ``weights_only`` load. For example, functions
+    added to this list can be called during unpickling, classes could be instantiated
+    and have state set.
 
     Args:
         safe_globals (List[Any]): list of globals to mark as safe
+
+    Example:
+        >>> # xdoctest: +SKIP("Can't torch.save(t, ...) as doctest thinks MyTensor is defined on torch.serialization")
+        >>> import tempfile
+        >>> class MyTensor(torch.Tensor):
+        ...     pass
+        >>> t = MyTensor(torch.randn(2, 3))
+        >>> with tempfile.NamedTemporaryFile() as f:
+        ...     torch.save(t, f.name)
+        # Running `torch.load(f.name, weights_only=True)` will fail with
+        # Unsupported global: GLOBAL __main__.MyTensor was not an allowed global by default.
+        # Check the code and make sure MyTensor is safe to be used when loaded from an arbitrary checkpoint.
+        ...     torch.serialization.add_safe_globals([MyTensor])
+        ...     torch.load(f.name, weights_only=True)
+        # MyTensor([[-0.5024, -1.8152, -0.5455],
+        #          [-0.8234,  2.0500, -0.3657]])
     """
     _weights_only_unpickler._add_safe_globals(safe_globals)
 
@@ -273,7 +292,9 @@ def register_package(
 
 
 def check_module_version_greater_or_equal(
-    module, req_version_tuple, error_if_malformed=True
+    module,
+    req_version_tuple,
+    error_if_malformed=True,
 ):
     """
     Check if a module's version satisfies requirements
@@ -424,7 +445,9 @@ def _deserialize(backend_name, obj, location):
 
 register_package(10, _cpu_tag, _cpu_deserialize)
 register_package(
-    20, functools.partial(_backend_tag, "cuda"), functools.partial(_deserialize, "cuda")
+    20,
+    functools.partial(_backend_tag, "cuda"),
+    functools.partial(_deserialize, "cuda"),
 )
 register_package(21, _mps_tag, _mps_deserialize)
 register_package(22, _meta_tag, _meta_deserialize)
@@ -434,15 +457,19 @@ register_package(
     functools.partial(_deserialize, "privateuse1"),
 )
 register_package(
-    24, functools.partial(_backend_tag, "hpu"), functools.partial(_deserialize, "hpu")
+    24,
+    functools.partial(_backend_tag, "hpu"),
+    functools.partial(_deserialize, "hpu"),
 )
 register_package(
-    25, functools.partial(_backend_tag, "xpu"), functools.partial(_deserialize, "xpu")
+    25,
+    functools.partial(_backend_tag, "xpu"),
+    functools.partial(_deserialize, "xpu"),
 )
 
 
 def location_tag(
-    storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]
+    storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage],
 ):
     for _, tagger, _ in _package_registry:
         location = tagger(storage)
@@ -977,7 +1004,7 @@ def load(
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
     *,
-    weights_only: bool = False,
+    weights_only: Optional[bool] = None,
     mmap: Optional[bool] = None,
     **pickle_load_args: Any,
 ) -> Any:
@@ -1067,7 +1094,7 @@ def load(
         # Load all tensors onto the CPU, using a function
         >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage, weights_only=True)
         # Load all tensors onto GPU 1
-        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1), weights_only=True)
+        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1), weights_only=True)  # type: ignore[attr-defined]
         # Map tensors from GPU 1 to GPU 0
         >>> torch.load('tensors.pt', map_location={'cuda:1': 'cuda:0'}, weights_only=True)
         # Load tensor from io.BytesIO object
@@ -1081,12 +1108,38 @@ def load(
     """
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (
-        "Weights only load failed. Re-running `torch.load` with `weights_only` set to `False`"
-        " will likely succeed, but it can result in arbitrary code execution."
-        " Do it only if you get the file from a trusted source. Alternatively, to load"
-        " with `weights_only` please check the recommended steps in the following error message."
-        " WeightsUnpickler error: "
+        "Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
+        "but it can result in arbitrary code execution. Do it only if you got the file from a "
+        "trusted source."
     )
+    DOCS_MESSAGE = (
+        "\n\nCheck the documentation of torch.load to learn more about types accepted by default with "
+        "weights_only https://pytorch.org/docs/stable/generated/torch.load.html."
+    )
+
+    def _get_wo_message(message: str) -> str:
+        pattern = r"GLOBAL (\S+) was not an allowed global by default."
+        has_unsafe_global = re.search(pattern, message) is not None
+        if has_unsafe_global:
+            updated_message = (
+                "Weights only load failed. This file can still be loaded, to do so you have two options "
+                f"\n\t(1) {UNSAFE_MESSAGE}\n\t(2) Alternatively, to load with `weights_only=True` please check "
+                "the recommended steps in the following error message.\n\tWeightsUnpickler error: "
+                + message
+            )
+        else:
+            updated_message = (
+                f"Weights only load failed. {UNSAFE_MESSAGE}\n Please file an issue with the following "
+                "so that we can make `weights_only=True` compatible with your use case: WeightsUnpickler "
+                "error: " + message
+            )
+        return updated_message + DOCS_MESSAGE
+
+    if weights_only is None:
+        weights_only, warn_weights_only = False, True
+    else:
+        warn_weights_only = False
+
     # Add ability to force safe only weight loads via environment variable
     if os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in [
         "1",
@@ -1103,6 +1156,21 @@ def load(
             )
     else:
         if pickle_module is None:
+            if warn_weights_only:
+                warnings.warn(
+                    "You are using `torch.load` with `weights_only=False` (the current default value), which uses "
+                    "the default pickle module implicitly. It is possible to construct malicious pickle data "
+                    "which will execute arbitrary code during unpickling (See "
+                    "https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). "
+                    "In a future release, the default value for `weights_only` will be flipped to `True`. This "
+                    "limits the functions that could be executed during unpickling. Arbitrary objects will no "
+                    "longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the "
+                    "user via `torch.serialization.add_safe_globals`. We recommend you start setting "
+                    "`weights_only=True` for any use case where you don't have full control of the loaded file. "
+                    "Please open an issue on GitHub for any issues related to this experimental feature.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
             pickle_module = pickle
 
     # make flipping default BC-compatible
@@ -1154,7 +1222,7 @@ def load(
                             **pickle_load_args,
                         )
                     except RuntimeError as e:
-                        raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
+                        raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
                 return _load(
                     opened_zipfile,
                     map_location,
@@ -1178,7 +1246,7 @@ def load(
                     **pickle_load_args,
                 )
             except RuntimeError as e:
-                raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
+                raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
         return _legacy_load(
             opened_file, map_location, pickle_module, **pickle_load_args
         )

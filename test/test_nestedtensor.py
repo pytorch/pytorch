@@ -58,6 +58,8 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 
+from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
+
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
 
@@ -3561,10 +3563,24 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.dim(), 3)
         self.assertEqual(nt.numel(), 27)
 
-    def test_linear(self, device):
-        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
-        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
-        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+    @parametrize("nt_dim", [3, 4, 5])
+    def test_linear(self, device, nt_dim):
+        if nt_dim == 3:
+            fixed_shape = (3,)
+        elif nt_dim == 4:
+            fixed_shape = (4, 3)
+        elif nt_dim == 5:
+            fixed_shape = (5, 4, 3)
+
+        a = torch.randn(
+            2, *fixed_shape, requires_grad=True, dtype=torch.float64, device=device
+        )
+        b = torch.randn(
+            3, *fixed_shape, requires_grad=True, dtype=torch.float64, device=device
+        )
+        c = torch.randn(
+            4, *fixed_shape, requires_grad=True, dtype=torch.float64, device=device
+        )
         weight = torch.randn(
             4, 3, requires_grad=True, dtype=torch.float64, device=device
         )
@@ -5174,18 +5190,26 @@ class TestNestedTensorSubclass(TestCase):
         # S: (constant) sequence length
         # D: embedding size
         query = random_nt_from_dims(
-            [4, None, 8, 10], device=device, dtype=dtype, layout=torch.jagged
+            [4, None, 8, 10],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
         )
         key = random_nt_from_similar(query)
         value = random_nt_from_similar(query)
         output = F.scaled_dot_product_attention(query, key, value)
         self.assertTrue(isinstance(output, NestedTensor))
+        output.values().sum().backward()
 
+        query_dense = query.clone().detach().requires_grad_(True)
         # should be equivalent to just running the buffers through
         output_dense = F.scaled_dot_product_attention(
-            query._values, key._values, value._values
+            query_dense.values(), key.values(), value.values()
         )
-        self.assertEqual(output._values, output_dense)
+        torch._dynamo.disable(self.assertEqual)(output._values, output_dense)
+        output_dense.sum().backward()
+        torch._dynamo.disable(self.assertEqual)(query.grad, query_dense.grad)
 
     @onlyCUDA
     @unittest.skipIf(
@@ -5273,6 +5297,40 @@ class TestNestedTensorSubclass(TestCase):
         output = f(values, offsets)
         output.sum().backward()
         self.assertEqual(values.grad, torch.ones_like(values))
+
+    @skipIfTorchDynamo()
+    def test_nested_tensor_activation_checkpoint(self, device):
+        values = torch.randn(
+            9, 3, 256, requires_grad=True, device=device, dtype=torch.float32
+        )
+        lengths = torch.tensor([1, 2, 3, 3], device=device, dtype=torch.int64)
+        offsets = F.pad(lengths, pad=(1, 0)).cumsum(dim=0)
+
+        def fn(values, offsets):
+            nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
+            return convert_nt_to_jagged(nt).sum()
+
+        checkpoint(fn, values, offsets, use_reentrant=False).backward()
+        self.assertIsNotNone(values.grad)
+
+        context_fn = partial(
+            create_selective_checkpoint_contexts,
+            [
+                torch.ops.aten.cumsum.default,
+            ],
+        )
+
+        values.grad = None
+
+        def fn(values, lengths):
+            offsets = F.pad(lengths, pad=(1, 0)).cumsum(dim=0)
+            nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
+            return convert_nt_to_jagged(nt).sum()
+
+        checkpoint(
+            fn, values, lengths, use_reentrant=False, context_fn=context_fn
+        ).backward()
+        self.assertIsNotNone(values.grad)
 
     # Internally-defined NT use cases are lifted to here for maximum test realism.
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
