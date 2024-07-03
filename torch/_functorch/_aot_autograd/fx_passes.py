@@ -127,14 +127,14 @@ def refunctionalize_set(graph: fx.Graph) -> None:
                 next_set_node_idx = len(node_list) - 1
             set_node = node_list[set_node_idx]
             Y_input = set_node.args[1]
+            # Between primal_X's this `.set_(primal_X, Y)` and its next `.set_(primal_X, ...)` (or end of graph),
+            # if `.set_(Y, ...)` is not called, we will replace usage of output of this `.set_(primal_X, Y)` node with Y,
+            # and delete the `.set_(primal_X, Y)` node.
             if not any(
                 node_list[idx].target is torch.ops.aten.set_.source_Tensor
                 and node_list[idx].args[0] == Y_input
                 for idx in range(set_node_idx + 1, next_set_node_idx)
             ):
-                # Between primal_X's this `.set_(primal_X, Y)` and its next `.set_(primal_X, ...)` (or end of graph),
-                # if `.set_(Y, ...)` is not called, we will replace usage of output of this `.set_(primal_X, Y)` node with Y,
-                # and delete the `.set_(primal_X, Y)` node.
                 set_node.replace_all_uses_with(
                     Y_input,
                     delete_user_cb=lambda n: node_to_idx[n] > set_node_idx
