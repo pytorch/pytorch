@@ -616,7 +616,7 @@ class SymFloat:
         raise TypeError("type stub not overridden")
 
     def __repr__(self):
-        return self.node.str()
+        return self.node._graph_repr()
 
     def _sympy_(self):
         return self.node.expr
@@ -684,7 +684,7 @@ class SymBool:
         raise TypeError("type stub not overridden")
 
     def __repr__(self):
-        return str(self.node)
+        return self.node._graph_repr()
 
     def _sympy_(self):
         return self.node.expr
