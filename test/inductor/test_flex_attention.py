@@ -53,16 +53,6 @@ def create_attention(score_mod, block_mask):
     )
 
 
-def create_block_mask(score_mod, query, key):
-    if score_mod in test_score_mods:
-        block_mask = _create_block_mask(
-            score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
-        )
-    else:
-        block_mask = None
-    return block_mask
-
-
 test_dtypes = (
     [torch.float16, torch.bfloat16, torch.float32]
     if PLATFORM_SUPPORTS_BF16
@@ -229,7 +219,9 @@ class TestFlexAttention(InductorTestCase):
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
-        block_mask = create_block_mask(score_mod, q, k)
+        block_mask = _create_block_mask(
+            score_mod, 1, 1, q.shape[-2], k.shape[-2], q.device
+        )
         sdpa_partial = create_attention(score_mod, block_mask)
         compiled_sdpa = torch.compile(sdpa_partial)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)

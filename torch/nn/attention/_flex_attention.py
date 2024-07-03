@@ -163,6 +163,8 @@ def _create_mask(
     Returns:
         mask (Tensor): A mask tensor with shape (B, H, M, N).
     """
+    from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
+
     b = torch.arange(0, B, device=device)
     h = torch.arange(0, H, device=device)
     m = torch.arange(0, M, device=device)
@@ -171,7 +173,8 @@ def _create_mask(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None))
-    out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
+    with TransformGetItemToIndex():
+        out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
     mask = torch.where(torch.isinf(out), False, True)
     return mask
 
