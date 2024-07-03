@@ -751,7 +751,19 @@ class InstructionTranslatorBase(
             inner_fn = fn.fn
         if inner_fn and callable(inner_fn) and is_forbidden(inner_fn):
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
-        self.push(fn.call_function(self, args, kwargs))
+        try:
+            value = fn.call_function(self, args, kwargs)
+        except torch._dynamo.exc.ObservedException:
+            # We're already handling this exception - keep it going.
+            raise
+        except RuntimeError as e:
+            # Our function call raised an exception. Treat it as an internal
+            # exception and "handle" it.
+            log.debug("called function raised exception: %s (%s)", type(e), e)
+            self.exn_vt_stack.append(e)
+            unimplemented(f"raise {e}")
+            return
+        self.push(value)
 
     def inline_user_function_return(self, fn, args, kwargs):
         """
@@ -1318,7 +1330,7 @@ class InstructionTranslatorBase(
                 self.jump(exn_tab_entry)
             else:
                 # No handler found. Bubble the exception to the parent
-                # instruction translater. We use special exception for this.
+                # instruction translator. We use a special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
                     raise Unsupported("Observed exception")
