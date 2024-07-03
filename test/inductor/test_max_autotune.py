@@ -54,7 +54,7 @@ def _get_path_without_sccache() -> str:
 
 
 def benchmark_choice(choice, args, out, expected_out, timings):
-    result = choice.benchmark(*args, out=out)
+    result = float(choice.benchmark(*args, out=out))
     if expected_out is not None:
         torch.testing.assert_close(out, expected_out)
 
