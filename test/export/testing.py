@@ -235,7 +235,7 @@ def _make_fn_with_mocked_export(fn, mocked_export_fn):
 
 # Controls tests generated in test/export/test_export_training_ir_to_run_decomp.py
 def expectedFailureTrainingIRToRunDecomp(fn):
-    # fn._expected_failure_training_ir_to_run_decomp = True
+    fn._expected_failure_training_ir_to_run_decomp = True
     return fn
 
 
