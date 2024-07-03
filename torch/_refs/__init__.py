@@ -2208,7 +2208,11 @@ def _make_copy_from_view(fn):
     """
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
-    fn = out_wrapper()(fn)
+    aten_fn = getattr(aten, fn.__name__)
+    if not hasattr(aten_fn, "__annotations__"):
+        aten_fn.__annotations__ = dict(fn.__annotations__)
+
+    fn = out_wrapper()(aten_fn)
 
     @wraps(fn)
     def _fn(*args, out=None, **kwargs):
@@ -2577,6 +2581,14 @@ def addr(
         vec2.ndim == 1,
         lambda: f"addr: Expected 1-D argument vec2, but got {vec2.ndim}-D",
     )
+    for arg, arg_name in ((alpha, "alpha"), (beta, "beta")):
+        if isinstance(arg, bool):
+            torch._check(
+                utils.is_boolean_dtype(self.dtype)
+                and utils.is_boolean_dtype(vec1.dtype)
+                and utils.is_boolean_dtype(vec2.dtype),
+                lambda: f"Boolean {arg_name} only supported for Boolean results.",
+            )
     self = self.expand(vec1.shape[0], vec2.shape[0])
     if utils.is_boolean_dtype(self.dtype):
         # Integers are accepted for booleans
@@ -6319,7 +6331,7 @@ unfold_copy = _make_copy_from_view(unfold)
 unsqueeze_copy = _make_copy_from_view(unsqueeze)
 view_copy = _make_copy_from_view(view)
 
-# TODO: Decompose select_copy, unbind_copy
+# TODO: unbind_copy
 
 
 # xref: isStorage in torch/csrc/DynamicTypes.cpp
