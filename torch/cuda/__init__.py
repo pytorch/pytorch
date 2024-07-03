@@ -11,7 +11,6 @@ It is lazily initialized, so you can always import it, and use
 :ref:`cuda-semantics` has more details about working with CUDA.
 """
 
-
 import contextlib
 import importlib
 import os

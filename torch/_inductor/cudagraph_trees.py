@@ -120,6 +120,7 @@ from . import config
 @dataclasses.dataclass(frozen=True)
 class GraphID:
     "Unique counter of a cuda graph recording"
+
     id: int
 
 
@@ -686,6 +687,7 @@ class OutputAliasInfo:
 
 class _UnaliasedStorage(OutputAliasInfo):
     "Singleton to mark that the graph output constructs a new alias or is None"
+
     pass
 
 
@@ -694,6 +696,7 @@ UnaliasedStorage = _UnaliasedStorage()
 
 class AliasesPriorGraphOutput(OutputAliasInfo):
     "Marks that the graph output aliases an output of a prior graph"
+
     __slots__ = ["index"]
 
     index: PathOutputIndex
@@ -1213,7 +1216,7 @@ class CUDAGraphNode:
                     "Expected all cuda outputs in cuda graph recording. Non cuda output "
                     f"from {self.stack_traces[i] if self.stack_traces else '(unknown)'}"
                 ),
-            ),
+            )
 
             ref = static_input_persistent_storage_ptrs.get(
                 o.untyped_storage().data_ptr(), None

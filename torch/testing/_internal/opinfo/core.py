@@ -1530,8 +1530,7 @@ class ReductionOpInfo(OpInfo):
         # kwargs to use when calling the op. This is required for operators that
         # have other required parameters besides the input tensor.
         generate_args_kwargs: Callable = lambda t, dim=None, keepdim=False: (
-            yield tuple(),
-            {},
+            yield (tuple(), {})
         ),
         # Options from the OpInfo base class
         **kwargs,

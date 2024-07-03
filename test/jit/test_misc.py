@@ -129,7 +129,7 @@ class TestMisc(JitTestCase):
     def test_subexpression_Tuple_int_int_Future(self):
         @torch.jit.script
         def fn(
-            x: Tuple[int, int, torch.jit.Future[int]]
+            x: Tuple[int, int, torch.jit.Future[int]],
         ) -> Tuple[int, torch.jit.Future[int]]:
             return x[0], x[2]
 
@@ -147,7 +147,7 @@ class TestMisc(JitTestCase):
     def test_subexpression_Optional(self):
         @torch.jit.script
         def fn(
-            x: Optional[Dict[int, torch.jit.Future[int]]]
+            x: Optional[Dict[int, torch.jit.Future[int]]],
         ) -> Optional[torch.jit.Future[int]]:
             if x is not None:
                 return x[0]

@@ -1201,9 +1201,7 @@ class AOTInductorModelCache:
                 example_kwargs,
             )
             with torch.no_grad():
-                so_path = torch._inductor.aot_compile(
-                    gm, example_args, example_kwargs
-                )  # type: ignore[arg-type]
+                so_path = torch._inductor.aot_compile(gm, example_args, example_kwargs)  # type: ignore[arg-type]
 
             cls.cache[key] = torch._export.aot_load(so_path, device)
 
