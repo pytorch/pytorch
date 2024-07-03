@@ -60,12 +60,11 @@ kernel void weight_to_int4pack(constant int *W [[buffer(0)]],
                                constant uint2 &sizes [[buffer(2)]],
                                uint2 thread_index [[thread_position_in_grid]]) {
   const uint N = sizes.x;
-  const uint K = sizes.y;
+  const uint Kdiv2 = sizes.y;
   const uint n = thread_index.x; // 0..N-1
-  const uint k2 = thread_index.y; // 0..K/2-1
-  int32_t src_val0 = W[n * K + 2 * k2];
-  int32_t src_val1 = W[n * K + 2 * k2 + 1];
-  outputData[n * (K / 2) + k2] = (uint8_t(src_val1) << 4) | uint8_t(src_val0);
+  const uint k = thread_index.y; // 0..Kdiv2-1
+  uint8_t src_val = W[n * Kdiv2 + k];
+  outputData[n * Kdiv2 + k] = (src_val & 0xF << 4) | (src_val >> 4);
 }
 
 /*
@@ -708,7 +707,7 @@ INSTANTIATE_MV(bfloat);
 
 Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
   TORCH_CHECK(in.dim() == 2, __func__, " : expect weight to be 2D tensor.");
-  TORCH_CHECK(in.dtype() == at::kInt, __func__, " : expect weight to be kInt.");
+  TORCH_CHECK(in.dtype() == at::kByte, __func__, " : expect weight to be kByte.");
   TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8,
               __func__,
               " : innerKTiles need to be 2, 4, or 8, got ",
@@ -716,7 +715,8 @@ Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
 
   auto weight = in.contiguous();
   auto N = weight.size(0);
-  auto K = weight.size(1);
+  auto Kdiv2 = weight.size(1);
+  auto K = Kdiv2 * 2;
 
   // Create fake shapes for cpu. The meta registration in dynamo requires
   // operator has the same output shape for each device. So creating a fake
@@ -725,12 +725,12 @@ Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
                                  at::TensorOptions().dtype(at::kInt).device(at::kMPS));
 
   MPSStream* mpsStream = getCurrentMPSStream();
-  std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(N), static_cast<uint32_t>(K), 0, 0};
+  std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(N), static_cast<uint32_t>(Kdiv2), 0, 0};
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCaptureEnabled()) {
-        getMPSProfiler().startCapture(fmt::format("weight_to_int4pack_{}x{}", N, K), mpsStream);
+        getMPSProfiler().startCapture(fmt::format("weight_to_int4pack_{}x{}", N, Kdiv2), mpsStream);
       }
 #endif
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
@@ -741,7 +741,7 @@ Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
       mtl_setBuffer(computeEncoder, weight, 0);
       mtl_setBuffer(computeEncoder, weight_packed, 1);
       mtl_setBytes(computeEncoder, sizes, 2);
-      [computeEncoder dispatchThreads:MTLSizeMake(N, K / 2, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+      [computeEncoder dispatchThreads:MTLSizeMake(N, Kdiv2, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCapturing()) {
         getMPSProfiler().stopCapture(mpsStream);
