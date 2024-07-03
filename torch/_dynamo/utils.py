@@ -1321,6 +1321,7 @@ def same(
     relax_numpy_equality=False,
     ignore_non_fp=False,
     log_error=log.error,
+    use_larger_multiplier_for_smaller_tensor=False,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -1454,9 +1455,13 @@ def same(
                 # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
                 multiplier = 3.0 if res.dtype == torch.bfloat16 else 2.0
 
-                if fp64_ref.numel() <= 10 and tol >= 4 * 1e-2:
+                if use_larger_multiplier_for_smaller_tensor and (
+                    fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
+                ):
                     multiplier = 8.0
-                elif fp64_ref.numel() <= 500 and tol >= 4 * 1e-2:
+                elif use_larger_multiplier_for_smaller_tensor and (
+                    fp64_ref.numel() <= 500 and tol >= 4 * 1e-2
+                ):
                     multiplier = 5.0
                 elif (
                     fp64_ref.numel() < 1000
@@ -1470,7 +1475,12 @@ def same(
                     multiplier = 3.0
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
-                if not passes_test and math.isnan(ref_error) and math.isnan(res_error):
+                if (
+                    not passes_test
+                    and equal_nan
+                    and math.isnan(ref_error)
+                    and math.isnan(res_error)
+                ):
                     passes_test = True
                 if not passes_test:
                     log_error(
