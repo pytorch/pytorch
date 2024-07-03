@@ -406,7 +406,7 @@ if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--dynamic-shapes --dynamic-batch-only)
 fi
 
-if [[ "${TEST_CONFIG}" == *cpu_inductor* ]]; then
+if [[ "${TEST_CONFIG}" == *cpu_inductor* || "${TEST_CONFIG}" == *cpu_aot_inductor* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--device cpu)
 else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
@@ -531,9 +531,10 @@ test_single_dynamo_benchmark() {
     test_perf_for_dashboard "$suite" \
       "${DYNAMO_BENCHMARK_FLAGS[@]}" "$@" "${partition_flags[@]}"
   else
-    if [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
+    if [[ "${TEST_CONFIG}" == *aot_inductor* && "${TEST_CONFIG}" != *cpu_aot_inductor* ]]; then
       # Test AOTInductor with the ABI-compatible mode on CI
       # This can be removed once the ABI-compatible mode becomes default.
+      # For CPU device, we perfer non ABI-compatible mode on CI when testing AOTInductor.
       export TORCHINDUCTOR_ABI_COMPATIBLE=1
     fi
     python "benchmarks/dynamo/$suite.py" \
@@ -574,7 +575,7 @@ test_dynamo_benchmark() {
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
   else
-    if [[ "${TEST_CONFIG}" == *cpu_inductor* ]]; then
+    if [[ "${TEST_CONFIG}" == *cpu_inductor* || "${TEST_CONFIG}" == *cpu_aot_inductor* ]]; then
       local dt="float32"
       if [[ "${TEST_CONFIG}" == *amp* ]]; then
         dt="amp"
@@ -621,7 +622,8 @@ test_inductor_torchbench_smoketest_perf() {
   # https://github.com/pytorch/pytorch/actions/runs/7158691360/job/19491437314,
   # and thus we lower its threshold to reduce flakiness. If this continues to be a problem,
   # we switch to use some other model.
-  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 4.9
+  # lowering threshold from 4.9 to 4.7 for cu124. Will bump it up after cuda 12.4.0->12.4.1 update
+  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 4.7
 
   # Check memory compression ratio for a few models
   for test in hf_Albert timm_vision_transformer; do
@@ -1266,13 +1268,14 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
-  if [[ "${TEST_CONFIG}" == *cpu_inductor* ]]; then
+  if [[ "${TEST_CONFIG}" == *cpu_inductor* || "${TEST_CONFIG}" == *cpu_aot_inductor* ]]; then
     install_torchaudio cpu
   else
     install_torchaudio cuda
   fi
   install_torchtext
   install_torchvision
+  TORCH_CUDA_ARCH_LIST="8.0;8.6" pip_install git+https://github.com/pytorch/ao.git
   id=$((SHARD_NUMBER-1))
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
@@ -1291,7 +1294,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     checkout_install_torchbench
     # Do this after checkout_install_torchbench to ensure we clobber any
     # nightlies that torchbench may pull in
-    if [[ "${TEST_CONFIG}" != *cpu_inductor* ]]; then
+    if [[ "${TEST_CONFIG}" != *cpu_inductor* && "${TEST_CONFIG}" != *cpu_aot_inductor* ]]; then
       install_torchrec_and_fbgemm
     fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
