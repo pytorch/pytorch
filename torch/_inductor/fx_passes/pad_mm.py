@@ -15,7 +15,10 @@ from torch._inductor.autoheuristic.autoheuristic import (
     AutoHeuristic,
     LocalFeedback,
 )
-from torch._inductor.autoheuristic.autoheuristic_utils import pad_mm_operations
+from torch._inductor.autoheuristic.autoheuristic_utils import (
+    pad_mm_operations,
+    pad_mm_precondition,
+)
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
@@ -633,6 +636,7 @@ def run_autoheuristic(
         context=context,
         name=name,
         augment_context=pad_mm_operations(),
+        precondition=pad_mm_precondition,
     )
     choice = autoheuristic.get_choice()
     choice2should_pad = {orig_choice: False, pad_choice: True, "autotune": None}

@@ -17,12 +17,6 @@ class PadMMA100(LearnedHeuristic):
         metadata: AHMetadata,
         context: AHContext,
     ) -> bool:
-        if (
-            context.get_value("m") < 512
-            or context.get_value("k") < 512
-            or context.get_value("n") < 512
-        ):
-            return False
         return (
             metadata.name == self.get_name()
             and metadata.shared_memory == 166912

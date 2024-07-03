@@ -101,6 +101,7 @@ class AutoHeuristic:
         context: AHContext,
         name: str,
         augment_context: Optional[List[AHOperation]] = None,
+        precondition: Optional[Callable[[AHMetadata, AHContext], bool]] = None,
     ) -> None:
         """
         Initializes an instance of the AutoHeuristic class.
@@ -113,6 +114,7 @@ class AutoHeuristic:
             context: Context to store with each choice and feedback.
             name: A string that identifies the heuristic.
             augment_context: An optional list of AHOperation instances that augment the context.
+            precondition: A callable that returns a boolean indicating whether AutoHeuristic should run.
         """
         self.fallback = fallback
         self.choices = choices
@@ -127,6 +129,10 @@ class AutoHeuristic:
             self.choices,
             self.name,
         )
+        self.precondition = precondition
+
+        if not self.satisfies_precondition():
+            return
 
         if torch._inductor.config.autoheuristic_log_path == "DEFAULT":
             self.log_path = self.get_default_log_path()
@@ -142,6 +148,11 @@ class AutoHeuristic:
                 feedback_val = self.feedback(choice)
                 self.save_data(choice, feedback_val)
 
+    def satisfies_precondition(self) -> bool:
+        return self.precondition is None or self.precondition(
+            self.metadata, self.context
+        )
+
     def get_choice(self) -> Choice:
         """
         Returns the chosen option based on the autoheuristic mode.
@@ -152,6 +163,9 @@ class AutoHeuristic:
         Returns:
             Choice: The chosen option.
         """
+
+        if not self.satisfies_precondition():
+            return self.fallback()
 
         if torch._inductor.config.autoheuristic_mode == "USE_HEURISTIC":
             if self.augment_context is not None:

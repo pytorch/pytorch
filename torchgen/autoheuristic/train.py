@@ -400,9 +400,6 @@ class AHTrain:
     def add_new_features(self, results):
         return (results, [])
 
-    def add_precondition(self):
-        return ""
-
     def codegen_boilerplate(
         self, heuristic_name, opt_name, threshold, shared_memory, device_capa
     ):
@@ -419,7 +416,6 @@ class {heuristic_name}(LearnedHeuristic):
         pass
 
     def check_precondition(self, metadata: AHMetadata, context: AHContext,) -> bool:
-        {self.add_precondition()}
         return (
             metadata.name == self.get_name()
             and metadata.shared_memory == {shared_memory}

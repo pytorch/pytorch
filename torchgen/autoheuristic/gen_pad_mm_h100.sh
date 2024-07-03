@@ -1,7 +1,5 @@
 #!/bin/bash
 
-data="h100-data.txt"
+data="pad_mm_h100_data.txt"
 
-python train_pad_mm.py ${data} \
-    --heuristic-name PadMMH100 \
-    --gpu H100
+python train_pad_mm.py ${data} --heuristic-name PadMMH100

@@ -111,6 +111,23 @@ class AHMetadata:
         }
 
 
+def check_minsize(context: AHContext, minsize: int) -> bool:
+    return (
+        context.get_value("m") >= minsize
+        and context.get_value("k") >= minsize
+        and context.get_value("n") >= minsize
+    )
+
+def pad_mm_precondition(metadata: AHMetadata, context: AHContext) -> bool:
+    if metadata.shared_memory == 166912 and str(metadata.device_capa) == "(8, 0)":
+        # A100 precondition
+        return check_minsize(context, 512)
+    elif metadata.shared_memory == 232448 and str(metadata.device_capa) == "(9, 0)":
+        # H100 precondition
+        return check_minsize(context, 768)
+    return False
+
+
 def pad_mm_operations() -> List[AHOperation]:
     m_times_k_op = AHOperation("m*k", lambda data: data["m"] * data["k"])
     m_times_n_op = AHOperation("m*n", lambda data: data["m"] * data["n"])
