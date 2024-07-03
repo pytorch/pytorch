@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
-"""Locally Optimal Block Preconditioned Conjugate Gradient methods.
-"""
+"""Locally Optimal Block Preconditioned Conjugate Gradient methods."""
 # Author: Pearu Peterson
 # Created: February 2020
 

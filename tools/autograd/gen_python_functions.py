@@ -522,12 +522,12 @@ def create_python_bindings_sharded(
     grouped = group_filter_overloads(pairs, pred)
 
     def key_func(
-        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]]
+        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]],
     ) -> str:
         return kv[0].base
 
     def env_func(
-        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]]
+        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]],
     ) -> dict[str, list[str]]:
         name, fn_pairs = kv
         return {

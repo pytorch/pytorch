@@ -393,7 +393,7 @@ def _tuple_flatten(d: Tuple[Any, ...]) -> Tuple[List[Any], Context]:
 
 
 def _tuple_flatten_with_keys(
-    d: Tuple[Any, ...]
+    d: Tuple[Any, ...],
 ) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
     values, context = _tuple_flatten(d)
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
@@ -421,7 +421,7 @@ def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
 
 
 def _dict_flatten_with_keys(
-    d: Dict[Any, Any]
+    d: Dict[Any, Any],
 ) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
     values, context = _dict_flatten(d)
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
@@ -485,7 +485,7 @@ def _ordereddict_flatten(d: GenericOrderedDict[Any, Any]) -> Tuple[List[Any], Co
 
 
 def _ordereddict_flatten_with_keys(
-    d: GenericOrderedDict[Any, Any]
+    d: GenericOrderedDict[Any, Any],
 ) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
     values, context = _ordereddict_flatten(d)
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
@@ -508,7 +508,7 @@ def _defaultdict_flatten(d: DefaultDict[Any, Any]) -> Tuple[List[Any], Context]:
 
 
 def _defaultdict_flatten_with_keys(
-    d: DefaultDict[Any, Any]
+    d: DefaultDict[Any, Any],
 ) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
     values, context = _defaultdict_flatten(d)
     _, dict_context = context
@@ -1001,7 +1001,7 @@ def map_only(__type_or_types_or_pred: Type2[T, S]) -> MapOnlyFn[Fn2[T, S, Any]]:
 
 @overload
 def map_only(
-    __type_or_types_or_pred: Type3[T, S, U]
+    __type_or_types_or_pred: Type3[T, S, U],
 ) -> MapOnlyFn[Fn3[T, S, U, Any]]: ...
 
 
@@ -1016,12 +1016,12 @@ def map_only(__type_or_types_or_pred: TypeAny) -> MapOnlyFn[FnAny[Any]]: ...
 
 @overload
 def map_only(
-    __type_or_types_or_pred: Callable[[Any], bool]
+    __type_or_types_or_pred: Callable[[Any], bool],
 ) -> MapOnlyFn[FnAny[Any]]: ...
 
 
 def map_only(
-    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]]
+    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]],
 ) -> MapOnlyFn[FnAny[Any]]:
     """
     Suppose you are writing a tree_map over tensors, leaving everything

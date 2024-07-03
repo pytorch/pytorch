@@ -2,6 +2,7 @@
 """
 Utils for caching the outputs of AOTAutograd
 """
+
 from __future__ import annotations
 
 import functools
