@@ -753,7 +753,7 @@ class InstructionTranslatorBase(
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
         try:
             value = fn.call_function(self, args, kwargs)
-        except torch._dynamo.exc.ObservedException:
+        except torch._dynamo.exc.TorchDynamoException:
             # We're already handling this exception - keep it going.
             raise
         except RuntimeError as e:
