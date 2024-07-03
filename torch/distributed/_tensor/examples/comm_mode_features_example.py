@@ -283,95 +283,145 @@ class CommDebugModeExample:
           FORWARD PASS
             *c10d_functional.all_reduce: 1
             MLPModule
+            *module type: class 'torch.testing._internal.distributed._tensor.common_dtensor.MLPModule'
               FORWARD PASS
                 *c10d_functional.all_reduce: 1
                 MLPModule.net1
+                *module type: class 'torch.nn.modules.linear.Linear'
+                *Parameter List
+                *weight: (Shard(dim=0),)
+                *bias: (Shard(dim=0),)
                   FORWARD PASS
                     **aten.detach.default
                       shape: [torch.Size([16, 10])]
                       sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                     **aten.detach.default
                       shape: [torch.Size([16, 10])]
                       sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                     **aten.detach.default
                       shape: [torch.Size([16, 10])]
                       sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                     **aten.detach.default
                       shape: [torch.Size([16])]
                       sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                     **aten.detach.default
                       shape: [torch.Size([16])]
                       sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                     **aten.detach.default
                       shape: [torch.Size([16])]
                       sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                     **aten.view.default
                     **aten.t.default
                       shape: [torch.Size([16, 10])]
                       sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.t.default
                     **aten.addmm.default
                       shape: [torch.Size([16]), torch.Size([8, 10]), torch.Size([10, 16])]
                       sharding: [(Shard(dim=0),), (Replicate(),), (Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.addmm.default
                     **aten.view.default
                 MLPModule.relu
+                *module type: class 'torch.nn.modules.activation.ReLU'
                   FORWARD PASS
                     **aten.relu.default
                     **aten.detach.default
                 MLPModule.net2
+                *module type: class 'torch.nn.modules.linear.Linear'
+                *Parameter List
+                *weight: (Shard(dim=1),)
+                *bias: (Replicate(),)
                   FORWARD PASS
                     *c10d_functional.all_reduce: 1
                     **aten.detach.default
                       shape: [torch.Size([10, 16])]
                       sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                     **aten.detach.default
                       shape: [torch.Size([10, 16])]
                       sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                     **aten.detach.default
                       shape: [torch.Size([10, 16])]
                       sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                     **aten.detach.default
                       shape: [torch.Size([10])]
                       sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                     **aten.detach.default
                       shape: [torch.Size([10])]
                       sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                     **aten.detach.default
                       shape: [torch.Size([10])]
                       sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10])]
+                      sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                     **aten.view.default
                     **aten.t.default
                       shape: [torch.Size([10, 16])]
                       sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.t.default
                     **aten.addmm.default
                       shape: [torch.Size([10]), torch.Size([8, 16]), torch.Size([16, 10])]
                       sharding: [(Replicate(),), (Shard(dim=1),), (Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.div.Tensor
                     **aten.addmm.default
                     **_c10d_functional.all_reduce.default
@@ -383,51 +433,63 @@ class CommDebugModeExample:
                     **aten.t.default
                       shape: [torch.Size([16, 10])]
                       sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.t.default
                     **aten.mm.default
                       shape: [torch.Size([8, 10]), torch.Size([10, 16])]
                       sharding: [(Replicate(),), (Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.mm.default
                     **aten.t.default
                       shape: [torch.Size([8, 10])]
                       sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.t.default
                     **aten.mm.default
                       shape: [torch.Size([10, 8]), torch.Size([8, 16])]
                       sharding: [(Replicate(),), (Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.mm.default
                     **aten.t.default
                       shape: [torch.Size([10, 16])]
                       sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.t.default
                     **aten.sum.dim_IntList
                       shape: [torch.Size([8, 10])]
                       sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.sum.dim_IntList
                     **aten.view.default
                       shape: [torch.Size([1, 10])]
                       sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.view.default
                     **aten.detach.default
                       shape: [torch.Size([10])]
                       sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                       shape: [torch.Size([10])]
                       sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                     **aten.t.default
                       shape: [torch.Size([16, 10])]
                       sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.t.default
                     **aten.detach.default
                       shape: [torch.Size([10, 16])]
                       sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                       shape: [torch.Size([10, 16])]
                       sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                     **aten.detach.default
@@ -435,45 +497,56 @@ class CommDebugModeExample:
                     **aten.t.default
                       shape: [torch.Size([8, 16])]
                       sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.t.default
                     **aten.mm.default
                       shape: [torch.Size([16, 8]), torch.Size([8, 10])]
                       sharding: [(Shard(dim=0),), (Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.mm.default
                     **aten.t.default
                       shape: [torch.Size([16, 10])]
                       sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.t.default
                     **aten.sum.dim_IntList
                       shape: [torch.Size([8, 16])]
                       sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.sum.dim_IntList
                     **aten.view.default
                       shape: [torch.Size([1, 16])]
                       sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.view.default
                     **aten.detach.default
                       shape: [torch.Size([16])]
                       sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                       shape: [torch.Size([16])]
                       sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                     **aten.t.default
                       shape: [torch.Size([10, 16])]
                       sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.t.default
                     **aten.detach.default
                       shape: [torch.Size([16, 10])]
                       sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
                       shape: [torch.Size([16, 10])]
                       sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
+
         """
         torch.manual_seed(0)
 
