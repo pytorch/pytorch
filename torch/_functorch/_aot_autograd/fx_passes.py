@@ -60,13 +60,16 @@ def refunctionalize_set(graph: fx.Graph) -> None:
     # ```
     # Note that this process is iterative and will handle any number (>=2) of nested `.set_()`.
     for i, n in enumerate(node_list):
-        if (
-            n.op == "call_function"
-            and n.target is torch.ops.aten.set_.source_Tensor
-            and n.args[0].target is torch.ops.aten.set_.source_Tensor
-            and n.args[0].args[0] in primal_inputs
-        ):
-            n.args = (n.args[0].args[0], n.args[1])
+        if n.op == "call_function" and n.target is torch.ops.aten.set_.source_Tensor:
+            if (
+                n.args[0].target is torch.ops.aten.set_.source_Tensor
+                and n.args[0].args[0] in primal_inputs
+            ):
+                n.args = (n.args[0].args[0], n.args[1])
+            # After clean up, every `.set_` node we encounter should always be setting into the primal input.
+            assert (
+                n.args[0] in primal_inputs
+            ), "Violation of assumptions on FSDP2 implementation. Please report a bug to PyTorch."
 
     # Step 2: Re-functionalizing `.set_(primal_X, ...)`.
     # Replacement conditions:
