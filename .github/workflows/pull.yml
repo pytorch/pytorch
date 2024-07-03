@@ -19,6 +19,9 @@ concurrency:
 
 permissions: read-all
 
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: True
+
 jobs:
   llm-td:
     name: before-test
