@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import collections
 import contextlib
 import dataclasses
 import functools
@@ -129,6 +128,14 @@ If you mutate the data of such a tensor, we swing the StorageBox pointer to poin
 Tensors backed by views add one more indirection to the IR.
 TensorBox -> View -> StorageBox -> Buffer
 In these cases, the underlying StorageBox/Buffer will be shared with the pre-view TensorBox.
+
+Computation is represented by Operation nodes, with each operation producing 1
+or more output Buffers. In the case of mutations, these will be new Buffers that have the
+mutated buffer listed in its get_mutation_names().
+
+It is also possible to have an InputBuffer for which there is no corresponding Operation,
+e.g. it may be a graph input or compile time constant.
+
 """
 
 
@@ -154,6 +161,7 @@ def validate_ir(node_or_nodes):
                     TensorBox,
                     sympy.logic.boolalg.Boolean,
                     Expr,
+                    int,
                     EffectfulKernel,
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
@@ -289,8 +297,14 @@ class IRNode:
         self.origins = set(self._current_origins)
         self.traceback = traceback.format_stack() if config.debug_ir_traceback else None
 
+    def get_read_names(self) -> Set[str]:
+        raise NotImplementedError(f"NYI on {type(self)}")
+
     def get_traceback(self):
         return self.traceback
+
+    def get_defining_op(self):
+        raise NotImplementedError
 
     def common_repr(self, shorten=True):
         origins = f"origins={getattr(self, 'origins', '')}"
@@ -307,13 +321,6 @@ class IRNode:
             return f"{type(self).__name__}(\n{new_lines}\n)"
         else:
             return f"{type(self).__name__}({lines})"
-
-    def is_user_of(self, name):
-        return name in self.get_read_names()
-
-    @cache_on_self
-    def get_read_names(self):
-        return {dep.name for dep in self.get_reads()}
 
     def get_dtype(self):
         return self.dtype
@@ -370,6 +377,75 @@ class IRNode:
     mark_reuse: Callable[[int], None]
     realize_hint: Callable[[], None]
     get_unbacked_symbol_uses: Callable[[], Set[sympy.Symbol]]
+
+
+@dataclasses.dataclass
+class Operation:
+    def __post_init__(self):
+        self.operation_name: Optional[str] = None
+
+    def get_device(self):
+        raise NotImplementedError
+
+    def get_origin_node(self):
+        assert hasattr(self, "origin_node")
+        return self.origin_node
+
+    def get_origins(self):
+        assert hasattr(self, "origins")
+        return self.origins
+
+    def get_operation_name(self) -> str:
+        assert self.operation_name is not None
+        return self.operation_name
+
+    def is_extern(self):
+        return False
+
+    def is_no_op(self):
+        return False
+
+    def get_read_writes(self):
+        raise NotImplementedError
+
+    def is_user_of(self, name):
+        return name in self.get_read_names()
+
+    def get_read_names(self) -> Set[str]:
+        return {dep.name for dep in self.get_reads()}
+
+    def get_reads(self):
+        return self.get_read_writes().reads
+
+    def get_outputs(self) -> List[Buffer]:
+        raise NotImplementedError
+
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
+
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        """
+        Returns the unbacked symbols which are required to be in scope in
+        order to successfully perform codegen for this buffer.  For example,
+        a buffer that corresponds to an extern kernel call that takes i0 as
+        an argument would return {i0} here.  This is used to generate necessary
+        dependencies that ensure we actually bind i0 in codegen before you
+        try to use it.
+
+        Note that this is NOT transitive; in particular, if this buffer takes
+        in as input another buffer with dynamic shape (e.g., (i0,)), we will
+        not report it here, because you will already have a dependency
+        on that buffer, which will eventually have a dependency on i0 if
+        necessary.
+        """
+        return set()
+
+    def get_workspace_size(self):
+        """
+        Gets extra global memory size needed by this buffer.
+        Some algorithms (e.g. group gemm) may require extra global memory in the generated code.
+        """
+        return 0
 
 
 @dataclasses.dataclass
@@ -473,6 +549,9 @@ class Loops(IRNode):
                     self.make_loader(),
                     self.get_size(),
                 ).reads
+
+    def get_read_names(self) -> Set[str]:
+        return {dep.name for dep in self.get_reads()}
 
     def get_reduction_size(self):
         raise NotImplementedError(
@@ -2067,6 +2146,9 @@ class BaseView(IRNode):
     def is_module_buffer(self):
         return self.data.is_module_buffer()  # type: ignore[attr-defined]
 
+    def get_read_names(self) -> Set[str]:
+        return self.data.get_read_names()
+
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
@@ -3195,6 +3277,9 @@ class Buffer(IRNode):
     def get_origin_node(self):
         return self.origin_node
 
+    def get_defining_op(self) -> Optional[Operation]:
+        return None
+
     @property
     def dtype(self):
         return getattr(self.layout, "dtype", None)
@@ -3247,9 +3332,6 @@ class Buffer(IRNode):
 
         return loader
 
-    def is_no_op(self):
-        return False
-
     def codegen_reference(self, writer=None):
         return self.get_name()
 
@@ -3266,49 +3348,35 @@ class Buffer(IRNode):
             return [self.layout.target.get_name()]
         return ()
 
-    def get_read_writes(self):
-        with patch.object(FlexibleLayout, "allow_indexing", True):
-            return extract_read_writes(
-                self.make_loader(),
-                self.get_size(),
-            )
-
-    def get_reads(self):
-        return self.get_read_writes().reads
-
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return set()
+    def get_read_names(self) -> Set[str]:
+        return {self.get_name()}
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
-        """
-        Returns the unbacked symbols which are required to be in scope in
-        order to successfully perform codegen for this buffer.  For example,
-        a buffer that corresponds to an extern kernel call that takes i0 as
-        an argument would return {i0} here.  This is used to generate necessary
-        dependencies that ensure we actually bind i0 in codegen before you
-        try to use it.
+        return set()
 
-        Note that this is NOT transitive; in particular, if this buffer takes
-        in as input another buffer with dynamic shape (e.g., (i0,)), we will
-        not report it here, because you will already have a dependency
-        on that buffer, which will eventually have a dependency on i0 if
-        necessary.
-        """
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
     def realize(self):
         pass
 
-    def get_workspace_size(self):
-        """
-        Gets extra global memory size needed by this buffer.
-        Some algorithms (e.g. group gemm) may require extra global memory in the generated code.
-        """
-        return 0
-
     def should_allocate(self):
         # Returns False by default.
         return False
+
+
+@dataclasses.dataclass
+class OperationBuffer(Buffer, Operation):
+    # An operation that produces a single output buffer
+    def get_outputs(self) -> List[Buffer]:
+        return [self]
+
+    def get_defining_op(self) -> Operation:
+        return self
+
+    def __post_init__(self):
+        Buffer.__post_init__(self)
+        Operation.__post_init__(self)
 
 
 class InputBuffer(Buffer):
@@ -3359,7 +3427,7 @@ class ShapeAsConstantBuffer(IRNode):
 
 
 @dataclasses.dataclass
-class ComputedBuffer(Buffer):
+class ComputedBuffer(OperationBuffer):
     data: Loops
 
     def get_computed_buffer_name(self):
@@ -3653,7 +3721,7 @@ class ComputedBuffer(Buffer):
         return self.data.constant_to_device(device)
 
 
-class TemplateBuffer(Buffer):
+class TemplateBuffer(OperationBuffer):
     """
     Represents a Triton (in the future other type) of template operator
     that we can fuse an epilogue onto.
@@ -3664,6 +3732,7 @@ class TemplateBuffer(Buffer):
         self.inputs = InputsKernel.unwrap_storage(inputs)
         self.make_kernel_render = make_kernel_render
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
 
     def get_read_writes(self):
         return self.normalized_read_writes()
@@ -3728,6 +3797,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         super().__init__(layout, inputs, make_kernel_render)
         self.debug_extra = debug_extra
         self.mutated_inputs = mutated_inputs
+        self.outputs: List[Buffer] = [self]
         if mutated_inputs is not None:
             # Ensure that the mutated inputs are only allowed for certain nodes
             allowed_set = {
@@ -3738,7 +3808,13 @@ class TritonTemplateBuffer(TemplateBuffer):
             assert (
                 current_node in allowed_set
             ), f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
-            mark_node_as_mutating(self, *mutated_inputs)
+            device = self.inputs[0].get_device()
+            self.outputs += [
+                MutationOutput(NoneLayout(device), buf, self) for buf in mutated_inputs
+            ]
+
+    def get_outputs(self) -> List[Buffer]:
+        return self.outputs
 
     def __str__(self):
         out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
@@ -3864,27 +3940,29 @@ class CppTemplateBuffer(TemplateBuffer):
 
 
 @dataclasses.dataclass
-class InputsKernel(Buffer):
+class InputsKernel(OperationBuffer):
     inputs: List[Buffer]
 
     def get_read_writes_input(self, x):
         return dependencies.StarDep(x.get_name())
 
     def get_read_writes(self):
-        star_dep = []
+        reads: Set[dependencies.Dep] = set()
+        StarDep = dependencies.StarDep
         for input in self.inputs:
             if isinstance(input, list):
-                star_dep.extend([self.get_read_writes_input(x) for x in input])
+                reads.update({StarDep(x.get_name()) for x in input})
             else:
-                star_dep.append(self.get_read_writes_input(input))
+                reads.add(StarDep(input.get_name()))
+
+        writes: Set[dependencies.Dep] = {
+            StarDep(buf.get_name()) for buf in self.get_outputs()
+        }
 
         return dependencies.ReadWrites(
-            set(star_dep),
-            {dependencies.StarDep(self.get_name())},
-            set(),
-            [],
-            None,
-            op_counts=collections.Counter(),
+            reads=reads,
+            writes=writes,
+            index_exprs=set(),
         )
 
     @classmethod
@@ -3992,7 +4070,7 @@ class ConcatKernel(NopKernel):
             inputs=[],
         )
         kernel = StorageBox(concat_kernel)
-        buffer_names = []
+        op_names = []
         for i in range(len(inputs)):
             input_buffer = cls.realize_into(
                 inputs[i],
@@ -4012,15 +4090,14 @@ class ConcatKernel(NopKernel):
                 and is_gpu(inputs[i].get_device().type)
                 and not is_dynamic(input_buffer)
             ):
-                buffer_names.append(input_buffer.get_name())
+                op_names.append(input_buffer.get_operation_name())
 
-        if len(buffer_names) > 1 and V.graph.has_feature(
-            device, BackendFeature.FOREACH
-        ):
-            V.graph.register_list(buffer_names)
+        if len(op_names) > 1 and V.graph.has_feature(device, BackendFeature.FOREACH):
+            V.graph.register_operation_list(op_names)
 
         concat_kernel.name = V.graph.register_buffer(concat_kernel)
         concat_kernel.inputs = cls.unwrap_storage(concat_kernel.inputs)
+        V.graph.register_operation(concat_kernel)
 
         return kernel
 
@@ -4105,6 +4182,7 @@ class ExternKernel(InputsKernel):
     unbacked_bindings: Dict[sympy.Symbol, pytree.KeyPath] = dataclasses.field(
         default_factory=dict
     )
+    mutation_outputs: List[MutationOutput] = dataclasses.field(default_factory=list)
 
     def __init__(
         self,
@@ -4134,7 +4212,11 @@ class ExternKernel(InputsKernel):
         self.op_overload = op_overload
         self.collect_arg_kwarg_properties()
         self.unbacked_bindings = {}
+        self.mutation_outputs = []
         self.fx_node = V.graph.current_node
+
+    def get_outputs(self) -> List[Buffer]:
+        return [self, *self.mutation_outputs]
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
@@ -4722,6 +4804,7 @@ class ExternKernelOut(ExternKernel):
             op_overload,
         )
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
 
     def should_allocate(self):
         return True
@@ -4781,12 +4864,36 @@ class ExternKernelAlloc(ExternKernel):
             op_overload,
         )
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
 
     def should_allocate(self):
         return False
 
     def apply_constraint(self):
         raise NotImplementedError
+
+
+class MutationOutput(Buffer):
+    """
+    An output buffer that represents the mutation of a pre-existing buffer
+    """
+
+    def __init__(self, layout, mutated_node, mutating_node: Operation):
+        super().__init__(name=None, layout=layout)
+        mutated_node_name = mutated_node.get_name()
+        V.graph.mark_buffer_mutated(mutated_node_name)
+        self.mutation_names = [mutated_node_name]
+        self.mutating_node: Operation = mutating_node
+        self.name = V.graph.register_buffer(self)
+
+    def get_defining_op(self) -> Operation:
+        return self.mutating_node
+
+    def get_mutation_names(self):
+        return self.mutation_names
+
+    def should_allocate(self):
+        return False
 
 
 class UserDefinedTritonKernel(ExternKernel):
@@ -4830,14 +4937,6 @@ class UserDefinedTritonKernel(ExternKernel):
             new_name, self.grid, configs, args, triton_meta, raw_args
         )
 
-    def should_allocate(self):
-        return False
-
-    def has_side_effects(self):
-        # UserDefinedTritonKernel does not return anything, but rather
-        # modifies input in place, do not let it get DCEd
-        return True
-
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         # add unbacked symbols used in the grid to the ones used
         # in the kwargs (the latter is generated by ExternKernel)
@@ -4845,12 +4944,6 @@ class UserDefinedTritonKernel(ExternKernel):
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
-
-    def get_mutation_names(self):
-        # NB: Inductor only allows a node to mutate 0 or 1 buffers.
-        # To get around that, we create MutationOutputs which marks their
-        # assigned input as mutable, thus, adhering to Inductor's constraint.
-        return []
 
     def __init__(self, *, kernel_idx, grid, kernel_args):
         inputs = []
@@ -4866,16 +4959,15 @@ class UserDefinedTritonKernel(ExternKernel):
                 kwargs[k] = v
 
         assert len(inputs) != 0
-        device = inputs[0].get_device()
+        self.device = inputs[0].get_device()
 
         super().__init__(
             None,
-            NoneLayout(device),  # type: ignore[arg-type]
+            NoneLayout(self.device),  # type: ignore[arg-type]
             inputs,
             tuple(constant_args),
             kwargs,
         )
-        self.name = V.graph.register_buffer(self)
         self.kernel_idx = kernel_idx
         self.grid = grid
 
@@ -4894,48 +4986,18 @@ class UserDefinedTritonKernel(ExternKernel):
                 kernel, {**kernel_args, **autotuned_kwargs}
             )
         ]
-        mark_node_as_mutating(self, *self.mutable_args)
 
-    def get_inputs_that_alias_output(self):
-        return [i.get_name() for i in self.mutable_args]
+        self.mutation_outputs = [
+            MutationOutput(NoneLayout(self.device), buf, self)
+            for buf in self.mutable_args
+        ]
+        V.graph.register_operation(self)
 
+    def get_outputs(self) -> List[Buffer]:
+        return list(self.mutation_outputs)
 
-def mark_node_as_mutating(cur_buffer, *mutated_nodes: IRNode):
-    """
-    Allows ops in mutated_nodes to be marked as being mutated as well as
-    indicates to the scheduler that these ops depend on cur_buffer.
-
-    NB: Use this instead of directly constructing MutationOutput
-    """
-    for node in mutated_nodes:
-        assert isinstance(
-            node, IRNode
-        ), f"{node} node is type {type(node)} and is not an IRNode"
-        V.graph.mark_buffer_mutated(node.get_name())
-        MutationOutput(node.get_layout(), node, cur_buffer)
-
-
-class MutationOutput(ExternKernel):
-    def get_mutation_names(self):
-        return [self.inputs[0].get_name()]
-
-    def __init__(self, layout, mutated_node, node_doing_mutating):
-        # NB: Do not directly construct this - use `mark_node_as_mutating`
-        super().__init__(None, layout, [mutated_node, node_doing_mutating], ())
-        self.node_doing_mutating = node_doing_mutating
-        self.name = V.graph.register_buffer(self)
-
-    def should_allocate(self):
-        return False
-
-    def is_no_op(self):
-        return True
-
-    def has_side_effects(self):
-        return True
-
-    def get_inputs_that_alias_output(self):
-        return [self.inputs[0].get_name()]
+    def get_device(self) -> torch.device:
+        return self.device
 
 
 class InplaceBernoulliFallback(ExternKernel):
@@ -4974,12 +5036,13 @@ class InplaceBernoulliFallback(ExternKernel):
             constant_args,
             op_overload=op_overload,
         )
+        V.graph.mark_buffer_mutated(x.get_name())
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
         self.python_kernel_name = "aten.bernoulli_"
         if not config.abi_compatible:
             # TODO: this should be simplified once we switch to ABI-compatible only
             self.cpp_kernel_name = "at::native::bernoulli_"
-        mark_node_as_mutating(self, x)
 
 
 # Used to deal with torch.complex types
@@ -5019,7 +5082,9 @@ class InplaceCopyFallback(ExternKernel):
                 "aoti_torch_copy_" if config.abi_compatible else "at::_ops::copy_::call"
             ),
         )
+        V.graph.mark_buffer_mutated(inputs[0].get_name())
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
 
     @classmethod
     def create(cls, dst, src, non_blocking: bool = False):
@@ -5030,7 +5095,6 @@ class InplaceCopyFallback(ExternKernel):
             inputs,
             constant_args,
         )
-        mark_node_as_mutating(result, dst)
         return result
 
 
@@ -5072,10 +5136,10 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
         )
         V.graph.mark_buffer_mutated(variable.get_name())
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
         self.python_kernel_name = "inductor_ops.resize_storage_bytes_"
         self.cpp_kernel_name = "torch::inductor::resize_storage_bytes_"
         V.graph.never_reuse_buffers.add(variable.data.get_name())
-        mark_node_as_mutating(self, variable)
 
 
 class SetSourceTensorKernel(ExternKernelAlloc):
@@ -5089,16 +5153,14 @@ class SetSourceTensorKernel(ExternKernelAlloc):
         V.graph.never_reuse_buffers.add(self_tensor.data.get_name())
         V.graph.never_reuse_buffers.add(storage_tensor.get_name())
         V.graph.never_reuse_buffers.add(self.get_name())
-        mark_node_as_mutating(self, self_tensor, storage_tensor)
+        device = storage_tensor.get_device()
+        self.mutation_outputs = [
+            MutationOutput(NoneLayout(device), self_tensor, self),
+            MutationOutput(NoneLayout(device), storage_tensor, self),
+        ]
 
     def get_inputs_that_alias_output(self):
         return [self.inputs[0].get_name(), self.inputs[1].get_name()]
-
-    def get_mutation_names(self):
-        return [self.inputs[1].get_name()]
-
-    def has_side_effects(self):
-        return True
 
 
 class ScatterFallback(ExternKernel):
@@ -5172,8 +5234,9 @@ class ScatterFallback(ExternKernel):
             op_overload=op_overload,
         )
         self.cpp_kernel_name = get_aten_cpp_kernel_name(op_overload)
+        V.graph.mark_buffer_mutated(x.get_name())
         self.name = V.graph.register_buffer(self)
-        mark_node_as_mutating(self, x)
+        V.graph.register_operation(self)
 
 
 class IndexPutFallback(ExternKernel):
@@ -5220,8 +5283,9 @@ class IndexPutFallback(ExternKernel):
             cpp_kernel_name=cpp_kernel_name,
             op_overload=op_overload,
         )
+        V.graph.mark_buffer_mutated(self.inputs[0].get_name())
         self.name = V.graph.register_buffer(self)
-        mark_node_as_mutating(self, x)
+        V.graph.register_operation(self)
 
 
 class DeviceCopy(ExternKernelOut):
@@ -5229,10 +5293,7 @@ class DeviceCopy(ExternKernelOut):
     def create(cls, x, device):
         if (
             not x.is_extern()
-            and all(
-                (r.name in V.graph.constants and isinstance(r, dependencies.MemoryDep))
-                for r in x.get_reads()
-            )
+            and all(r in V.graph.constants for r in x.get_read_names())
             and not config.aot_inductor.use_runtime_constant_folding
         ):
             return x.constant_to_device(device)
@@ -5342,6 +5403,7 @@ has_c_shim = {
     aten._fft_c2c.default,
     aten._scaled_dot_product_efficient_attention.default,
     aten._scaled_dot_product_flash_attention.default,
+    aten._scaled_dot_product_cudnn_attention.default,
     aten._scaled_mm.default,
     aten.addmm.out,
     aten.bmm.out,
@@ -5465,15 +5527,20 @@ class FallbackKernel(ExternKernelAlloc):
                 return
             if info.alias_info is None:
                 return
+
+            def add_alias(t):
+                self.alias_names.append(t.get_name())
+                if info.alias_info.is_write:
+                    self.mutation_outputs.append(
+                        MutationOutput(NoneLayout(t.get_device()), t, self)
+                    )
+
             if is_list_tensor:
                 for tensor_arg in arg:
-                    self.alias_names.append(tensor_arg.get_name())
-                    mark_node_as_mutating(self, tensor_arg)
+                    add_alias(tensor_arg)
             else:
                 assert isinstance(info.type, torch.TensorType) or is_optional_tensor
-                self.alias_names.append(arg.get_name())
-                if info.alias_info.is_write:
-                    mark_node_as_mutating(self, arg)
+                add_alias(arg)
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
@@ -5913,6 +5980,7 @@ class MultiOutput(ExternKernel):
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
         self.indices = indices
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
@@ -5949,6 +6017,12 @@ class MutableBox(IRNode):
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return self.data.get_unbacked_symbol_uses()
+
+    def get_read_names(self) -> Set[str]:
+        return self.data.get_read_names()
+
+    def get_defining_op(self):
+        return self.data.get_defining_op()
 
     def codegen_reference(self, writer=None):
         return self.data.codegen_reference(writer)
@@ -6032,6 +6106,7 @@ class StorageBox(MutableBox):
             data=self.data,
         )
         self.data.name = V.graph.register_buffer(self.data)
+        V.graph.register_operation(self.data)
         self.data.origins = self.origins
         self.data.origin_node = origin_node
         self.data.traceback = traceback
@@ -6162,6 +6237,7 @@ class Conditional(ExternKernel):
         )
 
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
 
     @classmethod
     def create(
@@ -6277,6 +6353,7 @@ class WhileLoop(ExternKernel):
         )
 
         self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
 
     @classmethod
     def create(
@@ -6781,8 +6858,9 @@ class _CollectiveKernel(FallbackKernel):
         for tensor_arg in tensor_args:
             tensor_arg.realize()
 
+        device = tensor_args[0].get_device()
         packed = cls(
-            NoneLayout(tensor_args[0].get_device()),
+            NoneLayout(device),
             kernel,
             tensor_args,
             non_tensor_args,
@@ -6791,7 +6869,12 @@ class _CollectiveKernel(FallbackKernel):
         packed.cpp_kernel_name = cpp_kernel_name
         packed.python_kernel_name = python_kernel_name
 
-        mark_node_as_mutating(packed, *pytree.tree_leaves(inputs))
+        packed.mutation_outputs.extend(
+            [
+                MutationOutput(NoneLayout(device), buf, packed)
+                for buf in pytree.tree_leaves(inputs)
+            ]
+        )
 
     # NOTE: [Out-of-Place Collective Safety]
     # Between the initiation and completion of an out-of-place collective:
@@ -6907,8 +6990,9 @@ class _WaitKernel(_CollectiveKernel):
             non_tensor_args,
             unflatten_args,
         )
-
-        mark_node_as_mutating(packed, inp)
+        packed.mutation_outputs.append(
+            MutationOutput(NoneLayout(inp.get_device()), inp, packed)
+        )
 
     def get_read_writes(self):
         read_writes = super().get_read_writes()

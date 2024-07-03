@@ -399,8 +399,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
             model_name = os.path.basename(model_path)
             if (
-                not re.search("|".join(args.filter), model_name, re.I)
-                or re.search("|".join(args.exclude), model_name, re.I)
+                not re.search("|".join(args.filter), model_name, re.IGNORECASE)
+                or re.search("|".join(args.exclude), model_name, re.IGNORECASE)
                 or model_name in args.exclude_exact
                 or model_name in self.skip_models
             ):
