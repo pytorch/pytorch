@@ -109,10 +109,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             torch.cuda.Event,
         }
         if hasattr(torch, "hpu"):
-            _in_graph_class_list.update({
-                torch.hpu.Stream,
-                torch.hpu.Event,
-            })
+            _in_graph_class_list.update(
+                {
+                    torch.hpu.Stream,
+                    torch.hpu.Event,
+                }
+            )
 
         return set(tensortype_to_dtype.keys()) | _in_graph_class_list
 
