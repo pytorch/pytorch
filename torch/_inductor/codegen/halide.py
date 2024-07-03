@@ -837,11 +837,11 @@ class HalideKernel(SIMDKernel):
                     for sym, size in added_sym_size:
                         full_index += stride * sym
                         stride *= size
-                    self.index_replacements[node.symbol()] = (
-                        V.graph.sizevars.simplify_with_ranges(
-                            ModularIndexing(full_index, node.divisor, node.length),
-                            self.halide_vars,  # type: ignore[arg-type]
-                        )
+                    self.index_replacements[
+                        node.symbol()
+                    ] = V.graph.sizevars.simplify_with_ranges(
+                        ModularIndexing(full_index, node.divisor, node.length),
+                        self.halide_vars,  # type: ignore[arg-type]
                     )
 
         # codegen the variable definitions
@@ -1153,9 +1153,9 @@ class HalideKernel(SIMDKernel):
 
         if isinstance(value, tuple):
             assert reduction_type == "welford_combine"
-            self.cse.reduction_cache[cache_key] = result_tuple = (
-                self.welford_combine_impl(*value)
-            )
+            self.cse.reduction_cache[
+                cache_key
+            ] = result_tuple = self.welford_combine_impl(*value)
             return result_tuple
 
         assert isinstance(value, HalideCSEVariable) and value.used_dims is not None
@@ -1474,25 +1474,40 @@ class HalideKernel(SIMDKernel):
 
         code.do_unindent(2)
         code.splice(
-            f"""
+            """
             if __name__ == "__main__":
                 hl.main()
-            else:
-                hl.load_plugin({HalideCodeCache.find_libautoschedule(meta.scheduler)!r})
-                target = hl.Target({meta.target!r})
-                autoscheduler = hl.AutoschedulerParams({meta.scheduler!r}, {meta.scheduler_flags!r})
-                with hl.GeneratorContext(target, autoscheduler):
-                    gen = Kernel()
-                    pipeline = gen._build_pipeline()
-                    # gen.compile_to_callable() does not run the autoscheduler
-                    pipeline.apply_autoscheduler(target, autoscheduler)
-                    kernel = pipeline.compile_to_callable([
-                            gen._get_input_parameter(a.name)._to_argument()
-                            for a in gen._get_arginfos()
-                            if a.dir == hl.ArgInfoDirection.Input
-                        ], target)
-            """
+            """.rstrip(),
         )
+        if meta.scheduler:
+            code.splice(
+                f"""
+                else:
+                    hl.load_plugin({HalideCodeCache.find_libautoschedule(meta.scheduler)!r})
+                    target = hl.Target({meta.target!r})
+                    autoscheduler = hl.AutoschedulerParams({meta.scheduler!r}, {meta.scheduler_flags!r})
+                    with hl.GeneratorContext(target, autoscheduler):
+                        gen = Kernel()
+                        pipeline = gen._build_pipeline()
+                        # gen.compile_to_callable() does not run the autoscheduler
+                        pipeline.apply_autoscheduler(target, autoscheduler)
+                        kernel = pipeline.compile_to_callable([
+                                gen._get_input_parameter(a.name)._to_argument()
+                                for a in gen._get_arginfos()
+                                if a.dir == hl.ArgInfoDirection.Input
+                            ], target)
+                """,
+                strip=True,
+            )
+        else:
+            code.splice(
+                f"""
+                  else:
+                      with hl.GeneratorContext(hl.Target({meta.target!r})):
+                          kernel = Kernel().compile_to_callable()
+                  """,
+                strip=True,
+            )
         return code.getvalue()
 
     @staticmethod
@@ -1541,6 +1556,7 @@ class HalideScheduling(SIMDScheduling):
             [
                 BackendFeature.TUPLE_REDUCTION,
                 BackendFeature.PREFER_STORE_LOOP_ORDER,
+                BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
             ]
         )
         return result

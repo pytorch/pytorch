@@ -3852,7 +3852,15 @@ class CommonTemplate:
 
         torch._dynamo.mark_dynamic(x, 0)
 
-        self.common(fn, (x, w))
+        atol = None
+        rtol = None
+        if self.device == "xpu":
+            # set to float32 default tolerance,
+            # check_model_gpu with update rotl to 2e-3 for fp16.
+            # fix issue #129974
+            atol = 1e-05
+            rtol = 1.3e-06
+        self.common(fn, (x, w), atol=atol, rtol=rtol)
 
     def test_conv2d_channels_last(self):
         if self.device == GPU_TYPE:
@@ -11486,11 +11494,9 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 ),
                 (
                     fn3,
-                    (
-                        "triton_poi_fused_layer_norm_relu"
-                        if torch._dynamo.config.inline_inbuilt_nn_modules
-                        else "triton_poi_fused_LayerNorm_ReLU"
-                    ),
+                    "triton_poi_fused_layer_norm_relu"
+                    if torch._dynamo.config.inline_inbuilt_nn_modules
+                    else "triton_poi_fused_LayerNorm_ReLU",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]

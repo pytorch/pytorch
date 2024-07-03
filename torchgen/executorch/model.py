@@ -7,7 +7,6 @@ import itertools
 from collections import defaultdict, namedtuple
 from dataclasses import dataclass
 from enum import IntEnum
-from typing_extensions import assert_never
 
 from torchgen.model import (
     BackendIndex,
@@ -17,6 +16,7 @@ from torchgen.model import (
     NativeFunctionsGroup,
     OperatorName,
 )
+from torchgen.utils import assert_never
 
 
 KERNEL_KEY_VERSION = 1
@@ -174,9 +174,9 @@ class ETKernelIndex:
     def from_backend_indices(
         backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]]
     ) -> ETKernelIndex:
-        kernel_index: dict[OperatorName, dict[ETKernelKey, BackendMetadata]] = (
-            defaultdict(dict)
-        )
+        kernel_index: dict[
+            OperatorName, dict[ETKernelKey, BackendMetadata]
+        ] = defaultdict(dict)
         ETKernelIndex.grow_from_backend_indices(kernel_index, backend_indices)
         return ETKernelIndex(kernel_index)
 
