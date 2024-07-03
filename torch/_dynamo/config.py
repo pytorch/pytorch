@@ -304,6 +304,10 @@ def _get_optimize_ddp_mode():
     return mode
 
 
+# Skip tracing the torchrec files added to trace_rules.FBCODE_SKIP_DIRS
+skip_torchrec = True
+
+
 # No longer used
 optimize_ddp_lazy_compile = False
 
@@ -453,7 +457,8 @@ compiled_autograd = False
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
-    def _make_closure_patcher(**changes): ...
+    def _make_closure_patcher(**changes):
+        ...
 
 
 from torch.utils._config_module import install_config_module

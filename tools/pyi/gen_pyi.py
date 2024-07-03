@@ -1,3 +1,30 @@
+from __future__ import annotations
+
+import argparse
+import collections
+import importlib
+import sys
+from pprint import pformat
+from typing import Sequence
+from unittest.mock import Mock, patch
+from warnings import warn
+
+from tools.autograd.gen_python_functions import (
+    group_overloads,
+    load_signatures,
+    should_generate_py_binding,
+)
+
+from torchgen.api.python import (
+    PythonSignatureGroup,
+    PythonSignatureNativeFunctionPair,
+    returns_structseq_pyi,
+)
+from torchgen.gen import parse_native_yaml, parse_tags_yaml
+from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
+from torchgen.utils import FileManager
+
+
 """
 This module implements generation of type stubs for PyTorch,
 enabling use of autocomplete in IDEs like PyCharm, which otherwise
@@ -21,39 +48,6 @@ Here's our general strategy:
 There are a number of type hints which we've special-cased;
 read gen_pyi for the gory details.
 """
-
-from __future__ import annotations
-
-import argparse
-import collections
-import importlib
-import sys
-from typing import Sequence
-from unittest.mock import Mock, patch
-from warnings import warn
-
-from tools.autograd.gen_python_functions import (
-    group_overloads,
-    load_signatures,
-    should_generate_py_binding,
-)
-
-from torchgen.api.python import (
-    all_ops,
-    binary_ops,
-    comparison_ops,
-    format_function_signature as defs,
-    inplace_binary_ops,
-    PythonSignatureGroup,
-    PythonSignatureNativeFunctionPair,
-    returns_structseq_pyi,
-    symmetric_comparison_ops,
-    to_py_type_ops,
-    unary_ops,
-)
-from torchgen.gen import parse_native_yaml, parse_tags_yaml
-from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
-from torchgen.utils import FileManager
 
 
 def get_py_torch_functions(
@@ -86,41 +80,36 @@ def get_py_torch_functions(
 # TODO: Consider defining some aliases for our Union[...] types, to make
 # the stubs to read on the human eye.
 
-DEVICE_PARAM = "device: DeviceLikeType | None = None"
-FACTORY_PARAMS = [
-    "dtype: _dtype | None = None",
-    DEVICE_PARAM,
-    "requires_grad: _bool = False",
-    "pin_memory: _bool = False",
-]
+DEVICE_PARAM = "device: Optional[DeviceLikeType] = None"
+FACTORY_PARAMS = f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False, pin_memory: _bool = False"
 
 # NOTE: specifying indices for Tensor.__getitem__
 # We can imitate numpy's definition of ndarray.__getitem__ found in numpy/__init__.pyi:
 #
 # key: (
-#     slice
-#     | EllipsisType
-#     | None
-#     | _ArrayLikeInt_co
+#     None
+#     | slice
+#     | ellipsis
 #     | SupportsIndex
-#     | tuple[slice | EllipsisType | None | _ArrayLikeInt_co | SupportsIndex, ...]
+#     | _ArrayLikeInt_co
+#     | tuple[None | slice | ellipsis | _ArrayLikeInt_co | SupportsIndex, ...]
 # )
 #
 # where:
 #
 # _ArrayLikeInt_co = _DualArrayLike[
-#     dtype[bool_ | integer[Any]],
-#     bool | int,
+#     dtype[Union[bool_, integer[Any]]],
+#     Union[bool, int],
 # ]
 #
 # and
 #
-# _DualArrayLike = (
-#     _SupportsArray[_DType]
-#     | _NestedSequence[_SupportsArray[_DType]]
-#     | _T
-#     | _NestedSequence[_T]
-# )
+# _DualArrayLike = Union[
+#     _SupportsArray[_DType],
+#     _NestedSequence[_SupportsArray[_DType]],
+#     _T,
+#     _NestedSequence[_T],
+# ]
 #
 # Moreover, _NestedSequence is a Protocol that matches arbitrary nesting of list/tuple.
 # We can substitute and simplify:
@@ -128,15 +117,14 @@ FACTORY_PARAMS = [
 # _ArrayLikeInt_co -> [bool | int | | Tensor | NestedSequence[bool | int] | NestedSequence[Tensor]]
 # which leaves us with key: T | tuple[T, ...], where T is:
 # T = (
-#     SupportsIndex | bool | int | slice | EllipsisType | None
+#     None | bool | int | slice | ellipsis | SupportsIndex
 #     | Tensor | _NestedSequence[Tensor] | _NestedSequence[bool | int]
 # )
-_leaf_types = (
-    "_bool | _int | slice | EllipsisType | Tensor | None"  # not SupportsIndex!
-)
-_index_types = f"SupportsIndex | {_leaf_types} | _NestedSequence[{_leaf_types}]"
-_index_type_def = f"_Index: TypeAlias = {_index_types}"
-INDICES = "indices: _Index | tuple[_Index, ...]"
+
+# NOTE: ellipsis is equal to type[Ellipsis] in stub files.
+_leaf_types = "Union[None, _bool, _int, slice, ellipsis, Tensor]"  # not SupportsIndex!
+_index = f"Union[SupportsIndex, {_leaf_types}, _NestedSequence[{_leaf_types}]]"
+INDICES = f"indices: Union[{_index}, tuple[{_index}, ...]]"
 
 blocklist = [
     "__init_subclass__",
@@ -189,9 +177,53 @@ blocklist = [
     "copy_",
 ]
 
+binary_ops = (
+    "add",
+    "sub",
+    "mul",
+    "div",
+    "pow",
+    "lshift",
+    "rshift",
+    "mod",
+    "truediv",
+    "matmul",
+    "floordiv",
+    "radd",
+    "rsub",
+    "rmul",
+    "rtruediv",
+    "rfloordiv",
+    "rpow",  # reverse arithmetic
+    "and",
+    "or",
+    "xor",
+    "rand",
+    "ror",
+    "rxor",  # logic
+    "iadd",
+    "iand",
+    "idiv",
+    "ilshift",
+    "imul",
+    "ior",
+    "irshift",
+    "isub",
+    "ixor",
+    "ifloordiv",
+    "imod",  # inplace ops
+)
+symmetric_comparison_ops = ("eq", "ne")
+asymmetric_comparison_ops = ("ge", "gt", "lt", "le")
+comparison_ops = symmetric_comparison_ops + asymmetric_comparison_ops
+
+unary_ops = ("neg", "abs", "invert")
+to_py_type_ops = ("bool", "float", "complex", "long", "index", "int", "nonzero")
+all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
+
 
 def sig_for_ops(opname: str) -> list[str]:
-    """sig_for_ops(opname : str) -> list[str]
+    """sig_for_ops(opname : str) -> List[str]
 
     Returns signatures for operator special functions (__add__ etc.)"""
 
@@ -200,25 +232,17 @@ def sig_for_ops(opname: str) -> list[str]:
     assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
 
     name = opname[2:-2]
-    if name in symmetric_comparison_ops:
-        # e.g.: `__eq__`, `__ne__`
-        # unsafe override https://github.com/python/mypy/issues/5704
-        # PYI032 any-eq-ne-annotation https://docs.astral.sh/ruff/rules/any-eq-ne-annotation
-        return [
-            f"def {opname}(self, other: Any) -> Tensor: ...  # type: ignore[override] # noqa: PYI032"
-        ]
-    if name in inplace_binary_ops:
-        # e.g.: `__iadd__`, `__imul__`
-        # Use `Self` as return type instead of `Tensor` to allow for subclasses
-        return [f"def {opname}(self, other: Any) -> Self: ..."]
-    if name in binary_ops or name in comparison_ops:
-        # e.g.: `__add__`, `__mul__` and `__le__`, `__gt__`
+    if name in binary_ops:
         return [f"def {opname}(self, other: Any) -> Tensor: ..."]
-    if name in unary_ops:
-        # e.g.: `__pos__`, `__neg__`, `__abs__`
+    elif name in comparison_ops:
+        sig = f"def {opname}(self, other: Any) -> Tensor: ..."
+        if name in symmetric_comparison_ops:
+            # unsafe override https://github.com/python/mypy/issues/5704
+            sig += "  # type: ignore[override]"
+        return [sig]
+    elif name in unary_ops:
         return [f"def {opname}(self) -> Tensor: ..."]
-    if name in to_py_type_ops:
-        # e.g.: `__int__`, `__index__`, `__float__`, `__bool__`
+    elif name in to_py_type_ops:
         if name in {"bool", "float", "complex"}:
             tname = name
         elif name == "nonzero":
@@ -226,9 +250,10 @@ def sig_for_ops(opname: str) -> list[str]:
         else:
             tname = "int"
         if tname in {"float", "int", "bool", "complex"}:
-            tname = "_" + tname
+            tname = "builtins." + tname
         return [f"def {opname}(self) -> {tname}: ..."]
-    raise ValueError(f"unknown op {opname!r}")
+    else:
+        raise Exception("unknown op", opname)  # noqa: TRY002
 
 
 def generate_type_hints(sig_group: PythonSignatureGroup) -> list[str]:
@@ -276,16 +301,20 @@ def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]
     # Otherwise force return_indices to be kwarg
     arg_list_keyword = arg_list.copy()
     arg_list_keyword.insert(flag_pos, "*")
+    tmpl = "def {name}({args}) -> {{return_type}}: ..."
     return {
         name: [
-            defs(name, arg_list, "Tensor").format(
+            tmpl.format(name=name, args=", ".join(arg_list)).format(
                 return_indices="return_indices: Literal[False] = False",
+                return_type="Tensor",
             ),
-            defs(name, arg_list_positional, "tuple[Tensor, Tensor]").format(
+            tmpl.format(name=name, args=", ".join(arg_list_positional)).format(
                 return_indices="return_indices: Literal[True]",
+                return_type="Tuple[Tensor, Tensor]",
             ),
-            defs(name, arg_list_keyword, "tuple[Tensor, Tensor]").format(
+            tmpl.format(name=name, args=", ".join(arg_list_keyword)).format(
                 return_indices="return_indices: Literal[True]",
+                return_type="Tuple[Tensor, Tensor]",
             ),
         ]
     }
@@ -293,11 +322,13 @@ def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]
 
 def gen_nn_functional(fm: FileManager) -> None:
     INPUT = "input: Tensor"
-    KERNEL_SIZE = "kernel_size: _int | _size"
-    STRIDE_PADDING = [
-        "stride: _int | _size | None = None",
-        "padding: _int | _size = 0",
-    ]
+    KERNEL_SIZE = "kernel_size: Union[_int, _size]"
+    STRIDE_PADDING = ", ".join(
+        [
+            "stride: Optional[Union[_int, _size]] = None",
+            "padding: Union[_int, _size] = 0",
+        ]
+    )
 
     # TODO the list for `torch._C._nn` is nonexhaustive
     unsorted_c_nn_function_hints: dict[str, list[str]] = {}
@@ -306,39 +337,36 @@ def gen_nn_functional(fm: FileManager) -> None:
         unsorted_c_nn_function_hints.update(
             {
                 f"avg_pool{d}d": [
-                    defs(
-                        f"avg_pool{d}d",
-                        [
-                            INPUT,
-                            KERNEL_SIZE,
-                            *STRIDE_PADDING,
-                            "ceil_mode: bool = False",
-                            "count_include_pad: bool = True",
-                            "divisor_override: int | None = None",
-                        ],
-                        "Tensor",
+                    f"def avg_pool{d}d({{}}) -> Tensor: ...".format(
+                        ", ".join(
+                            [
+                                f"{INPUT}",
+                                f"{KERNEL_SIZE}",
+                                f"{STRIDE_PADDING}",
+                                "ceil_mode: bool = False",
+                                "count_include_pad: bool = True",
+                                "divisor_override: Optional[int] = None",
+                            ]
+                        )
                     )
                 ],
                 f"fractional_max_pool{d}d": [
-                    defs(
-                        f"fractional_max_pool{d}d",
-                        [
-                            INPUT,
-                            KERNEL_SIZE,
-                            "output_size: _int | _size",
-                            "_random_samples: Tensor",
-                        ],
-                        "tuple[Tensor, Tensor]",
+                    f"def fractional_max_pool{d}d({{}}) -> {{}}: ...".format(
+                        ", ".join(
+                            [
+                                f"{INPUT}",
+                                f"{KERNEL_SIZE}",
+                                "output_size: Union[_int, _size]",
+                                "_random_samples: Tensor",
+                            ]
+                        ),
+                        "Tuple[Tensor, Tensor]",
                     )
                 ],
                 f"adaptive_max_pool{d}d": [
-                    defs(
-                        f"adaptive_max_pool{d}d",
-                        [
-                            INPUT,
-                            "output_size: _int | _size",
-                        ],
-                        "tuple[Tensor, Tensor]",
+                    f"def adaptive_max_pool{d}d({{}}) -> {{}}: ...".format(
+                        ", ".join([f"{INPUT}", "output_size: Union[_int, _size]"]),
+                        "Tuple[Tensor, Tensor]",
                     )
                 ],
             }
@@ -347,101 +375,99 @@ def gen_nn_functional(fm: FileManager) -> None:
     unsorted_c_nn_function_hints.update(
         {
             "hardtanh": [
-                defs(
-                    "hardtanh",
-                    [
-                        "input: Tensor",
-                        "min_val: float = ...",
-                        "max_val: float = ...",
-                        "*",
-                        "out: Tensor | None = None",
-                    ],
-                    "Tensor",
+                "def hardtanh({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "min_val: float = ...",
+                            "max_val: float = ...",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
                 )
             ],
             "hardtanh_": [
-                defs(
-                    "hardtanh_",
-                    ["input: Tensor", "min_val: float = ...", "max_val: float = ..."],
-                    "Tensor",
-                ),
+                "def hardtanh_({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "min_val: float = ...",
+                            "max_val: float = ...",
+                        ]
+                    )
+                )
             ],
-            "elu_": [defs("elu_", ["input: Tensor", "alpha: float = ..."], "Tensor")],
+            "elu_": ["def elu_(input: Tensor, alpha: float = ...) -> Tensor: ..."],
             "leaky_relu": [
-                defs(
-                    "leaky_relu",
-                    [
-                        "input: Tensor",
-                        "negative_slope: float = ...",
-                        "*",
-                        "out: Tensor | None = None",
-                    ],
-                    "Tensor",
+                "def leaky_relu({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "negative_slope: float = ...",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
                 )
             ],
             "leaky_relu_": [
-                defs(
-                    "leaky_relu_",
-                    ["input: Tensor", "negative_slope: float = ..."],
-                    "Tensor",
-                )
+                f"def leaky_relu_({', '.join(['input: Tensor', 'negative_slope: float = ...'])}) -> Tensor: ..."
             ],
-            "log_sigmoid": [defs("log_sigmoid", ["input: Tensor"], "Tensor")],
-            "gelu": [
-                defs("gelu", ["input: Tensor", "approximate: str = ..."], "Tensor")
-            ],
+            "log_sigmoid": ["def log_sigmoid(input: Tensor) -> Tensor: ..."],
+            "gelu": ["def gelu(input: Tensor, approximate: str = ...) -> Tensor: ..."],
             "softplus": [
-                defs(
-                    "softplus",
-                    ["input: Tensor", "beta: float = ...", "threshold: float = ..."],
-                    "Tensor",
+                "def softplus({}) -> Tensor: ...".format(
+                    ", ".join(
+                        ["input: Tensor", "beta: float = ...", "threshold: float = ..."]
+                    )
                 )
             ],
             "softshrink": [
-                defs("softshrink", ["input: Tensor", "lambd: float = ..."], "Tensor")
+                "def softshrink(input: Tensor, lambd: float = ...) -> Tensor: ..."
             ],
             "hardsigmoid": [
-                defs(
-                    "hardsigmoid",
-                    ["input: Tensor", "*", "out: Tensor | None = None"],
-                    "Tensor",
-                )
+                f"def hardsigmoid({', '.join(['input: Tensor', '*', 'out: Optional[Tensor] = None'])}) -> Tensor: ..."
             ],
             "linear": [
-                defs(
-                    "linear",
-                    ["input: Tensor", "weight: Tensor", "bias: Tensor | None = None"],
-                    "Tensor",
+                "def linear({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "weight: Tensor",
+                            "bias: Optional[Tensor] = None",
+                        ]
+                    )
                 )
             ],
             "pad": [
-                defs(
-                    "pad",
-                    [
-                        "input: Tensor",
-                        "pad: Sequence[int]",
-                        "mode: str = ...",
-                        "value: float | None = None",
-                    ],
-                    "Tensor",
+                "def pad({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "pad: Sequence[int]",
+                            "mode: str = ...",
+                            "value: Optional[float] = None",
+                        ]
+                    )
                 )
             ],
             "one_hot": [
-                defs("one_hot", ["tensor: Tensor", "num_classes: int = ..."], "Tensor")
+                "def one_hot(tensor: Tensor, num_classes: int = ...) -> Tensor: ..."
             ],
             "scaled_dot_product_attention": [
-                defs(
-                    "scaled_dot_product_attention",
-                    [
-                        "query: Tensor",
-                        "key: Tensor",
-                        "value: Tensor",
-                        "attn_mask: Tensor | None = None",
-                        "dropout_p: float = 0.0",
-                        "is_causal: bool = False",
-                        "scale: float | None = None",
-                    ],
-                    "Tensor",
+                "def scaled_dot_product_attention({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "query: Tensor",
+                            "key: Tensor",
+                            "value: Tensor",
+                            "attn_mask: Optional[Tensor] = None",
+                            "dropout_p: float = 0.0",
+                            "is_causal: bool = False",
+                            "scale: Optional[float] = None",
+                        ]
+                    )
                 )
             ],
         }
@@ -453,65 +479,55 @@ def gen_nn_functional(fm: FileManager) -> None:
             hints = ["@overload\n" + h for h in hints]
         c_nn_function_hints += hints
 
-    extra_nn_functional___all__: list[str] = []
-
     # Functions imported into `torch.nn.functional` from `torch`, perhaps being filtered
     # through an `_add_docstr` call
     torch_imports = [
-        "adaptive_avg_pool1d",
-        "avg_pool1d",
-        "bilinear",
-        "celu_",
-        "channel_shuffle",
-        "conv_tbc",
-        "conv_transpose1d",
-        "conv_transpose2d",
-        "conv_transpose3d",
         "conv1d",
         "conv2d",
         "conv3d",
-        "cosine_similarity",
+        "conv_transpose1d",
+        "conv_transpose2d",
+        "conv_transpose3d",
+        "conv_tbc",
+        "avg_pool1d",
+        "adaptive_avg_pool1d",
+        "relu_",
+        "selu_",
+        "celu_",
+        "prelu",
+        "rrelu_",
         "hardshrink",
+        "bilinear",
+        "pixel_shuffle",
+        "pixel_unshuffle",
+        "channel_shuffle",
         "native_channel_shuffle",
         "pairwise_distance",
         "pdist",
-        "pixel_shuffle",
-        "pixel_unshuffle",
-        "prelu",
-        "relu_",
-        "rrelu_",
-        "selu_",
+        "cosine_similarity",
     ]
-    imported_hints = [
-        "from torch import (",
-        *sorted(f"    {name} as {name}," for name in torch_imports),
-        ")",
-    ]
-    extra_nn_functional___all__.extend(torch_imports)
+    imported_hints = [f"from torch import {_} as {_}" for _ in torch_imports]
 
     # Functions imported into `torch.nn.functional` from `torch._C._nn`
     c_nn_imports = [
         "avg_pool2d",
         "avg_pool3d",
-        "elu_",
-        "gelu",
         "hardtanh_",
+        "elu_",
         "leaky_relu_",
-        "linear",
-        "log_sigmoid",
-        "one_hot",
-        "pad",
-        "scaled_dot_product_attention",
+        "gelu",
         "softplus",
         "softshrink",
+        "linear",
+        "pad",
+        "one_hot",
+        "scaled_dot_product_attention",
     ]
-    renamed = {"log_sigmoid": "logsigmoid"}
-    imported_hints += [
-        "from torch._C._nn import (",
-        *sorted(f"    {name} as {renamed.get(name, name)}," for name in c_nn_imports),
-        ")",
-    ]
-    extra_nn_functional___all__.extend(renamed.get(name, name) for name in c_nn_imports)
+    imported_hints += [f"from torch._C._nn import {_} as {_}" for _ in c_nn_imports]
+    # This is from `torch._C._nn` but renamed
+    imported_hints.append(
+        "from torch._C._nn import log_sigmoid\nlogsigmoid = log_sigmoid"
+    )
 
     # Functions generated by `torch._jit_internal.boolean_dispatch` in `nn.functional`
     unsorted_dispatched_hints: dict[str, list[str]] = {}
@@ -521,10 +537,10 @@ def gen_nn_functional(fm: FileManager) -> None:
             **get_max_pool_dispatch(
                 f"max_pool{d}d",
                 [
-                    INPUT,
-                    KERNEL_SIZE,
-                    *STRIDE_PADDING,
-                    "dilation: _int | _size = 1",
+                    f"{INPUT}",
+                    f"{KERNEL_SIZE}",
+                    f"{STRIDE_PADDING}",
+                    "dilation: Union[_int, _size] = 1",
                     "ceil_mode: bool = False",
                     "{return_indices}",
                 ],
@@ -532,27 +548,22 @@ def gen_nn_functional(fm: FileManager) -> None:
             **get_max_pool_dispatch(
                 f"fractional_max_pool{d}d",
                 [
-                    INPUT,
-                    KERNEL_SIZE,
-                    "output_size: _int | _size | None = None",
-                    "output_ratio: _ratio_any_t | None = None",
+                    f"{INPUT}",
+                    f"{KERNEL_SIZE}",
+                    "output_size: Optional[Union[_int, _size]] = None",
+                    "output_ratio: Optional[_ratio_any_t] = None",
                     "{return_indices}",
-                    "_random_samples: Tensor | None = None",
+                    "_random_samples: Optional[Tensor] = None",
                 ],
             ),
             **get_max_pool_dispatch(
                 f"adaptive_max_pool{d}d",
-                [
-                    INPUT,
-                    "output_size: _int | _size",
-                    "{return_indices}",
-                ],
+                [f"{INPUT}", "output_size: Union[_int, _size]", "{return_indices}"],
             ),
         )
 
     # There's no fractional_max_pool1d
     del unsorted_dispatched_hints["fractional_max_pool1d"]
-    extra_nn_functional___all__.extend(unsorted_dispatched_hints)
 
     dispatched_hints: list[str] = []
     for _, hints in sorted(unsorted_dispatched_hints.items()):
@@ -560,19 +571,12 @@ def gen_nn_functional(fm: FileManager) -> None:
             hints = ["@overload\n" + h for h in hints]
         dispatched_hints += hints
 
-    extra_nn_functional___all__ = [
-        "__all__ += [",
-        *(f'    "{name}",' for name in extra_nn_functional___all__),
-        "]",
-    ]
-
     fm.write_with_template(
         "torch/nn/functional.pyi",
         "torch/nn/functional.pyi.in",
         lambda: {
             "imported_hints": imported_hints,
             "dispatched_hints": dispatched_hints,
-            "extra_nn_functional___all__": extra_nn_functional___all__,
         },
     )
     fm.write_with_template(
@@ -662,20 +666,20 @@ def gen_pyi(
         unsorted_function_hints.update(
             {
                 f"sparse_{n}_tensor": [
-                    defs(
-                        f"sparse_{n}_tensor",
-                        [
-                            f"{n1}_indices: Tensor | list",
-                            f"{n2}_indices: Tensor | list",
-                            "values: Tensor | list",
-                            "size: _size | None = None",
-                            "*",
-                            "dtype: _dtype | None = None",
-                            "device: DeviceLikeType | None = None",
-                            "requires_grad: _bool = False",
-                            "check_invariants: _bool | None = None",
-                        ],
-                        "Tensor",
+                    f"def sparse_{n}_tensor({{}}) -> Tensor: ...".format(
+                        ", ".join(
+                            [
+                                f"{n1}_indices: Union[Tensor, List]",
+                                f"{n2}_indices: Union[Tensor, List]",
+                                "values: Union[Tensor, List]",
+                                "size: Optional[_size] = None",
+                                "*",
+                                "dtype: Optional[_dtype] = None",
+                                "device: Optional[DeviceLikeType] = None",
+                                "requires_grad: _bool = False",
+                                "check_invariants: Optional[_bool] = None",
+                            ]
+                        ),
                     )
                 ],
             }
@@ -683,383 +687,324 @@ def gen_pyi(
 
     unsorted_function_hints.update(
         {
-            "set_flush_denormal": [
-                defs("set_flush_denormal", ["mode: _bool"], "_bool")
-            ],
-            "get_default_dtype": [defs("get_default_dtype", [], "_dtype")],
+            "set_flush_denormal": ["def set_flush_denormal(mode: _bool) -> _bool: ..."],
+            "get_default_dtype": ["def get_default_dtype() -> _dtype: ..."],
             "asarray": [
-                defs(
-                    "asarray",
-                    [
-                        "obj: Any",
-                        "*",
-                        "dtype: _dtype | None = None",
-                        "device: DeviceLikeType | None = None",
-                        "copy: _bool | None = None",
-                        "requires_grad: _bool = False",
-                    ],
-                    "Tensor",
+                "def asarray({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "obj: Any",
+                            "*",
+                            "dtype: Optional[_dtype] = None",
+                            "device: Optional[DeviceLikeType] = None",
+                            "copy: Optional[_bool] = None",
+                            "requires_grad: _bool = False",
+                        ]
+                    )
                 )
             ],
-            "from_numpy": [defs("from_numpy", ["ndarray"], "Tensor")],
+            "from_numpy": ["def from_numpy(ndarray) -> Tensor: ..."],
             "frombuffer": [
-                defs(
-                    "frombuffer",
-                    [
-                        "buffer: Any",
-                        "*",
-                        "dtype: _dtype",
-                        "count: int = -1",
-                        "offset: int = 0",
-                        "requires_grad: _bool = False",
-                    ],
-                    "Tensor",
+                "def frombuffer({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "buffer: Any",
+                            "*",
+                            "dtype: _dtype",
+                            "count: int = -1",
+                            "offset: int = 0",
+                            "requires_grad: _bool = False",
+                        ]
+                    )
                 )
             ],
-            "numel": [defs("numel", ["self: Tensor"], "_int")],
+            "numel": ["def numel(self: Tensor) -> _int: ..."],
             "as_tensor": [
-                defs(
-                    "as_tensor",
-                    ["data: Any", "dtype: _dtype | None = None", DEVICE_PARAM],
-                    "Tensor",
+                "def as_tensor({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "data: Any",
+                            "dtype: Optional[_dtype] = None",
+                            DEVICE_PARAM,
+                        ]
+                    )
                 )
             ],
-            "get_num_threads": [defs("get_num_threads", [], "_int")],
-            "set_num_threads": [defs("set_num_threads", ["num: _int"], "None")],
-            "init_num_threads": [defs("init_num_threads", [], "None")],
-            "get_num_interop_threads": [defs("get_num_interop_threads", [], "_int")],
+            "get_num_threads": ["def get_num_threads() -> _int: ..."],
+            "set_num_threads": ["def set_num_threads(num: _int) -> None: ..."],
+            "init_num_threads": ["def init_num_threads() -> None: ..."],
+            "get_num_interop_threads": ["def get_num_interop_threads() -> _int: ..."],
             "set_num_interop_threads": [
-                defs("set_num_interop_threads", ["num: _int"], "None")
+                "def set_num_interop_threads(num: _int) -> None: ..."
             ],
             # These functions are explicitly disabled by
             # SKIP_PYTHON_BINDINGS because they are hand bound.
             # Correspondingly, we must hand-write their signatures.
-            "tensor": [defs("tensor", ["data: Any", *FACTORY_PARAMS], "Tensor")],
+            "tensor": [f"def tensor(data: Any, {FACTORY_PARAMS}) -> Tensor: ..."],
             "sparse_coo_tensor": [
-                defs(
-                    "sparse_coo_tensor",
-                    [
-                        "indices: Tensor",
-                        "values: Tensor | list",
-                        "size: _size | None = None",
-                        "*",
-                        "dtype: _dtype | None = None",
-                        "device: DeviceLikeType | None = None",
-                        "requires_grad: _bool = False",
-                        "check_invariants: _bool | None = None",
-                        "is_coalesced: _bool | None = None",
-                    ],
-                    "Tensor",
+                "def sparse_coo_tensor({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "indices: Tensor",
+                            "values: Union[Tensor, List]",
+                            "size: Optional[_size] = None",
+                            "*",
+                            "dtype: Optional[_dtype] = None",
+                            "device: Optional[DeviceLikeType] = None",
+                            "requires_grad: _bool = False",
+                            "check_invariants: Optional[_bool] = None",
+                            "is_coalesced: Optional[_bool] = None",
+                        ]
+                    )
                 )
             ],
             "sparse_compressed_tensor": [
-                defs(
-                    "sparse_compressed_tensor",
-                    [
-                        "compressed_indices: Tensor | list",
-                        "plain_indices: Tensor | list",
-                        "values: Tensor | list",
-                        "size: _size | None = None",
-                        "*",
-                        "dtype: _dtype | None = None",
-                        "layout: _layout | None = None",
-                        "device: DeviceLikeType | None = None",
-                        "requires_grad: _bool = False",
-                        "check_invariants: _bool | None = None",
-                    ],
-                    "Tensor",
+                "def sparse_compressed_tensor({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "compressed_indices: Union[Tensor, List]",
+                            "plain_indices: Union[Tensor, List]",
+                            "values: Union[Tensor, List]",
+                            "size: Optional[_size] = None",
+                            "*",
+                            "dtype: Optional[_dtype] = None",
+                            "layout: Optional[_layout] = None",
+                            "device: Optional[DeviceLikeType] = None",
+                            "requires_grad: _bool = False",
+                            "check_invariants: Optional[_bool] = None",
+                        ]
+                    )
                 )
             ],
-            "_sync": [defs("_sync", ["t: Tensor"], "None")],
+            "_sync": ["def _sync(t: Tensor) -> None: ..."],
             "_is_functional_tensor": [
-                defs("_is_functional_tensor", ["t: Tensor"], "_bool")
+                "def _is_functional_tensor(t: Tensor) -> _bool: ..."
             ],
             "_from_functional_tensor": [
-                defs("_from_functional_tensor", ["t: Tensor"], "Tensor")
+                "def _from_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
             "_to_functional_tensor": [
-                defs("_to_functional_tensor", ["t: Tensor"], "Tensor")
+                "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
             "_functionalize_replace": [
-                defs(
-                    "_functionalize_replace", ["self_: Tensor", "other: Tensor"], "None"
-                )
+                "def _functionalize_replace(self_: Tensor, other: Tensor) -> None: ..."
             ],
             "_functionalize_commit_update": [
-                defs("_functionalize_commit_update", ["t: Tensor"], "None")
+                "def _functionalize_commit_update(t: Tensor) -> None: ..."
             ],
             "_functionalize_mark_mutation_hidden_from_autograd": [
-                defs(
-                    "_functionalize_mark_mutation_hidden_from_autograd",
-                    ["t: Tensor"],
-                    "None",
-                )
+                "def _functionalize_mark_mutation_hidden_from_autograd(t: Tensor) -> None: ..."
             ],
             "_functionalize_are_all_mutations_hidden_from_autograd": [
-                defs(
-                    "_functionalize_are_all_mutations_hidden_from_autograd",
-                    ["t: Tensor"],
-                    "_bool",
-                )
+                "def _functionalize_are_all_mutations_hidden_from_autograd(t: Tensor) -> _bool: ..."
             ],
             "_functionalize_are_all_mutations_under_no_grad_or_inference_mode": [
-                defs(
-                    "_functionalize_are_all_mutations_under_no_grad_or_inference_mode",
-                    ["t: Tensor"],
-                    "_bool",
-                )
+                "def _functionalize_are_all_mutations_under_no_grad_or_inference_mode(t: Tensor) -> _bool: ..."
             ],
             "_functionalize_was_inductor_storage_resized": [
-                defs(
-                    "_functionalize_was_inductor_storage_resized",
-                    ["t: Tensor"],
-                    "_bool",
-                )
+                "def _functionalize_was_inductor_storage_resized(t: Tensor) -> _bool: ..."
             ],
-            "_functionalize_sync": [defs("_functionalize_sync", ["t: Tensor"], "None")],
+            "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_functionalize_was_storage_changed": [
-                defs("_functionalize_was_storage_changed", ["tensor: Tensor"], "_bool")
+                "def _functionalize_was_storage_changed(tensor: Tensor) -> _bool: ..."
             ],
             "_functionalize_has_metadata_mutation": [
-                defs(
-                    "_functionalize_has_metadata_mutation", ["tensor: Tensor"], "_bool"
-                )
+                "def _functionalize_has_metadata_mutation(tensor: Tensor) -> _bool: ..."
             ],
             "_functionalize_apply_view_metas": [
-                defs(
-                    "_functionalize_apply_view_metas",
-                    ["tensor: Tensor", "base: Tensor"],
-                    "Tensor",
-                )
+                "def _functionalize_apply_view_metas(tensor: Tensor,  base: Tensor) -> Tensor: ..."
             ],
             "_functionalize_is_symbolic": [
-                defs("_functionalize_is_symbolic", ["tensor: Tensor"], "_bool")
+                "def _functionalize_is_symbolic(tensor: Tensor) -> _bool: ..."
             ],
             "_enable_functionalization": [
-                defs(
-                    "_enable_functionalization",
-                    ["*", "reapply_views: _bool = False"],
-                    "None",
-                )
+                "def _enable_functionalization(*, reapply_views: _bool = False): ..."
             ],
-            "_disable_functionalization": [defs("_disable_functionalization")],
+            "_disable_functionalization": ["def _disable_functionalization(): ..."],
             "range": [
-                defs(
-                    "range",
-                    [
-                        "start: Number",
-                        "end: Number",
-                        "step: Number = 1",
-                        "*",
-                        "out: Tensor | None = None",
-                        *FACTORY_PARAMS,
-                    ],
-                    "Tensor",
+                "def range({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "start: Number",
+                            "end: Number",
+                            "step: Number = 1",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 )
             ],
             "arange": [
-                defs(
-                    "arange",
-                    [
-                        "start: Number",
-                        "end: Number",
-                        "step: Number",
-                        "*",
-                        "out: Tensor | None = None",
-                        *FACTORY_PARAMS,
-                    ],
-                    "Tensor",
+                "def arange({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "start: Number",
+                            "end: Number",
+                            "step: Number",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 ),
-                defs(
-                    "arange",
-                    [
-                        "start: Number",
-                        "end: Number",
-                        "*",
-                        "out: Tensor | None = None",
-                        *FACTORY_PARAMS,
-                    ],
-                    "Tensor",
+                "def arange({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "start: Number",
+                            "end: Number",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 ),
-                defs(
-                    "arange",
-                    ["end: Number", "*", "out: Tensor | None = None", *FACTORY_PARAMS],
-                    "Tensor",
+                "def arange({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "end: Number",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 ),
             ],
             "linspace": [
-                defs(
-                    "linspace",
-                    [
-                        "start: Number",
-                        "end: Number",
-                        "steps: _int | None = None",
-                        "*",
-                        "out: Tensor | None = None",
-                        *FACTORY_PARAMS,
-                    ],
-                    "Tensor",
+                "def linspace({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "start: Number",
+                            "end: Number",
+                            "steps: Optional[_int] = None",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 )
             ],
             "logspace": [
-                defs(
-                    "logspace",
-                    [
-                        "start: Number",
-                        "end: Number",
-                        "steps: _int | None = None",
-                        "base: _float = 10.0",
-                        "*",
-                        "out: Tensor | None = None",
-                        *FACTORY_PARAMS,
-                    ],
-                    "Tensor",
+                "def logspace({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "start: Number",
+                            "end: Number",
+                            "steps: Optional[_int] = None",
+                            "base: _float = 10.0",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 )
             ],
             "randint": [
-                defs(
-                    "randint",
-                    [
-                        "low: _int",
-                        "high: _int",
-                        "size: _size",
-                        "*",
-                        "generator: Generator | None = None",
-                        *FACTORY_PARAMS,
-                    ],
-                    "Tensor",
+                "def randint({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "low: _int",
+                            "high: _int",
+                            "size: _size",
+                            "*",
+                            "generator: Optional[Generator] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 ),
-                defs(
-                    "randint",
-                    [
-                        "high: _int",
-                        "size: _size",
-                        "*",
-                        "generator: Generator | None = None",
-                        *FACTORY_PARAMS,
-                    ],
-                    "Tensor",
+                "def randint({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "high: _int",
+                            "size: _size",
+                            "*",
+                            "generator: Optional[Generator] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 ),
             ],
             "full": [
-                defs(
-                    "full",
-                    [
-                        "size: _size",
-                        "fill_value: Number | _complex",
-                        "*",
-                        "out: Tensor | None = None",
-                        "layout: _layout = strided",
-                        *FACTORY_PARAMS,
-                    ],
-                    "Tensor",
+                "def full({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "size: _size",
+                            "fill_value: Union[Number, _complex]",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                            "layout: _layout = strided",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 ),
-                defs(
-                    "full",
-                    [
-                        "size: _size",
-                        "fill_value: Number | _complex",
-                        "*",
-                        "names: list[str | None]",
-                        "layout: _layout = strided",
-                        *FACTORY_PARAMS,
-                    ],
-                    "Tensor",
+                "def full({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "size: _size",
+                            "fill_value: Union[Number, _complex]",
+                            "*",
+                            "names: List[Union[str, None]]",
+                            "layout: _layout = strided",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 ),
             ],
-            "is_grad_enabled": [defs("is_grad_enabled", [], "_bool")],
+            "is_grad_enabled": ["def is_grad_enabled() -> _bool: ..."],
             "is_inference_mode_enabled": [
-                defs("is_inference_mode_enabled", [], "_bool")
+                "def is_inference_mode_enabled() -> _bool: ..."
             ],
             "nonzero": [
-                defs(
-                    "nonzero",
-                    [
-                        "input: Tensor",
-                        "*",
-                        "as_tuple: Literal[False] = False",
-                        "out: Tensor | None = None",
-                    ],
-                    "Tensor",
-                ),
-                defs(
-                    "nonzero",
-                    ["input: Tensor", "*", "as_tuple: Literal[True]"],
-                    "tuple[Tensor, ...]",
-                ),
+                "def nonzero(input: Tensor, *, as_tuple: Literal[False] = False, out: Optional[Tensor] = None) -> Tensor: ...",
+                "def nonzero(input: Tensor, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...",
             ],
-            "dsmm": [defs("dsmm", ["input: Tensor", "mat2: Tensor"], "Tensor")],
-            "hsmm": [defs("hsmm", ["input: Tensor", "mat2: Tensor"], "Tensor")],
+            "dsmm": ["def dsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
+            "hsmm": ["def hsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "saddmm": [
-                defs(
-                    "saddmm",
-                    [
-                        "input: Tensor",
-                        "mat1: Tensor",
-                        "mat2: Tensor",
-                        "*",
-                        "beta: Number = 1",
-                        "alpha: Number = 1",
-                        "out: Tensor | None = None",
-                    ],
-                    "Tensor",
+                "def saddmm({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "mat1: Tensor",
+                            "mat2: Tensor",
+                            "*",
+                            "beta: Number = 1",
+                            "alpha: Number = 1",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
                 )
             ],
-            "spmm": [defs("spmm", ["input: Tensor", "mat2: Tensor"], "Tensor")],
+            "spmm": ["def spmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "div": [
-                defs(
-                    "div",
-                    [
-                        "input: Tensor | Number",
-                        "other: Tensor | Number",
-                        "*",
-                        "rounding_mode: str | None = None",
-                        "out: Tensor | None = None",
-                    ],
-                    "Tensor",
+                "def div({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Union[Tensor, Number]",
+                            "other: Union[Tensor, Number]",
+                            "*",
+                            "rounding_mode: Optional[str] = None",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
                 )
             ],
         }
     )
     for binop in ["true_divide", "floor_divide"]:
         unsorted_function_hints[binop].append(
-            defs(
-                binop,
-                [
-                    "input: Tensor | Number",
-                    "other: Tensor | Number",
-                    "*",
-                    "out: Tensor | None = None",
-                ],
-                "Tensor",
-            )
+            f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
+            "*, out: Optional[Tensor] = None) -> Tensor: ..."
         )
     for binop in ["mul"]:
         unsorted_function_hints[binop].append(
-            defs(
-                binop,
-                [
-                    "input: Tensor | Number | _complex",
-                    "other: Tensor | Number | _complex",
-                    "*",
-                    "out: Tensor | None = None",
-                ],
-                "Tensor",
-            )
+            f"def {binop}(input: Union[Tensor, Number, _complex], other: Union[Tensor, Number, _complex], "
+            "*, out: Optional[Tensor] = None) -> Tensor: ..."
         )
     for binop in ["add", "sub"]:
         unsorted_function_hints[binop].append(
-            defs(
-                binop,
-                [
-                    "input: Tensor | Number | _complex",
-                    "other: Tensor | Number | _complex",
-                    "*",
-                    "alpha: Number | _complex | None = 1",
-                    "out: Tensor | None = None",
-                ],
-                "Tensor",
-            )
+            f"def {binop}(input: Union[Tensor, Number, _complex], other: Union[Tensor, Number, _complex], "
+            "*, alpha: Optional[Union[Number, _complex]] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
         )
 
     native_functions = parse_native_yaml(
@@ -1087,13 +1032,13 @@ def gen_pyi(
     def replace_special_case(hint: str) -> str:
         # NB: Keep this in sync with enum in aten/src/ATen/core/Reduction.h
         hint = hint.replace("at::Reduction::Mean", "1")
-        hint = hint.replace(": Tensor = None", ": Tensor | None = None")
+        hint = hint.replace(": Tensor = None", ": Optional[Tensor] = None")
         # Match both:
-        # ": Tensor | tuple[Tensor | ...] | list[Tensor] = None"
-        # ": tuple[Tensor | ...] | list[Tensor] = None"
+        # ": Union[Tensor, Tuple[Tensor, ...], List[Tensor]] = None"
+        # ": Union[Tuple[Tensor, ...], List[Tensor]] = None"
         hint = hint.replace(
-            "tuple[Tensor, ...] | list[Tensor] = None",
-            "tuple[Tensor, ...] | list[Tensor] | None = None",
+            "Tuple[Tensor, ...], List[Tensor]] = None",
+            "Tuple[Tensor, ...], List[Tensor], None] = None",
         )
         return hint
 
@@ -1111,171 +1056,122 @@ def gen_pyi(
     # Generate type signatures for Tensor methods
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    index_type_def = [_index_type_def]
     unsorted_tensor_method_hints: dict[str, list[str]] = collections.defaultdict(list)
     unsorted_tensor_method_hints.update(
         {
             "size": [
-                defs("size", ["self", "dim: None = None"], "Size"),
-                defs("size", ["self", "dim: _int"], "_int"),
+                "def size(self, dim: None = None) -> Size: ...",
+                "def size(self, dim: _int) -> _int: ...",
             ],
             "stride": [
-                defs("stride", ["self", "dim: None = None"], "tuple[_int, ...]"),
-                defs("stride", ["self", "dim: _int"], "_int"),
+                "def stride(self, dim: None = None) -> Tuple[_int, ...]: ...",
+                "def stride(self, dim: _int) -> _int: ...",
             ],
             "new_ones": [
-                defs("new_ones", ["self", "size: _size", *FACTORY_PARAMS], "Tensor")
+                f"def new_ones(self, size: _size, {FACTORY_PARAMS}) -> Tensor: ..."
             ],
             "new_tensor": [
-                defs("new_tensor", ["self", "data: Any", *FACTORY_PARAMS], "Tensor")
+                f"def new_tensor(self, data: Any, {FACTORY_PARAMS}) -> Tensor: ..."
             ],
-            "__new__": [defs("__new__", ["cls", "*args", "**kwargs"], "Self")],
+            "__new__": ["def __new__(cls, *args, **kwargs) -> Self: ..."],
             # new and __init__ have the same signatures differ only in return type
             # Adapted from legacy_tensor_ctor and legacy_tensor_new
             "new": [
-                defs("new", ["cls", "*args: Any", DEVICE_PARAM], "Self"),
-                defs("new", ["cls", "storage: Storage"], "Self"),
-                defs("new", ["cls", "other: Tensor"], "Self"),
-                defs("new", ["cls", "size: _size", "*", DEVICE_PARAM], "Self"),
+                f"def new(cls, *args: Any, {DEVICE_PARAM}) -> Self: ...",
+                "def new(cls, storage: Storage) -> Self: ...",
+                "def new(cls, other: Tensor) -> Self: ...",
+                f"def new(cls, size: _size, *, {DEVICE_PARAM}) -> Self: ...",
             ],
             "__init__": [
-                defs("__init__", ["self", "*args: Any", DEVICE_PARAM], "None"),
-                defs("__init__", ["self", "storage: Storage"], "None"),
-                defs("__init__", ["self", "other: Tensor"], "None"),
-                defs("__init__", ["self", "size: _size", "*", DEVICE_PARAM], "None"),
+                f"def __init__(self, *args: Any, {DEVICE_PARAM}) -> None: ...",
+                "def __init__(self, storage: Storage) -> None: ...",
+                "def __init__(self, other: Tensor) -> None: ...",
+                f"def __init__(self, size: _size, *, {DEVICE_PARAM}) -> None: ...",
             ],
-            "as_subclass": [defs("as_subclass", ["self", "cls: type[S]"], "S")],
+            "as_subclass": ["def as_subclass(self, cls: _Type[S]) -> S: ..."],
             "_make_subclass": [
-                "@staticmethod\n"
-                + defs(
-                    "_make_subclass",
-                    [
-                        "cls: type[S]",
-                        "data: Tensor",
-                        "require_grad: _bool = False",
-                        "dispatch_strides: _bool = False",
-                        "dispatch_device: _bool = False",
-                        "device_for_backend_keys: _device | None = None",
-                    ],
-                    "S",
+                "@staticmethod    \ndef _make_subclass({}) -> S: ...".format(
+                    ", ".join(
+                        [
+                            "cls: _Type[S]",
+                            "data: Tensor",
+                            "require_grad: _bool = False",
+                            "dispatch_strides: _bool = False",
+                            "dispatch_device: _bool = False",
+                            "device_for_backend_keys: Optional[_device] = None",
+                        ]
+                    )
                 )
             ],
-            "__contains__": [defs("__contains__", ["self", "item: Any", "/"], "_bool")],
-            "__getitem__": [defs("__getitem__", ["self", INDICES, "/"], "Tensor")],
+            "__contains__": ["def __contains__(self, other: Any, /) -> _bool: ..."],
+            "__getitem__": [f"def __getitem__(self, {INDICES}) -> Tensor: ..."],
             "__setitem__": [
-                defs(
-                    "__setitem__",
-                    ["self", INDICES, "value: Tensor | Number", "/"],
-                    "None",
-                )
+                f"def __setitem__(self, {INDICES}, val: Union[Tensor, Number]) -> None: ..."
             ],
-            "tolist": [defs("tolist", ["self"], "list")],
+            "tolist": ["def tolist(self) -> List: ..."],
             "requires_grad_": [
-                defs("requires_grad_", ["self", "mode: _bool = True"], "Tensor")
+                "def requires_grad_(self, mode: _bool = True) -> Tensor: ..."
             ],
-            "element_size": [defs("element_size", ["self"], "_int")],
-            "data_ptr": [defs("data_ptr", ["self"], "_int")],
-            "dim": [defs("dim", ["self"], "_int")],
+            "element_size": ["def element_size(self) -> _int: ..."],
+            "data_ptr": ["def data_ptr(self) -> _int: ..."],
+            "dim": ["def dim(self) -> _int: ..."],
             "nonzero": [
-                defs(
-                    "nonzero",
-                    ["self", "*", "as_tuple: Literal[False] = False"],
-                    "Tensor",
-                ),
-                defs(
-                    "nonzero",
-                    ["self", "*", "as_tuple: Literal[True]"],
-                    "tuple[Tensor, ...]",
-                ),
+                "def nonzero(self, *, as_tuple: Literal[False] = False) -> Tensor: ...",
+                "def nonzero(self, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...",
             ],
-            "numel": [defs("numel", ["self"], "_int")],
-            "ndimension": [defs("ndimension", ["self"], "_int")],
-            "nelement": [defs("nelement", ["self"], "_int")],
+            "numel": ["def numel(self) -> _int: ..."],
+            "ndimension": ["def ndimension(self) -> _int: ..."],
+            "nelement": ["def nelement(self) -> _int: ..."],
             "cuda": [
-                defs(
-                    "cuda",
-                    [
-                        "self",
-                        "device: _device | _int | str | None = None",
-                        "non_blocking: _bool = False",
-                        "memory_format: torch.memory_format = torch.preserve_format",
-                    ],
-                    "Tensor",
+                "def cuda({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "self",
+                            "device: Optional[Union[_device, _int, str]] = None",
+                            "non_blocking: _bool = False",
+                            "memory_format: torch.memory_format = torch.preserve_format",
+                        ]
+                    )
                 )
             ],
             "xpu": [
-                defs(
-                    "xpu",
-                    [
-                        "self",
-                        "device: _device | _int | str | None = None",
-                        "non_blocking: _bool = False",
-                        "memory_format: torch.memory_format = torch.preserve_format",
-                    ],
-                    "Tensor",
+                "def xpu({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "self",
+                            "device: Optional[Union[_device, _int, str]] = None",
+                            "non_blocking: _bool = False",
+                            "memory_format: torch.memory_format = torch.preserve_format",
+                        ]
+                    )
                 )
             ],
             "cpu": [
-                defs(
-                    "cpu",
-                    [
-                        "self",
-                        "memory_format: torch.memory_format = torch.preserve_format",
-                    ],
-                    "Tensor",
-                )
+                "def cpu(self, memory_format: torch.memory_format = torch.preserve_format) -> Tensor: ..."
             ],
-            "numpy": [
-                defs("numpy", ["self", "*", "force: _bool = False"], "numpy.ndarray")
-            ],
-            "apply_": [defs("apply_", ["self", "callable: Callable"], "Tensor")],
+            "numpy": ["def numpy(self, *, force: _bool = False) -> numpy.ndarray: ..."],
+            "apply_": ["def apply_(self, callable: Callable) -> Tensor: ..."],
             "map_": [
-                defs("map_", ["self", "tensor: Tensor", "callable: Callable"], "Tensor")
+                "def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ..."
             ],
             "map2_": [
-                defs(
-                    "map2_",
-                    ["self", "x: Tensor", "y: Tensor", "callable: Callable"],
-                    "Tensor",
-                )
+                "def map2_(self, x: Tensor, y: Tensor, callable: Callable) -> Tensor: ..."
             ],
-            "storage": [defs("untyped_storage", ["self"], "UntypedStorage")],
-            "storage_type": [defs("storage_type", ["self"], "Storage")],
+            "storage": ["def untyped_storage(self) -> UntypedStorage: ..."],
+            "storage_type": ["def storage_type(self) -> Storage: ..."],
             "type": [
-                defs(
-                    "type",
-                    ["self", "dtype: None = None", "non_blocking: _bool = False"],
-                    "str",
-                ),
-                defs(
-                    "type",
-                    ["self", "dtype: str | _dtype", "non_blocking: _bool = False"],
-                    "Tensor",
-                ),
+                "def type(self, dtype: None = None, non_blocking: _bool = False) -> str: ...",
+                "def type(self, dtype: Union[str, _dtype], non_blocking: _bool = False) -> Tensor: ...",
             ],
-            "get_device": [defs("get_device", ["self"], "_int")],
+            "get_device": ["def get_device(self) -> _int: ..."],
             "contiguous": [
-                defs(
-                    "contiguous",
-                    [
-                        "self",
-                        "memory_format: torch.memory_format = torch.contiguous_format",
-                    ],
-                    "Tensor",
-                )
+                "def contiguous(self, memory_format=torch.contiguous_format) -> Tensor: ..."
             ],
-            "has_names": [defs("has_names", ["self"], "_bool")],
+            "has_names": ["def has_names(self) -> _bool: ..."],
             "is_contiguous": [
-                defs(
-                    "is_contiguous",
-                    [
-                        "self",
-                        "memory_format: torch.memory_format = torch.contiguous_format",
-                    ],
-                    "_bool",
-                )
+                "def is_contiguous(self, memory_format=torch.contiguous_format) -> _bool: ..."
             ],
-            "_is_view": [defs("_is_view", ["self"], "_bool")],
+            "_is_view": ["def _is_view(self) -> _bool: ..."],
             "is_cpu": ["is_cpu: _bool"],
             "is_cuda": ["is_cuda: _bool"],
             "is_leaf": ["is_leaf: _bool"],
@@ -1290,151 +1186,71 @@ def gen_pyi(
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],
             "is_ipu": ["is_ipu: _bool"],
-            "storage_offset": [defs("storage_offset", ["self"], "_int")],
+            "storage_offset": ["def storage_offset(self) -> _int: ..."],
             "to": [
                 (
-                    defs(
-                        "to",
-                        [
-                            "self",
-                            *to_args,
-                            "non_blocking: _bool = False",
-                            "copy: _bool = False",
-                            "*",
-                            "memory_format: torch.memory_format | None = None",
-                        ],
-                        "Tensor",
-                    )
+                    f"def to(self, {args}, non_blocking: _bool = False, copy: _bool = False, *, "
+                    "memory_format: Optional[torch.memory_format] = None) -> Tensor: ..."
                 )
-                for to_args in [
-                    ["dtype: _dtype"],
-                    [
-                        "device: DeviceLikeType | None = None",
-                        "dtype: _dtype | None = None",
-                    ],
-                    ["other: Tensor"],
+                for args in [
+                    "dtype: _dtype",
+                    "device: Optional[DeviceLikeType] = None, dtype: Optional[_dtype] = None",
+                    "other: Tensor",
                 ]
             ],
-            "item": [defs("item", ["self"], "Number")],
+            "item": ["def item(self) -> Number: ..."],
             "copy_": [
-                defs(
-                    "copy_",
-                    ["self", "src: Tensor", "non_blocking: _bool = False"],
-                    "Tensor",
-                )
+                "def copy_(self, src: Tensor, non_blocking: _bool = False) -> Tensor: ..."
             ],
             "set_": [
-                defs(
-                    "set_",
-                    [
-                        "self",
-                        "storage: Storage | TypedStorage | UntypedStorage",
-                        "offset: _int",
-                        "size: _size",
-                        "stride: _size",
-                    ],
-                    "Tensor",
-                ),
-                defs(
-                    "set_",
-                    ["self", "storage: Storage | TypedStorage | UntypedStorage"],
-                    "Tensor",
-                ),
+                "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage], "
+                "offset: _int, size: _size, stride: _size) -> Tensor: ...",
+                "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage]) -> Tensor: ...",
             ],
             "split": [
-                defs(
-                    "split",
-                    ["self", "split_size: _int", "dim: _int = 0"],
-                    "Sequence[Tensor]",
-                ),
-                defs(
-                    "split",
-                    ["self", "split_size: tuple[_int, ...]", "dim: _int = 0"],
-                    "Sequence[Tensor]",
-                ),
+                "def split(self, split_size: _int, dim: _int = 0) -> Sequence[Tensor]: ...",
+                "def split(self, split_size: Tuple[_int, ...], dim: _int = 0) -> Sequence[Tensor]: ...",
             ],
             "div": [
-                defs(
-                    "div",
-                    [
-                        "self",
-                        "other: Tensor | Number",
-                        "*",
-                        "rounding_mode: str | None = None",
-                    ],
-                    "Tensor",
-                )
+                "def div(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ..."
             ],
             "div_": [
-                defs(
-                    "div_",
-                    [
-                        "self",
-                        "other: Tensor | Number",
-                        "*",
-                        "rounding_mode: str | None = None",
-                    ],
-                    "Tensor",
-                )
+                "def div_(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ..."
             ],
         }
     )
     for binop in ["true_divide", "floor_divide"]:
         for inplace in [False, True]:
-            out_args = ["*", "out: Tensor | None = None"]
+            out_suffix = ", *, out: Optional[Tensor] = None"
             if inplace:
                 binop += "_"
-                out_args = []
+                out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                defs(
-                    binop,
-                    [
-                        "self",
-                        "other: Tensor | Number | torch.SymInt | torch.SymFloat",
-                        *out_args,
-                    ],
-                    "Tensor",
-                )
+                f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{out_suffix})"
+                " -> Tensor: ..."
             )
     for binop in ["mul"]:
         for inplace in [False, True]:
-            out_args = ["*", "out: Tensor | None = None"]
+            out_suffix = ", *, out: Optional[Tensor] = None"
             if inplace:
                 binop += "_"
-                out_args = []
+                out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                defs(
-                    binop,
-                    [
-                        "self",
-                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
-                        *out_args,
-                    ],
-                    "Tensor",
-                )
+                f"def {binop}(self, other: Union[Tensor, Number, _complex, torch.SymInt, torch.SymFloat]{out_suffix})"
+                " -> Tensor: ..."
             )
     for binop in ["add", "sub"]:
         for inplace in [False, True]:
-            out_args = ["out: Tensor | None = None"]
+            out_suffix = ", out: Optional[Tensor] = None"
             if inplace:
                 binop += "_"
-                out_args = []
+                out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                defs(
-                    binop,
-                    [
-                        "self",
-                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
-                        "*",
-                        "alpha: Number | _complex | None = 1",
-                        *out_args,
-                    ],
-                    "Tensor",
-                )
+                f"def {binop}(self, other: Union[Tensor, Number, _complex, torch.SymInt, torch.SymFloat], "
+                f"*, alpha: Optional[Union[Number, _complex]] = 1{out_suffix})"
+                " -> Tensor: ..."
             )
     simple_conversions = [
-        "bfloat16",
-        "bool",
         "byte",
         "char",
         "double",
@@ -1443,6 +1259,8 @@ def gen_pyi(
         "int",
         "long",
         "short",
+        "bool",
+        "bfloat16",
     ]
     for name in simple_conversions:
         unsorted_tensor_method_hints[name].append(f"def {name}(self) -> Tensor: ...")
@@ -1491,15 +1309,7 @@ def gen_pyi(
     # Generate structseq definitions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    structseqs = dict(sorted(structseqs.items()))
     structseq_defs = [f"{defn}\n" for defn in structseqs.values()]
-    return_types___all__ = [
-        "__all__ = [",
-        '    "pytree_register_structseq",',
-        '    "all_return_types",',
-        *(f'    "{name}",' for name in structseqs),
-        "]",
-    ]
 
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1528,49 +1338,47 @@ def gen_pyi(
     # source
     dtype_class_hints = [
         f"{n}: dtype = ..."
-        for n in sorted(
-            [
-                "float32",
-                "float",
-                "float64",
-                "double",
-                "float16",
-                "bfloat16",
-                "float8_e4m3fn",
-                "float8_e4m3fnuz",
-                "float8_e5m2",
-                "float8_e5m2fnuz",
-                "half",
-                "uint8",
-                "uint16",
-                "uint32",
-                "uint64",
-                "int8",
-                "int16",
-                "short",
-                "int32",
-                "int",
-                "int64",
-                "long",
-                "complex32",
-                "complex64",
-                "chalf",
-                "cfloat",
-                "complex128",
-                "cdouble",
-                "quint8",
-                "qint8",
-                "qint32",
-                "bool",
-                "quint4x2",
-                "quint2x4",
-                "bits1x8",
-                "bits2x4",
-                "bits4x2",
-                "bits8",
-                "bits16",
-            ]
-        )
+        for n in [
+            "float32",
+            "float",
+            "float64",
+            "double",
+            "float16",
+            "bfloat16",
+            "float8_e4m3fn",
+            "float8_e4m3fnuz",
+            "float8_e5m2",
+            "float8_e5m2fnuz",
+            "half",
+            "uint8",
+            "uint16",
+            "uint32",
+            "uint64",
+            "int8",
+            "int16",
+            "short",
+            "int32",
+            "int",
+            "int64",
+            "long",
+            "complex32",
+            "complex64",
+            "chalf",
+            "cfloat",
+            "complex128",
+            "cdouble",
+            "quint8",
+            "qint8",
+            "qint32",
+            "bool",
+            "quint4x2",
+            "quint2x4",
+            "bits1x8",
+            "bits2x4",
+            "bits4x2",
+            "bits8",
+            "bits16",
+        ]
     ]
 
     # Generate __all__ directive
@@ -1581,12 +1389,9 @@ def gen_pyi(
     hinted_function_names = [
         name for name, hint in unsorted_function_hints.items() if hint
     ]
-    all_symbols = sorted(list(structseqs) + hinted_function_names)
-    all_directive = [
-        "__all__ = [",
-        *(f'    "{name}",' for name in all_symbols),
-        "]",
-    ]
+    all_symbols = sorted(list(structseqs.keys()) + hinted_function_names)
+    all_directive = pformat(all_symbols, width=100, compact=True).split("\n")
+    all_directive[0] = f"__all__ = {all_directive[0]}"
 
     # Dispatch key hints
     # ~~~~~~~~~~~~~~~~~~
@@ -1608,9 +1413,7 @@ def gen_pyi(
 
     env = {
         "structseq_defs": structseq_defs,
-        "return_types___all__": return_types___all__,
         "function_hints": function_hints,
-        "index_type_def": index_type_def,
         "tensor_method_hints": tensor_method_hints,
         "legacy_class_hints": legacy_class_hints,
         "legacy_storage_base_hints": legacy_storage_base_hints,
@@ -1678,18 +1481,12 @@ def main() -> None:
         help="path to deprecated.yaml",
     )
     parser.add_argument(
-        "--out",
-        metavar="OUT",
-        default=".",
-        help="path to output directory",
+        "--out", metavar="OUT", default=".", help="path to output directory"
     )
     args = parser.parse_args()
     fm = FileManager(install_dir=args.out, template_dir=".", dry_run=False)
     gen_pyi(
-        args.native_functions_path,
-        args.tags_path,
-        args.deprecated_functions_path,
-        fm,
+        args.native_functions_path, args.tags_path, args.deprecated_functions_path, fm
     )
 
 

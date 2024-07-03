@@ -2,6 +2,7 @@
 import contextlib
 import functools
 import logging
+import math
 import os
 import traceback
 import weakref
@@ -399,30 +400,31 @@ class FakeTensorConverter:
 
             with no_dispatch():
                 value = t.item()
-            # Peephole strip out unnecessary torch.as_tensor(x).item()
-            if isinstance(source, FloatTensorSource):
-                item_source = source.base
-            else:
-                item_source = CallMethodItemSource(source)
-            symbol = shape_env.create_unspecified_symbol(
-                value,
-                source=item_source,
-                dynamic_dim=DimDynamic.DYNAMIC,
-            )
-            # NB: reusing item_memo here ensures that we invalidate on
-            # mutation
-            if t.dtype == torch.int64:
-                out.item_memo = shape_env.create_symintnode(
-                    symbol,
-                    hint=value,
+            if not math.isnan(value):
+                # Peephole strip out unnecessary torch.as_tensor(x).item()
+                if isinstance(source, FloatTensorSource):
+                    item_source = source.base
+                else:
+                    item_source = CallMethodItemSource(source)
+                symbol = shape_env.create_unspecified_symbol(
+                    value,
                     source=item_source,
+                    dynamic_dim=DimDynamic.DYNAMIC,
                 )
-            elif t.dtype == torch.float64:
-                out.item_memo = shape_env.create_symfloatnode(
-                    symbol,
-                    hint=value,
-                    source=item_source,
-                )
+                # NB: reusing item_memo here ensures that we invalidate on
+                # mutation
+                if t.dtype == torch.int64:
+                    out.item_memo = shape_env.create_symintnode(
+                        symbol,
+                        hint=value,
+                        source=item_source,
+                    )
+                elif t.dtype == torch.float64:
+                    out.item_memo = shape_env.create_symfloatnode(
+                        symbol,
+                        hint=value,
+                        source=item_source,
+                    )
         if make_constant:
             self.add_constant_storage_mapping(out)
         # NB: meta_converter set the memo
@@ -447,10 +449,8 @@ class FakeTensorConverter:
 def init_cuda_context():
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available():
-        (
-            torch.empty(1, device="cuda")
-            if torch.version.hip is None
-            else torch.zeros(1, device="cuda")
+        torch.empty(1, device="cuda") if torch.version.hip is None else torch.zeros(
+            1, device="cuda"
         )
 
 
@@ -856,7 +856,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
     Extract the TensorMetadata of a tensor.
     """
     memory_format: Optional[torch.memory_format] = suggest_memory_format(t)
-    if is_sparse_any(t) or not t.is_contiguous(memory_format=memory_format):  # type: ignore[arg-type]
+    if is_sparse_any(t) or not t.is_contiguous(memory_format=memory_format):
         memory_format = None
 
     return TensorMetadata(
