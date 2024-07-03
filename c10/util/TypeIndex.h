@@ -93,7 +93,7 @@ inline constexpr string_view extract(
     string_view str) {
 #if !defined(__CUDA_ARCH__) // CUDA doesn't like std::logic_error in device code
   return (!str.starts_with(prefix) || !str.ends_with(suffix))
-      ? (throw std::logic_error("Invalid pattern"), string_view())
+      ? string_view("Invalid pattern")
       : str.substr(prefix.size(), str.size() - prefix.size() - suffix.size());
 #else
   return str.substr(prefix.size(), str.size() - prefix.size() - suffix.size());
