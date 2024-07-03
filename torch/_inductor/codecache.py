@@ -56,12 +56,28 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
-from torch._inductor.cpu_vec_isa import (
-    get_compiler_version_info,
-    invalid_vec_isa,
-    pick_vec_isa,
-    VecISA,
+from .cpp_builder import (
+    _get_python_include_dirs,
+    get_cpp_compiler,
+    homebrew_libomp,
+    is_apple_clang,
+    is_clang,
+    is_conda_llvm_openmp_installed,
 )
+
+"""
+codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
+https://github.com/pytorch/pytorch/issues/124245#issuecomment-2197778902
+"""
+from torch._inductor.cpp_builder import (
+    _set_gpu_runtime_env,
+    _transform_cuda_paths,
+    CppBuilder,
+    CppOptions,
+    CppTorchCudaOptions,
+    get_compiler_version_info,
+)
+from torch._inductor.cpu_vec_isa import invalid_vec_isa, pick_vec_isa, VecISA
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
@@ -1178,87 +1194,9 @@ class CompiledFxGraph:
         return self.current_callable(inputs)
 
 
-def cpp_compiler() -> str:
-    if config.is_fbcode():
-        return build_paths.cc() if torch.version.hip is None else build_paths.clang()
-    if isinstance(config.cpp.cxx, (list, tuple)):
-        search = tuple(config.cpp.cxx)
-    else:
-        search = (config.cpp.cxx,)
-    return cpp_compiler_search(search)
-
-
-@functools.lru_cache(1)
-def cpp_compiler_search(search: str) -> str:
-    for cxx in search:
-        try:
-            if cxx is None:
-                # gxx package is only available for Linux
-                # according to https://anaconda.org/conda-forge/gxx/
-                if sys.platform != "linux":
-                    continue
-                # Do not install GXX by default
-                if not os.getenv("TORCH_INDUCTOR_INSTALL_GXX"):
-                    continue
-                from filelock import FileLock
-
-                lock_dir = get_lock_dir()
-                lock = FileLock(
-                    os.path.join(lock_dir, "g++.lock"), timeout=LOCK_TIMEOUT
-                )
-                with lock:
-                    cxx = install_gcc_via_conda()
-            subprocess.check_output([cxx, "--version"])
-            return cxx
-        except (subprocess.SubprocessError, FileNotFoundError, ImportError):
-            continue
-    raise exc.InvalidCxxCompiler
-
-
-def install_gcc_via_conda() -> str:
-    """On older systems, this is a quick way to get a modern compiler"""
-    prefix = os.path.join(cache_dir(), "gcc")
-    cxx_path = os.path.join(prefix, "bin", "g++")
-    if not os.path.exists(cxx_path):
-        log.info("Downloading GCC via conda")
-        conda = os.environ.get("CONDA_EXE", "conda")
-        if conda is None:
-            conda = shutil.which("conda")
-        if conda is not None:
-            subprocess.check_call(
-                [
-                    conda,
-                    "create",
-                    f"--prefix={prefix}",
-                    "--channel=conda-forge",
-                    "--quiet",
-                    "-y",
-                    "python=3.8",
-                    "gxx",
-                ],
-                stdout=subprocess.PIPE,
-            )
-    return cxx_path
-
-
-def is_gcc() -> bool:
-    if sys.platform == "darwin" and is_apple_clang():
-        return False
-    return bool(re.search(r"(gcc|g\+\+)", cpp_compiler()))
-
-
-@functools.lru_cache(None)
-def is_apple_clang() -> bool:
-    cxx = cpp_compiler()
-    version_string = subprocess.check_output([cxx, "--version"]).decode("utf8")
-    return "Apple" in version_string.splitlines()[0]
-
-
-def is_clang() -> bool:
-    # Mac OS apple clang maybe named as gcc, need check compiler info.
-    if sys.platform == "darwin":
-        return is_apple_clang()
-    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler()))
+"""
+TODO: will remove old cpp builder when we switch to the new one.
+"""
 
 
 def get_compile_only(compile_only: bool = True) -> str:
@@ -1270,7 +1208,7 @@ def get_shared(shared: bool = True, compile_only: bool = False) -> str:
         return ""
     if compile_only:
         return "-fPIC"
-    if platform.system() == "Darwin" and "clang" in cpp_compiler():
+    if platform.system() == "Darwin" and "clang" in get_cpp_compiler():
         # This causes undefined symbols to behave the same as linux
         return "-shared -fPIC -undefined dynamic_lookup"
     else:
@@ -1354,76 +1292,6 @@ def use_standard_sys_dir_headers() -> str:
         return "-nostdinc"
     else:
         return ""
-
-
-@functools.lru_cache(None)
-def is_conda_llvm_openmp_installed() -> bool:
-    try:
-        command = "conda list llvm-openmp --json"
-        output = subprocess.check_output(command.split()).decode("utf8")
-        return len(json.loads(output)) > 0
-    except subprocess.SubprocessError:
-        return False
-
-
-@functools.lru_cache(None)
-def homebrew_libomp() -> Tuple[bool, str]:
-    try:
-        # check if `brew` is installed
-        subprocess.check_output(["which", "brew"])
-        # get the location of `libomp` if it is installed
-        # this is the location that `libomp` **would** be installed
-        # see https://github.com/Homebrew/brew/issues/10261#issuecomment-756563567 for details
-        libomp_path = (
-            subprocess.check_output(["brew", "--prefix", "libomp"])
-            .decode("utf8")
-            .strip()
-        )
-        # check if `libomp` is installed
-        omp_available = os.path.exists(libomp_path)
-        return omp_available, libomp_path
-    except subprocess.SubprocessError:
-        return False, ""
-
-
-def _set_gpu_runtime_env() -> None:
-    if (
-        config.is_fbcode()
-        and torch.version.hip is None
-        and "CUDA_HOME" not in os.environ
-        and "CUDA_PATH" not in os.environ
-    ):
-        os.environ["CUDA_HOME"] = build_paths.cuda()
-
-
-def _get_python_include_dirs():
-    include_dir = Path(sysconfig.get_path("include"))
-    # On Darwin Python executable from a framework can return
-    # non-existing /Library/Python/... include path, in which case
-    # one should use Headers folder from the framework
-    if not include_dir.exists() and platform.system() == "Darwin":
-        std_lib = Path(sysconfig.get_path("stdlib"))
-        include_dir = (std_lib.parent.parent / "Headers").absolute()
-    if not (include_dir / "Python.h").exists():
-        warnings.warn(f"Can't find Python.h in {str(include_dir)}")
-    return [str(include_dir)]
-
-
-def _transform_cuda_paths(lpaths):
-    # This handles two cases:
-    # 1. Meta internal cuda-12 where libs are in lib/cuda-12 and lib/cuda-12/stubs
-    # 2. Linux machines may have CUDA installed under either lib64/ or lib/
-    for i, path in enumerate(lpaths):
-        if (
-            "CUDA_HOME" in os.environ
-            and path.startswith(os.environ["CUDA_HOME"])
-            and not os.path.exists(f"{path}/libcudart_static.a")
-        ):
-            for root, dirs, files in os.walk(path):
-                if "libcudart_static.a" in files:
-                    lpaths[i] = os.path.join(path, root)
-                    lpaths.append(os.path.join(lpaths[i], "stubs"))
-                    break
 
 
 def get_include_and_linking_paths(
@@ -1654,7 +1522,7 @@ def cpp_compile_command(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} {inp_name_str} {get_shared(shared, compile_only)}
+            {get_cpp_compiler()} {inp_name_str} {get_shared(shared, compile_only)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {get_glibcxx_abi_build_flags()}
             {ipaths_str} {lpaths} {libs} {build_arch_flags}
@@ -1870,7 +1738,7 @@ class AotCodeCompiler:
                 specified_dir=specified_output_path,
             )
             consts_o = os.path.splitext(consts_path)[0] + ".o"
-            cmd = f"{cpp_compiler()} -c -o {consts_o} {consts_path}"
+            cmd = f"{get_cpp_compiler()} -c -o {consts_o} {consts_path}"
             run_command_and_check(cmd)
             if is_large_consts:
                 with open(consts_o, "r+b") as f:
@@ -2185,7 +2053,7 @@ class CppCodeCache:
 
         from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
 
-        dummy_builder = CppBuilder(
+        command_gen = CppBuilder(
             name="o", sources="i", BuildOption=CppTorchCudaOptions(**compile_command)
         )
         # write function will calc source_code hash, the same source code with different
@@ -2193,8 +2061,8 @@ class CppCodeCache:
         # So we need get a command_line which contains isa related parameter as a part of hash key.
         # And then pass the command_line to below write function as extra parameter to
         # guarantee the source code hash contains ISA difference.
-        dummy_cmd = repr(dummy_builder.get_command_line())
-        key, input_path = write(source_code, "cpp", extra=dummy_cmd)
+        vec_isa_cmd = repr(command_gen.get_command_line())
+        key, input_path = write(source_code, "cpp", extra=vec_isa_cmd)
 
         if key not in cls.cache:
             from filelock import FileLock
@@ -2520,8 +2388,6 @@ def _do_validate_cpp_commands(
         extra_flags=extra_flags,
     ).split(" ")
 
-    from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
-
     dummy_build_option = CppTorchCudaOptions(
         vec_isa=picked_isa,
         include_pytorch=include_pytorch,
@@ -2718,12 +2584,10 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     @classmethod
     @functools.lru_cache(None)
     def config_hash(cls):
-        from torch._inductor.cpp_builder import CppBuilder, CppOptions
-
         command_gen = CppBuilder(
             name="O",
             sources="I",
-            BuildOption=CppOptions(compile_only=False),
+            BuildOption=CppOptions(),
         )
         command_line = command_gen.get_command_line()
         return sha256_hash(

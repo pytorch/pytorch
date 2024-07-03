@@ -204,6 +204,8 @@ include_patterns = [
     'torch/csrc/*.cpp',
     'torch/csrc/**/*.h',
     'torch/csrc/**/*.cpp',
+    'torch/csrc/jit/serialization/*.h',
+    'torch/csrc/jit/serialization/*.cpp',
 ]
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
@@ -232,6 +234,7 @@ exclude_patterns = [
     'torch/csrc/dynamo/eval_frame.h',
     'torch/csrc/inductor/**/*',
     'torch/csrc/jit/**/*',
+    'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/lazy/**/*',
 ]
 init_command = [
@@ -1101,7 +1104,6 @@ exclude_patterns = [
     'test/test_prims.py',
     'test/test_proxy_tensor.py',
     'test/test_pruning_op.py',
-    'test/test_public_bindings.py',
     'test/test_quantization.py',
     'test/test_reductions.py',
     'test/test_scatter_gather_ops.py',
@@ -1695,8 +1697,9 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     '--no-black-binary',
     'black==23.12.1',
-    'ufmt==2.1.0',
-    'usort==1.0.6',
+    'ufmt==2.7.0',
+    'usort==1.0.8.post1',
+    'isort==5.13.2',
 ]
 is_formatter = true
 
