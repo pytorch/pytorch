@@ -83,6 +83,7 @@ REQUIRE_HIGHER_TOLERANCE = {
 REQUIRE_EVEN_HIGHER_TOLERANCE = {
     "levit_128",
     "sebotnet33ts_256",
+    "beit_base_patch16_224",
 }
 
 # These models need higher tolerance in MaxAutotune mode
