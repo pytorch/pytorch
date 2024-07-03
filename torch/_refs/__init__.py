@@ -293,6 +293,7 @@ __all__ = [
     "tensor_split",
     "transpose",
     "transpose_copy",
+    "unbind_copy",
     "unfold",
     "unfold_copy",
     "unsqueeze",
@@ -6331,7 +6332,21 @@ unfold_copy = _make_copy_from_view(unfold)
 unsqueeze_copy = _make_copy_from_view(unsqueeze)
 view_copy = _make_copy_from_view(view)
 
-# TODO: unbind_copy
+
+@register_decomposition(aten.unbind_copy)
+def unbind_copy(
+    t: TensorLikeType, dim: int = 0, out: Optional[TensorSequenceType] = None
+) -> TensorSequenceType:
+    result = unbind(t, dim)
+    if out is None:
+        return tuple(i.clone(memory_format=torch.contiguous_format) for i in result)
+    torch._check(
+        len(out) == len(result),
+        f"len(out) ({len(out)}) != len(result) ({len(result)})",
+    )
+    for o, r in zip(out, result):
+        o.copy_(r)
+    return out
 
 
 # xref: isStorage in torch/csrc/DynamicTypes.cpp
