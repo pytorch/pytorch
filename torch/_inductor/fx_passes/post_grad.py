@@ -107,9 +107,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             )
             pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
             if not is_same_dict(counters["inductor"], inductor_before_change):
-                optimus_scuba_log[
-                    f"{pattern_matcher_pass.pass_name}_post_grad"
-                ] = upload_graph(gm.graph)
+                optimus_scuba_log[f"{pattern_matcher_pass.pass_name}_post_grad"] = (
+                    upload_graph(gm.graph)
+                )
 
     if config._micro_pipeline_tp:
         micro_pipeline_tp_patterns.apply(gm)
@@ -533,6 +533,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
 
     kernel.name = V.graph.register_buffer(kernel)
     kernel.inputs = ir.ConcatKernel.unwrap_storage(kernel.inputs)
+    V.graph.register_operation(kernel)
     return kernel_tensor
 
 

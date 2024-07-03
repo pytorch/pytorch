@@ -15,10 +15,10 @@ from .ir import (
     IRNode,
     is_contiguous_storage_and_layout,
     Layout,
-    mark_node_as_mutating,
     may_convert_to_optional,
     MultiOutput,
     MultiOutputLayout,
+    MutationOutput,
     NoneLayout,
     TensorBox,
 )
@@ -424,6 +424,11 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
                 torch::List<c10::optional<at::Scalar>> unary_scalars,
                 c10::optional<c10::string_view> unary_algorithm)"""
 
+        self.mutation_outputs = [
+            MutationOutput(NoneLayout(inputs[0].get_device()), inputs[0], self),
+            MutationOutput(NoneLayout(inputs[1].get_device()), inputs[1], self),
+        ]
+
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
@@ -434,9 +439,6 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             self.cpp_kernel_key,
             self.cpp_kernel_overload_name,
         )
-
-    def get_mutation_names(self):
-        return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
@@ -480,7 +482,6 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             inputs=inputs,
             constant_args=constant_args,
         )
-        mark_node_as_mutating(packed, inputs[1])
         # This op mutates in place which means that the result is not the
         # target but rather the input that is being mutated
         # init reorders the inputs, so inputs[1] becomes packed.inputs[0]
@@ -944,12 +945,12 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             binary_attr == "sum"
         ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
 
+        V.graph.mark_buffer_mutated(qaccum.get_name())
         packed = QConvPointWiseBinaryPT2E(
             layout=NoneLayout(qaccum.get_device()),
             inputs=inputs,
             constant_args=constant_args,
         )
-        mark_node_as_mutating(packed, qaccum)
 
         # Return accum since it has been inplace changed.
         return packed.inputs[packed.idx_for_inplace_sum]
@@ -1461,6 +1462,13 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
+    def get_mutation_names(self):
+        binary_post_op = self.constant_args[-5]
+        if binary_post_op == "sum":
+            return [self.inputs[-1].get_name()]
+        else:
+            return []
+
     @classmethod
     def create(
         cls,
@@ -1524,6 +1532,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         ]
 
         if binary_post_op == "sum":
+            V.graph.mark_buffer_mutated(other.get_name())
             packed = QLinearPointwiseBinaryPT2E(
                 layout=NoneLayout(other.get_device()),
                 inputs=inputs,
@@ -1531,7 +1540,6 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
                 has_bias=(bias is not None),
                 x_scale_zp_are_tensors=x_scale_zp_are_tensors,
             )
-            mark_node_as_mutating(packed, other)
             # Return other since it has been inplace changed.
             return packed.inputs[-1]
 

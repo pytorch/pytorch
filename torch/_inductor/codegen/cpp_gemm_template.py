@@ -555,9 +555,9 @@ class CppPackedGemmTemplate(CppTemplate):
             inp=inp,
             Y=Y,
             GemmOut=gemm_output_buffer,
-            buffer_aliases=[(gemm_output_buffer, Y)]
-            if gemm_output_buffer is not Y
-            else None,
+            buffer_aliases=(
+                [(gemm_output_buffer, Y)] if gemm_output_buffer is not Y else None
+            ),
             beta=self.beta,
             alpha=self.alpha,
             num_threads=self.num_threads,

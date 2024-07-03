@@ -445,11 +445,11 @@ def add_generated_native_functions(
             base_fn = (
                 d[SchemaKind.inplace]
                 if has_inplace
-                else d[SchemaKind.mutable]
-                if has_mutable
-                else d[SchemaKind.out]
-                if has_out
-                else d[SchemaKind.functional]
+                else (
+                    d[SchemaKind.mutable]
+                    if has_mutable
+                    else d[SchemaKind.out] if has_out else d[SchemaKind.functional]
+                )
             )
 
             # Note: [Mutable ops that cannot get an out variant]
