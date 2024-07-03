@@ -274,6 +274,7 @@ static inline PyObject* call_callback(
     frame,
     cache_entry_pyobj,
     frame_state);
+  frame->locals = NULL;
   Py_DECREF(frame);
   Py_DECREF(cache_entry_pyobj);
   return res;
@@ -582,6 +583,7 @@ static PyObject* _custom_eval_frame(
   }
 
 
+  int free_vars_copied = 0;
   #if IS_PYTHON_3_12_PLUS
   PyObject *locals = get_framelocals_mapping(frame);
   #else
@@ -629,7 +631,6 @@ static PyObject* _custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
-  int free_vars_copied = 0;
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = lookup(extra, locals, backend);
   _pytorch_record_function_exit(rf);
