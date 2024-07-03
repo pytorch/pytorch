@@ -930,14 +930,25 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         q, k, v = (torch.randn(1, 8, 1024, 64, device="cuda") for _ in range(3))
         metrics.reset()
-        f(q, k, v)
+        _, code = run_and_get_code(f, q, k, v)
+        # Check the attention output is not allocated
+        fc = FileCheck()
+        fc.check("buf0 = empty_strided_cuda((1, 1, 1)")  # SPARSE_KV_NUM_BLKS
+        fc.check("buf1 = empty_strided_cuda((1, 1, 1, 1)")  # SPARSE_KV_IDX
+        fc.check("buf4 = empty_strided_cuda")  # logsumexp
+        fc.check("buf7 = empty_strided_cuda")  # cos(attention)
+        fc.run(code[0])
+        fc = FileCheck()
+        fc.check_not("buf2 =")  # Dead buffer
+        fc.check_not("buf3 =")  # Dead buffer
+        fc.check_not("buf5 =")  # Dead buffer, attention output
+        fc.check_not("buf6 =")  # Mutation-buffer, not allocated
+        fc.run(code[0])
         accessed_bytes = 1 * 8 * 1024 * 64 * torch.float32.itemsize
         num_accesses = 4  # q, k, v reads, one output.
         # TODO: Get rid of this fudge factor
-        # We need this fudge factor for now, since
-        # 1. For some reason we materialize the output of the attention unnecessarily (it's related to the mutation somehow)
-        # 2. We also write the extraneous logsumexp
-        num_accesses += 2
+        # We need this fudge factor for now as we write the extraneous logsumexp
+        num_accesses += 1
         self.assertLess(metrics.num_bytes_accessed, accessed_bytes * num_accesses)
 
     @supported_platform
@@ -996,6 +1007,42 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return score
 
         self.run_test(bias_mod)
+
+    @supported_platform
+    def test_autograd_function_in_score_mod(self):
+        class ApplyMask(torch.autograd.Function):
+            generate_vmap_rule = True
+
+            @staticmethod
+            def forward(a, mask):
+                return torch.where(mask, a, -float("inf"))
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                _, mask = inputs
+                ctx.mark_non_differentiable(mask)
+                pass
+
+            @staticmethod
+            def backward(ctx, i):
+                return i, None
+
+        def score_mod(score, b, h, q, kv):
+            return ApplyMask.apply(score, q <= kv)
+
+        func = torch.compile(_flex_attention, fullgraph=True)
+
+        q, k, v = (
+            torch.randn(1, 8, 1024, 64, device="cuda", requires_grad=True)
+            for _ in range(3)
+        )
+
+        # Just checking that it runs
+        func(q, k, v)
+
+        # expectedFailure
+        # This doesn't work due to vmap + autograd.Function + torch.compile not composing
+        # self.run_test(score_mod)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
