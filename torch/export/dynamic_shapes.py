@@ -927,7 +927,7 @@ def _process_dynamic_shapes(
 
 
 def _get_dim_name_mapping(
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None]
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
 ):
     name_to_dim = {}
     for dim in tree_flatten(

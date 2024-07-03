@@ -537,7 +537,7 @@ def map_only(__type_or_types_or_pred: Type2[T, S]) -> MapOnlyFn[Fn2[T, S, Any]]:
 
 @overload
 def map_only(
-    __type_or_types_or_pred: Type3[T, S, U]
+    __type_or_types_or_pred: Type3[T, S, U],
 ) -> MapOnlyFn[Fn3[T, S, U, Any]]: ...
 
 
@@ -552,12 +552,12 @@ def map_only(__type_or_types_or_pred: TypeAny) -> MapOnlyFn[FnAny[Any]]: ...
 
 @overload
 def map_only(
-    __type_or_types_or_pred: Callable[[Any], bool]
+    __type_or_types_or_pred: Callable[[Any], bool],
 ) -> MapOnlyFn[FnAny[Any]]: ...
 
 
 def map_only(
-    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]]
+    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]],
 ) -> MapOnlyFn[FnAny[Any]]:
     """
     Suppose you are writing a tree_map over tensors, leaving everything
