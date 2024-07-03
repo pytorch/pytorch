@@ -128,18 +128,10 @@ def custom_op(
             schema_str = torch._custom_op.impl.infer_schema(fn, mutates_args)
         else:
             schema_str = schema
-        from torch._library.infer_schema import get_device_arg_id, has_tensor_arg
-
-        device_arg_id = None
-        if not has_tensor_arg(schema_str) and device_types is not None:
-            device_arg_id = get_device_arg_id(schema_str)
-            if device_arg_id is None:
-                raise ValueError(
-                    "Functions without tensor inputs are required to have a `device: torch.device` argument"
-                )
 
         namespace, opname = name.split("::")
-        result = CustomOpDef(namespace, opname, schema_str, fn, device_arg_id)
+        backend_select = device_types is not None
+        result = CustomOpDef(namespace, opname, schema_str, fn, backend_select)
         if schema is not None:
             # Check that schema's alias annotations match those of `mutates_args`.
             expected = set()
@@ -170,7 +162,7 @@ class CustomOpDef:
     You should not instantiate CustomOpDef directly; instead, use the
     :func:`torch.library.custom_op` API.
 
-    If `device_arg_id` is not None, we switch on the device argument to select the correct backend to dispatch to.
+    If `backend_select` is True, we switch on the device argument to select the correct backend to dispatch to.
     """
 
     def __init__(
@@ -179,7 +171,7 @@ class CustomOpDef:
         name: str,
         schema: str,
         fn: Callable,
-        device_arg_id: Union[int, None],
+        backend_select: bool
     ) -> None:
         # Fields used to interface with the PyTorch dispatcher
         self._namespace = namespace
@@ -193,10 +185,8 @@ class CustomOpDef:
         self._setup_context_fn: Optional[Callable] = None
         self._backward_fn: Optional[Callable] = None
 
-        self._device_arg_id = device_arg_id
-
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
-        self._register_to_dispatcher()
+        self._register_to_dispatcher(backend_select)
         OPDEFS[self._qualname] = self
 
     @property
@@ -469,7 +459,7 @@ class CustomOpDef:
         self._backward_fn = backward
         self._setup_context_fn = setup_context
 
-    def _register_to_dispatcher(self) -> None:
+    def _register_to_dispatcher(self, backend_select) -> None:
         lib = self._lib
         schema_str = self._name + self._schema
         cpp_schema = _C.parse_schema(schema_str)
@@ -532,8 +522,18 @@ class CustomOpDef:
                 with_keyset=True,
             )
 
-        if self._device_arg_id is not None:
-            device_arg_id: int = self._device_arg_id  # silent linter error
+        from torch._library.utils import has_tensor_arg, get_device_arg_id
+
+        device_arg_id = None
+        if not has_tensor_arg(schema) and backend_select:
+            device_arg_id = get_device_arg_id(schema)
+            if device_arg_id is None:
+                raise ValueError(
+                    "Functions without tensor inputs are required to have a `device: torch.device` argument"
+                )
+
+        if device_arg_id is not None:
+            device_arg_id: int = device_arg_id  # silent linter error
 
             def backend_select(*args, **kwargs):
                 device = args[device_arg_id].type
