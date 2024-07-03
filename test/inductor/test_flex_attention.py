@@ -2,6 +2,7 @@
 # flake8: noqa: B950
 
 import functools
+import string
 from collections import namedtuple
 from typing import Callable, Optional
 
@@ -1206,6 +1207,39 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             torch.autograd.gradcheck(
                 func, (query, key, value, score_mod), raise_exception=True
             )
+        )
+
+    @supported_platform
+    def test_block_mask_viz(self):
+        def causal(score, b, h, q, kv):
+            return torch.where(q >= kv, score, -float("inf"))
+
+        block_mask = _create_block_mask(causal, 1, 1, 2048, 2048)
+
+        def replace_non_printable(s):
+            return "".join(c if c in string.printable else "@" for c in s)
+
+        self.assertExpectedInline(
+            replace_non_printable(str(block_mask)),
+            """\
+BlockMask(sparsity=-52.73%, mask=
+@@
+@@@@
+@@@@@@
+@@@@@@@@
+@@@@@@@@@@
+@@@@@@@@@@@@
+@@@@@@@@@@@@@@
+@@@@@@@@@@@@@@@@
+@@@@@@@@@@@@@@@@@@
+@@@@@@@@@@@@@@@@@@@@
+@@@@@@@@@@@@@@@@@@@@@@
+@@@@@@@@@@@@@@@@@@@@@@@@
+@@@@@@@@@@@@@@@@@@@@@@@@@@
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+)""",
         )
 
     @supported_platform

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 """This module implements the user facing API for flex_attention in PyTorch."""
 import functools
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 
 import torch
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
@@ -77,26 +77,35 @@ class _BlockMask:
         )
 
     def __str__(self):
-        s = f"BlockMask(sparsity={100 *self.sparsity():.2f}%, mask=\n"
+        s = f"BlockMask(sparsity={self.sparsity():.2f}%, mask=\n"
         s += self.to_string()
         s += ")"
         return s
 
-    def sparsity(self):
+    def sparsity(self) -> float:
+        """
+        Computes the percentage of blocks that are sparse (i.e. not computed)
+        """
         dense_mask = self.to_dense()
-        return (1 - (dense_mask != 0).sum()) / dense_mask.numel()
+        return 100 * (1 - (dense_mask != 0).sum()) / dense_mask.numel()
 
-    def to_dense(self):
+    def to_dense(self) -> torch.Tensor:
+        """
+        Returns a dense block that is equivalent to the block mask.
+        """
         num_rows = self.kv_num_blocks.shape[-1]
         num_cols = self.q_num_blocks.shape[-1]
         batch, head = self.kv_num_blocks.shape[:2]
+        device = self.kv_num_blocks.device
         assert batch == 1, head == 1
 
         def create_dense_one(kv_num_blocks, kv_indices):
             dense_mask = kv_indices.new_zeros(num_rows, num_cols + 1, dtype=torch.int32)
 
-            row_indices = torch.arange(num_rows, dtype=torch.int).unsqueeze(-1)
-            col_indices = torch.arange(num_cols, dtype=torch.int)
+            row_indices = torch.arange(
+                num_rows, dtype=torch.int, device=device
+            ).unsqueeze(-1)
+            col_indices = torch.arange(num_cols, dtype=torch.int, device=device)
             index_mask = col_indices < kv_num_blocks.unsqueeze(-1)
 
             # We write to one spot "out of bounds"
@@ -110,6 +119,9 @@ class _BlockMask:
         return out
 
     def to_string(self, max_rows=20, max_cols=20):
+        """
+        Returns a string representation of the block mask. Quite nifty.
+        """
         dense_mask = self.to_dense()
         num_rows, num_cols = dense_mask.shape
         vis = ""
@@ -123,8 +135,11 @@ class _BlockMask:
             else:
                 return "░"
 
-        row_step = max(1, num_rows // max_rows)
-        col_step = max(1, num_cols // max_cols)
+        def cdiv(a, b):
+            return (a + (b - 1)) // b
+
+        row_step = max(1, cdiv(num_rows, max_rows))
+        col_step = max(1, cdiv(num_cols, max_cols))
 
         for r in range(0, num_rows, row_step):
             for c in range(0, num_cols, col_step):
@@ -178,7 +193,7 @@ def _create_block_mask_from_mask(
     mask: torch.Tensor,
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
-) -> Tuple:
+) -> _BlockMask:
     block_mask = _convert_mask_to_block_mask(
         mask, KV_BLOCK_SIZE=KV_BLOCK_SIZE, Q_BLOCK_SIZE=Q_BLOCK_SIZE
     )
@@ -272,7 +287,7 @@ def _create_block_mask(
 """
 
 
-def _create_empty_block_mask(query, key, value) -> Tuple:
+def _create_empty_block_mask(query, key, value) -> _BlockMask:
     device = query.device
     kv_len = key.size()[-2]
     q_len = query.size()[-2]
