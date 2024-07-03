@@ -187,15 +187,8 @@ class SubclassCreationMeta:
     # This is needed because we need the autograd metadata on the original subclass
     # (this is guaranteed to be a wrapper subclass that holds a fake tensor,
     #  so holding onto this at runtime shouldn't leak memory)
+    # This field is nulled out after calling make_runtime_safe()
     original_subclass: Optional[torch.Tensor]
-
-    # meta and inner_keys are produced by the subclass's __tensor_flatten__.
-    # We need to keep them around along with outer_size / outer_stride to plumb them
-    # into __tensor_unflatten__.
-    meta: Any
-    inner_keys: List[Any]
-    outer_size: Tuple[int, ...]
-    outer_stride: Tuple[int, ...]
 
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: Optional[type] = None
@@ -219,7 +212,7 @@ class SubclassCreationMeta:
         else:
             original_subclass_type = type(self.original_subclass)
 
-        rebuilt = original_subclass_type.__tensor_unflatten__(
+        rebuilt = original_subclass_type.__tensor_unflatten__(  # type: ignore[attr-defined]
             inner_tensors, self.meta, self.outer_size, self.outer_stride
         )
 
@@ -236,6 +229,10 @@ class SubclassCreationMeta:
         assert self.original_subclass is not None
         self.original_subclass_type = type(self.original_subclass)
         self.original_subclass = None
+        # Recurse on nested subclass info
+        for creation_meta in self.attrs.values():
+            if creation_meta is not None:
+                creation_meta.make_runtime_safe()
 
     def __post_init__(self):
         # sanity assert to make sure we don't leak memory
