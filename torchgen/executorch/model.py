@@ -172,11 +172,11 @@ class ETKernelIndex:
 
     @staticmethod
     def from_backend_indices(
-        backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]]
+        backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]],
     ) -> ETKernelIndex:
-        kernel_index: dict[
-            OperatorName, dict[ETKernelKey, BackendMetadata]
-        ] = defaultdict(dict)
+        kernel_index: dict[OperatorName, dict[ETKernelKey, BackendMetadata]] = (
+            defaultdict(dict)
+        )
         ETKernelIndex.grow_from_backend_indices(kernel_index, backend_indices)
         return ETKernelIndex(kernel_index)
 

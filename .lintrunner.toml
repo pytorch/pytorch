@@ -1696,8 +1696,8 @@ init_command = [
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
     '--no-black-binary',
-    'black==23.12.1',
     'ufmt==2.7.0',
+    'black==24.4.2',
     'usort==1.0.8.post1',
     'isort==5.13.2',
 ]

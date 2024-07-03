@@ -21,8 +21,7 @@ if typing.TYPE_CHECKING:
 
 
 class _SarifLogBuilder(Protocol):
-    def sarif_log(self) -> sarif.SarifLog:
-        ...
+    def sarif_log(self) -> sarif.SarifLog: ...
 
 
 def _assert_has_diagnostics(
@@ -331,7 +330,9 @@ class TestTorchScriptOnnxDiagnostics(common_utils.TestCase):
             diagnostics.export_context().log(diagnostic)
 
     def test_diagnostics_records_python_call_stack(self):
-        diagnostic = diagnostics.TorchScriptOnnxExportDiagnostic(self._sample_rule, diagnostics.levels.NOTE)  # fmt: skip
+        diagnostic = diagnostics.TorchScriptOnnxExportDiagnostic(
+            self._sample_rule, diagnostics.levels.NOTE
+        )
         # Do not break the above line, otherwise it will not work with Python-3.8+
         stack = diagnostic.python_call_stack
         assert stack is not None  # for mypy
@@ -367,9 +368,9 @@ class TestDiagnosticsInfra(common_utils.TestCase):
     def setUp(self):
         self.rules = _RuleCollectionForTest()
         with contextlib.ExitStack() as stack:
-            self.context: infra.DiagnosticContext[
-                infra.Diagnostic
-            ] = stack.enter_context(infra.DiagnosticContext("test", "1.0.0"))
+            self.context: infra.DiagnosticContext[infra.Diagnostic] = (
+                stack.enter_context(infra.DiagnosticContext("test", "1.0.0"))
+            )
             self.addCleanup(stack.pop_all().close)
         return super().setUp()
 

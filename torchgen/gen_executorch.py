@@ -295,7 +295,7 @@ def gen_unboxing(
 ) -> None:
     # Iterable type for write_sharded is a Tuple of (native_function, (kernel_key, metadata))
     def key_func(
-        item: tuple[NativeFunction, tuple[ETKernelKey, BackendMetadata]]
+        item: tuple[NativeFunction, tuple[ETKernelKey, BackendMetadata]],
     ) -> str:
         return item[0].root_name + ":" + item[1][0].to_native_string()
 
@@ -319,9 +319,9 @@ def gen_unboxing(
             "unboxed_kernels": [
                 ComputeCodegenUnboxedKernels(selector, use_aten_lib)(unbox_kernel_entry)
             ],
-            "fn_header": header
-            if unbox_kernel_entry == items[0]
-            else [],  # Only write header once
+            "fn_header": (
+                header if unbox_kernel_entry == items[0] else []
+            ),  # Only write header once
         },
         num_shards=1,
         sharded_keys={"unboxed_kernels", "fn_header"},
@@ -478,9 +478,9 @@ def gen_headers(
     cpu_fm.write(
         "Functions.h",
         lambda: {
-            "static_dispatch_extra_headers": aten_headers
-            if use_aten_lib
-            else ['#include "NativeFunctions.h"'],
+            "static_dispatch_extra_headers": (
+                aten_headers if use_aten_lib else ['#include "NativeFunctions.h"']
+            ),
             "Functions_declarations": gen_functions_declarations(
                 native_functions=native_functions,
                 kernel_index=kernel_index,
@@ -740,7 +740,7 @@ def parse_yaml(
 
         # (2) Return BackendIndices if kernel index is absent
         def map_index(
-            m: dict[OperatorName, BackendMetadata]
+            m: dict[OperatorName, BackendMetadata],
         ) -> dict[OperatorName, BackendMetadata]:
             return {op: m[op] for op in m if op in op_names}
 

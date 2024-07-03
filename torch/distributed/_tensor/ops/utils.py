@@ -85,7 +85,7 @@ def register_op_strategy(op, schema_info=None):
 
 
 def as_list(
-    x: Union[List[object], object]
+    x: Union[List[object], object],
     # pyre-fixme[11]: Annotation `immutable_list` is not defined as a type.
 ) -> Union[List[object], torch.fx.immutable_collections.immutable_list]:  # type: ignore[valid-type]
     # During tracing, `aten.sum.dim_IntList` uses `immutable_list` for its args,
@@ -275,9 +275,9 @@ def expand_to_full_mesh_op_strategy(
                 for input_strategy, input_spec in zip(input_args_strategy, input_specs)
             ]
             strategy = PlacementStrategy(
-                output_specs=tuple(spec_list[:input_index])
-                if input_index > 1
-                else spec_list[0],
+                output_specs=(
+                    tuple(spec_list[:input_index]) if input_index > 1 else spec_list[0]
+                ),
                 input_specs=input_specs,
                 redistribute_cost=redistribute_cost,
             )

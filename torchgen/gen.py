@@ -1361,7 +1361,7 @@ def get_grouped_by_view_native_functions(
     native_functions: Sequence[NativeFunction],
 ) -> Sequence[NativeFunction | NativeFunctionsViewGroup]:
     def maybe_create_view_group(
-        d: dict[ViewSchemaKind | SchemaKind, NativeFunction]
+        d: dict[ViewSchemaKind | SchemaKind, NativeFunction],
     ) -> list[NativeFunction | NativeFunctionsViewGroup]:
         funcs: list[NativeFunction | NativeFunctionsViewGroup] = []
         if ViewSchemaKind.aliasing in d:
@@ -1408,7 +1408,7 @@ def get_grouped_native_functions(
     native_functions: Sequence[NativeFunction],
 ) -> Sequence[NativeFunction | NativeFunctionsGroup]:
     def flatten_pre_group(
-        d: dict[SchemaKind, NativeFunction]
+        d: dict[SchemaKind, NativeFunction],
     ) -> Sequence[NativeFunction | NativeFunctionsGroup]:
         r = NativeFunctionsGroup.from_dict(d)
         if r is None:
@@ -1607,15 +1607,17 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
                 lambda: {
                     "ns_prologue": ns_helper.prologue,
                     "ns_epilogue": ns_helper.epilogue,
-                    "dispatch_helpers": dest.gen_registration_helpers(backend_idx)
-                    if gen_dispatch_helpers
-                    else [],
+                    "dispatch_helpers": (
+                        dest.gen_registration_helpers(backend_idx)
+                        if gen_dispatch_helpers
+                        else []
+                    ),
                     "dispatch_anonymous_definitions": anonymous_definitions[
                         kernel_namespace
                     ],
-                    "static_init_dispatch_registrations": ""
-                    if skip_dispatcher_op_registration
-                    else registration_body,
+                    "static_init_dispatch_registrations": (
+                        "" if skip_dispatcher_op_registration else registration_body
+                    ),
                     "deferred_dispatch_registrations": "",
                     "dispatch_namespace": dispatch_key.lower(),
                     "dispatch_namespaced_definitions": ns_definitions[kernel_namespace],
@@ -2289,9 +2291,9 @@ def gen_source_files(
             f"Register{dispatch_key}.cpp",
             "RegisterDispatchKey.cpp",
             lambda: {
-                "extra_cuda_headers": extra_cuda_headers
-                if is_cuda_dispatch_key(dispatch_key)
-                else "",
+                "extra_cuda_headers": (
+                    extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else ""
+                ),
                 "external_backend_headers": "",
                 "dispatch_headers": dest.gen_registration_headers(
                     backend_index, per_operator_headers, rocm
@@ -2474,12 +2476,12 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
     cpu_fm.write(
         "RegisterSchema.cpp",
         lambda: {
-            "aten_schema_registrations": []
-            if skip_dispatcher_op_registration
-            else aten_schema_registrations,
-            "schema_registrations": []
-            if skip_dispatcher_op_registration
-            else schema_registrations,
+            "aten_schema_registrations": (
+                [] if skip_dispatcher_op_registration else aten_schema_registrations
+            ),
+            "schema_registrations": (
+                [] if skip_dispatcher_op_registration else schema_registrations
+            ),
         },
     )
 

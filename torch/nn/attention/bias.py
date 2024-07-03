@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 """Defines bias subclasses that work with scaled_dot_product_attention"""
+
 from enum import auto, IntEnum
 from typing import Optional
 from warnings import warn

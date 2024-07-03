@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 r"""Zero Redundancy Optimizer."""
+
 import collections
 import copy
 import enum
@@ -908,9 +909,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         params_per_rank = overlap_info.params_per_rank
         offsets = overlap_info.offsets
 
-        self._bucket_assignments_per_rank_cache[assigned_rank][
-            bucket_index
-        ] = _DDPBucketAssignment(bucket_index, bucket_params, bucket_offset)
+        self._bucket_assignments_per_rank_cache[assigned_rank][bucket_index] = (
+            _DDPBucketAssignment(bucket_index, bucket_params, bucket_offset)
+        )
         if self.global_rank == assigned_rank:
             offsets[bucket_index] = len(params_per_rank[assigned_rank])
         params_per_rank[assigned_rank].extend(bucket_params)

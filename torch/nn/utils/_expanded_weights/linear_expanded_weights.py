@@ -23,9 +23,11 @@ class LinearPerSampleGrad(torch.autograd.Function):
                 f"of at least rank 2, got of rank {len(expanded_args_and_kwargs[0].shape)}"
             )
         expanded_kwargs = {
-            "bias": expanded_args_and_kwargs[2]
-            if len(expanded_args_and_kwargs) == 3
-            else None
+            "bias": (
+                expanded_args_and_kwargs[2]
+                if len(expanded_args_and_kwargs) == 3
+                else None
+            )
         }
         expanded_args = expanded_args_and_kwargs[:2]
         ctx.batch_first = is_batch_first(expanded_args_and_kwargs)

@@ -268,9 +268,11 @@ class BlockPtrOptions:
                 self.replace_roffset(offset, sympy.Integer(0)) for offset in offsets
             ]
         args = [
-            f"{name} + ({f(self.constant_offset)})"
-            if self.constant_offset != 0
-            else name,
+            (
+                f"{name} + ({f(self.constant_offset)})"
+                if self.constant_offset != 0
+                else name
+            ),
             f"shape={f(self.shape)}",
             f"strides={f(self.strides)}",
             f"block_shape={f(self.block_shape)}",
@@ -2494,15 +2496,15 @@ class TritonKernel(SIMDKernel):
             inductor_meta["profile_bandwidth_regex"] = config.profile_bandwidth_regex
             inductor_meta["profile_bandwidth_output"] = config.profile_bandwidth_output
         if config.coordinate_descent_tuning:
-            inductor_meta[
-                "coordinate_descent_tuning"
-            ] = config.coordinate_descent_tuning
-            inductor_meta[
-                "coordinate_descent_search_radius"
-            ] = config.coordinate_descent_search_radius
-            inductor_meta[
-                "coordinate_descent_check_all_directions"
-            ] = config.coordinate_descent_check_all_directions
+            inductor_meta["coordinate_descent_tuning"] = (
+                config.coordinate_descent_tuning
+            )
+            inductor_meta["coordinate_descent_search_radius"] = (
+                config.coordinate_descent_search_radius
+            )
+            inductor_meta["coordinate_descent_check_all_directions"] = (
+                config.coordinate_descent_check_all_directions
+            )
         return inductor_meta
 
     def codegen_kernel(self, name=None):

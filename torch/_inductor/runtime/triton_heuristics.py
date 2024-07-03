@@ -457,9 +457,11 @@ class CachingAutotuner(KernelInterface):
             "bin": binary,
             "launch_enter_hook": CompiledKernel.launch_enter_hook,
             "launch_exit_hook": CompiledKernel.launch_exit_hook,
-            "metadata": binary.packed_metadata
-            if hasattr(binary, "packed_metadata")
-            else binary.metadata,
+            "metadata": (
+                binary.packed_metadata
+                if hasattr(binary, "packed_metadata")
+                else binary.metadata
+            ),
             "shared": binary_shared,
         }
 
@@ -732,21 +734,27 @@ class CachingAutotuner(KernelInterface):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
         assert key is not None, "kernel_name can not be None"
         params = {
-            "mangled_name": launcher.bin.metadata.name
-            if hasattr(launcher.bin.metadata, "name")
-            else launcher.bin.metadata["name"],
+            "mangled_name": (
+                launcher.bin.metadata.name
+                if hasattr(launcher.bin.metadata, "name")
+                else launcher.bin.metadata["name"]
+            ),
             "grid_x": grid_x,
             "grid_y": grid_y,
             "grid_z": grid_z,
             "x_block": launcher.config.kwargs.get("XBLOCK", 1),
             "y_block": launcher.config.kwargs.get("YBLOCK", None),
             "z_block": launcher.config.kwargs.get("ZBLOCK", None),
-            "num_warps": launcher.bin.num_warps
-            if hasattr(launcher.bin, "num_warps")
-            else launcher.bin.metadata.num_warps,
-            "shared_mem": launcher.bin.shared
-            if hasattr(launcher.bin, "shared")
-            else launcher.bin.metadata.shared,
+            "num_warps": (
+                launcher.bin.num_warps
+                if hasattr(launcher.bin, "num_warps")
+                else launcher.bin.metadata.num_warps
+            ),
+            "shared_mem": (
+                launcher.bin.shared
+                if hasattr(launcher.bin, "shared")
+                else launcher.bin.metadata.shared
+            ),
             "stream": stream,
             # User defined triton kernels will have arbitrary kwarg names
             "meta": launcher.config.kwargs,

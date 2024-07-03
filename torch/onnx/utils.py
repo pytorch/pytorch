@@ -4,6 +4,7 @@
 These models can be loaded with the ONNX library and then
 converted to models which run on other deep learning frameworks.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -129,7 +130,7 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
 @contextlib.contextmanager
 @_beartype.beartype
 def disable_apex_o2_state_dict_hook(
-    model: Union[torch.nn.Module, torch.jit.ScriptFunction]
+    model: Union[torch.nn.Module, torch.jit.ScriptFunction],
 ):
     # Apex O2 hook state_dict to return fp16 weights as fp32.
     # Exporter cannot identify them as same tensors.
@@ -1984,9 +1985,11 @@ def _run_symbolic_function(
         raise errors.UnsupportedOperatorError(
             symbolic_function_name,
             opset_version,
-            symbolic_function_group.get_min_supported()
-            if symbolic_function_group
-            else None,
+            (
+                symbolic_function_group.get_min_supported()
+                if symbolic_function_group
+                else None
+            ),
         )
 
     except RuntimeError:

@@ -7547,7 +7547,7 @@ class CommonTemplate:
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
             def impl(a, b, c, d, e=2):
-                a.add_(b[0] * c * e),
+                a.add_(b[0] * c * e)
                 if d is not None:
                     d.add_(b[1])
 
@@ -7587,7 +7587,7 @@ class CommonTemplate:
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
             def impl(a, b, c, d, e=2):
-                a.add_(b[0] * c * e),
+                a.add_(b[0] * c * e)
                 if d is not None:
                     d.add_(b[1])
                 return b[0] + b[1]
@@ -9870,12 +9870,16 @@ class CommonTemplate:
             # 2. y has memory_format contiguity and fn gets preserve kwarg
             # 3. y has some other strides (not contiguous or channels last) and fn gets preserve
             yield x, torch.randn(*y_size), memory_format
-            yield x, torch.randn(*y_size).contiguous(
-                memory_format=memory_format
-            ), torch.preserve_format
-            yield x, torch.randn(*y_size).permute(
-                tuple(reversed(range(len(y_size))))
-            ), torch.preserve_format
+            yield (
+                x,
+                torch.randn(*y_size).contiguous(memory_format=memory_format),
+                torch.preserve_format,
+            )
+            yield (
+                x,
+                torch.randn(*y_size).permute(tuple(reversed(range(len(y_size))))),
+                torch.preserve_format,
+            )
 
     @skipIfXpu
     def test_resize_as(self):
@@ -11494,9 +11498,11 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_layer_norm_relu"
-                    if torch._dynamo.config.inline_inbuilt_nn_modules
-                    else "triton_poi_fused_LayerNorm_ReLU",
+                    (
+                        "triton_poi_fused_layer_norm_relu"
+                        if torch._dynamo.config.inline_inbuilt_nn_modules
+                        else "triton_poi_fused_LayerNorm_ReLU"
+                    ),
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]

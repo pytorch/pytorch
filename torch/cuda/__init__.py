@@ -11,7 +11,6 @@ It is lazily initialized, so you can always import it, and use
 :ref:`cuda-semantics` has more details about working with CUDA.
 """
 
-
 import contextlib
 import importlib
 import os
@@ -45,9 +44,9 @@ except ImportError:
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
-_queued_calls: List[
-    Tuple[Callable[[], None], List[str]]
-] = []  # don't invoke these until initialization occurs
+_queued_calls: List[Tuple[Callable[[], None], List[str]]] = (
+    []
+)  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
 
@@ -545,6 +544,7 @@ class StreamContext:
             ``None``.
     .. note:: Streams are per-device.
     """
+
     cur_stream: Optional["torch.cuda.Stream"]
 
     def __init__(self, stream: Optional["torch.cuda.Stream"]):

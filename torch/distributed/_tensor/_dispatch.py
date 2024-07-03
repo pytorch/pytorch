@@ -189,8 +189,9 @@ class OpDispatcher:
                     # did not already construct one
                     random._rng_tracker = random.OffsetBasedRNGTracker(mesh.device_type)
 
-                first_arg, first_local_arg = cast(dtensor.DTensor, args[0]), cast(
-                    torch.Tensor, local_tensor_args[0]
+                first_arg, first_local_arg = (
+                    cast(dtensor.DTensor, args[0]),
+                    cast(torch.Tensor, local_tensor_args[0]),
                 )
                 rng_context = (
                     random._rng_tracker._distribute_region(first_arg._spec)
@@ -375,9 +376,11 @@ class OpDispatcher:
             mesh,
             OpSchema(
                 op_call,
-                pytree.tree_unflatten(args_schema, args_spec)
-                if args_spec
-                else tuple(args_schema),
+                (
+                    pytree.tree_unflatten(args_schema, args_spec)
+                    if args_spec
+                    else tuple(args_schema)
+                ),
                 kwargs_schema,
                 schema_info=runtime_schema_info,
             ),
