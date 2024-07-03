@@ -356,6 +356,10 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                                                bool bidirectional,
                                                                                bool batch_first) {
   using namespace mps;
+  TORCH_CHECK(num_layers <= 2,
+              "MPS LSTM gradient kernel has an issue with the gradients for num_layers > 2. ",
+              "As a temporary fix, you can set the environment variable `PYTORCH_ENABLE_MPS_FALLBACK=1` ");
+
   const Tensor& grad_y_r = c10::value_or_else(grad_y_opt, [] { return Tensor(); });
   const Tensor& grad_hy_r = c10::value_or_else(grad_hy_opt, [] { return Tensor(); });
   const Tensor& grad_cy_r = c10::value_or_else(grad_cy_opt, [] { return Tensor(); });
