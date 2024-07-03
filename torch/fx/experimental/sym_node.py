@@ -234,12 +234,14 @@ class SymNode:
         return self.str()
 
     def __repr__(self):
-        return (
-            f"SymNode(expr={self.expr}, shape_env={self.shape_env}, "
-            f"pytype={self.pytype}, hint={self._hint}, constant={self.constant})"
-        )
+        rep = [
+            f"SymNode({self.expr}, shape_env={self.shape_env}, pytype={self.pytype}",
+            *(f"hint={self._hint}" for _ in [None] if self._hint is not None),
+            *(f"constant={self.constant}" for _ in [None] if self.constant is not None),
+        ]
+        return ", ".join(rep) + ")"
 
-    def _graph_repr(self) -> str:
+    def _graph_repr(self):
         # Representation used by GraphModule to create a pythonic version of a graph
         return self.str()
 
