@@ -13,7 +13,7 @@ import weakref
 
 from test import support
 
-from torch._inductor.ordered_set import OrderedSet
+from torch.utils.ordered_set import OrderedSet
 
 
 class PassThru(Exception):

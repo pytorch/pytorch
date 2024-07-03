@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import MutableSet, Set as AbstractSet
 from typing import Any, cast, Iterable, Iterator, Optional, TypeVar
 
@@ -21,16 +23,11 @@ class OrderedSet(MutableSet[T]):
     # Required overriden abstract methods
     #
 
-    def __contains__(self, elem: Any) -> bool:
+    def __contains__(self, elem: object) -> bool:
         return elem in self._dict
 
     def __iter__(self) -> Iterator[T]:
-        used = len(self)
-        it = iter(self._dict)
-        for _ in range(used):
-            if len(self) != used:
-                raise RuntimeError("OrderedSet changed size during iteration")
-            yield next(it)
+        yield from self._dict.keys()
 
     def __len__(self) -> int:
         return len(self._dict)
@@ -42,13 +39,13 @@ class OrderedSet(MutableSet[T]):
         self._dict.pop(elem, None)
 
     def clear(self) -> None:
-        # overridden because MutableSet impl is slwo
+        # overridden because MutableSet impl is slow
         self._dict.clear()
 
     # Unimplemented set() methods in _collections_abc.MutableSet
 
     @classmethod
-    def _wrap_in_set(cls, other: Any) -> Any:
+    def _wrap_iter_in_set(cls, other: Any) -> Any:
         """
         Wrap non-Set Iterables in OrderedSets
 
@@ -66,10 +63,10 @@ class OrderedSet(MutableSet[T]):
             raise KeyError("pop from an empty set")
         return self._dict.popitem()[0]
 
-    def copy(self) -> "OrderedSet[T]":
+    def copy(self) -> OrderedSet[T]:
         return self.__class__(self)
 
-    def difference(self, *others: Iterable[T]) -> "OrderedSet[T]":
+    def difference(self, *others: Iterable[T]) -> OrderedSet[T]:
         res = self if len(others) else self.copy()
         for other in others:
             res = res - other  # type: ignore[operator, arg-type]
@@ -83,7 +80,7 @@ class OrderedSet(MutableSet[T]):
         for other in others:
             self |= other  # type: ignore[operator, arg-type]
 
-    def intersection(self, *others: Iterable[T]) -> "OrderedSet[T]":
+    def intersection(self, *others: Iterable[T]) -> OrderedSet[T]:
         res = self if len(others) else self.copy()
         for other in others:
             res = res & other  # type: ignore[operator, arg-type]
@@ -94,18 +91,18 @@ class OrderedSet(MutableSet[T]):
             self &= other  # type: ignore[operator, arg-type]
 
     def issubset(self, other: Iterable[T]) -> bool:
-        return self <= self._wrap_in_set(other)
+        return self <= self._wrap_iter_in_set(other)
 
     def issuperset(self, other: Iterable[T]) -> bool:
-        return self >= self._wrap_in_set(other)
+        return self >= self._wrap_iter_in_set(other)
 
-    def symmetric_difference(self, other: Iterable[T]) -> "OrderedSet[T]":
+    def symmetric_difference(self, other: Iterable[T]) -> OrderedSet[T]:
         return self ^ other  # type: ignore[operator, arg-type]
 
     def symmetric_difference_update(self, other: Iterable[T]) -> None:
         self ^= other  # type: ignore[operator, arg-type]
 
-    def union(self, *others: Iterable[T]) -> "OrderedSet[T]":
+    def union(self, *others: Iterable[T]) -> OrderedSet[T]:
         res = self if len(others) else self.copy()
         for other in others:
             res = res | other  # type: ignore[operator, arg-type]
@@ -113,17 +110,17 @@ class OrderedSet(MutableSet[T]):
 
     # Specify here for correct type inference, otherwise would
     # return AbstractSet[T]
-    def __sub__(self, other: AbstractSet[T_co]) -> "OrderedSet[T]":
-        return cast("OrderedSet[T]", super().__sub__(other))
+    def __sub__(self, other: AbstractSet[T_co]) -> OrderedSet[T]:
+        return cast(OrderedSet[T], super().__sub__(other))
 
-    def __or__(self, other: AbstractSet[T_co]) -> "OrderedSet[T]":
-        return cast("OrderedSet[T]", super().__or__(other))
+    def __or__(self, other: AbstractSet[T_co]) -> OrderedSet[T]:
+        return cast(OrderedSet[T], super().__or__(other))
 
-    def __and__(self, other: AbstractSet[T_co]) -> "OrderedSet[T]":
-        return cast("OrderedSet[T]", super().__and__(other))
+    def __and__(self, other: AbstractSet[T_co]) -> OrderedSet[T]:
+        return cast(OrderedSet[T], super().__and__(other))
 
-    def __xor__(self, other: AbstractSet[T_co]) -> "OrderedSet[T]":
-        return cast("OrderedSet[T]", super().__xor__(other))
+    def __xor__(self, other: AbstractSet[T_co]) -> OrderedSet[T]:
+        return cast(OrderedSet[T], super().__xor__(other))
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({list(self)})"
