@@ -247,9 +247,11 @@ class TestFullyShardCompile(FSDPTest):
         # 1. torch.fx.passes.split_module (in post_grad pass)
         #     - OK, bad thing is that split_module has to slice the FX module into multiple submodules,
         #       how do we avoid that and only carve out just the ops we want into a submodule?
-        #       do we have to use split_module? can't we write our own submodule extraction function?
+        #       Do we actually have to use split_module? can't we write our own submodule extraction function? It should be simple right?
         # 2. HOP.grouped_node(submod) to wrap the call (in post_grad pass)
         # 3. Inductor lower that HOP to a dedicated Inductor IR (maybe ir.GroupedNode or ir.CollectiveSubgraph)?
+        # if u look at pattern matcher it already has subgraph and it goes to extra work to inline it- but to keep as submodule we’d just add a GraphModule and call_method
+        # https://github.com/pytorch/pytorch/blob/f6edd1f7c947368d3c82bb9076ba79f11273c587/torch/_inductor/pattern_matcher.py#L1173
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
         )
