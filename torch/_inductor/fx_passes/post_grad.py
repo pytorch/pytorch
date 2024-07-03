@@ -12,6 +12,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._inductor.virtualized import ops
 
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 
@@ -20,6 +21,7 @@ from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config, ir, pattern_matcher
+from ..codegen.common import BackendFeature, has_backend_feature
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 
 from ..lowering import lowerings as L
@@ -216,6 +218,88 @@ def is_valid_mm_plus_mm(match: Match):
     return True
 
 
+def scatter_upon_const_tensor_extra_check(m):
+    if not config.optimize_scatter_upon_const_tensor:
+        return False
+    full_shape = m.kwargs["shape"]
+    selector = m.kwargs["selector"]
+    dim = m.kwargs["dim"]
+    if dim < 0:
+        dim += len(full_shape)
+
+    selector_ft = selector.meta["val"]
+    assert selector_ft.dim() == len(full_shape)
+
+    for idx, select_sz, full_sz in zip(
+        itertools.count(), selector_ft.shape, full_shape
+    ):
+        if idx == dim:
+            continue
+
+        # TODO: the pattern can be updated to support the case that index tensor
+        # is shorter. But that will need a more complex condition expression
+        # especially for multi-dimensional tensors.
+        # Skip it for now.
+        if isinstance(full_sz, fx.Node):
+            full_sz = full_sz.meta["val"]
+        if select_sz < full_sz:
+            return False
+
+    # Actually we can support small size larger than 1. It would be a bit
+    # tedius. E.g., we load all the index values (not many) and compare
+    # them with the position in tensor to decide what value to return.
+    return selector_ft.size(dim) == 1
+
+
+@register_lowering_pattern(
+    CallFunction(
+        aten.scatter.value,
+        CallFunction(
+            aten.full,
+            KeywordArg("shape"),
+            KeywordArg("background_val"),
+            dtype=KeywordArg("dtype"),
+        ),
+        KeywordArg("dim"),
+        KeywordArg("selector"),
+        KeywordArg("val"),  # scalar value
+    ),
+    extra_check=scatter_upon_const_tensor_extra_check,
+)
+def scatter_upon_const_tensor(
+    match: Match, shape, background_val, dtype, dim, selector, val
+):
+    """
+    Match the pattern of full+scatter into a pointwise.
+
+    TODO: Right now the scatter value must be a scalar. But we could support it
+    when it is a tensor as well.
+    """
+    from torch._inductor import metrics
+
+    metrics.num_matches_for_scatter_upon_const_tensor += 1
+
+    selector_loader = selector.make_loader()
+
+    def inner_fn(idx):
+        selector_idx = list(idx)
+        selector_idx[dim] = 0
+
+        selector = selector_loader(selector_idx)
+        return ops.where(
+            selector == ops.index_expr(idx[dim], torch.int64),
+            ops.constant(val, dtype),
+            ops.constant(background_val, dtype),
+        )
+
+    return ir.Pointwise.create(
+        device=selector.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=shape,
+    )
+
+
 @register_lowering_pattern(
     CallFunction(
         aten.add,
@@ -236,6 +320,7 @@ def cuda_and_enabled_mixed_mm(match):
             match.kwargs["mat2_dtype"].itemsize
             > match.kwargs["mat2"].meta.get("val").dtype.itemsize
         )
+        and has_backend_feature("cuda", BackendFeature.TRITON_TEMPLATES)
     )
 
 
@@ -448,6 +533,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
 
     kernel.name = V.graph.register_buffer(kernel)
     kernel.inputs = ir.ConcatKernel.unwrap_storage(kernel.inputs)
+    V.graph.register_operation(kernel)
     return kernel_tensor
 
 
