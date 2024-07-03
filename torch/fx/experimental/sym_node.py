@@ -240,7 +240,7 @@ class SymNode:
         return self.str()
 
     def __repr__(self):
-        return self.str()
+        raise RuntimeError("BLARGH")
 
     # These methods call the metaprogrammed methods, they're hand written
     # here so we get good stack traces
