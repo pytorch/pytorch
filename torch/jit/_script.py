@@ -1020,7 +1020,9 @@ def call_prepare_scriptable_func_impl(obj, memo):
     if obj_id in memo:
         return memo[id(obj)]
 
-    obj = obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj  # type: ignore[operator]
+    obj = (
+        obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj
+    )  # type: ignore[operator]
     # Record obj in memo to avoid infinite recursion in the case of cycles in the module
     # hierarchy when recursing below.
     memo[obj_id] = obj
@@ -1148,7 +1150,11 @@ def _script_impl(
             obj, torch.jit._recursive.infer_methods_to_compile
         )
     else:
-        obj = obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj  # type: ignore[operator]
+        obj = (
+            obj.__prepare_scriptable__()
+            if hasattr(obj, "__prepare_scriptable__")
+            else obj
+        )  # type: ignore[operator]
 
     if isinstance(obj, dict):
         return create_script_dict(obj)

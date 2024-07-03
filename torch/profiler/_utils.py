@@ -128,9 +128,9 @@ class BasicEvaluation:
                 EventKey(curr_event) not in self.metrics
             ), f"Duplicate id: {curr_event.id}, {curr_event.name}"
             self.metrics[EventKey(curr_event)] = EventMetrics(self_time_ns=self_time)
-            self.metrics[EventKey(curr_event)].duration_time_ns = (
-                curr_event.duration_time_ns
-            )
+            self.metrics[
+                EventKey(curr_event)
+            ].duration_time_ns = curr_event.duration_time_ns
 
     def compute_queue_depth(self):
         """
@@ -210,8 +210,7 @@ class BasicEvaluation:
 
             while (
                 current_kernel_index < len(cuda_kernel_events)
-                and (cuda_kernel_events[current_kernel_index].start_ns())
-                <= start_time  # type: ignore[possibly-undefined]
+                and (cuda_kernel_events[current_kernel_index].start_ns()) <= start_time  # type: ignore[possibly-undefined]
             ):
                 current_kernel_index += 1
             current_queue_depth = spawned_kernel_index - current_kernel_index + 1

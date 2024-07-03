@@ -374,7 +374,8 @@ def _multi_tensor_sgd(
         return
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, momentum_buffer_list], with_indices=True  # type: ignore[list-item]
+        [params, grads, momentum_buffer_list],
+        with_indices=True,  # type: ignore[list-item]
     )
     for (
         device_params,
@@ -476,7 +477,8 @@ def _fused_sgd(
         for i, g in enumerate(grads):
             momentum_buffer_list[i] = torch.empty_like(g)
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, momentum_buffer_list], with_indices=False  # type: ignore[list-item]
+        [params, grads, momentum_buffer_list],
+        with_indices=False,  # type: ignore[list-item]
     )
     for (device, _), (
         (device_params, device_grads, device_momentum_buffer_list),

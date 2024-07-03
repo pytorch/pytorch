@@ -657,7 +657,9 @@ def _export_to_aten_ir(
         elif isinstance(val, torch.SymInt):
             return SymIntArgument(name=node.name)
         elif isinstance(val, torch.ScriptObject):
-            return CustomObjArgument(name=node.name, class_fqn=val._type().qualified_name())  # type: ignore[attr-defined]
+            return CustomObjArgument(
+                name=node.name, class_fqn=val._type().qualified_name()
+            )  # type: ignore[attr-defined]
         elif isinstance(val, FakeScriptObject):
             return CustomObjArgument(
                 name=node.name, class_fqn=val.script_class_name, fake_val=val
@@ -696,9 +698,15 @@ def _export_to_aten_ir(
         user_outputs=set(graph_signature.user_outputs),  # type: ignore[arg-type]
         buffer_mutations=graph_signature.buffers_to_mutate,  # type: ignore[arg-type]
         user_input_mutations=graph_signature.user_inputs_to_mutate,  # type: ignore[arg-type]
-        grad_params=graph_signature.backward_signature.gradients_to_parameters if is_joint else {},  # type: ignore[arg-type, union-attr]
-        grad_user_inputs=graph_signature.backward_signature.gradients_to_user_inputs if is_joint else {},  # type: ignore[arg-type, union-attr]
-        loss_output=graph_signature.backward_signature.loss_output if is_joint else None,  # type: ignore[arg-type, union-attr]
+        grad_params=graph_signature.backward_signature.gradients_to_parameters
+        if is_joint
+        else {},  # type: ignore[arg-type, union-attr]
+        grad_user_inputs=graph_signature.backward_signature.gradients_to_user_inputs
+        if is_joint
+        else {},  # type: ignore[arg-type, union-attr]
+        loss_output=graph_signature.backward_signature.loss_output
+        if is_joint
+        else None,  # type: ignore[arg-type, union-attr]
         inputs=[
             make_argument_spec(i, node)
             for i, node in enumerate(gm.graph.nodes)
@@ -1078,7 +1086,8 @@ def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
             ).module()
 
         elif isinstance(traced_callable, torch.ScriptMethod) and isinstance(
-            traced_callable.owner(), (torch._C.ScriptModule, torch.nn.Module)  # type: ignore[operator]
+            traced_callable.owner(),
+            (torch._C.ScriptModule, torch.nn.Module),  # type: ignore[operator]
         ):
             with patch_forward(traced_callable.owner(), traced_callable):  # type: ignore[operator]
                 return _export(
@@ -1381,7 +1390,9 @@ def _export_to_aten_ir_make_fx(
             elif isinstance(val, torch.SymInt):
                 return SymIntArgument(name=node.name)
             elif isinstance(val, torch.ScriptObject):
-                return CustomObjArgument(name=node.name, class_fqn=val._type().qualified_name())  # type: ignore[attr-defined]
+                return CustomObjArgument(
+                    name=node.name, class_fqn=val._type().qualified_name()
+                )  # type: ignore[attr-defined]
             elif isinstance(val, FakeScriptObject):
                 return CustomObjArgument(
                     name=node.name, class_fqn=val.script_class_name, fake_val=val
@@ -1420,7 +1431,9 @@ def _export_to_aten_ir_make_fx(
     input_specs, output_specs = _sig_to_specs(
         user_inputs=set(input_names[params_len:]),
         inputs_to_parameters=dict(zip(input_names[0:param_len], named_parameters)),
-        inputs_to_buffers=dict(zip(input_names[param_len : param_len + buffer_len], named_buffers)),  # type: ignore[arg-type]
+        inputs_to_buffers=dict(
+            zip(input_names[param_len : param_len + buffer_len], named_buffers)
+        ),  # type: ignore[arg-type]
         user_outputs=set(output_names),
         buffer_mutations={},
         user_input_mutations={},

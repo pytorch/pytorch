@@ -330,7 +330,9 @@ class Optimizer:
             options (used when a parameter group doesn't specify them).
     """
 
-    OptimizerPreHook: TypeAlias = Callable[[Self, Args, Kwargs], Optional[Tuple[Args, Kwargs]]]  # type: ignore[misc]
+    OptimizerPreHook: TypeAlias = Callable[
+        [Self, Args, Kwargs], Optional[Tuple[Args, Kwargs]]
+    ]  # type: ignore[misc]
     OptimizerPostHook: TypeAlias = Callable[[Self, Args, Kwargs], None]  # type: ignore[misc]
 
     _optimizer_step_pre_hooks: Dict[int, OptimizerPreHook]
@@ -831,7 +833,9 @@ class Optimizer:
         handle = hooks.RemovableHandle(self._optimizer_load_state_dict_post_hooks)
         self._optimizer_load_state_dict_post_hooks[handle.id] = hook
         if prepend:
-            self._optimizer_load_state_dict_post_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+            self._optimizer_load_state_dict_post_hooks.move_to_end(
+                handle.id, last=False
+            )  # type: ignore[attr-defined]
         return handle
 
     @torch._disable_dynamo
@@ -890,7 +894,10 @@ class Optimizer:
                     for k, v in value.items()
                 }
             elif isinstance(value, Iterable):
-                return type(value)(_cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)  # type: ignore[call-arg]
+                return type(value)(
+                    _cast(param, v, param_id=param_id, param_groups=param_groups)
+                    for v in value
+                )  # type: ignore[call-arg]
             else:
                 return value
 

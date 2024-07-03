@@ -1475,9 +1475,7 @@ def get_native_function_declarations_from_ns_grouped_kernels(
 {ns_helper.prologue}
 {newline.join(ordered_kernels)}
 {ns_helper.epilogue}
-        """.split(
-                newline
-            )
+        """.split(newline)
         )
     return declarations
 
@@ -1672,9 +1670,7 @@ def get_namespaced_declaration(
 {ns_helper.prologue}
 {newline.join(ordered_kernels)}
 {ns_helper.epilogue}
-        """.split(
-                newline
-            )
+        """.split(newline)
         )
     return declarations
 
@@ -2387,9 +2383,7 @@ def gen_source_files(
                         os.path.join(aoti_fm.install_dir, header_file_name)
                     ) as old_file:
                         old_header = old_file.read()
-                        assert (
-                            old_header == new_header
-                        ), """
+                        assert old_header == new_header, """
 
 WARNING: The generated AOTInductor C shim header files have unexpectedly changed. This
 indicates an AOTInductor fallback operator ABI backward compatibility breakage!!!

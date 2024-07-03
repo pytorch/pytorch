@@ -996,7 +996,10 @@ class LOBPCG:
         )
 
     def _get_svqb(
-        self, U: Tensor, drop: bool, tau: float  # Tensor  # bool  # float
+        self,
+        U: Tensor,
+        drop: bool,
+        tau: float,  # Tensor  # bool  # float
     ) -> Tensor:
         """Return B-orthonormal U.
 

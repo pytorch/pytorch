@@ -286,9 +286,9 @@ def _verify_options(
 
     options = options or StateDictOptions()
 
-    fqn_param_mapping: Dict[Union[str, torch.Tensor], Union[Set[str], torch.Tensor]] = (
-        {}
-    )
+    fqn_param_mapping: Dict[
+        Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
+    ] = {}
     shared_params_mapping: Dict[
         Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
     ] = {}

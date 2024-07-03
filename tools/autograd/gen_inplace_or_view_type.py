@@ -590,8 +590,7 @@ def inplace_or_view_method_definition(
         # For functions that modify their inputs but don't return them,
         # we can't give them autograd support.
         # See https://github.com/pytorch/pytorch/issues/53796
-        not modifies_arguments(f)
-        or len(f.func.returns) == 0
+        not modifies_arguments(f) or len(f.func.returns) == 0
     ):
         return None
     return METHOD_DEFINITION.substitute(

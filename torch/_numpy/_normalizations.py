@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 
-""""Normalize" arguments: convert array_likes to tensors, dtypes to torch dtypes and so on."""
+""" "Normalize" arguments: convert array_likes to tensors, dtypes to torch dtypes and so on."""
 
 from __future__ import annotations
 

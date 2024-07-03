@@ -304,7 +304,9 @@ class DefaultLogsSpecs(LogsSpecs):
             if not self._run_log_dir:
                 self._run_log_dir = self._make_log_dir(self._root_log_dir, run_id)
 
-            attempt_log_dir = os.path.join(self._run_log_dir, f"attempt_{restart_count}")  # type: ignore[call-overload]
+            attempt_log_dir = os.path.join(
+                self._run_log_dir, f"attempt_{restart_count}"
+            )  # type: ignore[call-overload]
             shutil.rmtree(attempt_log_dir, ignore_errors=True)
             os.makedirs(attempt_log_dir)
 

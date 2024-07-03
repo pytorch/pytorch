@@ -278,7 +278,10 @@ class CppTemplateKernel(CppKernel):
                         orig_src, src, epilogue_nodes
                     )
                 return self.store_pointwise_nodes(
-                    dst, epilogue_nodes, offsets, reindexers  # type: ignore[arg-type]
+                    dst,
+                    epilogue_nodes,
+                    offsets,
+                    reindexers,  # type: ignore[arg-type]
                 )
         else:
             if dst.get_name() != src.get_name():

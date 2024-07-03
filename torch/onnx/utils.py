@@ -534,7 +534,10 @@ def export(
             model, dynamic_axes, input_names
         )
         exported_program = torch.export.export(
-            model, args=args, kwargs=kwargs, dynamic_shapes=dynamic_shapes  # type: ignore[arg-type]
+            model,
+            args=args,
+            kwargs=kwargs,
+            dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
         )
         # TODO: expose ExportOptions?
         onnx_program = torch.onnx.dynamo_export(exported_program, *args, **kwargs)
@@ -1671,7 +1674,9 @@ def _export(
 
             if keep_initializers_as_inputs is not True:
                 params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
-                    graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
+                    graph,
+                    params_dict,
+                    getattr(model, "training", False),  # type: ignore[arg-type]
                 )
             _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
             if export_params:
@@ -1980,7 +1985,9 @@ def _run_symbolic_function(
         }
         if namespace == "onnx":
             # Clone node to trigger ONNX shape inference
-            return graph_context.op(op_name, *inputs, **attrs, outputs=node.outputsSize())  # type: ignore[attr-defined]
+            return graph_context.op(
+                op_name, *inputs, **attrs, outputs=node.outputsSize()
+            )  # type: ignore[attr-defined]
 
         raise errors.UnsupportedOperatorError(
             symbolic_function_name,

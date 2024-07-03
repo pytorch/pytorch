@@ -606,7 +606,10 @@ def _multi_tensor_adam(
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
             torch._foreach_add_(exp_avg_sq_sqrt, eps)
             torch._foreach_addcdiv_(
-                device_params, device_exp_avgs, exp_avg_sq_sqrt, step_size  # type: ignore[arg-type]
+                device_params,
+                device_exp_avgs,
+                exp_avg_sq_sqrt,
+                step_size,  # type: ignore[arg-type]
             )
 
 

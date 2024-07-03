@@ -1324,9 +1324,7 @@ not ___dict_contains('bbbbbbbb', G['sys'].modules)
 not ___dict_contains('cccccccc', G['sys'].modules)
 str(L['x'].device) == 'cpu'
 str(L['x'].dtype) == 'torch.float32'
-utils_device.CURRENT_DEVICE == None""".split(
-            "\n"
-        ):
+utils_device.CURRENT_DEVICE == None""".split("\n"):
             self.assertIn(
                 line,
                 guard_code_str,
@@ -7665,9 +7663,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
         ).check(
             "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
-        ).run(
-            prof.report()
-        )
+        ).run(prof.report())
 
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call

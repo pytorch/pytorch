@@ -679,9 +679,7 @@ def load_deprecated_signatures(
                     function=pair.function,
                 )
             )
-        assert (
-            any_schema_found
-        ), f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
+        assert any_schema_found, f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
 
     return results
 

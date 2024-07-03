@@ -280,7 +280,9 @@ class PostGradBatchLinearFusion(BatchFusion):
                             args=(batch_biases[i],),
                             kwargs={"size": broadcast_shape},
                         )
-                        broadcast_bias.meta["val"] = aten.broadcast_to(batch_biases_meta[i]["val"], broadcast_shape)  # type: ignore[assignment]
+                        broadcast_bias.meta["val"] = aten.broadcast_to(
+                            batch_biases_meta[i]["val"], broadcast_shape
+                        )  # type: ignore[assignment]
                         new_bias_add = graph.call_function(
                             aten.add.Tensor, args=((broadcast_bias, new_mm))
                         )
@@ -954,7 +956,11 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             # for relu op, we also use the inplace to construct the key
             # we batch the ops with same parent to enable followup split cat
             parent = node.args[0]
-            parent = parent.target if self.graph_search_options.get("fuse_nodes_with_same_parent", False) else ""  # type: ignore[union-attr]
+            parent = (
+                parent.target
+                if self.graph_search_options.get("fuse_nodes_with_same_parent", False)
+                else ""
+            )  # type: ignore[union-attr]
             group_key = (
                 "batch_aten_" + self.op.__name__.lower().split(".")[0],
                 str(input.meta["val"].shape),

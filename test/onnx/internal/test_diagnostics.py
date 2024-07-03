@@ -344,9 +344,7 @@ class TestTorchScriptOnnxDiagnostics(common_utils.TestCase):
         self.assertIn("test_diagnostics.py", frame.location.uri)
 
     def test_diagnostics_records_cpp_call_stack(self):
-        diagnostic = (
-            self._trigger_node_missing_onnx_shape_inference_warning_diagnostic_from_cpp()
-        )
+        diagnostic = self._trigger_node_missing_onnx_shape_inference_warning_diagnostic_from_cpp()
         stack = diagnostic.cpp_call_stack
         assert stack is not None  # for mypy
         self.assertGreater(len(stack.frames), 0)
@@ -400,12 +398,14 @@ class TestDiagnosticsInfra(common_utils.TestCase):
             },
         ):
             diagnostic1 = infra.Diagnostic(
-                custom_rules.custom_rule, infra.Level.WARNING  # type: ignore[attr-defined]
+                custom_rules.custom_rule,
+                infra.Level.WARNING,  # type: ignore[attr-defined]
             )
             self.context.log(diagnostic1)
 
             diagnostic2 = infra.Diagnostic(
-                custom_rules.custom_rule_2, infra.Level.ERROR  # type: ignore[attr-defined]
+                custom_rules.custom_rule_2,
+                infra.Level.ERROR,  # type: ignore[attr-defined]
             )
             self.context.log(diagnostic2)
 

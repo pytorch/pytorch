@@ -448,7 +448,9 @@ def add_generated_native_functions(
                 else (
                     d[SchemaKind.mutable]
                     if has_mutable
-                    else d[SchemaKind.out] if has_out else d[SchemaKind.functional]
+                    else d[SchemaKind.out]
+                    if has_out
+                    else d[SchemaKind.functional]
                 )
             )
 

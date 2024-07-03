@@ -2392,9 +2392,7 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
-    )(
-        model
-    )  # type: ignore[return-value]
+    )(model)  # type: ignore[return-value]
 
 
 def _register_device_module(device_type, module):

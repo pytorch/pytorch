@@ -424,9 +424,7 @@ def create_functionalized_fn(
 
                 # Ban metadata mutations on fw inputs during the bw
                 if not inpt_info.mutates_metadata:
-                    assert (
-                        not joint_mutates_metadata
-                    ), "Found a graph input that had its metadata mutated in the backward. This is not supported"
+                    assert not joint_mutates_metadata, "Found a graph input that had its metadata mutated in the backward. This is not supported"
 
                 # Ban storage resizing on fw inputs during the bw
                 if not inpt_info.mutation_inductor_storage_resize:
@@ -455,10 +453,11 @@ def create_functionalized_fn(
             for f_inpt, before, after in zip(
                 f_args[1], tangents_before, tangents_after
             ):
-                assert not has_metadata_mutation(
-                    f_inpt, before, check_only_storage_mutation=False
-                ) and not has_data_mutation(
-                    f_inpt
+                assert (
+                    not has_metadata_mutation(
+                        f_inpt, before, check_only_storage_mutation=False
+                    )
+                    and not has_data_mutation(f_inpt)
                 ), "Found an input to the backward that was mutated during the backward pass. This is not supported"
 
         if aot_config.keep_inference_input_mutations:
@@ -531,9 +530,7 @@ def create_functionalized_fn(
                             inpt_f.elem, before=False
                         )
                         if old_storage_size != new_storage_size:
-                            assert (
-                                old_storage_size == 0 or new_storage_size == 0
-                            ), f"""\
+                            assert old_storage_size == 0 or new_storage_size == 0, f"""\
 Encountered a storage resize during tracing on input {i}. Old nbytes={old_storage_size}, new nbytes={new_storage_size}
 We only support storage resizing on graph inputs as long as the input either starts or ends with a storage size of 0
 (the case for FSDP)"""
@@ -567,8 +564,10 @@ We only support storage resizing on graph inputs as long as the input either sta
                         if inpt_old.is_inference():
                             maybe_preserve_vc = nullcontext()
                         else:
-                            maybe_preserve_vc = torch.autograd._unsafe_preserve_version_counter(
-                                inpt_old  # type: ignore[assignment]
+                            maybe_preserve_vc = (
+                                torch.autograd._unsafe_preserve_version_counter(
+                                    inpt_old  # type: ignore[assignment]
+                                )
                             )
                         with torch.no_grad(), maybe_preserve_vc:
                             inpt_old.copy_(inpt_new)

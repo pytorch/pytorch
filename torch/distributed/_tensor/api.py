@@ -612,9 +612,7 @@ def distribute_tensor(
                 xla_distribute_tensor,
             )
 
-            return xla_distribute_tensor(
-                tensor, device_mesh, placements
-            )  # type:ignore[return-value]
+            return xla_distribute_tensor(tensor, device_mesh, placements)  # type:ignore[return-value]
         except ImportError as e:
             msg = "To use DTensor API with xla, you must install the torch_xla package!"
             raise ImportError(msg) from e
@@ -802,7 +800,9 @@ def distribute_module(
                 FutureWarning,
                 stacklevel=2,
             )
-            module.register_forward_pre_hook(lambda _, inputs: input_fn(inputs, device_mesh))  # type: ignore[call-arg]
+            module.register_forward_pre_hook(
+                lambda _, inputs: input_fn(inputs, device_mesh)
+            )  # type: ignore[call-arg]
         elif num_args == 3:
             # input_fn takes in module, inputs, device mesh
             module.register_forward_pre_hook(

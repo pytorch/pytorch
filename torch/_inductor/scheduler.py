@@ -644,9 +644,7 @@ class BaseSchedulerNode:
                     display=False
                 ) as flop_counter_mode, V.set_current_node(
                     self.node.fx_node
-                ), V.set_fake_mode(
-                    fake_mode
-                ):
+                ), V.set_fake_mode(fake_mode):
                     from .ir import ir_node_to_tensor
 
                     fake_inputs = [

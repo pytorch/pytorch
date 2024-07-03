@@ -505,7 +505,9 @@ def run_test(
                 if should_retry
                 and isinstance(test_module, ShardedTest)
                 and test_module.time is not None
-                else THRESHOLD * 3 if is_cpp_test else None
+                else THRESHOLD * 3
+                if is_cpp_test
+                else None
             )
         )
     )

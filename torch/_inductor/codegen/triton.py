@@ -1577,7 +1577,9 @@ class TritonKernel(SIMDKernel):
         self.filter_masks(mask_vars)
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
-        return IndexingOptions(index_str, mask_vars, mask_str, expand_str, has_rindex, index)  # type: ignore[arg-type]
+        return IndexingOptions(
+            index_str, mask_vars, mask_str, expand_str, has_rindex, index
+        )  # type: ignore[arg-type]
 
     def codegen_block_ptr(
         self, name: str, var: str, indexing: BlockPtrOptions, other=""
@@ -2457,9 +2459,7 @@ class TritonKernel(SIMDKernel):
             {}
             import torch
             from torch._inductor.runtime.triton_heuristics import grid, split_scan_grid
-        """.format(
-                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
-            )
+        """.format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
         )
 
     def _get_heuristic(self):

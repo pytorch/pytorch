@@ -1578,9 +1578,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 num_intermediate_bases = (
                     CompiledFunction.metadata.num_intermediate_bases
                 )
-                num_graph_handled_inputs = (
-                    CompiledFunction.metadata.num_mutated_graph_handled_indices_seen_by_autograd
-                )
+                num_graph_handled_inputs = CompiledFunction.metadata.num_mutated_graph_handled_indices_seen_by_autograd
                 num_mutated_runtime_inps = (
                     CompiledFunction.metadata.num_mutated_inp_runtime_indices
                 )
@@ -1612,8 +1610,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 inp_tangents, out_tangents, intermediate_base_tangents = (
                     flat_args[num_tokens:num_mutated_runtime_inps],
                     flat_args[
-                        num_tokens
-                        + num_mutated_runtime_inps : num_tokens
+                        num_tokens + num_mutated_runtime_inps : num_tokens
                         + num_mutated_runtime_inps
                         + CompiledFunction.metadata.num_outputs
                     ],

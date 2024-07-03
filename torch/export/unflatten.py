@@ -205,9 +205,9 @@ class UnflattenedModule(torch.nn.Module):
 
         non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
         assigned_buffers: Set[str] = set()  # tracking unused buffers
-        id_to_buffer: Dict[int, Tuple[torch.nn.Parameter, bool]] = (
-            {}
-        )  # handle weight-sharing
+        id_to_buffer: Dict[
+            int, Tuple[torch.nn.Parameter, bool]
+        ] = {}  # handle weight-sharing
         for name in self.graph_signature.buffers:  # this loop adds used buffers
             if name in non_persistent_buffers:
                 persistent = False
@@ -822,8 +822,7 @@ class _ModuleFrame:
         if x in self.node_to_placeholder:
             return self.node_to_placeholder[x]
         elif (
-            x.op == "placeholder"
-            or self.module_call_graph.get(self.fqn) is None
+            x.op == "placeholder" or self.module_call_graph.get(self.fqn) is None
             # allow placeholder creation if we are not preserving module call signature
         ):
             self.add_placeholder(x)

@@ -2970,7 +2970,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             module_name = self.f_globals["__name__"]
             module_source = self.import_source(module_name)
             if "torch_package" in module_name:
-                fglobals_value = torch.package.package_importer._package_imported_modules[module_name]  # type: ignore[assignment]
+                fglobals_value = (
+                    torch.package.package_importer._package_imported_modules[
+                        module_name
+                    ]
+                )  # type: ignore[assignment]
             else:
                 fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
             fglobals_vt = VariableBuilder(self, module_source)(fglobals_value)

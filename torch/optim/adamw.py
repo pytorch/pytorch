@@ -589,7 +589,8 @@ def _multi_tensor_adamw(
             step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
 
             bias_correction2_sqrt = [
-                _dispatch_sqrt(bc) for bc in bias_correction2  # type: ignore[arg-type]
+                _dispatch_sqrt(bc)
+                for bc in bias_correction2  # type: ignore[arg-type]
             ]
 
             if amsgrad:
@@ -678,7 +679,8 @@ def _fused_adamw(
             )
         if lr_dict is not None and device not in lr_dict:
             lr = lr_dict.setdefault(
-                device, lr.to(device=device, non_blocking=True)  # type: ignore[union-attr]
+                device,
+                lr.to(device=device, non_blocking=True),  # type: ignore[union-attr]
             )
         torch._foreach_add_(device_state_steps, 1)
         torch._fused_adamw_(

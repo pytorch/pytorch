@@ -15,7 +15,7 @@ build-backend = "setuptools.build_meta:__legacy__"
 
 
 [tool.ufmt]
-formatter = "black"
+formatter = "ruff-api"
 sorter = "usort"
 
 
@@ -46,7 +46,7 @@ standard_library = ["typing_extensions"]
 
 [tool.ruff]
 target-version = "py38"
-line-length = 120
+line-length = 88
 
 [tool.ruff.lint]
 # NOTE: Synchoronize the ignores with .flake8

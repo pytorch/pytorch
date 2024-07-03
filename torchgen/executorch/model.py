@@ -94,9 +94,9 @@ class ETKernelKey:
             assert type_alias in type_alias_map, "Undefined type alias: " + str(
                 type_alias
             )
-            assert (
-                dim_order in dim_order_alias_map
-            ), "Undefined dim_order alias: " + str(dim_order)
+            assert dim_order in dim_order_alias_map, (
+                "Undefined dim_order alias: " + str(dim_order)
+            )
             dtype_alias_used.add(type_alias)
 
         # Generate all permutations of dtype alias values

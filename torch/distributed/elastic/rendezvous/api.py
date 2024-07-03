@@ -77,8 +77,12 @@ class RendezvousStoreInfo:
         if rank == 0:
             addr = socket.getfqdn()
             port = _get_free_port()
-            store.set(RendezvousStoreInfo.MASTER_ADDR_KEY, addr.encode(encoding="UTF-8"))  # type: ignore[arg-type]
-            store.set(RendezvousStoreInfo.MASTER_PORT_KEY, str(port).encode(encoding="UTF-8"))  # type: ignore[arg-type]
+            store.set(
+                RendezvousStoreInfo.MASTER_ADDR_KEY, addr.encode(encoding="UTF-8")
+            )  # type: ignore[arg-type]
+            store.set(
+                RendezvousStoreInfo.MASTER_PORT_KEY, str(port).encode(encoding="UTF-8")
+            )  # type: ignore[arg-type]
 
         addr = store.get(RendezvousStoreInfo.MASTER_ADDR_KEY).decode(encoding="UTF-8")
         port = int(

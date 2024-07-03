@@ -314,101 +314,91 @@ class _FindOperatorOverloadsInOnnxRegistry(infra.Rule):
 
 @dataclasses.dataclass
 class _POERules(infra.RuleCollection):
-    node_missing_onnx_shape_inference: _NodeMissingOnnxShapeInference = (
-        dataclasses.field(
-            default=_NodeMissingOnnxShapeInference.from_sarif(
-                id="POE0001",
-                name="node-missing-onnx-shape-inference",
-                short_description={"text": "Node is missing ONNX shape inference."},
-                full_description={
-                    "text": "Node is missing ONNX shape inference. This usually happens when the node is not valid under standard ONNX operator spec.",
-                    "markdown": "Node is missing ONNX shape inference.\nThis usually happens when the node is not valid under standard ONNX operator spec.\n",
-                },
-                message_strings={
-                    "default": {
-                        "text": "The shape inference of {op_name} type is missing, so it may result in wrong shape inference for the exported graph. Please consider adding it in symbolic function."
-                    }
-                },
-                help_uri=None,
-                properties={"deprecated": False, "tags": []},
-            ),
-            init=False,
-        )
+    node_missing_onnx_shape_inference: _NodeMissingOnnxShapeInference = dataclasses.field(
+        default=_NodeMissingOnnxShapeInference.from_sarif(
+            id="POE0001",
+            name="node-missing-onnx-shape-inference",
+            short_description={"text": "Node is missing ONNX shape inference."},
+            full_description={
+                "text": "Node is missing ONNX shape inference. This usually happens when the node is not valid under standard ONNX operator spec.",
+                "markdown": "Node is missing ONNX shape inference.\nThis usually happens when the node is not valid under standard ONNX operator spec.\n",
+            },
+            message_strings={
+                "default": {
+                    "text": "The shape inference of {op_name} type is missing, so it may result in wrong shape inference for the exported graph. Please consider adding it in symbolic function."
+                }
+            },
+            help_uri=None,
+            properties={"deprecated": False, "tags": []},
+        ),
+        init=False,
     )
     """Node is missing ONNX shape inference."""
 
-    missing_custom_symbolic_function: _MissingCustomSymbolicFunction = (
-        dataclasses.field(
-            default=_MissingCustomSymbolicFunction.from_sarif(
-                id="POE0002",
-                name="missing-custom-symbolic-function",
-                short_description={
-                    "text": "Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX."
-                },
-                full_description={
-                    "text": "Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX.",
-                    "markdown": "Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX.\n",
-                },
-                message_strings={
-                    "default": {
-                        "text": "ONNX export failed on an operator with unrecognized namespace {op_name}. If you are trying to export a custom operator, make sure you registered it with the right domain and version."
-                    }
-                },
-                help_uri=None,
-                properties={"deprecated": False, "tags": []},
-            ),
-            init=False,
-        )
+    missing_custom_symbolic_function: _MissingCustomSymbolicFunction = dataclasses.field(
+        default=_MissingCustomSymbolicFunction.from_sarif(
+            id="POE0002",
+            name="missing-custom-symbolic-function",
+            short_description={
+                "text": "Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX."
+            },
+            full_description={
+                "text": "Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX.",
+                "markdown": "Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX.\n",
+            },
+            message_strings={
+                "default": {
+                    "text": "ONNX export failed on an operator with unrecognized namespace {op_name}. If you are trying to export a custom operator, make sure you registered it with the right domain and version."
+                }
+            },
+            help_uri=None,
+            properties={"deprecated": False, "tags": []},
+        ),
+        init=False,
     )
     """Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX."""
 
-    missing_standard_symbolic_function: _MissingStandardSymbolicFunction = (
-        dataclasses.field(
-            default=_MissingStandardSymbolicFunction.from_sarif(
-                id="POE0003",
-                name="missing-standard-symbolic-function",
-                short_description={
-                    "text": "Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX."
-                },
-                full_description={
-                    "text": "Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX.",
-                    "markdown": "Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX.\n",
-                },
-                message_strings={
-                    "default": {
-                        "text": "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Please feel free to request support or submit a pull request on PyTorch GitHub: {issue_url}."
-                    }
-                },
-                help_uri=None,
-                properties={"deprecated": False, "tags": []},
-            ),
-            init=False,
-        )
+    missing_standard_symbolic_function: _MissingStandardSymbolicFunction = dataclasses.field(
+        default=_MissingStandardSymbolicFunction.from_sarif(
+            id="POE0003",
+            name="missing-standard-symbolic-function",
+            short_description={
+                "text": "Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX."
+            },
+            full_description={
+                "text": "Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX.",
+                "markdown": "Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX.\n",
+            },
+            message_strings={
+                "default": {
+                    "text": "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Please feel free to request support or submit a pull request on PyTorch GitHub: {issue_url}."
+                }
+            },
+            help_uri=None,
+            properties={"deprecated": False, "tags": []},
+        ),
+        init=False,
     )
     """Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX."""
 
-    operator_supported_in_newer_opset_version: _OperatorSupportedInNewerOpsetVersion = (
-        dataclasses.field(
-            default=_OperatorSupportedInNewerOpsetVersion.from_sarif(
-                id="POE0004",
-                name="operator-supported-in-newer-opset-version",
-                short_description={
-                    "text": "Operator is supported in newer opset version."
-                },
-                full_description={
-                    "text": "Operator is supported in newer opset version.",
-                    "markdown": "Operator is supported in newer opset version.\n\nExample:\n```python\ntorch.onnx.export(model, args, ..., opset_version=9)\n```\n",
-                },
-                message_strings={
-                    "default": {
-                        "text": "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Support for this operator was added in version {supported_opset_version}, try exporting with this version."
-                    }
-                },
-                help_uri=None,
-                properties={"deprecated": False, "tags": []},
-            ),
-            init=False,
-        )
+    operator_supported_in_newer_opset_version: _OperatorSupportedInNewerOpsetVersion = dataclasses.field(
+        default=_OperatorSupportedInNewerOpsetVersion.from_sarif(
+            id="POE0004",
+            name="operator-supported-in-newer-opset-version",
+            short_description={"text": "Operator is supported in newer opset version."},
+            full_description={
+                "text": "Operator is supported in newer opset version.",
+                "markdown": "Operator is supported in newer opset version.\n\nExample:\n```python\ntorch.onnx.export(model, args, ..., opset_version=9)\n```\n",
+            },
+            message_strings={
+                "default": {
+                    "text": "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Support for this operator was added in version {supported_opset_version}, try exporting with this version."
+                }
+            },
+            help_uri=None,
+            properties={"deprecated": False, "tags": []},
+        ),
+        init=False,
     )
     """Operator is supported in newer opset version."""
 
@@ -469,28 +459,26 @@ class _POERules(infra.RuleCollection):
     )
     """FX graph transformation during ONNX export before converting from FX IR to ONNX IR."""
 
-    no_symbolic_function_for_call_function: _NoSymbolicFunctionForCallFunction = (
-        dataclasses.field(
-            default=_NoSymbolicFunctionForCallFunction.from_sarif(
-                id="FXE0011",
-                name="no-symbolic-function-for-call-function",
-                short_description={
-                    "text": 'Cannot find symbolic function to convert the "call_function" FX node to ONNX.'
-                },
-                full_description={
-                    "text": 'Cannot find symbolic function to convert the "call_function" FX node to ONNX. ',
-                    "markdown": 'This error occurs when the ONNX converter is unable to find a corresponding symbolic function\nto convert a "call_function" node in the input graph to its equivalence in ONNX. The "call_function"\nnode represents a normalized function call in PyTorch, such as "torch.aten.ops.add".\n\nTo resolve this error, you can try one of the following:\n\n- If exists, apply the auto-fix suggested by the diagnostic. TODO: this part is not available yet.\n- Rewrite the model using only supported PyTorch operators or functions.\n- Follow this [guide](https://pytorch.org/tutorials/beginner/onnx/onnx_registry_tutorial.html#overview) to write and\n  register a custom symbolic function for the unsupported call_function FX node.\n',
-                },
-                message_strings={
-                    "default": {
-                        "text": 'No symbolic function to convert the "call_function" node {target} to ONNX. '
-                    }
-                },
-                help_uri=None,
-                properties={"deprecated": False, "tags": []},
-            ),
-            init=False,
-        )
+    no_symbolic_function_for_call_function: _NoSymbolicFunctionForCallFunction = dataclasses.field(
+        default=_NoSymbolicFunctionForCallFunction.from_sarif(
+            id="FXE0011",
+            name="no-symbolic-function-for-call-function",
+            short_description={
+                "text": 'Cannot find symbolic function to convert the "call_function" FX node to ONNX.'
+            },
+            full_description={
+                "text": 'Cannot find symbolic function to convert the "call_function" FX node to ONNX. ',
+                "markdown": 'This error occurs when the ONNX converter is unable to find a corresponding symbolic function\nto convert a "call_function" node in the input graph to its equivalence in ONNX. The "call_function"\nnode represents a normalized function call in PyTorch, such as "torch.aten.ops.add".\n\nTo resolve this error, you can try one of the following:\n\n- If exists, apply the auto-fix suggested by the diagnostic. TODO: this part is not available yet.\n- Rewrite the model using only supported PyTorch operators or functions.\n- Follow this [guide](https://pytorch.org/tutorials/beginner/onnx/onnx_registry_tutorial.html#overview) to write and\n  register a custom symbolic function for the unsupported call_function FX node.\n',
+            },
+            message_strings={
+                "default": {
+                    "text": 'No symbolic function to convert the "call_function" node {target} to ONNX. '
+                }
+            },
+            help_uri=None,
+            properties={"deprecated": False, "tags": []},
+        ),
+        init=False,
     )
     """Cannot find symbolic function to convert the "call_function" FX node to ONNX."""
 
@@ -540,28 +528,26 @@ class _POERules(infra.RuleCollection):
     )
     """Report any op level validation failure in warnings."""
 
-    find_opschema_matched_symbolic_function: _FindOpschemaMatchedSymbolicFunction = (
-        dataclasses.field(
-            default=_FindOpschemaMatchedSymbolicFunction.from_sarif(
-                id="FXE0014",
-                name="find-opschema-matched-symbolic-function",
-                short_description={
-                    "text": "Find the OnnxFunction that matches the input/attribute dtypes by comparing them with their opschemas."
-                },
-                full_description={
-                    "text": "Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas. A warning will be issued if the matched OnnxFunction is not an exact match.",
-                    "markdown": "When an ATen/Custom operator is registered and needs to be dispatched to an OnnxFunction, the input/attribute\ndtypes of the ATen/Custom operator are compared with the input/attribute dtypes of the OnnxFunction opschemas\nto find a match. However, if a perfect/exact match is not found, the dispatcher will attempt to find\nthe nearest match with the highest number of input/attribute dtypes matching the OnnxFunction opschemas, while\nissuing a warning.\n\nThere are two types of level that can be triggered in this rule:\n\n1. NOTE: A perfect match is found, and no warning is issued.\n2. WARNING: The matched OnnxFunction is not a perfect/exact match.\n\nHere are some suggestions based on the WARNING situation:\n\n1. If there are NO errors or mismatches in the results, it is safe to disregard this warning,\n  as the definition of OnnxFunction schema is usually more stringent.\n2. If there are errors or mismatches in the results, it is recommended to:\n  (a) Enable op_level_debugging to determine if the OnnxFunction might be incorrect.\n  (b) Report the issue to the PyTorch-ONNX team.\n  (c) Create/register a custom symbolic function to replace the default one.\n",
-                },
-                message_strings={
-                    "default": {
-                        "text": "The OnnxFunction: {symbolic_fn} is the nearest match of the node {node}."
-                    }
-                },
-                help_uri=None,
-                properties={"deprecated": False, "tags": []},
-            ),
-            init=False,
-        )
+    find_opschema_matched_symbolic_function: _FindOpschemaMatchedSymbolicFunction = dataclasses.field(
+        default=_FindOpschemaMatchedSymbolicFunction.from_sarif(
+            id="FXE0014",
+            name="find-opschema-matched-symbolic-function",
+            short_description={
+                "text": "Find the OnnxFunction that matches the input/attribute dtypes by comparing them with their opschemas."
+            },
+            full_description={
+                "text": "Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas. A warning will be issued if the matched OnnxFunction is not an exact match.",
+                "markdown": "When an ATen/Custom operator is registered and needs to be dispatched to an OnnxFunction, the input/attribute\ndtypes of the ATen/Custom operator are compared with the input/attribute dtypes of the OnnxFunction opschemas\nto find a match. However, if a perfect/exact match is not found, the dispatcher will attempt to find\nthe nearest match with the highest number of input/attribute dtypes matching the OnnxFunction opschemas, while\nissuing a warning.\n\nThere are two types of level that can be triggered in this rule:\n\n1. NOTE: A perfect match is found, and no warning is issued.\n2. WARNING: The matched OnnxFunction is not a perfect/exact match.\n\nHere are some suggestions based on the WARNING situation:\n\n1. If there are NO errors or mismatches in the results, it is safe to disregard this warning,\n  as the definition of OnnxFunction schema is usually more stringent.\n2. If there are errors or mismatches in the results, it is recommended to:\n  (a) Enable op_level_debugging to determine if the OnnxFunction might be incorrect.\n  (b) Report the issue to the PyTorch-ONNX team.\n  (c) Create/register a custom symbolic function to replace the default one.\n",
+            },
+            message_strings={
+                "default": {
+                    "text": "The OnnxFunction: {symbolic_fn} is the nearest match of the node {node}."
+                }
+            },
+            help_uri=None,
+            properties={"deprecated": False, "tags": []},
+        ),
+        init=False,
     )
     """Find the OnnxFunction that matches the input/attribute dtypes by comparing them with their opschemas."""
 
@@ -588,28 +574,26 @@ class _POERules(infra.RuleCollection):
     )
     """Determine if type promotion is required for the FX node. Insert cast nodes if needed."""
 
-    find_operator_overloads_in_onnx_registry: _FindOperatorOverloadsInOnnxRegistry = (
-        dataclasses.field(
-            default=_FindOperatorOverloadsInOnnxRegistry.from_sarif(
-                id="FXE0016",
-                name="find-operator-overloads-in-onnx-registry",
-                short_description={
-                    "text": "Find the list of OnnxFunction of the PyTorch operator in onnx registry."
-                },
-                full_description={
-                    "text": "This rule involves finding the list of OnnxFunction for the PyTorch operator overload in the ONNX registry. If the operator overload is not supported but its default overload is, a warning will be issued. If both the operator overload and its default overload are not supported, an error will be issued.",
-                    "markdown": "The operator overload name serves the purpose of verifying whether a PyTorch operator is registered in the ONNX registry.\nIf it's not found, the dispatcher takes a fallback approach and tries to locate the default overload of the PyTorch\noperator in the registry. If even the default overload is absent, it signifies that the operator is officially unsupported.\n\nThere are three types of level that can be triggered in this rule:\n\n1. NOTE: The op overload is supported.\n2. WARNING: The op overload is not supported, but it's default overload is supported.\n3. ERROR: The op overload is not supported, and it's default overload is also not supported.\n\nHere are some suggestions based on the WARNING situation:\n\n1. If there are NO errors or mismatches in the results, it is safe to disregard this warning.\n2. If there are errors or mismatches in the results, it is recommended to:\n  (a) Enable op_level_debugging to determine if the OnnxFunction might be incorrect.\n  (b) Report the unsupported overload to the PyTorch-ONNX team.\n  (c) Create/register a custom symbolic function to replace the default one.\n\nHere are some suggestions based on the ERROR situation:\n\n1. Report the unsupported operator to the PyTorch-ONNX team.\n2. Create/register a custom symbolic function to replace the default one.\n",
-                },
-                message_strings={
-                    "default": {
-                        "text": "Checking if the FX node: {node} is supported in onnx registry."
-                    }
-                },
-                help_uri=None,
-                properties={"deprecated": False, "tags": []},
-            ),
-            init=False,
-        )
+    find_operator_overloads_in_onnx_registry: _FindOperatorOverloadsInOnnxRegistry = dataclasses.field(
+        default=_FindOperatorOverloadsInOnnxRegistry.from_sarif(
+            id="FXE0016",
+            name="find-operator-overloads-in-onnx-registry",
+            short_description={
+                "text": "Find the list of OnnxFunction of the PyTorch operator in onnx registry."
+            },
+            full_description={
+                "text": "This rule involves finding the list of OnnxFunction for the PyTorch operator overload in the ONNX registry. If the operator overload is not supported but its default overload is, a warning will be issued. If both the operator overload and its default overload are not supported, an error will be issued.",
+                "markdown": "The operator overload name serves the purpose of verifying whether a PyTorch operator is registered in the ONNX registry.\nIf it's not found, the dispatcher takes a fallback approach and tries to locate the default overload of the PyTorch\noperator in the registry. If even the default overload is absent, it signifies that the operator is officially unsupported.\n\nThere are three types of level that can be triggered in this rule:\n\n1. NOTE: The op overload is supported.\n2. WARNING: The op overload is not supported, but it's default overload is supported.\n3. ERROR: The op overload is not supported, and it's default overload is also not supported.\n\nHere are some suggestions based on the WARNING situation:\n\n1. If there are NO errors or mismatches in the results, it is safe to disregard this warning.\n2. If there are errors or mismatches in the results, it is recommended to:\n  (a) Enable op_level_debugging to determine if the OnnxFunction might be incorrect.\n  (b) Report the unsupported overload to the PyTorch-ONNX team.\n  (c) Create/register a custom symbolic function to replace the default one.\n\nHere are some suggestions based on the ERROR situation:\n\n1. Report the unsupported operator to the PyTorch-ONNX team.\n2. Create/register a custom symbolic function to replace the default one.\n",
+            },
+            message_strings={
+                "default": {
+                    "text": "Checking if the FX node: {node} is supported in onnx registry."
+                }
+            },
+            help_uri=None,
+            properties={"deprecated": False, "tags": []},
+        ),
+        init=False,
     )
     """Find the list of OnnxFunction of the PyTorch operator in onnx registry."""
 

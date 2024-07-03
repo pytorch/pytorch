@@ -516,9 +516,9 @@ class GuardBuilder(GuardBuilderBase):
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
 
         # Save the guard managers to avoid repeatedly traversing sources.
-        self._cached_guard_managers: Dict[str, torch._C._dynamo.guards.GuardManager] = (
-            {}
-        )
+        self._cached_guard_managers: Dict[
+            str, torch._C._dynamo.guards.GuardManager
+        ] = {}
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -1889,8 +1889,8 @@ class GuardBuilder(GuardBuilderBase):
         func_name = getframeinfo(caller)[2]
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
-        assert func_name in dir(
-            self.__class__
+        assert (
+            func_name in dir(self.__class__)
         ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)

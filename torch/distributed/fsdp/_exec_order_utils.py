@@ -250,8 +250,7 @@ class _ExecOrderData:
                         (
                             rank,
                             world_indices[
-                                rank
-                                * num_valid_indices : (rank + 1)
+                                rank * num_valid_indices : (rank + 1)
                                 * num_valid_indices
                             ],
                         )

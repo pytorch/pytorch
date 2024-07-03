@@ -360,7 +360,9 @@ class ResolvedExportOptions(ExportOptions):
     def __init__(
         self,
         options: Union[ExportOptions, "ResolvedExportOptions"],
-        model: Optional[Union[torch.nn.Module, Callable, torch_export.ExportedProgram]] = None,  # type: ignore[name-defined]
+        model: Optional[
+            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+        ] = None,  # type: ignore[name-defined]
     ):
         from torch.onnx._internal.fx import (  # TODO: Prevent circular dep
             diagnostics,
@@ -1230,9 +1232,7 @@ class Exporter:
 
         with self.options.diagnostic_context, decomposition_skip.enable_decomposition_skips(
             self.options
-        ), torch._dynamo.config.patch(
-            dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
-        ):
+        ), torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
             graph_module = self.options.fx_tracer.generate_fx(
                 self.options, self.model, self.model_args, self.model_kwargs
             )

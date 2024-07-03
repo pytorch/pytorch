@@ -273,7 +273,9 @@ def backward(
     inputs = (
         (inputs,)
         if isinstance(inputs, (torch.Tensor, graph.GradientEdge))
-        else tuple(inputs) if inputs is not None else tuple()
+        else tuple(inputs)
+        if inputs is not None
+        else tuple()
     )
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))

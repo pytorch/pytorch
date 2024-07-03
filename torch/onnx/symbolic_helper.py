@@ -1082,7 +1082,9 @@ def _interpolate_helper(name, dim, interpolate_mode):
         coordinate_transformation_mode = (
             "asymmetric"
             if interpolate_mode == "nearest"
-            else "align_corners" if align_corners else "half_pixel"
+            else "align_corners"
+            if align_corners
+            else "half_pixel"
         )
 
         if scales is None:
@@ -1159,7 +1161,9 @@ def __interpolate_helper(
     coordinate_transformation_mode = (
         "asymmetric"
         if mode == "nearest"
-        else "align_corners" if align_corners else "half_pixel"
+        else "align_corners"
+        if align_corners
+        else "half_pixel"
     )
 
     if not _is_none(size):

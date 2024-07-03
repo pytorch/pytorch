@@ -151,9 +151,7 @@ class SampleInput:
         # Allow calling either as SampleInput(input, args=args, kwargs=kwargs), or as
         # SampleInput(input, *args, **kwargs) but not to mix the two forms
         if args is not None or kwargs is not None:
-            assert (
-                not var_args and not var_kwargs
-            ), """
+            assert not var_args and not var_kwargs, """
 A SampleInput can be constructed "naturally" with *args and **kwargs or by
 explicitly setting the "args" and "kwargs" parameters, but the two
 methods of construction cannot be mixed!"""
@@ -955,7 +953,9 @@ class OpInfo:
             else (
                 self.backward_dtypes
                 if self.backward_dtypes is not None
-                else self.dtypesIfCUDA if self.dtypesIfCUDA is not None else self.dtypes
+                else self.dtypesIfCUDA
+                if self.dtypesIfCUDA is not None
+                else self.dtypes
             )
         )
         self.backward_dtypes = (

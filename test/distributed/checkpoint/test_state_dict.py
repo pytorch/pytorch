@@ -746,7 +746,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         optim.step()
         optim.zero_grad()
         self.assertIsInstance(
-            list(optim.state.values())[0]["exp_avg"], DTensor  # noqa: RUF015
+            list(optim.state.values())[0]["exp_avg"],
+            DTensor,  # noqa: RUF015
         )
         opt_state_dict = ptd_state_dict.get_optimizer_state_dict(
             model,
@@ -761,7 +762,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             options=ptd_state_dict.StateDictOptions(full_state_dict=True),
         )
         self.assertIsInstance(
-            list(optim.state.values())[0]["exp_avg"], DTensor  # noqa: RUF015
+            list(optim.state.values())[0]["exp_avg"],
+            DTensor,  # noqa: RUF015
         )
 
     @with_comms

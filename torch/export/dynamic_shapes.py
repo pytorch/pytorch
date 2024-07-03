@@ -805,7 +805,8 @@ def _process_dynamic_shapes(
                 id(tensor),
                 i,
                 StrictMinMaxConstraint(
-                    vr=ValueRanges(lower=dim.value, upper=dim.value), warn_only=False  # type: ignore[attr-defined]
+                    vr=ValueRanges(lower=dim.value, upper=dim.value),
+                    warn_only=False,  # type: ignore[attr-defined]
                 ),
                 debug_name=dim.__name__,
             )

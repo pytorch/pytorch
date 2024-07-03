@@ -242,7 +242,9 @@ class CKGemmTemplate(CKTemplate):
             template_params=(",\n" + 12 * " ").join(template_params),
         ), self._template_from_string(template_type).render(operation_name=op.name())
 
-    def render(self, kernel: ROCmTemplateKernel, op: "CKGemmOperation", **kwargs) -> str:  # type: ignore[override]
+    def render(
+        self, kernel: ROCmTemplateKernel, op: "CKGemmOperation", **kwargs
+    ) -> str:  # type: ignore[override]
         """
         The primary entry point for the code rendering process used in this template.
         """

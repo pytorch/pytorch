@@ -66,7 +66,8 @@ def stage_backward(
         extract_tensors_with_grads(stage_output, output_grads)
 
         torch.autograd.backward(
-            stage_output_tensors, grad_tensors=output_grad_tensors  # type: ignore[arg-type]
+            stage_output_tensors,
+            grad_tensors=output_grad_tensors,  # type: ignore[arg-type]
         )
 
         # Extract gradients wrt the input values

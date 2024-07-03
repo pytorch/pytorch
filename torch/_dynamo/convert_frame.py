@@ -189,9 +189,7 @@ def preserve_global_state(fn):
                     torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
                 torch._C._set_cublas_allow_tf32(allow_tf32)
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
-                assert (
-                    guards.check()
-                ), f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
+                assert guards.check(), f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
     return _fn
@@ -1069,9 +1067,7 @@ class CatchErrorsWrapper:
             has_started_execution = frame.f_lasti >= first_real_inst_idx(frame.f_code)
         if (
             # TODO: the first condition is not covered by any test
-            has_started_execution
-            or is_skipfile
-            or config.disable
+            has_started_execution or is_skipfile or config.disable
         ):
             if log.isEnabledFor(logging.DEBUG):
                 print(frame.f_lasti, first_real_inst_idx(frame.f_code))

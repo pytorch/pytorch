@@ -345,8 +345,8 @@ class TritonTemplateKernel(TritonKernel):
             assert (
                 self.body.getvalue() == ""
             ), "Body should be clear before adding a modification"
-            assert subgraph_number < len(
-                self.subgraphs
+            assert (
+                subgraph_number < len(self.subgraphs)
             ), f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
 
             subgraph = self.subgraphs[subgraph_number]

@@ -544,7 +544,9 @@ def compile_fx_inner(
         )
     else:
         compiled_graph = fx_codegen_and_compile(
-            gm, example_inputs, **graph_kwargs  # type: ignore[arg-type]
+            gm,
+            example_inputs,
+            **graph_kwargs,  # type: ignore[arg-type]
         )
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
@@ -1097,7 +1099,9 @@ def cudagraphify_impl(
         (
             x
             if not isinstance(x, torch.Tensor)
-            else static_input(x) if idx not in static_input_idxs else x.detach()
+            else static_input(x)
+            if idx not in static_input_idxs
+            else x.detach()
         )
         for idx, x in enumerate(inputs)
     ]

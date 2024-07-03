@@ -91,9 +91,7 @@ class LRScheduler:
 
     _get_lr_called_within_step: bool = False
 
-    def __init__(
-        self, optimizer: Optimizer, last_epoch=-1, verbose="deprecated"
-    ):  # noqa: D107
+    def __init__(self, optimizer: Optimizer, last_epoch=-1, verbose="deprecated"):  # noqa: D107
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")

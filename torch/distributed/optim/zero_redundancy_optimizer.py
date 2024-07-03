@@ -1233,8 +1233,8 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 local_param_indices = local_param_group["params"]
                 global_params = global_param_group["params"]
 
-                assert len(local_param_indices) == len(
-                    global_params
+                assert (
+                    len(local_param_indices) == len(global_params)
                 ), "Mismatch between number of local and global parameters in parameter group"
                 for local_param_index, global_param in zip(
                     local_param_indices, global_params
@@ -1508,7 +1508,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     "error due to an empty parameter list",
                     self._optim_constructor,
                 )
-                self.optim: Any = self._optim_constructor(params, **self._optim_defaults)  # type: ignore[no-redef]
+                self.optim: Any = self._optim_constructor(
+                    params, **self._optim_defaults
+                )  # type: ignore[no-redef]
 
             # Log information about the DDP and ZeRO bucketing
             if dist.get_debug_level() != dist.DebugLevel.OFF:
@@ -1531,7 +1533,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         else:
             # NOTE: Passing `param_groups` into the local optimizer constructor
             # bypasses the empty parameter list check
-            self.optim: Optimizer = self._optim_constructor(param_groups, **self._optim_defaults)  # type: ignore[no-redef]
+            self.optim: Optimizer = self._optim_constructor(
+                param_groups, **self._optim_defaults
+            )  # type: ignore[no-redef]
 
         # TODO: Manually add `self.param_groups` if using a functional
         # optimizer; remove this if/when the functional optimizers support

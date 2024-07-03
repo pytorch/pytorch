@@ -2421,7 +2421,7 @@ class CPUReproTests(TestCase):
             ) as vec_checker:
 
                 def get_index():
-                    return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
+                    return -(itervars[0] ** 2) + 2 * itervars[0] + itervars[1]
 
                 ranges = [0, 100, 200]
                 vec_checker.itervars = itervars[:2]
@@ -2436,7 +2436,7 @@ class CPUReproTests(TestCase):
             ) as vec_checker:
 
                 def get_index():
-                    return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
+                    return -(itervars[0] ** 2) + 2 * itervars[0] + itervars[1]
 
                 ranges = [0, 100, 200]
                 vec_checker.itervars = itervars

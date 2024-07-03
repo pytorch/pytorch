@@ -233,7 +233,9 @@ class ROCmTemplateCaller(ChoiceCaller):
         make_kernel_render: Callable[[ROCmTemplateBuffer, Optional[List[IRNode]]], str],
         bmreq: ROCmBenchmarkRequest,
         template: "ROCmTemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
+        info_kwargs: Optional[
+            Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
+        ],  # type: ignore[type-arg]
     ):
         super().__init__(name, input_nodes, layout)
         self.category = category

@@ -438,7 +438,9 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         # When num_instances == 1, demux can be replaced by filter,
         # but keep it as Demultiplexer for the sake of consistency
         # like throwing Error when classification result is out of o range
-        container = _DemultiplexerIterDataPipe(datapipe, num_instances, classifier_fn, drop_none, buffer_size)  # type: ignore[abstract]
+        container = _DemultiplexerIterDataPipe(
+            datapipe, num_instances, classifier_fn, drop_none, buffer_size
+        )  # type: ignore[abstract]
         return [_ChildDataPipe(container, i) for i in range(num_instances)]
 
 
@@ -619,9 +621,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
 
     def __init__(self, *datapipes):
         self.datapipes = datapipes
-        self.buffer: List = (
-            []
-        )  # Store values to be yielded only when every iterator provides one
+        self.buffer: List = []  # Store values to be yielded only when every iterator provides one
 
     def __iter__(self):
         iterators = [iter(x) for x in self.datapipes]

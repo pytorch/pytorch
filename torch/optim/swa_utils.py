@@ -261,7 +261,9 @@ class AveragedModel(Module):
                 ) in grouped_tensors.items():
                     if self.multi_avg_fn:
                         self.multi_avg_fn(
-                            self_params, model_params, self.n_averaged.to(device)  # type: ignore[arg-type]
+                            self_params,
+                            model_params,
+                            self.n_averaged.to(device),  # type: ignore[arg-type]
                         )
                     elif (
                         device is not None

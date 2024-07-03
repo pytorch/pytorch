@@ -2870,7 +2870,9 @@ def native_layer_norm(
     # mean and normalized, so we need to Cast it back
     if is_type_half:
         denominator = g.op(
-            "Cast", denominator, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()  # type: ignore[possibly-undefined]
+            "Cast",
+            denominator,
+            to_i=_type_utils.JitScalarType(input_dtype).onnx_type(),  # type: ignore[possibly-undefined]
         )
         rdenominator = g.op("Reciprocal", denominator)
     else:
@@ -4577,7 +4579,8 @@ def _generic_rnn(
                 reform_weights(g, w, hidden_size, reform_permutation) for w in weights
             )
         return tuple(
-            symbolic_helper._unsqueeze_helper(g, x, [0]) for x in (weight_ih, weight_hh)  # type: ignore[possibly-undefined]
+            symbolic_helper._unsqueeze_helper(g, x, [0])
+            for x in (weight_ih, weight_hh)  # type: ignore[possibly-undefined]
         )
 
     @_beartype.beartype

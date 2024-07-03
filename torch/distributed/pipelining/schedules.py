@@ -504,7 +504,9 @@ class Schedule1F1B(PipelineScheduleSingle):
                 recv_work.wait()
 
             # Compute
-            output = self._stage.forward_one_chunk(fwd_mb_index, arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
+            output = self._stage.forward_one_chunk(
+                fwd_mb_index, arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index]
+            )  # type: ignore[index]
 
             # Clear previous chunk's forward sends (hopefully they have well
             # finished, otherwise, we are heavily communication bound, in which
@@ -556,7 +558,9 @@ class Schedule1F1B(PipelineScheduleSingle):
                 fuse_work.wait()
 
             # Now do the fwd
-            output = self._stage.forward_one_chunk(fwd_mb_index, arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
+            output = self._stage.forward_one_chunk(
+                fwd_mb_index, arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index]
+            )  # type: ignore[index]
 
             # Compute loss
             self._maybe_compute_loss(self._stage, output, target_mbs, fwd_mb_index)
@@ -698,9 +702,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
                         ), f"Running Backward for stage {s_id}, microbatch {mb_id} without first running Forward"
                         stage_actions[s_id][B].add(mb_id)
                     elif ctype == W:
-                        assert (
-                            not self.use_full_backward
-                        ), "Schedule contains 'W' actions, but is configured to use full backward"
+                        assert not self.use_full_backward, "Schedule contains 'W' actions, but is configured to use full backward"
                         assert (
                             mb_id in stage_actions[s_id][B]
                         ), f"Running Weight for stage {s_id}, microbatch {mb_id} without first running Backward"

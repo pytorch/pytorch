@@ -107,7 +107,8 @@ else:
 
             res_submesh._parent_mesh = parent_mesh  # type: ignore[possibly-undefined]
             res_submesh._dim_group_infos = [
-                parent_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims  # type: ignore[possibly-undefined]
+                parent_mesh._dim_group_infos[mesh_dim]
+                for mesh_dim in submesh_dims  # type: ignore[possibly-undefined]
             ]
             self.child_to_parent_mapping[res_submesh] = parent_mesh
 

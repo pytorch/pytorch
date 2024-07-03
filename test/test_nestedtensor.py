@@ -4421,9 +4421,7 @@ class TestNestedTensorSubclass(TestCase):
         for tensor_list in self._get_example_tensor_lists():
             nt = torch.nested.nested_tensor(
                 tensor_list, layout=torch.jagged, device=device
-            ).transpose(
-                1, -1
-            )  # set ragged_idx = last dimension
+            ).transpose(1, -1)  # set ragged_idx = last dimension
             out = nt.unbind()
             self.assertEqual(len(out), len(tensor_list))
             for i, t in enumerate(out):

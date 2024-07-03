@@ -1266,9 +1266,7 @@ def export(
         check_if_dynamo_supported()
         torch._C._log_api_usage_once("torch._dynamo.export")
         if decomposition_table is not None:
-            assert (
-                aten_graph
-            ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
+            assert aten_graph, "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
         if pre_dispatch:
             assert aten_graph, "pre_dispatch=True can only be used when aten_graph=True"
         f = innermost_fn(f)

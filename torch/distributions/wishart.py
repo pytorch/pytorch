@@ -82,9 +82,12 @@ class Wishart(ExponentialFamily):
         scale_tril: Optional[torch.Tensor] = None,
         validate_args=None,
     ):
-        assert (covariance_matrix is not None) + (scale_tril is not None) + (
-            precision_matrix is not None
-        ) == 1, "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
+        assert (
+            (covariance_matrix is not None)
+            + (scale_tril is not None)
+            + (precision_matrix is not None)
+            == 1
+        ), "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
 
         param = next(
             p

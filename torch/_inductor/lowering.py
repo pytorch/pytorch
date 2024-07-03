@@ -1806,8 +1806,8 @@ def native_dropout(x, p, train):
 
 @register_lowering(aten.bernoulli_, type_promotion_kind=None)
 def bernoulli_(x, *args):
-    assert config.fallback_random or x.get_device() == torch.device(
-        "cpu"
+    assert (
+        config.fallback_random or x.get_device() == torch.device("cpu")
     ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     x.realize()
     op_overload = (
@@ -1821,8 +1821,8 @@ def bernoulli_(x, *args):
 
 @register_lowering(aten.bernoulli.p, type_promotion_kind=None)
 def bernoulli_p(x, *args):
-    assert config.fallback_random or x.get_device() == torch.device(
-        "cpu"
+    assert (
+        config.fallback_random or x.get_device() == torch.device("cpu")
     ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     return bernoulli_(clone(x), *args)
 

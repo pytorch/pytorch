@@ -511,7 +511,8 @@ def merge_splits(
             kwargs={"dim": first_split_dim},
         )
         first_split_num_to_user = {
-            user.args[1]: user for user in first_split.users.keys()  # type: ignore[union-attr]
+            user.args[1]: user
+            for user in first_split.users.keys()  # type: ignore[union-attr]
         }
 
         new_split_num = 0
@@ -600,7 +601,11 @@ class SplitCatSimplifier:
             graph, split_node, split_sections, user_inputs_list, simplified_split_ranges
         )
         self.replace_cat(
-            graph, split_node, next_users, user_inputs_list_new, transform_params_list  # type: ignore[arg-type]
+            graph,
+            split_node,
+            next_users,
+            user_inputs_list_new,
+            transform_params_list,  # type: ignore[arg-type]
         )
         self.erase_old_nodes(graph, split_node, next_users)  # type: ignore[arg-type]
         counters["inductor"]["unbind_stack_pass"] += 1

@@ -438,8 +438,8 @@ class PrepareModuleInput(ParallelStyle):
         self.input_kwarg_layouts = input_kwarg_layouts or {}
         self.desired_input_kwarg_layouts = desired_input_kwarg_layouts or {}
         if self.with_kwargs:
-            assert len(self.input_kwarg_layouts) == len(
-                self.desired_input_kwarg_layouts
+            assert (
+                len(self.input_kwarg_layouts) == len(self.desired_input_kwarg_layouts)
             ), "input_kwarg_layouts and desired_input_kwarg_layouts should have same length!"
 
     def _prepare_input_arg(
@@ -512,7 +512,9 @@ class PrepareModuleInput(ParallelStyle):
                 with_kwargs=True,
             )  # type: ignore[misc]
         else:
-            module.register_forward_pre_hook(lambda _, inputs: self._prepare_input_fn(inputs, device_mesh))  # type: ignore[misc, call-arg]
+            module.register_forward_pre_hook(
+                lambda _, inputs: self._prepare_input_fn(inputs, device_mesh)
+            )  # type: ignore[misc, call-arg]
         return module
 
 
@@ -610,5 +612,7 @@ class PrepareModuleOutput(ParallelStyle):
             return tuple(prepared_outputs)
 
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        module.register_forward_hook(lambda _, inputs, outputs: self._prepare_out_fn(outputs, device_mesh))  # type: ignore[misc, call-arg]
+        module.register_forward_hook(
+            lambda _, inputs, outputs: self._prepare_out_fn(outputs, device_mesh)
+        )  # type: ignore[misc, call-arg]
         return module

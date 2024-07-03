@@ -749,12 +749,8 @@ def jagged_scaled_dot_product_attention(
         d1 = query._size[1]
         d2 = value._size[-1]
 
-        min_seqlen_tensor = query._metadata_cache.get(
-            "min_seqlen", None
-        )  # type: ignore[attr-defined]
-        max_seqlen_tensor = query._metadata_cache.get(
-            "max_seqlen", None
-        )  # type: ignore[attr-defined]
+        min_seqlen_tensor = query._metadata_cache.get("min_seqlen", None)  # type: ignore[attr-defined]
+        max_seqlen_tensor = query._metadata_cache.get("max_seqlen", None)  # type: ignore[attr-defined]
 
         # convert jagged layout Nested Tensor to strided layout Nested Tensor
         # which support the math implementation of SDPA

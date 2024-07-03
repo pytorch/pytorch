@@ -112,9 +112,7 @@ class BasePruningMethod(ABC):
                     old_method = hook
                     hooks_to_remove.append(k)
                     found += 1
-            assert (
-                found <= 1
-            ), f"Avoid adding multiple pruning hooks to the\
+            assert found <= 1, f"Avoid adding multiple pruning hooks to the\
                 same tensor {name} of module {module}. Use a PruningContainer."
 
             for k in hooks_to_remove:
@@ -246,7 +244,9 @@ class BasePruningMethod(ABC):
         # before removing pruning from a tensor, it has to have been applied
         assert (
             self._tensor_name is not None
-        ), f"Module {module} has to be pruned            before pruning can be removed"  # this gets set in apply()
+        ), (
+            f"Module {module} has to be pruned            before pruning can be removed"
+        )  # this gets set in apply()
 
         # to update module[name] to latest trained weights
         weight = self.apply_mask(module)  # masked weights

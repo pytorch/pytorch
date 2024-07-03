@@ -532,9 +532,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 "setattr(FSDPManagedNNModuleVariable(MutatingModel), state, ...)"
             ).check_not(
                 "setattr(FSDPManagedNNModuleVariable(FullyShardedDataParallel), _is_root, ...)"
-            ).run(
-                prof.report()
-            )
+            ).run(prof.report())
 
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -1138,9 +1136,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 f"""{expected_guard_source} "L['self']._modules['net']" TYPE_MATCH"""
             ).check(
                 f"""{expected_guard_source} "L['self']._modules['net']._modules['0']" TYPE_MATCH"""
-            ).run(
-                GUARDS_FILE.getvalue()
-            )
+            ).run(GUARDS_FILE.getvalue())
 
             self.assertTrue(same(correct_outputs, outputs))
 

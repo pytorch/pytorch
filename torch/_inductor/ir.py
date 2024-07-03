@@ -1045,7 +1045,9 @@ class Reduction(Loops):
                 return (
                     bool(val)
                     if dst_dtype == torch.bool
-                    else float(val) if dst_dtype.is_floating_point else int(val)
+                    else float(val)
+                    if dst_dtype.is_floating_point
+                    else int(val)
                 )
 
             rtypes_to_inits = {
@@ -2790,7 +2792,9 @@ class Layout(IRNode):
         if ndim not in [4, 5] or shape[1] == 1:
             return False
         for left, right, size in zip(
-            strides, make_channels_last_strides_for(shape), shape  # type: ignore[arg-type]
+            strides,
+            make_channels_last_strides_for(shape),
+            shape,  # type: ignore[arg-type]
         ):
             if size != 1 and left != right:
                 return False
@@ -3542,7 +3546,8 @@ class ComputedBuffer(OperationBuffer):
                 else:
                     indices = index_vars
                 stride_lengths = [
-                    V.graph.sizevars.stride_hints(expr, indices) for expr in reads  # type: ignore[arg-type]
+                    V.graph.sizevars.stride_hints(expr, indices)
+                    for expr in reads  # type: ignore[arg-type]
                 ]
                 from .scheduler import pick_loop_order
 
@@ -4327,7 +4332,9 @@ class ExternKernel(InputsKernel):
         return pw
 
     @classmethod
-    def process_kernel(cls, kernel, *args, **kwargs) -> Tuple[
+    def process_kernel(
+        cls, kernel, *args, **kwargs
+    ) -> Tuple[
         Any,
         List[Any],
         List[Any],
@@ -5335,7 +5342,9 @@ class DynamicScalar(ExternKernel):
 
     def __init__(self, sym, keypath, data):
         data.realize()
-        super().__init__(None, NoneLayout(torch.device("cpu")), self.unwrap_storage([data]))  # type: ignore[arg-type]
+        super().__init__(
+            None, NoneLayout(torch.device("cpu")), self.unwrap_storage([data])
+        )  # type: ignore[arg-type]
         self.sym = sym
         self.keypath = keypath
 
@@ -5631,7 +5640,9 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.cpp_kernel_name = kernel._schema.name
         self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
+        self.cpp_kernel_key = (
+            f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
+        )
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
 
@@ -5795,7 +5806,9 @@ class FallbackKernel(ExternKernelAlloc):
             self.python_kernel_name = f"torch.ops.higher_order.{kernel.__name__}"
         else:
             # For non-aten OpOverload, i.e. custom ops
-            self.python_kernel_name = f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"  # type: ignore[union-attr]
+            self.python_kernel_name = (
+                f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"  # type: ignore[union-attr]
+            )
             if V.graph.cpp_wrapper:
                 self.use_runtime_dispatch = True
                 self.set_cpp_kernel(kernel)
@@ -6829,7 +6842,9 @@ class _CollectiveKernel(FallbackKernel):
 
         self.cpp_kernel_name = kernel._schema.name
         self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
+        self.cpp_kernel_key = (
+            f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
+        )
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.ordered_kwargs_for_cpp_kernel = [

@@ -13,9 +13,7 @@ class DeviceProperties:
 
 
 class DeviceInterface(device_interface.DeviceInterface):
-    class Event(
-        device_interface._EventBase
-    ):  # pyright: ignore [reportPrivateImportUsage]
+    class Event(device_interface._EventBase):  # pyright: ignore [reportPrivateImportUsage]
         def __init__(
             self,
             enable_timing: bool = False,

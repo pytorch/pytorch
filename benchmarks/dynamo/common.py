@@ -3938,7 +3938,14 @@ def run(runner, args, original_dir=None):
         runner.skip_models.clear()
 
     experiment = null_experiment
-    global current_name, current_device, current_batch_size, output_filename, disable_output, optimize_ctx, current_onnx_compiler
+    global \
+        current_name, \
+        current_device, \
+        current_batch_size, \
+        output_filename, \
+        disable_output, \
+        optimize_ctx, \
+        current_onnx_compiler
     optimize_ctx = contextlib.nullcontext()
 
     if args.disable_output:

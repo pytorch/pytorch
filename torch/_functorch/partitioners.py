@@ -1557,7 +1557,8 @@ def choose_saved_values_set(
         return [
             i
             for i in banned_nodes
-            if (
+            if
+            (
                 # Only allow recomputing nodes that are actually required for BW
                 i.dist_from_bw < int(1e9)  # type: ignore[attr-defined]
                 and get_node_storage(i) not in input_storages
