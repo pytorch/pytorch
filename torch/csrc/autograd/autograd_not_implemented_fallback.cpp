@@ -392,8 +392,11 @@ static void autogradNotImplementedFallbackImpl(
         // where each element represents the norm of corresponding input Tensor,
         // here I want to return the same number of Tensors as the input
         // TensorList, see https://github.com/pytorch/pytorch/issues/93940
+        // Skip nattive_channel_shuffle as well
+        // For details see https://github.com/pytorch/pytorch/issues/130073
         if (!is_aliased_output[idx_ret] && t.has_storage() &&
-            op_name != "aten::_foreach_norm")
+            op_name != "aten::_foreach_norm" &&
+            op_name != "aten::native_channel_shuffle")
           TORCH_INTERNAL_ASSERT(t.storage().use_count() == 1);
       },
       stack,
