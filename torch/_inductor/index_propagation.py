@@ -20,6 +20,7 @@ printers. So simple operations like minimum and maximum cannot be translated to
 SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 
 """
+
 import itertools
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Literal, Optional, overload, Tuple, Union

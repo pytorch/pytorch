@@ -4418,8 +4418,9 @@ class TestExamplesCorrectness(TestCase):
         # This example mimics what a user might do when trying to find the optimal learning rate. They would
         # want to run a bunch of models with the same behavior (including the same dropout!) and have them
         # each run with different learning rates. Specifically, this is an example of using same randomness with vmap
-        points, labels = torch.randn(100, 2, 2, 2, 2, device=device), torch.randint(
-            0, 2, (100,), device=device
+        points, labels = (
+            torch.randn(100, 2, 2, 2, 2, device=device),
+            torch.randint(0, 2, (100,), device=device),
         )
 
         class MLPClassifier(nn.Module):

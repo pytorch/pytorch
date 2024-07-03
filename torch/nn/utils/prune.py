@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Pruning methods."""
+
 import numbers
 from abc import ABC, abstractmethod
 from collections.abc import Iterable

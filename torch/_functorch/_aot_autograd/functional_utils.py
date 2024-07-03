@@ -6,6 +6,7 @@ This file contains utilities related to functionalization in AOTAutograd:
 3. regenerating/replaying views from their base
 4. checking if a graph is functional i.e. whether it contains any mutation ops
 """
+
 from __future__ import annotations
 
 from typing import Optional

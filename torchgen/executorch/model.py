@@ -172,7 +172,7 @@ class ETKernelIndex:
 
     @staticmethod
     def from_backend_indices(
-        backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]]
+        backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]],
     ) -> ETKernelIndex:
         kernel_index: dict[OperatorName, dict[ETKernelKey, BackendMetadata]] = (
             defaultdict(dict)

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 """Base optimizer."""
+
 import functools
 import math
 import warnings
