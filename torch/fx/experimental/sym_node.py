@@ -227,11 +227,11 @@ class SymNode:
     def clone(self):
         return self
 
-    def _str(self):
+    def str(self):
         return f"{self.expr}"
 
     def __str__(self):
-        return self._str()
+        return self.str()
 
     def __repr__(self):
         rep = [
@@ -245,9 +245,9 @@ class SymNode:
             rep.append(f"fx_node={self.fx_node}")
         return ", ".join(rep) + ")"
 
-    def _graph_repr(self) -> str:
+    def _graph_repr(self) -> str:  # type: ignore[valid-type]
         # Representation used by GraphModule to create a pythonic version of a graph
-        return self._str()
+        return self.str()
 
     # These methods call the metaprogrammed methods, they're hand written
     # here so we get good stack traces
