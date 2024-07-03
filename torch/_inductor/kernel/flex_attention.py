@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 """ Triton Implementation of the flex_attention Kernel"""
 
-import functools
 import logging
 from enum import auto, Enum
 from typing import Any, List, Tuple
@@ -475,6 +474,7 @@ def create_num_blocks_fake_generator(sparse_indices):
             dtype=x.get_dtype(),
             device=x.get_device(),
         )
+
     return create_num_blocks_fake
 
 
