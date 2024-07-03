@@ -807,14 +807,18 @@ def register_onednn_fusion_ops():
                     CppPackedGemmTemplate.add_choices(
                         choices,
                         layout,
-                        [x, x_scale, x_zp, packed_weight, w_scale, w_zp]
-                        if bias is None
-                        else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias],
+                        (
+                            [x, x_scale, x_zp, packed_weight, w_scale, w_zp]
+                            if bias is None
+                            else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias]
+                        ),
                         has_bias=bias is not None,
                         epilogue_creator=epilogue_creator,
-                        input_indices=[0, 3, 1, 2, 4, 5]
-                        if bias is None
-                        else [6, 0, 3, 1, 2, 4, 5],
+                        input_indices=(
+                            [0, 3, 1, 2, 4, 5]
+                            if bias is None
+                            else [6, 0, 3, 1, 2, 4, 5]
+                        ),
                     )
             if len(choices) == 0 or use_aten_gemm_kernels():
                 kwargs = dict(
@@ -829,9 +833,11 @@ def register_onednn_fusion_ops():
                     kwargs["bias"] = None
                 choices.append(
                     aten_mkldnn_qlinear_unary.bind(
-                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp)
-                        if bias is None
-                        else (x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias),
+                        (
+                            (x, x_scale, x_zp, packed_weight, w_scale, w_zp)
+                            if bias is None
+                            else (x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias)
+                        ),
                         layout,
                         **kwargs,
                     )
@@ -846,9 +852,11 @@ def register_onednn_fusion_ops():
             result = autotune_select_algorithm(
                 "qlinear_unary",
                 choices,
-                [x, x_scale, x_zp, packed_weight, w_scale, w_zp]
-                if bias is None
-                else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias],
+                (
+                    [x, x_scale, x_zp, packed_weight, w_scale, w_zp]
+                    if bias is None
+                    else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias]
+                ),
                 layout,
                 input_gen_fns=input_gen_fns,
             )
@@ -1103,15 +1111,28 @@ def register_onednn_fusion_ops():
                     CppPackedGemmTemplate.add_choices(
                         choices,
                         layout,
-                        [x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2]
-                        if bias is None
-                        else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2, bias],
+                        (
+                            [x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2]
+                            if bias is None
+                            else [
+                                x,
+                                x_scale,
+                                x_zp,
+                                packed_weight,
+                                w_scale,
+                                w_zp,
+                                x2,
+                                bias,
+                            ]
+                        ),
                         has_bias=bias is not None,
                         epilogue_creator=epilogue_creator,
                         # Reorder bias and x2
-                        input_indices=[0, 3, 1, 2, 4, 5, 6]
-                        if bias is None
-                        else [7, 0, 3, 1, 2, 4, 5, 6],
+                        input_indices=(
+                            [0, 3, 1, 2, 4, 5, 6]
+                            if bias is None
+                            else [7, 0, 3, 1, 2, 4, 5, 6]
+                        ),
                     )
 
             if len(choices) == 0 or use_aten_gemm_kernels():
@@ -1131,9 +1152,20 @@ def register_onednn_fusion_ops():
                     kwargs["bias"] = None
                 choices.append(
                     aten_mkldnn_qlinear_binary.bind(
-                        (x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2)
-                        if bias is None
-                        else (x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2, bias),
+                        (
+                            (x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2)
+                            if bias is None
+                            else (
+                                x,
+                                x_scale,
+                                x_zp,
+                                packed_weight,
+                                w_scale,
+                                w_zp,
+                                x2,
+                                bias,
+                            )
+                        ),
                         layout,
                         **kwargs,
                     )
@@ -1149,9 +1181,11 @@ def register_onednn_fusion_ops():
             result = autotune_select_algorithm(
                 "qlinear_binary",
                 choices,
-                [x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2]
-                if bias is None
-                else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2, bias],
+                (
+                    [x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2]
+                    if bias is None
+                    else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2, bias]
+                ),
                 layout,
                 input_gen_fns=input_gen_fns,
             )

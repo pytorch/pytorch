@@ -192,9 +192,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         )
         if fn.__kwdefaults__:
             kwdefaults_sources = {
-                k: None
-                if self.source is None
-                else DefaultsSource(self.source, k, is_kw=True)
+                k: (
+                    None
+                    if self.source is None
+                    else DefaultsSource(self.source, k, is_kw=True)
+                )
                 for k in fn.__kwdefaults__
             }
             fake_func.__kwdefaults__ = {
@@ -441,9 +443,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             closure_scope = None
         self.closure_scope = closure_scope
         # Either a source or a VT with .can_reconstruct() == True
-        self.wrapped_reconstructible: Optional[
-            Union[Source, VariableTracker]
-        ] = wrapped_reconstructible
+        self.wrapped_reconstructible: Optional[Union[Source, VariableTracker]] = (
+            wrapped_reconstructible
+        )
 
     def self_args(self):
         return []

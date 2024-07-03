@@ -279,7 +279,9 @@ class PythonArgument:
                 and self.default.startswith("{")
                 and self.default.endswith("}")
             ):
-                default = "(" + self.default[1:-1] + ")"
+                default = (
+                    "(" + ", ".join(map(str.strip, self.default[1:-1].split(","))) + ")"
+                )
             else:
                 default = {
                     "nullptr": "None",
@@ -551,9 +553,9 @@ class PythonSignatureGroup:
 
         # Out overloads in C++ don't have TensorOptions arguments,
         # so take these from the functional variant
-        signature_kwargs[
-            "tensor_options_args"
-        ] = functional.signature.tensor_options_args
+        signature_kwargs["tensor_options_args"] = (
+            functional.signature.tensor_options_args
+        )
 
         return PythonSignatureGroup(
             signature=type(out.signature)(**signature_kwargs),
