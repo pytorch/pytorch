@@ -597,7 +597,7 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
         value = values[0]
         tx.output.create_node(
             "call_function", torch._C._set_deterministic_algorithms, (value,), {}
-        ),
+        )
         torch._C._set_deterministic_algorithms(value)
 
     def module_name(self):

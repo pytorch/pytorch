@@ -913,9 +913,9 @@ alias analysis kind: PURE_FUNCTION
 
     def test_multiple_fallback(self):
         global_m = C._dispatch_library("IMPL", "_", "XLA")
-        global_m.fallback_fallthrough(),
+        global_m.fallback_fallthrough()
         try:
-            global_m.fallback_fallthrough(),
+            global_m.fallback_fallthrough()
         except RuntimeError as e:
             self.assertExpectedInline(
                 str(e),
