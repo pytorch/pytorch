@@ -3,7 +3,6 @@
 from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
-
 from torch.distributed._tensor._op_schema import (
     _is_inplace_op,
     OpSchema,
@@ -514,7 +513,6 @@ def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     follow_placements = _derive_follow_placements_from_tuple_strategy(
         input_tuple_strategy
     )
-    follow_placements = normalize_shard_for_stack(follow_placements, dim)
 
     # create op strategy base on the follow placements
     op_strategy = OpStrategy([])
@@ -523,6 +521,9 @@ def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         DTensorSpec(mesh, tuple(follow_placements))
         for _ in range(len(input_tuple_strategy.childs))
     )
+
+    follow_placements = normalize_shard_for_stack(follow_placements, dim)
+
     op_strategy.strategies.append(
         PlacementStrategy(
             output_specs=DTensorSpec(mesh, tuple(follow_placements)),

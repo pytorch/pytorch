@@ -202,3 +202,12 @@ def gh_update_pr_state(org: str, repo: str, pr_num: int, state: str = "open") ->
             )
         else:
             raise
+
+
+def gh_query_issues_by_labels(
+    org: str, repo: str, labels: List[str], state: str = "open"
+) -> List[Dict[str, Any]]:
+    url = f"{GITHUB_API_URL}/repos/{org}/{repo}/issues"
+    return gh_fetch_json(
+        url, method="GET", params={"labels": ",".join(labels), "state": state}
+    )

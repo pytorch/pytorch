@@ -13,12 +13,9 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives
 import torch.nn as nn
 import torch.utils._pytree as pytree
-
 from functorch import make_fx
-
 from torch import fx
 from torch._decomp.decompositions import native_layer_norm_backward
-
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._spmd.data_parallel import gradients_tagging
 from torch.distributed._spmd.parallel_mode import (

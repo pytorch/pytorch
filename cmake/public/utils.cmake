@@ -434,15 +434,25 @@ function(torch_compile_options libname)
       -Wextra
       -Wdeprecated
       -Wno-unused-parameter
-      -Wno-unused-function
       -Wno-missing-field-initializers
-      -Wno-unknown-pragmas
       -Wno-type-limits
       -Wno-array-bounds
       -Wno-unknown-pragmas
       -Wno-strict-overflow
       -Wno-strict-aliasing
       )
+    if("${libname}" STREQUAL "torch_cpu")
+      list(APPEND private_compile_options -Wunused-function)
+      list(APPEND private_compile_options -Wunused-variable)
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        list(APPEND private_compile_options -Wunused-but-set-variable)
+      endif()
+      if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+        list(APPEND private_compile_options -Wunused-private-field)
+      endif()
+    else()
+      list(APPEND private_compile_options -Wno-unused-function)
+    endif()
     if(NOT "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
@@ -450,12 +460,11 @@ function(torch_compile_options libname)
         -Wno-maybe-uninitialized)
     endif()
 
+    if(WERROR)
+      list(APPEND private_compile_options -Wno-strict-overflow)
+    endif()
   endif()
 
-  if(MSVC)
-  elseif(WERROR)
-    list(APPEND private_compile_options -Wno-strict-overflow)
-  endif()
 
   target_compile_options(${libname} PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>:${private_compile_options}>)

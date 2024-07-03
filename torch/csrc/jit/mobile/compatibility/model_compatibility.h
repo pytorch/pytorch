@@ -47,7 +47,7 @@ c10::IValue readArchive(
     caffe2::serialize::PyTorchStreamReader& stream_reader);
 
 bool check_zip_file(
-    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
+    const std::shared_ptr<caffe2::serialize::ReadAdapterInterface>& rai);
 
 // The family of methods below to get the root ops and information from a model
 TORCH_API std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(

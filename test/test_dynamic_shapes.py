@@ -8,6 +8,8 @@ import math
 import operator
 import re
 
+import numpy as np
+
 import sympy
 
 import torch
@@ -386,6 +388,17 @@ class TestPySymInt(TestCase):
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
 
+    def test_floordiv_static(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 8)
+        # This was extracted from
+        # python test/inductor/test_cuda_cpp_wrapper.py -k
+        # DynamicShapesCudaWrapperCudaTests.test_insignificant_strides_cuda_dynamic_shapes_cuda_wrapper
+        bool(s0 % 2 == 0)
+        bool(s0 % (s0 // 2) == 0)
+        bool(2 * (s0 // 2) == s0)
+        self.assertTrue(statically_known_true(s0 // (s0 // 2) == 2))
+
     def test_numel(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
@@ -626,7 +639,7 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i0 < s0))
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[-s0 + u0 < 0]""",
+            """[u0 < s0]""",
         )
         self.assertTrue(i0 < s0)
         self.assertTrue(i0 != s0)
@@ -804,6 +817,22 @@ def forward(self, x_1):
                 )
             )
         )
+
+    def test_numpy_sym_max(self):
+        self.assertEqual(torch.sym_max(np.int64(10), 12), 12)
+        self.assertEqual(torch.sym_max(np.int64(12), 10), 12)
+        self.assertEqual(torch.sym_max(np.int64(10), 12.5), 12.5)
+        self.assertEqual(torch.sym_max(np.int64(14), 12.5), 14.0)
+        self.assertEqual(torch.sym_max(np.float64(14.0), 12), 14.0)
+        self.assertEqual(torch.sym_max(np.float64(14.0), 16), 16.0)
+
+    def test_numpy_sym_min(self):
+        self.assertEqual(torch.sym_min(np.int64(10), 12), 10)
+        self.assertEqual(torch.sym_min(np.int64(12), 10), 10)
+        self.assertEqual(torch.sym_min(np.int64(10), 12.5), 10.0)
+        self.assertEqual(torch.sym_min(np.int64(14), 12.5), 12.5)
+        self.assertEqual(torch.sym_min(np.float64(14.0), 12), 12.0)
+        self.assertEqual(torch.sym_min(np.float64(14.0), 16), 14.0)
 
     def test_debug_has_internal_overlap_unbacked(self):
         shape_env = ShapeEnv()
@@ -1227,18 +1256,12 @@ class TestSymNumberMagicMethods(TestCase):
     def test_symnode_hashing(self):
         shape_env = ShapeEnv()
 
-        # SymInt, SymBool, SymFloat are unhashable
-        unhashable = (
-            create_symint(shape_env, 3),
-            create_symbool(shape_env, True),
-            # We should be passing in float here, but create_symbol currently
-            # only supports int
-            create_symfloat(shape_env, 3.0),
-        )
-
-        for x in unhashable:
-            with self.assertRaisesRegex(TypeError, "unhashable"):
-                hash(x)
+        # These all trigger specialization when hashed
+        hash(create_symint(shape_env, 3))
+        hash(create_symbool(shape_env, True))
+        # We should be passing in float here, but create_symbol currently
+        # only supports int
+        hash(create_symfloat(shape_env, 3.0))
 
         # NestedInt (SymInt), constant SymBool, SymNode are hashable
         j1 = torch._C._get_nested_int(1, 1)
@@ -2476,6 +2499,13 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s2)]))
+
+    def test_guards_float_print(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 3)
+        guard_bool(2 / s0 == 2 / 3)
+        guards = shape_env.produce_guards_expression([s0])
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
 
     def test_guards_float_div(self):
         shape_env = ShapeEnv()

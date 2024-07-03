@@ -226,7 +226,7 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
     bool profiler_need_input = torch::autograd::profiler::profilerEnabled() &&
         torch::autograd::profiler::getProfilerConfig().report_input_shapes;
     // parse through args if they exist
-    if (self->input_values != NULL && profiler_need_input) {
+    if (self->input_values != nullptr && profiler_need_input) {
       THPObjectPtr input_fast(
           PySequence_Fast(self->input_values, "input must be a sequence"));
       PyObject** input_items = PySequence_Fast_ITEMS(input_fast.get());
@@ -240,9 +240,9 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
     }
 
     // parse through kwargs if they exist
-    if (self->keyword_values != NULL && profiler_need_input) {
+    if (self->keyword_values != nullptr && profiler_need_input) {
       Py_ssize_t pos = 0;
-      PyObject *key, *value;
+      PyObject *key = nullptr, *value = nullptr;
       while (PyDict_Next(self->keyword_values, &pos, &key, &value)) {
         // Get the string representation of the key and value
         std::string key_str = THPUtils_unpackString(key);
