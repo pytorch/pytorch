@@ -2003,9 +2003,10 @@ class TestSDPA(NNTestCase):
                 self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
                 self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
 
+    @onlyCPU
     def test_scaled_dot_product_fused_attention_with_inf(self, device):
         # https://github.com/pytorch/pytorch/issues/127055.
-        full = torch.full((600, 600), float("-inf"))
+        full = torch.full((600, 600), float("-inf"), device=device)
         mask = torch.triu(full, diagonal=1) + torch.tril(full, diagonal=-10)
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=torch.float32, requires_grad=False)
         input_shape = SdpaShape(1, 600, 2, 8)
