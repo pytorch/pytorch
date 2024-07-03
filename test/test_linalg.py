@@ -4712,7 +4712,7 @@ class TestLinalg(TestCase):
         assert( (total_num_results - ref_num_results) == 1)
 
         # Set tuning iterations to zero
-        import os
+        # Tune a single GEMM and verify that we get a new tuning result
         os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "0"
         assert(torch.cuda.tunable.get_max_tuning_iterations() > 0)
         os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "100" # reset to default
