@@ -37,7 +37,7 @@ jobs:
           path: llm-target-determinator
 
       - name: Setup python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: "3.9"
           cache: 'pip'
