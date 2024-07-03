@@ -876,7 +876,7 @@ else:
                             os.remove(os.path.join(root, file))
                         elif file.endswith('.py'):
                             os.remove(os.path.join(root, file))
-                # need an __init__.py file otherwise it would be treated as a directory
+                # need an __init__.py file otherwise we wouldn't have a package
                 open(os.path.join(self.bdist_dir, 'torch', '__init__.py'), 'w').close()
 
 
