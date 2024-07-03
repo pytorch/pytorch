@@ -1943,10 +1943,13 @@ class TestSDPA(NNTestCase):
             tol = Tolerances(5e-2, 5e-2)
         if dtype is torch.float16:
             tol = Tolerances(1e-2, 1e-2)
+        mask_q_seq_len_shape = [q_seq_len, 1]
+        # to avoid all false bool mask
+        mask_kv_seq_len_shape = [kv_seq_len] if bool_mask else [kv_seq_len, 1]
         for mask_shape in itertools.product(
-            [q_seq_len, 1], [kv_seq_len, 1]
+            mask_q_seq_len_shape, mask_kv_seq_len_shape
         ) if mask_dim == 2 else itertools.product(
-            [batch_size, 1], [n_head, 1], [q_seq_len, 1], [kv_seq_len, 1]
+            [batch_size, 1], [n_head, 1], mask_q_seq_len_shape, mask_kv_seq_len_shape
         ):
             make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
             q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
