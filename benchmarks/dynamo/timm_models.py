@@ -115,6 +115,10 @@ SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
     "xcit_large_24_p8_224",
 }
 
+REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR = {
+    "mobilenetv3_large_100",
+}
+
 
 def refresh_model_names():
     import glob
@@ -342,6 +346,9 @@ class TimmRunner(BenchmarkRunner):
             return torch.enable_grad()
         else:
             return torch.no_grad()
+
+    def use_larger_multiplier_for_smaller_tensor(self, name):
+        return name in REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR
 
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
