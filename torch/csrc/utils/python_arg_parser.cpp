@@ -315,6 +315,21 @@ static py::object dispatch_on_subclass(
           torch_api_function, py::reinterpret_borrow<py::object>(arg));
       if (maybe_torch_dispatch_rule.ptr() != Py_None) {
         torch_function = maybe_torch_dispatch_rule;
+        auto py_arg = py::reinterpret_borrow<py::object>(arg);
+        ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
+            torch_function.ptr(),
+            py_arg.get_type().ptr(),
+            torch_api_function,
+            py_types.ptr(),
+            args,
+            kwargs,
+            NULL));
+        if (ret.ptr() == nullptr) {
+          throw python_error();
+        }
+        if (ret.ptr() != Py_NotImplemented) {
+          break;
+        }
       }
     }
 

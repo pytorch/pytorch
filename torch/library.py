@@ -191,7 +191,7 @@ class Library:
         TorchDispatchMode.
 
         If it is a Tensor subclass, we expect fn to have the following signature:
-        (func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any
+        (cls, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any
 
         If it is a TorchDispatchMode, we expect fn to have the following signature:
         (mode, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any

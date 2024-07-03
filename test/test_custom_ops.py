@@ -2638,8 +2638,9 @@ class TestCustomOpAPI(TestCase):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
             called = 0
 
-            def TwoTensor_foo(func, types, args, kwargs):
+            def TwoTensor_foo(cls, func, types, args, kwargs):
                 nonlocal called
+                assert cls is TwoTensor
                 called += 1
                 return x.sin()
 
