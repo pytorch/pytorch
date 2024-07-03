@@ -603,7 +603,7 @@ class TestConverter(TestCase):
         #     )
 
         # Nested module testing.
-        inp = (torch.ones(3),)
+        inp = (torch.ones(3, 3),)
         orig_m = NestedM(3)
         # TODO: fix trace: state_dict is not equal.
         ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])

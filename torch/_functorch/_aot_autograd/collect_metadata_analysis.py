@@ -160,6 +160,7 @@ def run_functionalized_fw_and_collect_metadata(
         with disable_above, mode:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
+            print("torch/_functorch/_aot_autograd/collect_metadata_analysis.py [163] - Flat Args", flat_f_args)
             flat_f_outs = f(*flat_f_args)
             # We didn't do any tracing, so we don't need to process the
             # unbacked symbols, they will just disappear into the ether.

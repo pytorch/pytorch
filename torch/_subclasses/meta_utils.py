@@ -1452,6 +1452,7 @@ class MetaConverter:
                             with torch.no_grad(), no_dispatch():
                                 assert t.size is not None
                                 assert t.stride is not None
+                                print("torch/_subclasses/meta_utils.py [1430] - Value to torch.empty_strided", t.size, t.stride, t.dtype, t.device)
                                 r.real_tensor = torch.empty_strided(
                                     t.size, t.stride, dtype=t.dtype, device=t.device
                                 )

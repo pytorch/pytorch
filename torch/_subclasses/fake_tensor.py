@@ -364,6 +364,7 @@ class FakeTensorConverter:
                     constant=t if make_constant else None,
                 )
 
+        print("torch/_subclasses/fake_tensor 332; Meta Converter", t)
         out = self.meta_converter(
             t,
             shape_env=shape_env,
