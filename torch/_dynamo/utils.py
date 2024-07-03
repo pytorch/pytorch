@@ -701,7 +701,7 @@ _compilation_metrics: Deque[Union[CompilationMetrics, BwdCompilationMetrics]] = 
 
 
 def record_compilation_metrics(
-    compilation_metrics: Union[CompilationMetrics, BwdCompilationMetrics]
+    compilation_metrics: Union[CompilationMetrics, BwdCompilationMetrics],
 ):
     global _compilation_metrics
     _compilation_metrics.append(compilation_metrics)

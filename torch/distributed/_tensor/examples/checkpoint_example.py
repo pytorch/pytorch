@@ -4,6 +4,7 @@ The following example contains a simple MLP model that uses
 different DTensor layouts, and use the checkpointing API to
 checkpoint save/load the model.
 """
+
 import os
 from typing import cast, List
 
