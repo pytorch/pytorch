@@ -2980,26 +2980,39 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertEqual(result.device, torch.device("cpu"))
         self.assertEqual(result, torch.ones(3))
 
-        with self.assertRaisesRegex(RuntimeError, "f does not have a kernel registered for cuda"):
+        with self.assertRaisesRegex(
+            RuntimeError, "f does not have a kernel registered for cuda"
+        ):
             f("cuda")
 
-        with self.assertRaisesRegex(ValueError, "Functions without tensor inputs are required to have a `device: torch.device` argument"):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Functions without tensor inputs are required to have a `device: torch.device` argument",
+        ):
+
             @torch.library.custom_op(
                 "_torch_testing::f2", mutates_args={}, device_types="cpu"
             )
             def f2() -> Tensor:
                 return torch.ones(3)
-        
-        with self.assertRaisesRegex(ValueError, "Functions without tensor inputs are required to have a `device: torch.device` argument"):
-            @torch.library.custom_op( "_torch_testing::f3", mutates_args={}, device_types="cpu" ) 
-            def f3() -> Tensor: 
-                raise NotImplementedError("NYI") 
-            
-            @f3.register_kernel("cpu") 
-            def _(): 
-                return torch.zeros(3) 
-        
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Functions without tensor inputs are required to have a `device: torch.device` argument",
+        ):
+
+            @torch.library.custom_op(
+                "_torch_testing::f3", mutates_args={}, device_types="cpu"
+            )
+            def f3() -> Tensor:
+                raise NotImplementedError("NYI")
+
+            @f3.register_kernel("cpu")
+            def _():
+                return torch.zeros(3)
+
             result = f(x)
+
 
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"

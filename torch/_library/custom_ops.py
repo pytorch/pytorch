@@ -166,12 +166,7 @@ class CustomOpDef:
     """
 
     def __init__(
-        self,
-        namespace: str,
-        name: str,
-        schema: str,
-        fn: Callable,
-        backend_select: bool
+        self, namespace: str, name: str, schema: str, fn: Callable, backend_select: bool
     ) -> None:
         # Fields used to interface with the PyTorch dispatcher
         self._namespace = namespace
@@ -522,7 +517,7 @@ class CustomOpDef:
                 with_keyset=True,
             )
 
-        from torch._library.utils import has_tensor_arg, get_device_arg_id
+        from torch._library.utils import get_device_arg_id, has_tensor_arg
 
         device_arg_id = None
         if not has_tensor_arg(schema) and backend_select:
@@ -533,17 +528,31 @@ class CustomOpDef:
                 )
 
         if device_arg_id is not None:
-            device_arg_id: int = device_arg_id  # silent linter error
 
-            def backend_select(*args, **kwargs):
+            def get_dispatch_key(device: str):
+                if device == "cpu":
+                    return _C.DispatchKey.CPU
+                elif device == "cuda":
+                    return _C.DispatchKey.CUDA
+                elif device == "xpu":
+                    return _C.DispatchKey.XPU
+                elif device == "ipu":
+                    return _C.DispatchKey.IPU
+                else:
+                    raise RuntimeError(f"Unsupported device type: {device}")
+
+            def backend_select(keyset, *args, **kwargs):
                 device = args[device_arg_id].type
                 if device not in self._backend_fns:
                     raise RuntimeError(
                         f"{self._name} does not have a kernel registered for {device}"
                     )
-                return self._backend_fns[device](*args, **kwargs)
+                dispatch_key = get_dispatch_key(device)
+                return self._opoverload.redispatch(
+                    _C.DispatchKeySet(dispatch_key), *args, **kwargs
+                )
 
-            lib.impl(self._name, backend_select, "BackendSelect", with_keyset=False)
+            lib.impl(self._name, backend_select, "BackendSelect", with_keyset=True)
 
     def __call__(self, *args, **kwargs):
         return self._opoverload(*args, **kwargs)

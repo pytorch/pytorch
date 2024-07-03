@@ -257,19 +257,24 @@ def has_kwarg_only_tensors(schema: _C.FunctionSchema):
         return True
     return False
 
+
 def has_tensor_arg(schema: _C.FunctionSchema) -> bool:
     """
     Given a schema, returns True if the schema has a Tensor arg.
     A Tensor arg is any arg with a type annotation that might involve Tensor.
     """
-    return any((is_tensor_like_type(a.type) or is_tensorlist_like_type(a.type)) for a in schema.arguments)
+    return any(
+        (is_tensor_like_type(a.type) or is_tensorlist_like_type(a.type))
+        for a in schema.arguments
+    )
+
 
 def get_device_arg_id(schema: _C.FunctionSchema) -> Union[int, None]:
     """
     Given a schema, returns the id of the `device: torch.device` argument.
     If it does not exist, returns None.
     """
-    for (i, a) in enumerate(schema.arguments):
+    for i, a in enumerate(schema.arguments):
         if a.type is _C.DeviceObjType.get() and a.name == "device":
             return i
     return None
