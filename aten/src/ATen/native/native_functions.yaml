@@ -2370,8 +2370,10 @@
     MPS: empty_mps
     Meta: empty_meta_symint
     MkldnnCPU: empty_mkldnn
-    SparseCPU, SparseCUDA, SparseMeta: empty_sparse
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: empty_sparse_compressed
+    SparseCPU, SparseCUDA: empty_sparse
+    SparseMeta: empty_sparse_symint
+    SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
+    SparseCsrMeta: empty_sparse_compressed_symint
     QuantizedCPU, QuantizedCUDA, QuantizedMeta: empty_unknown_quantized
   tags: core
 
@@ -14771,12 +14773,12 @@
     CUDA: _scaled_dot_product_efficient_attention_backward_cuda
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_cudnn_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+- func: _scaled_dot_product_cudnn_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   dispatch:
     CUDA: _scaled_dot_product_cudnn_attention_cuda
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_cudnn_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor philox_seed, Tensor philox_offset, *, float? scale=None) -> (Tensor, Tensor, Tensor)
+- func: _scaled_dot_product_cudnn_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor attn_bias, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, *, float? scale=None) -> (Tensor, Tensor, Tensor)
   dispatch:
     CUDA: _scaled_dot_product_cudnn_attention_backward_cuda
   tags: nondeterministic_seeded
@@ -15617,6 +15619,7 @@
   dispatch:
     CPU: _fused_adam_kernel_cpu_
     CUDA: _fused_adam_kernel_cuda_
+    MPS: _fused_adam_kernel_mps_
   autogen: _fused_adam.tensor_lr, _fused_adam.tensor_lr_out
 
 - func: _fused_adamw_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, float lr, float beta1, float beta2, float weight_decay, float eps, bool amsgrad, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
@@ -15636,6 +15639,7 @@
   dispatch:
     CPU: _fused_adamw_kernel_cpu_
     CUDA: _fused_adamw_kernel_cuda_
+    MPS: _fused_adamw_kernel_mps_
   autogen: _fused_adamw.tensor_lr, _fused_adamw.tensor_lr_out
 
 - func: _fused_sgd_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] momentum_buffer_list, *, float weight_decay, float momentum, float lr, float dampening, bool nesterov, bool maximize, bool is_first_step, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()

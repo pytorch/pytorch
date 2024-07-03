@@ -349,10 +349,11 @@ def _get_optimization_cflags() -> List[str]:
         if sys.platform != "darwin":
             # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
             # `-march=native` is unrecognized option on M1
-            if platform.machine() == "ppc64le":
-                cflags.append("mcpu=native")
-            else:
-                cflags.append("march=native")
+            if not config.is_fbcode():
+                if platform.machine() == "ppc64le":
+                    cflags.append("mcpu=native")
+                else:
+                    cflags.append("march=native")
 
         return cflags
 
@@ -424,7 +425,7 @@ class CppOptions(BuildOptionsBase):
 
     def __init__(
         self,
-        compile_only: bool,
+        compile_only: bool = False,
         warning_all: bool = True,
         extra_flags: Sequence[str] = (),
         use_absolute_path: bool = False,
