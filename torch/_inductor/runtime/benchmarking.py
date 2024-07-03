@@ -56,6 +56,12 @@ class LazyBenchmark:
     
     def __rmul__(self, other: Any) -> Self:
         return LazyBenchmark(lambda: other * self.evaluate())
+    
+    def __truediv__(self, other: Any) -> Self:
+        return LazyBenchmark(lambda: self.evaluate() / other)
+    
+    def __rtruediv__(self, other: Any) -> Self:
+        return LazyBenchmark(lambda: other / self.evaluate())
 
 
 class Benchmarker:
