@@ -28,7 +28,6 @@ atomic = true
 profile = "black"
 indent = 4
 line_length = 88
-lines_before_imports = 1
 lines_after_imports = 2
 multi_line_output = 3
 include_trailing_comma = true
