@@ -1433,11 +1433,11 @@ class Scheduler:
         self.post_grad_graph_id = next(_post_grad_graph_counter)
 
         self.completed_operations: OrderedSet[str] = OrderedSet()
-        self.available_buffer_names = OrderedSet(
+        self.available_buffer_names = OrderedSet([
             *V.graph.graph_inputs.keys(),
             *V.graph.constants.keys(),
             *V.graph.torchbind_constants.keys(),
-        )
+        ])
 
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
 
