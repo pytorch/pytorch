@@ -241,6 +241,8 @@ class SymNode:
             rep.append(f"hint={self._hint}")
         if self.constant is not None:
             rep.append(f"constant={self.constant}")
+        if self.fx_node is not None:
+            rep.append(f"fx_node={self.fx_node}")
         return ", ".join(rep) + ")"
 
     def _graph_repr(self) -> str:
