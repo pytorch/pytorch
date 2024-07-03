@@ -1361,7 +1361,7 @@ def get_grouped_by_view_native_functions(
     native_functions: Sequence[NativeFunction],
 ) -> Sequence[NativeFunction | NativeFunctionsViewGroup]:
     def maybe_create_view_group(
-        d: dict[ViewSchemaKind | SchemaKind, NativeFunction]
+        d: dict[ViewSchemaKind | SchemaKind, NativeFunction],
     ) -> list[NativeFunction | NativeFunctionsViewGroup]:
         funcs: list[NativeFunction | NativeFunctionsViewGroup] = []
         if ViewSchemaKind.aliasing in d:
@@ -1408,7 +1408,7 @@ def get_grouped_native_functions(
     native_functions: Sequence[NativeFunction],
 ) -> Sequence[NativeFunction | NativeFunctionsGroup]:
     def flatten_pre_group(
-        d: dict[SchemaKind, NativeFunction]
+        d: dict[SchemaKind, NativeFunction],
     ) -> Sequence[NativeFunction | NativeFunctionsGroup]:
         r = NativeFunctionsGroup.from_dict(d)
         if r is None:
