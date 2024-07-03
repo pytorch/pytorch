@@ -6,6 +6,7 @@ This module stores various pieces of Python-global state relating to the JIT.
 This is not intended to be imported directly; please the exposed
 functionalities in `torch.jit`.
 """
+
 import os
 import weakref
 from typing import Any, Dict, Type

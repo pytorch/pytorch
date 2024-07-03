@@ -3346,8 +3346,9 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
 
     orig_hx = hidden[0]
     orig_cx = hidden[1]
-    hx, cx = orig_hx.narrow(0, 0, last_batch_size), orig_cx.narrow(
-        0, 0, last_batch_size
+    hx, cx = (
+        orig_hx.narrow(0, 0, last_batch_size),
+        orig_cx.narrow(0, 0, last_batch_size),
     )
 
     for inp in split_inp:

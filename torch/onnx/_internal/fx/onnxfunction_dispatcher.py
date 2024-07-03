@@ -869,9 +869,9 @@ def _is_arg_with_complex_dtype(arg: fx_type_utils.Argument) -> bool:
 
 @_beartype.beartype
 def _find_onnx_data_type(
-    torch_input: Optional[
-        Union[fx_type_utils.TensorLike, str, int, float, bool, list, tuple, complex]
-    ]
+    torch_input: Union[
+        fx_type_utils.TensorLike, str, int, float, bool, list, tuple, complex, None
+    ],
 ) -> Set[str]:
     """Convert inputs data type from torch acceptable dtype to the compatible onnx dtype string."""
     if (

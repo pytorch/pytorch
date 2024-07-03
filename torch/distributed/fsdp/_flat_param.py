@@ -2656,7 +2656,7 @@ def _safe_setattr_tensor_or_param(
 
 
 def _convert_to_params(
-    tensors: List[Union[torch.Tensor, nn.Parameter]]
+    tensors: List[Union[torch.Tensor, nn.Parameter]],
 ) -> List[nn.Parameter]:
     return [t if isinstance(t, nn.Parameter) else nn.Parameter(t) for t in tensors]
 
