@@ -12,6 +12,6 @@ class DynamicShapeView(torch.nn.Module):
         x = x.view(*new_x_shape)
         return x.permute(0, 2, 1)
 
-example_inputs = (torch.randn(10, 10),)
+example_args = (torch.randn(10, 10),)
 tags = {"torch.dynamic-shape"}
 model = DynamicShapeView()
