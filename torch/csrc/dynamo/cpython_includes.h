@@ -26,6 +26,10 @@
 #undef Py_BUILD_CORE
 #endif // PY_VERSION_HEX >= 0x03080000
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #if IS_PYTHON_3_13_PLUS
 #define F_CODE(x) ((PyCodeObject*)(x)->f_executable)
 #define PREV_INSTR(x) (x)->instr_ptr
@@ -38,4 +42,8 @@
 #define FUNC(x) ((x)->f_funcobj)
 #else
 #define FUNC(x) ((x)->f_func)
+#endif
+
+#ifdef __cplusplus
+} // extern "C"
 #endif

@@ -36,6 +36,7 @@ inline static void eval_frame_callback_set(PyObject* obj) {
 // All the eval APIs change in 3.11 so we need to decide which one to use on the fly
 // https://docs.python.org/3/c-api/init.html#c._PyFrameEvalFunction
 #if IS_PYTHON_3_11_PLUS
+#define THP_EVAL_API_FRAME_OBJECT _PyInterpreterFrame
 
 // We need to be able to return the _PyInterpreterFrame to python so create
 // a python binding for it
@@ -43,6 +44,7 @@ inline static void eval_frame_callback_set(PyObject* obj) {
 typedef struct THPPyInterpreterFrame {
   PyObject_HEAD
   _PyInterpreterFrame* frame; // Borrowed reference
+  PyObject* locals;
 } THPPyInterpreterFrame;
 
 THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame);
@@ -62,7 +64,12 @@ DECLARE_PYOBJ_ATTR(f_func)
 
 DECLARE_PYOBJ_ATTR(f_globals)
 DECLARE_PYOBJ_ATTR(f_builtins)
-DECLARE_PYOBJ_ATTR(f_locals)
+
+static PyObject* THPPyInterpreterFrame_f_locals(THPPyInterpreterFrame* self, PyObject* _noargs) {
+  DEBUG_NULL_CHECK(self->locals);
+  Py_XINCREF(self->locals);
+  return self->locals;
+}
 
 #if IS_PYTHON_3_13_PLUS
 DECLARE_PYOBJ_ATTR(f_executable)
@@ -140,11 +147,13 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
   if (!self)
     return NULL;
   self->frame = frame;
+  self->locals = NULL;
   return self;
 }
 
 
 #else
+#define THP_EVAL_API_FRAME_OBJECT PyFrameObject
 
 static int
 THP_PyFrame_FastToLocalsWithError(THP_EVAL_API_FRAME_OBJECT *frame, int *free_vars_copied) {
@@ -242,6 +251,7 @@ inline static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
 static inline PyObject* call_callback(
     PyObject* callable,
     THP_EVAL_API_FRAME_OBJECT* _frame,
+    PyObject* locals,
     CacheEntry* cache_entry,
     FrameState* frame_state) {
 
@@ -252,6 +262,7 @@ static inline PyObject* call_callback(
   if (frame == NULL) {
     return NULL;
   }
+  frame->locals = locals;
 #else
   PyObject* frame = Py_NewRef(_frame);
 #endif
@@ -571,7 +582,18 @@ static PyObject* _custom_eval_frame(
   }
 
 
-  PyObject *locals = FrameLocalsMapping_new(frame);
+  #if IS_PYTHON_3_12_PLUS
+  PyObject *locals = get_framelocals_mapping(frame);
+  #else
+  if (THP_PyFrame_FastToLocalsWithError(frame, &free_vars_copied) < 0) {
+    DEBUG_TRACE("error %s", get_frame_name(frame));
+    *should_clear_frame = 1;
+    return NULL;
+  }
+  PyObject *locals = frame->f_locals;
+  Py_INCREF(locals);
+  #endif
+
   PyObject* backend = get_backend(callback);
 
   // A callback of Py_False indicates "run only" mode, the cache is checked, but
@@ -581,7 +603,8 @@ static PyObject* _custom_eval_frame(
     _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
     PyObject* maybe_cached_code = lookup(extra, locals, backend);
     _pytorch_record_function_exit(rf);
-    FrameLocalsMapping_delete(&locals);
+
+    Py_DECREF(locals);
 
     if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
@@ -597,6 +620,7 @@ static PyObject* _custom_eval_frame(
     *should_clear_frame = 1;
     return eval_custom_code(tstate, frame, cached_code, throw_flag, 0);
   }
+  DEBUG_CHECK(PyDict_CheckExact(locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
@@ -606,19 +630,13 @@ static PyObject* _custom_eval_frame(
   eval_frame_callback_set(Py_None);
 
   int free_vars_copied = 0;
-  if (THP_PyFrame_FastToLocalsWithError(frame, &free_vars_copied) < 0) {
-    DEBUG_TRACE("error %s", get_frame_name(frame));
-    *should_clear_frame = 1;
-    return NULL;
-  }
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
-  printf("do lookup\n");
   PyObject* maybe_cached_code = lookup(extra, locals, backend);
   _pytorch_record_function_exit(rf);
-  FrameLocalsMapping_delete(&locals);
   if (maybe_cached_code == NULL) {
     // Python error
     *should_clear_frame = 1;
+    Py_DECREF(locals);
     return NULL;
   } else if (maybe_cached_code != Py_None) {
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
@@ -627,13 +645,15 @@ static PyObject* _custom_eval_frame(
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
+    Py_DECREF(locals);
     return eval_custom_code(tstate, frame, cached_code, throw_flag, free_vars_copied);
   }
   // cache miss
   CacheEntry* cache_entry = extract_cache_entry(extra);
   FrameState* frame_state = extract_frame_state(extra);
   PyObject* result =
-      call_callback(callback, frame, cache_entry, frame_state);
+      call_callback(callback, frame, locals, cache_entry, frame_state);
+  Py_DECREF(locals);
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of

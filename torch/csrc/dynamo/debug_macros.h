@@ -6,6 +6,10 @@
 #include <stdio.h>
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifdef _WIN32
 #define unlikely(x) (x)
 #else
@@ -47,4 +51,8 @@
 #define DEBUG_TRACE(msg, ...)
 #define DEBUG_TRACE0(msg)
 
+#endif
+
+#ifdef __cplusplus
+} // extern "C"
 #endif

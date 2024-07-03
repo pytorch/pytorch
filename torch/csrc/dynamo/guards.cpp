@@ -3336,9 +3336,7 @@ void* convert_to_root_guard_manager(py::object root) {
 }
 
 bool run_root_guard_manager(void* root, PyObject* f_locals) {
-  printf("got here!\n");
   bool result = ((RootGuardManager*)root)->check_nopybind(f_locals);
-  printf("done running root guard manager\n");
   return result;
 }
 

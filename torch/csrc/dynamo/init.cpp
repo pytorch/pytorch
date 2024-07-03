@@ -6,7 +6,6 @@
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/extra_state.h>
-#include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 #include <torch/csrc/utils/pybind.h>
@@ -69,9 +68,6 @@ void initDynamoBindings(PyObject* torch) {
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
   py::bind_vector<std::vector<uint8_t>>(m, "VectorUInt8");
   m.attr("py_opcode_caches") = _PyOpcode_Caches_vec;
-
-  py::class_<FrameLocalsMapping>(m, "_FrameLocalsMapping")
-      .def("test", &FrameLocalsMapping::getitem);
 }
 
 } // namespace torch::dynamo
