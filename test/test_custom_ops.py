@@ -2969,6 +2969,7 @@ Please use `add.register_fake` to add an fake impl.""",
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             numpy_sin_inplace(x)
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_factory_function(self):
         @torch.library.custom_op(
             "_torch_testing::f", mutates_args={}, device_types="cpu"
