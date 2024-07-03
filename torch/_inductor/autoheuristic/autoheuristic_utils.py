@@ -118,6 +118,7 @@ def check_minsize(context: AHContext, minsize: int) -> bool:
         and context.get_value("n") >= minsize
     )
 
+
 def pad_mm_precondition(metadata: AHMetadata, context: AHContext) -> bool:
     if metadata.shared_memory == 166912 and metadata.device_capa == (8, 0):
         # A100 precondition
