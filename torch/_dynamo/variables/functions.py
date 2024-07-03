@@ -534,7 +534,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 parent.symbolic_locals[var] = child.symbolic_locals[var]
 
     def reconstruct(self, codegen):
-        codegen.load_import_from(__name__, "_create_nested_fn")
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(__name__, "_create_nested_fn")
+        )
         codegen(self.code)
         codegen.extend_output([codegen._create_load_const(self.f_globals)])
         codegen(ConstantVariable.create(self.code.value.co_name))
@@ -563,12 +565,14 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         else:
             codegen.extend_output([codegen.create_load_const(None)])
 
-        codegen.extend_output(create_call_function(7, push_null=True))
+        codegen.extend_output(create_call_function(7, False))
 
         if self.wrapped_reconstructible:
-            codegen.load_import_from("functools", "wraps")
+            codegen.add_push_null(
+                lambda: codegen.load_import_from("functools", "wraps")
+            )
             codegen(self.wrapped_reconstructible)
-            codegen.extend_output(create_call_function(1, True))
+            codegen.extend_output(create_call_function(1, False))
             codegen.extend_output(create_rot_n(2))
             codegen.extend_output(create_call_function(1, True))
 
@@ -593,7 +597,18 @@ class SkipFunctionVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+        if not isinstance(
+            value,
+            (
+                types.MethodWrapperType,
+                types.WrapperDescriptorType,
+                types.MemberDescriptorType,
+            ),
+        ):
+            # These descriptors are not guaranteed to return the same object on
+            # attribute lookup. They are unlikely to be changed, so we can skip
+            # guarding them.
+            install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         return cls(
             value,
             source=source,
@@ -815,18 +830,18 @@ class FunctoolsPartialVariable(VariableTracker):
         self.keywords = keywords
 
     def reconstruct(self, codegen):
-        codegen.load_import_from("functools", "partial")
+        codegen.add_push_null(lambda: codegen.load_import_from("functools", "partial"))
         codegen(self.func)
         if self.args:
             codegen.foreach(self.args)
         if not self.keywords:
-            codegen.extend_output(create_call_function(len(self.args) + 1, True))
+            codegen.extend_output(create_call_function(len(self.args) + 1, False))
             return
 
         codegen.foreach(self.keywords.values())
         keys = tuple(self.keywords.keys())
         codegen.extend_output(
-            codegen.create_call_function_kw(len(keys) + len(self.args) + 1, keys, True)
+            codegen.create_call_function_kw(len(keys) + len(self.args) + 1, keys, False)
         )
 
     def get_function(self):

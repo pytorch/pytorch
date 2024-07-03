@@ -11,6 +11,7 @@ from unittest import mock
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd, config
 from torch._dynamo.utils import counters
@@ -1307,6 +1308,99 @@ main()
             yield model[1].weight.grad
 
         self.check_output_and_recompiles(fn, 1)
+
+    def test_trace_run_with_rng_state(self):
+        def sdpa(xq, xk):
+            return F.scaled_dot_product_attention(xq, xk, xk, is_causal=True)
+
+        def g(xq_1, xk_1, xq_2, xk_2):
+            # xq: (bs, n_local_heads, seqlen, head_dim)
+            # xk: (bs, n_local_heads, cache_len + seqlen, head_dim)
+            y1 = sdpa(xq_1, xk_1)
+            y2 = torch.utils.checkpoint.checkpoint(
+                sdpa, xq_2, xk_2, use_reentrant=False
+            )
+            y = torch.mul(y1, y2)
+            z = torch.matmul(y, y)
+            return z
+
+        def f():
+            bs = 1
+            n_local_heads = 1
+            seqlen = 2
+            head_dim = 2
+            cache_len = 2
+            xq_list = [
+                torch.ones(
+                    (bs, n_local_heads, seqlen, head_dim),
+                    requires_grad=True,
+                    device="cpu",
+                )
+                for _ in range(2)
+            ]
+            xk_list = [
+                torch.ones(
+                    (bs, n_local_heads, cache_len + seqlen, head_dim),
+                    requires_grad=True,
+                    device="cpu",
+                )
+                for _ in range(2)
+            ]
+            out = torch.compile(g, fullgraph=True)(
+                xq_list[0], xk_list[0], xq_list[1], xk_list[1]
+            )
+            out.sum().backward()
+            return out, *[x.grad for x in xq_list + xk_list]
+
+        """
+        Walkthrough of what happens with `run_with_rng_state`:
+        1. `run_with_rng_state` only shows up in the backward graph (this op is inserted by the partitioner).
+        2. The Dynamo graph captured by Compiled Autograd looks like:
+        ```
+        ===== __compiled_fn_3 =====
+        torch/fx/_lazy_graph_module.py class GraphModule(torch.nn.Module):
+            def forward(self, L_inputs_ : list):
+                ...
+                run_with_rng_state = torch.ops.higher_order.run_with_rng_state(
+                    getitem_8,
+                    torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
+                    getitem_3, getitem_4, getitem_4, 0.0, True,
+                )
+                ...
+        ```
+        3. We want to preserve this `run_with_rng_state` op when going through AOTAutograd. We do it by having special handling
+        in `run_with_rng_state` op's py_functionalize_impl.
+        """
+
+        def _run_with_rng_state_op_check(inductor_post_grad_graph):
+            # Checks that `run_with_rng_state` op exists in Compiled Autograd's Inductor post-grad graph.
+            op_set = {node.target for node in inductor_post_grad_graph.nodes}
+            if torch.ops.higher_order.run_and_save_rng_state not in op_set:
+                # This is backward graph, so check existence of `run_with_rng_state` op
+                self.assertTrue(torch.ops.higher_order.run_with_rng_state in op_set)
+
+        with torch._inductor.config.patch(
+            post_grad_custom_post_pass=_run_with_rng_state_op_check
+        ):
+            compiler_fn = make_compiler_fn(fullgraph=True)
+
+            def make_compiler_fn_with_op_check():
+                def _compiler_fn(gm):
+                    # Checks that `run_with_rng_state` op exists in Compiled Autograd's Dynamo graph.
+                    self.assertTrue(
+                        any(
+                            node.target is torch.ops.higher_order.run_with_rng_state
+                            for node in gm.graph.nodes
+                        )
+                    )
+                    return compiler_fn(gm)
+
+                return _compiler_fn
+
+            compiler_fn_with_op_check = make_compiler_fn_with_op_check()
+            self.check_output_and_recompiles(
+                f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
+            )
 
     def test_autograd_cpp_node(self):
         cpp_source = """
