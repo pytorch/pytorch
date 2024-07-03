@@ -73,8 +73,6 @@ class TORCH_API Context {
       return at::detail::getPrivateUse1Hooks();
     } else if (device_type == at::kMTIA) {
       return at::detail::getMTIAHooks();
-    } else if (device_type == at::kXPU) {
-      return at::detail::getXPUHooks();
     } else if (device_type == at::kHIP) {
       return at::detail::getHIPHooks();
     } else {
