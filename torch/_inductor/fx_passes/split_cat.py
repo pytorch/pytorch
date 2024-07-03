@@ -164,6 +164,9 @@ def normalize_split_base(
     if split_input is None or split_dim is None or split_size is None:
         log.debug("couldn't find split args")
         return
+    if isinstance(split_dim, torch.fx.Node):
+        log.debug("nodes as dim is not supported")
+        return
     if "example_value" not in split_node.meta:
         log.debug("example value absent for node: %s", split_node)
         return
@@ -223,6 +226,9 @@ def remove_split_with_size_one(match: Match, *args, **kwargs):
     split_input, split_size, split_dim = _get_split_args_default(split_node)
     if split_input is None or split_dim is None or split_size is None:
         log.debug("couldn't find split args")
+        return
+    if isinstance(split_dim, torch.fx.Node):
+        log.debug("nodes as dim is not supported")
         return
     if "example_value" not in split_node.meta:
         log.debug("example value absent for node: %s", split_node)
@@ -306,6 +312,9 @@ def normalize_cat_default(match: Match, *args, **kwargs):
             cat_dim = 0
     if tensors is None or cat_dim is None:
         log.debug("couldn't find cat args")
+        return
+    if isinstance(cat_dim, torch.fx.Node):
+        log.debug("nodes as dim is not supported")
         return
     assert isinstance(tensors, (list, tuple))
     for tensor in itertools.chain([cat_node], tensors):
@@ -933,6 +942,7 @@ class SplitCatSimplifier:
             if (
                 user_node.target == torch.cat
                 and split_dim != cat_dim
+                and type(split_dim) is type(cat_dim)
                 and split_node.target == torch.split
             ):
                 with graph.inserting_after(new_cat_node):
