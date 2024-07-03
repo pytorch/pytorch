@@ -245,7 +245,7 @@ class SymNode:
             rep.append(f"fx_node={self.fx_node}")
         return ", ".join(rep) + ")"
 
-    def _graph_repr(self) -> str:  # type: ignore[valid-type]
+    def _graph_repr(self) -> builtins.str:
         # Representation used by GraphModule to create a pythonic version of a graph
         return self.str()
 
