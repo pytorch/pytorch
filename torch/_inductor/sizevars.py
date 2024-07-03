@@ -219,9 +219,12 @@ class SizeVarAllocator:
                     # approximate test passed, try sound version
                     va = index_vars[a]
                     vb = index_vars[b]
-                    v = sympy_index_symbol("_merge_tester")
-                    expr1 = sympy_subs(index_formulas[k], {va: v * sizes[a], vb: 0})
-                    expr2 = sympy_subs(index_formulas[k], {va: 0, vb: v})
+                    m1 = sympy_index_symbol("_merge_tester1")
+                    m2 = sympy_index_symbol("_merge_tester2")
+                    # NOTE: can't sub vb=0 here in case va * vb appears in the expression,
+                    # in which case both expr1 and expr2 would be zero!
+                    expr1 = sympy_subs(index_formulas[k], {va: m1 * sizes[a], vb: m2})
+                    expr2 = sympy_subs(index_formulas[k], {va: 0, vb: (m1 + m2)})
                     if self.simplify(expr1) == self.simplify(expr2):
                         continue
                 return False
@@ -445,7 +448,9 @@ class SizeVarAllocator:
         min_val = self.evaluate_min(left, right)
         return right if min_val is left else left
 
-    def evaluate_static_shape(self, left: Expr) -> int:
+    def evaluate_static_shape(self, left: Union[Expr, int]) -> int:
+        if isinstance(left, int):
+            return left
         right = self.size_hint(left)
         self.guard_equals(left, sympy.Integer(right))
         return int(right)
@@ -458,7 +463,9 @@ class SizeVarAllocator:
             return sympy_subs(expr, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         return expr
 
-    def symbolic_hint(self, expr: Expr) -> Union[Expr, int]:
+    def symbolic_hint(self, expr: Union[Expr, int]) -> Union[Expr, int]:
+        if isinstance(expr, int):
+            return expr
         # Substitute all hints into expr, but leave unbacked symints alone
         expr = self.simplify(expr)
         if not isinstance(expr, Expr):
@@ -473,7 +480,9 @@ class SizeVarAllocator:
         expr = self.remove_precomputed_replacements(expr)
         return sympy_subs(expr, self.var_to_val)
 
-    def size_hint(self, expr: Expr, *, fallback: Optional[int] = None) -> int:
+    def size_hint(
+        self, expr: Union[Expr, int], *, fallback: Optional[int] = None
+    ) -> int:
         out = self.symbolic_hint(expr)
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
             # Use the provided heuristic fallback hint

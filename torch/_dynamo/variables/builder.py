@@ -1373,6 +1373,13 @@ class VariableBuilder:
                 f"torch.compile does not support sparse Tensor with {value.layout} layout"
             )
 
+        # TODO(pearu,sparse-team) - Add the corresponding SPARSE_TENSOR_MATCH guards
+        if is_sparse_any(value) and value.is_sparse and not self.tx.export:
+            # A hot fix for sparse tensors + torch.compile. There is some
+            # support for export + coo tensor. We need to create
+            # SPARSE_TENSOR_GUARDS for guards to work propertly.
+            unimplemented("torch.compile does not support sparse Tensors")
+
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,

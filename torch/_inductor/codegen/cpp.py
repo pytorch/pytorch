@@ -23,7 +23,7 @@ from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from ..._dynamo.utils import counters
 
-from .. import codecache, config, cpu_vec_isa, ir, metrics
+from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import (
@@ -1572,7 +1572,9 @@ class CppKernel(Kernel):
         self.is_reduction = False
         self.non_parallel_reduction_prefix = IndentedBuffer()
         self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
-        self.weight_recps_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="wrecps")
+        self.weight_recps_cse = CSE(
+            self.newvar_prefix, self.suffix, name_prefix="wrecps"
+        )
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
@@ -2298,7 +2300,7 @@ class CppVecKernel(CppKernel):
                     load_mask = f"{self._load_mask}.is_masked({itervar_inner})"
                 else:
                     load_mask = f"{self._load_mask} != 0"
-            if codecache.is_gcc():
+            if cpp_builder.is_gcc():
                 code.writeline(f"#pragma GCC unroll {self.num_elems}")
             else:
                 code.writeline(f"#pragma unroll {self.num_elems}")
@@ -2382,7 +2384,7 @@ class CppVecKernel(CppKernel):
         stride = self._try_get_const_stride(index, tiling_var)
         code = IndentedBuffer()
         if stride == 1:
-            if dtype == torch.float and self.tail_size == None:
+            if dtype == torch.float and self.tail_size is None:
                 code.writeline(f"{value}.store({var_expr});")
             else:
                 code.writeline(f"{value}.store({var_expr}, {self.num_elems});")
@@ -2462,13 +2464,17 @@ class CppVecKernel(CppKernel):
                 self.weight_recps_val = self.weight_recps_cse.generate(
                     self.compute, f"reduction {self.weight_recp_vec_range}", write=False
                 )
-                self.weight_recps_cse.reduction_cache[self.weight_recp_vec_range] = self.weight_recps_val
+                self.weight_recps_cse.reduction_cache[
+                    self.weight_recp_vec_range
+                ] = self.weight_recps_val
                 self.non_parallel_reduction_prefix.writeline(
                     self.welford_weight_reciprocal_vec(dtype)
                 )
             else:
                 self.gen_weight_recps = False
-                self.weight_recps_val = self.weight_recps_cse.reduction_cache[self.weight_recp_vec_range]
+                self.weight_recps_val = self.weight_recps_cse.reduction_cache[
+                    self.weight_recp_vec_range
+                ]
             # use masked acc_vec for tail vec kernel
             acc_vec_ = f"masked_{acc_vec}" if self.tail_size else acc_vec
             self.stores.writeline(
@@ -3649,6 +3655,7 @@ class CppScheduling(BaseScheduling):
     backend_features = dict.fromkeys(
         [
             BackendFeature.INPLACE_BUFFERS,
+            BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
         ]
     )
 
@@ -3884,7 +3891,7 @@ class CppScheduling(BaseScheduling):
         return (
             not node1.is_template()
             and not node2.is_template()
-            and node1.get_names() & node2.ancestors
+            and node1.get_operation_names() & node2.ancestors
             and not (
                 self._can_fuse_horizontal_impl(node1, node2)
                 and not node1.is_reduction()
@@ -3982,7 +3989,9 @@ class CppScheduling(BaseScheduling):
         _, (_, rnumel) = template_node.group
         assert rnumel == ()
         ctb: ir.CppTemplateBuffer = cast(ir.CppTemplateBuffer, template_node.node)
-        epilogue_ir_nodes: List[Optional[ir.Buffer]] = [n.node for n in epilogue_nodes]
+        epilogue_ir_nodes: List[Optional[ir.Operation]] = [
+            n.node for n in epilogue_nodes
+        ]
         assert all(
             isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
         ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
@@ -4310,7 +4319,7 @@ class LoopLevel:
             line1 = ""
         elif self.simd_omp:
             line1 = f"#pragma omp {simd}"
-        elif not self.is_reduction and codecache.is_gcc():
+        elif not self.is_reduction and cpp_builder.is_gcc():
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
