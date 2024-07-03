@@ -364,11 +364,14 @@ static void autogradNotImplementedFallbackImpl(
 #ifndef NDEBUG
   _foreach_tensor(
       [&](size_t idx_tensor, size_t _, const at::Tensor& t) {
-        if (storage_saved.at(idx_tensor).has_value())
+        // Skip next two for chunk_cat, see
+        // https://github.com/pytorch/pytorch/issues/130073
+        if (storage_saved.at(idx_tensor).has_value() &&
+            op_name != "aten::_chunk_cat")
           TORCH_INTERNAL_ASSERT(
               storage_saved.at(idx_tensor).value().is_alias_of(t.storage()),
               op_name);
-        if (impl_saved.at(idx_tensor))
+        if (impl_saved.at(idx_tensor) && op_name != "aten::_chunk_cat")
           TORCH_INTERNAL_ASSERT(
               impl_saved.at(idx_tensor) == t.getIntrusivePtr(), op_name);
       },
