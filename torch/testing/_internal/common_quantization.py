@@ -476,7 +476,7 @@ def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
     assert torch.isnan(out).sum() == 0
 
     out = out.to(dtype=torch.int32).reshape(w.shape)
-    out_uint8 = (out[::,::2] << 4 | out[::,1::2]).to(torch.uint8)
+    out_uint8 = (out[::, ::2] << 4 | out[::, 1::2]).to(torch.uint8)
 
     # Scales and zeros for the same q-group should be contiguous, so we can
     # load as a 32-bit word
