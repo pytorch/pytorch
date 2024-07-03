@@ -234,14 +234,14 @@ class SymNode:
         return self.str()
 
     def __repr__(self):
-        return self.str()
-
-    def debug_repr(self):
-        # This method includes additional debugging information
         return (
             f"SymNode(expr={self.expr}, shape_env={self.shape_env}, "
             f"pytype={self.pytype}, hint={self._hint}, constant={self.constant})"
         )
+
+    def _graph_repr(self) -> str:
+        # Representation used by GraphModule to create a pythonic version of a graph
+        return self.str()
 
     # These methods call the metaprogrammed methods, they're hand written
     # here so we get good stack traces
