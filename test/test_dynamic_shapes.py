@@ -8,6 +8,8 @@ import math
 import operator
 import re
 
+import numpy as np
+
 import sympy
 
 import torch
@@ -815,6 +817,22 @@ def forward(self, x_1):
                 )
             )
         )
+
+    def test_numpy_sym_max(self):
+        self.assertEqual(torch.sym_max(np.int64(10), 12), 12)
+        self.assertEqual(torch.sym_max(np.int64(12), 10), 12)
+        self.assertEqual(torch.sym_max(np.int64(10), 12.5), 12.5)
+        self.assertEqual(torch.sym_max(np.int64(14), 12.5), 14.0)
+        self.assertEqual(torch.sym_max(np.float64(14.0), 12), 14.0)
+        self.assertEqual(torch.sym_max(np.float64(14.0), 16), 16.0)
+
+    def test_numpy_sym_min(self):
+        self.assertEqual(torch.sym_min(np.int64(10), 12), 10)
+        self.assertEqual(torch.sym_min(np.int64(12), 10), 10)
+        self.assertEqual(torch.sym_min(np.int64(10), 12.5), 10.0)
+        self.assertEqual(torch.sym_min(np.int64(14), 12.5), 12.5)
+        self.assertEqual(torch.sym_min(np.float64(14.0), 12), 12.0)
+        self.assertEqual(torch.sym_min(np.float64(14.0), 16), 14.0)
 
     def test_debug_has_internal_overlap_unbacked(self):
         shape_env = ShapeEnv()
