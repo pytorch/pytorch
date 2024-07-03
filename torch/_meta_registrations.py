@@ -6098,12 +6098,6 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
     return torch.empty_like(self, dtype=result_dtype)
 
 
-@register_meta(aten.channel_shuffle.default)
-def meta_channel_shuffle(input, groups):
-    # The output shape is the same as the input, but is contiguous
-    return input.new_empty(input.size())
-
-
 @register_meta(aten._local_scalar_dense)
 def meta_local_scalar_dense(self: Tensor):
     raise RuntimeError("Tensor.item() cannot be called on meta tensors")
