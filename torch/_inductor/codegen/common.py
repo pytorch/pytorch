@@ -27,6 +27,7 @@ from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
+from torch._inductor.ordered_set import OrderedSet
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -1364,7 +1365,7 @@ class KernelArgs:
     # after you do a call into this kernel, which buffers actually contain
     # updated data?  Modeled off of python_argdefs.
     def live_output_buffers(self):
-        live_outs = set()
+        live_outs = OrderedSet()  # type: ignore[var-annotated]
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
                 continue
@@ -1440,7 +1441,7 @@ class CSE:
         self.store_cache = store_cache or {}
         self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
-        self.invalidated_stores = set()
+        self.invalidated_stores = OrderedSet()  # type: ignore[var-annotated]
         self.varname_map = varname_map or {}
 
     def invalidate(self, keep_vars: Set[str]):
@@ -1572,16 +1573,16 @@ class Kernel(CodeGen):
         self.num_reduction = 0
 
         self.cse: CSE = CSE(self.newvar_prefix, self.suffix)
-        self.must_keep_buffers = set()
-        self.store_buffer_names = set()
+        self.must_keep_buffers = OrderedSet()  # type: ignore[var-annotated]
+        self.store_buffer_names = OrderedSet()  # type: ignore[var-annotated]
         self._load_mask = None
         self._load_other = None
-        # set in set_current_node
+        # OrderedSet in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None
 
-        self.removed_buffers = set()
-        self.inplaced_to_remove = set()
+        self.removed_buffers = OrderedSet()  # type: ignore[var-annotated]
+        self.inplaced_to_remove = OrderedSet()  # type: ignore[var-annotated]
 
         # key: the buffer to write
         # value: the buffer to read and whose memory can be reused for
