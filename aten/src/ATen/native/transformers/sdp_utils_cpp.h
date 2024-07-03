@@ -417,13 +417,6 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
 
   bool same_num_heads =
       q_num_heads == k_num_heads && q_num_heads == v_num_heads;
-  
-  if(params.enable_gqa && !supports_gqa){
-    TORCH_WARN(
-      "GQA is not supported for the kernel. Try with supported kernels, or set enable_gqa to false."
-    );
-  }
-
 
   if(params.enable_gqa && supports_gqa){
     return check_grouped_query_attention(params, debug);

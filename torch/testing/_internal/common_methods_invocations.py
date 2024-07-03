@@ -8700,15 +8700,16 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
 
     qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape), broadcast_tuple, gqa_tuple]
     samples = []
-    for qkv_shape, is_causal, dropout_p in product(
-            qkv_shapes, [True, False], [0.0, 0.5]):
+    for qkv_shape, is_causal, dropout_p, enable_gqa in product(
+            qkv_shapes, [True, False], [0.0, 0.5], [True, False]):
         shape_q, shape_kv = qkv_shape
         samples.append(SampleInput(
             make(shape_q),
             make(shape_kv),
             make(shape_kv),
             is_causal=is_causal,
-            dropout_p=dropout_p
+            dropout_p=dropout_p,
+            enable_gqa=enable_gqa,
         ))
 
     # Add non standard shapes
