@@ -213,6 +213,9 @@ conv_depthwise2d_forward_kernel(
 }
 
 template <int kSize, int stride, typename scalar_t, typename index_t>
+#if !defined(USE_ROCM)
+C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
+#endif
 __global__ void conv_depthwise2d_backward_kernel(
     const PackedTensorAccessor32<const scalar_t, 4, DefaultPtrTraits> grad_output,
     PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> grad_input,
@@ -245,17 +248,11 @@ __global__ void conv_depthwise2d_backward_kernel(
 
     acc_t value(0);
 
-#if !defined(USE_ROCM)
-#pragma unroll
-#endif
     for (int multiplier = 0; multiplier < depthwiseMultiplier; ++multiplier) {
       int och = (c * depthwiseMultiplier) + multiplier;
       int weightOffset = och * kernelHeight * kernelWidth;
-#if !defined(USE_ROCM)
-#pragma unroll
-#endif
       for (int kh = 0; kh < KH_LIMIT; ++kh) {
-#if defined(USE_ROCM)
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
         for (int kw = 0; kw < KW_LIMIT; ++kw) {
@@ -281,7 +278,6 @@ __global__ void conv_depthwise2d_backward_kernel(
     grad_input.data()[linearIndex] = static_cast<scalar_t>(value);
   }
 }
-
 
 template <typename scalar_t, typename index_t=unsigned>
 __global__ void conv_depthwise2d_grad_weight_kernel(
@@ -508,7 +504,24 @@ void conv_depthwise2d_backward_out(
     auto grad_input_a = grad_input.packed_accessor32<scalar_t, 4>();
     auto weight_a = weight.packed_accessor32<const scalar_t, 4>();
 
-    if (kW == 3 && kH == 3) {
+    if (kW == 5 && kH == 5) {
+      if (dW == 1 && dH == 1){
+        conv_depthwise2d_backward_kernel<5, 1><<<grid, block, 0, stream>>>(
+            grad_output_a, grad_input_a, weight_a, n, inputChannels, depthwiseMultiplier, outputChannels, width,
+            height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      } else if (dW == 2 && dH == 2) {
+        conv_depthwise2d_backward_kernel<5, 2><<<grid, block, 0, stream>>>(
+            grad_output_a, grad_input_a, weight_a, n, inputChannels, depthwiseMultiplier, outputChannels, width,
+            height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      } else {
+        conv_depthwise2d_backward_kernel<5, 0><<<grid, block, 0, stream>>>(
+            grad_output_a, grad_input_a, weight_a, n, inputChannels, depthwiseMultiplier, outputChannels, width,
+            height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }
+    } else if (kW == 3 && kH == 3) {
       if (dW == 1 && dH == 1){
         conv_depthwise2d_backward_kernel<3, 1><<<grid, block, 0, stream>>>(
             grad_output_a, grad_input_a, weight_a, n, inputChannels, depthwiseMultiplier, outputChannels, width,
