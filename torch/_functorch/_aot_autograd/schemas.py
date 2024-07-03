@@ -8,7 +8,7 @@ import collections
 import functools
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, NewType, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, NewType, Optional, Set, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -170,48 +170,60 @@ class SubclassCreationMeta:
     # In the inner graph that only takes in dense tensor inputs,
     # this maps to the first index of "tensors that should go in this subclass wrapper"
     flat_tensor_start_idx: int
-    # The number of tensors that live in this subclass wrapper
+    # arg_count is inclusive of the arg_counts of any
+    # inner tensor subclasses: If I have a TwoTensor and
+    # both of its inner elements are TwoTensors, then the
+    # arg_count of the outer-most sublass will be 4
     arg_count: int
+    # meta and attrs are produced by the subclass's __tensor_flatten__.
+    # We need to keep them around along with outer_size / outer_stride to plumb them
+    # into __tensor_unflatten__
+    attrs: Dict[str, Union["SubclassCreationMeta", None]]
+    outer_size: List[int]
+    outer_stride: List[int]
+    meta: Any
     # Stores the original subclass itself.
     # This is needed because we need the autograd metadata on the original subclass
     # (this is guaranteed to be a wrapper subclass that holds a fake tensor,
     #  so holding onto this at runtime shouldn't leak memory)
-    original_subclass: torch.Tensor
-    # meta and inner_keys are produced by the subclass's __tensor_flatten__.
-    # We need to keep them around along with outer_size / outer_stride to plumb them
-    # into __tensor_unflatten__.
-    meta: Any
-    inner_keys: List[Any]
-    outer_size: Tuple[int, ...]
-    outer_stride: Tuple[int, ...]
+    original_subclass: Any
 
     def creation_fn(self, all_args, *, is_runtime: bool):
-        curr_args = all_args[
-            self.flat_tensor_start_idx : self.flat_tensor_start_idx + self.arg_count
-        ]
-        assert len(curr_args) == len(
-            self.inner_keys
-        ), f"inner_keys: {str(self.inner_keys)}. len(curr_args): {len(curr_args)}"
-        # NB: Sometimes we have real inner tensors and symbolic metadata.
-        # TODO: Resolve this so we always have matching real / symbolic tensors / metadata.
-        out = type(self.original_subclass).__tensor_unflatten__(  # type: ignore[attr-defined]
-            dict(zip(self.inner_keys, curr_args)),
-            self.meta,
-            self.outer_size,
-            self.outer_stride,
+        inner_tensors = {}
+
+        curr_start_idx = self.flat_tensor_start_idx
+        for attr, creation_meta in self.attrs.items():
+            if creation_meta is None:
+                subclass = all_args[curr_start_idx]
+                curr_start_idx += 1
+            else:
+                subclass = creation_meta.creation_fn(all_args, is_runtime=is_runtime)
+                curr_start_idx += creation_meta.arg_count
+            inner_tensors[attr] = subclass
+
+        rebuilt = type(self.original_subclass).__tensor_unflatten__(
+            inner_tensors, self.meta, self.outer_size, self.outer_stride
         )
+
         if not is_runtime:
             # After wrapping up the inner dense tensors into a subclass, we need to make sure that our new wrapper
             # has correct autograd metadata, since we'll be tracing through the autograd engine with the subclass.
             # We don't trace through the autograd engine at runtime though, so no need
             # to compute this extra metadata then!
-            torch._mirror_autograd_meta_to(self.original_subclass, out)  # type: ignore[attr-defined]
+            torch._mirror_autograd_meta_to(self.original_subclass, rebuilt)  # type: ignore[attr-defined]
 
-        return out
+        return rebuilt
 
     def __post_init__(self):
         # sanity assert to make sure we don't leak memory
         assert is_fake(self.original_subclass)
+
+        # This saves the type of subclass nested structure to compare
+        # against runtime tangent inputs. We do wanna compute this at AOT
+        # time as it is invoked in hot-path
+        from .subclass_utils import get_types_for_subclass
+
+        self.subclass_type = get_types_for_subclass(self.original_subclass)
 
 
 # This class encapsulates all aliasing + mutation info we need about the forward graph

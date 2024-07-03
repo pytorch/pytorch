@@ -24,7 +24,7 @@ from torch._inductor.pattern_matcher import (
     stable_topological_sort,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import get_gpu_shared_memory, run_and_get_code
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
@@ -32,9 +32,11 @@ from torch.testing._internal.common_utils import IS_LINUX, LazyVal, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
 
-
-is_A100 = LazyVal(
-    lambda: torch.cuda.is_available() and get_gpu_shared_memory() == 166912
+# NVIDIA A100-SXM4-40GB
+is_a100_linux = LazyVal(
+    lambda: IS_LINUX
+    and torch.cuda.is_available()
+    and "A100" in torch.cuda.get_device_name(0)
 )
 
 
@@ -281,7 +283,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @unittest.skipIf(not is_A100, "heuristic only run on A100")
+    @unittest.skipIf(not is_a100_linux, "heuristic only run on Linux A100")
     @inductor_config.patch(mixed_mm_choice="heuristic")
     def test_mixed_mm_heuristic_no(self):
         def fn(a, b):
@@ -328,7 +330,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, True)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @unittest.skipIf(not is_A100, "heuristic only run on A100")
+    @unittest.skipIf(not is_a100_linux, "heuristic only run on Linux A100")
     @inductor_config.patch(mixed_mm_choice="heuristic")
     def test_mixed_mm_heuristic_yes(self):
         def fn(a, b):

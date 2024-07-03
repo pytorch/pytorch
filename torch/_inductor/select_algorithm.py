@@ -14,7 +14,7 @@ import sys
 import textwrap
 import time
 from collections import namedtuple
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -42,7 +42,6 @@ from .codegen.triton import (
 )
 
 from .codegen.triton_utils import config_of, signature_to_meta
-from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .runtime.hints import DeviceProperties
@@ -103,6 +102,8 @@ class PartialRender:
         return self.code
 
 
+# This is used to store info needed for lowering each subgraph in triton
+# templates
 SubgraphInfo = namedtuple(
     "SubgraphInfo",
     [
@@ -529,47 +530,31 @@ class TritonTemplateKernel(TritonKernel):
     def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
         _, call_args, _, arg_types = self.args.python_argdefs()
-        call_args = [str(a) for a in call_args]
-
-        for i in range(len(call_args)):
-            if V.graph.is_unspec_arg(call_args[i]):
-                call_args[i] = call_args[i] + ".item()"
-            if isinstance(call_args[i], sympy.Symbol):
-                call_args[i] = texpr(call_args[i])
-
-        current_device = V.graph.scheduler.get_current_device_or_throw()
-
         if V.graph.cpp_wrapper:
             # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
             # if any dynamic dimension is involved. We rely on the Python version
             # of the grid function to generate those grid configs, which may contain
             # symbolic values. The wrapper will use cexpr to print out C++ code
             # appropriately for the grid configs.
-            grid_args = [V.graph.sizevars.simplify(s) for s in self.call_sizes] + [
-                self.meta
-            ]
-            grid = self.grid_fn(*grid_args)
-
+            grid = self.call_sizes + [self.meta]
             wrapper.generate_kernel_call(
                 name,
                 call_args,
-                device_index=current_device.index,
+                grid=self.grid_fn(*grid),
                 arg_types=arg_types,
-                grid=grid,
                 triton_meta=self.triton_meta,
             )
         else:
-            stream_name = wrapper.write_get_raw_stream(current_device.index, V.graph)
-
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
-
-            grid_call = [
-                pexpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes
-            ] + [meta]
-            grid_call = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
-            wrapper.writeline(
-                f"{name}.run({', '.join(call_args)}, grid={grid_call}, stream={stream_name})"
+            grid = self.call_sizes + [meta]
+            wrapper.generate_kernel_call(
+                name,
+                call_args,
+                grid=grid,
+                grid_fn=f"{self.grid_fn.__module__}.{self.grid_fn.__name__}",
+                arg_types=arg_types,
+                triton_meta=self.triton_meta,
             )
 
 
@@ -1200,10 +1185,6 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
-            # TODO - debug issue
-            if torch.version.hip:
-                return no_op
-
             # check local and global cache before precompiling
             timings = self.lookup(
                 choices,
@@ -1245,42 +1226,25 @@ class AlgorithmSelectorCache(PersistentCache):
                     return choice.precompile()
 
             executor = ThreadPoolExecutor(max_workers=num_workers)
-            futures = executor.map(
-                lambda c: precompile_with_captured_stdout(c),
-                [c for c in choices if hasattr(c, "precompile")],
-                timeout=precompilation_timeout_seconds,
-            )
+
+            futures = {}
+            for c in choices:
+                if hasattr(c, "precompile"):
+                    future = executor.submit(precompile_with_captured_stdout, c)
+                    futures[future] = c
 
             @functools.lru_cache(None)
             @restore_stdout_stderr(initial_stdout, initial_stderr)
             def wait_on_futures():
                 counters["inductor"]["select_algorithm_precompile"] += 1
-                try:
-                    iterator = iter(futures)
-                    while True:
-                        try:
-                            next(iterator)
-                        except CUDACompileError:
-                            log.error(  # noqa: G201
-                                "CUDA Compilation error", exc_info=True
-                            )
-                except TimeoutError:
-                    log.warning(
-                        f"Precompilation timed out after {precompilation_timeout_seconds} seconds."  # noqa: G004
-                    )
-                except StopIteration:
-                    pass
-                except Exception as e:
-                    try:
-                        from triton.runtime.autotuner import OutOfResources
-
-                        if isinstance(e, OutOfResources):
-                            # This config is invalid due to requiring too many resources
-                            pass
-                        else:
-                            raise e
-                    except ImportError:
-                        raise e from None
+                for future in as_completed(
+                    futures,
+                    timeout=precompilation_timeout_seconds,
+                ):
+                    if e := future.exception():
+                        log.error(
+                            "Exception %s for benchmark choice %s", e, futures[future]
+                        )
 
                 executor.shutdown(wait=True)
 
@@ -1531,7 +1495,9 @@ class AlgorithmSelectorCache(PersistentCache):
         elapse: float,
         precompile_elapse: float,
     ):
-        V.debug.log_autotuning_results(name, input_nodes, timings, elapse)
+        V.debug.log_autotuning_results(
+            name, input_nodes, timings, elapse, precompile_elapse
+        )
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
             return
         sizes = ", ".join(
@@ -1594,8 +1560,11 @@ class AlgorithmSelectorCache(PersistentCache):
         for choice in top_k:
             result = timings[choice]
             if result:
+                kernel_info = (
+                    choice.debug_extra if hasattr(choice, "debug_extra") else ""
+                )
                 sys.stderr.write(
-                    f"  {choice.name} {result:.4f} ms {best_time / result:.1%}\n"
+                    f"  {choice.name} {result:.4f} ms {best_time / result:.1%} {kernel_info}\n"
                 )
             else:
                 sys.stderr.write(
@@ -1621,21 +1590,31 @@ class AlgorithmSelectorCache(PersistentCache):
         # triton templates want the base tensor.
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
+        return AlgorithmSelectorCache.generate_example_value(
+            V.graph.sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            V.graph.sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            node.get_device(),
+            node.get_dtype(),
+            node.layout.offset,
+        )
+
+    @staticmethod
+    def generate_example_value(size, stride, device, dtype, extra_size):
         # preserve rng states to avoid the rand_strided call below changes
         # the rng states for the real model code.
         with preserve_rng_state():
             return rand_strided(
-                V.graph.sizevars.size_hints(
-                    node.get_size(),
-                    fallback=config.unbacked_symint_fallback,
-                ),
-                V.graph.sizevars.size_hints(
-                    node.get_stride(),
-                    fallback=config.unbacked_symint_fallback,
-                ),
-                device=node.get_device(),
-                dtype=node.get_dtype(),
-                extra_size=node.layout.offset,
+                size,
+                stride,
+                device=device,
+                dtype=dtype,
+                extra_size=extra_size,
             )
 
     @staticmethod
