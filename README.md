@@ -152,6 +152,7 @@ Commands to install binaries via Conda or pip wheels are on our website: [https:
 #### NVIDIA Jetson Platforms
 
 Python wheels for NVIDIA's Jetson Nano, Jetson TX1/TX2, Jetson Xavier NX/AGX, and Jetson AGX Orin are provided [here](https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-10-now-available/72048) and the L4T container is published [here](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/l4t-pytorch).
+
 They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv) and [@ptrblck](https://github.com/ptrblck) are maintaining them.
 
 ### From Source
@@ -202,7 +203,7 @@ Other potentially useful environment variables may be found in `setup.py`.
 
 #### Install Dependencies
 
-- Common
+**Common**
 
 ```bash
 conda install cmake ninja
@@ -210,7 +211,7 @@ conda install cmake ninja
 pip install -r requirements.txt
 ```
 
-- Linux
+**Linux**
 
 ```bash
 conda install intel::mkl-static intel::mkl-include
@@ -223,7 +224,7 @@ conda install -c pytorch magma-cuda121  # or the magma-cuda* that matches your C
 make triton
 ```
 
-- MacOS
+**MacOS**
 
 ```bash
 # Add this package on intel x86 processor machines only
@@ -232,7 +233,7 @@ conda install intel::mkl-static intel::mkl-include
 conda install pkg-config libuv
 ```
 
-- Windows
+**Windows**
 
 ```bash
 conda install intel::mkl-static intel::mkl-include
@@ -253,7 +254,7 @@ git submodule update --init --recursive
 
 #### Install PyTorch
 
-- Linux
+**Linux**
 
 If you would like to compile PyTorch with [new C++ ABI](https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html) enabled, then first run this command:
 
@@ -285,13 +286,13 @@ python setup.py develop
 >
 > This is caused by `ld` from the Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.8.1+.
 
-- MacOS
+**MacOS**
 
 ```bash
 python3 setup.py develop
 ```
 
-- Windows
+**Windows**
 
 Choose Correct Visual Studio Version.
 
@@ -302,7 +303,7 @@ come with Visual Studio Code by default.
 
 If you want to build legacy python code, please refer to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
 
-- CPU-only builds
+**CPU-only builds**
 
 In this mode PyTorch computations will run on your CPU, not your GPU
 
@@ -313,7 +314,7 @@ python setup.py develop
 
 Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/main/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
 
-- CUDA based build
+**CUDA based build**
 
 In this mode PyTorch computations will leverage your GPU via CUDA for faster number crunching
 
@@ -359,7 +360,7 @@ You can adjust the configuration of cmake variables optionally (without building
 the following. For example, adjusting the pre-detected directories for CuDNN or BLAS can be done
 with such a step.
 
-On Linux
+**Linux**
 
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
@@ -367,7 +368,7 @@ python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```
 
-On macOS
+**macOS**
 
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
