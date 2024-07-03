@@ -4505,14 +4505,7 @@ class TestLinalg(TestCase):
         # disable tunableop buffer rotation for all tests everywhere, it can be slow
         import os
         os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"] = "0"
-        assert torch.cuda.tunable.is_enabled() is False, "TunableOp should be off by default"
-        assert torch.cuda.tunable.tuning_is_enabled(), "TunableOp's tuning should be enabled by default"
-        torch.cuda.tunable.tuning_enable(False)
-        assert torch.cuda.tunable.tuning_is_enabled() is False
-        torch.cuda.tunable.tuning_enable(True)
-        assert torch.cuda.tunable.tuning_is_enabled()
-        assert torch.cuda.tunable.get_max_tuning_duration() == 30
-        assert torch.cuda.tunable.get_max_tuning_iterations() == 100
+        set_tunableop_defaults()
 
         torch.cuda.tunable.enable()
         # set these to single iterations to keep it short but still exercise the code
@@ -4563,24 +4556,16 @@ class TestLinalg(TestCase):
             except FileNotFoundError:
                 pass
 
-        # disables TunableOp, no file will be written, restore to default values
+        # disables TunableOp
         torch.cuda.tunable.enable(False)
-        torch.cuda.tunable.set_filename(filename1)  # reset back to default filename for next unit test
-        torch.cuda.tunable.set_max_tuning_duration(30)
-        torch.cuda.tunable.set_max_tuning_iterations(100)
-        assert torch.cuda.tunable.is_enabled() is False, "TunableOp should be off after resetting"
-        assert torch.cuda.tunable.get_max_tuning_iterations() == 100
 
     @onlyCUDA
     @skipCUDAIfNotRocm
     @dtypes(torch.float)
     def test_bmm_tunableop_rocm(self, device, dtype):
         # buffer rotation (on by default) with strided batched gemm tunableop was causing a mem fault
+        set_tunableop_defaults()
         torch.cuda.tunable.enable(True)
-        ordinal = torch.cuda.current_device()
-        filename = f"tunableop_results{ordinal}.csv"
-        torch.cuda.tunable.set_filename(filename)
-        iterations = torch.cuda.tunable.get_max_tuning_iterations()
         torch.cuda.tunable.set_max_tuning_iterations(10)
         # the following 3 cases cover all previous failure cases and are here to catch regressions
         B = 16
@@ -4620,11 +4605,12 @@ class TestLinalg(TestCase):
         # clean up, remove any file that was generated
         try:
             import os
+            filename = torch.cuda.tunable.get_filename()
             os.remove(filename)
         except FileNotFoundError:
             pass
-        # reset back to prior settings
-        torch.cuda.tunable.set_max_tuning_iterations(iterations)
+
+        # disable TunableOp
         torch.cuda.tunable.enable(False)
 
     @onlyCUDA
