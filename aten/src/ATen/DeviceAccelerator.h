@@ -13,9 +13,9 @@
 // - It provides a set of common APIs as defined by AcceleratorHooksInterface
 //
 // As of today, accelerator devices are (in no particular order):
-// CUDA, MTIA, XPU, PrivateUse1
+// CUDA, MTIA, PrivateUse1
 // We want to add once all the proper APIs are supported and tested:
-// HIP, MPS
+// HIP, MPS, XPU
 
 namespace at {
 
