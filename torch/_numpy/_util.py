@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 
-"""Assorted utilities, which do not need anything other then torch and stdlib.
-"""
+"""Assorted utilities, which do not need anything other then torch and stdlib."""
 
 import operator
 
