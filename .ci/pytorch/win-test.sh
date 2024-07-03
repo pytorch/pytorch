@@ -52,10 +52,10 @@ run_tests() {
             break
         fi
     done
-    if [[ "$BUILD_ENVIRONMENT" == *cuda* && $has_nvidia_smi -eq 0 ]]; then
+    if [[ $USE_CUDA -eq 1 && $has_nvidia_smi -eq 0 ]]; then
         echo "Failed to find nvidia-smi, failing"
         exit 1
-    elif [[ "$BUILD_ENVIRONMENT" != *cuda* && $has_nvidia_smi -eq 1 ]]; then
+    elif [[ $USE_CUDA -eq 0 && $has_nvidia_smi -eq 1 ]]; then
         echo "Found nvidia-smi, failing"
         exit 1
     fi
