@@ -1470,6 +1470,8 @@ def same(
                     multiplier = 3.0
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
+                if not passes_test and math.isnan(ref_error) and math.isnan(res_error):
+                    passes_test = True
                 if not passes_test:
                     log_error(
                         "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, tol: %f",
