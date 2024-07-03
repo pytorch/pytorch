@@ -3011,6 +3011,18 @@ Please use `add.register_fake` to add an fake impl.""",
 
             result = f(x)
 
+        @torch.library.custom_op("_torch_testing::f4", mutates_args={})
+        def f4(device: torch.device) -> Tensor:
+            raise NotImplementedError("NYI")
+
+        @f4.register_kernel("cpu")
+        def _(device: torch.device):
+            return torch.zeros(3)
+
+        result = f(device="cpu")
+        self.assertEqual(result.device, torch.device("cpu"))
+        self.assertEqual(result, torch.ones(3))
+
 
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"

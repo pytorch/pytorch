@@ -160,8 +160,6 @@ class CustomOpDef:
 
     You should not instantiate CustomOpDef directly; instead, use the
     :func:`torch.library.custom_op` API.
-
-    If `backend_select` is True, we switch on the device argument to select the correct backend to dispatch to.
     """
 
     def __init__(self, namespace: str, name: str, schema: str, fn: Callable) -> None:
@@ -279,15 +277,15 @@ class CustomOpDef:
                 self._backend_fns[device_type] = fn
             return fn
 
-        from torch._library.utils import get_device_arg_id, has_tensor_arg
+        from torch._library.utils import get_device_arg_index, has_tensor_arg
 
         if device_types is not None and not has_tensor_arg(self._opoverload._schema):
-            device_arg_id = get_device_arg_id(self._opoverload._schema)
-            if device_arg_id is None:
+            device_arg_index = get_device_arg_index(self._opoverload._schema)
+            if device_arg_index is None:
                 raise ValueError(
                     "Functions without tensor inputs are required to have a `device: torch.device` argument"
                 )
-            self._register_backend_select_dispatcher(device_arg_id)
+            self._register_backend_select_dispatcher(device_arg_index)
 
         # See NOTE: [Supporting decorator and non-decorator usage]
         if fn is None:
@@ -524,12 +522,17 @@ class CustomOpDef:
                 with_keyset=True,
             )
 
-    def _register_backend_select_dispatcher(self, device_arg_id: int):
+    def _register_backend_select_dispatcher(self, device_arg_index: int):
+        """
+        Switch on the device argument to select the correct backend to dispatch to.
+        """
+
         def backend_select(keyset, *args, **kwargs):
-            device = args[device_arg_id].type
+            device = args[device_arg_index].type
             if device not in self._backend_fns:
                 raise RuntimeError(
-                    f"{self._name} does not have a kernel registered for {device}"
+                    f"{self._name} does not have a kernel registered for {device}. "
+                    "Please use register_kernel to do so."
                 )
             dispatch_key = _C._dispatch_key_for_device(device)
             dispatch_key = getattr(_C.DispatchKey, dispatch_key)

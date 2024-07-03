@@ -269,12 +269,12 @@ def has_tensor_arg(schema: _C.FunctionSchema) -> bool:
     )
 
 
-def get_device_arg_id(schema: _C.FunctionSchema) -> Union[int, None]:
+def get_device_arg_index(schema: _C.FunctionSchema) -> Union[int, None]:
     """
     Given a schema, returns the id of the `device: torch.device` argument.
     If it does not exist, returns None.
     """
-    for i, a in enumerate(schema.arguments):
-        if a.type is _C.DeviceObjType.get() and a.name == "device":
-            return i
+    for index, arg in enumerate(schema.arguments):
+        if arg.type is _C.DeviceObjType.get() and arg.name == "device":
+            return index
     return None
