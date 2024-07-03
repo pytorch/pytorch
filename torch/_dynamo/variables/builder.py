@@ -956,7 +956,12 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, types.GetSetDescriptorType):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            # GetSet descriptors are C functions attached to an attribute lookup
+            # using PyGetSetDef. Python, on attribute lookup, can decide to
+            # create a new object on the fly, and therefore the `id` of the
+            # descriptors is not guaranteed to be same for different attribute
+            # accesses. Since these are unlikely to change during the program
+            # execution, we can skip guarding on them.
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
