@@ -50,6 +50,12 @@ class LazyBenchmark:
     
     def __rsub__(self, other: Any) -> Self:
         return LazyBenchmark(lambda: other - self.finalize())
+    
+    def __mul__(self, other: Any) -> Self:
+        return LazyBenchmark(lambda: self.finalize() * other)
+    
+    def __rmul__(self, other: Any) -> Self:
+        return LazyBenchmark(lambda: other * self.finalize())
 
 
 class Benchmarker:
