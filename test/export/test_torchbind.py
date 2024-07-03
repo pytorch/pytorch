@@ -102,6 +102,12 @@ class TestExportTorchbind(TestCase):
                 test.tq_size_counter += 1
                 return len(self.queue)
 
+            def is_empty(self):
+                return len(self.queue) == 0
+
+            def float_size(self):
+                return float(len(self.queue))
+
         self.torch_bind_ops = [
             torch.ops._TorchScriptTesting.takes_foo,
             torch.ops._TorchScriptTesting.takes_foo_python_meta,
@@ -666,6 +672,54 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(tq.size(), 0)
         self.assertEqual(tq1.size(), 0)
 
+    def test_non_strict_export_methods(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, tq, x):
+                x_cos = tq.pop() + tq.float_size() + self.linear(x)
+                if tq.is_empty():
+                    x_sin = self.linear(tq.pop()) - tq.size() + x
+                else:
+                    x_sin = tq.pop() + tq.size() + x
+                return x_sin, x_cos, tq
+
+        mod = Model()
+        tq = _empty_tensor_queue()
+        a = torch.randn(2, 2)
+        b = torch.randn(2, 2)
+        tq.push(a)
+        tq.push(b)
+        ep = torch.export.export(mod, (tq, torch.randn(2, 2)), strict=False)
+        self.assertExpectedInline(
+            ep.graph_module.code.strip(),
+            """\
+def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
+    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, tq, 'pop');  token = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops.higher_order.call_torchbind, tq, 'float_size');  getitem = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    add = torch.ops.aten.add.Tensor(getitem_1, 1.0);  getitem_1 = None
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  p_linear_weight = p_linear_bias = None
+    add_1 = torch.ops.aten.add.Tensor(add, linear);  add = linear = None
+    with_effects_2 = torch._higher_order_ops.effects.with_effects(getitem_2, torch.ops.higher_order.call_torchbind, tq, 'is_empty');  getitem_2 = None
+    getitem_4 = with_effects_2[0];  with_effects_2 = None
+    with_effects_3 = torch._higher_order_ops.effects.with_effects(getitem_4, torch.ops.higher_order.call_torchbind, tq, 'pop');  getitem_4 = None
+    getitem_6 = with_effects_3[0]
+    getitem_7 = with_effects_3[1];  with_effects_3 = None
+    with_effects_4 = torch._higher_order_ops.effects.with_effects(getitem_6, torch.ops.higher_order.call_torchbind, tq, 'size');  getitem_6 = None
+    getitem_8 = with_effects_4[0];  with_effects_4 = None
+    add_2 = torch.ops.aten.add.Tensor(getitem_7, 0);  getitem_7 = None
+    add_3 = torch.ops.aten.add.Tensor(add_2, x);  add_2 = x = None
+    return (getitem_8, add_3, add_1, tq)""",  # noqa: B950
+        )
+        self.assertEqual(tq.size(), 2)
+        self.assertTrue(tq.pop() is a)
+        self.assertTrue(tq.pop() is b)
+
     def test_identifying_torchbind_ops(self):
         for op in self.torch_bind_ops:
             self.assertTrue(op._has_torchbind_op_overload)
@@ -921,6 +975,18 @@ class TestCompileTorchbind(TestCase):
             def size(self):
                 return len(self.queue)
 
+        @torch._library.register_fake_class("_TorchScriptTesting::_FlattenWithTensorOp")
+        class FakeFlatten:
+            def __init__(self, t):
+                self.t = t
+
+            def get(self):
+                return self.t
+
+            @classmethod
+            def __obj_unflatten__(cls, flattened_ctx):
+                return cls(**dict(flattened_ctx))
+
         torch._dynamo.reset()
 
     def tearDown(self):
@@ -1158,6 +1224,31 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
     add = x2 + 2;  x2 = None
     return (sub, add)""",
             )
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_tensor_op_in_tensor_flatten(self, backend):
+        test_obj = torch.classes._TorchScriptTesting._FlattenWithTensorOp(
+            torch.randn(3, 2)
+        )
+
+        class TestMod(torch.nn.Module):
+            def forward(self, obj, x):
+                return obj.get() + x
+
+        mod = TestMod()
+
+        torch.compile(mod, backend=backend, fullgraph=True)(test_obj, torch.randn(3, 1))
+        ep = torch.export.export(mod, (test_obj, torch.randn(3, 1)), strict=False)
+        self.assertExpectedInline(
+            ep.graph_module.code.strip(),
+            """\
+def forward(self, token, obj, x):
+    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, obj, 'get');  token = obj = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    add = torch.ops.aten.add.Tensor(getitem_1, x);  getitem_1 = x = None
+    return (getitem, add)""",  # noqa: B950
+        )
 
     @parametrize("backend", ["eager", "aot_eager"])
     def test_compile_error_on_non_fakified_method(self, backend):

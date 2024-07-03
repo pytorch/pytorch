@@ -1358,6 +1358,8 @@ class TestUtilityFuns(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "custom_namespace::custom_op")
 
+    # gelu is exported as onnx::Gelu for opset >= 20
+    @skipIfUnsupportedMaxOpsetVersion(19)
     def test_custom_opsets_gelu(self):
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::gelu", 9)
 
@@ -1382,6 +1384,8 @@ class TestUtilityFuns(_BaseTestCase):
         self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
         self.assertEqual(graph.opset_import[1].version, 1)
 
+    # gelu is exported as onnx::Gelu for opset >= 20
+    @skipIfUnsupportedMaxOpsetVersion(19)
     def test_register_aten_custom_op_symbolic(self):
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "aten::gelu", 9)
 
