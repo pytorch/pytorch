@@ -4654,6 +4654,119 @@ class TestLinalg(TestCase):
             else:
                 os.environ[PYTORCH_TUNABLEOP_NUMERICAL_CHECK] = prev_val
 
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.float)
+    def test_validator_tunableop_rocm(self, device, dtype):
+        # Test that the validator on ROCM has exactly 5 lines
+        # Format of the Validator is as follows:
+        # Validator,PT_VERSION,X.Y.Z.
+        # Validator,ROCBLAS_VERSION,X.Y,Z
+        # Validator,HIPBLASLT_VERSION,X,Y.Z
+        # Validator,ROCM_Version,X,Y.Z
+        # Validator,GCN_ARCH_NAME,<architecutre name>
+        validator_num_lines = 5
+        set_tunableop_defaults()
+        torch.cuda.tunable.enable()
+        # set these to single iterations to keep it short but still exercise the code
+        torch.cuda.tunable.set_max_tuning_iterations(1)
+
+        N = M = K = 4
+        A = torch.randn(N, K, device=device, dtype=dtype)
+        B = torch.randn(K, M, device=device, dtype=dtype)
+        C = torch.matmul(A, B)
+        assert len(torch.cuda.tunable.get_validators()) == validator_num_lines
+
+        # disables TunableOp
+        torch.cuda.tunable.enable(False)
+
+    @onlyCUDA
+    @dtypes(torch.half)
+    def test_minimum_tuning_iteration_tunableop(self, device, dtype):
+        # Make sure that there is at least one tuning iteration under various scenarios
+        set_tunableop_defaults()
+
+        torch.cuda.tunable.enable()
+        # set these to single iterations to keep it short but still exercise the code
+        torch.cuda.tunable.set_max_tuning_iterations(1)
+
+        # Set tuning duration to zero milliseconds
+        # Tune a single GEMM and verify that we get a new tuning result
+        import os
+        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS"] = "0"
+        assert(torch.cuda.tunable.get_max_tuning_iterations() > 0)
+        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS"] = "30" # reset to default
+
+        # Reference number of results
+        ref_num_results = len(torch.cuda.tunable.get_results())
+
+        N = M = K = 8
+        A = torch.randn(N, K, device=device, dtype=dtype)
+        B = torch.randn(K, M, device=device, dtype=dtype)
+        C = torch.matmul(A, B)
+
+        # This stores total number of cummulative results
+        total_num_results = len(torch.cuda.tunable.get_results())
+
+        # There must be a new tuning result
+        assert( (total_num_results - ref_num_results) == 1)
+
+        # Set tuning iterations to zero
+        import os
+        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "0"
+        assert(torch.cuda.tunable.get_max_tuning_iterations() > 0)
+        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "100" # reset to default
+
+        # Reference number of results
+        ref_num_results = total_num_results
+
+        N = M = K = 16
+        A = torch.randn(N, K, device=device, dtype=dtype)
+        B = torch.randn(K, M, device=device, dtype=dtype)
+        C = torch.matmul(A, B)
+
+        # This stores total number of cummulative results
+        total_num_results = len(torch.cuda.tunable.get_results())
+
+        # There must be a new tuning result
+        assert( (total_num_results - ref_num_results) == 1)
+
+        # disables TunableOp
+        torch.cuda.tunable.enable(False)
+
+    @onlyCUDA
+    @dtypes(torch.half)
+    def test_matmul_check_entries_tunableop(self, device, dtype):
+        # Tune a couple of matrix multiplies
+        # Verify we get the correct number of results
+        set_tunableop_defaults()
+        torch.cuda.tunable.enable()
+        # set these to single iterations to keep it short but still exercise the code
+        torch.cuda.tunable.set_max_tuning_iterations(1)
+
+        # Reference number of results
+        ref_num_results = len(torch.cuda.tunable.get_results())
+
+        # Execute matrix multiplies. We intentionally throw in M list the same index
+        # twice. The CSV file should only get unique GEMMs
+        count_matmul = 4
+        K = 64
+        for M in [32, 64, 32]:
+            for N in [32, 64]:
+                A = torch.randn(N, K, device=device, dtype=dtype)
+                B = torch.randn(K, M, device=device, dtype=dtype)
+                C = torch.matmul(A, B)
+
+        # This stores total number of cummulative results
+        total_num_results = len(torch.cuda.tunable.get_results())
+
+        # Take the difference to calculate the number of results from
+        # the this test and verify that it agrees with the number of
+        # GEMMs.
+        assert( (total_num_results - ref_num_results) == count_matmul)
+
+        # disables TunableOp
+        torch.cuda.tunable.enable(False)
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
