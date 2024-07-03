@@ -17,6 +17,8 @@ import types
 import weakref
 from typing import Any, List, NamedTuple, Optional, Union
 
+from torch._utils_internal import justknobs_check
+
 from torch.utils._sympy.value_ranges import ValueRanges
 
 try:
@@ -1255,15 +1257,22 @@ class VariableBuilder:
             # unspecializing int by default, but still
             # specialize for the following conditions
             if not TracingContext.get().force_unspec_int_unbacked_size_like and (
-                value in self._common_constants()
                 # Assume integers from global variables want to be specialized
-                or not self.source.guard_source().is_local()
+                not self.source.guard_source().is_local()
                 # Assume that integers that came from NN modules want to be
                 # specialized (as we don't expect users to be changing the
                 # NN modules on the fly)
                 or self.source.guard_source().is_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
+                # TODO: Delete this condition when rollout is done.  NB: this
+                # condition never evaluates True in open source
+                or (
+                    not justknobs_check(
+                        "pytorch/dynamo:enable_unspecialize_zero_one_plain_int"
+                    )
+                    and value in self._common_constants()
+                )
             ):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
@@ -1944,15 +1953,7 @@ def wrap_fx_proxy_cls(
             )
 
         options.update(specialized_props)
-        vt = target_cls(proxy, **options)
-        if (
-            "source" in options
-            and options["source"]
-            and initial_example_value is not None
-            and initial_example_value not in tx.output.side_effects
-        ):
-            vt = tx.output.side_effects.track_object_existing(initial_example_value, vt)
-        return vt
+        return target_cls(proxy, **options)
     elif (
         hasattr(proxy.node.target, "__name__")
         and proxy.node.target.__name__ == "set_state"
