@@ -969,12 +969,32 @@ class TestBinaryUfuncs(TestCase):
         d_ref = d_true.float() if rounding_unsupported else d_true
         self.assertEqual(d_trunc, d_ref.trunc().to(dtype))
 
+    @dtypes(*floating_types_and(torch.bfloat16, torch.float16))
+    def test_floor_div_extremal(self, device, dtype):
+        for num, denom, shape in itertools.product(
+            [torch.finfo(dtype).max * 0.7],
+            [0.5, -0.5, 0.0],
+            [(), (32,)],  # Scalar and vectorized
+        ):
+            a = torch.full(shape, num, dtype=dtype, device=device)
+            b = torch.full(shape, denom, dtype=dtype, device=device)
+
+            ref = np.floor_divide(num, denom).item()
+            if ref > torch.finfo(dtype).max:
+                ref = np.inf
+            elif ref < torch.finfo(dtype).min:
+                ref = -np.inf
+            expect = torch.full(shape, ref, dtype=dtype, device=device)
+            actual = torch.div(a, b, rounding_mode="floor")
+            self.assertEqual(expect, actual)
+
     @dtypes(torch.bfloat16, torch.half, torch.float32, torch.float64)
     def test_div_rounding_nonfinite(self, device, dtype):
         # Compare division of special floating point values against NumPy
         num = torch.tensor(
             [1.0, -1.0, 0, 0.1, -0.1, np.pi, -np.pi, np.inf, -np.inf, np.nan],
             dtype=dtype,
+            device=device,
         )
         # Divide by zero is tested separately
         denom = num[num != 0]
@@ -3694,8 +3714,6 @@ class TestBinaryUfuncs(TestCase):
             actual = op(x, y, alpha=alpha)
             self.assertTrue(not (actual.isnan() or actual.isinf()))
 
-    # https://github.com/pytorch/pytorch/issues/127003
-    @xfailIfTorchDynamo
     def test_sub_typing(self, device):
         m1 = torch.tensor(
             [True, False, False, True, False, False], dtype=torch.bool, device=device
@@ -3889,14 +3907,14 @@ class TestBinaryUfuncs(TestCase):
         def test_dx(sizes, dim, dx, device):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, dx=dx, dim=dim)
-            expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)
+            expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual, exact_dtype=False)
 
         def test_x(sizes, dim, x, device):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, x=torch.tensor(x, device=device), dim=dim)
-            expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)
+            expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual.cpu(), exact_dtype=False)
 

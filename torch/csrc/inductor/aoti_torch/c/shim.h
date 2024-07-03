@@ -566,21 +566,25 @@ AOTI_TORCH_EXPORT void aoti_torch_check(
     const char* msg);
 
 #ifdef STRIP_ERROR_MESSAGES
-#define AOTI_TORCH_CHECK(cond, ...)    \
-  aoti_torch_check(                    \
-      cond,                            \
-      __func__,                        \
-      __FILE__,                        \
-      static_cast<uint32_t>(__LINE__), \
-      TORCH_CHECK_MSG(cond, "", __VA_ARGS__));
+#define AOTI_TORCH_CHECK(cond, ...)              \
+  if (!(cond)) {                                 \
+    aoti_torch_check(                            \
+        false,                                   \
+        __func__,                                \
+        __FILE__,                                \
+        static_cast<uint32_t>(__LINE__),         \
+        TORCH_CHECK_MSG(cond, "", __VA_ARGS__)); \
+  }
 #else
-#define AOTI_TORCH_CHECK(cond, ...)    \
-  aoti_torch_check(                    \
-      cond,                            \
-      __func__,                        \
-      __FILE__,                        \
-      static_cast<uint32_t>(__LINE__), \
-      TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__));
+#define AOTI_TORCH_CHECK(cond, ...)                \
+  if (!(cond)) {                                   \
+    aoti_torch_check(                              \
+        false,                                     \
+        __func__,                                  \
+        __FILE__,                                  \
+        static_cast<uint32_t>(__LINE__),           \
+        TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
+  }
 #endif
 
 #ifdef __cplusplus

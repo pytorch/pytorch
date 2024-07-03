@@ -58,6 +58,7 @@ post_grad_pass_names = [
     "normalization_aten_pass",
     "decompose_mm_pass",
     "unbind_stack_aten_pass",
+    "shape_padding_multiplier",
 ]
 
 for pass_name in pre_grad_pass_names:
@@ -602,6 +603,7 @@ class SplitCatSimplifier:
             graph, split_node, next_users, user_inputs_list_new, transform_params_list  # type: ignore[arg-type]
         )
         self.erase_old_nodes(graph, split_node, next_users)  # type: ignore[arg-type]
+        counters["inductor"]["unbind_stack_pass"] += 1
 
     def get_user_input_list(
         self, split_node: torch.fx.Node, next_users: List[torch.fx.Node]

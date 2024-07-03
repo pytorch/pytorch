@@ -7,6 +7,8 @@ import sys
 import sympy
 from sympy import S
 
+from .numbers import int_oo
+
 __all__ = [
     "FloorDiv",
     "ModularIndexing",
@@ -22,6 +24,7 @@ __all__ = [
     "ToFloat",
     "FloatPow",
     "PowByNatural",
+    "Identity",
 ]
 
 
@@ -102,6 +105,15 @@ class FloorDiv(sympy.Function):
         # makes it difficult to check the types.
         if divisor.is_zero:
             raise ZeroDivisionError("division by zero")
+        if base in (int_oo, -int_oo, sympy.oo, -sympy.oo) and divisor in (
+            int_oo,
+            -int_oo,
+            sympy.oo,
+            -sympy.oo,
+        ):
+            return sympy.nan
+        if base is sympy.nan or divisor is sympy.nan:
+            return sympy.nan
 
         if base.is_zero:
             return sympy.S.Zero
@@ -109,20 +121,37 @@ class FloorDiv(sympy.Function):
             return base
         if base.is_integer and divisor == -1:
             return sympy.Mul(base, -1)
+        if (
+            isinstance(base, sympy.Number)
+            and isinstance(divisor, sympy.Number)
+            and (
+                base in (int_oo, -int_oo, sympy.oo, -sympy.oo)
+                or divisor in (int_oo, -int_oo, sympy.oo, -sympy.oo)
+            )
+        ):
+            r = float(base) / float(divisor)
+            if r == math.inf:
+                return int_oo
+            elif r == -math.inf:
+                return -int_oo
+            elif math.isnan(r):
+                return sympy.nan
+            else:
+                return sympy.Integer(math.floor(r))
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return sympy.Integer(int(base) // int(divisor))
         if isinstance(base, FloorDiv):
             return FloorDiv(base.args[0], base.args[1] * divisor)
 
-        # gcd in sympy is over polynomials, so you'll end up with rationals if
-        # you do this.  Don't.
-        """
-        if isinstance(base, sympy.Add):
-            for a in base.args:
-                gcd = sympy.gcd(a, divisor)
-                if gcd == divisor:
-                    return FloorDiv(base - a, divisor) + a / gcd
-        """
+        # Expands (x + y) // b into x // b + y // b.
+        # This only works if floor is an identity, i.e. x / b is an integer.
+        for term in sympy.Add.make_args(base):
+            quotient = term / divisor
+            if quotient.is_integer and isinstance(divisor, sympy.Integer):
+                # NB: this is correct even if the divisor is not an integer, but it
+                # creates rational expressions that cause problems with dynamic
+                # shapes.
+                return FloorDiv(base - term, divisor) + quotient
 
         try:
             gcd = sympy.gcd(base, divisor)
@@ -354,10 +383,10 @@ class CeilToInt(sympy.Function):
     @classmethod
     def eval(cls, number):
         # assert number.is_integer is not True, number
-        if number == sympy.oo:
-            return sympy.Integer(sys.maxsize - 1)
-        if number == -sympy.oo:
-            return sympy.Integer(-sys.maxsize - 1)
+        if number in (sympy.oo, int_oo):
+            return int_oo
+        if number in (-sympy.oo, -int_oo):
+            return -int_oo
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.ceil(float(number)))
 
@@ -368,10 +397,10 @@ class FloorToInt(sympy.Function):
     @classmethod
     def eval(cls, number):
         # assert number.is_integer is not True, number
-        if number == sympy.oo:
-            return sympy.Integer(sys.maxsize - 1)
-        if number == -sympy.oo:
-            return sympy.Integer(-sys.maxsize - 1)
+        if number in (sympy.oo, int_oo):
+            return int_oo
+        if number in (-sympy.oo, int_oo):
+            return -int_oo
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))
 
@@ -420,6 +449,7 @@ def safe_pow(base, exp):
     return sign * _safe_pow(base, exp)
 
 
+# Prevent people from overflowing pow
 def _safe_pow(base, exponent):
     if exponent < 0:
         raise ValueError("Exponent must be non-negative.")
@@ -428,17 +458,20 @@ def _safe_pow(base, exponent):
         return 1
 
     half_exp = safe_pow(base, exponent // 2)
-    if half_exp > sys.maxsize - 1:
-        return sys.maxsize - 1
+    if half_exp is int_oo:
+        return int_oo
+
+    # TODO: microoptimization is to avoid overflowing into arbitrary precision
+    # and detect overflow prior to doing operations
 
     result = half_exp * half_exp
-    if result > sys.maxsize - 1:
-        return sys.maxsize - 1
+    if result > sys.maxsize:
+        return int_oo
 
     if exponent % 2 == 1:
         result *= base
-        if result > sys.maxsize - 1:
-            return sys.maxsize - 1
+        if result > sys.maxsize:
+            return int_oo
 
     return result
 
@@ -448,14 +481,20 @@ class PowByNatural(sympy.Function):
 
     @classmethod
     def eval(cls, base, exp):
-        if isinstance(base, sympy.Number) and isinstance(exp, sympy.Number):
-            return sympy.Integer(safe_pow(base, exp))
+        if isinstance(base, sympy.Integer) and isinstance(exp, sympy.Integer):
+            r = safe_pow(base, exp)
+            if r in (-int_oo, int_oo):
+                return r
+            return sympy.Integer(r)
         if isinstance(exp, sympy.Integer):
-            # Translate power into iterated multiplication
-            r = sympy.Integer(1)
-            for _ in range(int(exp)):
-                r *= base
-            return r
+            # Rely on regular sympy Pow for this (note that iterated
+            # multiplication turns into a Pow anyway, you can't escape!!)
+            return sympy.Pow(base, exp)
+        if exp in (int_oo, sympy.oo):
+            if base.is_nonnegative:
+                return int_oo
+            elif base.is_negative:
+                return sympy.zoo  # this is apparently what (-2)**sympy.oo does
         # NB: do NOT translate into sympy.Pow, we will lose knowledge that exp
         # is a natural number if we do
 
@@ -463,11 +502,15 @@ class PowByNatural(sympy.Function):
 # base is assumed to be nonnegative, thereby prevent complex numbers from
 # occuring
 class FloatPow(sympy.Function):
-    is_integer = False
     is_real = True
 
     @classmethod
     def eval(cls, base, exp):
+        # NB: These test sympy.Number, not sympy.Float, because:
+        #   - Sometimes we may have sympy.oo or int_oo, and that's not a Float
+        #     (but coerces to math.Inf)
+        #   - Sometimes Float(0.0) will unpredictably decay to Integer(0),
+        #     but we should still accept it in floatey contexts
         if isinstance(base, sympy.Number) and isinstance(exp, sympy.Number):
             return sympy.Float(float(base) ** float(exp))
         # NB: do not do any nontrivial reasoning
@@ -479,7 +522,6 @@ class FloatPow(sympy.Function):
 # In particular, sympy division is willing to simplify x/x == 1
 # where 1 is an integer, but this must be a float if x was float.
 class FloatTrueDiv(sympy.Function):
-    is_integer = False
     is_real = True
 
     @classmethod
@@ -503,7 +545,6 @@ class FloatTrueDiv(sympy.Function):
 # so just have a different operator
 # NB: Right now, Inductor codegen doesn't implement this correctly lol
 class IntTrueDiv(sympy.Function):
-    is_integer = False
     is_real = True
 
     @classmethod
@@ -511,7 +552,18 @@ class IntTrueDiv(sympy.Function):
         if divisor.is_zero:
             raise ZeroDivisionError("division by zero")
 
-        if isinstance(base, sympy.Number) and isinstance(divisor, sympy.Number):
+        if (
+            isinstance(base, sympy.Number)
+            and isinstance(divisor, sympy.Number)
+            and (
+                base in (int_oo, -int_oo, sympy.oo, -sympy.oo)
+                or divisor in (int_oo, -int_oo, sympy.oo, -sympy.oo)
+            )
+        ):
+            # Don't have to worry about precision here, you're getting zero or
+            # inf from the division
+            return sympy.Float(float(base) / float(divisor))
+        if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return sympy.Float(int(base) / int(divisor))
 
 
@@ -578,7 +630,6 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
 
 # NB: this is inconsistent with math.trunc in Python
 class TruncToFloat(sympy.Function):
-    is_integer = False
     is_real = True
 
     @classmethod
@@ -597,10 +648,10 @@ class TruncToInt(sympy.Function):
     @classmethod
     def eval(cls, number):
         # assert number.is_integer is not True, number
-        if number == sympy.oo:
-            return sympy.Integer(sys.maxsize - 1)
-        if number == -sympy.oo:
-            return sympy.Integer(-sys.maxsize - 1)
+        if number in (sympy.oo, int_oo):
+            return int_oo
+        if number in (-sympy.oo, -int_oo):
+            return -int_oo
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.trunc(float(number)))
 
@@ -613,7 +664,11 @@ class RoundToInt(sympy.Function):
     def eval(cls, number):
         # assert number.is_integer is not True, number
 
-        if isinstance(number, sympy.Float):
+        if number is sympy.oo:
+            return int_oo
+        if number is -sympy.oo:
+            return -int_oo
+        if isinstance(number, sympy.Number):
             return sympy.Integer(round(float(number), 0))
 
 
@@ -633,19 +688,17 @@ class RoundToInt(sympy.Function):
 
 # NB: Like Round, this only ever returns floats.  ndigits cannot be None
 class RoundDecimal(sympy.Function):
-    is_integer = False
     is_real = True
 
     @classmethod
     def eval(cls, number, ndigits):
         # assert number.is_integer is not True, number
 
-        if isinstance(number, sympy.Float) and isinstance(ndigits, sympy.Integer):
+        if isinstance(number, sympy.Number) and isinstance(ndigits, sympy.Integer):
             return sympy.Float(round(float(number), int(ndigits)))
 
 
 class ToFloat(sympy.Function):
-    is_integer = False
     is_real = True
 
     @classmethod
@@ -655,6 +708,25 @@ class ToFloat(sympy.Function):
 
         if isinstance(number, sympy.Integer):
             return sympy.Float(int(number))
+        if number is int_oo:
+            return sympy.oo
+        if number is -int_oo:
+            return -sympy.oo
+
+
+class Identity(sympy.Function):
+    """
+    Prevents expansion and other optimizations
+    """
+
+    def __repr__(self):
+        return f"Identity({self.args[0]})"
+
+    def _eval_is_real(self):
+        return self.args[0].is_real
+
+    def _eval_is_integer(self):
+        return self.args[0].is_integer  # type: ignore[attr-defined]
 
 
 def make_opaque_unary_fn(name):
@@ -685,7 +757,11 @@ def make_opaque_unary_fn(name):
                 # weird objects but ask silly questions, get silly answers
                 except OverflowError:
                     return getattr(sympy, name)(a)
-            elif a in [sympy.oo, -sympy.oo, sympy.zoo, -sympy.zoo]:
+            elif a in [sympy.oo, -sympy.oo, sympy.zoo, -sympy.zoo, int_oo, -int_oo]:
+                if a is int_oo:
+                    a = sympy.oo
+                if a is -int_oo:
+                    a = -sympy.oo
                 return getattr(sympy, name)(a)
             return None
 

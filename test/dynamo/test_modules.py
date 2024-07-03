@@ -750,6 +750,27 @@ class ParametersModule3(ParametersModule1):
         return F.relu(self.linear1(x)) * self.scale + ones
 
 
+class ParametersModule4(ParametersModule1):
+    def forward(self, x):
+        ones = torch.ones(10, dtype=next(self.parameters(recurse=False)).dtype)
+        return F.relu(self.linear1(x)) * self.scale + ones
+
+
+class ParametersModule5(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = torch.nn.Linear(10, 10)
+        self.scale = torch.nn.Parameter(torch.randn(10, 10))
+        self.scale_dup = self.scale
+
+    def forward(self, x):
+        counter = 0
+        for param in self.parameters():
+            counter += 1
+
+        return x * self.scale * counter
+
+
 class SuperModule(BasicModule):
     def forward(self, x):
         x = super().forward(x)
@@ -1160,6 +1181,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_parameters1 = make_test(ParametersModule1())
     test_parameters2 = make_test(ParametersModule2())
     test_parameters3 = make_test(ParametersModule3(), expected_ops=5)
+    test_parameters4 = make_test(ParametersModule4())
+    test_parameters5 = make_test(ParametersModule5())
     test_hasattr = make_test(HasAttrModule())
     test_enumvalues = make_test(EnumValues())
     test_access_by_keys = make_test(AccessByKeys())
@@ -1215,7 +1238,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         out4 = [opt_m4(i), opt_m4(i), opt_m4(i)]
         self.assertTrue(torch._dynamo.testing.same(out2, out3))
         self.assertTrue(torch._dynamo.testing.same(out2, out4))
-        self.assertEqual(cnt.frame_count, 3)
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(cnt.frame_count, """2""")
+        else:
+            self.assertExpectedInline(cnt.frame_count, """1""")
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_generation_tag(self):
@@ -2511,6 +2537,19 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         optim_res = torch._dynamo.optimize(cnt)(MyModule())(torch.ones(10, 10))
         self.assertEqual(eager_res, optim_res)
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_module_setattr(self):
+        models = torch.nn.Sequential(torch.nn.Linear(3, 3))
+        models[0].abc = False
+
+        def run():
+            models[0].abc = True
+            x = torch.randn(1, 3)
+            return models(x)
+
+        run = torch.compile(run, fullgraph=True)
+        run()
+        self.assertTrue(models[0].abc)
 
     def test_assign_does_not_exist(self):
         class MyModule(torch.nn.Module):

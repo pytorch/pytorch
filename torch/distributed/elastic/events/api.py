@@ -10,9 +10,10 @@
 import json
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Dict, Union, Optional
+from typing import Dict, Optional, Union
 
-__all__ = ['EventSource', 'Event', 'NodeState', 'RdzvEvent']
+
+__all__ = ["EventSource", "Event", "NodeState", "RdzvEvent"]
 
 EventMetadataValue = Union[str, int, float, bool, None]
 

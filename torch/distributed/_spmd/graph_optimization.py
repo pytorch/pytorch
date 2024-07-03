@@ -37,6 +37,7 @@ from torch.fx.passes.shape_prop import TensorMetadata
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
+
 logger: logging.Logger = logging.getLogger("graph_optimization")
 aten = torch.ops.aten
 fake_tensor_mode = FakeTensorMode()
