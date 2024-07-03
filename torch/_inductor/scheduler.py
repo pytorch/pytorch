@@ -1973,7 +1973,6 @@ class Scheduler:
                 for sub_node in node.snodes:
                     self.name_to_fused_node[sub_node.get_name()] = sub_node
                 new_nodes.extend(self.fuse_nodes(node.snodes))
-                # new_nodes.extend(node.snodes)
             else:
                 new_nodes.append(node)
         self.nodes = new_nodes
