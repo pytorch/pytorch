@@ -36,6 +36,7 @@ class B2BGEMMTest(TestCase):
         self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.2, rtol=0.01))
         self.assertTrue("B2B_GEMM_TRITON_ENTRANCE" in code)
 
+
 if __name__ == "__main__":
     if HAS_CUDA:
         run_tests()
