@@ -456,13 +456,26 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
         return (16, 16, 4, 1)
 
 
-def create_num_blocks_fake(x, num_blocks_for_autotuning) -> torch.Tensor:
-    return torch.full(
-        x.get_size(),
-        int(num_blocks_for_autotuning),
-        dtype=x.get_dtype(),
-        device=x.get_device(),
-    )
+def create_num_blocks_fake_generator(sparse_indices):
+    # The idea here is that we need to create a real tensor with real data
+    # that's representative for benchmarking.
+    # For example, returning all zeros for the `kv_num_blocks` input would mean
+    # that we are computing 0 blocks for each row, which would provide bogus
+    # autotuning results.
+    #
+    # In this case, we choose to use min(16, max_block) blocks, because I
+    # (Horace) think it'll probably result in pretty representative performance.
+    # If it's too short then prefetching won't help. If it's too long then
+    # autotuning will take longer for no good reason.
+    def create_num_blocks_fake(x) -> torch.Tensor:
+        num_blocks_for_autotuning = min(16, sparse_indices.shape[-1])
+        return torch.full(
+            x.get_size(),
+            int(num_blocks_for_autotuning),
+            dtype=x.get_dtype(),
+            device=x.get_device(),
+        )
+    return create_num_blocks_fake
 
 
 def create_indices_fake(x) -> torch.Tensor:
@@ -584,18 +597,14 @@ def flex_attention(*args, **kwargs):
         sparse_kv_num_blocks,
         sparse_kv_indices,
     ] + list(other_buffers)
-    num_blocks_for_autotuning = min(10, sparse_kv_indices.get_size()[-1])
-
     input_gen_fns = {
-        4: functools.partial(
-            create_num_blocks_fake, num_blocks_for_autotuning=num_blocks_for_autotuning
-        ),  # sparse_kv_num_blocks
+        4: create_num_blocks_fake_generator(sparse_kv_indices),  # sparse_kv_num_blocks
         5: create_indices_fake,  # sparse_kv_indices
     }
     return (
         autotune_select_algorithm(
             "flex_attention",
-            choices[:3],
+            choices,
             inputs_for_autotuning,
             layout,
             input_gen_fns=input_gen_fns,
@@ -1064,17 +1073,10 @@ def flex_attention_backward(*args, **kwargs):
         sparse_q_num_blocks,
         sparse_q_indices,
     ] + list(other_buffers)
-    kv_autotune_blocks = min(10, sparse_kv_indices.get_size()[-1])
-    q_autotune_blocks = min(10, sparse_q_indices.get_size()[-1])
-
     input_gen_fns = {
-        9: functools.partial(
-            create_num_blocks_fake, num_blocks_for_autotuning=kv_autotune_blocks
-        ),  # sparse_kv_num_blocks
+        9: create_num_blocks_fake_generator(sparse_kv_indices),  # sparse_kv_num_blocks
         10: create_indices_fake,
-        11: functools.partial(
-            create_num_blocks_fake, num_blocks_for_autotuning=q_autotune_blocks
-        ),  # sparse_q_num_blocks
+        11: create_num_blocks_fake_generator(sparse_q_indices),  # sparse_q_num_blocks
         12: create_indices_fake,
     }
 

@@ -66,6 +66,7 @@ class _BlockSparseMask:
         self.KV_BLOCK_SIZE = KV_BLOCK_SIZE
         self.Q_BLOCK_SIZE = Q_BLOCK_SIZE
 
+    # def __str__
 
 def broadcast_to_dim(x, dim):
     while x.dim() < dim:
