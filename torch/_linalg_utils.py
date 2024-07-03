@@ -111,7 +111,11 @@ def lstsq(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
 
 
 def _symeig(
-    input, eigenvectors=False, upper=True, *, out=None
+    input,
+    eigenvectors=False,
+    upper=True,
+    *,
+    out=None,
 ) -> Tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
@@ -128,7 +132,11 @@ def _symeig(
 
 
 def eig(
-    self: Tensor, eigenvectors: bool = False, *, e=None, v=None
+    self: Tensor,
+    eigenvectors: bool = False,
+    *,
+    e=None,
+    v=None,
 ) -> Tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
