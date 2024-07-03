@@ -3,6 +3,7 @@ from typing import Dict, List
 
 import torch
 from torch import fx
+from torch.utils import _pytree as pytree
 
 
 def is_primal(node: fx.Node) -> bool:
@@ -13,18 +14,28 @@ def move_resize_zero_to_end_of_graph(graph: fx.Graph) -> None:
     node_list = list(graph.nodes)
     return_node = node_list[-1]
     assert return_node.target == "output"
-    for n in node_list:
-        if (
-            n.op == "call_function"
-            and n.target is torch.ops.inductor.resize_storage_bytes_.default
-            and n.args[1] == 0
-        ):
-            resize_node = n
-            with graph.inserting_before(return_node):
-                new_resize_node = graph.call_function(
-                    torch.ops.inductor.resize_storage_bytes_.default, resize_node.args
-                )
-            graph.erase_node(resize_node)
+    resize_nodes_to_insert_at_end = []
+    node_to_usage_map = defaultdict(list)
+    for i, n in enumerate(node_list):
+        if n.op == "call_function":
+            if (
+                n.target is torch.ops.inductor.resize_storage_bytes_.default
+                and n.args[1] == 0
+            ):
+                resize_nodes_to_insert_at_end.append((n, i))
+            args_flat = pytree.arg_tree_leaves(*n.args, **n.kwargs)
+            for arg in args_flat:
+                node_to_usage_map[arg].append(i)
+    for resize_node, resize_node_idx in resize_nodes_to_insert_at_end:
+        assert resize_node_idx == node_to_usage_map[resize_node.args[0]][-1], (
+            "Input to .resize_storage_bytes_(X, 0) is used after the resize-to-0 op, "
+            "which violates assumption on FSDP2 implementation. Please report a bug to PyTorch."
+        )
+        with graph.inserting_before(return_node):
+            new_resize_node = graph.call_function(
+                torch.ops.inductor.resize_storage_bytes_.default, resize_node.args
+            )
+        graph.erase_node(resize_node)
 
 
 def refunctionalize_set(graph: fx.Graph) -> None:
@@ -47,6 +58,7 @@ def refunctionalize_set(graph: fx.Graph) -> None:
     # set_1 = aten.set_(primal_X, Y1)
     # set_2 = aten.set_(primal_X, Y2)
     # ```
+    # Note that this process is iterative and will handle any number (>=2) of nested `.set_()`.
     for i, n in enumerate(node_list):
         if (
             n.op == "call_function"
@@ -79,25 +91,25 @@ def refunctionalize_set(graph: fx.Graph) -> None:
             if i < len(set_idx_list) - 1:
                 next_set_node_idx = set_idx_list[i + 1]
             else:
-                # The last segment always ends with the graph output node.
+                # The last section always ends with the graph output node.
                 next_set_node_idx = len(node_list) - 1
             set_node = node_list[set_node_idx]
             Y_input = set_node.args[1]
-            if not any(
+            # Between primal_X's this `.set_(primal_X, Y)` and its next `.set_(primal_X, ...)` (or end of graph):
+            # 1. `.set_(Y, ...)` should never called.
+            assert not any(
                 node_list[idx].target is torch.ops.aten.set_.source_Tensor
                 and node_list[idx].args[0] == Y_input
                 for idx in range(set_node_idx + 1, next_set_node_idx)
-            ):
-                # If `.set_(Y, ...)` is never called between primal_X's
-                # this `.set_(primal_X, Y)` and its next `.set_(primal_X, ...)` (or end of graph),
-                # then within this section of the graph we will replace usage of output of
-                # this `.set_(primal_X, Y)` node with Y, and delete the `.set_(primal_X, Y)` node.
-                set_node.replace_all_uses_with(
-                    Y_input,
-                    delete_user_cb=lambda n: node_to_idx[n] > set_node_idx
-                    and node_to_idx[n] < next_set_node_idx,
-                )
-                set_nodes_to_be_deleted.add(set_node)
+            ), "Violation of assumptions on FSDP2 implementation. Please report a bug to PyTorch."
+            # 2. We will replace usage of output of this `.set_(primal_X, Y)` node with Y,
+            # and delete the `.set_(primal_X, Y)` node.
+            set_node.replace_all_uses_with(
+                Y_input,
+                delete_user_cb=lambda n: node_to_idx[n] > set_node_idx
+                and node_to_idx[n] < next_set_node_idx,
+            )
+            set_nodes_to_be_deleted.add(set_node)
         # For any primal input, if we have deleted the last `.set_(primal_X, ...)`,
         # we will re-insert `.set_(primal_X, Y_last)` at the end of the graph.
         last_set_node = node_list[primal_input_to_set_idx[primal_input][-1]]
