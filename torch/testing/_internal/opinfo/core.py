@@ -1178,6 +1178,7 @@ class OpInfo:
         tensor in a sequence input conjugated.
         """
 
+        set_seed = kwargs.pop("set_seed", True)
         samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
         conj_samples = list(samples)
 
@@ -1197,7 +1198,7 @@ class OpInfo:
         return TrackedInputIter(
             iter(conj_samples),
             "conjugate sample input",
-            set_seed=kwargs.get("set_seed", True),
+            set_seed=set_seed,
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
 
@@ -1208,6 +1209,7 @@ class OpInfo:
         These samples should be sufficient to test the function works correctly
         with autograd, TorchScript, etc.
         """
+        set_seed = kwargs.pop("set_seed", True)
         samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
 
         if kwargs.get("include_conjugated_inputs", False):
@@ -1221,7 +1223,7 @@ class OpInfo:
         return TrackedInputIter(
             iter(samples),
             "sample input",
-            set_seed=kwargs.get("set_seed", True),
+            set_seed=set_seed,
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
 
@@ -1233,6 +1235,7 @@ class OpInfo:
         of inputs when reference_inputs_func is defined. If undefined this returns
         the sample inputs.
         """
+        set_seed = kwargs.pop("set_seed", True)
         if self.reference_inputs_func is None:
             samples = self.sample_inputs_func(
                 self, device, dtype, requires_grad, **kwargs
@@ -1240,7 +1243,7 @@ class OpInfo:
             return TrackedInputIter(
                 iter(samples),
                 "reference input",
-                set_seed=kwargs.get("set_seed", True),
+                set_seed=set_seed,
                 restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
             )
 
@@ -1253,7 +1256,7 @@ class OpInfo:
         return TrackedInputIter(
             iter(references),
             "reference input",
-            set_seed=kwargs.get("set_seed", True),
+            set_seed=set_seed,
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
 
@@ -1261,12 +1264,13 @@ class OpInfo:
         """
         Returns an iterable of ErrorInputs.
         """
+        set_seed = kwargs.pop("set_seed", True)
         errs = self.error_inputs_func(self, device, **kwargs)
         return TrackedInputIter(
             iter(errs),
             "error input",
             callback=lambda e: e.sample_input,
-            set_seed=kwargs.get("set_seed", True),
+            set_seed=set_seed,
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
 
