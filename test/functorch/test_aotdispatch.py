@@ -4952,7 +4952,7 @@ def forward(self):
     full = torch.ops.aten.full.default([], 11, device = device(type='cpu'), pin_memory = False)
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(full);  full = None
     full_1 = torch.ops.aten.full.default([_local_scalar_dense], 0, device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    return (full_1,)""",
+    return (full_1,)""",  # noqa: B950
         )
 
 

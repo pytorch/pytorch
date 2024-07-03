@@ -3,7 +3,7 @@
 import itertools
 from contextlib import contextmanager, nullcontext
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import patch
 
 import torch
@@ -1039,7 +1039,7 @@ def aot_export_module(
     output_loss_index: Optional[int] = None,
     pre_dispatch: bool = False,
     # If None, will be infered from inputs and mod.graph.nodes if mod is a graph module, but the inferred result might be wrong.
-    dynamic_shapes: Union[bool, None] = None,
+    dynamic_shapes: Optional[bool] = None,
     kwargs=None,
 ) -> Tuple[torch.fx.GraphModule, GraphSignature]:
     """
@@ -1348,7 +1348,7 @@ def _aot_export_function(
     no_tangents: bool = False,
     pre_dispatch: bool = False,
     # If None, `dynamic_shapes` will be infered from inputs, but the inferred result might be wrong.
-    dynamic_shapes: Union[bool, None] = None,
+    dynamic_shapes: Optional[bool] = None,
     kwargs=None,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     kwargs = kwargs or {}
@@ -1358,17 +1358,18 @@ def _aot_export_function(
 
     if dynamic_shapes is None:
         # Try to infer `dynamic_shapes from inputs and graph nodes
-        args_and_vals = flat_args.copy()
-        if hasattr(func, "_orig_mod") and isinstance(
-            func._orig_mod, torch.fx.GraphModule
+        fake_mode = detect_fake_mode(flat_args)
+        if (
+            fake_mode is None
+            and hasattr(func, "_orig_mod")
+            and isinstance(func._orig_mod, torch.fx.GraphModule)
         ):
-            args_and_vals = args_and_vals + [
+            vals = [
                 node.meta["val"]
                 for node in func._orig_mod.graph.nodes
                 if "val" in node.meta
             ]
-
-        fake_mode = detect_fake_mode(args_and_vals)
+            fake_mode = detect_fake_mode(vals)
         dynamic_shapes = fake_mode is not None and fake_mode.shape_env is not None
 
     # The export use case doesn't care about several bits of AOTConfig

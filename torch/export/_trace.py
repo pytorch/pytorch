@@ -204,6 +204,10 @@ def _convert_input_to_fake(gm, args, kwargs):
             fake_val = node.meta["val"]
             if fake_val is not None and isinstance(fake_val, torch.Tensor):
                 fake_inps.append(fake_val)
+        elif "example_value" in node.meta:
+            fake_val = node.meta["example_value"]
+            if fake_val is not None and isinstance(fake_val, torch.Tensor):
+                fake_inps.append(fake_val)
 
     if detected_fake_mode := detect_fake_mode(fake_inps):
         fake_mode = detected_fake_mode
