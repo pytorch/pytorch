@@ -168,14 +168,19 @@ void SetPyTorchDDPUsageLogger(
   *GetDDPUsageLogger() = std::move(logger);
 }
 
-static int64_t GLOBAL_RANK = -1;
+// return the reference of the static global rank
+int64_t& getGlobalRankReference() {
+  static int64_t globalRank = -1;
+  return globalRank;
+}
 
 int64_t GetGlobalRank() {
-  return GLOBAL_RANK;
+  int64_t globalRankValue = getGlobalRankReference();
+  return globalRankValue;
 }
 
 void SetGlobalRank(int64_t rank) {
-  GLOBAL_RANK = rank;
+  getGlobalRankReference() = rank;
 }
 
 void LogAPIUsage(const std::string& event) try {
@@ -404,8 +409,8 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
   long ns = 0;
 #endif
 
-  if (GLOBAL_RANK != -1) {
-    stream_ << "[rank" << GLOBAL_RANK << "]:";
+  if (GetGlobalRank() != -1) {
+    stream_ << "[rank" << GetGlobalRank() << "]:";
   }
   stream_ << "[" << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
           << (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
