@@ -269,7 +269,6 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
-
     def test_no_tensor_computation(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -323,7 +322,6 @@ graph():
     %y : [num_users=0] = placeholder[target=y]
     return (5,)""",
         )
-
 
     def test_no_tensor_computation_4(self):
         class Module(torch.nn.Module):
