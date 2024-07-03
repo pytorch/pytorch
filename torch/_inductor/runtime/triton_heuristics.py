@@ -1767,7 +1767,7 @@ def grid(*numels):
             z_grid,
         )
 
-    setattr(grid_fn, "grid_fn_str", f"grid({numels})")  # noqa: B010
+    setattr(grid_fn, "grid_fn_str", f"grid{numels}")  # noqa: B010
 
     return grid_fn
 
