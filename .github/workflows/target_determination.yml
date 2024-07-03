@@ -8,6 +8,8 @@ jobs:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
     runs-on: linux.2xlarge
+    env:
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: True
     steps:
       # [pytorch repo ref]
       # Use a pytorch/pytorch reference instead of a reference to the local

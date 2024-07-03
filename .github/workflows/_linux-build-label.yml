@@ -68,7 +68,6 @@ on:
         required: false
         description: |
           HF Auth token to avoid rate limits when downloading models or datasets from hub
-
     outputs:
       docker-image:
         value: ${{ jobs.build.outputs.docker-image }}
@@ -86,6 +85,8 @@ jobs:
     outputs:
       docker-image: ${{ steps.linux-build.outputs.docker-image }}
       test-matrix: ${{ steps.linux-build.outputs.test-matrix }}
+    env:
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: True
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
