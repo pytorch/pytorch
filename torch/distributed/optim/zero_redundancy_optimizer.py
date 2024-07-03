@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 r"""Zero Redundancy Optimizer."""
+
 import collections
 import copy
 import enum

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Weight Averaging implementation."""
+
 import itertools
 import math
 import warnings
