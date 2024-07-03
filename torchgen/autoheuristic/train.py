@@ -407,9 +407,8 @@ class AHTrain:
         self, heuristic_name, opt_name, threshold, shared_memory, device_capa
     ):
         boiler_plate = f"""# flake8: noqa: B950
-from typing import Any, Tuple
 
-from torch._inductor.autoheuristic.autoheuristic_utils import Choice, ContextDictT
+from torch._inductor.autoheuristic.autoheuristic_utils import AHContext, AHMetadata, Choice
 from torch._inductor.autoheuristic.learnedheuristic_interface import (
     LearnedHeuristic,
 )
@@ -419,12 +418,17 @@ class {heuristic_name}(LearnedHeuristic):
     def __init__(self) -> None:
         pass
 
-    def check_precondition(self, name: str, context_dict: ContextDictT, shared_memory: Any, device_capa: Tuple[int, int]) -> bool:
+    def check_precondition(self, metadata: AHMetadata, context: AHContext,) -> bool:
         {self.add_precondition()}
-        return name == '{opt_name}' and shared_memory == {shared_memory} and str(device_capa) == '{device_capa}'
+        return (
+            metadata.name == self.get_name()
+            and metadata.shared_memory == {shared_memory}
+            and str(metadata.device_capa) == "{device_capa}"
+        )
 
-    def get_feedback(self, context_dict: ContextDictT, choice: Choice) -> float:
-        return self.predict(context_dict)
+    def get_feedback(self, context: AHContext, choice: Choice) -> float:
+        context.context_dict["choice"] = choice
+        return self.predict(context)
 
     def get_speedup_threshold(self) -> float:
         return {threshold}
@@ -460,7 +464,7 @@ class {heuristic_name}(LearnedHeuristic):
                 device_capa_str,
             )
         )
-        fn_def = "\n    def predict(self, context_dict: ContextDictT) -> float:"
+        fn_def = "\n    def predict(self, context: AHContext) -> float:"
         lines.append(fn_def)
 
         def dt_to_python(node, depth):
@@ -471,14 +475,14 @@ class {heuristic_name}(LearnedHeuristic):
                 threshold = tree_.threshold[node]
                 if name in dummy_col_2_col_val:
                     (orig_name, value) = dummy_col_2_col_val[name]
-                    predicate = (
-                        f"{indent}if str(context_dict['{orig_name}']) != '{value}':"
-                    )
+                    predicate = f"{indent}if str(context.get_value('{orig_name}')) != '{value}':"
                     if threshold != 0.5:
                         print(f"expected threshold to be 0.5 but is {threshold}")
                         sys.exit(1)
                 else:
-                    predicate = f"{indent}if context_dict['{name}'] <= {threshold}:"
+                    predicate = (
+                        f"{indent}if context.get_value('{name}') <= {threshold}:"
+                    )
                 lines.append(predicate)
                 dt_to_python(tree_.children_left[node], depth + 1)
                 lines.append(f"{indent}else:")

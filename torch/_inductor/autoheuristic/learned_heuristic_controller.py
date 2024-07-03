@@ -3,9 +3,13 @@ import inspect
 import pkgutil
 
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from torch._inductor.autoheuristic.autoheuristic_utils import Choice, ContextDictT
+from torch._inductor.autoheuristic.autoheuristic_utils import (
+    AHContext,
+    AHMetadata,
+    Choice,
+)
 from torch._inductor.autoheuristic.learnedheuristic_interface import LearnedHeuristic
 
 
@@ -60,17 +64,11 @@ class LearnedHeuristicController:
 
     def __init__(
         self,
-        name: str,
-        context_dict: ContextDictT,
-        choices: List[Choice],
-        shared_memory: Any,
-        device_capa: Tuple[int, int],
+        metadata: AHMetadata,
+        context: AHContext,
     ) -> None:
-        self.name = name
-        self.context_dict = context_dict
-        self.choices = choices
-        self.shared_memory = shared_memory
-        self.device_capa = device_capa
+        self.metadata = metadata
+        self.context = context
 
     def get_heuristics(self, name: str) -> List[LearnedHeuristic]:
         """
@@ -102,10 +100,8 @@ class LearnedHeuristicController:
         which choice to make.
         """
 
-        heuristics = self.get_heuristics(self.name)
+        heuristics = self.get_heuristics(self.metadata.name)
         for heuristic in heuristics:
-            if heuristic.check_precondition(
-                self.name, self.context_dict, self.shared_memory, self.device_capa
-            ):
-                return heuristic.get_decision(self.context_dict, self.choices)
+            if heuristic.check_precondition(self.metadata, self.context):
+                return heuristic.get_decision(self.context, self.metadata.choices)
         return None

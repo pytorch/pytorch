@@ -40,7 +40,11 @@ class AHTrainPadMM(AHTrain):
         return df
 
     def shape_size_precondition(self, min_size):
-        return f"""if context_dict["m"] < {min_size} or context_dict["k"] < {min_size} or context_dict["n"] < {min_size}:
+        return f"""if (
+            context.get_value("m") < {min_size}
+            or context.get_value("k") < {min_size}
+            or context.get_value("n") < {min_size}
+        ):
             return False"""
 
     def add_precondition(self):

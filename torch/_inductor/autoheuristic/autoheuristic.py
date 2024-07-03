@@ -6,12 +6,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 
 from torch._inductor.autoheuristic.autoheuristic_utils import (
+    AHContext,
+    AHMetadata,
     AHOperation,
     Choice,
     CHOICE_COL,
     Feedback,
     FEEDBACK_COL,
-    Value,
 )
 from torch._inductor.autoheuristic.learned_heuristic_controller import (
     LearnedHeuristicController,
@@ -74,39 +75,6 @@ class GlobalFeedback(_Feedback):
         super().__init__(feedback_fn)
 
 
-class AHFeature:
-    """
-    The context, that AutoHeuristic stores, is a list of features. AutoHeuristic needs to know whether a feature is
-    categorical (i.e., not a continuous variable) to learn a machine learning model.
-    """
-
-    def __init__(self, name: str, value: Value, is_categorical: bool = False) -> None:
-        self.name = name
-        self.value = value
-        self.is_categorical = is_categorical
-
-
-class AHContext:
-    """
-    This class is used to specify which information AutoHeuristic should store. For each choice, AutoHeursitic will
-    store the context and the collected feedback. The context could be something like the shape of a tensor, i.e.,
-    information that will help to learn a heuristic.
-    """
-
-    features: List[AHFeature]
-
-    def __init__(self) -> None:
-        self.features = []
-
-    def add_feature(
-        self, name: str, value: Value, is_categorical: bool = False
-    ) -> None:
-        self.features.append(AHFeature(name, value, is_categorical=is_categorical))
-
-    def to_dict(self) -> Dict[str, Value]:
-        return {f.name: f.value for f in self.features}
-
-
 class InconsistentMetadata(Exception):
     """
     Exception that is thrown when AutoHeuristic tries to log data to a file where the metadata stored in the file does
@@ -151,9 +119,14 @@ class AutoHeuristic:
         self.feedback = feedback
         self.context = context
         self.name = name
-        self.features = context.features
         self.collected_feedback = {}
         self.augment_context = augment_context
+        self.metadata = AHMetadata(
+            get_gpu_shared_memory(),
+            torch.cuda.get_device_capability(),
+            self.choices,
+            self.name,
+        )
 
         if torch._inductor.config.autoheuristic_log_path == "DEFAULT":
             self.log_path = self.get_default_log_path()
@@ -181,16 +154,11 @@ class AutoHeuristic:
         """
 
         if torch._inductor.config.autoheuristic_mode == "USE_HEURISTIC":
-            context_dict = self.context.to_dict()
             if self.augment_context is not None:
-                for op in self.augment_context:
-                    op.apply_operation(context_dict)
+                self.context.apply_operations(self.augment_context)
             controller = LearnedHeuristicController(
-                self.name,
-                context_dict,
-                self.choices,
-                get_gpu_shared_memory(),
-                torch.cuda.get_device_capability(),
+                self.metadata,
+                self.context,
             )
             decision = controller.get_decision()
             if decision is not None:
@@ -217,23 +185,14 @@ class AutoHeuristic:
         return path
 
     def serialize_metadata(self) -> str:
-        numerical_features = [f.name for f in self.features if not f.is_categorical]
-        categorical_features = [f.name for f in self.features if f.is_categorical]
-
-        # use amount of shared_memory and device_capability to identify GPU
-        # TODO(AlnisM): there might be a better way to do this
-        shared_memory = get_gpu_shared_memory()
-        device_capability = torch.cuda.get_device_capability()
-
-        metadata = {
-            "numerical_features": numerical_features,
-            "categorical_features": categorical_features,
-            "choices": self.choices,
-            "shared_memory": shared_memory,
-            "device_capa": device_capability,
-            "name": self.name,
-        }
-        return json.dumps(metadata)
+        metadata_dict = self.metadata.to_dict()
+        (
+            num_features,
+            cat_features,
+        ) = self.context.get_numerical_and_categorical_features()
+        metadata_dict["numerical_features"] = num_features
+        metadata_dict["categorical_features"] = cat_features
+        return json.dumps(metadata_dict)
 
     def save_data(self, choice: Choice, feedback_val: Feedback) -> None:
         self.collected_feedback[choice] = feedback_val
@@ -251,12 +210,12 @@ class AutoHeuristic:
                 )
         else:
             lines.append(self.serialize_metadata())
-            feature_header = ",".join([f.name for f in self.features])
+            feature_header = self.context.get_feature_names_csv()
             header = feature_header + "," + CHOICE_COL + "," + FEEDBACK_COL
             lines.append(header)
 
         line = ""
-        feature_values = ",".join([str(f.value) for f in self.features])
+        feature_values = self.context.get_feature_values_csv()
         line += feature_values + "," + choice + "," + str(feedback_val)
         lines.append(line)
 

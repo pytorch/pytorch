@@ -1,14 +1,25 @@
 import functools
 
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
 
 Feedback = float
 Choice = str
 Value = Any
-ContextDictT = Dict[str, Value]
 
 CHOICE_COL = "choice"
 FEEDBACK_COL = "feedback"
+
+
+class AHFeature:
+    """
+    The context, that AutoHeuristic stores, is a list of features. AutoHeuristic needs to know whether a feature is
+    categorical (i.e., not a continuous variable) to learn a machine learning model.
+    """
+
+    def __init__(self, name: str, value: Value, is_categorical: bool = False) -> None:
+        self.name = name
+        self.value = value
+        self.is_categorical = is_categorical
 
 
 class AHOperation:
@@ -29,6 +40,75 @@ class AHOperation:
 
     def apply_operation(self, data: Any) -> None:
         data[self.name] = self.func(data)
+
+
+class AHContext:
+    """
+    This class is used to specify which information AutoHeuristic should store. For each choice, AutoHeursitic will
+    store the context and the collected feedback. The context could be something like the shape of a tensor, i.e.,
+    information that will help to learn a heuristic.
+    """
+
+    features: List[AHFeature]
+    context_dict: Dict[str, Value]
+
+    def __init__(self) -> None:
+        self.features = []
+        self.context_dict = {}
+
+    def add_feature(
+        self, name: str, value: Value, is_categorical: bool = False
+    ) -> None:
+        self.features.append(AHFeature(name, value, is_categorical=is_categorical))
+        self.context_dict[name] = value
+
+    def get_numerical_and_categorical_features(self) -> Tuple[List[str], List[str]]:
+        numerical_features = []
+        categorical_features = []
+        for feature in self.features:
+            if feature.is_categorical:
+                categorical_features.append(feature.name)
+            else:
+                numerical_features.append(feature.name)
+
+        return numerical_features, categorical_features
+
+    def get_feature_names_csv(self) -> str:
+        return ",".join(feature.name for feature in self.features)
+
+    def get_feature_values_csv(self) -> str:
+        return ",".join(str(feature.value) for feature in self.features)
+
+    def get_value(self, name: str) -> Value:
+        return self.context_dict[name]
+
+    def apply_operations(self, operations: List[AHOperation]) -> None:
+        for op in operations:
+            op.apply_operation(self.context_dict)
+
+
+class AHMetadata:
+    def __init__(
+        self,
+        shared_memory: Any,
+        device_capa: Tuple[int, int],
+        choices: List[Choice],
+        name: str,
+    ) -> None:
+        # use amount of shared_memory and device_capability to identify GPU
+        # TODO(AlnisM): there might be a better way to do this
+        self.shared_memory = shared_memory
+        self.device_capa = device_capa
+        self.choices = choices
+        self.name = name
+
+    def to_dict(self) -> Dict[str, Value]:
+        return {
+            "shared_memory": self.shared_memory,
+            "device_capa": self.device_capa,
+            "choices": self.choices,
+            "name": self.name,
+        }
 
 
 def pad_mm_operations() -> List[AHOperation]:
