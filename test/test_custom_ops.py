@@ -595,6 +595,15 @@ class TestCustomOp(CustomOpTestCaseBase):
         def blah9(x, *, y):
             pass
 
+    def test_infer_schema_no_return(self):
+        with self.assertRaisesRegex(
+            ValueError, "No return type annotation was provided. Please add one."
+        ):
+
+            @torch.library.custom_op("mylib::foo", mutates_args={})
+            def foo(x: torch.Tensor, y: int):
+                return x * y
+
     def test_infer_schema_supported(self):
         def a(x: Tensor) -> Tensor:
             return torch.empty([])
@@ -671,6 +680,34 @@ class TestCustomOp(CustomOpTestCaseBase):
         self.assertExpectedInline(
             infer_schema(g, mutates_args={"x", "w", "z"}),
             """(Tensor(a0!) x, Tensor[] y, Tensor(a2!)[] z, Tensor(a3!)?[] w) -> ()""",
+        )
+
+        self.assertExpectedInline(
+            infer_schema(g, mutates_args="unknown"),
+            """(Tensor(a0!) x, Tensor(a1!)[] y, Tensor(a2!)[] z, Tensor(a3!)?[] w) -> ()""",
+        )
+
+        def h(
+            x: Tensor,
+            a: Optional[int] = None,
+            b: float = 3.14,
+            c: bool = True,
+            d: int = 3,
+            e: str = "foo",
+            f: torch.dtype = torch.float,
+            g: torch.dtype = torch.float32,
+            h: torch.dtype = torch.int,
+            i: torch.device = torch.device("cpu:0"),
+            j: torch.device = "cpu",
+        ) -> None:
+            pass
+
+        self.assertExpectedInline(
+            infer_schema(h),
+            (
+                """(Tensor x, SymInt? a=None, float b=3.14, bool c=True, SymInt d=3, str e="foo", """
+                """ScalarType f=float32, ScalarType g=float32, ScalarType h=int32, Device i="cpu:0", Device j="cpu") -> ()"""
+            ),
         )
 
     def test_infer_schema_unsupported(self):
@@ -2434,15 +2471,53 @@ class TestCustomOpAPI(TestCase):
             f: torch.dtype = torch.float,
             g: torch.dtype = torch.float32,
             h: torch.dtype = torch.int,
+            i: torch.device = torch.device("cpu:0"),
+            j: torch.device = "cpu",
         ) -> Tensor:
-            defaults.extend([a, b, c, d, e, f, g, h])
+            defaults.extend([a, b, c, d, e, f, g, h, i, j])
             return x.clone()
 
         x = torch.randn(3)
         f(x)
         self.assertEqual(
             defaults,
-            [None, 3.14, True, 3, "foo", torch.float, torch.float32, torch.int],
+            [
+                None,
+                3.14,
+                True,
+                3,
+                "foo",
+                torch.float,
+                torch.float32,
+                torch.int,
+                torch.device("cpu:0"),
+                "cpu",
+            ],
+        )
+        default_values = [
+            arg.default_value
+            for arg in torch.ops._torch_testing.f.default._schema.arguments
+        ]
+        # enum values taken from c10/core/ScalarType.h
+        type_enum = {
+            "float": 6,
+            "int": 3,
+        }
+        self.assertEqual(
+            default_values,
+            [
+                None,
+                None,
+                3.14,
+                True,
+                3,
+                "foo",
+                type_enum["float"],
+                type_enum["float"],
+                type_enum["int"],
+                torch.device("cpu:0"),
+                torch.device("cpu"),
+            ],
         )
 
     def test_mutated_error(self):
@@ -2499,6 +2574,54 @@ class TestCustomOpAPI(TestCase):
             if prev is None and after is None:
                 continue
             self.assertGreater(after, prev)
+
+    def test_mutated_unknown(self):
+        @torch.library.custom_op(
+            "_torch_testing::f", mutates_args="unknown", device_types="cpu"
+        )
+        def f(x: Tensor) -> None:
+            x_np = x.numpy()
+            np.sin(x_np, out=x_np)
+
+        x = torch.randn(3)
+        version = x._version
+        expected = x.sin()
+        f(x)
+        self.assertEqual(x, expected)
+        self.assertGreater(x._version, version)
+
+        @torch.library.custom_op("_torch_testing::f2", mutates_args="unknown")
+        def f2(
+            x: Tensor, y: Optional[Tensor], z: List[Tensor], w: List[Optional[Tensor]]
+        ) -> None:
+            return
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        z = [torch.randn(3), torch.randn(3)]
+        w = [torch.randn(3), None, torch.randn(3)]
+        initial_versions = pytree.tree_map_only(
+            torch.Tensor, lambda x: x._version, (x, y, z, w)
+        )
+        f2(x, y, z, w)
+        new_versions = pytree.tree_map_only(
+            torch.Tensor, lambda x: x._version, (x, y, z, w)
+        )
+
+        initial_versions, _ = pytree.tree_flatten(initial_versions)
+        new_versions, _ = pytree.tree_flatten(new_versions)
+        for prev, after in zip(initial_versions, new_versions):
+            if prev is None and after is None:
+                continue
+            self.assertGreater(after, prev)
+
+        with self.assertRaisesRegex(ValueError, "string"):
+
+            @torch.library.custom_op("_torch_testing::f3", mutates_args="x")
+            def f3(
+                x: Tensor,
+            ) -> None:
+                return
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @parametrize("idx", [0, 1, 2, 3, 4, 5])
