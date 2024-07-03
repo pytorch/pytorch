@@ -122,7 +122,6 @@ class CommModeModuleTracker(ModuleTracker):
         self.module_parameters_dict.clear()
         self.sharding_dict.clear()
         self.parent_dict.clear()
-        self.parent_list.clear()
         self.parent_list = ["Global"]
         self.module_depth_dict.clear()
         self.module_depth_dict["Global"] = 0
