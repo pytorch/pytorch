@@ -387,10 +387,10 @@ _a100_default_config = {
     (torch.float32, 128): (128, 32, 4, 3),
     (torch.float32, 256): (64, 16, 4, 3),
     (torch.bfloat16, 64): (128, 64, 4, 3),
-    (torch.bfloat16, 128): (128, 128, 8, 2),
+    (torch.bfloat16, 128): (128, 64, 8, 3),
     (torch.bfloat16, 256): (32, 64, 4, 3),
     (torch.float16, 64): (128, 64, 4, 3),
-    (torch.float16, 128): (128, 128, 8, 2),
+    (torch.float16, 128): (128, 64, 8, 3),
     (torch.float16, 256): (32, 64, 4, 3),
 }
 
@@ -514,6 +514,9 @@ def flex_attention(*args, **kwargs):
 
     for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
+            continue
+        # Work around https://github.com/pytorch/pytorch/issues/129625
+        if num_stages == 2:
             continue
 
         flex_attention_template.maybe_append_choice(
