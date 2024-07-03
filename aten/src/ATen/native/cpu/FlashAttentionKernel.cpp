@@ -383,7 +383,7 @@ void cpu_flash_attention(
           if (tmp_max == -std::numeric_limits<accum_t>::infinity()) {
             // to avoid `nan = exp2f(-inf - (-inf))`
             fill_stub(conditional_data_ptr(qk_data, qk_reduced_data) + row * kvBlockSize,
-              static_cast<scalar_t>(1), kvBlockSize);
+              static_cast<scalar_t>(0), kvBlockSize);
           } else {
             tmp_sum = tmp_max;
             // qk <- exp(qk - max) and sum per row
