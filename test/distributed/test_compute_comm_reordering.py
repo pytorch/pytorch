@@ -316,8 +316,8 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             add = a + a
             ar = _functional_collectives.all_reduce(add, "sum", ranks, tag)
             # Normally, we would fuse this into `add = a + a`,
-            # but here in this unit test, we intentionally put `add` and `ar` computation into a GroupedSchedulerNode,
-            # which prevents them from being fused with any other ops.
+            # but here in this unit test, we intentionally put `add` and `ar` computation
+            # into a GroupedSchedulerNode, which prevents them from being fused with any other ops.
             c = a * a
             d = torch.matmul(c, ar)
             return (d,)
