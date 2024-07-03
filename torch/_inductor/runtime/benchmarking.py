@@ -1,7 +1,8 @@
 import functools
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Self, Tuple, Union
+from typing import Any, Callable, Dict, List, Tuple, Union
+from typing_extensions import Self
 
 import torch
 from torch._inductor import config as inductor_config
