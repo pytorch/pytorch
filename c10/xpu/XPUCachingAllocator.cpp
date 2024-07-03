@@ -38,7 +38,7 @@ void decrease_stat(Stat& stat, size_t amount) {
   stat.current -= static_cast<int64_t>(amount);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stat.current >= 0,
-      "Negative tracked stat in CUDA allocator (likely logic error).");
+      "Negative tracked stat in XPU allocator (likely logic error).");
   stat.freed += static_cast<int64_t>(amount);
 }
 
