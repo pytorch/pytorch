@@ -6,7 +6,7 @@ import subprocess
 
 import torch
 import torch.utils.cpp_extension
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase, serialTest
 
 
 def remove_build_path():
@@ -191,6 +191,7 @@ class CppThreadTest(TestCase):
             }
         )
 
+    @serialTest()
     def test_profile_memory(self) -> None:
         self.start_profiler(True)
         cpp.start_threads(self.ThreadCount, IterationCount, True)
