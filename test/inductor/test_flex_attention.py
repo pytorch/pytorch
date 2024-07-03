@@ -55,12 +55,9 @@ def create_attention(score_mod, block_mask):
 
 
 def create_block_mask(score_mod, query, key):
-    if score_mod in test_score_mods:
-        block_mask = _create_block_mask(
-            score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
-        )
-    else:
-        block_mask = None
+    block_mask = _create_block_mask(
+        score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
+    )
     return block_mask
 
 
@@ -597,6 +594,19 @@ class TestFlexAttention(InductorTestCase):
         FileCheck().check_count(".run(", 5, True).run(code[0])
 
     @supported_platform
+    def test_doc_mask_sparse(self):
+        document_id = torch.zeros(S, dtype=torch.int, device="cuda")
+        for i in range(0, S, 256):
+            document_id[i : i + 256] = i // 256
+
+        def document_masking_causal(score, b, h, q_idx, kv_idx):
+            causal_mask = q_idx >= kv_idx
+            document_mask = document_id[q_idx] == document_id[kv_idx]
+            return torch.where(causal_mask & document_mask, score, -float("inf"))
+
+        self.run_test(document_masking_causal, torch.float16)
+
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     def test_skip_odd_keys(self, dtype: torch.dtype):
         def score_mod(score, b, h, q, kv):
@@ -1055,7 +1065,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask,
+                block_mask.as_tuple(),
             )
 
         @torch.compile(backend="aot_eager")
@@ -1069,7 +1079,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask,
+                block_mask.as_tuple(),
             )
 
         ref_out, ref_lse = eager_sdpa_hop(
@@ -1126,7 +1136,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask,
+                block_mask.as_tuple(),
             )
             lse_2 = lse * 2
             return lse_2
@@ -1154,7 +1164,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask,
+                block_mask.as_tuple(),
             )
             lse_2 = lse * 2
             return out, lse_2
@@ -1217,27 +1227,34 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         block_mask = _create_block_mask(causal, 1, 1, 2048, 2048)
 
         def replace_non_printable(s):
-            return "".join(c if c in string.printable else "@" for c in s)
+            def replace(c):
+                if c not in string.printable:
+                    return "@"
+                elif c == " ":
+                    return "s"
+                return c
+
+            return "".join(replace(c) for c in s)
 
         self.assertExpectedInline(
             replace_non_printable(str(block_mask)),
             """\
-BlockMask(sparsity=46.88%, mask=
-@@
-@@@@
-@@@@@@
-@@@@@@@@
-@@@@@@@@@@
-@@@@@@@@@@@@
-@@@@@@@@@@@@@@
-@@@@@@@@@@@@@@@@
-@@@@@@@@@@@@@@@@@@
-@@@@@@@@@@@@@@@@@@@@
-@@@@@@@@@@@@@@@@@@@@@@
-@@@@@@@@@@@@@@@@@@@@@@@@
-@@@@@@@@@@@@@@@@@@@@@@@@@@
-@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+BlockMask(sparsity=46.88%,smask=
+@@ssssssssssssssssssssssssssssss
+@@@@ssssssssssssssssssssssssssss
+@@@@@@ssssssssssssssssssssssssss
+@@@@@@@@ssssssssssssssssssssssss
+@@@@@@@@@@ssssssssssssssssssssss
+@@@@@@@@@@@@ssssssssssssssssssss
+@@@@@@@@@@@@@@ssssssssssssssssss
+@@@@@@@@@@@@@@@@ssssssssssssssss
+@@@@@@@@@@@@@@@@@@ssssssssssssss
+@@@@@@@@@@@@@@@@@@@@ssssssssssss
+@@@@@@@@@@@@@@@@@@@@@@ssssssssss
+@@@@@@@@@@@@@@@@@@@@@@@@ssssssss
+@@@@@@@@@@@@@@@@@@@@@@@@@@ssssss
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@ssss
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ss
 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 )""",
         )

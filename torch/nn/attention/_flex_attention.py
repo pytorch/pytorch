@@ -4,7 +4,10 @@ import functools
 from typing import Callable, Optional
 
 import torch
-from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
+from torch._higher_order_ops.flex_attention import (
+    flex_attention as flex_attention_hop,
+    TransformGetItemToIndex,
+)
 from torch._higher_order_ops.utils import _set_compilation_env
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
@@ -254,7 +257,8 @@ def _create_mask(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None))
-    out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
+    with TransformGetItemToIndex():
+        out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
     mask = torch.where(torch.isinf(out), False, True)
     return mask
 
