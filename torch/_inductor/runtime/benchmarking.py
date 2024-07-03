@@ -261,7 +261,7 @@ class Benchmarker:
         properties = torch.cuda.get_device_properties(device)
         return properties.l2CacheSize
 
-    def get_event_pairs(self, iters: int) -> List[Tuple(torch.cuda.Event, torch.cuda.Event)]:
+    def get_event_pairs(self, iters: int) -> List[Tuple[torch.cuda.Event, torch.cuda.Event]]:
         return [
             (
                 torch.cuda.Event(enable_timing=True),
@@ -270,13 +270,13 @@ class Benchmarker:
             for _ in range(iters)
         ]
 
-    def get_interleaved_event_pairs(self, num_callables: int, iters: int) -> List[List[Tuple(torch.cuda.Event, torch.cuda.Event)]]:
+    def get_interleaved_event_pairs(self, num_callables: int, iters: int) -> List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]]:
         return [self.get_event_pairs(num_callables) for _ in range(iters)]
 
-    def get_min_timing(self, event_pairs: List[Tuple(torch.cuda.Event, torch.cuda.Event)]) -> float:
+    def get_min_timing(self, event_pairs: List[Tuple[torch.cuda.Event, torch.cuda.Event]]) -> float:
         return min([start_event.elapsed_time(end_event) for start_event, end_event in event_pairs])
 
-    def get_interleaved_min_timing(self, interleaved_event_pairs: List[List[Tuple(torch.cuda.Event, torch.cuda.Event)]]) -> float:
+    def get_interleaved_min_timing(self, interleaved_event_pairs: List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]]) -> float:
         return [self.get_min_timing(event_pairs) for event_pairs in zip(*interleaved_event_pairs)]
             
     
