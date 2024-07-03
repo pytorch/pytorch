@@ -130,11 +130,18 @@ def refunctionalize_set(graph: fx.Graph) -> None:
             # Between primal_X's this `.set_(primal_X, Y)` and its next `.set_(primal_X, ...)` (or end of graph),
             # if `.set_(Y, ...)` is not called, we will replace usage of output of this `.set_(primal_X, Y)` node with Y,
             # and delete the `.set_(primal_X, Y)` node.
-            if not any(
-                node_list[idx].target is torch.ops.aten.set_.source_Tensor
-                and node_list[idx].args[0] == Y_input
-                for idx in range(set_node_idx + 1, next_set_node_idx)
-            ):
+            # (NOTE: Y may or may not be a primal input. If Y is not a primal and `.set_(Y, ...)` exists, we error out.)
+            set_Y_exists = False
+            for idx in range(set_node_idx + 1, next_set_node_idx):
+                if (
+                    node_list[idx].target is torch.ops.aten.set_.source_Tensor
+                    and node_list[idx].args[0] == Y_input
+                ):
+                    set_Y_exists = True
+                    assert (
+                        Y_input in primal_inputs
+                    ), f".set_(non_primal, ...) is not supported. Violating graph: {graph}"
+            if not set_Y_exists:
                 set_node.replace_all_uses_with(
                     Y_input,
                     delete_user_cb=lambda n: node_to_idx[n] > set_node_idx
