@@ -40,22 +40,22 @@ class LazyBenchmark:
         return other <= self.value
 
     def __add__(self, other: Any) -> Self:
-        return LazyBenchmark(lambda: self.finalize() + other)
+        return LazyBenchmark(lambda: self.evaluate() + other)
     
     def __radd__(self, other: Any) -> Self:
-        return LazyBenchmark(lambda: other + self.finalize())
+        return LazyBenchmark(lambda: other + self.evaluate())
 
     def __sub__(self, other: Any) -> Self:
-        return LazyBenchmark(lambda: self.finalize() - other)
+        return LazyBenchmark(lambda: self.evaluate() - other)
     
     def __rsub__(self, other: Any) -> Self:
-        return LazyBenchmark(lambda: other - self.finalize())
+        return LazyBenchmark(lambda: other - self.evaluate())
     
     def __mul__(self, other: Any) -> Self:
-        return LazyBenchmark(lambda: self.finalize() * other)
+        return LazyBenchmark(lambda: self.evaluate() * other)
     
     def __rmul__(self, other: Any) -> Self:
-        return LazyBenchmark(lambda: other * self.finalize())
+        return LazyBenchmark(lambda: other * self.evaluate())
 
 
 class Benchmarker:
