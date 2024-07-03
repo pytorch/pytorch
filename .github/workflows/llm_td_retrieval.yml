@@ -12,6 +12,21 @@ jobs:
     runs-on: linux.4xlarge
     continue-on-error: true
     steps:
+      - name: Setup python
+        uses: actions/setup-python@v4
+        continue-on-error: true
+        with:
+          python-version: "3.8"
+          cache: 'pip'
+          architecture: 'x86'
+
+      - name: Setup python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: 'pip'
+          architecture: 'x64'
+
       - name: Clone PyTorch
         uses: actions/checkout@v3
         with:
@@ -36,11 +51,6 @@ jobs:
           ref: v0.0.2
           path: llm-target-determinator
 
-      - name: Setup python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.8"
-          cache: 'pip'
 
       - name: Install requirements
         shell: bash -l {0}
