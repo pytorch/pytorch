@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-""" Triton Implementation of the flex_attention Kernel"""
+"""Triton Implementation of the flex_attention Kernel"""
 
 import logging
 from enum import auto, Enum
