@@ -130,17 +130,6 @@ Welford<T> welford_combine(const Welford<T>& acc, const T& data, const WeightRec
 
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T>
-Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, const int64_t tail_size) {
-  auto out = welford_combine(a, b);
-  return Welford<T>{
-    T::set(a.mean, out.mean, tail_size),
-    T::set(a.m2, out.m2, tail_size),
-    T::set(a.weight, out.weight, tail_size),
-    out.index
-  };
-}
-
-template <typename T>
 Welford<T> welford_combine(const Welford<T>& acc, const T& data, const int64_t tail_size, const WeightRecp<T>* w=nullptr) {
   auto out = welford_combine(acc, data, w);
   return Welford<T>{
