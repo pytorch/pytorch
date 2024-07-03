@@ -39,7 +39,7 @@ jobs:
       - name: Setup python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.9"
+          python-version: "3.8"
           cache: 'pip'
 
       - name: Install requirements
