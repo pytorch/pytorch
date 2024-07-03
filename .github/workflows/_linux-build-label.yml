@@ -68,7 +68,6 @@ on:
         required: false
         description: |
           HF Auth token to avoid rate limits when downloading models or datasets from hub
-
     outputs:
       docker-image:
         value: ${{ jobs.build.outputs.docker-image }}

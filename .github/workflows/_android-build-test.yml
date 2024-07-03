@@ -23,6 +23,12 @@ on:
         type: string
         description: |
           A JSON description of what configs to run later on.
+      runner:
+        required: false
+        type: string
+        default: "linux.large"
+        description: |
+          Label of the runner this job should run on.
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -30,7 +36,7 @@ env:
 jobs:
   filter:
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.large]
+    runs-on: ${{ inputs.runner }}
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
       is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
