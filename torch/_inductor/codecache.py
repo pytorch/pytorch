@@ -56,6 +56,14 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
+from .cpp_builder import (
+    _get_python_include_dirs,
+    get_cpp_compiler,
+    homebrew_libomp,
+    is_apple_clang,
+    is_clang,
+    is_conda_llvm_openmp_installed,
+)
 
 """
 codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
@@ -1196,8 +1204,6 @@ def get_compile_only(compile_only: bool = True) -> str:
 
 
 def get_shared(shared: bool = True, compile_only: bool = False) -> str:
-    from .cpp_builder import get_cpp_compiler
-
     if not shared:
         return ""
     if compile_only:
@@ -1218,8 +1224,6 @@ def get_glibcxx_abi_build_flags() -> str:
 
 
 def cpp_flags() -> str:
-    from .cpp_builder import is_clang
-
     flags = ["-std=c++17", "-Wno-unused-variable", "-Wno-unknown-pragmas"]
     if is_clang():
         flags.append("-Werror=ignored-optimization-argument")
@@ -1296,13 +1300,6 @@ def get_include_and_linking_paths(
     cuda: bool = False,
     aot_mode: bool = False,
 ) -> Tuple[List[str], str, str, str, str]:
-    from .cpp_builder import (
-        _get_python_include_dirs,
-        homebrew_libomp,
-        is_apple_clang,
-        is_conda_llvm_openmp_installed,
-    )
-
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
@@ -1487,8 +1484,6 @@ def cpp_compile_command(
     use_mmap_weights: bool = False,
     extra_flags: Sequence[str] = (),
 ) -> str:
-    from .cpp_builder import get_cpp_compiler, is_clang
-
     ipaths, lpaths, libs, macros, build_arch_flags = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
     )
@@ -1599,8 +1594,6 @@ class AotCodeCompiler:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> str:
-        from .cpp_builder import get_cpp_compiler
-
         picked_vec_isa = pick_vec_isa()
         cpp_command = repr(
             cpp_compile_command(
@@ -2060,7 +2053,7 @@ class CppCodeCache:
 
         from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
 
-        dummy_builder = CppBuilder(
+        command_gen = CppBuilder(
             name="o", sources="i", BuildOption=CppTorchCudaOptions(**compile_command)
         )
         # write function will calc source_code hash, the same source code with different
@@ -2068,8 +2061,8 @@ class CppCodeCache:
         # So we need get a command_line which contains isa related parameter as a part of hash key.
         # And then pass the command_line to below write function as extra parameter to
         # guarantee the source code hash contains ISA difference.
-        dummy_cmd = repr(dummy_builder.get_command_line())
-        key, input_path = write(source_code, "cpp", extra=dummy_cmd)
+        vec_isa_cmd = repr(command_gen.get_command_line())
+        key, input_path = write(source_code, "cpp", extra=vec_isa_cmd)
 
         if key not in cls.cache:
             from filelock import FileLock
@@ -2594,7 +2587,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         command_gen = CppBuilder(
             name="O",
             sources="I",
-            BuildOption=CppOptions(compile_only=False),
+            BuildOption=CppOptions(),
         )
         command_line = command_gen.get_command_line()
         return sha256_hash(
