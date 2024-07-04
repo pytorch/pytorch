@@ -2651,9 +2651,12 @@ utils_device.CURRENT_DEVICE == None""".split(
             ref = fn(x, y)
             res = opt_fn(x, y)
             self.assertEqual(ref, res)
-        # It's all traced once with x = 1, x = 2 and then x = ks0
-        # For dynamic it's x=1 and x=ks0
-        self.assertEqual(cnts.frame_count, ifdynstaticdefault(3, 2))
+        # It's all traced once with x = 1 and then x = ks0
+        # For dynamic it's x=ks0
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(str(cnts.frame_count), """2""")
+        else:
+            self.assertExpectedInline(str(cnts.frame_count), """2""")
 
     def test_numpy_with_builtin_type(self):
         x = np.random.rand(5)
@@ -7201,6 +7204,28 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch._dynamo.mark_dynamic(y, 0)
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.optimize("eager")(dyn_fn)(y)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_sym_constrain_range_on_replaced_unbacked_symbol(self):
+        # Tests the following case:
+        # Deferred runtime asserts adds sym_constrain_range(u0).
+        # However, u0 is replaced with s0 + s1.
+        # So, now we have sym_constrain_range(s0 + s1).
+        def fn(x, y, z):
+            z += 7  # to avoid creating unspecified symbol instead of unbacked symbol
+            u0 = z.item()
+            s0 = x.size(0)
+            s1 = y.size(0)
+            torch._check(s0 < 100)
+            torch._check(s1 < 100)
+            torch._check(u0 == s0 + s1)
+            return x, y, z
+
+        inputs = (x := torch.randn(16, 10), y := torch.randn(16, 10), torch.tensor(32))
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(y, 0)
+        opt = torch._dynamo.optimize(nopython=True)(fn)
+        opt(*inputs)
 
     # Translation validation changes the exception type, don't run with it
     @torch.fx.experimental._config.patch(translation_validation=False)
