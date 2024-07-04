@@ -291,6 +291,8 @@ class TestPatternMatcher(TestCase):
 
         # examples that should not be selected by heuristic
         mat1_dtype = torch.float16
+        dyn_tensor = torch.randn(4, 4096, dtype=mat1_dtype, device="cuda")
+        torch._dynamo.mark_dynamic(dyn_tensor, 0)
         args_list = [
             (
                 torch.randn(1, 4097, dtype=mat1_dtype, device="cuda"),
@@ -322,6 +324,10 @@ class TestPatternMatcher(TestCase):
             ),
             (
                 torch.randn(1, 4096, dtype=torch.float32, device="cuda"),
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                dyn_tensor,
                 torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
             ),
         ]
