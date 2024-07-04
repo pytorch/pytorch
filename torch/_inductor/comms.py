@@ -12,7 +12,7 @@ import torch
 
 from . import config, ir
 from .dependencies import WeakDep
-from .utils import is_collective, is_wait, tuple_sorted
+from .utils import contains_collective, contains_wait, tuple_sorted
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
@@ -68,12 +68,12 @@ def raise_comms_and_sink_waits(
 
     comm_idx = 0
     for snode in snodes:
-        if raise_comms and is_collective(snode.node):
+        if raise_comms and contains_collective(snode.node):
             scores_0[snode.get_name()] = comm_idx
             for anc in snode.ancestors:
                 scores_0[anc] = min(scores_0[anc], comm_idx)
             comm_idx += 1
-        elif sink_waits and is_wait(snode.node):
+        elif sink_waits and contains_wait(snode.node):
             scores_1[snode.get_name()] = 1
 
     class Runnable:
@@ -166,7 +166,7 @@ def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
-    comm_nodes = [n for n in nodes if is_collective(n.node)]
+    comm_nodes = [n for n in nodes if contains_collective(n.node)]
 
     def item(x: Set[str]) -> str:
         assert len(x) == 1
@@ -178,7 +178,7 @@ def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
 
 
 def assert_no_comm_nodes(snodes: List[BaseSchedulerNode]) -> None:
-    assert not any(is_collective(snode.node) for snode in snodes)
+    assert not any(contains_collective(snode.node) for snode in snodes)
 
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
@@ -253,7 +253,7 @@ def reorder_compute_for_overlap(
 
     comm_nodes = []
     for snode in snodes:
-        if is_collective(snode.node):
+        if contains_collective(snode.node):
             comm_nodes.append(snode)
     if len(comm_nodes) == 0:
         # if there is no comm nodes, return the current order
@@ -420,10 +420,10 @@ def visualize_overlap(order):
     cur_comm_node = None
     for snode in order:
         if cur_comm_node is None:
-            if is_collective(snode.node):
+            if contains_collective(snode.node):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
-            elif is_wait(snode.node):
+            elif contains_wait(snode.node):
                 raise AssertionError(
                     "Wait is not expected when there is no collective running"
                 )
@@ -431,12 +431,12 @@ def visualize_overlap(order):
                 total_est_runtime += estimate_op_runtime(snode)
             overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
         else:  # cur_comm_node is not None
-            if is_collective(snode.node):
+            if contains_collective(snode.node):
                 raise AssertionError(
                     "Found two collectives running at the same time. "
                     "`visualize_overlap` needs to be updated to handle this case"
                 )
-            elif is_wait(snode.node):  # end of this comm op
+            elif contains_wait(snode.node):  # end of this comm op
                 overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
                 cur_comm_node = None
             else:  # overlapped compute op
@@ -473,3 +473,168 @@ def reorder_compute_and_comm_for_overlap(
             except Exception as e:
                 overlap_log.debug(str(e))
     return order
+
+
+def get_all_reads(snode):
+    reads = set()
+    reads.update(snode.read_writes.reads)
+    if isinstance(
+        snode, (scheduler.FusedSchedulerNode, scheduler.GroupedSchedulerNode)
+    ):
+        for sub_snode in snode.snodes:
+            reads.update(get_all_reads(sub_snode))
+    return reads
+
+
+def is_collective_op(snode, op):
+    return isinstance(snode.node, ir.CollectiveKernel) and snode.node.op_overload is op
+
+
+def is_fallback_op(snode):
+    return isinstance(snode.node, ir._FallbackKernel) and snode.node.op_overload is op
+
+
+# TODO: can we simplify the input args to just be `snodes`?
+def enforce_comm_ordering_for_fsdp(
+    name_to_fused_node: Dict[str, scheduler.BaseSchedulerNode],
+    graph_inputs: Dict[str, Buffer],
+    snodes: List[scheduler.BaseSchedulerNode],
+) -> List[scheduler.BaseSchedulerNode]:
+    def _find_all_recursive_deps_of_node_up_to_criteria(
+        snode, collected_node_set, criteria_cb
+    ):
+        collected_node_set.add(snode)
+        for dep in get_all_reads(snode):
+            if not criteria_cb(dep):
+                dep_node = name_to_fused_node[dep.name]
+                if dep_node in collected_node_set:
+                    continue
+                _find_all_recursive_deps_of_node_up_to_criteria(
+                    dep_node, collected_node_set, criteria_cb
+                )
+
+    new_order = []
+    scheduled = set()
+    ag_nodes = []
+    rs_nodes = []
+
+    def _create_group_node(nodes_to_group):
+        group_node = scheduler.GroupedSchedulerNode.create(nodes_to_group)
+        scheduled.update(nodes_to_group)
+        new_order.append(group_node)
+        name_to_fused_node[group_node.get_name()] = group_node
+        for node in nodes_to_group:
+            name_to_fused_node[node.get_name()] = group_node
+        return group_node
+
+    for snode in snodes:
+        if snode in scheduled:
+            continue
+        if (
+            isinstance(snode.node, ir.FallbackKernel)
+            and snode.node.op_overload is torch.ops.fsdp.split_with_sizes_copy.default
+        ):
+            # Case 1: Handle AllGather
+
+            # Find the "cast + copy_in + getitem + all_gather + all_gather_wait_tensor + copy_out" block
+            collected_node_set = set()
+            _find_all_recursive_deps_of_node_up_to_criteria(
+                snode,
+                collected_node_set,
+                criteria_cb=lambda dep: dep.name in graph_inputs,
+            )
+
+            # sort nodes by original buffer order
+            collected_nodes = sorted(
+                collected_node_set, key=lambda x: int(x.get_name()[3:])
+            )
+
+            # Group "cast + copy_in + getitem + all_gather" into one GroupedSchedulerNode
+            nodes_to_group = []
+            wait_node_idx = None
+            for i in range(len(collected_nodes) - 1):
+                node = collected_nodes[i]
+                nodes_to_group.append(node)
+                if isinstance(collected_nodes[i + 1].node, ir._WaitKernel):
+                    wait_node_idx = i + 1
+                    break
+            ag_group_node = _create_group_node(nodes_to_group)
+
+            # Group "all_gather_wait_tensor + copy_out" into one GroupedSchedulerNode
+            nodes_to_group = collected_nodes[wait_node_idx:]
+            wait_group_node = _create_group_node(nodes_to_group)
+            ag_nodes.append(
+                (
+                    ag_group_node,
+                    wait_group_node,
+                )
+            )
+        elif (
+            isinstance(snode.node, ir._WaitKernel)
+            and any(
+                is_collective_op(
+                    x, torch.ops._c10d_functional.reduce_scatter_tensor.default
+                )
+                for x in snode.ancestors
+            )
+            and any(
+                is_fallback_op(x, torch.ops.fsdp.chunk_cat.default)
+                for x in snode.ancestors
+            )
+        ):
+            # Case 2: Handle ReduceScatter
+
+            # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" block
+            collected_node_set = set()
+            _find_all_recursive_deps_of_node_up_to_criteria(
+                snode,
+                collected_node_set,
+                criteria_cb=lambda dep: is_fallback_op(
+                    name_to_fused_node[dep.name], torch.ops.fsdp.chunk_cat.default
+                ),
+            )
+            # sort nodes by original buffer order
+            collected_nodes = sorted(
+                list(collected_node_set), key=lambda x: int(x.get_name()[3:])
+            )
+
+            # Group "reduce_scatter copy-in + reduce_scatter comm" into one GroupedSchedulerNode
+            nodes_to_group = []
+            wait_node_idx = None
+            for i in range(len(collected_nodes) - 1):
+                node = collected_nodes[i]
+                nodes_to_group.append(node)
+                if isinstance(collected_nodes[i + 1].node, ir._WaitKernel):
+                    wait_node_idx = i + 1
+                    break
+            assert wait_node_idx is not None
+            rs_group_node = _create_group_node(nodes_to_group)
+
+            # Group "reduce_scatter wait + related output nodes" into one GroupedSchedulerNode
+            wait_group_node = _create_group_node(collected_nodes[wait_node_idx:])
+
+            rs_nodes.append(
+                (
+                    rs_group_node,
+                    wait_group_node,
+                )
+            )
+        else:
+            scheduled.add(snode)
+            new_order.append(snode)
+
+    # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run before next AllGather's "copy_in then AG" group node
+    prev_ag_wait = None
+    for ag_group_node, wait_group_node in ag_nodes:
+        if prev_ag_wait is not None:
+            ag_group_node.add_fake_dep(WeakDep(item(prev_ag_wait.get_buffer_names())))
+        prev_ag_wait = wait_group_node
+
+    # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run before next ReduceScatter's "copy_in then RS" group node
+    prev_rs_wait = None
+    for rs_group_node, wait_group_node in rs_nodes:
+        if prev_rs_wait is not None:
+            rs_group_node.add_fake_dep(WeakDep(item(prev_rs_wait.get_buffer_names())))
+        prev_rs_wait = wait_group_node
+
+    return new_order

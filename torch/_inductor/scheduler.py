@@ -591,6 +591,9 @@ class BaseSchedulerNode:
         """
         Returns estimated op runtime in nanoseconds (ns)
         """
+        if isinstance(self, GroupedSchedulerNode):
+            return sum([node.get_estimated_runtime() for node in self.snodes])
+
         buf = self.get_nodes()[0].get_outputs()[0]
         layout = buf.node.get_layout()
         dtype = buf.node.get_dtype()
@@ -1545,6 +1548,9 @@ class Scheduler:
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.logged_slow_fusion: Set[Tuple[str, str]] = set()
+        self.nodes = comms.enforce_comm_ordering_for_fsdp(
+            self.name_to_fused_node, V.graph.graph_inputs, self.nodes
+        )
         if config.pre_fusion_custom_pass is not None:
             self.nodes = config.pre_fusion_custom_pass(self.nodes)
         self.nodes = self.fuse_nodes(self.nodes)
