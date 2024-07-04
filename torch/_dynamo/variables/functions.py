@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
-from .. import variables
+from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder, install_guard
@@ -141,9 +141,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         ), f"expected FunctionType found {typestr(fn)} {fn}"
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
-        # unpack torch.jit.script_if_tracing
-        if inspect.getattr_static(fn, "__script_if_tracing_wrapper", False):
-            fn = inspect.getattr_static(fn, "__original_fn", fn)
         self.fn: types.FunctionType = fn
 
     def as_python_constant(self):
@@ -537,7 +534,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 parent.symbolic_locals[var] = child.symbolic_locals[var]
 
     def reconstruct(self, codegen):
-        codegen.load_import_from(__name__, "_create_nested_fn")
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(__name__, "_create_nested_fn")
+        )
         codegen(self.code)
         codegen.extend_output([codegen._create_load_const(self.f_globals)])
         codegen(ConstantVariable.create(self.code.value.co_name))
@@ -566,12 +565,14 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         else:
             codegen.extend_output([codegen.create_load_const(None)])
 
-        codegen.extend_output(create_call_function(7, push_null=True))
+        codegen.extend_output(create_call_function(7, False))
 
         if self.wrapped_reconstructible:
-            codegen.load_import_from("functools", "wraps")
+            codegen.add_push_null(
+                lambda: codegen.load_import_from("functools", "wraps")
+            )
             codegen(self.wrapped_reconstructible)
-            codegen.extend_output(create_call_function(1, True))
+            codegen.extend_output(create_call_function(1, False))
             codegen.extend_output(create_rot_n(2))
             codegen.extend_output(create_call_function(1, True))
 
@@ -596,7 +597,18 @@ class SkipFunctionVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+        if not isinstance(
+            value,
+            (
+                types.MethodWrapperType,
+                types.WrapperDescriptorType,
+                types.MemberDescriptorType,
+            ),
+        ):
+            # These descriptors are not guaranteed to return the same object on
+            # attribute lookup. They are unlikely to be changed, so we can skip
+            # guarding them.
+            install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         return cls(
             value,
             source=source,
@@ -667,7 +679,7 @@ class SkipFunctionVariable(VariableTracker):
                         f"so the PyTorch team can add support for it and see the next case for a workaround. "
                         f"If it is a third-party C/C++ Python extension, please "
                         f"either wrap it into a PyTorch-understood custom operator "
-                        f"(see https://pytorch.org/docs/main/notes/custom_operators.html "
+                        f"(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
                         f"for more details) or, if it is traceable, use "
                         f"torch.compiler.allow_in_graph."
                     )
@@ -675,6 +687,41 @@ class SkipFunctionVariable(VariableTracker):
                     torch._dynamo.utils.warn_once(msg)
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
+
+
+class WrapperUserFunctionVariable(VariableTracker):
+    """
+    Used to represent a wrapper object that contains the actual callable as an
+    attribute. For example, torch.jit.script/trace have the original function at
+    their _torchdynamo_inline attribute. Similarly, functions with
+    __script_if_tracing_wrapper have the original attr at "__original_fn".
+    """
+
+    def __init__(self, wrapper_obj, attr_to_trace, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.wrapper_obj = wrapper_obj
+        self.attr_to_trace = attr_to_trace
+
+    def var_getattr(self, tx, name):
+        if name == self.attr_to_trace:
+            val = getattr(self.wrapper_obj, self.attr_to_trace)
+            if self.source:
+                from .builder import VariableBuilder
+
+                return VariableBuilder(tx, AttrSource(self.source, name))(val)
+            else:
+                from .builder import SourcelessBuilder
+
+                return SourcelessBuilder.create(tx, val)
+
+        return super().var_getattr(tx, name)
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        return variables.UserFunctionVariable(polyfill.getattr_and_trace).call_function(
+            tx, [self, variables.ConstantVariable(self.attr_to_trace), *args], kwargs
+        )
 
 
 def _traceable_collective_remaps():
@@ -783,18 +830,18 @@ class FunctoolsPartialVariable(VariableTracker):
         self.keywords = keywords
 
     def reconstruct(self, codegen):
-        codegen.load_import_from("functools", "partial")
+        codegen.add_push_null(lambda: codegen.load_import_from("functools", "partial"))
         codegen(self.func)
         if self.args:
             codegen.foreach(self.args)
         if not self.keywords:
-            codegen.extend_output(create_call_function(len(self.args) + 1, True))
+            codegen.extend_output(create_call_function(len(self.args) + 1, False))
             return
 
         codegen.foreach(self.keywords.values())
         keys = tuple(self.keywords.keys())
         codegen.extend_output(
-            codegen.create_call_function_kw(len(keys) + len(self.args) + 1, keys, True)
+            codegen.create_call_function_kw(len(keys) + len(self.args) + 1, keys, False)
         )
 
     def get_function(self):

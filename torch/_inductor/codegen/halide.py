@@ -32,7 +32,6 @@ from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import HalideCodeCache
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
-from ..ops_handler import MockHandler
 
 from ..runtime.hints import HalideInputSpec, HalideMeta, ReductionHint
 from ..utils import (
@@ -89,6 +88,9 @@ class HalidePrinter(PythonPrinter):
     @staticmethod
     def cast_float(expr):
         return f"hl.cast(hl.Float(32), {expr})"
+
+    def _print_Float(self, expr):
+        return f"hl.f32({expr})"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
@@ -269,11 +271,13 @@ class HalideOverrides(OpOverrides):
     @staticmethod
     def minimum(a, b):
         # return f"hl.min({a}, {b})"  <== handles nan wrong
+        b = f"hl.cast({a.name}.type(), {b})"
         return f"hl.select(({a}<{b})|hl.is_nan({a}), {a}, {b}) if {a.name}.type().is_float() else hl.min({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
         # return f"hl.max({a}, {b})"  <== handles nan wrong
+        b = f"hl.cast({a.name}.type(), {b})"
         return f"hl.select(({a}>{b})|hl.is_nan({a}), {a}, {b}) if {a.name}.type().is_float() else hl.max({a}, {b})"
 
     @staticmethod
@@ -436,11 +440,13 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def isinf(x):
-        return f"hl.is_inf({x})"
+        # workaround https://github.com/halide/Halide/issues/8309
+        return f"hl.is_inf(hl.cast(hl.Float(32), {x}))"
 
     @staticmethod
     def isnan(x):
-        return f"hl.is_nan({x})"
+        # workaround https://github.com/halide/Halide/issues/8309
+        return f"hl.is_nan(hl.cast(hl.Float(32), {x}))"
 
     @staticmethod
     def round(x):
@@ -557,7 +563,7 @@ class HalideCSEVariable(CSEVariable):
 
     def index_str(self, dims):
         if len(dims) == 0:
-            return self.name
+            return f"{self.name}[()]"
         # Reversed since Halide is column major
         return f"{self.name}[{', '.join(map(str, dims))}]"
 
@@ -582,7 +588,7 @@ class DimensionInfo:
 
     def __init__(self, expr, size, stride):
         super().__init__()
-        if V.graph.sizevars.statically_known_leq(stride, 0):
+        if V.graph.sizevars.statically_known_lt(stride, 0):
             stride = -stride
             expr = -expr
         self.expr = expr
@@ -606,6 +612,35 @@ class DimensionInfo:
         return V.kernel.index_to_str(expr)
 
 
+def eq(left, right):
+    if V.graph.sizevars.statically_known_equals(left, right):
+        return True
+    try:
+        a = V.graph.sizevars.size_hint(left)
+        b = V.graph.sizevars.size_hint(right)
+    except TypeError:  # unbacked symints
+        return False
+    if a == b:
+        V.graph.sizevars.guard_equals(left, right)
+    return a == b
+
+
+def lt(left, right):
+    if V.graph.sizevars.statically_known_lt(left, right):
+        return True
+    try:
+        a = V.graph.sizevars.size_hint(left)
+        b = V.graph.sizevars.size_hint(right)
+    except TypeError:  # unbacked symints
+        gcd = sympy.gcd(left, right)
+        if gcd == left:
+            return left != right
+        return False
+    if a < b:
+        V.graph.sizevars.guard_lt(left, right)
+    return a < b
+
+
 class HalideKernel(SIMDKernel):
     overrides = HalideOverrides  # type: ignore[assignment]
     kexpr: Callable[[sympy.Expr], str] = texpr
@@ -617,7 +652,7 @@ class HalideKernel(SIMDKernel):
         mutations: Optional[Set[str]] = None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
-        disable_persistent_reduction=False,
+        override_persistent_reduction=None,
     ):
         super().__init__(
             *groups,
@@ -625,7 +660,7 @@ class HalideKernel(SIMDKernel):
             mutations=mutations,
             reduction_hint=reduction_hint,
             pid_cache=pid_cache,
-            disable_persistent_reduction=disable_persistent_reduction,
+            override_persistent_reduction=override_persistent_reduction,
         )
         # For halide, we just write directly to the body
         self.compute = self.body
@@ -636,10 +671,15 @@ class HalideKernel(SIMDKernel):
         self.has_reduction = self.inside_reduction
         self.buffer_dimensions: Dict[str, List[DimensionInfo]] = {}
         self.buffer_offsets: Dict[str, sympy.Expr] = {}
+        # {h0: size1, h1: size2, ...}
         self.halide_vars: Dict[sympy.Symbol, sympy.Expr] = {}
+        # {x0: h0, x1: h1+10*h2, ...}
         self.index_replacements: Dict[sympy.Expr, sympy.Expr] = {}
+        # {h1: hr1, ...}
         self.reduction_renames: Dict[sympy.Symbol, sympy.Symbol] = {}
+        # {"i": {h0: hi0}, "o": ...}
         self.dom_renames: Dict[str, Dict[sympy.Symbol, sympy.Symbol]] = {}
+        # {"in_ptr0": ["in_ptr0_view0"], ...}
         self.buffer_aliases: Dict[str, List[str]] = defaultdict(list)
 
     def create_cse_var(self, name, bounds=None):
@@ -660,8 +700,6 @@ class HalideKernel(SIMDKernel):
         assert not (
             self.index_replacements or self.halide_vars or self.reduction_renames
         )
-        eq = V.graph.sizevars.statically_known_equals
-        lt = V.graph.sizevars.statically_known_lt
         size_hint = functools.partial(V.graph.sizevars.size_hint, fallback=inf)
         indices = dict.fromkeys(map(super().prepare_indexing, indices))
         all_used_symbols = set()
@@ -671,6 +709,11 @@ class HalideKernel(SIMDKernel):
                 [tree.nodes.values() for tree in self.range_trees]
             )
         }
+
+        def simplify(expr):
+            return sympy.simplify(
+                V.graph.sizevars.remove_precomputed_replacements(expr)
+            )
 
         def visit_modular_indexing(base, divisor, modulus):
             if base in sym_to_node:
@@ -719,12 +762,16 @@ class HalideKernel(SIMDKernel):
         for tree in reversed(self.range_trees):
             nodes = [n for n in tree.nodes.values() if n.symbol() in all_used_symbols]
             nodes.sort(key=lambda n: size_hint(n.divisor))
+            if not nodes:
+                nodes.append(tree.lookup(1, tree.numel))
             handled_count = 0
             divisor = sympy.Integer(1)
             added_sym_size = []
             # decide on a minimal set of symbols and put them in self.halide_vars
-            while handled_count < len(nodes):
-                sizes_to_add = [n.length for n in nodes if eq(n.divisor, divisor)]
+            while handled_count < len(nodes) and not eq(tree.numel, divisor):
+                sizes_to_add = [
+                    simplify(n.length) for n in nodes if eq(n.divisor, divisor)
+                ]
                 handled_count += len(sizes_to_add)
                 assert sizes_to_add, nodes
                 end = divisor * functools.reduce(
@@ -732,7 +779,7 @@ class HalideKernel(SIMDKernel):
                 )
                 sizes_to_add.extend(
                     [
-                        sympy.simplify(n.divisor / divisor)
+                        simplify(n.divisor / divisor)
                         for n in nodes
                         if lt(divisor, n.divisor) and lt(n.divisor, end)
                     ]
@@ -742,7 +789,8 @@ class HalideKernel(SIMDKernel):
                     if eq(next_size, 1):
                         # sizes share no common factors, e.g [2, 21, 42, 441, 889056]
                         # TODO(jansel): we should just prevent fusion in cases that hit this
-                        next_size = sympy.simplify(tree.numel / divisor)
+                        next_size = simplify(tree.numel / divisor)
+                        assert not eq(next_size, 1)
                         sizes_to_add = []
                         handled_count = len(nodes)
                         had_fallback = True
@@ -756,11 +804,13 @@ class HalideKernel(SIMDKernel):
                     divisor *= next_size
                     new_sizes = [n.length for n in nodes if eq(n.divisor, divisor)]
                     handled_count += len(new_sizes)
+                    prior_len = len(sizes_to_add)
                     sizes_to_add = [
                         sympy.simplify(s / next_size)
                         for s in sizes_to_add
                         if not eq(s, next_size)
                     ]
+                    assert len(sizes_to_add) < prior_len or prior_len == 0
                     sizes_to_add.extend(new_sizes)
 
             # create a mapping to the new set of symbols in self.index_replacements
@@ -825,7 +875,10 @@ class HalideKernel(SIMDKernel):
         return renames
 
     def codegen_rdom(self, name, vars):
-        rsizes = [f"hl.Range(0, {self.kexpr(size)})" for size in vars.values()]
+        rsizes = [
+            f"hl.Range(0, {self.kexpr(self.rename_indexing(size))})"
+            for size in vars.values()
+        ]
         self.indexing_code.writeline(f"{name} = hl.RDom([{', '.join(rsizes)}])")
         for i, rsym in enumerate(vars.keys()):
             self.indexing_code.writeline(f"{rsym} = {name}[{i}]")
@@ -1074,11 +1127,11 @@ class HalideKernel(SIMDKernel):
             index_str = ", ".join(d.index_str(zero_vars=True) for d in dims)
             value_str = str(value)
 
+        dtype = V.graph.get_dtype(name)
         if mode is None:
-            dtype = V.graph.get_dtype(name)
             line = f"{var}[{index_str},] = hl.cast({halide_type(dtype)}, {value_str})"
         elif mode == "atomic_add":
-            line = f"{var}[{index_str},] += {value_str}"
+            line = f"{var}[{index_str},] += hl.cast({halide_type(dtype)}, {value_str})"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.body.writeline(DeferredLine(name, line))
@@ -1194,78 +1247,6 @@ class HalideKernel(SIMDKernel):
             unpacked.append(self.newfunc(result_var.used_dims))
             self.body.writeline(f"{unpacked[-1]} = {result_var}[{i}]")
         return tuple(unpacked)
-
-    def scan(
-        self,
-        dtypes: Tuple[torch.dtype, ...],
-        combine_fn: Callable[
-            [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
-        ],
-        values_orig: Tuple[CSEVariable, ...],
-    ) -> Tuple[CSEVariable, ...]:
-        assert self.inside_reduction
-        assert len(dtypes) == len(values_orig)
-        values: List[HalideCSEVariable] = []
-        all_used_dims = set()
-        for value in values_orig:
-            assert isinstance(value, HalideCSEVariable) and value.used_dims is not None
-            if value.used_dims and value.used_dims[-1] == "rindex":
-                values.append(value)
-            else:
-                values.append(self.genfunc(f"{value}", [*value.used_dims, "rindex"]))
-            all_used_dims.update(value.used_dims)
-        used_dims = [
-            tree.name for tree in self.range_trees if tree.name in all_used_dims
-        ]
-        result_var = self.newfunc(used_dims)
-        assert result_var.used_dims and result_var.used_dims[-1] == "rindex"
-        prefix = result_var.used_dims[:-1]
-        initial = [
-            f"hl.cast({halide_acc_type(dtype)}, {value})"
-            for dtype, value in zip(dtypes, values)
-        ]
-
-        length = self.kexpr(self.rename_indexing(self.range_trees[-1].numel))
-        scan_dom = self.genfunc(f"hl.RDom([hl.Range(1, {length})])", [])
-        scan = f"{scan_dom}.x"
-
-        if len(values) == 1:
-
-            def maybe_tuple(x):
-                return x[0]
-
-            read_left = [result_var.index_str([*prefix, f"{scan} - 1"])]
-            read_right = [result_var.index_str([*prefix, scan])]
-        else:
-
-            def maybe_tuple(x):
-                return f"hl.Tuple([{', '.join(x)}])"
-
-            read_left = [
-                result_var.index_str([*prefix, f"{scan} - 1"]) + f"[{i}]"
-                for i in range(len(values))
-            ]
-            read_right = [
-                result_var.index_str([*prefix, scan]) + f"[{i}]"
-                for i in range(len(values))
-            ]
-
-        self.body.writeline(f"{result_var} = {maybe_tuple(initial)}")
-
-        # Disable CSE for update fn
-        with V.set_ops_handler(HalideOverrides(MockHandler())):
-            combine_str = combine_fn(read_left, read_right)  # type: ignore[arg-type]
-        self.body.writeline(
-            f"{result_var.index_str([*prefix, scan])} = {maybe_tuple(combine_str)}"
-        )
-
-        if len(values) == 1:
-            return (result_var,)
-
-        unpack_vars = [self.newfunc(used_dims) for _ in values]
-        for i, v in enumerate(unpack_vars):
-            self.body.writeline(f"{v} = {result_var}[{i}]")
-        return tuple(unpack_vars)
 
     def genfunc(
         self, line, used_dims, *, bounds=ValueRanges.unknown()
@@ -1450,10 +1431,7 @@ class HalideKernel(SIMDKernel):
         def update_index(m):
             var = self.cse.varname_map[m.group(1)]
             assert var.used_dims is not None, var
-            if var.used_dims:
-                return str(var)
-            else:
-                return var.name  # a constant doesn't need to be wrapped in func
+            return str(var)
 
         for line in self.body._lines:
             if isinstance(line, str):
@@ -1475,7 +1453,7 @@ class HalideKernel(SIMDKernel):
                 range_hints = []
                 for i, dim in enumerate(dims):
                     hint = self._autoscheduler_workarounds(
-                        V.graph.sizevars.size_hint(dim.size, fallback=1)
+                        V.graph.sizevars.size_hint(dim.size, fallback=1), dims
                     )
                     range_hints.append(f"hl.Range(0, {hint})")
                     if "out" not in arg.name:
@@ -1496,31 +1474,47 @@ class HalideKernel(SIMDKernel):
 
         code.do_unindent(2)
         code.splice(
-            f"""
+            """
             if __name__ == "__main__":
                 hl.main()
-            else:
-                hl.load_plugin({HalideCodeCache.find_libautoschedule(meta.scheduler)!r})
-                target = hl.Target({meta.target!r})
-                autoscheduler = hl.AutoschedulerParams({meta.scheduler!r}, {meta.scheduler_flags!r})
-                with hl.GeneratorContext(target, autoscheduler):
-                    gen = Kernel()
-                    pipeline = gen._build_pipeline()
-                    # gen.compile_to_callable() does not run the autoscheduler
-                    pipeline.apply_autoscheduler(target, autoscheduler)
-                    kernel = pipeline.compile_to_callable([
-                            gen._get_input_parameter(a.name)._to_argument()
-                            for a in gen._get_arginfos()
-                            if a.dir == hl.ArgInfoDirection.Input
-                        ], target)
-            """
+            """.rstrip(),
         )
+        if meta.scheduler:
+            code.splice(
+                f"""
+                else:
+                    hl.load_plugin({HalideCodeCache.find_libautoschedule(meta.scheduler)!r})
+                    target = hl.Target({meta.target!r})
+                    autoscheduler = hl.AutoschedulerParams({meta.scheduler!r}, {meta.scheduler_flags!r})
+                    with hl.GeneratorContext(target, autoscheduler):
+                        gen = Kernel()
+                        pipeline = gen._build_pipeline()
+                        # gen.compile_to_callable() does not run the autoscheduler
+                        pipeline.apply_autoscheduler(target, autoscheduler)
+                        kernel = pipeline.compile_to_callable([
+                                gen._get_input_parameter(a.name)._to_argument()
+                                for a in gen._get_arginfos()
+                                if a.dir == hl.ArgInfoDirection.Input
+                            ], target)
+                """,
+                strip=True,
+            )
+        else:
+            code.splice(
+                f"""
+                  else:
+                      with hl.GeneratorContext(hl.Target({meta.target!r})):
+                          kernel = Kernel().compile_to_callable()
+                  """,
+                strip=True,
+            )
         return code.getvalue()
 
     @staticmethod
-    def _autoscheduler_workarounds(n):
+    def _autoscheduler_workarounds(n, dims):
         if (
-            config.halide.scheduler_cuda == "Anderson2021"
+            len(dims) == 1
+            and config.halide.scheduler_cuda == "Anderson2021"
             and V.graph.scheduler.get_current_device_or_throw().type == "cuda"
         ):
             # workaround https://github.com/halide/Halide/issues/8246
@@ -1562,10 +1556,9 @@ class HalideScheduling(SIMDScheduling):
             [
                 BackendFeature.TUPLE_REDUCTION,
                 BackendFeature.PREFER_STORE_LOOP_ORDER,
+                BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
             ]
         )
-        if config.halide.scan_kernels:
-            result[BackendFeature.SCAN] = None
         return result
 
     def define_kernel(self, src_code, node_schedule, kernel):
