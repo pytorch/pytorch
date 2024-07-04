@@ -399,6 +399,7 @@ static void autogradNotImplementedFallbackImpl(
         // For details see https://github.com/pytorch/pytorch/issues/130073
         if (!is_aliased_output[idx_ret] && t.has_storage() &&
             op_name != "aten::_foreach_norm" &&
+            op_name != "aten::_transformer_encoder_layer_fwd" &&
             op_name != "aten::native_channel_shuffle")
           TORCH_INTERNAL_ASSERT(t.storage().use_count() == 1);
       },
