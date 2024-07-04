@@ -8,7 +8,7 @@ import os
 import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, Dict
 
 from tools.stats.upload_stats_lib import (
     download_s3_artifacts,

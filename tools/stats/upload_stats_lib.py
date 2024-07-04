@@ -15,7 +15,6 @@ import rockset  # type: ignore[import]
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 S3_RESOURCE = boto3.resource("s3")
-DYNAMO_RESOURCE = boto3.resource("dynamodb")
 
 # NB: In CI, a flaky test is usually retried 3 times, then the test file would be rerun
 # 2 more times
@@ -150,7 +149,7 @@ def upload_to_dynamodb(
 ) -> None:
     print(f"Writing {len(docs)} documents to DynamoDB {dynamodb_table}")
     # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/dynamodb.html#batch-writing
-    with DYNAMO_RESOURCE.Table(dynamodb_table).batch_writer() as batch:
+    with boto3.resource("dynamodb").Table(dynamodb_table).batch_writer() as batch:
         for doc in docs:
             if generate_partition_key:
                 doc["dynamoKey"] = generate_partition_key(repo, doc)
