@@ -5,7 +5,7 @@ import itertools
 import re
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Callable, Iterator, Sequence
+from typing import Callable, Iterator, Sequence, Optional
 
 from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
 
@@ -581,7 +581,7 @@ class NativeFunction:
         loc: Location,
         valid_tags: set[str],
         ignore_keys: set[DispatchKey] | None = None,
-        whitelist_keys: Optional[Set[DispatchKey]] = None,
+        whitelist_keys: Optional[set[DispatchKey]] = None,
     ) -> tuple[NativeFunction, dict[DispatchKey, dict[OperatorName, BackendMetadata]]]:
         """
         Parse a NativeFunction from a dictionary as directly parsed
