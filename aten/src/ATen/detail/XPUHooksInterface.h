@@ -11,7 +11,7 @@
 namespace at {
 
 struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
-  virtual ~XPUHooksInterface() = default;
+  ~XPUHooksInterface() override = default;
 
   virtual void initXPU() const {
     TORCH_CHECK(
