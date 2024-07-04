@@ -133,6 +133,8 @@ class TestFullyShardCompile(FSDPTest):
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
 
+    # TODO: add small unit test to show that enforce FSDP comm ordering pass works, by using FSDP AG ops and RS ops (and their associated copy ops)
+
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._functorch.config.patch(recompute_views=True)
     @torch._functorch.config.patch(cse=False)
