@@ -540,20 +540,6 @@ def _setup_standard_sys_libs(
     return cflags, include_dirs, passthough_args
 
 
-@functools.lru_cache
-def _cpp_prefix_path() -> str:
-    from torch._inductor.codecache import write  # TODO
-
-    path = Path(Path(__file__).parent).parent / "codegen/cpp_prefix.h"
-    with path.open() as f:
-        content = f.read()
-        _, filename = write(
-            content,
-            "h",
-        )
-    return filename
-
-
 def _get_build_args_of_chosen_isa(vec_isa: VecISA):
     macros = []
     build_flags = []
@@ -575,7 +561,10 @@ def _get_build_args_of_chosen_isa(vec_isa: VecISA):
     return macros, build_flags
 
 
-def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
+def _get_torch_related_args(
+    include_pytorch: bool, use_absolute_path: bool, aot_mode: bool
+):
+    from torch._inductor.codecache import cpp_prefix_path
     from torch.utils.cpp_extension import _TORCH_PATH, TORCH_LIB_PATH
 
     include_dirs = [
@@ -588,10 +577,25 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
     ]
     libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
-    if sys.platform != "darwin" and not config.is_fbcode():
-        libraries = ["torch", "torch_cpu"]
-        if not aot_mode:
-            libraries.append("torch_python")
+
+    cpp_prefix_include_dir = f"{os.path.dirname(cpp_prefix_path())}"
+
+    if sys.platform == "linux" and (
+        include_pytorch or config.cpp.enable_kernel_profile
+    ):
+        if not config.is_fbcode():
+            libraries = ["torch", "torch_cpu"]
+            if not aot_mode:
+                libraries.append("torch_python")
+        else:
+            if aot_mode:
+                include_dirs.append(cpp_prefix_include_dir)
+    else:
+        if aot_mode:
+            include_dirs.append(cpp_prefix_include_dir)
+
+        if aot_mode and sys.platform == "linux" and not config.is_fbcode():
+            libraries = ["torch", "torch_cpu"]
 
     if _IS_WINDOWS:
         libraries.append("sleef")
@@ -617,19 +621,24 @@ def _get_python_include_dirs():
     return [str(include_dir)]
 
 
-def _get_python_related_args():
+def _get_python_related_args(include_pytorch: bool):
     python_include_dirs = _get_python_include_dirs()
     python_include_path = sysconfig.get_path(
         "include", scheme="nt" if _IS_WINDOWS else "posix_prefix"
     )
+    python_lib_path = []
+
     if python_include_path is not None:
         python_include_dirs.append(python_include_path)
 
     if _IS_WINDOWS:
         python_path = os.path.dirname(sys.executable)
-        python_lib_path = [os.path.join(python_path, "libs")]
+        get_python_lib_path = os.path.join(python_path, "libs")
     else:
-        python_lib_path = [sysconfig.get_config_var("LIBDIR")]
+        get_python_lib_path = sysconfig.get_config_var("LIBDIR")
+
+    if include_pytorch:
+        python_lib_path.append(get_python_lib_path)
 
     if config.is_fbcode():
         python_include_dirs.append(build_paths.python())
@@ -786,9 +795,15 @@ def get_cpp_torch_options(
         torch_include_dirs,
         torch_libraries_dirs,
         torch_libraries,
-    ) = _get_torch_related_args(include_pytorch=include_pytorch, aot_mode=aot_mode)
+    ) = _get_torch_related_args(
+        include_pytorch=include_pytorch,
+        use_absolute_path=use_absolute_path,
+        aot_mode=aot_mode,
+    )
 
-    python_include_dirs, python_libraries_dirs = _get_python_related_args()
+    python_include_dirs, python_libraries_dirs = _get_python_related_args(
+        include_pytorch=include_pytorch
+    )
 
     (
         omp_cflags,
@@ -940,13 +955,7 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     libraries: List[str] = []
     passthough_args: List[str] = []
 
-    if (
-        config.is_fbcode()
-        and "CUDA_HOME" not in os.environ
-        and "CUDA_PATH" not in os.environ
-    ):
-        os.environ["CUDA_HOME"] = build_paths.cuda()
-
+    _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
     include_dirs = cpp_extension.include_paths(cuda)
@@ -971,9 +980,6 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
                     libraries += ["c10_cuda", "cuda", "torch_cuda"]
 
     if aot_mode:
-        cpp_prefix_include_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
-        include_dirs += cpp_prefix_include_dir
-
         if cuda and torch.version.hip is None:
             _transform_cuda_paths(libraries_dirs)
 
@@ -1131,11 +1137,15 @@ class CppBuilder:
         # Code start here, initial self internal veriables firstly.
         self._compiler = BuildOption.get_compiler()
         self._use_absolute_path = BuildOption.get_use_absolute_path()
+        self._aot_mode = BuildOption.get_aot_mode()
 
+        """
         if len(output_dir) == 0:
             self._output_dir = os.path.dirname(os.path.abspath(__file__))
         else:
             self._output_dir = output_dir
+        """
+        self._output_dir = output_dir
 
         self._compile_only = BuildOption.get_compile_only()
         file_ext = (
@@ -1149,7 +1159,7 @@ class CppBuilder:
             sources = [sources]
 
         if config.is_fbcode():
-            if BuildOption.get_aot_mode() and not self._use_absolute_path:
+            if self._aot_mode and not self._use_absolute_path:
                 inp_name = sources
                 # output process @ get_name_and_dir_from_output_file_path
             else:
@@ -1247,10 +1257,16 @@ class CppBuilder:
         )
         return command_line
 
+    def print_config(self):
+        print(
+            f"!!! compile_only:{self._compile_only}, use_absolute_path:{self._use_absolute_path}, aot_mode:{self._aot_mode}"
+        )
+
     def get_target_file_path(self):
         return self._target_file
 
     def build(self) -> Tuple[int, str]:
+        self.print_config()
         """
         It is must need a temperary directory to store object files in Windows.
         After build completed, delete the temperary directory to save disk space.

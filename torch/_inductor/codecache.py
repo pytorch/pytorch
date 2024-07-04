@@ -2399,6 +2399,7 @@ def _do_validate_cpp_commands(
         vec_isa=picked_isa,
         include_pytorch=include_pytorch,
         cuda=test_cuda,
+        aot_mode=aot_mode,
         compile_only=compile_only,
         use_absolute_path=use_absolute_path,
         use_mmap_weights=mmap_weights,
