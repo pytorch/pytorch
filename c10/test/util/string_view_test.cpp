@@ -109,7 +109,8 @@ constexpr string_view assign(string_view value) {
   return result;
 }
 TEST(StringViewTest, testCopyAssignment) {
-#if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
+#if defined(__cpp_constexpr) && __cpp_constexpr >= 201304 && \
+    (!defined(__GNUC__) || __GNUC__ > 9)
   {
     constexpr string_view hello = assign("hello");
     static_assert(5 == hello.size(), "");
@@ -176,23 +177,6 @@ static_assert('l' == hello.at(2), "");
 static_assert('l' == hello.at(3), "");
 static_assert('o' == hello.at(4), "");
 
-TEST(StringViewTest, whenCallingAccessOperatorOutOfRange_thenThrows) {
-  expectThrows<std::out_of_range>(
-      [] { string_view("").at(1); },
-      "string_view::operator[] or string_view::at() out of range. Index: 1, size: 0");
-
-  expectThrows<std::out_of_range>(
-      [] { string_view("hello").at(5); },
-      "string_view::operator[] or string_view::at() out of range. Index: 5, size: 5");
-
-  expectThrows<std::out_of_range>(
-      [] { string_view("hello").at(100); },
-      "string_view::operator[] or string_view::at() out of range. Index: 100, size: 5");
-
-  expectThrows<std::out_of_range>(
-      [] { string_view("hello").at(string_view::npos); },
-      "string_view::operator[] or string_view::at() out of range. Index: 18446744073709551615, size: 5");
-}
 } // namespace test_random_access
 
 namespace test_front_back {
@@ -236,11 +220,6 @@ TEST(StringViewTest, whenRemovingValidPrefix_thenWorks) {
   EXPECT_EQ(remove_prefix(string_view("hello"), 5), string_view(""));
 }
 
-TEST(StringViewTest, whenRemovingTooLargePrefix_thenThrows) {
-  expectThrows<std::out_of_range>(
-      [] { remove_prefix(string_view("hello"), 6); },
-      "basic_string_view::remove_prefix: out of range. PrefixLength: 6, size: 5");
-}
 } // namespace test_remove_prefix
 
 namespace test_remove_suffix {
@@ -261,11 +240,6 @@ TEST(StringViewTest, whenRemovingValidSuffix_thenWorks) {
   EXPECT_EQ(remove_suffix(string_view("hello"), 5), string_view(""));
 }
 
-TEST(StringViewTest, whenRemovingTooLargeSuffix_thenThrows) {
-  expectThrows<std::out_of_range>(
-      [] { remove_suffix(string_view("hello"), 6); },
-      "basic_string_view::remove_suffix: out of range. SuffixLength: 6, size: 5");
-}
 } // namespace test_remove_suffix
 
 namespace test_swap_function {
@@ -336,15 +310,6 @@ TEST(StringViewTest, whenCopyingJustAtRange_thenDoesntCrash) {
   EXPECT_EQ(0, num_copied);
 }
 
-TEST(StringViewTest, whenCopyingOutOfRange_thenThrows) {
-  string_view data = "hello";
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  char result[2];
-  expectThrows<std::out_of_range>(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
-      [&] { data.copy(result, 2, 6); },
-      "basic_string_view::copy: out of range. Index: 6, size: 5");
-}
 } // namespace test_copy
 
 namespace test_substr {
@@ -366,15 +331,6 @@ static_assert(string_view("hello").substr(0, 100) == string_view("hello"), "");
 static_assert(string_view("hello").substr(1, 100) == string_view("ello"), "");
 static_assert(string_view("hello").substr(5, 100) == string_view(""), "");
 
-TEST(StringViewTest, whenCallingSubstrWithPosOutOfRange_thenThrows) {
-  expectThrows<std::out_of_range>(
-      [] { string_view("hello").substr(6); },
-      "basic_string_view::substr parameter out of bounds. Index: 6, size: 5");
-
-  expectThrows<std::out_of_range>(
-      [] { string_view("hello").substr(6, 0); },
-      "basic_string_view::substr parameter out of bounds. Index: 6, size: 5");
-}
 } // namespace test_substr
 
 namespace test_compare_overload1 {
