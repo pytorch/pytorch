@@ -55,7 +55,7 @@ template <> struct Vec2Type<bfloat> {
 };
 #endif
 
-kernel void weight_to_int4pack(constant int *W [[buffer(0)]],
+kernel void weight_to_int4pack(constant uchar *W [[buffer(0)]],
                                device uchar *outputData [[buffer(1)]],
                                constant uint2 &sizes [[buffer(2)]],
                                uint2 thread_index [[thread_position_in_grid]]) {
@@ -63,8 +63,8 @@ kernel void weight_to_int4pack(constant int *W [[buffer(0)]],
   const uint Kdiv2 = sizes.y;
   const uint n = thread_index.x; // 0..N-1
   const uint k = thread_index.y; // 0..Kdiv2-1
-  uint8_t src_val = W[n * Kdiv2 + k];
-  outputData[n * Kdiv2 + k] = (src_val & 0xF << 4) | (src_val >> 4);
+  uchar src_val = W[n * Kdiv2 + k];
+  outputData[n * Kdiv2 + k] = ((src_val & 0xF) << 4) | (src_val >> 4);
 }
 
 /*
