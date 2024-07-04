@@ -2,6 +2,8 @@
 
 import contextlib
 
+import unittest
+
 import numpy as np
 
 import torch
@@ -18,7 +20,9 @@ from torch._inductor.test_operators import realize
 
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.utils._pytree import tree_map
 from torch.utils._sympy.functions import ModularIndexing
 
 if HAS_CUDA:
@@ -170,9 +174,24 @@ class ImplDetailTest(TestCase):
     }
 )
 class LoopOrderingTest(TestCase):
-    def do_acc_test(self, f, *args):
+    def do_acc_test(self, f, *args, cast_fp8=True):
         expect = f(*args)
         actual = torch.compile(f)(*args)
+
+        if cast_fp8:
+
+            def _cast(x):
+                if isinstance(x, torch.Tensor) and x.dtype in (
+                    torch.float8_e5m2,
+                    torch.float8_e4m3fn,
+                ):
+                    return x.to(torch.float32)
+                return x
+
+            # Wordaround the issue that call allclose on fp8 tensor triggers error
+            #   RuntimeError: "mul_cuda" not implemented for 'Float8_e4m3fn'
+            expect = tree_map(_cast, expect)
+            actual = tree_map(_cast, actual)
         self.assertTrue(same(expect, actual, tol=1e-3))
 
     def setUp(self):
@@ -350,6 +369,28 @@ class LoopOrderingTest(TestCase):
 
         x = torch.randn(100)
         self.do_acc_test(f, x)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    @unittest.skipIf(not SM90OrLater, "FP8 requires H100+")
+    def test_fp8_cast_and_t(self):
+        """
+        This test repros the not able to fuses issue in
+        https://github.com/pytorch/pytorch/issues/130015
+        for fp8 cast and transpose
+        """
+
+        def f(x, scale):
+            x = x * scale
+            x = x.clamp(-1 * E4M3_MAX_POS, E4M3_MAX_POS)
+            x = x.to(torch.float8_e4m3fn)
+            x_t = x.t().contiguous().t()
+            return x, x_t
+
+        x = torch.randn(4096, 4096, dtype=torch.bfloat16)
+        scale = torch.Tensor([10.0]).cuda()
+        E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
+
+        self.do_acc_test(f, x, scale)
         self.assertEqual(1, metrics.generated_kernel_count)
 
 

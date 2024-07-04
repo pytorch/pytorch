@@ -17,6 +17,8 @@ import types
 import weakref
 from typing import Any, List, NamedTuple, Optional, Union
 
+from torch._utils_internal import justknobs_check
+
 from torch.utils._sympy.value_ranges import ValueRanges
 
 try:
@@ -1248,15 +1250,22 @@ class VariableBuilder:
             # unspecializing int by default, but still
             # specialize for the following conditions
             if not TracingContext.get().force_unspec_int_unbacked_size_like and (
-                value in self._common_constants()
                 # Assume integers from global variables want to be specialized
-                or not self.source.guard_source().is_local()
+                not self.source.guard_source().is_local()
                 # Assume that integers that came from NN modules want to be
                 # specialized (as we don't expect users to be changing the
                 # NN modules on the fly)
                 or self.source.guard_source().is_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
+                # TODO: Delete this condition when rollout is done.  NB: this
+                # condition never evaluates True in open source
+                or (
+                    not justknobs_check(
+                        "pytorch/dynamo:enable_unspecialize_zero_one_plain_int"
+                    )
+                    and value in self._common_constants()
+                )
             ):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
@@ -1372,6 +1381,13 @@ class VariableBuilder:
             unimplemented(
                 f"torch.compile does not support sparse Tensor with {value.layout} layout"
             )
+
+        # TODO(pearu,sparse-team) - Add the corresponding SPARSE_TENSOR_MATCH guards
+        if is_sparse_any(value) and value.is_sparse and not self.tx.export:
+            # A hot fix for sparse tensors + torch.compile. There is some
+            # support for export + coo tensor. We need to create
+            # SPARSE_TENSOR_GUARDS for guards to work propertly.
+            unimplemented("torch.compile does not support sparse Tensors")
 
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
