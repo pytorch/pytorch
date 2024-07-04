@@ -598,7 +598,7 @@ class TestGenXPUByBackendWhitelist(unittest.TestCase):
             if (is_generic_dispatch_key(k) or str(k) in ["XPU"])
         ]
 
-        static_dispatch_idx: List[BackendIndex] = []
+        static_dispatch_idx: list[BackendIndex] = []
         static_dispatch_idx = []
 
         gen_source_files(

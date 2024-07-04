@@ -7,7 +7,7 @@ import os
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal, Sequence, TypeVar, Optional
+from typing import Any, Callable, Literal, Optional, Sequence, TypeVar
 
 import yaml
 
@@ -146,7 +146,7 @@ def parse_native_yaml_struct(
     es: object,
     valid_tags: set[str],
     ignore_keys: set[DispatchKey] | None = None,
-    whitelist_keys: Optional[Set[DispatchKey]] = None,
+    whitelist_keys: Optional[set[DispatchKey]] = None,
     path: str = "<stdin>",
     skip_native_fns_gen: bool = False,
 ) -> ParsedYaml:
@@ -225,7 +225,7 @@ def parse_native_yaml(
     path: str,
     tags_yaml_path: str,
     ignore_keys: set[DispatchKey] | None = None,
-    whitelist_keys: Optional[Set[DispatchKey]] = None,
+    whitelist_keys: Optional[set[DispatchKey]] = None,
     *,
     skip_native_fns_gen: bool = False,
     loaded_yaml: object | None = None,
@@ -357,8 +357,9 @@ def get_static_dispatch_backend(
 
 
 def static_dispatch_ops_header(
-    f: NativeFunction, backend_index: list[BackendIndex],
-    whitelist_keys: Optional[Set[DispatchKey]] = None,
+    f: NativeFunction,
+    backend_index: list[BackendIndex],
+    whitelist_keys: Optional[set[DispatchKey]] = None,
 ) -> str | None:
     if backend_index is None or f.manual_kernel_registration:
         return None
@@ -1441,7 +1442,7 @@ def get_ns_grouped_kernels(
     *,
     grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
     backend_indices: dict[DispatchKey, BackendIndex],
-    whitelist_keys: Optional[Set[DispatchKey]] = None,
+    whitelist_keys: Optional[set[DispatchKey]] = None,
     native_function_decl_gen: Callable[
         [NativeFunctionsGroup | NativeFunction, BackendIndex], list[str]
     ] = dest.compute_native_function_declaration,
@@ -1501,7 +1502,7 @@ def get_native_function_declarations(
     *,
     grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
     backend_indices: dict[DispatchKey, BackendIndex],
-    whitelist_keys: Optional[Set[DispatchKey]] = None,
+    whitelist_keys: Optional[set[DispatchKey]] = None,
     native_function_decl_gen: Callable[
         [NativeFunctionsGroup | NativeFunction, BackendIndex], list[str]
     ] = dest.compute_native_function_declaration,
@@ -1863,7 +1864,7 @@ def gen_per_operator_headers(
     ops_fm: FileManager,
     functions_keys: set[DispatchKey],
     dispatch_keys: Sequence[DispatchKey],
-    whitelist_keys: Optional[Set[DispatchKey]] = None,
+    whitelist_keys: Optional[set[DispatchKey]] = None,
     rocm: bool,
 ) -> None:
     # For CMake builds, split operator declarations into separate headers in
@@ -2073,7 +2074,7 @@ def gen_headers(
     ops_fm: FileManager,
     dispatch_keys: Sequence[DispatchKey],
     functions_keys: set[DispatchKey],
-    whitelist_keys: Optional[Set[DispatchKey]] = None,
+    whitelist_keys: Optional[set[DispatchKey]] = None,
     rocm: bool,
     per_operator_headers: bool,
 ) -> None:
@@ -2214,7 +2215,7 @@ def gen_source_files(
     cuda_fm: FileManager,
     dispatch_keys: Sequence[DispatchKey],
     functions_keys: set[DispatchKey],
-    whitelist_keys: Optional[Set[DispatchKey]] = None,
+    whitelist_keys: Optional[set[DispatchKey]] = None,
     rocm: bool,
     force_schema_registration: bool,
     per_operator_headers: bool,
