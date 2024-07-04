@@ -285,11 +285,12 @@ def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
     ):
         return input.view(input.shape)
 
-    result = input.new_empty(input.shape)
-    result.view(n, cg, groups, *dhw).copy_(
-        input.reshape(n, groups, cg, *dhw).transpose(1, 2)
+    return (
+        input.reshape(n, groups, cg, *dhw)
+        .transpose(1, 2)
+        .contiguous()
+        .view(input.shape)
     )
-    return result
 
 
 def group_norm(
