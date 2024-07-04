@@ -2177,7 +2177,7 @@ Tensor& put_along_dim_out(const Tensor& self, const Tensor& indices, const Tenso
   checkDevice("torch.put_along_dim():", {self, indices, values}, self.device());
   if (opt_dim.has_value()) {
     auto [new_indices, new_values] = _put_along_dim_helper(self, indices, values, opt_dim.value());
-    at::scatter_out(result, self, opt_dim.value(), indices, values);
+    at::scatter_out(result, self, opt_dim.value(), new_indices, new_values);
   } else {
     TORCH_CHECK(indices.dim() == 1, "when axis=None, `indices` must have a single dimension");
     at::put_out(result, self, indices, values);
