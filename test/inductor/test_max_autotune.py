@@ -673,11 +673,11 @@ class TestMaxAutotune(TestCase):
     def test_conv3d(self):
         fn = torch.nn.functional.conv3d
         image = torch.randn([1, 3, 8, 16, 32])
-        filter = torch.randn([3, 3, 7, 7, 7])
+        filt = torch.randn([3, 3, 7, 7, 7])
 
         with config.patch({"max_autotune": True}):
-            expected = fn(image, filter)
-            actual = torch.compile(fn)(image, filter)
+            expected = fn(image, filt)
+            actual = torch.compile(fn)(image, filt)
             torch.testing.assert_close(actual, expected, atol=6e-5, rtol=0.001)
 
     def test_non_contiguous_input_mm(self):
