@@ -92,6 +92,7 @@ from ..utils import (
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
+    is_wrapper_or_member_descriptor,
     istype,
     odict_values,
     proxy_args_kwargs,
@@ -327,6 +328,7 @@ class VariableBuilder:
         if (
             self._can_lift_attrs_to_inputs(vt)
             and value not in self.tx.output.side_effects
+            and not is_wrapper_or_member_descriptor(value)
         ):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
 
@@ -956,7 +958,12 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, types.GetSetDescriptorType):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            # GetSet descriptors are C functions attached to an attribute lookup
+            # using PyGetSetDef. Python, on attribute lookup, can decide to
+            # create a new object on the fly, and therefore the `id` of the
+            # descriptors is not guaranteed to be same for different attribute
+            # accesses. Since these are unlikely to change during the program
+            # execution, we can skip guarding on them.
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
