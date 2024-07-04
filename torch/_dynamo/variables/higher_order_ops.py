@@ -597,18 +597,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Expected 4 arguments but got {len(args)}.\n"
                 f"Usage: cond(pred, true_fn, false_fn, operands)",
             )
-
-        # Specialize into one of the branches since pred is constant
-        if type(args[0]) is ConstantVariable:
-            log.warning(
-                "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
-                " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool."
-            )
-            if args[0].as_python_constant():
-                return args[1].call_function(tx, args[3].unpack_var_sequence(tx), {})
-            else:
-                return args[2].call_function(tx, args[3].unpack_var_sequence(tx), {})
-
         # predicate
         if type(args[0]) not in (ConstantVariable, TensorVariable, SymNodeVariable):
             unimplemented(
@@ -1494,13 +1482,13 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
 class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @staticmethod
     def normalize_to_args(args, kwargs):
-        # input signature is (query, key, value, score_mod, *other_buffers)
-        # Flatten args and kwargs into lists
-        flat_args = pytree.tree_flatten(args)[0]
+        # input signature is (query, key, value, score_mod, block_mask, *other_buffers),
+        # block_mask is a tuple, and we don't want to flatten it.
+        # only flatten kwargs into lists
         flat_kwargs = pytree.tree_flatten(kwargs)[0]
 
         # Combine the flattened lists
-        all_args = flat_args + flat_kwargs
+        all_args = args + flat_kwargs
         return all_args
 
     def create_wrapped_node(
@@ -1570,10 +1558,21 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        query, key, value, score_mod = self.normalize_to_args(args, kwargs)
+        (
+            query,
+            key,
+            value,
+            score_mod,
+            block_mask,
+        ) = self.normalize_to_args(args, kwargs)
 
         p_args = self.create_wrapped_node(tx, query, score_mod)
-        proxied_args = [query, key, value]
+        proxied_args = [
+            query,
+            key,
+            value,
+            block_mask,
+        ]
 
         # Store the invocation as a call
         # Norm_kwargs contains the score_function and we dont want to proxy this because
@@ -1589,12 +1588,15 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             lse_meta = query_meta.new_empty(logsumexp_shape, dtype=torch.float32)
         example_value = (out_meta, lse_meta)
 
+        # Compose the ordered HOO args from two parts:
+        # - inp_args: [query, key, value, block_mask]
+        # - p_args: [score_mod, *other_buffers]
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
                 self.value,
-                args=inp_args + p_args,
+                args=inp_args[:3] + p_args[:1] + inp_args[3:] + p_args[1:],
                 kwargs={},
             ),
             example_value=example_value,

@@ -1398,6 +1398,7 @@ SYMPY_INTERP = {
     'floor': math.floor,
     'ceiling': math.ceil,
     'FloorToInt': math.floor,
+    'FloatPow': math.pow,
     'CeilToInt': math.ceil,
     'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
     'RoundToInt': builtins.round,
@@ -3440,12 +3441,6 @@ class ShapeEnv:
     ) -> "sympy.Expr":
         """Create a new symbol which is tracked by this ShapeEnv
         """
-        if dynamic_dim is DimDynamic.SIZE_LIKE_UNBACKED:
-            r = self.create_unbacked_symint().node.expr
-            self._constrain_range_for_size(r)
-            # TODO: maybe put the hint somewhere
-            return r
-
         # check if constraint_dim is actually static integer
         if isinstance(constraint_dim, StrictMinMaxConstraint) and constraint_dim.vr.lower == constraint_dim.vr.upper:
             dynamic_dim = DimDynamic.STATIC
@@ -3469,6 +3464,14 @@ class ShapeEnv:
                 and source_name
                 and (source_name in symbolic_context.shape_env_to_source_to_symbol_cache[id(self)])):
             return symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name]
+
+        if dynamic_dim is DimDynamic.SIZE_LIKE_UNBACKED:
+            out = self.create_unbacked_symint().node.expr
+            self._constrain_range_for_size(out)
+            # TODO: maybe put the hint somewhere
+            if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
+                symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name] = out
+            return out
 
         if do_not_specialize_zero_one:
             specialize_zero_one = False
@@ -4734,6 +4737,10 @@ class ShapeEnv:
                 self.var_to_range[symbol] = new
                 self.log.debug("_update_var_to_range %s = %s (update)", symbol, new)
 
+        if (v := self.var_to_val.get(symbol)) is not None:
+            r = self.var_to_range[symbol]
+            assert v in r, f"{v} not in {r}"
+
     def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str) -> None:
         """
         Adds or updates a replacement for a symbol.
@@ -5115,6 +5122,17 @@ class ShapeEnv:
     @record_shapeenv_event(save_tracked_fakes=True)
     def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None,
                       expect_rational=True, size_oblivious: bool = False, *, forcing_spec: bool = False):
+        try:
+            return self._evaluate_expr(orig_expr, hint, fx_node, expect_rational, size_oblivious, forcing_spec=forcing_spec)
+        except Exception:
+            self.log.warning(
+                "failed during evaluate_expr(%s, hint=%s, expect_rational=%s, size_oblivious=%s, forcing_spec=%s",
+                orig_expr, hint, expect_rational, size_oblivious, forcing_spec
+            )
+            raise
+
+    def _evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None,
+                       expect_rational=True, size_oblivious: bool = False, *, forcing_spec: bool = False):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
