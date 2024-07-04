@@ -235,7 +235,6 @@ class CausalBias(torch.Tensor):
                     is_causal=True,  # TODO: Flash accepts causal = True and for this particular op it means lower right
                     return_debug_mask=False,
                     scale=og_scale,
-                    enable_gqa=enable_gqa,
                 )[0]
                 return _postprocess_flash_output(out, og_head_size)
             if can_use_efficient_attention(sdpa_params):
