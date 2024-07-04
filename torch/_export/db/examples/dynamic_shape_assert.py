@@ -13,6 +13,6 @@ class DynamicShapeAssert(torch.nn.Module):
         assert x.shape[0] > 1
         return x
 
-example_inputs = (torch.randn(3, 2),)
+example_args = (torch.randn(3, 2),)
 tags = {"python.assert"}
 model = DynamicShapeAssert()
