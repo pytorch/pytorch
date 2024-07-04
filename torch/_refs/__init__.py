@@ -2207,10 +2207,7 @@ def _make_copy_from_view(fn):
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
     aten_fn = getattr(aten, fn.__name__)
-    if not hasattr(aten_fn, "__annotations__"):
-        aten_fn.__annotations__ = dict(fn.__annotations__)
-
-    fn = out_wrapper()(aten_fn)
+    fn = out_wrapper(annotations=dict(fn.__annotations__))(aten_fn)
 
     @wraps(fn)
     def _fn(*args, out=None, **kwargs):
