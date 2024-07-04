@@ -358,7 +358,7 @@ def flex_attention(
     Where:
         - ``score``: A scalar tensor representing the attention score,
           with the same data type and device as the query, key, and value tensors.
-        - ``batch``, ``head``, ``token_q``, ``token_kv``: Scalar tensors indicating
+        - ``b``, ``h``, ``q_idx``, ``kv_idx``: Scalar tensors indicating
           the batch index, head index, query index, and key/value index, respectively.
           These should have the ``torch.int`` data type and be located on the same device as the score tensor.
 
@@ -422,6 +422,9 @@ def flex_attention(
                 )
                 return out
 
+# Shim for some temporary BC
+_flex_attention = flex_attention
+_create_block_mask = create_block_mask
 
 """Some common used score_mod functions for flex_attention in PyTorch."""
 
