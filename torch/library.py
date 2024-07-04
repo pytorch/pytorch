@@ -49,6 +49,14 @@ def fallthrough_kernel():
     raise NotImplementedError("fallthrough_kernel() should never be called.")
 
 
+def Schema(name: str, function: Callable, mutates_args=()) -> str:
+    from torch._library.infer_schema import infer_schema
+
+    schema_str = infer_schema(function, mutates_args)
+    schema_str = name + schema_str
+    return schema_str
+
+
 class Library:
     """
     A class to create libraries that can be used to register new operators or
