@@ -1518,6 +1518,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         bhmn = [create_scalar() for _ in range(4)]
+        # Create 5 dummy nodes to be used for speculate_subgraph.
         new_args = [score, *bhmn]
 
         with TransformGetItemToIndex():
@@ -1530,14 +1531,27 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 score_function,
                 new_args,
                 {},  # expect only args no kwargs for now
-                description="flex_attention",
+                description="score_mod",
                 source_target=self.value,
                 set_subgraph_inputs="flatten_manual",
             )
 
+        # Remove the last 5 dummy "new_empty" nodes from the graph.
+        count = 0
+        for node in reversed(tx.output.graph.nodes):
+            if count >= 5:
+                break
+            if (
+                node.op == "call_method"
+                and node.target == "new_empty"
+                and len(node.users) == 0
+            ):
+                tx.output.graph.erase_node(node)
+                count += 1
+
         body_name = add_subgraph(
             tx,
-            "flex_attention",
+            "score_mod",
             torch.fx.GraphModule(tx.output.nn_modules, body_graph),
         )
 
