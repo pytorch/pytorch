@@ -47,7 +47,6 @@ def main():
     df = df[functools.reduce(operator.or_, [df[f] != 0 for f in fields])]
 
     prefix = prefix.strip("_") or "output"
-    assert args.output or prefix
     output = args.output or f"{prefix}.csv"
     print(f"Writing {output}")
     df.to_csv(output, index=False)
