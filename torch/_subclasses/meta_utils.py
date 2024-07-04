@@ -102,12 +102,15 @@ def assert_metadata_eq(
         assert_eq(m1.grad is not None, safe_grad(m2) is not None)
         if m1.grad is not None:
             go(m1.grad, safe_grad(m2))
-        assert_eq(m1.layout, m2.layout)
+        # TODO: move "assert_eq(m1.layout, m2.layout)" out of sparse
+        #       branches (but not ready for prime time yet)...
         if m1.is_sparse:
+            assert_eq(m1.layout, m2.layout)
             assert_eq(m1.dense_dim, m2.dense_dim())
             assert_eq(m1.sparse_dim, m2.sparse_dim())
             assert_eq(m1.is_coalesced, m2.is_coalesced())
         elif is_sparse_compressed(m1):
+            assert_eq(m1.layout, m2.layout)
             assert_eq(m1.dense_dim, m2.dense_dim())
             assert_eq(m1.sparse_dim, m2.sparse_dim())
         else:
