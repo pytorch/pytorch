@@ -15,7 +15,14 @@ from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
-from ..utils import check_constant_args, get_first_attr, identity, istype, make_cell
+from ..utils import (
+    check_constant_args,
+    get_first_attr,
+    identity,
+    is_wrapper_or_member_descriptor,
+    istype,
+    make_cell,
+)
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 
@@ -597,14 +604,7 @@ class SkipFunctionVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        if not isinstance(
-            value,
-            (
-                types.MethodWrapperType,
-                types.WrapperDescriptorType,
-                types.MemberDescriptorType,
-            ),
-        ):
+        if not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip
             # guarding them.
