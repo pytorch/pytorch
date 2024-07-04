@@ -257,10 +257,19 @@ def _create_mask(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None))
-    with TransformGetItemToIndex():
-        out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
-    mask = torch.where(torch.isinf(out), False, True)
+    out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
+    mask = torch.where(torch.isneginf(out), False, True)
     return mask
+
+
+# Done as a workaround around torch.compile not compiling what we want in the
+# presence of the torchfunctionmdoe
+def _create_block_mask_inner(
+    score_mod, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
+):
+    mask = _create_mask(score_mod, B, H, M, N, device)
+    block_mask = _create_block_mask_from_mask(mask, KV_BLOCK_SIZE, Q_BLOCK_SIZE)
+    return block_mask
 
 
 def _create_block_mask(
@@ -272,6 +281,7 @@ def _create_block_mask(
     device: str = "cuda",
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
+    _compiled=False,
 ):
     r"""This function creates a block mask tuple from a score_mod function.
 
@@ -289,9 +299,13 @@ def _create_block_mask(
         block_mask (tuple): A tuple of (kv_num_blocks, kv_indices, q_num_blocks, q_indices,
                             KV_BLOCK_SIZE, Q_BLOCK_SIZE) which represents the block mask.
     """
-    mask = _create_mask(score_mod, B, H, M, N, device)
-    block_mask = _create_block_mask_from_mask(mask, KV_BLOCK_SIZE, Q_BLOCK_SIZE)
-    return block_mask
+    inner_func = _create_block_mask_inner
+    # This is kind of a temporary hack to workaround some issues
+    if _compiled:
+        inner_func = torch.compile(inner_func)
+
+    with TransformGetItemToIndex():
+        return inner_func(score_mod, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE)
 
 
 """

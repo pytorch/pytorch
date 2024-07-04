@@ -159,6 +159,10 @@ class ConstantFolder(torch.fx.Interpreter):
         ):
             return self.unknown_value
 
+        # This value is at least 1 GB
+        if node.meta["val"].numel() > 2**30:
+            return self.unknown_value
+
         out = super().run_node(node)
 
         if node.op != "get_attr" and isinstance(out, torch.Tensor):

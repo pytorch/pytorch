@@ -933,6 +933,17 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             self.assertTrue((ref - out).abs().mean() < 1e-2)
 
     @supported_platform
+    def test_make_block_mask(self):
+        def causal_mask(score, b, h, q_idx, kv_idx):
+            return torch.where(q_idx >= kv_idx, score, -float("inf"))
+
+        block_mask_a = _create_block_mask(causal_mask, 1, 1, 512, 512, _compiled=True)
+        block_mask_b = _create_block_mask(causal_mask, 1, 1, 512, 512, _compiled=False)
+        self.assertEqual(block_mask_a.kv_num_blocks, block_mask_b.kv_num_blocks)
+        self.assertEqual(block_mask_a.kv_indices, block_mask_b.kv_indices)
+        self.assertEqual(block_mask_a.q_num_blocks, block_mask_b.q_num_blocks)
+
+    @supported_platform
     def test_epilogue_fused(self):
         @torch.compile
         def f(q, k, v):
