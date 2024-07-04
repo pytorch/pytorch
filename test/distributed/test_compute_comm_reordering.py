@@ -314,21 +314,27 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     def test_grouped_scheduler_node(self):
         def func(a, *, tag, ranks, group_size):
             add = a + a
-            ar = _functional_collectives.all_reduce(add, "sum", ranks, tag)
-            # Normally, we would fuse this into `add = a + a`,
-            # but here in this unit test, we intentionally put `add` and `ar` computation
+            div = add / a
+            ar = _functional_collectives.all_reduce(div, "sum", ranks, tag)
+            # Normally, we would fuse `add = a + a`, `div = add / a` and `mul = a * a` together into a single fused op,
+            # but here in this unit test, we intentionally put `add`, `div` and `ar` computation
             # into a GroupedSchedulerNode, which prevents them from being fused with any other ops.
-            c = a * a
-            d = torch.matmul(c, ar)
-            return (d,)
+            mul = a * a
+            mm = torch.matmul(mul, ar)
+            return (mm,)
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-            FileCheck().check("triton_poi_fused_add").check(
-                "_c10d_functional.all_reduce_"
-            ).check("triton_poi_fused_mul").run(code)
+            # A few expectations:
+            # 1. `add = a + a` and `div = add / a` are still fused, which means fusion
+            #    still happens among nodes within a GroupedSchedulerNode.
+            # 2. `mul = a * a` is not fused with `add` or `div`, because the latter two are within
+            #    GroupedSchedulerNode and thus are prevented from being fused with any outside ops.
+            FileCheck().check("triton_poi_fused_add_div_0.").check(
+                "_c10d_functional.all_reduce_."
+            ).check("triton_poi_fused_mul_1.").run(code)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
