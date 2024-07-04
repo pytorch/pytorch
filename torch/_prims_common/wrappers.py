@@ -214,7 +214,7 @@ def out_wrapper(
     annotations: Optional[Dict] = None,
     exact_dtype: bool = False,
     pass_is_out: bool = False,
-    preserve_memory_format = False,
+    preserve_memory_format: bool = False,
 ):
     # The wrapped function needs to convert the output parameters to ensure
     # compatibility between the Python API (which always uses "out" as the
