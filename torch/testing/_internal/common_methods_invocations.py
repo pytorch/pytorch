@@ -2998,6 +2998,7 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
         make_arg((S, S)), gather_variable((S, S // 2), 0, S, True, device=device))
 
 
+
 def error_inputs_aminmax_amax_amin(op_info, device, is_ref=False, **kwargs):
 
     # Error Inputs for zero-dim tensors, when 'dim' arg is not provided.
@@ -5325,6 +5326,20 @@ def sample_inputs_put(op_info, device, dtype, requires_grad, **kwargs):
                           args=(idx.clone(),
                                 src.clone().requires_grad_(requires_grad),
                                 acc))
+
+def sample_inputs_put_along_dim(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
+    make_idx = partial(make_tensor, low=0, high=2, dtype=torch.int64, device=device, requires_grad=False)
+
+    test_cases = [  # input shape, index shape, values shape, dim
+        ((2, 3), (2, 1), (2, 1), 1),
+        ((2, 3), (2, 1), (2, 1), 0),
+    ]
+    for input_shape, index_shape, value_shape, dim in test_cases:
+        input_t = make_arg(input_shape)
+        index_t = make_idx(index_shape)
+        value_t = make_arg(value_shape)
+        yield SampleInput(input_t, index_t, value_t, dim)
 
 def sample_inputs_take(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -16815,6 +16830,10 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            check_batched_gradgrad=False,  # vmap complains of the sizes
            sample_inputs_func=sample_inputs_put),
+    OpInfo('put_along_dim',
+            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+            supports_out=True,
+            sample_inputs_func=sample_inputs_put_along_dim),
     BinaryUfuncInfo('float_power',
                     ref=np.float_power,
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
