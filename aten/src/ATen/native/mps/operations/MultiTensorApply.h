@@ -82,7 +82,11 @@ struct FusedAdamEncodingFunctor {
   }
 };
 
-struct FusedSgdEncodingFunctor {
+template <bool momentum>
+struct FusedSgdEncodingFunctor {};
+
+template <>
+struct FusedSgdEncodingFunctor<true> {
   void operator()(
     id<MTLComputeCommandEncoder>& computeEncoder,
       id<MTLBuffer>& tensorArgumentBuffer,
@@ -150,6 +154,54 @@ struct FusedSgdEncodingFunctor {
       [computeEncoder setBytes:&nesterov_lv length:sizeof(uint8_t) atIndex:6];
       [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
       [computeEncoder setBytes:&is_first_step_lv length:sizeof(uint8_t) atIndex:8];
+  }
+};
+
+template <>
+struct FusedSgdEncodingFunctor<false> {
+  void operator()(
+    id<MTLComputeCommandEncoder>& computeEncoder,
+      id<MTLBuffer>& tensorArgumentBuffer,
+      const MetadataArguments& metadata_arguments,
+      const double weight_decay,
+      const double lr,
+      const bool maximize
+    ) const {
+      float weight_decay_lv = weight_decay;
+      float lr_lv = lr;
+      uint8_t maximize_lv = maximize;
+
+      [computeEncoder setBuffer:tensorArgumentBuffer
+                                  offset:0
+                                  atIndex:0];
+      [computeEncoder setBytes:&metadata_arguments
+                                  length:sizeof(MetadataArguments)
+                                  atIndex:1];
+      [computeEncoder setBytes:&weight_decay_lv length:sizeof(float) atIndex:2];
+      [computeEncoder setBytes:&lr_lv length:sizeof(float) atIndex:3];
+      [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:4];
+  }
+
+  void operator()(
+    id<MTLComputeCommandEncoder>& computeEncoder,
+      id<MTLBuffer>& tensorArgumentBuffer,
+      const MetadataArguments& metadata_arguments,
+      const double weight_decay,
+      const at::Tensor& lr,
+      const bool maximize
+    ) const {
+      float weight_decay_lv = weight_decay;
+      uint8_t maximize_lv = maximize;
+
+      [computeEncoder setBuffer:tensorArgumentBuffer
+                                  offset:0
+                                  atIndex:0];
+      [computeEncoder setBytes:&metadata_arguments
+                                  length:sizeof(MetadataArguments)
+                                  atIndex:1];
+      [computeEncoder setBytes:&weight_decay_lv length:sizeof(float) atIndex:2];
+      [computeEncoder setBuffer:getMTLBufferStorage(lr) offset:lr.storage_offset() * lr.element_size() atIndex:3];
+      [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:4];
   }
 };
 
