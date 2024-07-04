@@ -1475,7 +1475,8 @@ class RuntimeAssert:
 
 # Used for printing SymExprs in compile_fx
 class SymExprPrinter(StrPrinter):
-    pass
+    def _print_Float(self, expr):
+        return str(float(expr))
 
 
 class ShapeGuardPrinter(SymExprPrinter):
