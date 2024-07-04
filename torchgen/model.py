@@ -5,7 +5,7 @@ import itertools
 import re
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Callable, Iterator, Sequence, Optional
+from typing import Callable, Iterator, Optional, Sequence
 
 from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
 
