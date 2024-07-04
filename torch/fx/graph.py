@@ -1348,15 +1348,6 @@ class Graph:
         assert isinstance(kwargs, dict)
         result_node = self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
         result_node.meta = copy.copy(node.meta)
-        NUMERIC_DEBUG_HANDLE_KEY = "_numeric_debug_handle"
-        if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
-            numeric_debug_handle = node.meta[NUMERIC_DEBUG_HANDLE_KEY]
-            for k, v in dict(numeric_debug_handle).items():
-                if k == "output":
-                    result_node.meta[NUMERIC_DEBUG_HANDLE_KEY][k] = v
-                else:
-                    result_node.meta[NUMERIC_DEBUG_HANDLE_KEY][arg_transform(k)] = v
-
         return result_node
 
     @compatibility(is_backward_compatible=True)

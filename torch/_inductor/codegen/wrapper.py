@@ -575,18 +575,25 @@ class WrapperCodeGen(CodeGen):
 
     @cache_on_self
     def write_triton_header_once(self) -> None:
-        import_str = """
+        import_str = f"""
             import triton
             import triton.language as tl
-            from {} import grid, split_scan_grid, start_graph, end_graph
-            {}
-            """.format(
-            triton_heuristics.__name__,
-            V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"),
-        )
+            from {triton_heuristics.__name__} import grid, split_scan_grid, start_graph, end_graph
+            """
         self.header.splice(import_str)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.splice(import_str)
+        self.write_get_raw_stream_header_once()
+
+    @cache_on_self
+    def write_get_raw_stream_header_once(self) -> None:
+        self.header.writeline(
+            V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+        )
+        if config.triton.autotune_at_compile_time:
+            self.kernel_autotune_calls.writeline(
+                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+            )
 
     def add_meta_once(self, meta: TritonMetaParams) -> str:
         meta = repr(meta)
@@ -659,7 +666,7 @@ class WrapperCodeGen(CodeGen):
     # that stream caching happens per graph instance. this
     # is important for nested subgraph codegening.
     def write_get_raw_stream(self, device_idx: int, graph=None) -> str:
-        self.write_triton_header_once()
+        self.write_get_raw_stream_header_once()
         name = f"stream{device_idx}"
         self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
@@ -714,6 +721,9 @@ class WrapperCodeGen(CodeGen):
         self.generate_extern_kernel_alloc(fallback_kernel, args)
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
+        # If it's a NoneLayout then the extern_kernel should essentially be
+        # treated as if it doesn't return anything
+        no_return = isinstance(extern_kernel.layout, ir.NoneLayout)
         output_name = extern_kernel.get_name()
         origin_node = extern_kernel.get_origin_node()
         kernel_name = extern_kernel.get_kernel_name()
@@ -722,18 +732,22 @@ class WrapperCodeGen(CodeGen):
             # view operation fallbacks cause issues since inductor
             # doesn't know the memory is still needed and might reuse it.
             ending = f".clone(){ending}"
-        self.writeline(
-            f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
-        )
-        if (
-            self.supports_intermediate_hooks
-            and config.generate_intermediate_hooks
-            and origin_node is not None
-        ):
-            counters["inductor"]["intermediate_hooks"] += 1
+
+        if no_return:
+            self.writeline(f"{self.declare}{kernel_name}({', '.join(args)}){ending}")
+        else:
             self.writeline(
-                f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
+                f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
             )
+            if (
+                self.supports_intermediate_hooks
+                and config.generate_intermediate_hooks
+                and origin_node is not None
+            ):
+                counters["inductor"]["intermediate_hooks"] += 1
+                self.writeline(
+                    f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
+                )
 
     def generate_extern_kernel_out(
         self, kernel: str, out: str, out_view: Optional[str], args: List[str]
@@ -1481,7 +1495,7 @@ class WrapperCodeGen(CodeGen):
             elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
                 return str(arg)
             else:
-                return pexpr(V.graph.sizevars.simplify(arg))
+                return self.expr_printer(V.graph.sizevars.simplify(arg))
 
         call_args = [wrap_arg(arg) for arg in call_args]
 
@@ -1570,6 +1584,7 @@ class WrapperCodeGen(CodeGen):
             call_args_str = ", ".join(call_args_str)
             stream_name = self.write_get_raw_stream(device_index, V.graph)
             if triton:
+                self.write_triton_header_once()
                 if grid is None:
                     grid_str = grid_fn
                 else:
@@ -1718,7 +1733,7 @@ class WrapperCodeGen(CodeGen):
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
 
-    def make_buffer_reuse(self, old, new, delete_old: bool):
+    def make_buffer_reuse(self, old: ir.Buffer, new: ir.Buffer, delete_old: bool):
         assert old.get_dtype() == new.get_dtype()
         old_name = old.get_name()
         new_name = new.get_name()
@@ -1747,14 +1762,14 @@ class WrapperCodeGen(CodeGen):
             )
         )
 
-    def codegen_allocation(self, buffer):
+    def codegen_allocation(self, buffer: ir.Buffer):
         name = buffer.get_name()
 
         if name in V.graph.removed_buffers or name in self.allocated:
             return
         self.allocated.add(name)
         if isinstance(
-            buffer,
+            buffer.get_defining_op(),
             (ir.ExternKernelAlloc, ir.MultiOutput),
         ):
             return
@@ -1762,21 +1777,21 @@ class WrapperCodeGen(CodeGen):
         layout = buffer.get_layout()
         if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
             return
+        if isinstance(layout, ir.NoneLayout):
+            return
         if isinstance(layout, ir.NonOwningLayout):
             assert isinstance(
                 layout.view, ir.ReinterpretView
             ), f"unexpected {type(layout.view)}: {layout.view}"
-            self.codegen_allocation(layout.view.data)
+            assert isinstance(layout.view.data, ir.StorageBox), type(layout.view.data)
+            assert isinstance(layout.view.data.data, ir.Buffer), type(layout.view.data)
+            self.codegen_allocation(layout.view.data.data)
             self.codegen_deferred_allocation(name, layout)
             return
 
         self.writeline(AllocateLine(self, buffer))
 
     def codegen_free(self, buffer):
-        assert (
-            buffer.get_workspace_size() == 0
-        ), "Only support zero workspace size for now!"
-
         name = buffer.get_name()
 
         # can be freed but not reused
@@ -1812,7 +1827,7 @@ class WrapperCodeGen(CodeGen):
             and self.reuses[buffer.get_name()] == reused_buffer.get_name()
         )
 
-    def codegen_inplace_reuse(self, input_buffer, output_buffer):
+    def codegen_inplace_reuse(self, input_buffer: ir.Buffer, output_buffer: ir.Buffer):
         assert buffer_reuse_key(input_buffer) == buffer_reuse_key(output_buffer)
         self.codegen_allocation(input_buffer)
         self.freed.add(input_buffer.get_name())
