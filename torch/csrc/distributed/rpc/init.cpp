@@ -19,9 +19,7 @@
 #include <pybind11/chrono.h>
 #include <pybind11/operators.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 namespace {
 
@@ -857,6 +855,4 @@ PyMethodDef* python_functions() {
   return methods;
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
