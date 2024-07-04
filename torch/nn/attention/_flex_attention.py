@@ -45,7 +45,7 @@ def _identity(
 _DEFAULT_SPARSE_BLOCK_SIZE = 128
 
 
-class _BlockMask:
+class BlockMask:
     kv_num_blocks: torch.Tensor
     kv_indices: torch.Tensor
     q_num_blocks: torch.Tensor
@@ -163,7 +163,7 @@ class _BlockMask:
         return vis
 
 
-def broadcast_to_dim(x, dim):
+def _broadcast_to_dim(x, dim):
     while x.dim() < dim:
         x = x.unsqueeze(0)
     return x
@@ -175,7 +175,7 @@ def _convert_mask_to_block_mask(
     Q_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
 ):
     assert mask.dtype == torch.bool
-    mask = broadcast_to_dim(mask, 4)
+    mask = _broadcast_to_dim(mask, 4)
     B, H, Q, KV = mask.shape
     assert Q % Q_BLOCK_SIZE == 0
     assert KV % KV_BLOCK_SIZE == 0
@@ -207,7 +207,7 @@ def _create_block_mask_from_mask(
     mask: torch.Tensor,
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
-) -> _BlockMask:
+) -> BlockMask:
     block_mask = _convert_mask_to_block_mask(
         mask, KV_BLOCK_SIZE=KV_BLOCK_SIZE, Q_BLOCK_SIZE=Q_BLOCK_SIZE
     )
@@ -218,7 +218,7 @@ def _create_block_mask_from_mask(
     q_indices = torch.argsort(block_mask, dim=2, descending=True, stable=True).permute(
         0, 1, 3, 2
     )
-    return _BlockMask(
+    return BlockMask(
         kv_num_blocks=kv_num_blocks.to(torch.int32).to(mask.device).contiguous(),
         kv_indices=kv_indices.to(torch.int32).to(mask.device).contiguous(),
         q_num_blocks=q_num_blocks.to(torch.int32).to(mask.device).contiguous(),
@@ -272,7 +272,7 @@ def _create_block_mask_inner(
     return block_mask
 
 
-def _create_block_mask(
+def create_block_mask(
     score_mod: _score_mod_signature,
     B: int,
     H: int,
@@ -316,11 +316,11 @@ def _create_block_mask(
 """
 
 
-def _create_empty_block_mask(query, key, value) -> _BlockMask:
+def _create_empty_block_mask(query, key, value) -> BlockMask:
     device = query.device
     kv_len = key.size()[-2]
     q_len = query.size()[-2]
-    return _BlockMask(
+    return BlockMask(
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
         q_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
@@ -330,12 +330,12 @@ def _create_empty_block_mask(query, key, value) -> _BlockMask:
     )
 
 
-def _flex_attention(
+def flex_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: _score_mod_signature = _identity,
-    block_mask: Optional[_BlockMask] = None,
+    block_mask: Optional[BlockMask] = None,
 ) -> torch.Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
