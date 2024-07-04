@@ -33,7 +33,6 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
 }
 } // namespace testutils
 
-using testutils::expectThrows;
 using testutils::string_equal;
 
 namespace test_typedefs {

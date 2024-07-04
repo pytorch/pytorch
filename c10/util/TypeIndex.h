@@ -93,7 +93,7 @@ inline constexpr string_view extract(
     string_view str) {
 #if !defined(__CUDA_ARCH__) // CUDA doesn't like std::logic_error in device code
   return (!str.starts_with(prefix) || !str.ends_with(suffix))
-      ? string_view("Invalid pattern")
+      ? (throw std::logic_error("Invalid pattern"), string_view())
       : str.substr(prefix.size(), str.size() - prefix.size() - suffix.size());
 #else
   return str.substr(prefix.size(), str.size() - prefix.size() - suffix.size());
@@ -110,7 +110,7 @@ inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() 
       __FUNCSIG__);
 #else
   return extract(
-      "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<",
+      "class c10::basic_string_view<char,struct std::char_traits<char> > __cdecl c10::util::detail::fully_qualified_type_name_impl<",
       ">(void)",
       __FUNCSIG__);
 #endif
