@@ -3,7 +3,7 @@ import inspect
 import warnings
 from functools import wraps
 
-from typing import Callable, NamedTuple, Optional, overload, Sequence, Tuple
+from typing import Callable, Dict, NamedTuple, Optional, overload, Sequence, Tuple
 
 import torch
 import torch._prims_common as utils
@@ -211,9 +211,10 @@ def _safe_copy_out(
 
 def out_wrapper(
     *out_names: str,
+    annotations: Optional[Dict] = None,
     exact_dtype: bool = False,
     pass_is_out: bool = False,
-    preserve_memory_format=False,
+    preserve_memory_format = False,
 ):
     # The wrapped function needs to convert the output parameters to ensure
     # compatibility between the Python API (which always uses "out" as the
@@ -325,7 +326,11 @@ def out_wrapper(
             parameters=params, return_annotation=return_type  # type: ignore[arg-type]
         )
 
-        _fn.__annotations__ = dict(fn.__annotations__)
+        if annotations is None:
+            _fn.__annotations__ = dict(fn.__annotations__)
+        else:
+            _fn.__annotations__ = annotations
+
         _fn.__annotations__["out"] = out_type
         _fn.__annotations__["return"] = return_type
 
