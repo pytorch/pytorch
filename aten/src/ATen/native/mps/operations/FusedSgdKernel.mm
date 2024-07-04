@@ -38,7 +38,7 @@ static void _fused_sgd_with_momentum_kernel_mps_(at::TensorList params,
   multi_tensor_apply_for_fused_optimizer<3, 512>(kernel_name,
                                                  tensor_lists,
                                                  state_steps,
-                                                 mps::FusedSgdEncodingFunctor<true>(),
+                                                 mps::FusedSgdEncodingFunctor<true /*momentum*/>(),
                                                  weight_decay,
                                                  momentum,
                                                  lr,
@@ -72,7 +72,7 @@ static void _fused_sgd_with_momentum_kernel_mps_(at::TensorList params,
   multi_tensor_apply_for_fused_optimizer<3, 512>(kernel_name,
                                                  tensor_lists,
                                                  state_steps,
-                                                 mps::FusedSgdEncodingFunctor<true>(),
+                                                 mps::FusedSgdEncodingFunctor<true /*momentum*/>(),
                                                  weight_decay,
                                                  momentum,
                                                  lr_tensor,
@@ -125,8 +125,13 @@ void _fused_sgd_kernel_mps_(at::TensorList params,
 
   at::TensorList state_steps;
 
-  multi_tensor_apply_for_fused_optimizer<2, 512>(
-      kernel_name, tensor_lists, state_steps, mps::FusedSgdEncodingFunctor<false>(), weight_decay, lr, maximize);
+  multi_tensor_apply_for_fused_optimizer<2, 512>(kernel_name,
+                                                 tensor_lists,
+                                                 state_steps,
+                                                 mps::FusedSgdEncodingFunctor<false /*momentum*/>(),
+                                                 weight_decay,
+                                                 lr,
+                                                 maximize);
 }
 
 void _fused_sgd_kernel_mps_(at::TensorList params,
@@ -187,8 +192,13 @@ void _fused_sgd_kernel_mps_(at::TensorList params,
 
   at::TensorList state_steps;
 
-  multi_tensor_apply_for_fused_optimizer<2, 512>(
-      kernel_name, tensor_lists, state_steps, mps::FusedSgdEncodingFunctor<false>(), weight_decay, lr_tensor, maximize);
+  multi_tensor_apply_for_fused_optimizer<2, 512>(kernel_name,
+                                                 tensor_lists,
+                                                 state_steps,
+                                                 mps::FusedSgdEncodingFunctor<false /*momentum*/>(),
+                                                 weight_decay,
+                                                 lr_tensor,
+                                                 maximize);
 }
 
 } // namespace at::native
