@@ -17,6 +17,8 @@ import types
 import weakref
 from typing import Any, List, NamedTuple, Optional, Union
 
+from torch._utils_internal import justknobs_check
+
 from torch.utils._sympy.value_ranges import ValueRanges
 
 try:
@@ -69,6 +71,7 @@ from ..source import (
     OptimizerSource,
     RandomValueSource,
     Source,
+    SubclassAttrListSource,
     TupleIteratorGetItemSource,
 )
 from ..trace_rules import (
@@ -276,8 +279,10 @@ class BackwardStateGraphArg(GraphArg):
 
     def reconstruct(self, codegen):
         assert codegen.tx.output.backward_state_var
-        codegen.load_import_from(BackwardState.__module__, "BackwardState")
-        codegen.call_function(0, True)
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(BackwardState.__module__, "BackwardState")
+        )
+        codegen.call_function(0, False)
         codegen.dup_top()
         codegen.store(codegen.tx.output.backward_state_var)
 
@@ -954,7 +959,10 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MethodWrapperType):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            # Method-wrappers are written in C, and they are not guaranteed to
+            # return the same object on attribute lookup. Therefore, we cannot
+            # insert a FUNCTION_MATCH guard here. method-wrappers are very
+            # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
             if value in (torch.utils.hooks.BackwardHook, torch.nn.Parameter):
@@ -1242,15 +1250,22 @@ class VariableBuilder:
             # unspecializing int by default, but still
             # specialize for the following conditions
             if not TracingContext.get().force_unspec_int_unbacked_size_like and (
-                value in self._common_constants()
                 # Assume integers from global variables want to be specialized
-                or not self.source.guard_source().is_local()
+                not self.source.guard_source().is_local()
                 # Assume that integers that came from NN modules want to be
                 # specialized (as we don't expect users to be changing the
                 # NN modules on the fly)
                 or self.source.guard_source().is_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
+                # TODO: Delete this condition when rollout is done.  NB: this
+                # condition never evaluates True in open source
+                or (
+                    not justknobs_check(
+                        "pytorch/dynamo:enable_unspecialize_zero_one_plain_int"
+                    )
+                    and value in self._common_constants()
+                )
             ):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
@@ -1367,6 +1382,13 @@ class VariableBuilder:
                 f"torch.compile does not support sparse Tensor with {value.layout} layout"
             )
 
+        # TODO(pearu,sparse-team) - Add the corresponding SPARSE_TENSOR_MATCH guards
+        if is_sparse_any(value) and value.is_sparse and not self.tx.export:
+            # A hot fix for sparse tensors + torch.compile. There is some
+            # support for export + coo tensor. We need to create
+            # SPARSE_TENSOR_GUARDS for guards to work propertly.
+            unimplemented("torch.compile does not support sparse Tensors")
+
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,
@@ -1394,6 +1416,10 @@ class VariableBuilder:
         # and recursively install corresponding guard for each inner attribute.
         if is_traceable_wrapper_subclass(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
+            install_guard(
+                SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
+            )
+
             attrs, _ = value.__tensor_flatten__()
             for attr in attrs:
                 inner_value = getattr(value, attr)
@@ -2110,15 +2136,14 @@ def _automatic_dynamic(
         )
 
         # Get symbolic contexts for inner tensors
-        attrs, _ = type(e).__tensor_flatten__(e)
         inner_contexts = {}  # mapping from attr -> symbolic context
+        attrs, _ = type(e).__tensor_flatten__(e)
         for attr in attrs:
             inner_tensor = getattr(e, attr)
             inner_source = AttrSource(source, attr)
-            inner_context = _automatic_dynamic(
+            inner_contexts[attr] = _automatic_dynamic(
                 inner_tensor, tx, inner_source, static_shapes
             )
-            inner_contexts[attr] = inner_context
 
         return SubclassSymbolicContext(
             dynamic_sizes=outer_context.dynamic_sizes,
