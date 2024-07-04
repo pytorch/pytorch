@@ -295,10 +295,7 @@ class StarDep(Dep):
 # materialize that buffer
 @dataclasses.dataclass(frozen=True)
 class WeakDep(Dep):
-    # Fake dependency on unused buffer
     name: str
-    # Buffer that is doing the mutation
-    mutating_buf: str
 
     @property
     def index(self):
@@ -309,7 +306,7 @@ class WeakDep(Dep):
 
     def rename(self, renames: Dict[str, str]) -> "WeakDep":
         if self.name in renames:
-            return WeakDep(renames[self.name], self.mutating_buf)
+            return WeakDep(renames[self.name])
         return self
 
     def numbytes_hint(self):
@@ -686,6 +683,9 @@ class FreeUnbackedSymbolsOpsHandler:
         return (None,) * 2
 
     def scan(self, dtypes, combine_fn, values):
+        return (None,) * len(values)
+
+    def sort(self, dtypes, values, stable, descending):
         return (None,) * len(values)
 
     def reduction(

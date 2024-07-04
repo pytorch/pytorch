@@ -75,8 +75,6 @@ class BaseSchedulerNode:
         self.scheduler: Scheduler = scheduler
         self.node: Optional[ir.Buffer] = node
         self.users: List[NodeUser] = []
-        self.inverse_users: List[BaseSchedulerNode] = []
-        self.node_users: List[BaseSchedulerNode] = []
         self.set_read_writes(node.get_read_writes())
         self.ancestors: Set[str] = set()
         self.min_order: int
@@ -669,7 +667,6 @@ def pformat(obj: Any) -> str:
 class OutputNode:
     def __init__(self, dep: StarDep) -> None:
         self.unmet_dependencies = {dep}
-        self.inverse_users: List[BaseSchedulerNode] = []
 
     def is_reduction(self) -> bool:
         return False
@@ -1016,8 +1013,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self.scheduler = scheduler
         self.node = None
         self.users: List[NodeUser] = []
-        self.inverse_users = []
-        self.node_users = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
         self.ancestors = set.union(
             *[x.ancestors for x in snodes if x.ancestors is not None]
@@ -1529,8 +1524,6 @@ class Scheduler:
         self.merge_loops()
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
-            # Refresh node_users and inverse_users to reflect fused nodes
-            self.compute_node_users()
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
@@ -1682,6 +1675,21 @@ class Scheduler:
                 return rename(self.mutation_renames[n])
             return n
 
+        def dep_closure(node_name: str) -> Set[str]:
+            reachable_names = {node_name}
+            node = self.name_to_node[node_name]
+            write_dep = next(iter(node.read_writes.writes))
+            for read_dep in node.read_writes.reads:
+                if (
+                    read_dep.name in self.name_to_node
+                    and isinstance(read_dep, dependencies.MemoryDep)
+                    and isinstance(write_dep, dependencies.MemoryDep)
+                    and read_dep.index == write_dep.index
+                    and read_dep.size == write_dep.size
+                ):
+                    reachable_names.update(dep_closure(read_dep.name))
+            return reachable_names
+
         def add_user(
             used_by_name: str,
             user_node: Union[BaseSchedulerNode, OutputNode],
@@ -1748,12 +1756,13 @@ class Scheduler:
                 node.add_fake_dep(StarDep(alt_name, mode=node_mode))
                 for other_node in name_to_users[alt_name].items:
                     # this node must run after all prior readers
-                    if other_node.get_name() == node.get_name():
-                        continue
-
                     other_name = rename(other_node.get_name())
-                    node.add_fake_dep(WeakDep(other_name, mutating_buf=node.get_name()))
-                    add_user(other_name, node, is_weak=True)
+                    known_dep_node_names = dep_closure(node.get_name())
+                    if other_name not in known_dep_node_names:
+                        # If this node already directly or indirectly depends on other_node,
+                        # we don't need to insert an extra dep.
+                        node.add_fake_dep(WeakDep(other_name))
+                        add_user(other_name, node, is_weak=True)
 
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
@@ -1806,44 +1815,6 @@ class Scheduler:
         # copy users information onto the nodes
         for node in self.nodes:
             node.set_users(name_to_users[node.get_name()].items)
-
-        # populate inverse_users
-        for node in self.nodes:
-            for user in node.users:
-                user.node.inverse_users.append(node)
-
-    def compute_node_users(self) -> None:
-        # set up buffer name to (fused)snode mapping
-        buf_to_snode: Dict[str, BaseSchedulerNode] = {}
-        for node in self.nodes:
-            if isinstance(node, FusedSchedulerNode):
-                for x in node.snodes:
-                    buf_to_snode[x.get_name()] = node
-            buf_to_snode[node.get_name()] = node
-
-        for node in self.nodes:
-            node.node_users = []
-            node.inverse_users = []
-
-        # compute inverse_users
-        for node in self.nodes:
-            inverse_users: List[BaseSchedulerNode] = []
-            for dep in node.unmet_dependencies:
-                assert dep.name in buf_to_snode
-                dep_node = buf_to_snode[dep.name]
-                inverse_users.append(dep_node)
-            node.inverse_users = inverse_users
-
-        # compute node_users
-        # TODO: ideally, we should deduplicate .users and .node_users,
-        # but currently .users contains extra information that's difficult to
-        # extract into a standalone container.
-        node_to_users: Dict[BaseSchedulerNode, List[BaseSchedulerNode]] = {}
-        for node in self.nodes:
-            for inverse_user in node.inverse_users:
-                node_to_users.setdefault(inverse_user, []).append(node)
-        for node, users in node_to_users.items():
-            node.node_users = users
 
     def dead_node_elimination(self) -> None:
         """
@@ -2030,9 +2001,6 @@ class Scheduler:
                 new_scheduler_node.min_order = node.min_order
                 new_scheduler_node.max_order = node.max_order
                 new_scheduler_node.last_usage = node.last_usage
-                for user in new_scheduler_node.users:
-                    user.node.inverse_users.remove(node)
-                    user.node.inverse_users.append(new_scheduler_node)
 
     def speedup_by_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -2585,6 +2553,9 @@ class Scheduler:
         We can fuse them if all the reads of node2 either match
         corresponding writes in node1, or are written by nodes that can
         be scheduled before the fusion of node1 and node2.
+
+        We also disable fusion of a write subsequent to a read if the reads
+        and writes do not align.
         """
         node1_names = node1.get_names()
         computed_deps = set()
@@ -2596,10 +2567,6 @@ class Scheduler:
             for rd in node2.unmet_dependencies:
                 if self.fusable_read_and_write(rd, cd):
                     computed_deps.add(rd)
-
-        for dep in node2.unmet_dependencies:
-            if isinstance(dep, WeakDep) and self.fusable_weak_dep(dep, node1, node2):
-                computed_deps.add(dep)
 
         remaining_deps = {dep.name for dep in node2.unmet_dependencies - computed_deps}
         if remaining_deps & node1_names:
@@ -2614,38 +2581,21 @@ class Scheduler:
                 why("intermediate nodes between node1 & node2")
                 return False
 
+        # similar to can_inplace, if we are going to fuse a write subsequent to a read
+        # require that the indexing and size is the same
+        for write in node2.read_writes.writes:
+            if not isinstance(write, MemoryDep):
+                continue
+            for read in node1.read_writes.reads:
+                if write.name != self.mutation_renames.get(read.name, read.name):
+                    continue
+
+                # bail on StarDep
+                if not self.fusable_read_and_write(read, write):
+                    why("fusing a write into a read with different indexing formula")
+                    return False
+
         return True
-
-    def fusable_weak_dep(
-        self, weak_dep: WeakDep, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        # A weak dep can be fused if and only if the fused operation acts inplace
-        # on the buffer being mutated. i.e. the same index is being read then mutated
-        mutating_writes = [
-            write
-            for write in node2.read_writes.writes
-            if write.name == weak_dep.mutating_buf
-        ]
-        if len(mutating_writes) != 1:
-            return False
-        write = mutating_writes[0]
-        assert isinstance(write, MemoryDep)
-
-        if free_symbol_is_type(write.index, SymT.TMP):
-            return False
-
-        relevant_reads = (
-            read
-            for read in node1.read_writes.reads
-            if self.mutation_renames.get(read.name, read.name) == weak_dep.mutating_buf
-        )
-        return all(
-            isinstance(read, MemoryDep)
-            and not free_symbol_is_type(read.index, SymT.TMP)
-            and read.index == write.index
-            and read.size == write.size
-            for read in relevant_reads
-        )
 
     # StarDep doesn't match MemoryDep, different indices don't match
     # However, broadcasting sometimes strips dimensions, and if that's the case
