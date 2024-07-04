@@ -956,11 +956,6 @@ def permute(x, dims):
     return TensorBox(PermuteView.create(x.data, tuple(dims)))
 
 
-@register_lowering(aten.permute_copy, type_promotion_kind=None)
-def permute_copy(x, dim):
-    return clone(permute(x, dim))
-
-
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
     assert isinstance(x, TensorBox)
