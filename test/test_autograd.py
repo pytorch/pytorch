@@ -3025,8 +3025,6 @@ class TestAutograd(TestCase):
         c.backward(torch.tensor([1, 1, 1], dtype=torch.double), retain_graph=True)
         c.backward(torch.tensor([1, 1, 1], dtype=torch.double))
 
-    @unittest.expectedFailure
-    # https://github.com/pytorch/pytorch/issues/129938
     def test_backward_twice_without_saved_values(self):
         b = torch.randn(3, requires_grad=True, dtype=torch.double)
         c = b + 1
