@@ -2,6 +2,7 @@
 # flake8: noqa: B950
 
 import functools
+import string
 from collections import namedtuple
 from typing import Callable, Optional
 
@@ -18,8 +19,9 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn.attention._flex_attention import (
     _causal,
     _compose,
-    _create_block_sparse_mask,
-    _create_empty_block_sparse_mask,
+    _create_block_mask,
+    _create_block_mask_from_mask,
+    _create_empty_block_mask,
     _flex_attention,
     _generate_alibi_bias,
     _identity,
@@ -46,25 +48,17 @@ torch.set_float32_matmul_precision("high")
 index = torch.ops.aten.index
 
 
-def create_attention(score_mod, block_sparse_mask):
+def create_attention(score_mod, block_mask):
     return functools.partial(
-        _flex_attention, score_mod=score_mod, block_sparse_mask=block_sparse_mask
+        _flex_attention, score_mod=score_mod, block_mask=block_mask
     )
 
 
-def create_block_sparse_mask_from_score_mod(score_mod, query, key, value):
-    Q_LEN = query.shape[-2]
-    KV_LEN = key.shape[-2]
-    if score_mod == _causal:
-        return _create_block_sparse_mask(
-            torch.tril(
-                torch.ones(Q_LEN, KV_LEN, dtype=torch.bool, device=query.device)
-            ),
-            128,
-            128,
-        )
-    else:
-        return None
+def create_block_mask(score_mod, query, key):
+    block_mask = _create_block_mask(
+        score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
+    )
+    return block_mask
 
 
 test_dtypes = (
@@ -233,8 +227,8 @@ class TestFlexAttention(InductorTestCase):
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
-        block_sparse_mask = create_block_sparse_mask_from_score_mod(score_mod, q, k, v)
-        sdpa_partial = create_attention(score_mod, block_sparse_mask)
+        block_mask = create_block_mask(score_mod, q, k)
+        sdpa_partial = create_attention(score_mod, block_mask)
         compiled_sdpa = torch.compile(sdpa_partial)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
@@ -503,9 +497,9 @@ class TestFlexAttention(InductorTestCase):
         assert v_strides[-1] == 1
         v = torch.as_strided(v1, v_shape, v_strides, v_offset)
 
-        block_mask = _create_empty_block_sparse_mask(q, k, v)
+        block_mask = _create_empty_block_mask(q, k, v)
         sdpa_partial = create_attention(
-            score_mod=_generate_alibi_bias(8), block_sparse_mask=block_mask
+            score_mod=_generate_alibi_bias(8), block_mask=block_mask
         )
         compiled_sdpa = torch.compile(sdpa_partial)
         ref_out = sdpa_partial(q, k, v)
@@ -517,7 +511,7 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
-    def test_create_block_sparse_mask_is_compiled(self):
+    def test_create_block_mask_is_compiled(self):
         make_tensor = functools.partial(
             torch.randn,
             (B, H, S, D),
@@ -529,7 +523,7 @@ class TestFlexAttention(InductorTestCase):
 
         @torch.compile
         def func(q, k, v):
-            block_sparse_mask = _create_block_sparse_mask(
+            block_mask = _create_block_mask_from_mask(
                 torch.tril(
                     torch.ones(
                         q.shape[-2], k.shape[-2], dtype=torch.bool, device=q.device
@@ -544,17 +538,17 @@ class TestFlexAttention(InductorTestCase):
                 k,
                 v,
                 _causal,
-                block_sparse_mask,
+                block_mask,
             )
             return out
 
         _, code = run_and_get_code(func, q, k, v)
-        # Ensure _create_block_sparse_mask is compiled and generates 3 kernels,
+        # Ensure _create_block_mask_from_mask is compiled and generates 3 kernels,
         # flex_attention generates 1 kernel.
         FileCheck().check_count(".run(", 4, True).run(code[0])
 
     @supported_platform
-    def test_block_sparse_mask_is_reused(self):
+    def test_block_mask_is_reused(self):
         make_tensor = functools.partial(
             torch.randn,
             (B, H, S, D),
@@ -568,7 +562,7 @@ class TestFlexAttention(InductorTestCase):
 
         @torch.compile
         def func(q, k, v, k2, v2):
-            block_sparse_mask = _create_block_sparse_mask(
+            block_mask = _create_block_mask_from_mask(
                 torch.tril(
                     torch.ones(
                         q.shape[-2], k.shape[-2], dtype=torch.bool, device=q.device
@@ -583,21 +577,34 @@ class TestFlexAttention(InductorTestCase):
                 k,
                 v,
                 _causal,
-                block_sparse_mask,
+                block_mask,
             )
             out = _flex_attention(
                 q,
                 k2,
                 v2,
                 _causal,
-                block_sparse_mask,
+                block_mask,
             )
             return out
 
         _, code = run_and_get_code(func, q, k, v, k2, v2)
-        # Ensure _create_block_sparse_mask is compiled and generates 3 kernels,
+        # Ensure _create_block_mask_from_mask is compiled and generates 3 kernels,
         # 2 flex_attention generates 2 kernels.
         FileCheck().check_count(".run(", 5, True).run(code[0])
+
+    @supported_platform
+    def test_doc_mask_sparse(self):
+        document_id = torch.zeros(S, dtype=torch.int, device="cuda")
+        for i in range(0, S, 256):
+            document_id[i : i + 256] = i // 256
+
+        def document_masking_causal(score, b, h, q_idx, kv_idx):
+            causal_mask = q_idx >= kv_idx
+            document_mask = document_id[q_idx] == document_id[kv_idx]
+            return torch.where(causal_mask & document_mask, score, -float("inf"))
+
+        self.run_test(document_masking_causal, torch.float16)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -934,14 +941,25 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         q, k, v = (torch.randn(1, 8, 1024, 64, device="cuda") for _ in range(3))
         metrics.reset()
-        f(q, k, v)
+        _, code = run_and_get_code(f, q, k, v)
+        # Check the attention output is not allocated
+        fc = FileCheck()
+        fc.check("buf0 = empty_strided_cuda((1, 1, 1)")  # SPARSE_KV_NUM_BLKS
+        fc.check("buf1 = empty_strided_cuda((1, 1, 1, 1)")  # SPARSE_KV_IDX
+        fc.check("buf4 = empty_strided_cuda")  # logsumexp
+        fc.check("buf7 = empty_strided_cuda")  # cos(attention)
+        fc.run(code[0])
+        fc = FileCheck()
+        fc.check_not("buf2 =")  # Dead buffer
+        fc.check_not("buf3 =")  # Dead buffer
+        fc.check_not("buf5 =")  # Dead buffer, attention output
+        fc.check_not("buf6 =")  # Mutation-buffer, not allocated
+        fc.run(code[0])
         accessed_bytes = 1 * 8 * 1024 * 64 * torch.float32.itemsize
         num_accesses = 4  # q, k, v reads, one output.
         # TODO: Get rid of this fudge factor
-        # We need this fudge factor for now, since
-        # 1. For some reason we materialize the output of the attention unnecessarily (it's related to the mutation somehow)
-        # 2. We also write the extraneous logsumexp
-        num_accesses += 2
+        # We need this fudge factor for now as we write the extraneous logsumexp
+        num_accesses += 1
         self.assertLess(metrics.num_bytes_accessed, accessed_bytes * num_accesses)
 
     @supported_platform
@@ -1002,6 +1020,42 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(bias_mod)
 
     @supported_platform
+    def test_autograd_function_in_score_mod(self):
+        class ApplyMask(torch.autograd.Function):
+            generate_vmap_rule = True
+
+            @staticmethod
+            def forward(a, mask):
+                return torch.where(mask, a, -float("inf"))
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                _, mask = inputs
+                ctx.mark_non_differentiable(mask)
+                pass
+
+            @staticmethod
+            def backward(ctx, i):
+                return i, None
+
+        def score_mod(score, b, h, q, kv):
+            return ApplyMask.apply(score, q <= kv)
+
+        func = torch.compile(_flex_attention, fullgraph=True)
+
+        q, k, v = (
+            torch.randn(1, 8, 1024, 64, device="cuda", requires_grad=True)
+            for _ in range(3)
+        )
+
+        # Just checking that it runs
+        func(q, k, v)
+
+        # expectedFailure
+        # This doesn't work due to vmap + autograd.Function + torch.compile not composing
+        # self.run_test(score_mod)
+
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", [_identity, _causal])
     def test_logsumexp_correctness(self, dtype, score_mod):
@@ -1013,7 +1067,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        block_mask = _create_empty_block_sparse_mask(q, k, v)
+        block_mask = _create_empty_block_mask(q, k, v)
 
         @torch.compile
         def sdpa_hop(q, k, v, score_mod, block_mask):
@@ -1022,12 +1076,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask.kv_num_blocks,
-                block_mask.kv_indices,
-                block_mask.q_num_blocks,
-                block_mask.q_indices,
-                block_mask.KV_BLOCK_SIZE,
-                block_mask.Q_BLOCK_SIZE,
+                block_mask.as_tuple(),
             )
 
         @torch.compile(backend="aot_eager")
@@ -1041,12 +1090,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask.kv_num_blocks,
-                block_mask.kv_indices,
-                block_mask.q_num_blocks,
-                block_mask.q_indices,
-                block_mask.KV_BLOCK_SIZE,
-                block_mask.Q_BLOCK_SIZE,
+                block_mask.as_tuple(),
             )
 
         ref_out, ref_lse = eager_sdpa_hop(
@@ -1094,7 +1138,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        block_mask = _create_empty_block_sparse_mask(q, k, v)
+        block_mask = _create_empty_block_mask(q, k, v)
 
         @torch.compile
         def func(q, k, v, score_mod, block_mask):
@@ -1103,12 +1147,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask.kv_num_blocks,
-                block_mask.kv_indices,
-                block_mask.q_num_blocks,
-                block_mask.q_indices,
-                block_mask.KV_BLOCK_SIZE,
-                block_mask.Q_BLOCK_SIZE,
+                block_mask.as_tuple(),
             )
             lse_2 = lse * 2
             return lse_2
@@ -1127,7 +1166,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        block_mask = _create_empty_block_sparse_mask(q, k, v)
+        block_mask = _create_empty_block_mask(q, k, v)
 
         @torch.compile
         def func(q, k, v, score_mod, block_mask):
@@ -1136,12 +1175,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask.kv_num_blocks,
-                block_mask.kv_indices,
-                block_mask.q_num_blocks,
-                block_mask.q_indices,
-                block_mask.KV_BLOCK_SIZE,
-                block_mask.Q_BLOCK_SIZE,
+                block_mask.as_tuple(),
             )
             lse_2 = lse * 2
             return out, lse_2
@@ -1197,6 +1231,46 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    def test_block_mask_viz(self):
+        def causal(score, b, h, q, kv):
+            return torch.where(q >= kv, score, -float("inf"))
+
+        block_mask = _create_block_mask(causal, 1, 1, 2048, 2048)
+
+        def replace_non_printable(s):
+            def replace(c):
+                if c not in string.printable:
+                    return "@"
+                elif c == " ":
+                    return "s"
+                return c
+
+            return "".join(replace(c) for c in s)
+
+        self.assertExpectedInline(
+            replace_non_printable(str(block_mask)),
+            """\
+BlockMask(sparsity=46.88%,smask=
+@@ssssssssssssssssssssssssssssss
+@@@@ssssssssssssssssssssssssssss
+@@@@@@ssssssssssssssssssssssssss
+@@@@@@@@ssssssssssssssssssssssss
+@@@@@@@@@@ssssssssssssssssssssss
+@@@@@@@@@@@@ssssssssssssssssssss
+@@@@@@@@@@@@@@ssssssssssssssssss
+@@@@@@@@@@@@@@@@ssssssssssssssss
+@@@@@@@@@@@@@@@@@@ssssssssssssss
+@@@@@@@@@@@@@@@@@@@@ssssssssssss
+@@@@@@@@@@@@@@@@@@@@@@ssssssssss
+@@@@@@@@@@@@@@@@@@@@@@@@ssssssss
+@@@@@@@@@@@@@@@@@@@@@@@@@@ssssss
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@ssss
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ss
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+)""",
+        )
+
+    @supported_platform
     def test_fw_bw_graph_correctness(self):
         cnt = CompileCounterWithBackend("aot_eager")
         make_tensor = functools.partial(
@@ -1239,7 +1313,7 @@ class GraphModule(torch.nn.Module):
         new_empty_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         new_empty_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         flex_attention_0 = self.flex_attention_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, flex_attention_0, ones, zeros, ones_1, zeros_1, 8, 8);  l_args_0_ = l_args_1_ = l_args_2_ = flex_attention_0 = ones = zeros = ones_1 = zeros_1 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, flex_attention_0, (ones, zeros, ones_1, zeros_1, 8, 8));  l_args_0_ = l_args_1_ = l_args_2_ = flex_attention_0 = ones = zeros = ones_1 = zeros_1 = None
         out: "f64[2, 2, 8, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -1273,7 +1347,7 @@ class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", full_default: "i32[1, 1, 1]", full_default_1: "i32[1, 1, 1, 1]", getitem: "f64[2, 2, 8, 4]", getitem_1: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, full_default, full_default_1, full_default, full_default_1, 8, 8);  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, (full_default, full_default_1, full_default, full_default_1, 8, 8));  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = None
         getitem_2: "f64[2, 2, 8, 4]" = flex_attention_backward[0]
         getitem_3: "f64[2, 2, 8, 4]" = flex_attention_backward[1]
         getitem_4: "f64[2, 2, 8, 4]" = flex_attention_backward[2];  flex_attention_backward = None
