@@ -38,6 +38,7 @@ concurrency:
 
 jobs:
   conda-py3_8-cpu-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
