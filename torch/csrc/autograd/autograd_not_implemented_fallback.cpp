@@ -385,6 +385,10 @@ static void autogradNotImplementedFallbackImpl(
             // NJT components are expected to be reused; skip use_count() check
             op_name.rfind("aten::_nested_get", 0) == 0)
           return;
+        // Skip test_parallel_materialize
+        // For details see https://github.com/pytorch/pytorch/issues/130073
+        if (op_name == "aten::_test_parallel_materialize")
+          return;
         if (!is_inplace_output[idx_ret])
           TORCH_INTERNAL_ASSERT(
               t.use_count() <= 1, op_name); // Okay to return undefined tensor
@@ -395,7 +399,7 @@ static void autogradNotImplementedFallbackImpl(
         // where each element represents the norm of corresponding input Tensor,
         // here I want to return the same number of Tensors as the input
         // TensorList, see https://github.com/pytorch/pytorch/issues/93940
-        // Skip nattive_channel_shuffle as well
+        // Skip native_channel_shuffle as well as transformer_encoder
         // For details see https://github.com/pytorch/pytorch/issues/130073
         if (!is_aliased_output[idx_ret] && t.has_storage() &&
             op_name != "aten::_foreach_norm" &&
