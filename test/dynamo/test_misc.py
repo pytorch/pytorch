@@ -6100,6 +6100,22 @@ utils_device.CURRENT_DEVICE == None""".split(
         except TypeError as e:
             self.assertIn("__bool__ should return bool, returned float", str(e))
 
+    def test_unpack_tensor_shape_mismatch(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            a, b = x
+            return torch.sin(a + b)
+
+        x = torch.tensor(2.0)
+        with self.assertRaisesRegex(AssertionError, "Can't unpack scalar tensors"):
+            fn(x)
+
+        x = torch.tensor([2.0])
+        with self.assertRaisesRegex(
+            AssertionError, "Can't unpack a tensor of 1 rows into a tuple of 2 elements"
+        ):
+            fn(x)
+
     def test_if_cond_user_defined_object3(self):
         # obj.__bool__ is not existed, but obj.__len__ exists
         class A:  # noqa: B903
