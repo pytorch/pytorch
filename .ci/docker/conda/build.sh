@@ -61,16 +61,15 @@ GIT_BRANCH_NAME=${GITHUB_REF##*/}
 GIT_COMMIT_SHA=${GITHUB_SHA:-$(git rev-parse HEAD)}
 DOCKER_IMAGE_BRANCH_TAG=${DOCKER_IMAGE_NAME}-${GIT_BRANCH_NAME}
 DOCKER_IMAGE_SHA_TAG=${DOCKER_IMAGE_NAME}-${GIT_COMMIT_SHA}
-# temporary disable push for now. We don't want to accidentally push to repo
-#if [[ "${WITH_PUSH:-}" == true ]]; then
-#  (
-#    set -x
-#    docker push "${DOCKER_IMAGE_NAME}"
-#    if [[ -n ${GITHUB_REF} ]]; then
-#        docker tag ${DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_BRANCH_TAG}
-#        docker tag ${DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_SHA_TAG}
-#        docker push "${DOCKER_IMAGE_BRANCH_TAG}"
-#        docker push "${DOCKER_IMAGE_SHA_TAG}"
-#    fi
-#  )
-#fi
+if [[ "${WITH_PUSH:-}" == true ]]; then
+  (
+    set -x
+    docker push "${DOCKER_IMAGE_NAME}"
+    if [[ -n ${GITHUB_REF} ]]; then
+        docker tag ${DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_BRANCH_TAG}
+        docker tag ${DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_SHA_TAG}
+        docker push "${DOCKER_IMAGE_BRANCH_TAG}"
+        docker push "${DOCKER_IMAGE_SHA_TAG}"
+    fi
+  )
+fi

@@ -27,6 +27,10 @@ env:
   DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
   WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release')) }}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
 jobs:
   build-docker:
     runs-on: linux.12xlarge
@@ -37,7 +41,7 @@ jobs:
       CUDA_VERSION: ${{ matrix.cuda_version }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@move_docker_conda
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
       - name: Calculate docker image
