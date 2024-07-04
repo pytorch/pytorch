@@ -7,7 +7,7 @@ import os
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal, Sequence, TypeVar
+from typing import Any, Callable, Literal, Sequence, TypeVar, Optional
 
 import yaml
 
@@ -146,6 +146,7 @@ def parse_native_yaml_struct(
     es: object,
     valid_tags: set[str],
     ignore_keys: set[DispatchKey] | None = None,
+    whitelist_keys: Optional[Set[DispatchKey]] = None,
     path: str = "<stdin>",
     skip_native_fns_gen: bool = False,
 ) -> ParsedYaml:
@@ -159,7 +160,9 @@ def parse_native_yaml_struct(
         funcs = e.get("func")
         assert funcs is not None, f"missed 'func' in {e}"
         with context(lambda: f"in {loc}:\n  {funcs}"):
-            func, m = NativeFunction.from_yaml(e, loc, valid_tags, ignore_keys)
+            func, m = NativeFunction.from_yaml(
+                e, loc, valid_tags, ignore_keys, whitelist_keys
+            )
             rs.append(func)
             BackendIndex.grow_index(bs, m)
     error_check_native_functions(rs)
@@ -222,6 +225,7 @@ def parse_native_yaml(
     path: str,
     tags_yaml_path: str,
     ignore_keys: set[DispatchKey] | None = None,
+    whitelist_keys: Optional[Set[DispatchKey]] = None,
     *,
     skip_native_fns_gen: bool = False,
     loaded_yaml: object | None = None,
@@ -241,6 +245,7 @@ def parse_native_yaml(
             es,
             valid_tags,
             ignore_keys,
+            whitelist_keys,
             path=path,
             skip_native_fns_gen=skip_native_fns_gen,
         )
@@ -352,7 +357,8 @@ def get_static_dispatch_backend(
 
 
 def static_dispatch_ops_header(
-    f: NativeFunction, backend_index: list[BackendIndex]
+    f: NativeFunction, backend_index: list[BackendIndex],
+    whitelist_keys: Optional[Set[DispatchKey]] = None,
 ) -> str | None:
     if backend_index is None or f.manual_kernel_registration:
         return None
@@ -361,9 +367,14 @@ def static_dispatch_ops_header(
     for index in backend_index:
         dispatch_key = get_static_dispatch_backend(f, index)
         if dispatch_key is not None:
-            output.append(
-                f"#include <ATen/ops/{f.root_name}_{dispatch_key.lower()}_dispatch.h>"
-            )
+            if (whitelist_keys is not None) and dispatch_key in whitelist_keys:
+                output.append(
+                    f"#include <ATen/ops/{dispatch_key.lower()}/{f.root_name}_{dispatch_key.lower()}_dispatch.h>"
+                )
+            else:
+                output.append(
+                    f"#include <ATen/ops/{f.root_name}_{dispatch_key.lower()}_dispatch.h>"
+                )
     return "\n".join(output)
 
 
@@ -1430,6 +1441,7 @@ def get_ns_grouped_kernels(
     *,
     grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
     backend_indices: dict[DispatchKey, BackendIndex],
+    whitelist_keys: Optional[Set[DispatchKey]] = None,
     native_function_decl_gen: Callable[
         [NativeFunctionsGroup | NativeFunction, BackendIndex], list[str]
     ] = dest.compute_native_function_declaration,
@@ -1439,6 +1451,8 @@ def get_ns_grouped_kernels(
         native_function_namespaces = set()
         dispatch_keys = set()
         for dispatch_key, backend_idx in backend_indices.items():
+            if whitelist_keys and (dispatch_key not in whitelist_keys):
+                continue
             backend_metadata = backend_idx.get_kernel(f)
             if backend_metadata:
                 namespace = backend_metadata.cpp_namespace
@@ -1487,6 +1501,7 @@ def get_native_function_declarations(
     *,
     grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
     backend_indices: dict[DispatchKey, BackendIndex],
+    whitelist_keys: Optional[Set[DispatchKey]] = None,
     native_function_decl_gen: Callable[
         [NativeFunctionsGroup | NativeFunction, BackendIndex], list[str]
     ] = dest.compute_native_function_declaration,
@@ -1502,6 +1517,7 @@ def get_native_function_declarations(
     ns_grouped_kernels = get_ns_grouped_kernels(
         grouped_native_functions=grouped_native_functions,
         backend_indices=backend_indices,
+        whitelist_keys=whitelist_keys,
         native_function_decl_gen=native_function_decl_gen,
     )
     return get_native_function_declarations_from_ns_grouped_kernels(
@@ -1847,6 +1863,7 @@ def gen_per_operator_headers(
     ops_fm: FileManager,
     functions_keys: set[DispatchKey],
     dispatch_keys: Sequence[DispatchKey],
+    whitelist_keys: Optional[Set[DispatchKey]] = None,
     rocm: bool,
 ) -> None:
     # For CMake builds, split operator declarations into separate headers in
@@ -1886,7 +1903,9 @@ def gen_per_operator_headers(
                 "static_dispatch_ops_headers": list(
                     mapMaybe(
                         lambda fn: static_dispatch_ops_header(
-                            fn, backend_index=static_dispatch_idx
+                            fn,
+                            backend_index=static_dispatch_idx,
+                            whitelist_keys=whitelist_keys,
                         ),
                         functions,
                     )
@@ -1924,6 +1943,7 @@ def gen_per_operator_headers(
         declarations = get_native_function_declarations(
             grouped_native_functions=grouped_functions,
             backend_indices=backend_indices,
+            whitelist_keys=whitelist_keys,
             native_function_decl_gen=dest.compute_native_function_declaration,
         )
         ops_fm.write_with_template(
@@ -1943,11 +1963,20 @@ def gen_per_operator_headers(
         ("NativeMetaFunctions", "_meta"),
         ("NativeFunctions", "_native"),
     ]:
+        # codegen for whitelist keys generation only suuport single key currently
+        assert not whitelist_keys or len(whitelist_keys) == 1
+        if whitelist_keys:
+            dispatch_namespace = next(iter(whitelist_keys)).lower()
+
+        # {name}_native.h is backend specific for whitelist mode
+        # here, we generate them into {dispatch_key}/op/{name}_native.h separately.
         cpu_fm.write(
             f"{category}.h",
             lambda: {
                 f"{category}_includes": [
-                    f"#include <ATen/ops/{name}{suffix}.h>"
+                    f"#include <ATen/{dispatch_namespace}/ops/{name}{suffix}.h>"
+                    if whitelist_keys and (category == "NativeFunctions")
+                    else f"#include <ATen/ops/{name}{suffix}.h>"
                     for name in sorted(functions_by_root_name.keys())
                 ],
                 f"{category}_declarations": [],
@@ -2044,6 +2073,7 @@ def gen_headers(
     ops_fm: FileManager,
     dispatch_keys: Sequence[DispatchKey],
     functions_keys: set[DispatchKey],
+    whitelist_keys: Optional[Set[DispatchKey]] = None,
     rocm: bool,
     per_operator_headers: bool,
 ) -> None:
@@ -2059,6 +2089,7 @@ def gen_headers(
             ops_fm=ops_fm,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
+            whitelist_keys=whitelist_keys,
             rocm=rocm,
         )
     else:
@@ -2183,6 +2214,7 @@ def gen_source_files(
     cuda_fm: FileManager,
     dispatch_keys: Sequence[DispatchKey],
     functions_keys: set[DispatchKey],
+    whitelist_keys: Optional[Set[DispatchKey]] = None,
     rocm: bool,
     force_schema_registration: bool,
     per_operator_headers: bool,
@@ -2233,16 +2265,26 @@ def gen_source_files(
                     if not is_registered:
                         continue
 
-                    headers.append(f"#include <ATen/ops/{g.root_name}_native.h>")
+                    if whitelist_keys and (dispatch_key in whitelist_keys):
+                        headers.append(
+                            f"#include <ATen/{dispatch_namespace}/ops/{g.root_name}_native.h>"
+                        )
+                    else:
+                        headers.append(f"#include <ATen/ops/{g.root_name}_native.h>")
                     if (
                         dispatch_key
                         == DispatchKey.CompositeExplicitAutogradNonFunctional
                     ):
                         headers.append(f"#include <ATen/ops/{g.root_name}.h>")
                     if dispatch_key in functions_keys:
-                        headers.append(
-                            f"#include <ATen/ops/{g.root_name}_{dispatch_namespace}_dispatch.h>"
-                        )
+                        if whitelist_keys and dispatch_key in whitelist_keys:
+                            headers.append(
+                                f"#include <ATen/{dispatch_namespace}/ops/{g.root_name}_{dispatch_namespace}_dispatch.h>"
+                            )
+                        else:
+                            headers.append(
+                                f"#include <ATen/ops/{g.root_name}_{dispatch_namespace}_dispatch.h>"
+                            )
 
                 return sorted(set(headers))
 
@@ -2294,7 +2336,9 @@ def gen_source_files(
                 else "",
                 "external_backend_headers": "",
                 "dispatch_headers": dest.gen_registration_headers(
-                    backend_index, per_operator_headers, rocm
+                    backend_index,
+                    per_operator_headers,
+                    rocm,
                 ),
                 "ops_headers": operator_headers(),
                 "dispatch_helpers": "",
@@ -2437,6 +2481,10 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
             )
 
         del fm
+
+    if whitelist_keys and len(whitelist_keys) > 0:
+        # Only generate backend required source files
+        return
 
     # BackendSelect is generated specially
     def gen_backend_select() -> dict[str, list[str]]:
@@ -2840,7 +2888,15 @@ def main() -> None:
         if DispatchKey.MPS in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
 
-    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
+    whitelist_keys = None
+    if options.backend_whitelist:
+        whitelist_keys = {
+            k for k in dispatch_keys if str(k) in options.backend_whitelist
+        }
+
+    parsed_yaml = parse_native_yaml(
+        native_yaml_path, tags_yaml_path, ignore_keys, whitelist_keys
+    )
     valid_tags = _GLOBAL_PARSE_TAGS_YAML_CACHE[tags_yaml_path]
     native_functions, backend_indices = (
         parsed_yaml.native_functions,
@@ -2895,6 +2951,7 @@ def main() -> None:
         DispatchKey.CompositeExplicitAutograd,
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.Meta,
+        DispatchKey.XPU,
     }
     if options.mps:
         functions_keys.add(DispatchKey.MPS)
@@ -2933,6 +2990,7 @@ def main() -> None:
             cuda_fm=cuda_fm,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
+            whitelist_keys=whitelist_keys,
             rocm=options.rocm,
             force_schema_registration=options.force_schema_registration,
             per_operator_headers=options.per_operator_headers,
@@ -2955,6 +3013,7 @@ def main() -> None:
             ops_fm=ops_fm,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
+            whitelist_keys=whitelist_keys,
             rocm=options.rocm,
             per_operator_headers=options.per_operator_headers,
         )

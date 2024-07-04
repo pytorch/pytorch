@@ -1,0 +1,55 @@
+# This yaml is used only for testing the XPU codegen functionality.
+# The real one would reside in torch-xpu-ops
+- func: as_strided_copy(Tensor self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: as_strided_copy_symint
+  tags: view_copy
+  autogen: as_strided_copy.out
+
+- func: as_strided(Tensor(a) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a)
+  variants: function, method
+  dispatch:
+    XPU: as_strided_tensorimpl
+  device_check: NoCheck
+  device_guard: False
+  tags: core
+
+- func: mul.Tensor(Tensor self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  structured_delegate: mul.out
+  variants: function, method
+  tags: [core, pointwise]
+
+- func: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured_delegate: mul.out
+  variants: method
+  tags: pointwise
+
+- func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    XPU: mul_out
+  tags: pointwise
+  # For C++ only, until we have conversion from C++ numbers to Tensor
+
+- func: mul.Scalar(Tensor self, Scalar other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function, method
+  tags: [core, pointwise]
+
+- func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: method
+  autogen: mul.Scalar_out
+  tags: pointwise
+
+- func: native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    XPU: native_dropout_xpu
+  tags: [nondeterministic_seeded, core]
+  autogen: native_dropout.out
