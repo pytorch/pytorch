@@ -1781,7 +1781,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             subclass_metas=None,
                             is_joint_structure=False,
                             is_runtime=True,
-                            # don't append extra args for the bwd graph
                             append_extra=False,
                         )
                     )
@@ -1797,15 +1796,43 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         else t
                         for i, t in enumerate(all_args)
                     ]
+
+                    metas = iter(CompiledFunction.metadata.subclass_tangent_meta)
+                    tangent_metadata = [
+                        next(metas)
+                        if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a)
+                        else i
+                        for i, a in enumerate(all_args)
+                    ]
+
+                    # there should be a better way to get the number of symints
+                    # added
+                    len_extra_symints = len(
+                        unwrap_tensor_subclasses(
+                            all_args,
+                            subclass_metas=tangent_metadata,
+                            is_joint_structure=False,
+                            is_runtime=True,
+                            append_extra=config.append_backward
+                        )
+                    ) - len(
+                        unwrap_tensor_subclasses(
+                            all_args,
+                            subclass_metas=None,
+                            is_joint_structure=False,
+                            is_runtime=True,
+                            append_extra=False
+                        )
+                    )
+
                     all_args = unwrap_tensor_subclasses(
                         all_args,
-                        subclass_metas=None,
+                        subclass_metas=tangent_metadata,
                         is_joint_structure=False,
                         is_runtime=True,
-                        # don't append any extra arg when running the backward graph
-                        append_extra=False,
+                        append_extra=config.append_backward,
                     )
-                    tangents_start_idx = len(all_args) - len_tangents - len(rng_args)
+                    tangents_start_idx = len(all_args) - len_tangents - len(rng_args) - len_extra_symints
                     tangents_end_idx = tangents_start_idx + len_tangents
 
                 # Make the tangents contiguous. Note that we must do this after subclass desugaring
@@ -1938,11 +1965,13 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         is not None
                     )
                     # map "None" values to input symints
-                    n_symints = len(ctx.symints)
-                    assert (
-                        n_symints == CompiledFunction.metadata.num_symints_saved_for_bw
-                    )
-                    out += (*ctx.symints,)
+                    if not config.append_backward:
+                        n_symints = len(ctx.symints)
+                        assert (
+                            n_symints
+                            == CompiledFunction.metadata.num_symints_saved_for_bw
+                        )
+                        out += (*ctx.symints,)
                     outs_wrapped = wrap_tensor_subclasses(
                         out,
                         subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,

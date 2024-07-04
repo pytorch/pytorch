@@ -10,6 +10,7 @@ from typing import Any, List, Optional, Tuple, Union
 import torch.utils._pytree as pytree
 
 from torch import SymInt, Tensor
+from torch._functorch import config
 from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -165,7 +166,7 @@ def unwrap_tensor_subclasses(
                 if (
                     isinstance(x, Tensor)
                     and is_traceable_wrapper_subclass(x)
-                    and is_primals
+                    and (True if config.append_backward else is_primals)
                 ):
                     # x.size() can have both ints ans SymInts: `Size([3, sz1, 5])`
                     xs_inner += [sz for sz in x.size() if isinstance(sz, SymInt)]
