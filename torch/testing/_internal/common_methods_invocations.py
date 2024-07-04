@@ -8696,9 +8696,8 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
     dim_4_kv_shape = (batch, num_heads, seq_kv, head_dim)
 
     broadcast_tuple = ((num_heads, seq_q, head_dim), (batch, num_heads, seq_kv, head_dim))
-    gqa_tuple = ((batch, num_heads_q_gqa, seq_q, head_dim), (batch, num_heads_kv_gqa, seq_kv, head_dim))
 
-    qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape), broadcast_tuple, gqa_tuple]
+    qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape), broadcast_tuple]
     samples = []
     for qkv_shape, is_causal, dropout_p, enable_gqa in product(
             qkv_shapes, [True, False], [0.0, 0.5], [True, False]):
@@ -8708,8 +8707,7 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
             make(shape_kv),
             make(shape_kv),
             is_causal=is_causal,
-            dropout_p=dropout_p,
-            enable_gqa=enable_gqa,
+            dropout_p=dropout_p
         ))
 
     # Add non standard shapes
@@ -8730,6 +8728,15 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
             attn_mask=make((seq_q, seq_kv)),
             is_causal=False,
             dropout_p=0.0)
+    )
+
+    samples.append(
+        SampleInput(
+            make((batch, num_heads_q_gqa, seq_q, head_dim)),
+            make((batch, num_heads_kv_gqa, seq_kv, head_dim)),
+            make((batch, num_heads_kv_gqa, seq_kv, head_dim)),
+            enable_gqa=True
+        )
     )
 
     yield from samples
