@@ -1629,7 +1629,7 @@ class CppKernel(Kernel):
             reduction_type == "welford_reduce"
             and welford_weight_reciprocal_vec_fn
             and "vec" in f"{acc_type}"
-            and self.gen_weight_recps
+            and getattr(self, "gen_weight_recps", None)
         ):
             self.local_reduction_init.writeline(
                 welford_weight_reciprocal_vec_fn(dtype, num_threads)
