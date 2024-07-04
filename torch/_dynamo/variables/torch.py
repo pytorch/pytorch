@@ -773,6 +773,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ):
                     fn_ = getattr(torch, torch_sym_op)
 
+            fake_out_shape = None
             if "out" in kwargs and isinstance(kwargs["out"], variables.TensorVariable):
                 # Calling fake tensor propagation can mutate the out= tensor in
                 # tx.output.tracked_fakes. tracked_fakes are used to apply
