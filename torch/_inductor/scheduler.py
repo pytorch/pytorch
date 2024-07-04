@@ -2461,6 +2461,10 @@ class Scheduler:
             why("template epilogue not satisfied")
             return False
 
+        if (node1.get_names() | node2.get_names()) & V.graph.no_fuse_buffer_names:
+            why("fusion for buffer explicit disabled")
+            return False
+
         device = node1.get_device()
         device2 = node2.get_device()
         if device != device2:
