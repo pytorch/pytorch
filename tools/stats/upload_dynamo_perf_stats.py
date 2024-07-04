@@ -169,7 +169,7 @@ if __name__ == "__main__":
         workspace=args.rockset_workspace,
     )
     upload_to_dynamodb(
-        dynamodb_table=args.dnamodb_table,
+        dynamodb_table=args.dynamodb_table,
         repo=args.repo,
         docs=perf_stats,
         generate_partition_key=generate_partition_key,
