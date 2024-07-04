@@ -55,16 +55,23 @@ template <> struct Vec2Type<bfloat> {
 };
 #endif
 
-kernel void weight_to_int4pack(constant uchar *W [[buffer(0)]],
+kernel void weight_to_int4pack(constant int *W [[buffer(0)]],
                                device uchar *outputData [[buffer(1)]],
                                constant uint2 &sizes [[buffer(2)]],
                                uint2 thread_index [[thread_position_in_grid]]) {
   const uint N = sizes.x;
-  const uint Kdiv2 = sizes.y;
+  const uint K_int32 = sizes.y;
   const uint n = thread_index.x; // 0..N-1
-  const uint k = thread_index.y; // 0..Kdiv2-1
-  uchar src_val = W[n * Kdiv2 + k];
-  outputData[n * Kdiv2 + k] = ((src_val & 0xF) << 4) | (src_val >> 4);
+  const uint k = thread_index.y; // 0..K_int32-1
+  int32_t src_val = W[n * K_int32 + k];
+  uint8_t src_val0 = (uint8_t)((src_val & 0xFF000000) >> 24);
+  uint8_t src_val1 = (uint8_t)((src_val & 0x00FF0000) >> 16);
+  uint8_t src_val2 = (uint8_t)((src_val & 0x0000FF00) >> 8);
+  uint8_t src_val3 = (uint8_t)(src_val & 0x000000FF);
+  outputData[n * K_int32 * 4 + k * 4] = ((src_val3 & 0xF) << 4) | (src_val3 >> 4);
+  outputData[n * K_int32 * 4 + k * 4 + 1] = ((src_val2 & 0xF) << 4) | (src_val2 >> 4);
+  outputData[n * K_int32 * 4 + k * 4 + 2] = ((src_val1 & 0xF) << 4) | (src_val1 >> 4);
+  outputData[n * K_int32 * 4 + k * 4 + 3] = ((src_val0 & 0xF) << 4) | (src_val0 >> 4);
 }
 
 /*
@@ -723,9 +730,8 @@ Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
   // shape {N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2}
   auto weight_packed = at::empty({N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2},
                                  at::TensorOptions().dtype(at::kInt).device(at::kMPS));
-
   MPSStream* mpsStream = getCurrentMPSStream();
-  std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(N), static_cast<uint32_t>(Kdiv2), 0, 0};
+  std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(N), static_cast<uint32_t>(Kdiv2 / 4), 0, 0};
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
 #if _CAPTURE_KERNEL
@@ -741,7 +747,7 @@ Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
       mtl_setBuffer(computeEncoder, weight, 0);
       mtl_setBuffer(computeEncoder, weight_packed, 1);
       mtl_setBytes(computeEncoder, sizes, 2);
-      [computeEncoder dispatchThreads:MTLSizeMake(N, Kdiv2, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+      [computeEncoder dispatchThreads:MTLSizeMake(N, Kdiv2 / 4, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCapturing()) {
         getMPSProfiler().stopCapture(mpsStream);
