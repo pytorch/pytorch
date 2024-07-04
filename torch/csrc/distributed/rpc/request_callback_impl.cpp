@@ -161,8 +161,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptCall(
 
   c10::intrusive_ptr<JitFuture> future;
   if (scriptCall.hasOp()) {
-    future = runJitOperator(
-        *scriptCall.op(), scriptCall.stackRef(), streams);
+    future = runJitOperator(*scriptCall.op(), scriptCall.stackRef(), streams);
   } else {
     future = runJitFunction(
         scriptCall.qualifiedName(),
@@ -182,8 +181,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonCall(
     RpcCommandBase& rpc,
     const std::vector<c10::Stream>& streams) const {
   auto& upc = static_cast<UnpickledPythonCall&>(rpc);
-  auto future = runPythonFunction(
-      upc.pythonUdf(), streams, upc.isAsyncExecution());
+  auto future =
+      runPythonFunction(upc.pythonUdf(), streams, upc.isAsyncExecution());
 
   return future->then(
       [](JitFuture& future) {
@@ -201,9 +200,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptRemoteCall(
   c10::intrusive_ptr<JitFuture> future;
   if (scriptRemoteCall.hasOp()) {
     future = runJitOperator(
-        *scriptRemoteCall.op(),
-        scriptRemoteCall.stackRef(),
-        streams);
+        *scriptRemoteCall.op(), scriptRemoteCall.stackRef(), streams);
   } else {
     future = runJitFunction(
         scriptRemoteCall.qualifiedName(),
@@ -213,17 +210,15 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptRemoteCall(
   }
 
   return assignOwnerRRef(
-      scriptRemoteCall.retRRefId(),
-      scriptRemoteCall.retForkId(),
-      future);
+      scriptRemoteCall.retRRefId(), scriptRemoteCall.retForkId(), future);
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRemoteCall(
     RpcCommandBase& rpc,
     const std::vector<c10::Stream>& streams) const {
   auto& uprc = static_cast<UnpickledPythonRemoteCall&>(rpc);
-  auto future = runPythonFunction(
-      uprc.pythonUdf(), streams, uprc.isAsyncExecution());
+  auto future =
+      runPythonFunction(uprc.pythonUdf(), streams, uprc.isAsyncExecution());
 
   return assignOwnerRRef(uprc.rrefId(), uprc.forkId(), future);
 }

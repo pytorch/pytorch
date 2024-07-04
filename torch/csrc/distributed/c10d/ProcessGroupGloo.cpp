@@ -498,7 +498,8 @@ inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
               profilingTitle,
               c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
         };
-    recordFunctionBeforeCallback_ = at::wrapPropagateTLSState(std::move(before_handler));
+    recordFunctionBeforeCallback_ =
+        at::wrapPropagateTLSState(std::move(before_handler));
     std::function<void()> end_handler = [recordingFunction]() {
       recordingFunction->end();
     };

@@ -88,8 +88,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
                     ->config());
           }
 
-          auto retFuture =
-              processRpcWithErrors(*rpc, messageType, streams);
+          auto retFuture = processRpcWithErrors(*rpc, messageType, streams);
 
           // Response message has been sent at this moment, this post-response
           // work doesn't affect RPC trip time.
@@ -141,8 +140,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
 
   TORCH_CHECK(
       scriptCall.hasOp(), "Only supports the case where ScriptCall has an op");
-  auto future = runJitOperator(
-      *scriptCall.op(), scriptCall.stackRef(), streams);
+  auto future =
+      runJitOperator(*scriptCall.op(), scriptCall.stackRef(), streams);
 
   return future->then(
       [](JitFuture& future) {
@@ -212,9 +211,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptRemoteCall(
       *scriptRemoteCall.op(), scriptRemoteCall.stackRef(), streams);
 
   return assignOwnerRRef(
-      scriptRemoteCall.retRRefId(),
-      scriptRemoteCall.retForkId(),
-      future);
+      scriptRemoteCall.retRRefId(), scriptRemoteCall.retForkId(), future);
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::retrieveOwnerRRef(
@@ -316,8 +313,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
   auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
   // Kick off processing for the nested RPC command.
   // wrappedRpcResponseFuture will be a Future<T> to the result.
-  auto wrappedRpcResponseFuture = processRpc(
-      rpcWithAutograd.wrappedRpc(), wrappedMessageType, streams);
+  auto wrappedRpcResponseFuture =
+      processRpc(rpcWithAutograd.wrappedRpc(), wrappedMessageType, streams);
 
   auto fromWorkerId = rpcWithAutograd.fromWorkerId();
   // The original future needs to be marked as completed when the wrapped
