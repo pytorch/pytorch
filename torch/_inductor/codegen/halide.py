@@ -1311,7 +1311,7 @@ class HalideKernel(SIMDKernel):
         assert (
             len(self.reduction_renames) == 1
         ), "multi-dimensional scan not implemented"
-        (scan_var,) = [*self.reduction_renames]
+        (scan_var,) = [*self.reduction_renames]  # type: ignore[misc]
         scan_renames_cur = {scan_var: sympy_index_symbol(scan)}
         scan_renames_pri = {scan_var: sympy_index_symbol(scan) - 1}
 
