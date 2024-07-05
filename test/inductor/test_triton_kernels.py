@@ -750,8 +750,8 @@ def forward(self, x_1, output_1):
 
         t0 = torch.rand(5, device=GPU_TYPE, requires_grad=True)
         t1 = torch.rand(5, device=GPU_TYPE, requires_grad=True)
-        t2 = torch.rand(10, device=GPU_TYPE, requires_grad=True)
-        t3 = torch.rand(10, device=GPU_TYPE, requires_grad=True)
+        t2 = torch.rand(5, device=GPU_TYPE, requires_grad=True)
+        t3 = torch.rand(5, device=GPU_TYPE, requires_grad=True)
         torch_add = t2 + t3
 
         tests = [
