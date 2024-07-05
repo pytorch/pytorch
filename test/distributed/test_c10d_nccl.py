@@ -48,6 +48,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     skip_if_lt_x_gpu,
     skip_if_rocm,
+    TEST_SKIPS,
     with_dist_debug_levels,
     with_nccl_blocking_wait,
 )
@@ -575,6 +576,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self._check_nccl_timeout(timedelta(seconds=252))
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_optimization(self):
         # Test the optimization of new groups that contain all world
         # ranks use the "transparent" `ncclCommSplit` optimization.
@@ -614,14 +616,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         original_tensor = tensor.clone()
         ng = c10d.new_group([0])
 
-        # rank 0 hasn't split yet, but rank 1 did for the
-        # nocolor... so split count matches rank count coincidentally
-        # in each of the proceses this test spawned!
-        self.assertEqual(backend.comm_split_count(), self.rank)
+        # comm split happens eagerly since device_id is passed to init_process_group.
+        self.assertEqual(backend.comm_split_count(), 1)
         if self.rank == 0:
             dist.broadcast(tensor, 0, group=ng)
 
-        # now everyone has split because rank 0 has performed a comm
+        # no additional comm split happens after a collective.
         self.assertEqual(backend.comm_split_count(), 1)
         self.assertEqual(tensor, original_tensor)
 
@@ -3459,7 +3459,10 @@ class NCCLTraceTestBase(MultiProcessTestCase):
         return torch.device("cuda", self.rank_to_GPU[self.rank][0])
 
     def _join_processes(self, fn):
-        fn()
+        # We need to patch sys.exit() as skip_if will use sys.exit() and
+        # the exit code from the this process will not be catched.
+        with mock.patch("sys.exit") as exit_mock:
+            fn()
         super()._join_processes(fn)
 
     def _spawn_processes(self) -> None:
@@ -3658,6 +3661,29 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(last["output_dtypes"], ["Float"])
         self.assertEqual(last["timeout_ms"], 600000)
         self.assertEqual(last["collective_seq_id"] - first["collective_seq_id"], 9)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_trace_while_all_works_retired(self):
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "10"
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        device = self.local_device
+        # send more works than the buffer size to overwrite the previous entry
+        for i in range(12):
+            a = [torch.ones(3, 4, device=device)]
+            pg.broadcast(a).wait()
+        torch.cuda.synchronize(device=device)
+
+        # wait for all works to be retired
+        pg._wait_for_pending_works()
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        t = t["entries"]
+        self.assertEqual(len(t), 10)
+        last = t[-1]
+        self.assertEqual(last["retired"], True)
+        self.assertEqual(last["state"], "completed")
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -3999,6 +4025,16 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertTrue("duration_ms" not in t["entries"][0])
 
 
+def check_if_test_is_skipped(fn):
+    def wrapper(self, *args, **kwargs):
+        for skip in TEST_SKIPS.values():
+            if self.processes[0].exitcode == skip.exit_code:
+                return MultiProcessTestCase._check_return_codes(self, *args, **kwargs)
+        return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
     timeout_sec = 1
 
@@ -4014,6 +4050,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
         pg = c10d.distributed_c10d._get_default_group()
         return pg
 
+    @check_if_test_is_skipped
     def _check_return_codes(self, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
@@ -4030,7 +4067,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
 
 class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
     @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_if_lt_x_gpu(2)
     @parametrize("timing_enabled", [True, False])
     def test_timeout_dumps(self, timing_enabled):
         # dump on heartbeatmonitor thread
@@ -4080,6 +4117,7 @@ instantiate_parametrized_tests(NCCLTraceTest)
 
 
 class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
+    @check_if_test_is_skipped
     def _check_return_codes(self, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
@@ -4087,7 +4125,7 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
         self.assertEqual(self.processes[1].exitcode, -6)
 
     @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_if_lt_x_gpu(2)
     def test_timeout_dumps_on_stuck_ranks(self):
         # need rank0 to crash quicker after detecting timeout
         os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "1"
@@ -4139,6 +4177,7 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
         except TimeoutError:
             return None
 
+    @check_if_test_is_skipped
     def _check_return_codes(self, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort with exception and rank1 to exit with exit 1
