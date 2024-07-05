@@ -69,13 +69,18 @@ class TensorArg:
     name: str
     buffer: str
     dtype: torch.dtype
-    offset: sympy.Expr = sympy.Integer(0)
+    offset: sympy.Expr = sympy.Integer(0)  # c++ only
+    alias_of: Optional[str] = None  # halide only
 
 
 @dataclasses.dataclass
 class SizeArg:
     name: str
     expr: sympy.Expr
+
+    @property
+    def alias_of(self):
+        return None
 
 
 @dataclasses.dataclass
@@ -145,8 +150,11 @@ class BackendFeature(Enum):
     INPLACE_BUFFERS = auto()
     MASKED_SCATTER_WITH_INDEX = auto()
     SCAN = auto()
+    SORT = auto()
     TUPLE_REDUCTION = auto()
     PREFER_STORE_LOOP_ORDER = auto()
+    TRITON_TEMPLATES = auto()
+    REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
 def get_backend_features(device: Union[torch.device, str]):
@@ -189,22 +197,25 @@ def init_backend_registration():
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_cuda import CppWrapperCuda
     from .cuda_combined_scheduling import CUDACombinedScheduling
+    from .halide import HalideScheduling
     from .triton import TritonScheduling
     from .wrapper import WrapperCodeGen
 
     if get_scheduling_for_device("cpu") is None:
+        cpu_backends = {"cpp": CppScheduling, "halide": HalideScheduling}
         register_backend_for_device(
             "cpu",
-            CppScheduling,
+            lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
             WrapperCodeGen,
             CppWrapperCpu,
         )
 
     if get_scheduling_for_device("cuda") is None:
         # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
+        cuda_backends = {"triton": CUDACombinedScheduling, "halide": HalideScheduling}
         register_backend_for_device(
             "cuda",
-            CUDACombinedScheduling,
+            lambda *args, **kwargs: cuda_backends[config.cuda_backend](*args, **kwargs),
             WrapperCodeGen,
             CppWrapperCuda,
         )
@@ -240,7 +251,6 @@ def boolean_ops():
     return (
         "is_inf",
         "is_nan",
-        "bitwise_xor",
         "logical_not",
         "signbit",
         "le",
@@ -421,8 +431,8 @@ class ExprPrinter(Printer):
 
         if (
             isinstance(string, CSEVariable)
-            or re.match(r"^[a-z0-9_.]+$", string, re.I)
-            or re.match(r"^\([^)]*\)$", string, re.I)
+            or re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
+            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
             or string == ""
         ):
             return string
@@ -1333,7 +1343,6 @@ class KernelArgs:
             arg_defs.append("ws_ptr")
             call_args.append("workspace")
             precompile_args.append(self.workspace_arg)
-
         return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):
@@ -1667,6 +1676,15 @@ class Kernel(CodeGen):
     ) -> Tuple[CSEVariable, ...]:
         raise NotImplementedError
 
+    def sort(
+        self,
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[CSEVariable, ...],
+        stable: bool,
+        descending: bool,
+    ) -> Tuple[CSEVariable, ...]:
+        raise NotImplementedError
+
     def var_ranges(self):
         raise NotImplementedError
 
@@ -1862,15 +1880,20 @@ class Kernel(CodeGen):
                 return out
 
             @staticmethod
+            def _update_store_cache(name: str, value: CSEVariable):
+                self.cse.store_cache[name] = value
+                if self.current_node:
+                    buf = self.current_node.get_output(name)
+                    for other_name in buf.get_mutations():
+                        self.cse.store_cache[other_name] = value
+
+            @staticmethod
             def store(
                 name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
             ) -> None:
                 self.store_buffer_names.add(name)
                 if mode is None:
-                    self.cse.store_cache[name] = value
-                    if self.current_node:
-                        for other_name in self.current_node.get_mutations():
-                            self.cse.store_cache[other_name] = value
+                    CSEProxy._update_store_cache(name, value)
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
                 else:
@@ -1879,10 +1902,7 @@ class Kernel(CodeGen):
             @staticmethod
             def store_reduction(name: str, index: sympy.Expr, value: CSEVariable):
                 self.store_buffer_names.add(name)
-                self.cse.store_cache[name] = value
-                if self.current_node:
-                    for other_name in self.current_node.get_mutations():
-                        self.cse.store_cache[other_name] = value
+                CSEProxy._update_store_cache(name, value)
 
                 if name not in V.graph.removed_buffers:
                     return self.store_reduction(name, index, value)
@@ -1907,6 +1927,15 @@ class Kernel(CodeGen):
                 values: Tuple[CSEVariable, ...],
             ) -> Tuple[CSEVariable, ...]:
                 return self.scan(dtypes, combine_fn, values)
+
+            @staticmethod
+            def sort(
+                dtypes: Tuple[torch.dtype, ...],
+                values: Tuple[CSEVariable, ...],
+                stable: bool,
+                descending: bool,
+            ) -> Tuple[CSEVariable, ...]:
+                return self.sort(dtypes, values, stable, descending)
 
             @staticmethod
             def bucketize(
