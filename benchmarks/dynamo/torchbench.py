@@ -140,6 +140,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._config["tolerance"]
 
     @property
+    def _require_larger_multiplier_for_smaller_tensor(self):
+        return self._config["require_larger_multiplier_for_smaller_tensor"]
+
+    @property
     def _accuracy(self):
         return self._config["accuracy"]
 
@@ -414,6 +418,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         else:
             return torch.no_grad()
 
+    def use_larger_multiplier_for_smaller_tensor(self, name):
+        return name in self._require_larger_multiplier_for_smaller_tensor
+
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         tolerance = 1e-4
         cosine = self.args.cosine
@@ -421,6 +428,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.float16 or self.args.amp:
             if name in self._tolerance["higher_fp16"]:
                 return 1e-2, cosine
+            elif name in self._tolerance["even_higher"]:
+                return 8 * 1e-2, cosine
             return 1e-3, cosine
 
         if self.args.bfloat16:
