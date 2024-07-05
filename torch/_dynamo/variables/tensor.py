@@ -420,21 +420,33 @@ class TensorVariable(VariableTracker):
     def unpack_var_sequence(self, tx, idxes=None):
         from .builder import wrap_fx_proxy_cls
 
-        if idxes is None:
-            if self.size:
-                length = self.size[0]
+        if self.size:
+            size_len = len(self.size)
+        else:
+            size_var = self.call_method(tx, "size", [], {})
+            assert isinstance(size_var, SizeVariable)
+            size_len = len(size_var.items)
+        # Ensure we don't unpack a scalar tensor.
+        assert size_len != 0, "Can't unpack scalar tensors."
+
+        if self.size:
+            length = self.size[0]
+        else:
+            dyn_length = self.call_method(tx, "size", [ConstantVariable.create(0)], {})
+            # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values produced through
+            # symbolic_shapes, but that end up as int/sympy.Integer
+            assert isinstance(dyn_length, (SymNodeVariable, ConstantVariable))
+            if isinstance(dyn_length, SymNodeVariable):
+                length = dyn_length.evaluate_expr(tx.output)
             else:
-                dyn_length = self.call_method(
-                    tx, "size", [ConstantVariable.create(0)], {}
-                )
-                # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values produced through
-                # symbolic_shapes, but that end up as int/sympy.Integer
-                assert isinstance(dyn_length, (SymNodeVariable, ConstantVariable))
-                if isinstance(dyn_length, SymNodeVariable):
-                    length = dyn_length.evaluate_expr(tx.output)
-                else:
-                    length = dyn_length.value
+                length = dyn_length.value
+
+        if idxes is None:
             idxes = range(length)
+        else:
+            assert (
+                len(idxes) == length
+            ), f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
         return [
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes

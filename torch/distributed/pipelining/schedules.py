@@ -1029,9 +1029,9 @@ class PipelineScheduleMulti(_PipelineSchedule):
                                 f"Unknown computation type {computation_type}"
                             )
 
-                    # do the communication
-                    if ops:
-                        _batch_p2p(ops).wait()
+                # do the communication
+                if ops:
+                    _batch_p2p(ops).wait()
             except Exception as e:
                 logger.error(
                     "[Rank %s] pipeline schedule %s caught the following exception \
