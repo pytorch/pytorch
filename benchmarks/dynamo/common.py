@@ -1547,7 +1547,12 @@ class OnnxModelFromTorchScript(OnnxModel):
         if self.use_experimental_patch:
             import torch_onnx
 
-            torch_onnx.patch_torch(error_report=True, profile=True)
+            torch_onnx.patch_torch(
+                error_report=True,
+                profile=True,
+                dump_exported_program=False,
+                artifacts_dir=os.path.dirname(output_path),
+            )
         else:
             # make sure the patch is not in effect
             try:
