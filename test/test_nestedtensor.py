@@ -4499,9 +4499,8 @@ class TestNestedTensorSubclass(TestCase):
             dim=dim,
             batch_size=expected_batch_size,
             contiguous=True,
-            # TODO: compute min / max during construction for this case since it's easy
-            cached_min_seqlen=None,
-            cached_max_seqlen=None,
+            cached_min_seqlen=expected_seqlen,
+            cached_max_seqlen=expected_seqlen,
         )
 
         if torch.device(device) == t.device and dtype == t.dtype and contiguous:
@@ -4536,9 +4535,8 @@ class TestNestedTensorSubclass(TestCase):
             dim=dim,
             batch_size=expected_batch_size,
             contiguous=True,
-            # TODO: compute min / max during construction for this case since it's easy
-            cached_min_seqlen=None,
-            cached_max_seqlen=None,
+            cached_min_seqlen=expected_seqlen,
+            cached_max_seqlen=expected_seqlen,
         )
 
         # we don't support conversion between layouts this way atm

@@ -117,9 +117,10 @@ def as_nested_tensor(
             offsets = torch.arange(0, batch_size * seq_len + 1, seq_len,
                                    device=device, dtype=torch.int64)
 
-            from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
-
-            return nested_view_from_values_offsets(values, offsets)
+            # NB: the full path -must- be used here instead of importing so that @fx.wrap works
+            return torch.nested._internal.nested_tensor.nested_view_from_values_offsets(
+                values, offsets, min_seqlen=seq_len, max_seqlen=seq_len,
+            )
         else:
             from torch.nested._internal.nested_tensor import jagged_from_list
 
@@ -397,7 +398,7 @@ Example::
     if jagged_dim is None:
         jagged_dim = 1
 
-    from torch.nested._internal.nested_tensor import nested_view_from_values_offsets_lengths
-
-    return nested_view_from_values_offsets_lengths(
-        values, offsets, lengths, ragged_idx=jagged_dim, min_seqlen=min_seqlen, max_seqlen=max_seqlen)
+    # NB: the full path -must- be used here instead of importing so that @fx.wrap works
+    return torch.nested._internal.nested_tensor.nested_view_from_values_offsets_lengths(
+        values, offsets, lengths, ragged_idx=jagged_dim, min_seqlen=min_seqlen, max_seqlen=max_seqlen
+    )
