@@ -274,7 +274,6 @@ static inline PyObject* call_callback(
     frame,
     cache_entry_pyobj,
     frame_state);
-  frame->locals = NULL;
   Py_DECREF(frame);
   Py_DECREF(cache_entry_pyobj);
   return res;
