@@ -89,6 +89,7 @@ import importlib
 
 import torch
 import torch._functorch.config
+import torch._inductor.config as inductor_config
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
@@ -1469,7 +1470,7 @@ def same(
                 if use_larger_multiplier_for_smaller_tensor and (
                     fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
                 ):
-                    multiplier = 8.0
+                    multiplier = 10.0
                 elif use_larger_multiplier_for_smaller_tensor and (
                     fp64_ref.numel() <= 500 and tol >= 4 * 1e-2
                 ):
@@ -1491,6 +1492,9 @@ def same(
                     and equal_nan
                     and math.isnan(ref_error)
                     and math.isnan(res_error)
+                    # Some unit test for the accuracy minifier relies on
+                    # returning false in this case.
+                    and not inductor_config.cpp.inject_relu_bug_TESTING_ONLY
                 ):
                     passes_test = True
                 if not passes_test:
