@@ -26,6 +26,8 @@ jobs:
         github.event.workflow_run.conclusion == 'failure' || needs.get-conclusion.outputs.conclusion == 'failure'
     runs-on: ubuntu-22.04
     environment: upload-stats
+    permissions:
+      id-token: write
     name: Upload dynamo performance stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
     steps:
       - name: Checkout PyTorch
