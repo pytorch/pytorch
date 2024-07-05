@@ -776,6 +776,9 @@ class TritonHOPifier:
     def call_HOP(self, variable, grids, combined_args, tx):
         raise NotImplementedError("abstract method")
 
+    def check_grid(self, grid):
+        raise NotImplementedError("abstract method")
+
     def init_variable(self, variable, kernel, kernel_idx, grid):
         from triton.runtime.autotuner import Autotuner
 
@@ -853,9 +856,6 @@ class TritonHOPifier:
             tx,
         )
 
-    def check_grid(self, grid):
-        raise NotImplementedError("abstract method")
-
     def call_triton_kernel(self, variable, args, kwargs, tx):
         from triton.runtime.autotuner import autotune, Autotuner, Config
 
@@ -931,3 +931,156 @@ class TritonHOPifier:
             grids = [grids[0]]
 
         return self.call_HOP(variable, grids, combined_args_raw, tx)
+
+
+###############################################################################
+# capture_triton API that makes a user-defined triton kernel traceable into
+# a graph via make_fx or non-strict export (coming soon)
+
+
+def capture_triton(triton_kernel, /):
+    """Allows capture of a triton kernel into a graph via make_fx or
+    non-strict export (coming soon).
+
+    These technologies perform Dispatcher-based tracing (via
+    ``__torch_dispatch__``) and cannot see calls to raw triton kernels.
+    The ``capture_triton`` API returns a new callable that can actually
+    be traced into a graph.
+
+    Examples:
+
+        >>> import torch
+        >>> import triton
+        >>> from triton import language as tl
+        >>> from torch.fx.experimental.proxy_tensor import make_fx
+        >>> from torch._higher_order_ops.triton_kernel_wrap import capture_triton
+        >>>
+        >>> @triton.jit
+        >>> def add_kernel(
+        >>>     in_ptr0,
+        >>>     in_ptr1,
+        >>>     out_ptr,
+        >>>     n_elements,
+        >>>     BLOCK_SIZE: "tl.constexpr",
+        >>> ):
+        >>>     pid = tl.program_id(axis=0)
+        >>>     block_start = pid * BLOCK_SIZE
+        >>>     offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        >>>     mask = offsets < n_elements
+        >>>     x = tl.load(in_ptr0 + offsets, mask=mask)
+        >>>     y = tl.load(in_ptr1 + offsets, mask=mask)
+        >>>     output = x + y
+        >>>     tl.store(out_ptr + offsets, output, mask=mask)
+        >>>
+        >>> def add(x, y):
+        >>>     output = torch.empty_like(x)
+        >>>     n_elements = output.numel()
+        >>>
+        >>>     def grid_fn(meta):
+        >>>         return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+        >>>
+        >>>     capture_triton(add_kernel)[grid_fn](x, y, output, n_elements, 16)
+        >>>     return output
+        >>>
+        >>> x = torch.randn(3, device="cuda")
+        >>> y = torch.randn(3, device="cuda")
+        >>> gm = make_fx(add)(x, y)
+        >>> print(gm.code)
+        >>> # def forward(self, x_1, y_1):
+        >>> #     empty_like = torch.ops.aten.empty_like.default(x_1, pin_memory = False)
+        >>> #     triton_kernel_wrapper_mutation_proxy = triton_kernel_wrapper_mutation(
+        >>> #         kernel_idx = 0, constant_args_idx = 0,
+        >>> #         grid = [(1, 1, 1)], kwargs = {
+        >>> #             'in_ptr0': x_1, 'in_ptr1': y_1, 'out_ptr': empty_like,
+        >>> #             'n_elements': 3, 'BLOCK_SIZE': 16
+        >>> #         })
+        >>> #     return empty_like
+
+    """
+    from triton.runtime.autotuner import Autotuner
+    from triton.runtime.jit import JITFunction
+
+    if not isinstance(triton_kernel, (JITFunction, Autotuner)):
+        raise RuntimeError(
+            "capture_triton only works on functions annotated with triton.jit or triton.autotune"
+        )
+    return TraceableTritonKernelWrapper(triton_kernel, None, None)
+
+
+from ..fx._symbolic_trace import is_fx_tracing
+
+
+class TracingTritonHOPifier(TritonHOPifier):
+    def raise_unsupported(self, msg):
+        raise RuntimeError(msg)
+
+    def is_callable(self, maybe_callable):
+        return callable(maybe_callable)
+
+    def call_grid(self, grid, meta, tx):
+        assert tx is None
+        return grid(meta)
+
+    def check_grid(self, grid):
+        if not isinstance(grid, tuple):
+            raise RuntimeError(
+                "capture_triton can only handle grids that resolve to Tuple[int, ...]."
+            )
+        return grid
+
+    def call_HOP(self, variable, grids, combined_args, tx):
+        assert tx is None
+        import torch
+
+        non_graphable_args = {
+            k: v
+            for k, v in combined_args.items()
+            if not isinstance(v, (torch.Tensor, int, float, bool))
+        }
+        graphable_args = {
+            k: v
+            for k, v in combined_args.items()
+            if isinstance(v, (torch.Tensor, int, float, bool))
+        }
+        meta = graphable_args
+
+        constant_args_idx = kernel_side_table.add_constant_args(non_graphable_args)
+        return triton_kernel_wrapper_mutation(
+            kernel_idx=variable.kernel_idx,
+            constant_args_idx=constant_args_idx,
+            grid=grids,
+            kwargs=meta,
+        )
+
+
+tracing_triton_hopifier_singleton = TracingTritonHOPifier()
+
+
+class TraceableTritonKernelWrapper:
+    def __init__(self, kernel, kernel_idx, grid):
+        self.kernel = None
+        self.grid = None
+        tracing_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
+        assert self.kernel is not None
+
+    def __getitem__(self, *args):
+        return tracing_triton_hopifier_singleton.call_getitem(self, args)
+
+    def run(self, *args, **kwargs):
+        import torch._dynamo
+
+        if not is_fx_tracing() or torch._dynamo.is_compiling():
+            assert self.kernel is not None
+            return self.kernel.run(*args, **kwargs)
+        return tracing_triton_hopifier_singleton.call_run(self, args, kwargs, None)
+
+    def __call__(self, *args, **kwargs):
+        import torch._dynamo
+
+        if not is_fx_tracing() or torch._dynamo.is_compiling():
+            assert self.kernel is not None
+            return self.kernel[self.grid](*args, **kwargs)
+
+        return tracing_triton_hopifier_singleton.call_triton_kernel(
+            self, args, kwargs, None
+        )
