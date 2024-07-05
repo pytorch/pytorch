@@ -522,7 +522,7 @@ def flex_attention(*args, **kwargs):
         query.get_device(),
         query.get_dtype(),
         query.get_size(),
-        FlexibleLayout.fill_ordered(query.get_size(), [3, 1, 2, 0])
+        query.get_stride(),
     )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = query.get_size()[:-1]  # [B, H, M]
