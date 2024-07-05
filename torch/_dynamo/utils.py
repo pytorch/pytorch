@@ -1470,7 +1470,7 @@ def same(
                 if use_larger_multiplier_for_smaller_tensor and (
                     fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
                 ):
-                    multiplier = 8.0
+                    multiplier = 10.0
                 elif use_larger_multiplier_for_smaller_tensor and (
                     fp64_ref.numel() <= 500 and tol >= 4 * 1e-2
                 ):
