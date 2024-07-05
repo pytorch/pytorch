@@ -24,12 +24,6 @@ from torch.distributed.pipelining import (
 from torch.distributed.pipelining.schedules import (
     _format_pipeline_order,
     _validate_pipeline_order,
-    _Action,
-    B,
-    F,
-    RESHARD,
-    UNSHARD,
-    W,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -686,28 +680,6 @@ class TestSchedulePlan(unittest.TestCase):
 
 instantiate_parametrized_tests(TestSchedulePlan)
 
-
-class TestScheduleLowering(unittest.TestCase):
-    """Tests lowering passes that convert simple compute-only (FBW) schedules into compute+comms schedules"""
-
-    @parametrize(
-        "action_str_and_ref",
-        [
-            ("1F0", _Action(1, F, 0)),
-            ("2B1", _Action(2, B, 1)),
-            ("0W3", _Action(0, W, 3)),
-            ("1UNSHARD", _Action(1, UNSHARD)),
-            ("3RESHARD", _Action(3, RESHARD)),
-        ],
-    )
-    def test_action_parse(self, action_str_and_ref):
-        act_str, ref = action_str_and_ref
-        act = _Action.from_str(act_str)
-        self.assertEqual(act, ref)
-        self.assertEqual(act_str, act.__repr__())
-
-
-instantiate_parametrized_tests(TestScheduleLowering)
 
 if __name__ == "__main__":
     # Run only the TestSchedulePlan tests (single process)

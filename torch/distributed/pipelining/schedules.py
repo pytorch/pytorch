@@ -36,16 +36,12 @@ class _ComputationType(Enum):
     FORWARD = 1
     BACKWARD = 2
     WEIGHT = 3
-    UNSHARD = 4
-    RESHARD = 5
 
     def __str__(self):
         str_map = {
             _ComputationType.FORWARD: "F",
             _ComputationType.BACKWARD: "B",
             _ComputationType.WEIGHT: "W",
-            _ComputationType.UNSHARD: "UNSHARD",
-            _ComputationType.RESHARD: "RESHARD",
         }
         return str_map[self]
 
@@ -57,10 +53,6 @@ class _ComputationType(Enum):
             return _ComputationType.BACKWARD
         elif action == "W":
             return _ComputationType.WEIGHT
-        elif action == "UNSHARD":
-            return _ComputationType.UNSHARD
-        elif action == "RESHARD":
-            return _ComputationType.RESHARD
         else:
             raise RuntimeError(f"Invalid computation type {action}")
 
@@ -68,10 +60,8 @@ class _ComputationType(Enum):
 F = _ComputationType.FORWARD
 B = _ComputationType.BACKWARD
 W = _ComputationType.WEIGHT
-UNSHARD = _ComputationType.UNSHARD
-RESHARD = _ComputationType.RESHARD
 
-_action_regex = re.compile(r"(\d+)([F,B,W]|UNSHARD|RESHARD)(\d*)")
+_action_regex = re.compile(r"(\d+)([F,B,W])(\d*)")
 
 
 class _Action(NamedTuple):
@@ -181,15 +171,21 @@ def _validate_pipeline_order(
         #     )
 
         # Ensure that no microbatch is operated on twice in current_timestep_actions
-        unique_microbatch_indices = {action.microbatch_index for action in current_timestep_actions}
+        unique_microbatch_indices = {
+            action.microbatch_index for action in current_timestep_actions
+        }
         if len(unique_microbatch_indices) != len(current_timestep_actions):
             error_msg.append(
                 "Duplicate microbatch index found in current_timestep_actions"
             )
 
         for action in current_timestep_actions:
-            stage_index, computation_type, mb_index  = action
-
+            stage_index = action.stage_index
+            computation_type = action.computation_type
+            mb_index = action.microbatch_index
+            assert (
+                mb_index is not None
+            ), "All currently supported action types require valid microbatch_index"
             if mb_index >= num_microbatches:
                 error_msg.append(f"Microbatch index {mb_index} out of range")
 
@@ -1021,7 +1017,9 @@ class PipelineScheduleMulti(_PipelineSchedule):
                             # Previous rank doing backward or weight update has no influence for the current rank forward recv
                             pass
                         else:
-                            raise ValueError(f"Unknown computation type {computation_type}")
+                            raise ValueError(
+                                f"Unknown computation type {computation_type}"
+                            )
                 for next_rank in all_next_ranks:
                     next_rank_ops = self.pipeline_order[next_rank]
                     next_rank_action = None
