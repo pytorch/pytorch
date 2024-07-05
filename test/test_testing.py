@@ -2221,13 +2221,11 @@ class TestImports(TestCase):
                 sys.executable,
                 "-c",
                 textwrap.dedent(
-                    f"""
+                    """
                     import warnings
                     warnings.filterwarnings("always", module=r".*torch.*")
-
-                    {program}
                     """
-                ).strip(),
+                ).strip() + "\n" + textwrap.dedent(program).strip(),
             ],
             stderr=subprocess.STDOUT,
             # On Windows, opening the subprocess with the default CWD makes `import torch`
