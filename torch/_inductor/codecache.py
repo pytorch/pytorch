@@ -621,33 +621,35 @@ def build_code_hash(roots, prefix, hasher):
             build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
 
 
-def get_code_hash(roots, extra_files=()):
-    hasher = hashlib.sha256()
-    hasher.update(torch.__version__.encode("utf-8"))
-    build_code_hash(roots, "", hasher)
-    for path in extra_files:
-        if os.path.exists(path):
-            with open(path, "rb") as f:
-                hasher.update(f.read())
-    return hasher.digest()
-
-
 @functools.lru_cache(None)
 def torch_key():
     """
     Compute a key that contains relevant information about torch source files
     """
     if not config.is_fbcode():
-        inductor_root = os.path.dirname(__file__)
-        extra_files = (
-            "codegen/aoti_runtime/interface.cpp",
-            "codegen/aoti_runtime/implementation.cpp",
-            "codegen/cpp_prefix.h",
-            "script.ld",
-        )
-        return get_code_hash(
-            [inductor_root], [os.path.join(inductor_root, x) for x in extra_files]
-        )
+
+        def get_code_hash(root):
+            # This function isn't meant to be used outside of torch_key, just a
+            # helper for clarity. Instead, use torch_key() directly when you need
+            # a hash representing the state of the source code.
+            extra_files = (
+                "codegen/aoti_runtime/interface.cpp",
+                "codegen/aoti_runtime/implementation.cpp",
+                "codegen/cpp_prefix.h",
+                "script.ld",
+            )
+            inductor_root = os.path.dirname(__file__)
+            extra_files = [os.path.join(inductor_root, x) for x in extra_files]
+            hasher = hashlib.sha256()
+            hasher.update(torch.__version__.encode("utf-8"))
+            build_code_hash([root], "", hasher)
+            for path in extra_files:
+                if os.path.exists(path):
+                    with open(path, "rb") as f:
+                        hasher.update(f.read())
+            return hasher.digest()
+
+        return get_code_hash(_TORCH_PATH)
 
     from libfb.py import parutil
 
