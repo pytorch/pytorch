@@ -4361,6 +4361,17 @@ class TestNestedTensorSubclass(TestCase):
         )
         self.assertTrue(nt is nt2)
 
+        # ensure call with device=None uses input tensor device
+        nt3 = torch.nested.as_nested_tensor(
+            t.to(device=device, dtype=dtype),
+            device=None,
+            dtype=None,
+            layout=layout,
+        )
+        self._validate_nt(
+            nt3, device, dtype, layout, requires_grad, expected_dim, expected_batch_size
+        )
+
         # we don't support conversion between layouts this way atm
         other_layout = torch.strided if layout == torch.jagged else torch.jagged
         with self.assertRaisesRegex(
