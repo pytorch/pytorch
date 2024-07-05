@@ -954,7 +954,6 @@ class TestConverter(TestCase):
         values = [empty] + [torch.randn(M, N) for N in Ns]
         # Cannot script variable length inputs.
         self._check_equal_ts_ep_converter(func2, tuple(values), ["trace"])
-        
 
 
 if __name__ == "__main__":
