@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa: E731, C405, F811, C418, C417
 import collections
+import fractions
 import functools
 import inspect
 import itertools
@@ -14,6 +15,7 @@ from typing import Any, Dict, List, NamedTuple
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 import torch
 
@@ -329,6 +331,58 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_methodcall3(a, b):
         return constant3(a, b=1.0) + b
+
+    def test_is_integer(self):
+        @torch._dynamo.optimize(nopython=True)
+        def forward(t, m):
+            return t if m.is_integer() else 2 * t
+
+        t = torch.tensor([1])
+        assert forward(t, 1.0).item() == 1
+        assert forward(t, 1.5).item() == 2
+
+        assert forward(t, np.float32(1.0)).item() == 1
+        assert forward(t, np.float64(1.5)).item() == 2
+
+    @parametrize("method", ("as_integer_ratio", "bit_length", "conjugate"))
+    def test_int_methods(self, method):
+        @torch._dynamo.optimize(nopython=True)
+        def forward(t, m):
+            return t if getattr(m, method)() else 2 * t
+
+        t = torch.tensor([1])
+        forward(t, 1)
+
+    @parametrize("method", ("as_integer_ratio", "conjugate", "hex", "is_integer"))
+    def test_float_methods(self, method):
+        @torch._dynamo.optimize(nopython=True)
+        def forward(t, m):
+            return t if getattr(m, method)() else 2 * t
+
+        t = torch.tensor([1])
+        forward(t, 1.0)
+
+    def test_fraction_as_integer_ratio(self):
+        @torch._dynamo.optimize(nopython=True)
+        def forward(t, m):
+            return t if m.as_integer_ratio()[1] else 2 * t
+
+        t = torch.tensor([1])
+        forward(t, fractions.Fraction(1))
+
+    @pytest.mark.xfail(
+        reason=(
+            "Fraction.conjugate() raises torch._dynamo.exc.Unsupported: "
+            "call_function UserDefinedClassVariable"
+        )
+    )
+    def test_fraction_conjugate(self):
+        @torch._dynamo.optimize(nopython=True)
+        def forward(t, m):
+            return t if m.conjugate() else 2 * t
+
+        t = torch.tensor([1])
+        forward(t, fractions.Fraction(1))
 
     @make_test
     def test_device_constant(a):
