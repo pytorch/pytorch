@@ -52,6 +52,7 @@ from ..utils import (
     has_torch_function,
     is_namedtuple_cls,
     is_utils_checkpoint,
+    is_wrapper_or_member_descriptor,
     istype,
     namedtuple_fields,
     object_has_getattribute,
@@ -901,7 +902,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.__func__, self.var_getattr(tx, "__class__"), source=source
             )
-        elif inspect.ismethoddescriptor(subobj):
+        elif inspect.ismethoddescriptor(subobj) and not is_wrapper_or_member_descriptor(
+            subobj.__get__
+        ):
             # Attribute has a __get__ method. Create a user defined object vt
             # for the subobj, and then trace the __get__ method.
             descriptor_var = UserDefinedObjectVariable(subobj, source=source)
