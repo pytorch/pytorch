@@ -11,6 +11,7 @@ import re
 import struct
 import subprocess
 import sys
+import textwrap
 import threading
 import time
 import unittest
@@ -1477,7 +1478,18 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 """
         try:
             subprocess.check_output(
-                [sys.executable, "-W", "all", "-c", script],
+                [
+                    sys.executable,
+                    "-c",
+                    textwrap.dedent(
+                        f"""
+                    import warnings
+                    warnings.filterwarnings("always", module=r".*torch.*")
+
+                    {script}
+                    """
+                    ).strip(),
+                ],
                 cwd=os.path.dirname(os.path.realpath(__file__)),
             )
         except subprocess.CalledProcessError as e:
