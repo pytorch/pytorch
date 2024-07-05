@@ -22,14 +22,10 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
 )
 from torch.distributed.pipelining.schedules import (
+    _Action,
+    _add_unshard_reshard,
     _format_pipeline_order,
     _validate_pipeline_order,
-    _Action,
-<<<<<<< HEAD
-=======
-    _add_unshard_reshard,
-    _ComputationType,
->>>>>>> 1bdeb293733 ([Pipelining] Implement compute to comm lowering)
     B,
     F,
     RESHARD,
