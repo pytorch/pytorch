@@ -263,11 +263,11 @@ class TestPySymInt(TestCase):
     def test_sympify_symint(self):
         shape_env = ShapeEnv()
         a = create_symint(shape_env, 2)
-        self.assertEqual(sympy.sympify(a), a.node.expr)
+        self.assertIs(sympy.sympify(a), a.node.expr)
         b = create_symfloat(shape_env, 3.0)
-        self.assertEqual(sympy.sympify(b), b.node.expr)
+        self.assertIs(sympy.sympify(b), b.node.expr)
         c = create_symbool(shape_env, True)
-        self.assertEqual(sympy.sympify(c), c.node.expr)
+        self.assertIs(sympy.sympify(c), c.node.expr)
 
     def test_roundtrip(self):
         shape_env = ShapeEnv()
