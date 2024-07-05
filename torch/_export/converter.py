@@ -1048,7 +1048,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
             except torch._dynamo.exc.UserError as exc:
                 dynamic_shape_dict = refine_dynamic_shapes_from_suggested_fixes(
                     exc.msg, dynamic_shape_dict
-                )
+                )  # type: ignore[assignment]
                 ep = torch.export._trace._export(
                     gm,
                     self.sample_args,
