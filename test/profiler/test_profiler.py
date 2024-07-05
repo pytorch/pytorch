@@ -1483,11 +1483,11 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                     "-c",
                     textwrap.dedent(
                         f"""
-                    import warnings
-                    warnings.filterwarnings("always", module=r".*torch.*")
+                        import warnings
+                        warnings.filterwarnings("always", module=r".*torch.*")
 
-                    {script}
-                    """
+                        {script}
+                        """
                     ).strip(),
                 ],
                 cwd=os.path.dirname(os.path.realpath(__file__)),
