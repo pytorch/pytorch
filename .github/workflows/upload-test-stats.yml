@@ -28,6 +28,8 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-22.04
     environment: upload-stats
+    permissions:
+      id-token: write
     name: Upload test stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
     steps:
       - name: Print workflow information
