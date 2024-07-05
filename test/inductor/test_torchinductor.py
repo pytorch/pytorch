@@ -3862,6 +3862,23 @@ class CommonTemplate:
             rtol = 1.3e-06
         self.common(fn, (x, w), atol=atol, rtol=rtol)
 
+    def test_conv3d(self):
+        m = torch.nn.Sequential(
+            torch.nn.Conv3d(3, 3, kernel_size=7),
+            ToTuple(),
+        )
+
+        self.common(
+            m,
+            (torch.randn([1, 3, 8, 16, 32]),),
+            atol=6e-5,
+            rtol=0.001,
+            # Make sure we compute also with fp16 in the reference. Otherwise,
+            # the reference will compute with fp32 and cast back to fp16, which
+            # causes numeric differences beyond tolerance.
+            reference_in_float=False if torch.version.hip else True,
+        )
+
     def test_conv2d_channels_last(self):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv2d channels_last")
