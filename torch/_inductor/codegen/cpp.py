@@ -2585,7 +2585,7 @@ class CppVecKernel(CppKernel):
             raise NotImplementedError
 
     def indirect_assert(self, var, lower, upper, mask=None):
-        assert not mask and not self._load_mask, "do not support mask in indirect_indexing assertion"
+        assert not mask, "do not support mask in indirect_indexing assertion"
         assert isinstance(var, CppCSEVariable)
         assert var.dtype is not None
         if not var.is_vec:
@@ -2606,7 +2606,11 @@ class CppVecKernel(CppKernel):
             assert upper
             cond = f"{var} < {upper}"
             cond_print = f"{var} < {upper_scalar}"
-        cond = f"({self._get_mask_type(var.dtype)}({cond})).all_masked()"
+        cond = f"({self._get_mask_type(var.dtype)}({cond}))"
+        if self._load_mask is not None:
+            # We need not check when load_mask is False
+            cond = f"({cond} | ~({self._load_mask}))"
+        cond = f"{cond}.all_masked()"
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
 
