@@ -49,6 +49,7 @@ from torch._dynamo.source import (
     TensorPropertySource,
 )
 from torch._guards import (
+    CompileContext,
     CompileId,
     DuplicateInputs,
     Guard,
@@ -2134,6 +2135,7 @@ class CheckFunctionManager:
                     reasons = get_guard_fail_reason_helper(
                         self.guard_manager,  # type: ignore[arg-type]
                         output_graph.local_scope,
+                        CompileContext.current_compile_id(),
                     )
                     raise AssertionError(f"Guard check failed: {reasons}")
 
