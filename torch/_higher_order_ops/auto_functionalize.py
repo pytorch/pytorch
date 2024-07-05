@@ -56,7 +56,7 @@ class AutoFunctionalized(HigherOrderOperator):
         super().__init__("auto_functionalized")
 
     def __call__(
-        self,
+        self_,
         _mutable_op: torch._ops.OpOverload,
         **kwargs: Dict[str, Any],
     ) -> Tuple[Any, Tuple[Tensor, ...]]:
@@ -231,6 +231,10 @@ def do_auto_functionalize(
             normalized_kwargs[arg.name] = arg.default_value
 
     unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
+    if "self" in unwrapped_kwargs:
+        warnings.warn(
+            "Using `self` as an argument in the definition of custom ops may lead to ambiguous parsing. Please consider using a different name for this argument to avoid potential issues."
+        )
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized(
             op, **unwrapped_kwargs  # type: ignore[arg-type]

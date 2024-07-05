@@ -288,16 +288,17 @@ class HigherOrderOperator(OperatorBase):
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
 
-    def dispatch(self, dispatch_key, *args, **kwargs):
+    # Use `self_` to avoid naming collide with custom ops arguments that are named "self".
+    def dispatch(self_, dispatch_key, *args, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
-        if dispatch_key in self._dispatch_cache:
-            kernel = self._dispatch_cache[dispatch_key]
+        if dispatch_key in self_._dispatch_cache:
+            kernel = self_._dispatch_cache[dispatch_key]
             assert not isinstance(kernel, torch._C.DispatchKey)
             return kernel(*args, **kwargs)
 
         if dispatch_key == torch._C.DispatchKey.FuncTorchDynamicLayerFrontMode:
-            return dispatch_functorch(self, args, kwargs)
+            return dispatch_functorch(self_, args, kwargs)
 
         if dispatch_key == torch._C.DispatchKey.Python:
             # The place to handle ProxyTorchDispatchMode, FakeTensorMode, etc
@@ -308,9 +309,9 @@ class HigherOrderOperator(OperatorBase):
                 curr_mode is not None
             ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
             assert (
-                type(curr_mode) in self.python_key_mode_table
+                type(curr_mode) in self_.python_key_mode_table
             ), f"Current active mode {curr_mode} not registered"
-            handler = self.python_key_mode_table[type(curr_mode)]
+            handler = self_.python_key_mode_table[type(curr_mode)]
             with _pop_mode_temporarily() as mode:
                 return handler(mode, *args, **kwargs)
 
@@ -358,7 +359,7 @@ class HigherOrderOperator(OperatorBase):
         assert not isinstance(kernel, torch._C.DispatchKey)
         return kernel(*args, **kwargs)
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self_, *args, **kwargs):
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
         import torch._dynamo
@@ -372,8 +373,8 @@ class HigherOrderOperator(OperatorBase):
                     self, flat_args, *args, **kwargs
                 )
 
-            dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
-            return self.dispatch(
+            dispatch_key_set = _compute_keyset(args, kwargs, self_.non_fallthrough_keys)
+            return self_.dispatch(
                 dispatch_key_set.highestPriorityTypeId(), *args, **kwargs
             )
 
