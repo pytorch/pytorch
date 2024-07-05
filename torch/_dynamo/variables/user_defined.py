@@ -909,6 +909,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # for the subobj, and then trace the __get__ method.
             descriptor_var = UserDefinedObjectVariable(subobj, source=source)
 
+            get_source = self.source
             if self.source:
                 get_source = AttrSource(self.source, "__get__")
 
