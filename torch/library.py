@@ -66,7 +66,7 @@ def infer_schema(
     Callers (e.g. the custom ops API) are responsible for checking these assumptions.
 
     Args:
-        function: function schema to define a new operator.
+        function: The function from which to infer a schema for from its type annotations.
         name (Optional[str]): The name of the operator in the schema. If ``name`` is None, then the
                               name of the function is used as the name of the operator.
         mutates_args ("unknown" | Iterable[str]): The arguments that are mutated in the function.
