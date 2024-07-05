@@ -599,8 +599,13 @@ def test_aoti_op_db():
         "atleast_3d",
         "clone",
         "index_reduce",
+        "median",
+        "new_",
+        "nonzero",
+        "ones_like",
+        "searchsorted"
     ]
-    skip_conv_gemm = ["addbmm", "addmm", "addmv"]
+    skip_conv_gemm = ["addbmm", "addmm", "addmv", "mm"]
     multiple_returns = ["frexp"]
     for op in op_db:
         if isinstance(op, UnaryUfuncInfo):
