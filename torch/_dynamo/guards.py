@@ -2547,8 +2547,9 @@ def get_guard_fail_reason(
     guard_fn: GuardFn,
     code: types.CodeType,
     f_locals: Dict[str, object],
+    compile_id: CompileId,
 ) -> str:
-    reason_str = get_guard_fail_reason_helper(guard_fn, f_locals)
+    reason_str = get_guard_fail_reason_helper(guard_fn, f_locals, compile_id)
     guard_failures[orig_code_map[code]].append(reason_str)
 
     try:
