@@ -475,6 +475,9 @@ class TestFlexAttention(InductorTestCase):
             (test_strides[0], test_strides[0]),
             (test_strides[0], test_strides[1]),
             (test_strides[2], test_strides[3]),
+            (test_strides[3], test_strides[1]),
+            # (test_strides[2], test_strides[4]), # TODO: Doesn't work for
+            # broadcasting reasons i think
         ],
     )
     @common_utils.parametrize("do_s", test_strides[:3])
