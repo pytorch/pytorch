@@ -865,6 +865,22 @@ else:
             with concat_license_files(include_files=True):
                 super().run()
 
+        def write_wheelfile(self, *args, **kwargs):
+            super().write_wheelfile(*args, **kwargs)
+
+            if BUILD_LIBTORCH_WHL:
+                # Remove extraneneous files in the libtorch wheel
+                for root, dirs, files in os.walk(self.bdist_dir):
+                    for file in files:
+                        if file.endswith((".a", ".so")) and os.path.isfile(
+                            os.path.join(self.bdist_dir, file)
+                        ):
+                            os.remove(os.path.join(root, file))
+                        elif file.endswith(".py"):
+                            os.remove(os.path.join(root, file))
+                # need an __init__.py file otherwise we wouldn't have a package
+                open(os.path.join(self.bdist_dir, "torch", "__init__.py"), "w").close()
+
 
 class install(setuptools.command.install.install):
     def run(self):
@@ -1183,7 +1199,7 @@ def main():
     install_requires += extra_install_requires
 
     extras_require = {
-        "optree": ["optree>=0.11.0"],
+        "optree": ["optree==0.11.0"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
 
