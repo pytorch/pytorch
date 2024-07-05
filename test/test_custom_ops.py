@@ -710,6 +710,12 @@ class TestCustomOp(CustomOpTestCaseBase):
             ),
         )
 
+        def foo_impl(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        schema = torch.library.infer_schema(foo_impl, op_name="myop", mutates_args={})
+        self.assertExpectedInline(schema, "myop(Tensor x) -> Tensor")
+
     def test_infer_schema_unsupported(self):
         with self.assertRaisesRegex(ValueError, "varargs"):
 
@@ -3151,13 +3157,11 @@ Please use `add.register_fake` to add an fake impl.""",
         def foo_impl(x: torch.Tensor) -> torch.Tensor:
             return x.sin()
 
-        schema = torch.library.infer_schema(
-            function=foo_impl, name="myop", mutates_args={}
-        )
+        schema = torch.library.infer_schema(foo_impl, op_name="myop", mutates_args={})
         self.assertExpectedInline(schema, "myop(Tensor x) -> Tensor")
 
-        schema = torch.library.infer_schema(function=foo_impl, mutates_args={})
-        self.assertExpectedInline(schema, "foo_impl(Tensor x) -> Tensor")
+        schema = torch.library.infer_schema(foo_impl, mutates_args={})
+        self.assertExpectedInline(schema, "(Tensor x) -> Tensor")
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):

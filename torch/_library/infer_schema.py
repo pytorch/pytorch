@@ -7,19 +7,42 @@ import torch  # noqa: F401
 from .. import device, dtype, Tensor, types
 
 
-def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
-    """Given a function with type hints, parses a schema.
+def infer_schema(
+    prototype_function: typing.Callable, mutates_args=(), op_name: Optional[str] = None
+) -> str:
+    r"""Parses the schema of a given function with type hints. The schema is inferred from the
+        function's type hints, and can be used to define a new operator.
 
-    We make some assumptions to make our lives easier that correspond to how people
-    write custom ops in real life:
-    - none of the outputs alias any of the inputs or each other.
-    - only the args listed in ``mutates_args`` are being mutated. If ``mutates_args`` is "unknown",
-      it assumes that all inputs to the operator are being mutates.
-    - string type annotations "device, dtype, Tensor, types" without library specification
+    We make the following assumptions:
+    - None of the outputs alias any of the inputs or each other.
+    - String type annotations "device, dtype, Tensor, types" without library specification
       are assumed to be torch.*. Similarly, string type annotations "Optional, List, Sequence, Union"
       without library specification are assumed to be typing.*.
+    - Only the args listed in ``mutates_args`` are being mutated. If ``mutates_args`` is "unknown",
+        it assumes that all inputs to the operator are being mutates.
 
     Callers (e.g. the custom ops API) are responsible for checking these assumptions.
+
+    Args:
+        prototype_function: The function from which to infer a schema for from its type annotations.
+        op_name (Optional[str]): The name of the operator in the schema. If ``name`` is None, then the
+                              name is not included in the inferred schema. Note that the input schema to
+                              ``torch.library.Library.define`` requires a operator name.
+        mutates_args ("unknown" | Iterable[str]): The arguments that are mutated in the function.
+
+    Returns:
+        The inferred schema.
+
+    Example::
+
+        >>> def foo_impl(x: torch.Tensor) -> torch.Tensor:
+        >>>     return x.sin()
+        >>>
+        >>> infer_schema(foo_impl, name="foo", mutates_args={})
+        >>> # foo(Tensor x) -> Tensor
+        >>>
+        >>> infer_schema(foo_impl, mutates_args={})
+        >>> # (Tensor x) -> Tensor
     """
     UNKNOWN_MUTATES = "unknown"
     sig = inspect.signature(prototype_function)
@@ -126,6 +149,8 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
     if type(return_annotation) == str:
         return_annotation = convert_type_string(return_annotation)
     ret = parse_return(return_annotation, error_fn)
+    if op_name is not None:
+        return f"{op_name}({', '.join(params)}) -> {ret}"
     return f"({', '.join(params)}) -> {ret}"
 
 

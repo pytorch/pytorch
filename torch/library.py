@@ -17,6 +17,7 @@ from torch._library.custom_ops import (
     CustomOpDef,
     device_types_t,
 )
+from torch._library.infer_schema import infer_schema  # noqa: F401
 from torch._ops import OpOverload
 
 
@@ -47,48 +48,6 @@ def fallthrough_kernel():
     A dummy function to pass to ``Library.impl`` in order to register a fallthrough.
     """
     raise NotImplementedError("fallthrough_kernel() should never be called.")
-
-
-def infer_schema(
-    function: Callable, name: Optional[str] = None, mutates_args=()
-) -> str:
-    r"""Parses the schema of a given function with type hints. The schema is inferred from the
-        function's type hints, and can be used to define a new operator.
-
-    We make the following assumptions:
-    - None of the outputs alias any of the inputs or each other.
-    - String type annotations "device, dtype, Tensor, types" without library specification
-      are assumed to be torch.*. Similarly, string type annotations "Optional, List, Sequence, Union"
-      without library specification are assumed to be typing.*.
-    - Only the args listed in ``mutates_args`` are being mutated. If ``mutates_args`` is "unknown",
-        it assumes that all inputs to the operator are being mutates.
-
-    Callers (e.g. the custom ops API) are responsible for checking these assumptions.
-
-    Args:
-        function: The function from which to infer a schema for from its type annotations.
-        name (Optional[str]): The name of the operator in the schema. If ``name`` is None, then the
-                              name of the function is used as the name of the operator.
-        mutates_args ("unknown" | Iterable[str]): The arguments that are mutated in the function.
-
-    Returns:
-        The inferred schema.
-
-    Example::
-
-        >>> def foo_impl(x: torch.Tensor) -> torch.Tensor:
-        >>>     return x.sin()
-        >>>
-        >>> torch.library.infer_schema(function=foo_impl, name="foo", mutates_args={})
-        >>> # foo(Tensor x) -> Tensor
-    """
-    from torch._library.infer_schema import infer_schema
-
-    if name is None:
-        name = function.__name__
-    schema_str = infer_schema(function, mutates_args)
-    schema_str = name + schema_str
-    return schema_str
 
 
 class Library:
