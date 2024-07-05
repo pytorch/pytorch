@@ -397,6 +397,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._calculate_package_version_based_on_upgraders",
         "torch._C._can_use_flash_attention",
         "torch._C._can_use_mem_efficient_attention",
+        "torch._C._can_use_cudnn_attention",
         "torch._C._check_onnx_proto",
         "torch._C._check_sparse_tensor_invariants",
         "torch._C._collect_all",
@@ -2385,6 +2386,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.backends.cpu.get_cpu_capability",
         "torch.backends.cuda.can_use_efficient_attention",
         "torch.backends.cuda.can_use_flash_attention",
+        "torch.backends.cuda.can_use_cudnn_attention",
         "torch.backends.cuda.enable_flash_sdp",
         "torch.backends.cuda.enable_math_sdp",
         "torch.backends.cuda.enable_mem_efficient_sdp",
@@ -3272,11 +3274,12 @@ SKIP_DIRS_RE = re.compile(r"match nothing^")
 is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
 # Skip fbcode paths(including torch.package paths) containing
 # one of the following strings.
-FBCODE_SKIP_DIRS = {
-    "torchrec/distributed",
-    "torchrec/fb/distributed",
-    "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py",
-}
+FBCODE_SKIP_DIRS = set()
+# Remove this after fbcode is fully migrated to tracing through torchrec.
+if torch._dynamo.config.skip_torchrec:
+    FBCODE_SKIP_DIRS.add("torchrec/distributed")
+    FBCODE_SKIP_DIRS.add("torchrec/fb/distributed")
+    FBCODE_SKIP_DIRS.add("caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py")
 FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS))})")
 
 
