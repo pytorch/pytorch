@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import time
 from typing import Any, Callable, Dict, List, TypeVar
@@ -5,6 +6,7 @@ from typing_extensions import ParamSpec
 
 import torch.distributed.c10d_logger as c10d_logger
 from torch.distributed.checkpoint.logging_handlers import DCP_LOGGER_NAME
+
 
 __all__: List[str] = []
 
@@ -24,6 +26,8 @@ def _msg_dict_from_dcp_method_args(*args, **kwargs) -> Dict[str, Any]:
     # checkpoint ID can be passed in through the serializer or through the checkpoint id directly
     storage_writer = kwargs.get("storage_writer", None)
     storage_reader = kwargs.get("storage_reader", None)
+    planner = kwargs.get("planner", None)
+
     checkpoint_id = kwargs.get("checkpoint_id", None)
     if not checkpoint_id and (serializer := storage_writer or storage_reader):
         checkpoint_id = getattr(serializer, "checkpoint_id", None)
@@ -31,6 +35,15 @@ def _msg_dict_from_dcp_method_args(*args, **kwargs) -> Dict[str, Any]:
     msg_dict["checkpoint_id"] = (
         str(checkpoint_id) if checkpoint_id is not None else checkpoint_id
     )
+
+    if storage_writer:
+        msg_dict["storage_writer"] = storage_writer.__class__.__name__
+
+    if storage_reader:
+        msg_dict["storage_reader"] = storage_reader.__class__.__name__
+
+    if planner:
+        msg_dict["planner"] = planner.__class__.__name__
 
     return msg_dict
 

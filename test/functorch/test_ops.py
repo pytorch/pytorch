@@ -399,6 +399,7 @@ aliasing_ops_list_return = {
 
 skip_noncontig = {
     "_batch_norm_with_update",
+    "as_strided_copy",
 }
 
 
@@ -915,6 +916,7 @@ class TestOperators(TestCase):
                 skip("ormqr"),  # Takes too long
                 xfail("as_strided"),  # incorrect output
                 xfail("as_strided", "partial_views"),  # incorrect output
+                xfail("as_strided_copy"),  # incorrect output
                 xfail("as_strided_scatter"),  # incorrect output
                 skip("bernoulli"),  # calls random op
                 xfail("bfloat16"),  # rank 4 tensor for channels_last
@@ -1149,6 +1151,7 @@ class TestOperators(TestCase):
             xfail("nn.functional.max_unpool2d", "grad"),
             xfail("sparse.sampled_addmm", ""),
             xfail("sparse.mm", "reduce"),
+            xfail("as_strided_copy", ""),  # calls as_strided
             xfail("as_strided_scatter", ""),  # calls as_strided
             xfail("index_reduce", "prod"),  # .item() call
             # ---------------------------------------------------------------------
@@ -1187,6 +1190,7 @@ class TestOperators(TestCase):
         vmapvjp_fail.union(
             {
                 xfail("as_strided"),
+                xfail("as_strided_copy"),
                 xfail("as_strided", "partial_views"),
             }
         ),
@@ -1252,6 +1256,7 @@ class TestOperators(TestCase):
         xfail("quantile"),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip("as_strided"),  # Test runner cannot handle this
         # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
+        xfail("as_strided_copy"),
         xfail("as_strided_scatter"),
         xfail(
             "nn.functional.gaussian_nll_loss"
@@ -1391,6 +1396,11 @@ class TestOperators(TestCase):
                 xfail("masked.cumprod", ""),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
             }
+        ).difference(
+            {
+                # as_strided_copy fails test_vmapvjp, succeeds here
+                xfail("as_strided_copy", ""),
+            }
         ),
     )
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1526,6 +1536,11 @@ class TestOperators(TestCase):
                 xfail(
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
+            }
+        ).difference(
+            {
+                # as_strided_copy fails test_vmapvjp, succeeds here
+                xfail("as_strided_copy", ""),
             }
         ),
     )
@@ -1889,6 +1904,7 @@ class TestOperators(TestCase):
                 xfail(
                     "as_strided", "partial_views"
                 ),  # AssertionError: Tensor-likes are not close!
+                xfail("as_strided_copy"),  # AssertionError: Tensor-likes are not close!
                 xfail(
                     "as_strided_scatter"
                 ),  # AssertionError: Tensor-likes are not close!
@@ -2312,7 +2328,8 @@ class TestOperators(TestCase):
             xfail("nn.functional.max_unpool2d"),  # contiguous call
             xfail("to_sparse"),  # dispatch key issue
             xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
-            # https://github.com/pytorch/pytorch/issues/96560
+            # https://github.com/pytorch/pytorch/issues/96560#issuecomment-2151063723
+            # ** minor accuracy issue for float32 on ROCm
             decorate("xlogy", decorator=skipIfRocm),
             # numerical inconsistencies, look like bugs
             skip(
@@ -2371,6 +2388,11 @@ class TestOperators(TestCase):
                 "linalg.pinv", "hermitian", {torch.float32: tol(atol=5e-06, rtol=5e-06)}
             ),
             tol1("nn.functional.conv3d", {torch.float32: tol(atol=5e-04, rtol=9e-03)}),
+            tol1(
+                "nn.functional.conv2d",
+                {torch.float32: tol(atol=3e-05, rtol=5e-06)},
+                device_type="cuda",
+            ),
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
         ),

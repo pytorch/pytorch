@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+r"""Implementation for the NAdam algorithm."""
 from typing import cast, List, Optional, Tuple, Union
 
 import torch
@@ -23,7 +25,7 @@ from .optimizer import (
 __all__ = ["NAdam", "nadam"]
 
 
-class NAdam(Optimizer):
+class NAdam(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
@@ -38,7 +40,7 @@ class NAdam(Optimizer):
         maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
-    ):
+    ):  # noqa: D107
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -65,7 +67,7 @@ class NAdam(Optimizer):
         )
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("maximize", False)
@@ -147,7 +149,7 @@ class NAdam(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -593,7 +595,6 @@ def nadam(
 
     See :class:`~torch.optim.NAdam` for details.
     """
-
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"

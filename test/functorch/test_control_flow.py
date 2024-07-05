@@ -681,9 +681,43 @@ def forward(self, arg0_1):
         torch.compile(fn, backend=backend)(*inp)
         self.assertEqual(len(backend.graphs), 1)
         gm = backend.graphs[0]
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
+        if torch._dynamo.config.inline_inbuilt_nn_modules:
+            self.assertExpectedInline(
+                gm.code.strip(),
+                """\
+def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor, L_self_buffers_dec_ : torch.Tensor, L_self_modules_linear_parameters_weight_ : torch.nn.parameter.Parameter, L_self_modules_linear_parameters_bias_ : torch.nn.parameter.Parameter):
+    l_iter_ = L_iter_
+    l_x_ = L_x_
+    l_self_buffers_dec_ = L_self_buffers_dec_
+    l_self_modules_linear_parameters_weight_ = L_self_modules_linear_parameters_weight_
+    l_self_modules_linear_parameters_bias_ = L_self_modules_linear_parameters_bias_
+    cond_fn_0 = self.cond_fn_0
+    body_fn_0 = self.body_fn_0
+    while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_iter_, l_x_), (l_self_buffers_dec_, l_self_modules_linear_parameters_bias_, l_self_modules_linear_parameters_weight_));  cond_fn_0 = body_fn_0 = l_iter_ = l_x_ = l_self_buffers_dec_ = l_self_modules_linear_parameters_bias_ = l_self_modules_linear_parameters_weight_ = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1];  while_loop = None
+    return (getitem, getitem_1)""",  # noqa: B950
+            )
+            self.assertExpectedInline(
+                gm.cond_fn_0.code.strip(),
+                """\
+def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
+    sub = l_iter_ - l_self_buffers_dec__cond_fn;  l_iter_ = l_self_buffers_dec__cond_fn = None
+    gt = sub > 0;  sub = None
+    return gt""",  # noqa: B950
+            )
+            self.assertExpectedInline(
+                gm.body_fn_0.code.strip(),
+                """\
+def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
+    sub = l_iter_ - 1;  l_iter_ = None
+    linear = torch._C._nn.linear(l_x_, l_self_modules_linear_parameters_weight__body_fn, l_self_modules_linear_parameters_bias__body_fn);  l_x_ = l_self_modules_linear_parameters_weight__body_fn = l_self_modules_linear_parameters_bias__body_fn = None
+    return (sub, linear)""",  # noqa: B950
+            )
+        else:
+            self.assertExpectedInline(
+                gm.code.strip(),
+                """\
 def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor):
     l_iter_ = L_iter_
     l_x_ = L_x_
@@ -696,23 +730,23 @@ def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor):
     getitem = while_loop[0]
     getitem_1 = while_loop[1];  while_loop = None
     return (getitem, getitem_1)""",  # noqa: B950
-        )
-        self.assertExpectedInline(
-            gm.cond_fn_0.code.strip(),
-            """\
+            )
+            self.assertExpectedInline(
+                gm.cond_fn_0.code.strip(),
+                """\
 def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
     sub = l_iter_ - l__self___dec_cond_fn;  l_iter_ = l__self___dec_cond_fn = None
     gt = sub > 0;  sub = None
     return gt""",  # noqa: B950
-        )
-        self.assertExpectedInline(
-            gm.body_fn_0.code.strip(),
-            """\
+            )
+            self.assertExpectedInline(
+                gm.body_fn_0.code.strip(),
+                """\
 def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
     sub = l_iter_ - 1;  l_iter_ = None
     linear = torch._C._nn.linear(l_x_, l__self___linear_weight_body_fn, l__self___linear_bias_body_fn);  l_x_ = l__self___linear_weight_body_fn = l__self___linear_bias_body_fn = None
     return (sub, linear)""",  # noqa: B950
-        )
+            )
 
     def test_while_loop_nested2_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested2"]
@@ -2564,6 +2598,74 @@ def forward(self, arg0_1):
         a = torch.ones((3, 4, 5))
         res = torch.vmap(wrapper)(a)
         self.assertEqual(res, a + 1)
+
+    def test_cond_trace_set__and_mutate_input(self):
+        def f(a, tmp):
+            a_view = a.view(-1)
+            with torch.no_grad():
+                a.set_(tmp)
+                a_view.mul_(2)
+            return a + tmp
+
+        inp = torch.ones(3, 3, requires_grad=True)
+        tmp = torch.ones(3, 3, requires_grad=True)
+        # graph break: torch._dynamo.exc.Unsupported: call_function DelayGraphBreakVariable() [TensorVariable()] {}
+        # due to set_
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile",
+        ):
+            torch.cond(inp.sum() > 0, f, f, (inp, tmp))
+
+    def test_cond_trace_set__and_mutate_intermediate(self):
+        def f(a, tmp):
+            a = a.clone()
+            a_view = a.view(-1)
+            tmp = tmp.clone()
+            with torch.no_grad():
+                a.set_(tmp)
+                a_view.mul_(2)
+            return a + tmp
+
+        inp = torch.ones(3, 3, requires_grad=True)
+        tmp = torch.ones(3, 3, requires_grad=True)
+
+        class Mod(torch.nn.Module):
+            def forward(self, inp: torch.Tensor, tmp: torch.Tensor) -> torch.Tensor:
+                return torch.cond(inp.sum() > 0, f, f, (inp, tmp))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot mutate tensors with frozen storage"
+        ):
+            out = torch.compile(Mod(), backend="aot_eager")(inp, tmp)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot mutate tensors with frozen storage"
+        ):
+            out = torch.compile(Mod(), backend="inductor")(inp, tmp)
+
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+        out = torch.compile(Mod(), backend=backend)(inp, tmp)
+        self.assertExpectedInline(
+            backend.graphs[0].cond_true_0.code.strip("\n"),
+            """\
+def forward(self, l_inp_, l_tmp_):
+    l_inp__1 = l_inp_
+    l_tmp__1 = l_tmp_
+    clone = l_inp__1.clone();  l_inp__1 = None
+    view = clone.view(-1)
+    clone_1 = l_tmp__1.clone();  l_tmp__1 = None
+    _set_grad_enabled = torch._C._set_grad_enabled(False)
+    set_ = clone.set_(clone_1)
+    mul_ = view.mul_(2);  view = None
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
+    add = clone + clone_1;  clone = clone_1 = None
+    return (add,)
+    """,
+        )
+        self.assertEqual(out, f(inp, tmp))
 
 
 instantiate_parametrized_tests(TestControlFlowTraced)

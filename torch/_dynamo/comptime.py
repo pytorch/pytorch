@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # This file establishes the public comptime interface to Dynamo.
 # This allows Dynamo users to execute arbitrary Python code while
 # Dynamo is symbolically evaluating their original programs.

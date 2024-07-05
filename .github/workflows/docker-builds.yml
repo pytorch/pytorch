@@ -54,6 +54,7 @@ jobs:
           pytorch-linux-focal-py3-clang9-android-ndk-r21e,
           pytorch-linux-jammy-py3.8-gcc11,
           pytorch-linux-jammy-py3.8-gcc11-inductor-benchmarks,
+          pytorch-linux-jammy-py3.12-halide,
           pytorch-linux-jammy-xpu-2024.0-py3,
           pytorch-linux-jammy-py3-clang15-asan,
           pytorch-linux-focal-py3-clang10-onnx,

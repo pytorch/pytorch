@@ -2,13 +2,14 @@
 
 import io
 import os
-import pathlib
 import sys
+from pathlib import Path
 from typing import NamedTuple, Optional
 
 import torch
 from torch import Tensor
 from torch.testing._internal.common_utils import skipIfTorchDynamo, TemporaryFileName
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -397,7 +398,7 @@ class TestSaveLoad(JitTestCase):
 
         # Save then load.
         with TemporaryFileName() as fname:
-            path = pathlib.Path(fname)
+            path = Path(fname)
             m.save(path)
             m2 = torch.jit.load(path)
 
@@ -624,7 +625,7 @@ class TestSaveLoad(JitTestCase):
             traced_module = torch.jit.trace(module, input1)
             traced_inputs = list(traced_module.graph.inputs())
             with TemporaryFileName() as fname:
-                path = pathlib.Path(fname)
+                path = Path(fname)
                 traced_module.save(path)
                 print(traced_module.graph)
                 loaded_module = torch.jit.load(path, _restore_shapes=True)
@@ -640,7 +641,7 @@ class TestSaveLoad(JitTestCase):
             traced_module._c._retrieve_traced_inputs()["forward"], [input_tensor]
         )
         with TemporaryFileName() as fname:
-            path = pathlib.Path(fname)
+            path = Path(fname)
             traced_module.save(path)
             loaded_module = torch.jit.load(path, _restore_shapes=True)
             loaded_inputs = list(loaded_module.graph.inputs())
@@ -659,7 +660,7 @@ class TestSaveLoad(JitTestCase):
         self.assertEqual(len(traced_module._c._retrieve_traced_inputs()), 0)
 
         with TemporaryFileName() as fname:
-            path = pathlib.Path(fname)
+            path = Path(fname)
             traced_module.save(path)
             loaded_module = torch.jit.load(path, _restore_shapes=True)
             loaded_inputs = list(loaded_module.graph.inputs())
@@ -1055,7 +1056,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
         # Save then load.
         with TemporaryFileName() as fname:
-            path = pathlib.Path(fname)
+            path = Path(fname)
             torch.jit.save_jit_module_to_flatbuffer(m, path)
             m2 = torch.jit.load(path)
 

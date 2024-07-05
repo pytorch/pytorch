@@ -36,11 +36,18 @@
 #include <ATen/native/transformers/cuda/flash_attn/flash_api.h>
 #endif
 #ifdef USE_MEM_EFF_ATTENTION
-// MemoryEfficient Attention Specific Imports
+#ifndef USE_ROCM
+// MemoryEfficient Attention Specific Imports for CUDA
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_backward.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
+#else
+// MemoryEfficient Attention Specific Imports for ROCM
+#include <ATen/native/transformers/hip/aotriton_adapter.h>
+#include <aotriton/flash.h>
+#include <aotriton/runtime.h>
+#endif
 #endif
 
 #ifdef __HIP_PLATFORM_AMD__
@@ -164,29 +171,40 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
     const Tensor& value,
     const Tensor& out,
     const Tensor& logsumexp,
-    const Tensor& cumulative_sequence_length_q,
-    const Tensor& cumulative_sequence_length_k,
-    const int64_t max_seqlen_batch_q,
-    const int64_t max_seqlen_batch_k,
-    double dropout_p,
-    bool is_causal,
     const Tensor& philox_seed,
     const Tensor& philox_offset,
-    std::optional<double> scale) {
+    const Tensor& attn_bias,
+    const Tensor& cum_seq_q,
+    const Tensor& cum_seq_k,
+    const int64_t max_q,
+    const int64_t max_k,
+    double dropout_p,
+    bool is_causal,
+    c10::optional<double> scale) {
+
+    auto& ctx = at::globalContext();
+    if (ctx.deterministicAlgorithms()) {
+      if (ctx.deterministicAlgorithmsWarnOnly()) {
+        TORCH_WARN_ONCE(
+            "cuDNN Attention defaults to a non-deterministic algorithm. ",
+            "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
+      }
+    }
+
     const int64_t batch_size = query.size(0);
     const int64_t num_heads = query.size(1);
-    const int64_t head_dim = query.size(3);
-
+    const int64_t head_dim_qk = query.size(3);
+    const int64_t head_dim_v = value.size(3);
     const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
-
     auto dq = at::empty_like(query);
     auto dk = at::empty_like(key);
     auto dv = at::empty_like(value);
     run_cudnn_SDP_bprop(batch_size /*int64_t b*/,
                         num_heads /*int64_t h*/,
-                        max_seqlen_batch_q /*int64_t s_q*/,
-                        max_seqlen_batch_k /*int64_t s_kv*/,
-                        head_dim /*int64_t d*/,
+                        max_q/*int64_t s_q*/,
+                        max_k/*int64_t s_kv*/,
+                        head_dim_qk /*int64_t d_qk*/,
+                        head_dim_v /*int64_t d_v*/,
                         softmax_scale /*float scaling_factor*/,
                         is_causal /*bool is_causal*/,
                         dropout_p /*float dropout_probability*/,
@@ -348,7 +366,6 @@ _efficient_attention_backward(
     grad_bias = at::empty(sz, bias->options())
                     .slice(/*dim=*/-1, /*start=*/0, /*end=*/lastDim);
   }
-  at::Tensor workspace;
 
   const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
 
@@ -368,6 +385,62 @@ _efficient_attention_backward(
     }
   }
 
+#ifdef USE_ROCM
+  // ROCM Implementation
+  TORCH_CHECK(!num_splits_key.has_value(),
+              "ROCM does not support num_split_keys in _efficient_attention_forward");
+  TORCH_CHECK(!window_size.has_value(),
+              "ROCM does not support window_size in _efficient_attention_forward");
+  auto ret = aotriton::v2::flash::check_gpu(stream);
+  if (hipSuccess != ret) {
+    TORCH_CHECK(false,
+                "[AOTriton] Accelerated SDPA only supports MI200/MI300X GPUs (gfx90a:sramecc+:xnack- or gfx942:sramecc+:xnack-)")
+  }
+  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+  bool is_causal;
+  if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
+    is_causal = true;
+  } else if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {
+    is_causal = false;
+  } else {
+    TORCH_CHECK(false, "[_efficient_attention_backward] Unsupported mask type in AOTriton, for now");
+  }
+  at::Tensor q_t = query.permute({0,2,1,3});
+  at::Tensor k_t = key.permute({0,2,1,3});
+  at::Tensor v_t = value.permute({0,2,1,3});
+  at::Tensor out_t = out.permute({0,2,1,3});
+  at::Tensor dq_t = grad_q.permute({0,2,1,3});
+  at::Tensor dk_t = grad_k.permute({0,2,1,3});
+  at::Tensor dv_t = grad_v.permute({0,2,1,3});
+  at::Tensor dout_t = grad_out.permute({0,2,1,3});
+  at::Tensor softmax_lse = logsumexp.view({B * nH, max_seqlen_q});
+  at::Tensor delta = at::empty_like(softmax_lse).contiguous();
+
+  hipError_t err;
+  using aotriton::v2::flash::attn_bwd;
+  using sdp::aotriton_adapter::mk_aotensor;
+  using sdp::aotriton_adapter::cast_dtype;
+  aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
+  err = attn_bwd(mk_aotensor(q_t, "q"),
+                 mk_aotensor(k_t, "k"),
+                 mk_aotensor(v_t, "v"),
+                 bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4,
+                 softmax_scale,
+                 mk_aotensor(out_t, "out"),
+                 mk_aotensor(dout_t, "dout"),
+                 mk_aotensor(dq_t, "dq"),
+                 mk_aotensor(dk_t, "dk"),
+                 mk_aotensor(dv_t, "dv"),
+                 bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4,
+                 mk_aotensor<2>(softmax_lse, "L"),
+                 mk_aotensor<2>(delta, "delta"),
+                 float(dropout_p),
+                 rng_engine_inputs.seed_.val,
+                 rng_engine_inputs.offset_.val,
+                 is_causal,
+                 stream);
+#else
+  at::Tensor workspace;
   cudaDeviceProp* p = at::cuda::getDeviceProperties(query.device().index());
   const int computeCapability = p->major * 10 + p->minor;
 
@@ -624,8 +697,9 @@ _efficient_attention_backward(
                  }));
   TORCH_CHECK(kernel_launched, "cutlassB: no kernel found to launch!");
   AT_CUDA_CHECK(cudaGetLastError());
+#endif // USE_ROCM
   return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v), std::move(grad_bias));
-  #endif
+  #endif // defined(USE_MEM_EFF_ATTENTION)
   TORCH_CHECK(false, "USE_MEM_EFF_ATTENTION was not enabled for build.")
   return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
 }

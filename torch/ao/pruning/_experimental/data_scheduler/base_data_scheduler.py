@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from functools import wraps
 import weakref
 import abc
