@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
+import inspect
 import operator
 import warnings
 
@@ -1026,10 +1027,14 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
             return None
 
         # Get dummy dynamic shapes only for tensors.
-        dynamic_shapes = tree_map(
+        dynamic_shape_list = tree_map(
             _tree_map_helper_to_get_dynamic_shape,
             self.sample_args,
         )
+
+        dynamic_shape_dict = {}
+        for i, (k, _) in enumerate(inspect.signature(gm.forward).parameters.items()):
+            dynamic_shape_dict[k] = dynamic_shape_list[i]
 
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
             try:
@@ -1038,18 +1043,18 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
                     self.sample_args,
                     strict=False,
                     pre_dispatch=True,
-                    dynamic_shapes=dynamic_shapes,
+                    dynamic_shapes=dynamic_shape_dict,
                 )
             except torch._dynamo.exc.UserError as exc:
-                dynamic_shapes = refine_dynamic_shapes_from_suggested_fixes(
-                    exc.msg, dynamic_shapes
+                dynamic_shape_dict = refine_dynamic_shapes_from_suggested_fixes(
+                    exc.msg, dynamic_shape_dict
                 )
                 ep = torch.export._trace._export(
                     gm,
                     self.sample_args,
                     strict=False,
                     pre_dispatch=True,
-                    dynamic_shapes=dynamic_shapes,
+                    dynamic_shapes=dynamic_shape_dict,
                 )
 
         # Post-processing to make sure the ExportedProgram states are correct.

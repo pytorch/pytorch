@@ -462,6 +462,7 @@ class ConvertFrameAssert:
             return None
 
         if is_generator(code):
+            breakpoint()
             unimplemented("generator")
 
         if not has_tensor_in_frame(frame):

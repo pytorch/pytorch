@@ -674,6 +674,7 @@ class MetaConverter:
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
     ):
+        # breakpoint()
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -1448,11 +1449,10 @@ class MetaConverter:
                                 device="meta",
                             )
                         )
-                        if self.copy_data:
+                        if self.copy_data and not any([isinstance(s, torch.SymInt) for s in t.size]):
                             with torch.no_grad(), no_dispatch():
                                 assert t.size is not None
                                 assert t.stride is not None
-                                print("torch/_subclasses/meta_utils.py [1430] - Value to torch.empty_strided", t.size, t.stride, t.dtype, t.device)
                                 r.real_tensor = torch.empty_strided(
                                     t.size, t.stride, dtype=t.dtype, device=t.device
                                 )
@@ -1487,7 +1487,7 @@ class MetaConverter:
                     ):
                         # You're normal and happy, install the fresh storage into the memo
                         self.set_storage_memo(s, r.untyped_storage())
-                        if self.copy_data:
+                        if self.copy_data and not any([isinstance(s, torch.SymInt) for s in t.size]):
                             r.untyped_storage().real_storage = (
                                 r.real_tensor.untyped_storage()
                             )
@@ -1532,7 +1532,7 @@ class MetaConverter:
                         with torch.no_grad(), maybe_suppress():
                             with maybe_fake_mgr:
                                 r.set_(r_s, storage_offset, sizes, strides)
-                            if self.copy_data:
+                            if self.copy_data and not any([isinstance(s, torch.SymInt) for s in t.size]):
                                 with torch.no_grad(), no_dispatch():
                                     r.real_tensor.set_(
                                         r_s.real_storage,

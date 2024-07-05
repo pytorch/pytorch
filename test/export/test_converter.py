@@ -589,21 +589,21 @@ class TestConverter(TestCase):
                 else:
                     return self.linear(self.m2(x))
 
-        # # Basic module testing.
-        # inp = (torch.ones(3),)
-        # orig_m = M(3)
-        # ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
+        # Basic module testing.
+        inp = (torch.ones(3),)
+        orig_m = M(3)
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
 
-        # t = inp[0]
-        # t -= 0.8
-        # for ep in ep_list[1:]:
-        #     torch.testing.assert_close(
-        #         ep.module()(*inp),
-        #         orig_m(*inp),
-        #     )
+        t = inp[0]
+        t -= 0.8
+        for ep in ep_list[1:]:
+            torch.testing.assert_close(
+                ep.module()(*inp),
+                orig_m(*inp),
+            )
 
         # Nested module testing.
-        inp = (torch.ones(3, 3),)
+        inp = (torch.ones(4, 3),)
         orig_m = NestedM(3)
         # TODO: fix trace: state_dict is not equal.
         ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
@@ -616,19 +616,19 @@ class TestConverter(TestCase):
                 orig_m(*inp),
             )
 
-        # # Super nested module testing.
-        # inp = (torch.ones(3),)
-        # orig_m = SuperNestedM1(3)
-        # # TODO: fix trace: state_dict is not equal.
-        # ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
+        # Super nested module testing.
+        inp = (torch.ones(3),)
+        orig_m = SuperNestedM1(3)
+        # TODO: fix trace: state_dict is not equal.
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
 
-        # t = inp[0]
-        # t -= 0.8
-        # for ep in ep_list:
-        #     torch.testing.assert_close(
-        #         ep.module()(*inp),
-        #         orig_m(*inp),
-        #     )
+        t = inp[0]
+        t -= 0.8
+        for ep in ep_list:
+            torch.testing.assert_close(
+                ep.module()(*inp),
+                orig_m(*inp),
+            )
 
         # Super nested module testing.
         inp = (torch.ones(3),)
