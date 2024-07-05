@@ -340,7 +340,7 @@ def tree_iter(
 
     >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> list(tree_iter(tree))
-    [1, 2, 3, 4, None, 5]
+    [2, 3, 4, 1, None, 5]
     >>> list(tree_iter(1))
     [1]
     >>> list(tree_iter(None))
@@ -375,7 +375,7 @@ def tree_leaves(
 
     >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> tree_leaves(tree)
-    [1, 2, 3, 4, None, 5]
+    [2, 3, 4, 1, None, 5]
     >>> tree_leaves(1)
     [1]
     >>> tree_leaves(None)
