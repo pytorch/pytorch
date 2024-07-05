@@ -2042,7 +2042,7 @@ def forward(self, l_x_):
             if node.op == "call_function" and node.target == operator.getitem:
                 count += 1
 
-        self.assertEqual(count, 3)
+        self.assertEqual(count, 1)
         self.assertEqual(gm_torch_mode(inp).shape, f(inp).shape)
 
     def test_dynamic_slicing_invalid(self):
@@ -3489,16 +3489,15 @@ def forward(self, x):
     sym_size_int = torch.ops.aten.sym_size.int(arg0_1, 0)
     sub = sym_size_int - 1
     slice_2 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub);  sub = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(arg0_1, 2)
-    slice_3 = torch.ops.aten.slice.Tensor(slice_2, 1, 1, sym_size_int_1);  slice_2 = None
+    slice_3 = torch.ops.aten.slice.Tensor(slice_2, 1, 1, sym_size_int);  slice_2 = None
     slice_4 = torch.ops.aten.slice.Tensor(slice_3, 2, 1, 3);  slice_3 = None
     sub_1 = sym_size_int - 2
     slice_5 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub_1);  sub_1 = None
-    slice_6 = torch.ops.aten.slice.Tensor(slice_5, 1, 2, sym_size_int_1);  slice_5 = None
+    slice_6 = torch.ops.aten.slice.Tensor(slice_5, 1, 2, sym_size_int);  slice_5 = None
     slice_7 = torch.ops.aten.slice.Tensor(slice_6, 2, 2, 3);  slice_6 = None
-    sub_2 = sym_size_int - 3;  sym_size_int = None
+    sub_2 = sym_size_int - 3
     slice_8 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub_2);  arg0_1 = sub_2 = None
-    slice_9 = torch.ops.aten.slice.Tensor(slice_8, 1, 3, sym_size_int_1);  slice_8 = sym_size_int_1 = None
+    slice_9 = torch.ops.aten.slice.Tensor(slice_8, 1, 3, sym_size_int);  slice_8 = sym_size_int = None
     slice_10 = torch.ops.aten.slice.Tensor(slice_9, 2, 3, 3);  slice_9 = None
     return pytree.tree_unflatten([slice_1, slice_4, slice_7, slice_10], self._out_spec)""",
         )

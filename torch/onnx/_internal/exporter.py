@@ -1501,12 +1501,15 @@ def dynamo_export(
     _assert_dependencies(resolved_export_options)
 
     try:
-        return Exporter(
-            options=resolved_export_options,
-            model=model,
-            model_args=model_args,
-            model_kwargs=model_kwargs,
-        ).export()
+        from torch._dynamo import config as _dynamo_config
+
+        with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
+            return Exporter(
+                options=resolved_export_options,
+                model=model,
+                model_args=model_args,
+                model_kwargs=model_kwargs,
+            ).export()
     except Exception as e:
         sarif_report_path = _DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH
         resolved_export_options.diagnostic_context.dump(sarif_report_path)
