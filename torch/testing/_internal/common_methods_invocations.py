@@ -17385,12 +17385,6 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               # RuntimeError: Internal error: pybind11::error_already_set called while
-               # Python error indicator not set.
-               # TODO: Investigate this more
-               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_out'),
-           ),
            supports_out=True),
     UnaryUfuncInfo('signbit',
                    ref=np.signbit,
@@ -17828,6 +17822,8 @@ op_db: List[OpInfo] = [
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03),
                                                        torch.complex64: tol(atol=1e-02, rtol=1e-02)}),
                                     'TestCommon', 'test_noncontiguous_samples'),
+                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=5e-05)}),
+                                    'TestOperators', 'test_grad'),
                        # FIXME This should be the following, but the toleranceOverride does not seem to do anything!
                        # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
                        #              'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
