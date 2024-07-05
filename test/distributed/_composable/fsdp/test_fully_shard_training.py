@@ -1069,9 +1069,31 @@ class TestFullyShard2DTraining(FSDPTest):
             optim.step()
             ref_optim.step()
 
+    # TODO: remove this test when 2d state_dict is ready.
+    @skip_if_lt_x_gpu(2)
+    @skipIfRocm
+    def test_raise_not_implemented_state_dict_if_2d(self):
+        def parallelize(_model: Transformer, mesh: DeviceMesh, use_seq_parallel: bool):
+            _model = Transformer.parallelize(_model, mesh["tp"], use_seq_parallel)
+            for layer in _model.layers:
+                fully_shard(layer, mesh=mesh["dp"])
+            fully_shard(_model, mesh=mesh["dp"])
+            return _model
+
+        global_mesh = self.init_global_mesh()
+        seed = 42
+        torch.manual_seed(seed)
+        model_args = ModelArgs(dropout_p=0.0)
+        model = parallelize(Transformer(model_args), global_mesh, True)
+
+        with self.assertRaisesRegex(NotImplementedError, "2D"):
+            get_model_state_dict(model)
+
+    # Temporarily disable 2D state dict test, while strided sharding is being devleoped.
+    # TODO: re-enable this test once 2d state_dict is ready.
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_train_parity_2d_transformer_checkpoint_resume(self):
+    def _temp_disable_test_train_parity_2d_transformer_checkpoint_resume(self):
         """
         Tests train parity of a 2D transformer without checkpointing against a
         2D transformer with a checkpoint save/load.
