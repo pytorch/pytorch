@@ -694,8 +694,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
     // compute kernel;
     // - achieve better barrier performance.
     auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
-    // CUDAStream wrapper will correctly use a DeviceGuard here
-    currentStream.synchronize();
+    AT_CUDA_CHECK(cudaStreamSynchronize(currentStream));
   }
 }
 
