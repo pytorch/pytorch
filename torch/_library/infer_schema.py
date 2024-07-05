@@ -11,15 +11,15 @@ def infer_schema(
     prototype_function: typing.Callable, mutates_args=(), op_name: Optional[str] = None
 ) -> str:
     r"""Parses the schema of a given function with type hints. The schema is inferred from the
-        function's type hints, and can be used to define a new operator.
+    function's type hints, and can be used to define a new operator.
 
     We make the following assumptions:
     - None of the outputs alias any of the inputs or each other.
     - String type annotations "device, dtype, Tensor, types" without library specification
-      are assumed to be torch.*. Similarly, string type annotations "Optional, List, Sequence, Union"
-      without library specification are assumed to be typing.*.
+    are assumed to be torch.*. Similarly, string type annotations "Optional, List, Sequence, Union"
+    without library specification are assumed to be typing.*.
     - Only the args listed in ``mutates_args`` are being mutated. If ``mutates_args`` is "unknown",
-        it assumes that all inputs to the operator are being mutates.
+    it assumes that all inputs to the operator are being mutates.
 
     Callers (e.g. the custom ops API) are responsible for checking these assumptions.
 
