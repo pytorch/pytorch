@@ -7,6 +7,8 @@ from unittest import expectedFailure as xfail, skipIf as skipif
 
 from pytest import raises as assert_raises
 
+from torch._numpy import put_along_axis
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -16,8 +18,6 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
     xpassIfTorchDynamo,
 )
-
-from torch._numpy import put_along_axis
 
 # If we are going to trace through these, we should use NumPy
 # If testing on eager mode, we use torch._numpy
@@ -153,7 +153,7 @@ class TestPutAlongAxis(TestCase):
 
             assert_equal(i_min, i_max)
 
-    @xfail # (
+    @xfail  # (
     # reason="RuntimeError: Expected index [1, 2, 5] to be smaller than self [3, 4, 1] apart from dimension 1")
     def test_broadcast(self):
         """Test that non-indexing dimensions are broadcast in both directions"""
