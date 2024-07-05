@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import inspect
 import typing
-import warnings
 from typing import List, Optional, Sequence, Union  # noqa: F401
 
 import torch  # noqa: F401
@@ -42,15 +41,6 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
     seen_args = set()
     saw_kwarg_only_arg = False
     for idx, (name, param) in enumerate(sig.parameters.items()):
-        if name == "self" and name in mutates_args:
-            new_name = "_torch_self"
-            mutates_args.remove(name)
-            mutates_args.add(new_name)
-            name = new_name
-            warnings.warn(
-                "`self` in mutates_args is not supported. It has been renamed to `_torch_self`.",
-                UserWarning,
-            )
         if not supported_param(param):
             error_fn("We do not support positional-only args, varargs, or varkwargs.")
 
