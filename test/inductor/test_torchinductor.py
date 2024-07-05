@@ -1719,8 +1719,7 @@ class CommonTemplate:
         sample[-1] = 1
         self.common(fn, (sample,))
 
-    # https://github.com/halide/Halide/issues/8256
-    @config.patch("halide.scheduler_cuda", "Li2018")
+    @skip_if_gpu_halide
     @skipCPUIf(IS_MACOS, "fails on macos")
     def test_multilayer_var(self):
         def fn(a):
@@ -1944,6 +1943,7 @@ class CommonTemplate:
             fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)), atol=atol, rtol=rtol
         )
 
+    @skip_if_gpu_halide
     def test_min_max_reduction(self):
         def fn(a, b):
             return (
@@ -2095,6 +2095,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randint(4, (4,)),))
 
+    @skip_if_gpu_halide
     def test_dist(self):
         def fn(a, b):
             return (
@@ -3827,8 +3828,7 @@ class CommonTemplate:
             rtol=0.001,
         )
 
-    # https://github.com/halide/Halide/issues/8256
-    @config.patch("halide.scheduler_cuda", "Li2018")
+    @skip_if_gpu_halide
     def test_convolution4(self):
         def fn(x, w):
             x = F.conv2d(x, w, groups=w.shape[0])
@@ -4167,8 +4167,7 @@ class CommonTemplate:
 
         self.assertEqual(eager_delta, compile_delta)
 
-    # https://github.com/halide/Halide/issues/8256
-    @config.patch("halide.scheduler_cuda", "Li2018")
+    @skip_if_gpu_halide
     def test_buffer_copied_in_graph_with_different_shapes(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -4685,8 +4684,7 @@ class CommonTemplate:
         self.assertEqual(a.stride(), c.stride())
         self.assertEqual(c.stride()[2], 1)
 
-    # https://github.com/halide/Halide/issues/8256
-    @config.patch("halide.scheduler_cuda", "Li2018")
+    @skip_if_gpu_halide
     def test_std(self):
         def fn(x):
             return (
@@ -5371,6 +5369,7 @@ class CommonTemplate:
             check_lowp=False,  # accuracy issues with relatively large matmuls
         )
 
+    @skip_if_gpu_halide
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
@@ -6667,6 +6666,7 @@ class CommonTemplate:
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
 
+    @skip_if_gpu_halide
     def test_multilayer_any(self):
         def fn(x):
             return (x.isinf().any(), x.isfinite().all())
@@ -6936,8 +6936,7 @@ class CommonTemplate:
             self.assertEqual(fn(x[128:]), x[128 + 16 :][:16])
 
     # from GPT2ForSequenceClassification
-    # TODO(jansel): incorrect results with Anderson, report bug
-    @config.patch("halide.scheduler_cuda", "Li2018")
+    @skip_if_gpu_halide
     def test_index_tensor(self):
         def fn(x, y):
             ne = torch.ops.aten.ne.Scalar(x, 0)
@@ -7406,8 +7405,7 @@ class CommonTemplate:
                 check_lowp=check_lowp,
             )
 
-    # https://github.com/halide/Halide/issues/8256
-    @config.patch("halide.scheduler_cuda", "Li2018")
+    @skip_if_gpu_halide
     def test_dense_mask_index(self):
         r"""
         There will be a little difference for reduce order between aten and inductor
@@ -8625,6 +8623,7 @@ class CommonTemplate:
         os.environ.get("BUILD_ENVIRONMENT", "").startswith("parallelnative"),
         "TODO: debug this with asan",
     )
+    @skip_if_gpu_halide
     def test_tmp_not_defined_issue2(self):
         def forward(arg38_1, arg81_1, getitem_17, new_zeros_default_4):
             div_tensor_7 = torch.ops.aten.div.Tensor(getitem_17, arg81_1)
@@ -8761,6 +8760,7 @@ class CommonTemplate:
         kwargs = aot_graph_input_parser(forward, device=GPU_TYPE)
         self.common(forward, [], kwargs=kwargs)
 
+    @skip_if_gpu_halide
     @config.patch("halide.scheduler_cpu", "Mullapudi2016")
     def test_misaligned_address_issue1(self):
         def forward(sub_tensor_1, unsqueeze_default):
@@ -10537,8 +10537,7 @@ class CommonTemplate:
         o = torch.optim.AdamW(params)
         pt2_optimizer_step(o)
 
-    # https://github.com/halide/Halide/issues/8256
-    @config.patch("halide.scheduler_cuda", "Li2018")
+    @skip_if_gpu_halide
     def test_adaptive_avg_pool1d_argmax(self):
         # https://github.com/pytorch/pytorch/issues/113013
         def fn(x):
@@ -10842,6 +10841,7 @@ class CommonTemplate:
         actual = compiled_fn(torch.ones(s0, s1))
         self.assertTrue((actual == 1).all())
 
+    @skip_if_gpu_halide
     def test_pattern_matcher_multi_user(self):
         # Reproducer for https://github.com/pytorch/pytorch/issues/129685
 
