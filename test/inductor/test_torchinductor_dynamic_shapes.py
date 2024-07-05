@@ -3,14 +3,17 @@ import contextlib
 import importlib
 
 import math
+import operator
 import os
 import sys
 import unittest
 from functools import partial
+from typing import List
 
 import torch
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
+from torch._inductor import metrics
 from torch._inductor.codegen.common import device_codegens, register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.wrapper import WrapperCodeGen
@@ -19,7 +22,7 @@ from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
-    onlyCUDA,
+    onlyOn,
 )
 from torch.testing._internal.common_utils import (
     IS_ARM64,
@@ -30,7 +33,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -57,21 +60,21 @@ importlib.import_module("filelock")
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # calling div on only symint args
-    "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_conv_inference_heuristics_dynamic_shapes": TestFailure("cuda"),
+    "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
+    "test_conv_inference_heuristics_dynamic_shapes": TestFailure(("cuda", "xpu")),
 }
 
 if TEST_WITH_ROCM:
     # Tensor-likes are not close
-    test_failures["test_convolution1_dynamic_shapes"] = TestFailure(
+    test_failures["test_dynamic_stride_nobreak"] = TestFailure(
         ("cpu", "cuda"), is_skip=True
     )
-    test_failures["test_convolution3_dynamic_shapes"] = TestFailure(
-        ("cuda"), is_skip=True
+    test_failures["test_item_to_inputs_kernel_nobreak"] = TestFailure(
+        ("cpu", "cuda"), is_skip=True
     )
-    test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
-        ("cuda"), is_skip=True
-    )
+    test_failures["test_unbacked_reduction"] = TestFailure(("cpu"), is_skip=True)
 
 
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
@@ -96,7 +99,7 @@ if HAS_CPU:
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_GPU and not TEST_WITH_ASAN:
 
     class DynamicShapesGPUTests(TestCase):
         common = check_model_gpu
@@ -368,6 +371,47 @@ class TestInductorDynamic(TestCase):
         arg = torch.tensor(5, device=device)
         self.assertEqual(f(arg), cf(arg))
 
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    @torch._inductor.config.patch(implicit_fallbacks=True)
+    def test_unbacked_save_for_backwards(self, device) -> None:
+        @torch.library.custom_op("_test::_cat", mutates_args=())
+        def _cat(t: torch.Tensor, ds: List[int]) -> torch.Tensor:
+            return t * t.new_ones([sum(ds)])
+
+        @torch.library.register_fake("_test::_cat")
+        def _cat_fake(t: torch.Tensor, ds: List[int]) -> torch.Tensor:
+            [torch._check_is_size(d) for d in ds]
+            return t.new_empty([sum(ds)])
+
+        def _cat_setup_context(ctx, inputs, output):
+            pass
+
+        def _cat_backward(ctx, grad):
+            return grad.sum(), None
+
+        torch.library.register_autograd(
+            "_test::_cat",
+            _cat_backward,
+            setup_context=_cat_setup_context,
+        )
+
+        def fn(t, sizes):
+            r = torch.ops._test._cat(t, sizes.tolist())
+            return r * t
+
+        t = torch.randn((), requires_grad=True, device=device)
+        sizes = torch.tensor([4, 8], dtype=torch.int64, device="cpu")
+        out = fn(t, sizes)
+        out.sum().backward()
+        expect = t.grad
+        t.grad = None
+        torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)(
+            t, sizes
+        ).sum().backward()
+        self.assertEqual(t.grad, expect)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_reduction(self, device):
         expect_fail = device == "cpu" and not IS_ARM64
@@ -399,7 +443,7 @@ class TestInductorDynamic(TestCase):
             return torch.ops.aten.cat.default([g, g, g2])
 
         cf = torch.compile(fullgraph=True)(f)
-        arg = torch.tensor([4, 6], device="cuda")
+        arg = torch.tensor([4, 6], device=GPU_TYPE)
         self.assertEqual(f(arg), cf(arg))
 
     @torch._dynamo.config.patch(
@@ -493,8 +537,7 @@ class TestInductorDynamic(TestCase):
         res1 = opt(x1)
         self.assertEqual(ref1, res1)
 
-    # Need to comment: is xpu need this? if yes we may need to add onlyGPU
-    @onlyCUDA
+    @onlyOn(GPU_TYPE)
     def test_pad_dynamic(self, device):
         def get_same_padding(x: int, k: int, s: int, d: int):
             return max((math.ceil(x / s) - 1) * s + (k - 1) * d + 1 - x, 0)
@@ -649,6 +692,33 @@ class TestInductorDynamic(TestCase):
         actual = cfn(5)
         self.assertEqual(expect, actual)
 
+    def test_interpolate_ceil_eq(self, device):
+        ceiling = math.ceil
+        IntTrueDiv = operator.truediv
+
+        def fn(t):
+            s0, s2, s3 = t.size()
+            x = torch.zeros(
+                (
+                    s0,
+                    2048,
+                    ceiling(IntTrueDiv(2 * ((s2 - 1) // 8) + 2, 1)),
+                    ceiling(IntTrueDiv(2 * ((s3 - 1) // 8) + 2, 1)),
+                ),
+                dtype=torch.bfloat16,
+            )
+            return torch.nn.functional.interpolate(
+                x,
+                scale_factor=2,
+                mode="nearest",
+            )
+
+        cfn = self.compile_fn(fn)
+        arg = torch.randn(4, 16, 18)
+        expect = fn(arg)
+        actual = cfn(arg)
+        self.assertEqual(expect, actual)
+
     def test_full_recompiles(self, device):
         def fn(x):
             _, L = x.shape
@@ -788,12 +858,58 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([5], device=device))
 
+    def test_sort_dynamic_shape_with_check(self, device):
+        if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
 
-instantiate_device_type_tests(TestInductorDynamic, globals())
+            def check_count(n):
+                self.assertEqual(metrics.generated_kernel_count, 0)
+
+        else:
+
+            def check_count(n):
+                self.assertEqual(metrics.generated_kernel_count, n)
+
+        # Test dynamic shapes with statically known small enough to generate
+        # persistent sort kernel
+        def fn(a, descending):
+            torch._check(a.shape[-1] <= 256)
+            return a.sort(dim=-1, stable=True, descending=descending)
+
+        inp = torch.rand(10, 128, dtype=torch.float32, device=device)
+        inp[:, 10:20] = 1.0
+        inp[:, 30:40] = 1.0
+        metrics.reset()
+
+        opt_fn = torch.compile(fn, dynamic=True)
+        expect = fn(inp, False)
+        actual = opt_fn(inp, False)
+        self.assertEqual(actual, expect)
+        check_count(1)
+
+        expect = fn(inp, True)
+        actual = opt_fn(inp, True)
+        self.assertEqual(actual, expect)
+        check_count(2)
+
+        # Non-power of two
+        inp[:, :120]
+
+        expect = fn(inp, False)
+        actual = opt_fn(inp, False)
+        self.assertEqual(actual, expect)
+        check_count(2)  # Reused existing kernel
+
+        expect = fn(inp, True)
+        actual = opt_fn(inp, True)
+        self.assertEqual(actual, expect)
+        check_count(2)  # Reused existing kernel
+
+
+instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ASAN:
+    if (HAS_CPU or HAS_GPU) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")

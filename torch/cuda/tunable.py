@@ -138,12 +138,12 @@ __all__ = [
 
 def enable(val: bool = True) -> None:
     r"""This is the big on/off switch for all TunableOp implementations."""
-    torch._C._cuda_tunableop_enable(val)
+    torch._C._cuda_tunableop_enable(val)  # type: ignore[attr-defined]
 
 
 def is_enabled() -> bool:
     r"""Returns whether the TunableOp feature is enabled."""
-    return torch._C._cuda_tunableop_is_enabled()
+    return torch._C._cuda_tunableop_is_enabled()  # type: ignore[attr-defined]
 
 
 def tuning_enable(val: bool = True) -> None:
@@ -152,12 +152,12 @@ def tuning_enable(val: bool = True) -> None:
     When enabled, if a tuned entry isn't found, run the tuning step and record
     the entry.
     """
-    torch._C._cuda_tunableop_tuning_enable(val)
+    torch._C._cuda_tunableop_tuning_enable(val)  # type: ignore[attr-defined]
 
 
 def tuning_is_enabled() -> bool:
     r"""Returns whether TunableOp implementations can be tuned."""
-    return torch._C._cuda_tunableop_tuning_is_enabled()
+    return torch._C._cuda_tunableop_tuning_is_enabled()  # type: ignore[attr-defined]
 
 
 def set_max_tuning_duration(duration: int) -> None:
@@ -166,12 +166,12 @@ def set_max_tuning_duration(duration: int) -> None:
     If both max tuning duration and iterations are set, the smaller of the two
     will be honored. At minimum 1 tuning iteration will always be run.
     """
-    torch._C._cuda_tunableop_set_max_tuning_duration(duration)
+    torch._C._cuda_tunableop_set_max_tuning_duration(duration)  # type: ignore[attr-defined]
 
 
 def get_max_tuning_duration() -> int:
     r"""Get max time to spend tuning a given solution."""
-    return torch._C._cuda_tunableop_get_max_tuning_duration()
+    return torch._C._cuda_tunableop_get_max_tuning_duration()  # type: ignore[attr-defined]
 
 
 def set_max_tuning_iterations(iterations: int) -> None:
@@ -180,12 +180,12 @@ def set_max_tuning_iterations(iterations: int) -> None:
     If both max tuning duration and iterations are set, the smaller of the two
     will be honored. At minimum 1 tuning iteration will always be run.
     """
-    torch._C._cuda_tunableop_set_max_tuning_iterations(iterations)
+    torch._C._cuda_tunableop_set_max_tuning_iterations(iterations)  # type: ignore[attr-defined]
 
 
 def get_max_tuning_iterations() -> int:
     r"""Get max iterations to spend tuning a given solution."""
-    return torch._C._cuda_tunableop_get_max_tuning_iterations()
+    return torch._C._cuda_tunableop_get_max_tuning_iterations()  # type: ignore[attr-defined]
 
 
 def set_filename(filename: str, insert_device_ordinal: bool = False) -> None:
@@ -195,22 +195,22 @@ def set_filename(filename: str, insert_device_ordinal: bool = False) -> None:
     will be added to the given filename automatically. This can be used in a
     1-process-per-gpu cenario to ensure all processes write to a separate file.
     """
-    torch._C._cuda_tunableop_set_filename(filename, insert_device_ordinal)
+    torch._C._cuda_tunableop_set_filename(filename, insert_device_ordinal)  # type: ignore[attr-defined]
 
 
 def get_filename() -> str:
     r"""Get the results filename."""
-    return torch._C._cuda_tunableop_get_filename()
+    return torch._C._cuda_tunableop_get_filename()  # type: ignore[attr-defined]
 
 
 def get_results() -> Tuple[str, str, str, float]:
     r"""Return all TunableOp results."""
-    return torch._C._cuda_tunableop_get_results()
+    return torch._C._cuda_tunableop_get_results()  # type: ignore[attr-defined]
 
 
 def get_validators() -> Tuple[str, str]:
     r"""Return the TunableOp validators."""
-    return torch._C._cuda_tunableop_get_validators()
+    return torch._C._cuda_tunableop_get_validators()  # type: ignore[attr-defined]
 
 
 def write_file_on_exit(val: bool) -> None:
@@ -219,7 +219,7 @@ def write_file_on_exit(val: bool) -> None:
     This is useful as a final flush of your results to disk if your application
     terminates as result of normal operation or an error. Manual flushing of
     your results can be achieved by manually calling ``write_file()``."""
-    torch._C._cuda_tunableop_write_file_on_exit(val)
+    torch._C._cuda_tunableop_write_file_on_exit(val)  # type: ignore[attr-defined]
 
 
 def write_file(filename: Optional[str] = None) -> bool:
@@ -229,7 +229,7 @@ def write_file(filename: Optional[str] = None) -> bool:
     """
     if filename is None:
         filename = get_filename()
-    return torch._C._cuda_tunableop_write_file(filename)
+    return torch._C._cuda_tunableop_write_file(filename)  # type: ignore[attr-defined]
 
 
 def read_file(filename: Optional[str] = None) -> bool:
@@ -239,4 +239,4 @@ def read_file(filename: Optional[str] = None) -> bool:
     """
     if filename is None:
         filename = get_filename()
-    return torch._C._cuda_tunableop_read_file(filename)
+    return torch._C._cuda_tunableop_read_file(filename)  # type: ignore[attr-defined]

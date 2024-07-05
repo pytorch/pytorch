@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from .graph_module import GraphModule
 from ._lazy_graph_module import _make_graph_module
 from .graph import Graph
@@ -352,7 +353,7 @@ class Interpreter:
         attr_itr = self.module
         for i, atom in enumerate(target_atoms):
             if not hasattr(attr_itr, atom):
-                raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}")
+                raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i+1])}")
             attr_itr = getattr(attr_itr, atom)
         return attr_itr
 

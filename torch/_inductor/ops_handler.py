@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 from typing import (
     Any,
@@ -108,7 +109,8 @@ class OpsHandler(Protocol[T]):
         evaluates to true.  For example, you would use this if you needed to
         perform an indirect load that may not be valid on some elements;
         without masking, invalid accesses can cause IMAs.  When mask is true,
-        the result is the result of body; otherwise it is other.
+        the result is the result of body; otherwise it is other. Here, `other`
+        needs to be a constant.
 
         Contrast this with ops.where, which can multiplex between two values
         that have been unconditionally computed.
@@ -135,6 +137,38 @@ class OpsHandler(Protocol[T]):
         """
         Convert x to dtype.  src_dtype can be optionally set to specify what the original
         dtype of x was, which can improve code generation (used by torch to(dtype=dtype)).
+        """
+        ...
+
+    def trunc_to_int(self, x: T, dtype: torch.dtype) -> T:
+        """
+        Convert x to dtype with truncation semantics (similar to how the int
+        constructor works in Python).  In Inductor codegen, this just decays
+        to trunc and then to_dtype, but this composite operation helps
+        roundtrips for Sympy evaluation.
+
+        dtype is taken as an explicit parameter because the desired output
+        dtype is typically the index dtype, which may vary between int32 and
+        int64 depending on if we've shown that all the indexing operations can
+        be done in int32.
+        """
+        ...
+
+    def ceil_to_int(self, x: T, dtype: torch.dtype) -> T:
+        """
+        Convert x to dtype with ceiling semantics.  See also trunc_to_int.
+        """
+        ...
+
+    def floor_to_int(self, x: T, dtype: torch.dtype) -> T:
+        """
+        Convert x to dtype with ceiling semantics.  See also trunc_to_int.
+        """
+        ...
+
+    def round_to_int(self, x: T, dtype: torch.dtype) -> T:
+        """
+        Convert x to dtype with round-to-even semantics.  See also trunc_to_int.
         """
         ...
 
@@ -234,6 +268,18 @@ class OpsHandler(Protocol[T]):
         Perform an associative scan on 'value'.
         """
         # TODO: Improve the description with some pseudocode
+        ...
+
+    def sort(
+        self,
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[T, ...],
+        stable: bool,
+        descending: bool,
+    ) -> Tuple[T, ...]:
+        """
+        Sort values along the reduction dimension.
+        """
         ...
 
     def bucketize(
@@ -398,21 +444,23 @@ class OpsHandler(Protocol[T]):
     def isnan(self, x0: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
+    # This rounds half to even to break ties
     def round(self, x0: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
     def floor(self, x0: T) -> T:
         ...
 
     def sign(self, x0: T) -> T:
         ...
 
-    def to_int(self, x0: T) -> T:
-        ...
-
+    # NB: this returns a float, like the torch operation
     def trunc(self, x0: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
     def ceil(self, x0: T) -> T:
         ...
 
@@ -449,6 +497,7 @@ class OpsHandler(Protocol[T]):
     def mul(self, x0: T, x1: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
     def pow(self, x0: T, x1: T) -> T:
         ...
 
@@ -617,14 +666,21 @@ class OpsHandler(Protocol[T]):
 
     def floordiv(self, x0: T, x1: T) -> T:
         """Python-style floor division between integers only.  Computes the
-        true division of two numbers and floors the result.
+        true division of two numbers and floors the result.  If you want
+        floor division for floats, do regular truediv and floor the result.
         """
         ...
 
     def truediv(self, x0: T, x1: T) -> T:
-        """True division between floats.  Integer inputs are NOT valid: to do
-        Python style (int, int) -> float division, promote the inputs to float
-        first."""
+        """True division between floats.  Integer inputs are NOT valid.  To
+        do Python-style (int, int) -> float division, use int_truediv"""
+        ...
+
+    def int_truediv(self, x0: T, x1: T) -> T:
+        """True division between integers.  This is NOT the same as promoting
+        to float and doing integer division, there is a bespoke algorithm for
+        doing the division in higher precision than the above.
+        """
         ...
 
     def div(self, x0: T, x1: T) -> T:
@@ -638,6 +694,10 @@ class OpsHandler(Protocol[T]):
 
     def remainder(self, x0: T, x1: T) -> T:
         """Python-style modulus, take sign from RHS (x1)."""
+        ...
+
+    def round_decimal(self, x0: T, x1: T) -> T:
+        """Python-style round with decimal argument"""
         ...
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -695,7 +755,11 @@ class NoopHandler:
 
     @staticmethod
     def scan(dtypes, combine_fn, values) -> Tuple[None, ...]:
-        return tuple(None for i in range(len(values)))
+        return (None,) * len(values)
+
+    @staticmethod
+    def sort(dtypes, values, stable, descending) -> Tuple[None, ...]:
+        return (None,) * len(values)
 
     @staticmethod
     def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
@@ -731,6 +795,13 @@ class MockHandler:
     def scan(dtypes, combine_fn, values):
         return tuple(
             f"ops.scan({dtypes}, {combine_fn}, {values})[{i}]"
+            for i in range(len(values))
+        )
+
+    @staticmethod
+    def sort(dtypes, values, stable, descending):
+        return tuple(
+            f"ops.sort({dtypes}, {values}, stable={stable}, descending={descending})[{i}]"
             for i in range(len(values))
         )
 

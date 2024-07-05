@@ -16,7 +16,6 @@ from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -132,8 +131,8 @@ class MultiKernelTest(TestCase):
     def test_softmax_warn_mixed_layout(self):
         self.test_softmax()
 
-    test_softmax_cpp_wrapper = skipIfRocm(
-        make_cpp_wrapper_test(test_softmax, expect_multi_kernel=False)
+    test_softmax_cpp_wrapper = make_cpp_wrapper_test(
+        test_softmax, expect_multi_kernel=False
     )
 
     def test_layernorm(self):

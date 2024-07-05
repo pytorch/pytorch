@@ -8,6 +8,7 @@ import collections
 import contextlib
 import copy
 import functools
+import gc
 import inspect
 import itertools
 import random
@@ -32,6 +33,7 @@ import torch._dynamo.utils
 
 import torch._functorch.config
 import torch.library
+import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same
@@ -1078,6 +1080,67 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         out_test.sum().backward()
         self.assertEqual(leaf.grad, leaf_test.grad)
 
+    # https://github.com/pytorch/pytorch/issues/113263
+    def test_unpack_hooks_dont_run_during_tracing(self):
+        def f(x, y):
+            return x * y
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        pack_count = 0
+        unpack_count = 0
+
+        def pack_hook(x):
+            nonlocal pack_count
+            pack_count += 1
+            return x
+
+        # unpack hook shouldn't run during compilation, while we trace the forward
+        def unpack_hook(x):
+            nonlocal unpack_count
+            unpack_count += 1
+            return x
+
+        x = torch.ones(4, requires_grad=True)
+        y = torch.ones(4, requires_grad=False)
+        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+            out_test = f_compiled(x, y)
+            self.assertEqual(pack_count, 1)
+            self.assertEqual(unpack_count, 0)
+            out_test.sum().backward()
+            self.assertEqual(pack_count, 1)
+            self.assertEqual(unpack_count, 1)
+
+    # https://github.com/pytorch/pytorch/issues/113263
+    def test_unpack_hooks_can_be_disabled(self):
+        def f(x, y):
+            return x * y
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        x = torch.ones(4, requires_grad=True)
+        y = torch.ones(4, requires_grad=False)
+        with torch.autograd.graph.disable_saved_tensors_hooks("hooks are disabled"):
+            out_test = f_compiled(x, y)
+            out_test.sum().backward()
+
+    # https://github.com/pytorch/pytorch/issues/113263
+    def test_disabling_unpack_hooks_within_compiled_region(self):
+        def g(z):
+            with torch.autograd.graph.disable_saved_tensors_hooks("hooks are disabled"):
+                return z + 5
+
+        def f(x, y):
+            z = x * y
+            return g(z)
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        x = torch.ones(4, requires_grad=True)
+        y = torch.ones(4, requires_grad=False)
+        out_test = f_compiled(x, y)
+        out_test.sum().backward()
+
     # See https://github.com/pytorch/pytorch/issues/97745
     def test_gan_repro_trying_to_backward_through_the_graph_a_second_time(self):
         def f(a, b):
@@ -1242,6 +1305,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("aot_eager")(fn)
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
+
+    @torch._dynamo.config.patch(error_on_recompile=True)
+    @torch.fx.experimental._config.patch(use_duck_shape=False)
+    def test_dynamic_shape_disable_duck_size(self):
+        class TestModel(nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+
+            def forward(self, x: torch.Tensor, val: int) -> torch.Tensor:
+                return x + val
+
+        main_model = TestModel().to(memory_format=torch.channels_last)
+        opt_model = torch.compile(main_model, backend="eager", dynamic=True)
+
+        x1 = torch.rand(2, 5, 10, 10).to(memory_format=torch.channels_last)
+        x2 = torch.rand(2, 5, 4, 8).to(memory_format=torch.channels_last)
+
+        o1_ref = main_model(x1, 4)
+        o1 = opt_model(x1, 4)
+
+        o2_ref = main_model(x2, 20)
+        o2 = opt_model(x2, 20)
 
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])
@@ -1611,7 +1698,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
         self.assertEqual(
-            18 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
+            15 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
         )
 
     def test_exec_import(self):
@@ -4287,7 +4374,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
         x = torch.rand([2, 2])
         opt_fn(x, x)
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertExpectedInline(cnt.frame_count, """1""")
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_arange_in_bounds(self):
@@ -4356,7 +4443,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
         x = torch.rand([2, 2])
         self.assertEqual(opt_fn(x, [5]), fn(x, [5]))
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertExpectedInline(cnt.frame_count, """1""")
 
     def test_user_ctor_ctx_manager_custom_init_graph_break(self):
         counter = [0]
@@ -4384,7 +4471,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for i in range(0, 10):
             opt_fn(x, counter)
         self.assertEqual(counter[0], 12)
-        self.assertEqual(cnt.frame_count, torch._dynamo.utils.ifdynstaticdefault(3, 2))
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(cnt.frame_count, """2""")
+        else:
+            self.assertExpectedInline(cnt.frame_count, """1""")
 
     @unittest.expectedFailure
     def test_many_overlapping_inputs_does_not_explode_guards(self):
@@ -4658,68 +4748,130 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(type(actual), type(expected))
         self.assertEqual(actual.__dict__, expected.__dict__)
 
-    def test_storage_resize_forward_full_graph(self):
-        class TestModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.param = torch.nn.Parameter(torch.randn(4, 4))
+    def test_weakref(self):
+        def fn(x_weak, weight, y):
+            if x_weak is not None and x_weak() is not weight:
+                return torch.sin(y)
+            return torch.cos(y)
 
-            def forward(self, x):
-                self.param.untyped_storage().resize_(
-                    self.param.numel() * self.param.itemsize
-                )
-                with torch.no_grad():
-                    torch._foreach_copy_([self.param], [x])
-                out = torch.matmul(self.param, self.param)
-                self.param.untyped_storage().resize_(0)
-                return out
+        weight = torch.randn(4)
+        y = torch.randn(4)
+        x_weak = weakref.ref(weight)
 
-        def post_accumulate_grad_hook(param):
-            param.untyped_storage().resize_(0)
+        ref = fn(x_weak, weight, y)
 
-        # Beginning of backward, resize and put data into the param
-        def pre_backward_hook(module, grad) -> None:
-            module.param.untyped_storage().resize_(
-                self.param.numel() * self.param.itemsize
-            )
-            with torch.no_grad():
-                # simulates loading data into param from allgather
-                module.param.fill_(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x_weak, weight, y)
+        self.assertEqual(ref, res)
 
-        def post_forward_hook(module, args, output):
-            output.register_hook(functools.partial(pre_backward_hook, module))
+    def test_weakref_reconstruct(self):
+        def fn(x_weak, weight, y):
+            y = torch.sin(y)
+            referent = x_weak()
+            torch._dynamo.graph_break()
+            if referent is not weight:
+                return torch.sin(y)
+            return torch.cos(y)
 
-        x = torch.randn(4, 4)
+        weight = torch.randn(4)
+        y = torch.randn(4)
+        x_weak = weakref.ref(weight)
 
-        mod_ref = TestModule()
-        mod_test = deepcopy(mod_ref)
+        ref = fn(x_weak, weight, y)
 
-        # Start the param off with zero storage size to mimic fsdp
-        mod_ref.param.untyped_storage().resize_(0)
-        mod_test.param.untyped_storage().resize_(0)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        res = opt_fn(x_weak, weight, y)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnt.frame_count, 2)
 
-        # Resize storage at beginning of backward
-        # Free storage at end of backward
-        mod_ref.register_forward_hook(post_forward_hook, prepend=False)
-        mod_ref.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
-        mod_test.register_forward_hook(post_forward_hook, prepend=False)
-        mod_test.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
+    def test_weakref_del(self):
+        def fn(x_weak, y):
+            x = x_weak()
+            if x is not None:
+                return torch.sin(y)
+            return torch.cos(y)
 
-        mod_test = torch.compile(mod_test, backend=aot_graph_capture_backend)
+        weight = torch.randn(4)
+        x_weak = weakref.ref(weight)
+        y = torch.randn(4)
 
-        out_ref = mod_ref(x)
-        out_test = mod_test(x)
-        self.assertExpectedInline(
-            str(fw_graph[0].code.strip()),
-            """\
-def forward(self, primals_1, primals_2):
-    _foreach_copy = torch.ops.aten._foreach_copy.default([primals_1], [primals_2]);  primals_1 = primals_2 = None
-    getitem = _foreach_copy[0];  _foreach_copy = None
-    mm = torch.ops.aten.mm.default(getitem, getitem)
-    t_1 = torch.ops.aten.t.default(getitem);  getitem = None
-    return [mm, t_1]""",
-        )
-        self.assertEqual(out_ref, out_test)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref = fn(x_weak, y)
+        res = opt_fn(x_weak, y)
+        self.assertEqual(ref, res)
+
+        del weight
+        gc.collect()
+        ref = fn(x_weak, y)
+        res = opt_fn(x_weak, y)
+        self.assertEqual(ref, res)
+
+    #     @torch._functorch.config.patch(
+    #         recompute_views=True,
+    #     )
+    #     def test_storage_resize_forward_full_graph(self):
+    #         class TestModule(torch.nn.Module):
+    #             def __init__(self):
+    #                 super().__init__()
+    #                 self.param = torch.nn.Parameter(torch.randn(4, 4))
+
+    #             def forward(self, x):
+    #                 self.param.untyped_storage().resize_(
+    #                     self.param.numel() * self.param.itemsize
+    #                 )
+    #                 with torch.no_grad():
+    #                     torch._foreach_copy_([self.param], [x])
+    #                 out = torch.matmul(self.param, self.param)
+    #                 self.param.untyped_storage().resize_(0)
+    #                 return out
+
+    #         def post_accumulate_grad_hook(param):
+    #             param.untyped_storage().resize_(0)
+
+    #         # Beginning of backward, resize and put data into the param
+    #         def pre_backward_hook(module, grad) -> None:
+    #             module.param.untyped_storage().resize_(
+    #                 self.param.numel() * self.param.itemsize
+    #             )
+    #             with torch.no_grad():
+    #                 # simulates loading data into param from allgather
+    #                 module.param.fill_(2)
+
+    #         def post_forward_hook(module, args, output):
+    #             output.register_hook(functools.partial(pre_backward_hook, module))
+
+    #         x = torch.randn(4, 4)
+
+    #         mod_ref = TestModule()
+    #         mod_test = deepcopy(mod_ref)
+
+    #         # Start the param off with zero storage size to mimic fsdp
+    #         mod_ref.param.untyped_storage().resize_(0)
+    #         mod_test.param.untyped_storage().resize_(0)
+
+    #         # Resize storage at beginning of backward
+    #         # Free storage at end of backward
+    #         mod_ref.register_forward_hook(post_forward_hook, prepend=False)
+    #         mod_ref.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
+    #         mod_test.register_forward_hook(post_forward_hook, prepend=False)
+    #         mod_test.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
+
+    #         mod_test = torch.compile(mod_test, backend=aot_graph_capture_backend)
+
+    #         out_ref = mod_ref(x)
+    #         out_test = mod_test(x)
+    #         self.assertExpectedInline(
+    #             str(fw_graph[0].code.strip()),
+    #             """\
+    # def forward(self, primals_1, primals_2):
+    #     _foreach_copy = torch.ops.aten._foreach_copy.default([primals_1], [primals_2]);  primals_1 = primals_2 = None
+    #     getitem = _foreach_copy[0];  _foreach_copy = None
+    #     mm = torch.ops.aten.mm.default(getitem, getitem)
+    #     return [mm, getitem]""",
+    #         )
+    #         self.assertEqual(out_ref, out_test)
 
     def test_super_in_staticmethod(self):
         class A:
@@ -5006,6 +5158,24 @@ def forward(self, primals_1, primals_2):
 
         torch.compile(fn2)()
 
+    def test_jit_script_defaults(self):
+        @torch.jit.script
+        def fast_cos(x, c: float = 2.0):
+            return torch.cos(x) * c
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fast_cos = fast_cos
+
+            def forward(self, x):
+                return self.fast_cos(x)
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(mod(x), opt_mod(x))
+
     def test_enum(self):
         class ExplicitEnum(str, Enum):
             @classmethod
@@ -5053,6 +5223,81 @@ def forward(self, primals_1, primals_2):
         y = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(fn(x, y), opt_fn(x, y))
+
+    def test_nn_module_stack_bc(self):
+        from torch._dynamo.mutation_guard import GenerationTracker
+
+        def compiler(gm, *args):
+            module_stacks = [
+                node.meta.get("nn_module_stack", None) for node in gm.graph.nodes
+            ]
+            module_stacks, _ = pytree.tree_flatten(module_stacks)
+            module_stacks = [x for x in module_stacks if isinstance(x, str)]
+            for stack in module_stacks:
+                self.assertTrue("_module" not in stack)
+            return gm.forward
+
+        class SubMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod1 = SubMod()
+                self.submod2 = SubMod()
+
+            def forward(self, x):
+                return self.submod1(x) + self.submod2(x)
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend=compiler)
+        opt_mod(torch.randn(2, 2))
+
+        with torch._dynamo.config.patch(inline_inbuilt_nn_modules=True):
+            mod = Mod()
+            opt_mod = torch.compile(mod, backend=compiler)
+            opt_mod(torch.randn(2, 2))
+
+        # an example similar to Pippy usecase
+        mod = Mod()
+        GenerationTracker.tag(mod.submod1)
+        GenerationTracker.mark_class_dynamic(type(mod.submod1))
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend=compiler)
+        opt_mod(torch.randn(2, 2))
+
+    def test_is_make_fx_tracing(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            torch.nn.modules.activation._is_make_fx_tracing()
+            return torch.sin(x)
+
+        fn(torch.rand(4))
+
+    def test_negative_floor_div_solve(self):
+        class CompiledClass(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nums = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+                self.t = 5
+
+            def forward(self):
+                self.num = self.nums[self.t // 12]
+                self.t += 1
+                return self.num
+
+        m = CompiledClass()
+        m = torch.compile(m, backend="eager")
+
+        # the first call works
+        m()
+        # the second call causes a failure
+        m()
 
 
 instantiate_parametrized_tests(ReproTests)

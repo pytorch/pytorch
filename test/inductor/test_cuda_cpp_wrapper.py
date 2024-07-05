@@ -9,11 +9,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_utils import (
-    slowTest,
-    TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
-)
+from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -64,36 +60,6 @@ test_failures_cuda_wrapper = {
     ),
 }
 
-if TEST_WITH_ROCM:
-    # Current skips for ROCm - mostly all Tensor-likes failures, need to undergo investigation.
-    rocm_exclude_list = [
-        "test_addmm_cuda",
-        "test_batch_norm_2d_2_cuda",
-        "test_bmm1_cuda",
-        "test_cat_cuda",
-        "test_cat_slice_cat_cuda",
-        "test_custom_op_cuda",
-        "test_convolution1_cuda",
-        "test_foreach_cpp_wrapper_cuda",
-        "test_index_put_deterministic_fallback_cuda",
-        "test_index_tensor_cuda",
-        "test_inductor_layout_optimization_input_mutations_cuda",
-        "test_linear_relu_cuda",
-        "test_multi_device_cuda",
-        "test_mm_plus_mm2_cuda",
-        "test_sum_dtype_cuda",
-        "test_transpose_cuda",
-    ]
-
-    # Create skip entries for both the cuda and cuda_dynamic_shapes variants
-    for test_name in rocm_exclude_list:
-        dynamic_shapes_test_name = f"{test_name}_dynamic_shapes"
-        test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
-            ("cuda_wrapper",), is_skip=True
-        )
-        test_failures_cuda_wrapper[
-            dynamic_shapes_test_name
-        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
 
 if config.abi_compatible:
     xfail_list = [
@@ -228,14 +194,6 @@ if RUN_CUDA:
             "test_cat_slice_cat",
             tests=test_pattern_matcher.TestPatternMatcher(),
         ),
-        BaseTest(
-            "test_addmm",
-            tests=test_select_algorithm.TestSelectAlgorithm(),
-        ),
-        BaseTest(
-            "test_linear_relu",
-            tests=test_select_algorithm.TestSelectAlgorithm(),
-        ),
         # TODO: Re-enable this test after fixing cuda wrapper for conv Triton templates with dynamic shapes.
         # This test is unstable: it succeeds when an ATEN kernel is used, and fails when a Triton kernel is used.
         # Currently it passes on CI (an ATEN kernel is chosen) and fails locally (a Triton kernel is chosen).
@@ -259,6 +217,21 @@ if RUN_CUDA:
         BaseTest("test_fft_real_input_real_output"),
     ]:
         make_test_case(item.name, item.device, item.tests)
+
+    from torch._inductor.utils import is_big_gpu
+
+    if is_big_gpu(0):
+        for item in [
+            BaseTest(
+                "test_addmm",
+                tests=test_select_algorithm.TestSelectAlgorithm(),
+            ),
+            BaseTest(
+                "test_linear_relu",
+                tests=test_select_algorithm.TestSelectAlgorithm(),
+            ),
+        ]:
+            make_test_case(item.name, item.device, item.tests)
 
     test_torchinductor.copy_tests(
         CudaWrapperTemplate, TestCudaWrapper, "cuda_wrapper", test_failures_cuda_wrapper

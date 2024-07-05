@@ -1178,7 +1178,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kIsNan:
         return std::isnan(v);
       default:
-        throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
+        throw std::runtime_error("Invalid op_type: " + std::to_string(op_type));
     }
   }
 
@@ -1198,7 +1198,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       }
       default:
         throw std::runtime_error(
-            "Invalid integral op_type: " + c10::to_string(op_type));
+            "Invalid integral op_type: " + std::to_string(op_type));
     }
   }
 
@@ -1208,7 +1208,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kIsNan:
         return std::isnan(v);
       default:
-        throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
+        throw std::runtime_error("Invalid op_type: " + std::to_string(op_type));
     }
   }
 
@@ -1224,7 +1224,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kAtan2:
         return std::atan2(v1, v2);
       default:
-        throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
+        throw std::runtime_error("Invalid op_type: " + std::to_string(op_type));
     }
   }
 

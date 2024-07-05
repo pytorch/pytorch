@@ -14,6 +14,7 @@ import socket
 import time
 import traceback
 import warnings
+from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -21,15 +22,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
-from torch.distributed.elastic.rendezvous import RendezvousGracefulExitError
 from torch.distributed.elastic.events import Event, EventSource, record
 from torch.distributed.elastic.metrics import prof, put_metric
-from torch.distributed.elastic.multiprocessing import (
-    ProcessFailure,
-    SignalException,
-)
-from collections import defaultdict
+from torch.distributed.elastic.multiprocessing import ProcessFailure, SignalException
+from torch.distributed.elastic.rendezvous import RendezvousGracefulExitError
 from torch.distributed.elastic.utils.logging import get_logger
+
 
 __all__ = [
     "WorkerSpec",
@@ -250,7 +248,16 @@ class WorkerGroup:
     group contains cross instance workers or not depends on the implementation of the agent.
     """
 
-    __slots__ = ["spec", "workers", "store", "group_rank", "group_world_size", "state", "master_addr", "master_port"]
+    __slots__ = [
+        "spec",
+        "workers",
+        "store",
+        "group_rank",
+        "group_world_size",
+        "state",
+        "master_addr",
+        "master_port",
+    ]
 
     def __init__(self, spec: WorkerSpec):
         self.spec = spec
@@ -450,7 +457,9 @@ class SimpleElasticAgent(ElasticAgent):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _stop_workers(self, worker_group: WorkerGroup, is_restart: bool = False) -> None:
+    def _stop_workers(
+        self, worker_group: WorkerGroup, is_restart: bool = False
+    ) -> None:
         r"""Stop all workers in the given worker group.
 
         Implementors must deal with workers in all states defined by
@@ -468,7 +477,9 @@ class SimpleElasticAgent(ElasticAgent):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM, is_restart: bool = False) -> None:
+    def _shutdown(
+        self, death_sig: signal.Signals = signal.SIGTERM, is_restart: bool = False
+    ) -> None:
         """Clean up any resources that were allocated during the agent's work.
 
         Args:
@@ -499,7 +510,9 @@ class SimpleElasticAgent(ElasticAgent):
         self._store = store
 
         with self.record_duration("ASSIGN_WORKER_RANKS"):
-            workers = self._assign_worker_ranks(store, group_rank, group_world_size, spec)
+            workers = self._assign_worker_ranks(
+                store, group_rank, group_world_size, spec
+            )
         worker_group.workers = workers
         worker_group.store = store
         worker_group.group_rank = group_rank
@@ -532,8 +545,8 @@ class SimpleElasticAgent(ElasticAgent):
                 "role_ranks": [worker.role_rank for worker in workers],
                 "global_ranks": [worker.global_rank for worker in workers],
                 "role_world_sizes": [worker.role_world_size for worker in workers],
-                "global_world_sizes": [worker.world_size for worker in workers]
-            }
+                "global_world_sizes": [worker.world_size for worker in workers],
+            },
         )
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
@@ -612,9 +625,12 @@ class SimpleElasticAgent(ElasticAgent):
             store.multi_set(keys, values)
 
         # get will block until the data is available in the store.
-        base_global_rank, global_world_size, base_role_rank, role_world_size = json.loads(
-            store.get(f"{ASSIGNED_RANKS_PREFIX}{group_rank}")
-        )
+        (
+            base_global_rank,
+            global_world_size,
+            base_role_rank,
+            role_world_size,
+        ) = json.loads(store.get(f"{ASSIGNED_RANKS_PREFIX}{group_rank}"))
 
         workers = []
         for local_rank in range(spec.local_world_size):
@@ -733,7 +749,11 @@ class SimpleElasticAgent(ElasticAgent):
         finally:
             end_time = time.perf_counter()
             duration_ms = (end_time - start_time) * 1000
-            record(self._construct_event(state=state, source=EventSource.AGENT, duration_ms=duration_ms))
+            record(
+                self._construct_event(
+                    state=state, source=EventSource.AGENT, duration_ms=duration_ms
+                )
+            )
 
     def _construct_event(
         self,
@@ -844,7 +864,8 @@ class SimpleElasticAgent(ElasticAgent):
                 logger.info(
                     "[%s] worker group successfully finished."
                     " Waiting %s seconds for other agents to finish.",
-                    role, self._exit_barrier_timeout
+                    role,
+                    self._exit_barrier_timeout,
                 )
                 self._exit_barrier()
                 return run_result
@@ -854,7 +875,10 @@ class SimpleElasticAgent(ElasticAgent):
                         "[%s] Worker group %s. "
                         "%s/%s attempts left;"
                         " will restart worker group",
-                        role, state.name, self._remaining_restarts, spec.max_restarts
+                        role,
+                        state.name,
+                        self._remaining_restarts,
+                        spec.max_restarts,
                     )
                     self._remaining_restarts -= 1
                     self._restart_workers(self._worker_group)
@@ -871,11 +895,15 @@ class SimpleElasticAgent(ElasticAgent):
                         "[%s] Detected %s "
                         "new nodes from group_rank=%s; "
                         "will restart worker group",
-                        role, num_nodes_waiting, group_rank
+                        role,
+                        num_nodes_waiting,
+                        group_rank,
                     )
                     self._restart_workers(self._worker_group)
             else:
-                raise Exception(f"[{role}] Worker group in {state.name} state")  # noqa: TRY002
+                raise Exception(  # noqa: TRY002
+                    f"[{role}] Worker group in {state.name} state"
+                )
 
     def _exit_barrier(self):
         """
@@ -889,7 +917,8 @@ class SimpleElasticAgent(ElasticAgent):
         logger.info(
             "Local worker group finished (%s). "
             "Waiting %s seconds for other agents to finish",
-            self._worker_group.state, self._exit_barrier_timeout
+            self._worker_group.state,
+            self._exit_barrier_timeout,
         )
         start = time.time()
         try:
@@ -900,7 +929,8 @@ class SimpleElasticAgent(ElasticAgent):
                 barrier_timeout=self._exit_barrier_timeout,
             )
             logger.info(
-                "Done waiting for other agents. Elapsed: %s seconds", time.time() - start
+                "Done waiting for other agents. Elapsed: %s seconds",
+                time.time() - start,
             )
         except SignalException as e:
             logger.warning("Got termination signal: %s", e.sigval)
@@ -908,5 +938,5 @@ class SimpleElasticAgent(ElasticAgent):
         except Exception:
             logger.exception(
                 "Error waiting on exit barrier. Elapsed: %s seconds",
-                time.time() - start
+                time.time() - start,
             )

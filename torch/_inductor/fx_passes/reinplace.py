@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 import operator
 from collections import defaultdict

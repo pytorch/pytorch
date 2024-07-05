@@ -147,7 +147,7 @@ jiterator_also_stringify_as(jiterator_code(
 #define CENTRAL_RANGE 0.7
 
 template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_erfinv(T y) {
 /* Function to calculate inverse error function.  Rational approximation
 is used to generate an initial approximation, which is then improved to
@@ -232,7 +232,7 @@ Date:  February 1996
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 template <typename scalar_t, bool is_cuda=false>
-C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_float_divide_by_zero__ {
+C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_float_divide_by_zero__ {
   using acc_t = at::acc_type<scalar_t, is_cuda>;
   const acc_t MACHEP = acc_t{1.11022302462515654042E-16};
   constexpr acc_t zero = acc_t{0.0};
@@ -324,7 +324,7 @@ C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_igno
  *            N                   0
  */
 template <typename T>
-C10_HOST_DEVICE static inline T polevl(const T x, const T A[], size_t len) {
+C10_HOST_DEVICE inline T polevl(const T x, const T A[], size_t len) {
   T result = 0;
   for (size_t i = 0; i <= len; i++) {
     result = result * x + A[i];
@@ -332,7 +332,7 @@ C10_HOST_DEVICE static inline T polevl(const T x, const T A[], size_t len) {
   return result;
 }
 
-static inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
+inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
   double sign = +1;
   double result = 0;
   if (x < 0.5) {
@@ -350,7 +350,7 @@ static inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
   return sign * result;
 }
 
-static inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
+inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
   float sign = +1;
   float result = 0;
   if (x < 0.5f) {
@@ -372,7 +372,7 @@ static inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
  * This function is derived from the implementation of the digamma function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
-static inline double calc_digamma(double x) {
+inline double calc_digamma(double x) {
   // [C++ Standard Reference: Gamma Function] https://en.cppreference.com/w/cpp/numeric/math/tgamma
   static double PSI_10 = 2.25175258906672110764;
   if (x == 0) {
@@ -430,7 +430,7 @@ static inline double calc_digamma(double x) {
  * This function is derived from the implementation of the digamma function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
-static inline float calc_digamma(float x) {
+inline float calc_digamma(float x) {
   // See [C++ Standard Reference: Gamma Function]
   static float PSI_10 = 2.25175258906672110764f;
   if (x == 0) {
@@ -485,16 +485,16 @@ static inline float calc_digamma(float x) {
   return result + logf(x) - (0.5f / x) - y;
 }
 
-static inline c10::BFloat16 calc_digamma(c10::BFloat16 a) {
+inline c10::BFloat16 calc_digamma(c10::BFloat16 a) {
   return calc_digamma(static_cast<float>(a));
 }
 
-static inline c10::Half calc_digamma(c10::Half a) {
+inline c10::Half calc_digamma(c10::Half a) {
   return calc_digamma(static_cast<float>(a));
 }
 
 template <typename scalar_t, bool is_cuda=false>
-static inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
+inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
   // already blocked if n <= 1
   const auto one = scalar_t{1};
   return ((n % 2) ? one : -one) *
@@ -519,7 +519,7 @@ static inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
  * See NOTICE for the licenses.
  */
 template <typename scalar_t>
-static scalar_t ratevl(scalar_t x, const scalar_t num[], int64_t M,
+scalar_t ratevl(scalar_t x, const scalar_t num[], int64_t M,
     const scalar_t denom[], int64_t N) {
   // evaluating rational function, i.e., the ratio of two polynomials
   // the coefficients for numerator are given by `num` while coeffs for
@@ -1061,7 +1061,7 @@ static scalar_t _igamc_helper_continued_fraction(scalar_t a, scalar_t x) {
 }
 
 template <typename scalar_t>
-static inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
+inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
   /* the calculation of the regularized upper incomplete gamma function
    * is done differently based on the values of a and x:
    * - if x and/or a is at the boundary of defined region, then assign the
@@ -1141,7 +1141,7 @@ static inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
 }
 
 template <typename scalar_t>
-static inline scalar_t calc_igamma(scalar_t a, scalar_t x) {
+scalar_t calc_igamma(scalar_t a, scalar_t x) {
   /* the calculation of the regularized lower incomplete gamma function
    * is done differently based on the values of a and x:
    * - if x and/or a is at the boundary of defined region, then assign the
@@ -1203,39 +1203,39 @@ static inline scalar_t calc_igamma(scalar_t a, scalar_t x) {
 }
 
 template <>
-C10_UNUSED c10::BFloat16 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+C10_UNUSED inline c10::BFloat16 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED c10::Half calc_igamma<c10::Half>(c10::Half a, c10::Half x) {
+C10_UNUSED inline c10::Half calc_igamma<c10::Half>(c10::Half a, c10::Half x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED c10::BFloat16 calc_igammac<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+C10_UNUSED inline c10::BFloat16 calc_igammac<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
   return calc_igammac<float>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED c10::Half calc_igammac<c10::Half>(c10::Half a, c10::Half x) {
+C10_UNUSED inline c10::Half calc_igammac<c10::Half>(c10::Half a, c10::Half x) {
   return calc_igammac<float>(float(a), float(x));
 }
 
 inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }
 
 template <typename T>
-static T abs_impl(T v) {
+inline T abs_impl(T v) {
   return std::abs(v);
 }
 
 template <>
-C10_UNUSED uint8_t abs_impl(uint8_t v) {
+C10_UNUSED inline uint8_t abs_impl(uint8_t v) {
   return v;
 }
 
 template <typename T>
-static inline typename std::enable_if<std::is_integral<T>::value, T>::type
+inline typename std::enable_if<std::is_integral<T>::value, T>::type
 calc_gcd(T a, T b) {
   a = abs_impl(a);
   b = abs_impl(b);
@@ -1284,7 +1284,7 @@ C10_HOST_DEVICE c10::complex<T> exp2_impl(c10::complex<T> x) {
  * required is x -> 2(2ab/x - b - a)/(b-a).  If b is infinity, this becomes x -> 4a/x - 1.
  */
 template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 chbevl(const T x, const T array[], size_t len) {
   T b0, b1, b2;
 
@@ -1310,7 +1310,7 @@ chbevl(const T x, const T array[], size_t len) {
  * of all inputs to convert them into the domain of the approximation.
  */
 template <typename T>
-static inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_A() {
+inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_A() {
   /* Chebyshev coefficients for exp(-x) I0(x)
    * in the interval [0,8].
    *
@@ -1336,7 +1336,7 @@ static inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_A() {
 };
 
 template <typename T>
-static inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_B() {
+inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I0(x)
    * in the inverted interval [8,infinity].
    *
@@ -1361,7 +1361,7 @@ static inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_B() {
 };
 
 template <typename T>
-static inline typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
+inline typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
 chebyshev_coefficients_i1e_A() {
   /* Chebyshev coefficients for exp(-x) I1(x)
    * in the interval [0,8].
@@ -1388,7 +1388,7 @@ chebyshev_coefficients_i1e_A() {
 };
 
 template <typename T>
-static inline typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
+inline typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
 chebyshev_coefficients_i1e_A() {
   /* Chebyshev coefficients for exp(-x) I1(x)
    * in the interval [0,8].
@@ -1417,7 +1417,7 @@ chebyshev_coefficients_i1e_A() {
 };
 
 template <typename T>
-static inline typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
+inline typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
 chebyshev_coefficients_i1e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I1(x)
    * in the inverted interval [8,infinity].
@@ -1443,7 +1443,7 @@ chebyshev_coefficients_i1e_B() {
 };
 
 template <typename T>
-static inline typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
+inline typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
 chebyshev_coefficients_i1e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I1(x)
    * in the inverted interval [8,infinity].
@@ -1463,7 +1463,7 @@ chebyshev_coefficients_i1e_B() {
 };
 
 template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_i0(T _x) {
   T x = std::abs(_x);
 
@@ -1481,7 +1481,7 @@ calc_i0(T _x) {
 }
 
 // Upcast bfloat16 input to float for numerical accuracy purposes
-static inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }
+inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }
 
 /*
  * This function is derived from the implementation of the i1 function in the Cephes Math Library.
@@ -1493,7 +1493,7 @@ static inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cas
  * of all inputs to convert them into the domain of the approximation.
  */
 template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_i1(T _x) {
   T x = std::abs(_x);
 
@@ -1522,7 +1522,7 @@ calc_i1(T _x) {
  * of all inputs to convert them into the domain of the approximation.
  */
 template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_i1e(T _x) {
   T x = std::abs(_x);
 
@@ -1549,7 +1549,7 @@ calc_i1e(T _x) {
  * (integrated from minus infinity to x) is equal to y.
  */
 template <typename T>
-static inline C10_HOST_DEVICE T calc_ndtri(T y0) {
+inline C10_HOST_DEVICE T calc_ndtri(T y0) {
 
   /* sqrt(2pi) */
   constexpr T s2pi = 2.50662827463100050242E0;
@@ -1737,7 +1737,7 @@ static inline C10_HOST_DEVICE T calc_ndtri(T y0) {
 
 
 template <typename T>
-C10_HOST_DEVICE  static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+C10_HOST_DEVICE  inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 erfcx_y100(T y100)
 {
   switch (static_cast<int>(y100)) {
@@ -2148,7 +2148,7 @@ return 0.97771701335885035464e0 + (0.22000938572830479551e-1 + (0.27951610702682
 }
 
 template <typename T>
-C10_HOST_DEVICE static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+C10_HOST_DEVICE inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_erfcx(T x)
 {
   if (at::_isnan(x)) {
@@ -2188,7 +2188,7 @@ calc_erfcx(T x)
  * See NOTICE for the licenses.
  */
 template <typename T>
-static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
+inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
   T t = x * c10::frac_sqrt_2<T>;
   if (x < T{-1.0}) {
     return std::log(calc_erfcx(-t) / 2) - t * t;
@@ -2198,7 +2198,7 @@ static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
 }
 
 template<typename T>
-static inline C10_HOST_DEVICE T airy_ai_forward(T x) {
+inline C10_HOST_DEVICE T airy_ai_forward(T x) {
     static const T AN[] = {
             +3.46538101525629032477e-01,
             +1.20075952739645805542e+01,
@@ -2377,7 +2377,7 @@ static inline C10_HOST_DEVICE T airy_ai_forward(T x) {
 } // T airy_ai(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
+inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
     static const T PP[] = {
             +7.96936729297347051624e-04,
             +8.28352392107440799803e-02,
@@ -2489,7 +2489,7 @@ static inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
 } // bessel_j0_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
+inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
     static const T PP[] = {
             +7.62125616208173112003e-04,
             +7.31397056940917570436e-02,
@@ -2597,7 +2597,7 @@ static inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
 } // bessel_j1_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
+inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
     static const T PP[] = {
             +7.96936729297347051624e-04,
             +8.28352392107440799803e-02,
@@ -2712,7 +2712,7 @@ static inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
 } // bessel_y0_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
+inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
     static const T PP[] = {
             +7.62125616208173112003e-04,
             +7.31397056940917570436e-02,
@@ -2826,7 +2826,7 @@ static inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
 } // bessel_y1_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, int64_t n) {
+inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -2865,12 +2865,12 @@ static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, int64_t n) {
 } // chebyshev_polynomial_t_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, T n) {
+inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, T n) {
     return chebyshev_polynomial_t_forward(x, static_cast<int64_t>(n));
 } // chebyshev_polynomial_t_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, int64_t n) {
+inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -2913,12 +2913,12 @@ static inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, int64_t n) {
 } // chebyshev_polynomial_u_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, T n) {
+inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, T n) {
     return chebyshev_polynomial_u_forward(x, static_cast<int64_t>(n));
 } // chebyshev_polynomial_u_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, int64_t n) {
+inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -2969,12 +2969,12 @@ static inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, int64_t n) {
 } // chebyshev_polynomial_v_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, T n) {
+inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, T n) {
     return chebyshev_polynomial_v_forward(x, static_cast<int64_t>(n));
 } // chebyshev_polynomial_v_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, int64_t n) {
+inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3029,12 +3029,12 @@ static inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, int64_t n) {
 } // chebyshev_polynomial_w_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, T n) {
+inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, T n) {
     return chebyshev_polynomial_w_forward(x, static_cast<int64_t>(n));
 } // chebyshev_polynomial_w_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
+inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3061,17 +3061,17 @@ static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
 } // hermite_polynomial_h_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false, std::enable_if_t<!std::is_floating_point<T>::value, int> = 0>
-static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
+inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
     return hermite_polynomial_h_forward(x, static_cast<int64_t>(n));
 } // hermite_polynomial_h_forward(T x, T n)
 
 template<typename T, bool is_cuda=false, std::enable_if_t<std::is_floating_point<T>::value, int> = 0>
-static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
+inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
     return hermite_polynomial_h_forward(x, ((!std::isinf(n)) && (!std::isnan(n))) ? static_cast<int64_t>(n) : static_cast<int64_t>(-1));
 } // hermite_polynomial_h_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, int64_t n) {
+inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3098,12 +3098,12 @@ static inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, int64_t n) {
 } // hermite_polynomial_he_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, T n) {
+inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, T n) {
     return hermite_polynomial_he_forward(x, static_cast<int64_t>(n));
 } // hermite_polynomial_he_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
+inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3134,12 +3134,12 @@ static inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
 } // laguerre_polynomial_l_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, T n) {
+inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, T n) {
     return laguerre_polynomial_l_forward(x, static_cast<int64_t>(n));
 } // laguerre_polynomial_l_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, int64_t n) {
+inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3174,12 +3174,12 @@ static inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, int64_t n) {
 } // legendre_polynomial_p_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, T n) {
+inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, T n) {
     return legendre_polynomial_p_forward(x, static_cast<int64_t>(n));
 } // legendre_polynomial_p_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T modified_bessel_i0_forward(T x) {
+inline C10_HOST_DEVICE T modified_bessel_i0_forward(T x) {
     static const T A[] = {
             -4.41534164647933937950e-18,
             +3.33079451882223809783e-17,
@@ -3268,7 +3268,7 @@ static inline C10_HOST_DEVICE T modified_bessel_i0_forward(T x) {
 } // modified_bessel_i0_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T modified_bessel_i1_forward(T x) {
+inline C10_HOST_DEVICE T modified_bessel_i1_forward(T x) {
     static const T A[] = {
             +2.77791411276104639959e-18,
             -2.11142121435816608115e-17,
@@ -3364,7 +3364,7 @@ static inline C10_HOST_DEVICE T modified_bessel_i1_forward(T x) {
 } // modified_bessel_i1_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T modified_bessel_k0_forward(T x) {
+inline C10_HOST_DEVICE T modified_bessel_k0_forward(T x) {
     static const T A[] = {
             +1.37446543561352307156e-16,
             +4.25981614279661018399e-14,
@@ -3441,7 +3441,7 @@ static inline C10_HOST_DEVICE T modified_bessel_k0_forward(T x) {
 } // modified_bessel_k0_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
+inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
     static const T A[] = {
             -7.02386347938628759343e-18,
             -2.42744985051936593393e-15,
@@ -3519,7 +3519,7 @@ static inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
 } // modified_bessel_k1_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T scaled_modified_bessel_k0_forward(T x) {
+inline C10_HOST_DEVICE T scaled_modified_bessel_k0_forward(T x) {
     static const T A[] = {
             +1.37446543561352307156e-16,
             +4.25981614279661018399e-14,
@@ -3596,7 +3596,7 @@ static inline C10_HOST_DEVICE T scaled_modified_bessel_k0_forward(T x) {
 } // T scaled_modified_bessel_k0_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T scaled_modified_bessel_k1_forward(T x) {
+inline C10_HOST_DEVICE T scaled_modified_bessel_k1_forward(T x) {
     static const T A[] = {
             -7.02386347938628759343e-18,
             -2.42744985051936593393e-15,
@@ -3674,7 +3674,7 @@ static inline C10_HOST_DEVICE T scaled_modified_bessel_k1_forward(T x) {
 } // T scaled_modified_bessel_k1_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) {
+inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3717,12 +3717,12 @@ static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, int6
 } // shifted_chebyshev_polynomial_t_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, T n) {
+inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, T n) {
     return shifted_chebyshev_polynomial_t_forward(x, static_cast<int64_t>(n));
 } // shifted_chebyshev_polynomial_t_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, int64_t n) {
+inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3769,12 +3769,12 @@ static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, int6
 } // shifted_chebyshev_polynomial_u_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, T n) {
+inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, T n) {
     return shifted_chebyshev_polynomial_u_forward(x, static_cast<int64_t>(n));
 } // shifted_chebyshev_polynomial_u_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) {
+inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3825,12 +3825,12 @@ static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, int6
 } // shifted_chebyshev_polynomial_v_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, T n) {
+inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, T n) {
     return shifted_chebyshev_polynomial_v_forward(x, static_cast<int64_t>(n));
 } // shifted_chebyshev_polynomial_v_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, int64_t n) {
+inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3881,12 +3881,12 @@ static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, int6
 } // shifted_chebyshev_polynomial_w_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, T n) {
+inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, T n) {
     return shifted_chebyshev_polynomial_w_forward(x, static_cast<int64_t>(n));
 } // shifted_chebyshev_polynomial_w_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T spherical_bessel_j0_forward(T x) {
+inline C10_HOST_DEVICE T spherical_bessel_j0_forward(T x) {
     if (std::isinf(x)) {
         return T(0.0);
     }

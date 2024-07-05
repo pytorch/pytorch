@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import abc
-
 import argparse
 import collections
 import contextlib
@@ -14,7 +13,6 @@ import importlib
 import itertools
 import logging
 import os
-import pathlib
 import shutil
 import signal
 import subprocess
@@ -22,7 +20,7 @@ import sys
 import time
 import weakref
 from contextlib import contextmanager
-
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -60,6 +58,7 @@ from torch._dynamo.testing import (
     same,
 )
 
+
 try:
     from torch._dynamo.utils import (
         clone_inputs,
@@ -80,6 +79,7 @@ from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map, tree_map_only
+
 
 try:
     import torch_xla
@@ -143,6 +143,12 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "pyhpc_equation_of_state",
     "pyhpc_turbulent_kinetic_energy",
     "detectron2_fcos_r_50_fpn",
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
     "hf_T5_generate",
 }
 
@@ -714,7 +720,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             maybe_mark_step(args)
 
             with maybe_mark_profile(p=p, mark="actual"), maybe_enable_compiled_autograd(
-                args.compiled_autograd
+                args.compiled_autograd,
+                fullgraph=args.nopython,
+                dynamic=args.dynamic_shapes,
             ):
                 timings[rep, 1], actual_output = timed(
                     model,
@@ -912,7 +920,7 @@ def speedup_experiment_onnx(
         2. Running ORT with OnnxModel.
 
     Writes to ./{output_filename}, which should be
-        `pathlib.Path(self.output_dir) / f"{self.compiler}_{suite}_{self.dtype}_{self.mode}_{self.device}_{self.testing}.csv".
+        `Path(self.output_dir) / f"{self.compiler}_{suite}_{self.dtype}_{self.mode}_{self.device}_{self.testing}.csv".
 
     TODO(bowbao): Record export time and export peak memory usage.
     """
@@ -1184,12 +1192,14 @@ class AOTInductorModelCache:
             else:
                 _register_dataclass_output_as_pytree(example_outputs)
 
-            gm = torch.export._trace._export(
+            # TODO(angelayi): change this to predispatch
+            # https://github.com/pytorch/pytorch/issues/127513 needs to be fixed before changing
+            # to predispatch to avoid performance regressions
+            gm = torch.export._trace._export_to_torch_ir(
                 model,
                 example_args,
                 example_kwargs,
-                pre_dispatch=True,
-            ).module()
+            )
             with torch.no_grad():
                 so_path = torch._inductor.aot_compile(
                     gm, example_args, example_kwargs
@@ -1283,9 +1293,25 @@ class OnnxModel(abc.ABC):
         example_inputs,
         dynamic_shapes: bool,
         copy_before_export: bool = False,
+        use_experimental_patch: bool = False,
     ):
+        """The abstract class for exporting ONNX model.
+
+        Args:
+            output_directory: output path
+            model: model
+            example_inputs: example inputs for exporting
+            dynamic_shapes (bool): Whether to export the model with dynamic shapes.
+            copy_before_export (bool,): copy before export. Defaults to False.
+            use_experimental_patch (bool): Whether to apply torch_onnx patch which exports
+                with torch.export and onnx ir. Defaults to False.
+        """
         model_name = current_name
         self.copy_before_export = copy_before_export
+        self.use_experimental_patch = use_experimental_patch
+        # NOTE: torch_onnx patch is using OnnxModelFromTorchScript to export ONNX model.
+        if self.use_experimental_patch:
+            self._COMPILER_NAME = "torch_onnx_patch"
         self.model_dir = self._generate_onnx_model_directory(
             output_directory, self._COMPILER_NAME, model_name
         )
@@ -1321,8 +1347,8 @@ class OnnxModel(abc.ABC):
     @classmethod
     def _generate_onnx_model_directory(
         cls, output_directory: str, compiler_name: str, model_name: str
-    ) -> pathlib.Path:
-        model_path = pathlib.Path(
+    ) -> Path:
+        model_path = Path(
             output_directory,
             ".onnx_models",
             model_name,
@@ -1517,6 +1543,24 @@ class OnnxModelFromTorchScript(OnnxModel):
                     return self.model(**dict(zip(self.keys, args)))
 
             model = WrapperModel(model, list(example_inputs.keys()))
+
+        if self.use_experimental_patch:
+            import torch_onnx
+
+            torch_onnx.patch_torch(
+                error_report=True,
+                profile=True,
+                dump_exported_program=False,
+                artifacts_dir=os.path.dirname(output_path),
+            )
+        else:
+            # make sure the patch is not in effect
+            try:
+                import torch_onnx
+
+                torch_onnx.unpatch_torch()
+            except ImportError:
+                pass
 
         torch.onnx.export(
             model,
@@ -1826,6 +1870,7 @@ def optimize_onnx_ctx(
     run_n_iterations: Callable,
     dynamic_shapes: bool = False,
     copy_before_export: bool = False,
+    use_experimental_patch: bool = False,
 ) -> Callable:
     # NOTE(bowbao): This function creates and returns the onnx version of 'run_n_iterations',
     # which does the following:
@@ -1857,6 +1902,7 @@ def optimize_onnx_ctx(
                     copy.deepcopy(inputs),
                     dynamic_shapes=dynamic_shapes,
                     copy_before_export=copy_before_export,
+                    use_experimental_patch=use_experimental_patch,
                 )
             onnx_model = context.onnx_model
 
@@ -2212,6 +2258,10 @@ class BenchmarkRunner:
     def guard_on_nn_module_models(self):
         return set()
 
+    @property
+    def inline_inbuilt_nn_modules_models(self):
+        return set()
+
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError
 
@@ -2221,6 +2271,9 @@ class BenchmarkRunner:
         if self.args.float32:
             equal_nan = False
         return equal_nan
+
+    def use_larger_multiplier_for_smaller_tensor(self, name):
+        return False
 
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):
@@ -2344,7 +2397,6 @@ class BenchmarkRunner:
         from diffusers.models.transformer_2d import Transformer2DModel
         from torchbenchmark.models.nanogpt.model import Block
         from transformers.models.llama.modeling_llama import LlamaDecoderLayer
-
         from transformers.models.t5.modeling_t5 import T5Block
         from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
 
@@ -2458,6 +2510,10 @@ class BenchmarkRunner:
         if name in self.skip_accuracy_checks_large_models_dashboard:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
+        # Skip all accuracy check for the torchao backend
+        if self.args.backend == "torchao":
+            return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
+
         with self.pick_grad(name, self.args.training):
             # Collect the fp64 reference outputs to be used later for accuracy checking.
             fp64_outputs = None
@@ -2549,6 +2605,9 @@ class BenchmarkRunner:
                         cos_similarity=False,
                         tol=0,
                         equal_nan=self.equal_nan,
+                        use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
+                            name
+                        ),
                     )
                 ):
                     is_same = False
@@ -2580,7 +2639,11 @@ class BenchmarkRunner:
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-                    with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                    with maybe_enable_compiled_autograd(
+                        self.args.compiled_autograd,
+                        fullgraph=self.args.nopython,
+                        dynamic=self.args.dynamic_shapes,
+                    ):
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 log.exception("")
@@ -2633,6 +2696,9 @@ class BenchmarkRunner:
                     new_result,
                     fp64_outputs,
                     equal_nan=self.equal_nan,
+                    use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
+                        name
+                    ),
                     cos_similarity=cos_similarity,
                     tol=tolerance,
                 ):
@@ -2750,6 +2816,9 @@ class BenchmarkRunner:
                     peak_mem = percentage * total / 10**9
             except Exception:
                 log.exception("Backend %s failed in warmup()", mode)
+                write_csv_when_exception(
+                    self.args, current_name, "warmup_failed", current_device
+                )
                 return sys.exit(-1)
             dynamo_stats = get_dynamo_stats()
             dynamo_stats.subtract(start_stats)
@@ -2798,7 +2867,9 @@ class BenchmarkRunner:
                 aot_compilation_time = 0
 
             with maybe_enable_compiled_autograd(
-                self.args.compiled_autograd
+                self.args.compiled_autograd,
+                fullgraph=self.args.nopython,
+                dynamic=self.args.dynamic_shapes,
             ), maybe_snapshot_memory(
                 self.args.snapshot_memory, f"compiled_{self.args.only}"
             ):
@@ -2818,7 +2889,11 @@ class BenchmarkRunner:
                 with torch.profiler.profile(
                     activities=[torch.profiler.ProfilerActivity.CPU]
                 ) as prof:
-                    with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                    with maybe_enable_compiled_autograd(
+                        self.args.compiled_autograd,
+                        fullgraph=self.args.nopython,
+                        dynamic=self.args.dynamic_shapes,
+                    ):
                         warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
 
                 events = list(
@@ -3116,6 +3191,12 @@ def parse_args(args=None):
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
         "--freezing", action="store_true", help="turn on freezing", default=False
+    )
+    parser.add_argument(
+        "--inductor-config",
+        "-c",
+        action="append",
+        help="key=value in torch._inductor.config",
     )
     parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
@@ -3516,6 +3597,12 @@ def parse_args(args=None):
         help="Measure speedup with TorchScript ONNX, i.e. `torch.onnx.export`",
     )
     group.add_argument(
+        "--torch-onnx-patch",
+        "--torch_onnx_patch",
+        action="store_true",
+        help="Measure speedup with dynamo ONNX patch, i.e. `torch_onnx`",
+    )
+    group.add_argument(
         "--dynamo-onnx",
         "--dynamo_onnx",
         action="store_true",
@@ -3767,6 +3854,8 @@ def run(runner, args, original_dir=None):
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
 
+        torch.backends.mkldnn.deterministic = True
+
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
 
@@ -3906,6 +3995,17 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment_onnx
         output_filename = "torchscript_onnx.csv"
         current_onnx_compiler = "torchscript"
+    elif args.torch_onnx_patch:
+        optimize_ctx = functools.partial(
+            optimize_onnx_ctx,
+            args.output_directory or ".",
+            OnnxModelFromTorchScript,
+            copy_before_export=args.performance,
+            use_experimental_patch=True,
+        )
+        experiment = speedup_experiment_onnx
+        output_filename = "torch_onnx_patch.csv"
+        current_onnx_compiler = "torch_onnx_patch"
     elif args.dynamo_onnx:
         optimize_ctx = functools.partial(
             optimize_onnx_ctx,
@@ -4019,6 +4119,18 @@ def run(runner, args, original_dir=None):
         inductor_config.triton.divisible_by_16 = not args.disable_divisible_by_16
         if args.inference:
             inductor_config.freezing = args.freezing
+        if args.inductor_config:
+            for config in args.inductor_config:
+                key, value = config.split("=")
+                typ = type(inductor_config.__getattr__(key))
+                if issubclass(typ, bool):
+                    assert value in ("0", "1", "True", "False")
+                    value = value in ("1", "True")
+                elif issubclass(typ, (str, int, float)):
+                    value = typ(value)
+                else:
+                    raise NotImplementedError(typ)
+                inductor_config.__setattr__(key, value)
 
     runner.setup_amp()
 
@@ -4216,16 +4328,21 @@ def run(runner, args, original_dir=None):
             if name in runner.guard_on_nn_module_models:
                 guard_ctx = torch._dynamo.config.patch(guard_nn_modules=True)
 
+            inline_ctx = contextlib.nullcontext()
+            if name in runner.inline_inbuilt_nn_modules_models:
+                inline_ctx = torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
+
             with guard_ctx:
-                runner.run_one_model(
-                    name,
-                    model,
-                    example_inputs,
-                    optimize_ctx,
-                    experiment,
-                    explain=args.explain,
-                    tag=args.tag,
-                )
+                with inline_ctx:
+                    runner.run_one_model(
+                        name,
+                        model,
+                        example_inputs,
+                        optimize_ctx,
+                        experiment,
+                        explain=args.explain,
+                        tag=args.tag,
+                    )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             output_csv(

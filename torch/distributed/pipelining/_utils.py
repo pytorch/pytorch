@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 from dataclasses import dataclass
@@ -5,7 +6,6 @@ from typing import List, Tuple, Union
 
 import torch
 from torch import fx
-
 
 logger = logging.getLogger(__name__)
 

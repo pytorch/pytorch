@@ -1,12 +1,14 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from ._IR import Pipe, pipe_split, pipeline, SplitPoint
-from .PipelineSchedule import (
+from .schedules import (
     Schedule1F1B,
+    ScheduleFlexibleInterleaved1F1B,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
 )
-from .PipelineStage import PipelineStage
+from .stage import build_stage, PipelineStage
+
 
 __all__ = [
     "Pipe",
@@ -14,7 +16,9 @@ __all__ = [
     "SplitPoint",
     "pipeline",
     "PipelineStage",
+    "build_stage",
     "Schedule1F1B",
+    "ScheduleFlexibleInterleaved1F1B",
     "ScheduleGPipe",
     "ScheduleInterleaved1F1B",
     "ScheduleLoopedBFS",

@@ -576,7 +576,7 @@ static Tensor computeCatWoConditionals(
     std::vector<ExprPtr> store_indices(dims.size());
     for (int64_t i = 0; i < static_cast<int64_t>(dims.size()); ++i) {
       for_vars[i] = alloc<Var>(
-          "i" + c10::to_string(inp_pos) + "_" + c10::to_string(i),
+          "i" + std::to_string(inp_pos) + "_" + std::to_string(i),
           dims[i].dtype());
       load_indices[i] = for_vars[i];
       if (i == norm_concat_dim) {

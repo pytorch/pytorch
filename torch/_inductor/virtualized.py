@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This file provides a number of "global" variables/handlers that are actually
 thread local and dynamically scoped, with Inductor patching them to various
