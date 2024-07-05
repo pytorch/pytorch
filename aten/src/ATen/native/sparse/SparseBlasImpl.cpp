@@ -28,6 +28,7 @@ namespace at::native::sparse::impl {
 
 namespace {
 
+#ifndef USE_ROCM
 bool operands_support_triton_mm_kernel(const Tensor& compressed, const Tensor& strided) {
   // Triton works only with blocksizes which are powers of 2.
   const auto is_power_of_2 = [](int64_t v) -> bool {
@@ -49,7 +50,7 @@ bool operands_support_triton_mm_kernel(const Tensor& compressed, const Tensor& s
                && strided.size(-1) % blocksize[0] == 0);
      });
 }
-
+#endif
 }
 
 Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& strided, Tensor& result) {

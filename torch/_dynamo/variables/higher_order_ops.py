@@ -542,7 +542,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "flex_attention":
-            return TemplatedAttentionHigherOrderVariable(value, source, **kwargs)
+            return FlexAttentionHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
             "wrap_activation_checkpoint",
             "tag_activation_checkpoint",
@@ -1154,7 +1154,8 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
             torch.fx.Proxy, lambda a: get_fake_value(a.node, tx), p_args
         )
 
-        example_value = lowered_module.original_module.module()(*real_sub_args)
+        with tx.fake_mode:
+            example_value = lowered_module.original_module.module()(*real_sub_args)
 
         # NOTE [Guaranteeing the 1-1 correspondence of FakeTensors and real tensors]:
         # executorch modules promise not to alias inputs and outputs.
@@ -1478,16 +1479,16 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
         return fn.call_function(tx, args, kwargs)
 
 
-class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
+class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @staticmethod
     def normalize_to_args(args, kwargs):
-        # input signature is (query, key, value, score_mod, *other_buffers)
-        # Flatten args and kwargs into lists
-        flat_args = pytree.tree_flatten(args)[0]
+        # input signature is (query, key, value, score_mod, block_mask, *other_buffers),
+        # block_mask is a tuple, and we don't want to flatten it.
+        # only flatten kwargs into lists
         flat_kwargs = pytree.tree_flatten(kwargs)[0]
 
         # Combine the flattened lists
-        all_args = flat_args + flat_kwargs
+        all_args = args + flat_kwargs
         return all_args
 
     def create_wrapped_node(
@@ -1557,10 +1558,21 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        query, key, value, score_mod = self.normalize_to_args(args, kwargs)
+        (
+            query,
+            key,
+            value,
+            score_mod,
+            block_mask,
+        ) = self.normalize_to_args(args, kwargs)
 
         p_args = self.create_wrapped_node(tx, query, score_mod)
-        proxied_args = [query, key, value]
+        proxied_args = [
+            query,
+            key,
+            value,
+            block_mask,
+        ]
 
         # Store the invocation as a call
         # Norm_kwargs contains the score_function and we dont want to proxy this because
@@ -1576,12 +1588,15 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             lse_meta = query_meta.new_empty(logsumexp_shape, dtype=torch.float32)
         example_value = (out_meta, lse_meta)
 
+        # Compose the ordered HOO args from two parts:
+        # - inp_args: [query, key, value, block_mask]
+        # - p_args: [score_mod, *other_buffers]
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
                 self.value,
-                args=inp_args + p_args,
+                args=inp_args[:3] + p_args[:1] + inp_args[3:] + p_args[1:],
                 kwargs={},
             ),
             example_value=example_value,
