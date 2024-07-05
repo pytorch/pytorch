@@ -16466,7 +16466,6 @@ op_db: List[OpInfo] = [
     ),
     BinaryUfuncInfo(
         'igamma',
-        variant_test_name='dftemp',
         aliases=('torch.special.gammainc',),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         dtypesIfCUDA=floating_types(),
@@ -16483,7 +16482,6 @@ op_db: List[OpInfo] = [
     ),
     BinaryUfuncInfo(
         'igammac',
-        variant_test_name='dftemp',
         aliases=('torch.special.gammaincc',),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         dtypesIfCUDA=floating_types(),
@@ -22771,14 +22769,14 @@ python_ref_db = [
         torch_opinfo_name="hypot",
         supports_rhs_python_scalar=False,
     ),
-    # ElementwiseBinaryPythonRefInfo(
-    #     "_refs.igamma",
-    #     torch_opinfo_name="igamma",
-    # ),
-    # ElementwiseBinaryPythonRefInfo(
-    #     "_refs.igammac",
-    #     torch_opinfo_name="igammac",
-    # ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.igamma",
+        torch_opinfo_name="igamma",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.igammac",
+        torch_opinfo_name="igammac",
+    ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.isclose",
         torch_opinfo_name="isclose",
