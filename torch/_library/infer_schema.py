@@ -38,7 +38,7 @@ def infer_schema(
         >>> def foo_impl(x: torch.Tensor) -> torch.Tensor:
         >>>     return x.sin()
         >>>
-        >>> infer_schema(foo_impl, name="foo", mutates_args={})
+        >>> infer_schema(foo_impl, op_name="foo", mutates_args={})
         >>> # foo(Tensor x) -> Tensor
         >>>
         >>> infer_schema(foo_impl, mutates_args={})
