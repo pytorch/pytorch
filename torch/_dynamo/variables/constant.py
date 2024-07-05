@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import numbers
 import operator
 from typing import Dict, List
 
@@ -155,33 +156,31 @@ class ConstantVariable(VariableTracker):
         except NotImplementedError:
             return super().call_method(tx, name, args, kwargs)
 
-        def has_arith_binop(num_ty):
-            return (
-                isinstance(self.value, num_ty)
-                and hasattr(operator, name)
-                and len(args) == 1
-                and args[0].is_python_constant()
-            )
-
         if isinstance(self.value, str) and name in str.__dict__.keys():
             method = getattr(self.value, name)
             return ConstantVariable.create(method(*const_args, **const_kwargs))
-        elif has_arith_binop(int) or has_arith_binop(float):
-            op = getattr(operator, name)
-            add_target = const_args[0]
-            if isinstance(add_target, (torch.SymInt, torch.SymFloat)):
-                from .tensor import SymNodeVariable
+        elif isinstance(self.value, numbers.Number):
+            if not (args or kwargs):
+                return ConstantVariable.create(getattr(self.value, name)())
+            if (
+                hasattr(operator, name)
+                and len(args) == 1
+                and args[0].is_python_constant()
+            ):
+                add_target = const_args[0]
+                op = getattr(operator, name)
+                if isinstance(
+                    add_target, (torch.SymBool, torch.SymFloat, torch.SymInt)
+                ):
+                    # Addition between a non sym and sym makes a sym
+                    proxy = tx.output.create_proxy(
+                        "call_function", op, (self.value, add_target), {}
+                    )
+                    return SymNodeVariable.create(tx, proxy, add_target)
+                else:
+                    return ConstantVariable.create(op(self.value, add_target))
 
-                # Addition between a non sym and sym makes a sym
-                # sym_num = tx.output.register_attr_or_module(
-                #     add_target, f"sym_shape_{add_target}", source=None
-                # )
-                proxy = tx.output.create_proxy(
-                    "call_function", op, (self.value, add_target), {}
-                )
-                return SymNodeVariable.create(tx, proxy, add_target)
-            return ConstantVariable.create(op(self.value, add_target))
-        elif name == "__len__" and not (args or kwargs):
+        if name == "__len__" and not (args or kwargs):
             return ConstantVariable.create(len(self.value))
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
