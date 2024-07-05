@@ -461,7 +461,10 @@ function(torch_compile_options libname)
     endif()
 
     if(WERROR)
-      list(APPEND private_compile_options -Wno-strict-overflow)
+      list(APPEND private_compile_options
+        -Wno-strict-overflow
+        -Werror=inconsistent-missing-override
+        -Werror=inconsistent-missing-destructor-override)
     endif()
   endif()
 
