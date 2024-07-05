@@ -3805,6 +3805,15 @@ def constant_pad_nd(
     pad_left = [pad[2 * (dim - 1 - i)] for i in range(dim)]
     pad_right = [pad[2 * (dim - 1 - i) + 1] for i in range(dim)]
 
+    if input.numel() == 0:
+        shape = list(input.shape)
+        for i in range(dim):
+            shape[input.ndim - 1 - i] += pad[2 * i] + pad[2 * i + 1]
+        result = input.new_full(shape, value)
+        memory_format = utils.suggest_memory_format(input)
+        result = result.contiguous(memory_format=memory_format)
+        return result
+
     out_indices = [
         torch.arange(
             -pad_left[i], inp_shape[i] + pad_right[i], device=input.device
