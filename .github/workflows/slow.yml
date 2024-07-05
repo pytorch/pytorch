@@ -1,0 +1,178 @@
+# This workflow is dedicated to host slow jobs that are run only periodically because
+# they are too slow to run in every commit.  The list of slow tests can be found in
+# https://github.com/pytorch/test-infra/blob/generated-stats/stats/slow-tests.json
+name: slow
+
+on:
+  schedule:
+    - cron: 45 0,4,8,12,16,20 * * *
+    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
+  push:
+    tags:
+      - ciflow/slow/*
+    branches:
+      - release/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  # Often fails due to conda availability issues
+  # See https://github.com/pytorch/pytorch/issues/129717
+  # llm-td:
+  #   name: before-test
+  #   uses: ./.github/workflows/llm_td_retrieval.yml
+  #   permissions:
+  #     id-token: write
+  #     contents: read
+
+  target-determination:
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+    # needs: llm-td
+    permissions:
+      id-token: write
+      contents: read
+
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build:
+    name: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
+      cuda-arch-list: 8.6
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+
+  linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-test:
+    name: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build
+      - target-determination
+    with:
+      build-environment: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build.outputs.test-matrix }}
+      timeout-minutes: 300
+
+  linux-focal-cuda12_1-py3_10-gcc9-sm86-build:
+    name: linux-focal-cuda12.1-py3.10-gcc9-sm86
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
+      cuda-arch-list: 8.6
+      test-matrix: |
+        { include: [
+          { config: "slow", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "slow", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+
+  linux-focal-cuda12_1-py3_10-gcc9-sm86-test:
+    name: linux-focal-cuda12.1-py3.10-gcc9-sm86
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-focal-cuda12_1-py3_10-gcc9-sm86-build
+      - target-determination
+    with:
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.test-matrix }}
+
+  linux-focal-py3_8-clang10-build:
+    name: linux-focal-py3.8-clang10
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-py3.8-clang10
+      docker-image-name: pytorch-linux-focal-py3.8-clang10
+      test-matrix: |
+        { include: [
+          { config: "slow", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "slow", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+        ]}
+
+  linux-focal-py3_8-clang10-test:
+    name: linux-focal-py3.8-clang10
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-focal-py3_8-clang10-build
+      - target-determination
+    with:
+      build-environment: linux-focal-py3.8-clang10
+      docker-image: ${{ needs.linux-focal-py3_8-clang10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_8-clang10-build.outputs.test-matrix }}
+
+  linux-focal-rocm6_1-py3_8-build:
+    name: linux-focal-rocm6.1-py3.8
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-rocm6.1-py3.8
+      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      test-matrix: |
+        { include: [
+          { config: "slow", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "slow", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
+        ]}
+
+  linux-focal-rocm6_1-py3_8-test:
+    permissions:
+      id-token: write
+      contents: read
+    name: linux-focal-rocm6.1-py3.8
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-focal-rocm6_1-py3_8-build
+      - target-determination
+    with:
+      build-environment: linux-focal-rocm6.1-py3.8
+      docker-image: ${{ needs.linux-focal-rocm6_1-py3_8-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm6_1-py3_8-build.outputs.test-matrix }}
+
+  linux-jammy-py3_10-clang15-asan-build:
+    name: linux-jammy-py3.10-clang15-asan
+    uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-jammy-py3.10-clang15-asan
+      docker-image-name: pytorch-linux-jammy-py3-clang15-asan
+      test-matrix: |
+        { include: [
+          { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+        ]}
+      sync-tag: asan-build
+
+  linux-jammy-py3_10-clang15-asan-test:
+    name: linux-jammy-py3.10-clang15-asan
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-py3_10-clang15-asan-build
+      - target-determination
+    with:
+      build-environment: linux-jammy-py3.10-clang15-asan
+      docker-image: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.test-matrix }}
+      sync-tag: asan-test

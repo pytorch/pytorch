@@ -1,0 +1,117 @@
+name: Upload test stats
+
+on:
+  workflow_run:
+    workflows: [pull, trunk, periodic, inductor, unstable, slow, unstable-periodic, inductor-periodic, rocm, inductor-micro-benchmark]
+    types:
+      - completed
+
+jobs:
+  # the conclusion field in the github context is sometimes null
+  # solution adapted from https://github.com/community/community/discussions/21090#discussioncomment-3226271
+  get_workflow_conclusion:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-latest
+    outputs:
+      conclusion: ${{ fromJson(steps.get_conclusion.outputs.data).conclusion }}
+    steps:
+      - name: Get workflow run conclusion
+        uses: octokit/request-action@v2.1.0
+        id: get_conclusion
+        with:
+          route: GET /repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/attempts/${{ github.event.workflow_run.run_attempt }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-test-stats:
+    needs: get_workflow_conclusion
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-22.04
+    environment: upload-stats
+    name: Upload test stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
+    steps:
+      - name: Print workflow information
+        env:
+          TRIGGERING_WORKFLOW: ${{ toJSON(github.event.workflow_run) }}
+        run: echo "${TRIGGERING_WORKFLOW}"
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: |
+          pip3 install requests==2.32.2 rockset==1.0.3 boto3==1.19.12
+
+      - name: Upload test artifacts
+        id: upload-s3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_ARTIFACTS_URL: ${{ github.event.workflow_run.artifacts_url }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          REPO_FULLNAME: ${{ github.event.workflow_run.repository.full_name }}
+        run: |
+          echo "${WORKFLOW_ARTIFACTS_URL}"
+
+          # Note that in the case of Linux and Windows, their artifacts have already been uploaded to S3, so there simply won't be
+          # anything on GitHub to upload. The command should return right away
+          python3 -m tools.stats.upload_artifacts --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}"
+
+      - name: Upload test stats
+        env:
+          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          WORKFLOW_URL: ${{ github.event.workflow_run.html_url }}
+          HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          echo "${WORKFLOW_URL}"
+          python3 -m tools.stats.upload_test_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --head-branch "${HEAD_BRANCH}" --head-repository "${HEAD_REPOSITORY}"
+          python3 -m tools.stats.upload_sccache_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}"
+
+      - name: Analyze disabled tests rerun
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_ARTIFACTS_URL: ${{ github.event.workflow_run.artifacts_url }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          REPO_FULLNAME: ${{ github.event.workflow_run.repository.full_name }}
+        run: |
+          # Analyze the results from disable tests rerun and upload them to S3
+          python3 -m tools.stats.check_disabled_tests --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}"
+
+      - name: Upload gpt-fast benchmark results to Rockset
+        if: steps.upload-s3.outcome && steps.upload-s3.outcome == 'success' && github.event.workflow_run.name == 'inductor-micro-benchmark'
+        env:
+          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          REPO_FULLNAME: ${{ github.event.workflow_run.repository.full_name }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          python3 -m tools.stats.upload_dynamo_perf_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}" --head-branch "${HEAD_BRANCH}" --rockset-collection oss_ci_benchmark --rockset-workspace benchmarks --match-filename "^gpt_fast_benchmark"
+
+  check-api-rate:
+    if: ${{ always() && github.repository_owner == 'pytorch' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Get our GITHUB_TOKEN API limit usage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/rate_limit

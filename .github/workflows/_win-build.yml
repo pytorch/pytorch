@@ -1,0 +1,175 @@
+name: windows-build
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      cuda-version:
+        required: true
+        type: string
+        description: What CUDA version to build with, "cpu" for none.
+      build-with-debug:
+        required: false
+        type: boolean
+        default: false
+        description: If set, build in debug mode.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
+      test-matrix:
+        required: false
+        type: string
+        description: |
+          An option JSON description of what test configs to run later on. This
+          is moved here from the Linux test workflow so that we can apply filter
+          logic using test-config labels earlier and skip unnecessary builds
+
+    outputs:
+      test-matrix:
+        value: ${{ jobs.build.outputs.test-matrix }}
+        description: An optional JSON description of what test configs to run later on.
+
+env:
+  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+jobs:
+  build:
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch'
+    runs-on: [self-hosted, windows.4xlarge.nonephemeral]
+    timeout-minutes: 240
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Duplicated in win-test because this MUST go before a checkout
+      - name: Enable git symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
+
+      - name: Clean up leftover processes on non-ephemeral Windows runner
+        uses: pytorch/test-infra/.github/actions/cleanup-runner@main
+
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            To forward remote desktop on your local machine ssh as follows:
+              ssh -L 3389:localhost:3389 %%username%%@%%hostname%%
+            And then change password using `passwd` command.
+
+            To start build locally, change working folder to \actions-runner\_work\pytorch\pytorch,
+            Activate miniconda and Visual Studio environment, by running:
+              call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
+              call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+
+      - name: Setup Windows
+        uses: ./.github/actions/setup-win
+        with:
+          cuda-version: ${{ inputs.cuda-version }}
+
+      - name: Parse ref
+        id: parse-ref
+        shell: bash
+        run: python3 .github/scripts/parse_ref.py
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Apply the filter logic to the build step too if the test-config label is already there
+      - name: Select all requested test configurations (if the test matrix is available)
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+          job-name: ${{ steps.get-job-id.outputs.job-name }}
+
+      - name: Download pytest cache
+        uses: ./.github/actions/pytest-cache-download
+        continue-on-error: true
+        with:
+          cache_dir: .pytest_cache
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
+
+      - name: Build
+        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
+        id: build
+        shell: bash
+        env:
+          PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          BUILD_WHEEL: 1
+          MAX_JOBS: 8
+          CUDA_VERSION: ${{ inputs.cuda-version }}
+          PYTHON_VERSION: "3.8"
+          SCCACHE_BUCKET: "ossci-compiler-cache"
+          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
+          SCCACHE_REGION: us-east-1
+          VC_PRODUCT: "BuildTools"
+          VC_VERSION: ""
+          VC_YEAR: "2019"
+          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+          AWS_DEFAULT_REGION: us-east-1
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
+          TORCH_CUDA_ARCH_LIST: "8.6"
+          USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
+          OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+        run: |
+          .ci/pytorch/win-build.sh
+
+      # Upload to github so that people can click and download artifacts
+      - name: Upload artifacts to s3
+        if: steps.build.outcome != 'skipped'
+        uses: seemethere/upload-artifact-s3@v5
+        with:
+          retention-days: 14
+          if-no-files-found: error
+          name: ${{ inputs.build-environment }}
+          path: C:\${{ github.run_id }}\build-results
+
+      - name: Upload sccache stats
+        if: steps.build.outcome != 'skipped'
+        uses: seemethere/upload-artifact-s3@v5
+        with:
+          s3-prefix: |
+            ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+          retention-days: 14
+          if-no-files-found: warn
+          path: sccache-stats-*.json
+
+      - name: Teardown Windows
+        uses: ./.github/actions/teardown-win
+        if: always()
+        timeout-minutes: 120
+        with:
+          extra-delete-dir: /c/${{ github.run_id }}/build-results/
