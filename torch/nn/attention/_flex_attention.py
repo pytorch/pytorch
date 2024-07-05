@@ -235,6 +235,7 @@ def _create_mask(
     M: int,
     N: int,
     device: str = "cuda",
+    _transform: bool = True,
 ):
     r"""This function creates a mask tensor from a score_mod function.
 
@@ -249,16 +250,21 @@ def _create_mask(
     Returns:
         mask (Tensor): A mask tensor with shape (B, H, M, N).
     """
+    from contextlib import nullcontext
+
     b = torch.arange(0, B, device=device)
     h = torch.arange(0, H, device=device)
     m = torch.arange(0, M, device=device)
     n = torch.arange(0, N, device=device)
-    score_mod = torch.vmap(score_mod, in_dims=(0, None, None, None, 0))
-    score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None))
-    score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
-    score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None))
-    out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
-    mask = torch.where(torch.isneginf(out), False, True)
+    # A hack required because of lack of torchfunctionmode support
+    ctx = TransformGetItemToIndex() if _transform else nullcontext()
+    with ctx:  # type: ignore[attr-defined]
+        score_mod = torch.vmap(score_mod, in_dims=(0, None, None, None, 0))
+        score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None))
+        score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
+        score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None))
+        out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
+        mask = torch.where(torch.isneginf(out), False, True)
     return mask
 
 
@@ -267,7 +273,7 @@ def _create_mask(
 def _create_block_mask_inner(
     score_mod, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
 ):
-    mask = _create_mask(score_mod, B, H, M, N, device)
+    mask = _create_mask(score_mod, B, H, M, N, device, _transform=False)
     block_mask = _create_block_mask_from_mask(mask, KV_BLOCK_SIZE, Q_BLOCK_SIZE)
     return block_mask
 
@@ -302,7 +308,7 @@ def _create_block_mask(
     inner_func = _create_block_mask_inner
     # This is kind of a temporary hack to workaround some issues
     if _compiled:
-        inner_func = torch.compile(inner_func)
+        inner_func = torch.compile(inner_func, fullgraph=True)
 
     with TransformGetItemToIndex():
         return inner_func(score_mod, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE)
