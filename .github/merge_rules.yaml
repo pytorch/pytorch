@@ -313,10 +313,10 @@
   - Lint
   - pull
 
-name: DCP
-patterns:
+- name: DCP
+  patterns:
   - torch/distributed/checkpoint/**
-approved_by:
+  approved_by:
   - LucasLLC
   - fegin
   - wz337
@@ -326,8 +326,7 @@ approved_by:
   - kirtiteja
   - mhorowitz
   - saiteja64
-
-mandatory_checks_name:
+  mandatory_checks_name:
   - EasyCLA
   - Lint
   - pull
