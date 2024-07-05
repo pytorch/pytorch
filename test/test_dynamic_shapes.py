@@ -2500,6 +2500,13 @@ class TestGuardsExpressions(TestCase):
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s2)]))
 
+    def test_guards_float_print(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 3)
+        guard_bool(2 / s0 == 2 / 3)
+        guards = shape_env.produce_guards_expression([s0])
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+
     def test_guards_float_div(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 8)
