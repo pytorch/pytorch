@@ -522,7 +522,7 @@ def flex_attention(*args, **kwargs):
         query.get_device(),
         query.get_dtype(),
         query.get_size(),
-        query.get_stride(),
+        FlexibleLayout.fill_ordered(query.get_size(), [3, 1, 2, 0])
     )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = query.get_size()[:-1]  # [B, H, M]
@@ -634,11 +634,11 @@ flex_attention_backward_template = TritonTemplate(
     name="flex_attention_backward",
     grid=flex_attention_backward_grid,
     source=r"""
-{{def_kernel("Q", "K", "V", "OUT", "LSE", "DELTA", "DO", "DQ", "DV", "SPARSE_KV_NUM_BLKS", "SPARSE_KV_IDX", "SPARSE_Q_NUM_BLKS", "SPARSE_Q_IDX")}}
+{{def_kernel("Q", "K", "V", "LSE", "DELTA", "DO", "DQ", "DV", "SPARSE_KV_NUM_BLKS", "SPARSE_KV_IDX", "SPARSE_Q_NUM_BLKS", "SPARSE_Q_IDX")}}
     # Sub notation for this kernel:
     #
     # Q: Query, K: Key, V: Value
-    # OUT: Forward output, LSE: logsumexp (logsumexp is always stored in fp32 regardless of the input dtype)
+    # LSE: logsumexp (logsumexp is always stored in fp32 regardless of the input dtype)
     # DELTA: Precomputed sum(OUT* DO, axis=1)
     # DO: Derivative of Output, DQ: Derivative of Query, DV: Derivative of Value
     # DK: Derivative of Key, is the written to via the store_output call due to some limitations with
@@ -675,6 +675,11 @@ flex_attention_backward_template = TritonTemplate(
     stride_vm = {{stride("V", 2)}}
     stride_vd = {{stride("V", 3)}}
 
+    stride_doz = {{stride("DO", 0)}}
+    stride_doh = {{stride("DO", 1)}}
+    stride_dom = {{stride("DO", 2)}}
+    stride_dod = {{stride("DO", 3)}}
+
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
     Q_LEN = {{size("Q", 2)}}
@@ -699,12 +704,15 @@ flex_attention_backward_template = TritonTemplate(
     q_adj = (stride_qh * (off_hz % H) + stride_qz * (off_hz // H)).to(tl.int64)
     k_adj = (stride_kh * (off_hz % H) + stride_kz * (off_hz // H)).to(tl.int64)
     v_adj = (stride_vh * (off_hz % H) + stride_vz * (off_hz // H)).to(tl.int64)
+    do_adj = (stride_doh * (off_hz % H) + stride_doz * (off_hz // H)).to(tl.int64)
 
     # offset pointers for batch/head
     Q += q_adj
     K += k_adj
     V += v_adj
-    DO += q_adj
+    DO += do_adj
+    # TODO: This does not work if DQ is not the same layout as Q (for example,
+    # if Q is broadcasted)
     DQ += q_adj
     DV += v_adj
     LSE += off_chz
@@ -736,7 +744,7 @@ flex_attention_backward_template = TritonTemplate(
 
         q = tl.load(Q + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
         dq = tl.zeros([BLOCK_M2, BLOCK_DMODEL], dtype=tl.float32)
-        do = tl.load(DO + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
+        do = tl.load(DO + offs_m2[:, None] * stride_dom + offs_k[None, :] * stride_dod)
 
         lse = tl.load(LSE + offs_m2)
         lse = lse[:, None]
@@ -843,7 +851,7 @@ flex_attention_backward_template = TritonTemplate(
         offs_m1 = start_m1 + tl.arange(0, BLOCK_M1)
         offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
         qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
-        do_ptrs = DO + offs_m1[:, None] * stride_qm + offs_k[None, :] * stride_qd
+        do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_k[None, :] * stride_dod
         # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
         tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
 
@@ -906,7 +914,7 @@ flex_attention_backward_template = TritonTemplate(
             offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_M1
 
             qT_ptrs += offset * stride_qm
-            do_ptrs += offset * stride_qm
+            do_ptrs += offset * stride_dom
 
             curr_m += offset
 
@@ -1030,7 +1038,6 @@ def flex_attention_backward(*args, **kwargs):
                 query,
                 key,
                 value,
-                out,
                 logsumexp,
                 delta,
                 grad_out,
@@ -1061,7 +1068,6 @@ def flex_attention_backward(*args, **kwargs):
         query,
         key,
         value,
-        out,
         logsumexp,
         delta,
         grad_out,
