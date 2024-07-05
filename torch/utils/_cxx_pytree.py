@@ -75,6 +75,10 @@ __all__ = [
 ]
 
 
+__TORCH_DICT_SESSION = optree.dict_insertion_ordered(True, namespace="torch")
+__TORCH_DICT_SESSION.__enter__()  # enable globally and permanently
+
+
 T = TypeVar("T")
 S = TypeVar("S")
 U = TypeVar("U")
