@@ -681,6 +681,7 @@ class HalideKernel(SIMDKernel):
         self.dom_renames: Dict[str, Dict[sympy.Symbol, sympy.Symbol]] = {}
         # {"in_ptr0": ["in_ptr0_view0"], ...}
         self.buffer_aliases: Dict[str, List[str]] = defaultdict(list)
+        self.has_indirect_indexing = False
 
     def create_cse_var(self, name, bounds=None):
         self.body.writeline(f"{name} = hl.Func({name!r})")
@@ -758,6 +759,10 @@ class HalideKernel(SIMDKernel):
                 )
             all_used_symbols.update(super().prepare_indexing(index).free_symbols)
 
+        self.has_indirect_indexing = any(
+            symbol_is_type(sym, SymT.INDIRECT) for sym in all_used_symbols
+        )
+
         had_fallback = False
         for tree in reversed(self.range_trees):
             nodes = [n for n in tree.nodes.values() if n.symbol() in all_used_symbols]
@@ -795,11 +800,11 @@ class HalideKernel(SIMDKernel):
                         handled_count = len(nodes)
                         had_fallback = True
                     sym = sympy_index_symbol(f"h{len(self.halide_vars)}")
-                    self.halide_vars[sym] = next_size
                     if tree.prefix == "r":
                         self.reduction_renames[sym] = sympy_index_symbol(
                             f"hr{len(self.halide_vars)}"
                         )
+                    self.halide_vars[sym] = next_size
                     added_sym_size.append((sym, next_size))
                     divisor *= next_size
                     new_sizes = [n.length for n in nodes if eq(n.divisor, divisor)]
@@ -969,14 +974,16 @@ class HalideKernel(SIMDKernel):
         dims.sort(key=lambda d: V.graph.sizevars.size_hint(d.stride, fallback=inf))  # type: ignore[arg-type]
 
         if not dims:  # scalar load/store
-            dims.append(DimensionInfo(sympy.Integer(0), 1, 1))
+            if self.has_indirect_indexing:
+                # workaround https://github.com/halide/Halide/issues/8338
+                dims.append(DimensionInfo(sympy.Integer(0), 1, 1))
         elif not V.graph.sizevars.statically_known_equals(dims[0].stride, 1):
             # Halide assumes dimension 0 is stride == 1, so add a dummy dimension
             dims.insert(
                 0, DimensionInfo(sympy.Integer(0), 1 if is_store else dims[0].stride, 1)
             )
 
-        if not is_store:
+        if dims and not is_store:
             if var in self.buffer_offsets and V.graph.sizevars.statically_known_geq(
                 offset, self.buffer_offsets[var]
             ):
@@ -1066,13 +1073,21 @@ class HalideKernel(SIMDKernel):
         assert len(ordered) == len(used_dims)
         return ordered
 
+    def make_index_str(self, dims, replacements=None, zero_vars=False):
+        index_str = ", ".join(d.index_str(replacements, zero_vars) for d in dims)
+        if len(dims) == 0:
+            index_str = "()"
+        elif len(dims) == 1:
+            # workaround for https://github.com/halide/Halide/issues/8299
+            index_str = f"{index_str},"
+        return index_str
+
     def load(self, name: str, index: sympy.Expr):
         """Codegen a load from an InputBuffer"""
         var = self.args.input(name)
         index = self.prepare_indexing(index)
         var, dims = self.indexing_to_dimensions(var, index, False)
-        index_str = ", ".join(d.index_str() for d in dims)
-        line = f"{var}[{index_str},]"  # trailing comma workaround for https://github.com/halide/Halide/issues/8299
+        line = f"{var}[{self.make_index_str(dims)}]"
         dtype = V.graph.get_dtype(name)
         if dtype in (torch.float16, torch.bfloat16):
             dtype = torch.float32
@@ -1117,21 +1132,21 @@ class HalideKernel(SIMDKernel):
         var, dims = self.indexing_to_dimensions(var, index, True)
         if self.is_indirect_indexing(index) or mode is not None:
             replacements = self.setup_dom_indexing()
-            index_str = ", ".join(d.index_str(replacements) for d in dims)
+            index_str = self.make_index_str(dims, replacements)
             value_str = value.subs_str(replacements)
-            undef_dims = ", ".join(["hl.Var()"] * len(dims))
+            undef_dims = (", ".join(["hl.Var()"] * len(dims))) or "()"
             self.body.writeline(
                 DeferredLine(name, f"{var}[{undef_dims}] = hl.undef({var}.type())")
             )
         else:
-            index_str = ", ".join(d.index_str(zero_vars=True) for d in dims)
+            index_str = self.make_index_str(dims, zero_vars=True)
             value_str = str(value)
 
         dtype = V.graph.get_dtype(name)
         if mode is None:
-            line = f"{var}[{index_str},] = hl.cast({halide_type(dtype)}, {value_str})"
+            line = f"{var}[{index_str}] = hl.cast({halide_type(dtype)}, {value_str})"
         elif mode == "atomic_add":
-            line = f"{var}[{index_str},] += hl.cast({halide_type(dtype)}, {value_str})"
+            line = f"{var}[{index_str}] += hl.cast({halide_type(dtype)}, {value_str})"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.body.writeline(DeferredLine(name, line))
@@ -1320,7 +1335,6 @@ class HalideKernel(SIMDKernel):
                     cexpr(self.rename_indexing(x.size))
                     for x in self.buffer_dimensions[arg.name]
                 ]
-                assert shape, self.buffer_dimensions
                 stride = [
                     cexpr(self.rename_indexing(x.stride))
                     for x in self.buffer_dimensions[arg.name]
