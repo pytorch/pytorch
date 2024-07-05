@@ -3151,8 +3151,13 @@ Please use `add.register_fake` to add an fake impl.""",
         def foo_impl(x: torch.Tensor) -> torch.Tensor:
             return x.sin()
 
-        schema = torch.library.Schema("myop", signature=foo_impl, mutates_args={})
+        schema = torch.library.infer_schema(
+            function=foo_impl, name="myop", mutates_args={}
+        )
         self.assertExpectedInline(schema, "myop(Tensor x) -> Tensor")
+
+        schema = torch.library.infer_schema(function=foo_impl, mutates_args={})
+        self.assertExpectedInline(schema, "foo_impl(Tensor x) -> Tensor")
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):
