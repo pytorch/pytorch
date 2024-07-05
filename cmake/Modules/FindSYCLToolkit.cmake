@@ -64,7 +64,7 @@ if(WIN32)
   set(sycl_runtime_version 7)
   find_library(
     SYCL_LIBRARY
-    NAMES "sycl-preview${sycl_runtime_version}"
+    NAMES "sycl${sycl_runtime_version}"
     HINTS ${SYCL_LIBRARY_DIR}
     NO_DEFAULT_PATH
   )
