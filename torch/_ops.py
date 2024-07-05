@@ -289,7 +289,7 @@ class HigherOrderOperator(OperatorBase):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
 
     # Use `self_` to avoid naming collide with custom ops arguments that are named "self".
-    def dispatch(self_, dispatch_key, *args, **kwargs):
+    def dispatch(self_, dispatch_key, *args, **kwargs):  # noqa: B902
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
         if dispatch_key in self_._dispatch_cache:
@@ -331,19 +331,19 @@ class HigherOrderOperator(OperatorBase):
                     curr_mode is not None
                 ), "Illegal invocation of dispatch on torch._C.DispatchKey.PreDispatch without a mode."
                 assert (
-                    type(curr_mode) in self.python_key_mode_table
+                    type(curr_mode) in self_.python_key_mode_table
                 ), f"Current active mode {curr_mode} not registered"
-                handler = self.python_key_mode_table[type(curr_mode)]
+                handler = self_.python_key_mode_table[type(curr_mode)]
                 with _pop_mode_temporarily(functionality_key) as mode:
                     return handler(mode, *args, **kwargs)
 
-        final_key = resolve_key(self, dispatch_key)
+        final_key = resolve_key(self_, dispatch_key)
 
         # This can current fail due to backend fallbacks.  You just have to
         # register them by hand for HigherOrderOperator.
-        if final_key not in self.py_kernels:
+        if final_key not in self_.py_kernels:
             raise NotImplementedError(
-                f"could not find kernel for HigherOrderOperator {self._name} "
+                f"could not find kernel for HigherOrderOperator {self_._name} "
                 f"at dispatch key {final_key} (resolved from {dispatch_key})"
             )
 
@@ -352,14 +352,14 @@ class HigherOrderOperator(OperatorBase):
         # Also we do same thing for normal ops:
         # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
         if dispatch_key != torch._C.DispatchKey.PreDispatch:
-            self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
-        kernel = self.py_kernels[final_key]
+            self_._dispatch_cache[dispatch_key] = self_.py_kernels[final_key]
+        kernel = self_.py_kernels[final_key]
         # It's illegal to register DispatchKey to py_kernels, since there's no
         # C++ kernel to call into
         assert not isinstance(kernel, torch._C.DispatchKey)
         return kernel(*args, **kwargs)
 
-    def __call__(self_, *args, **kwargs):
+    def __call__(self_, *args, **kwargs):  # noqa: B902
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
         import torch._dynamo
@@ -370,7 +370,7 @@ class HigherOrderOperator(OperatorBase):
             flat_args = _to_flat_tuple(args, kwargs)
             if torch.overrides.has_torch_function(flat_args):
                 return torch.overrides.handle_torch_function(
-                    self, flat_args, *args, **kwargs
+                    self_, flat_args, *args, **kwargs
                 )
 
             dispatch_key_set = _compute_keyset(args, kwargs, self_.non_fallthrough_keys)
