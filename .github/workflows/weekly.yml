@@ -26,7 +26,7 @@ jobs:
           repo-name: xla
           branch: master
           pin-folder: .github/ci_commit_pins
-          test-infra-ref: main
+          test-infra-ref: xu_switch_to_mkl_static
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
       - name: update-triton-commit-hash
@@ -36,6 +36,6 @@ jobs:
           repo-name: triton
           branch: main
           pin-folder: .ci/docker/ci_commit_pins
-          test-infra-ref: main
+          test-infra-ref: xu_switch_to_mkl_static
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}

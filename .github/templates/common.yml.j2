@@ -5,10 +5,10 @@
 
 {%- set timeout_minutes = 240 -%}
 
-# NOTE: If testing pytorch/builder changes you can change this variable to change what pytorch/builder reference
+# NOTE: If testing xuhancn/pytorch_builder changes you can change this variable to change what xuhancn/pytorch_builder reference
 #       the binary builds will check out
-{%- set builder_repo = "pytorch/builder" -%}
-{%- set builder_branch = "main" -%}
+{%- set builder_repo = "xuhancn/pytorch_builder" -%}
+{%- set builder_branch = "xu_switch_to_mkl_static" -%}
 
 {%- macro concurrency(build_environment) -%}
 concurrency:

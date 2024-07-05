@@ -18,7 +18,7 @@ on:
       BUILDER_ROOT:
         required: false
         type: string
-        description: Root directory for the pytorch/builder repository. Not actually needed, but currently passing it in since we pass in the same inputs to the reusable workflows of all binary builds
+        description: Root directory for the xuhancn/pytorch_builder repository. Not actually needed, but currently passing it in since we pass in the same inputs to the reusable workflows of all binary builds
       PACKAGE_TYPE:
         required: true
         type: string

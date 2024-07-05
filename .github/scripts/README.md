@@ -57,7 +57,7 @@ New runner types can be added by committing changes to `.github/scale-config.yml
 
 > NOTE: New runner types can only be used once the changes to `.github/scale-config.yml` have made their way into the default branch
 
-### Testing [pytorch/builder](https://github.com/pytorch/builder) changes
+### Testing [xuhancn/pytorch_builder](https://github.com/xuhancn/pytorch_builder) changes
 
 In order to test changes to the builder scripts:
 

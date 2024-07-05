@@ -152,7 +152,7 @@ jobs:
 
   validate:
     needs: build
-    uses: pytorch/builder/.github/workflows/validate-docker-images.yml@main
+    uses: xuhancn/pytorch_builder/.github/workflows/validate-docker-images.yml@main
     with:
       channel: nightly
-      ref: main
+      ref: xu_switch_to_mkl_static

@@ -26,7 +26,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           repository: osalpekar/codellama
-          ref: main
+          ref: xu_switch_to_mkl_static
           path: codellama
 
       - name: Clone Target Determination Code

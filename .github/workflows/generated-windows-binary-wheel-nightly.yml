@@ -103,15 +103,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -220,15 +220,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -347,15 +347,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -465,15 +465,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -593,15 +593,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -711,15 +711,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -839,15 +839,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -957,15 +957,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1084,15 +1084,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1201,15 +1201,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1328,15 +1328,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1446,15 +1446,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1574,15 +1574,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1692,15 +1692,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1820,15 +1820,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1938,15 +1938,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2065,15 +2065,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2182,15 +2182,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2309,15 +2309,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2427,15 +2427,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2555,15 +2555,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2673,15 +2673,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2801,15 +2801,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2919,15 +2919,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3046,15 +3046,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3163,15 +3163,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3290,15 +3290,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3408,15 +3408,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3536,15 +3536,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3654,15 +3654,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3782,15 +3782,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3900,15 +3900,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -4027,15 +4027,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -4144,15 +4144,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -4271,15 +4271,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -4389,15 +4389,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -4517,15 +4517,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -4635,15 +4635,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -4763,15 +4763,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -4881,15 +4881,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout xuhancn/pytorch_builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: xu_switch_to_mkl_static
           submodules: recursive
-          repository: pytorch/builder
+          repository: xuhancn/pytorch_builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean xuhancn/pytorch_builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
