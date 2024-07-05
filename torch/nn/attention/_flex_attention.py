@@ -235,7 +235,7 @@ def _create_mask(
     M: int,
     N: int,
     device: str = "cuda",
-    _transform: bool = True,
+    _compiled: bool = False,
 ):
     r"""This function creates a mask tensor from a score_mod function.
 
@@ -256,13 +256,23 @@ def _create_mask(
     h = torch.arange(0, H, device=device)
     m = torch.arange(0, M, device=device)
     n = torch.arange(0, N, device=device)
+    # TODO: fix this
     # A hack required because of lack of torchfunctionmode support
-    ctx = TransformGetItemToIndex() if _transform else nullcontext()
-    with ctx:  # type: ignore[attr-defined]
+    # Working around some bugs with compiling vmap
+    if _compiled:
+        ctx = nullcontext()
+        b = b.view(B, 1, 1, 1)
+        h = h.view(1, H, 1, 1)
+        m = m.view(1, 1, M, 1)
+        n = n.view(1, 1, 1, N)
+    else:
+        ctx = TransformGetItemToIndex()  # type: ignore[assignment]
         score_mod = torch.vmap(score_mod, in_dims=(0, None, None, None, 0))
         score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None))
         score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
         score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None))
+
+    with ctx:
         out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
         mask = torch.where(torch.isneginf(out), False, True)
     return mask
@@ -273,7 +283,7 @@ def _create_mask(
 def _create_block_mask_inner(
     score_mod, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
 ):
-    mask = _create_mask(score_mod, B, H, M, N, device, _transform=False)
+    mask = _create_mask(score_mod, B, H, M, N, device, _compiled=True)
     block_mask = _create_block_mask_from_mask(mask, KV_BLOCK_SIZE, Q_BLOCK_SIZE)
     return block_mask
 
@@ -287,7 +297,7 @@ def _create_block_mask(
     device: str = "cuda",
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
-    _compiled=False,
+    _compiled=True,
 ):
     r"""This function creates a block mask tuple from a score_mod function.
 
@@ -309,7 +319,6 @@ def _create_block_mask(
     # This is kind of a temporary hack to workaround some issues
     if _compiled:
         inner_func = torch.compile(inner_func, fullgraph=True)
-
     with TransformGetItemToIndex():
         return inner_func(score_mod, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE)
 
