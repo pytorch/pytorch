@@ -161,21 +161,6 @@ def close_to_int(x, eps=0.1):
     return (y < eps) | (y > (1 - eps))
 
 
-def sample_inputs_df_temp(op_info, device, dtype, requires_grad, **kwargs):
-    make_input = partial(
-        make_tensor,
-        dtype=dtype,
-        device=device,
-        requires_grad=requires_grad,
-    )
-    yield SampleInput(
-        input=torch.tensor([2.0], device=device, dtype=dtype, requires_grad=requires_grad),
-        kwargs={
-            "other": torch.tensor([8.0], device=device, dtype=dtype, requires_grad=requires_grad),
-        },
-    )
-
-
 def sample_inputs_slice(op_info, device, dtype, requires_grad, **kwargs):
 
     make_input = partial(make_tensor, device=device, dtype=dtype,
