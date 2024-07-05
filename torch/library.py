@@ -30,7 +30,7 @@ __all__ = [
     "register_fake",
     "get_ctx",
     "custom_op",
-    "infer_schema"
+    "infer_schema",
 ]
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
