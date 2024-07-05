@@ -284,6 +284,7 @@ class HalideOverrides(OpOverrides):
         # return f"hl.max({a}, {b})"  <== handles nan wrong
         if not hasattr(a, "name"):
             return f"hl.max({a}, {b})"
+        b = f"hl.cast({a.name}.type(), {b})"
         return f"hl.select(({a}>{b})|hl.is_nan({a}), {a}, {b}) if {a.name}.type().is_float() else hl.max({a}, {b})"
 
     @staticmethod
