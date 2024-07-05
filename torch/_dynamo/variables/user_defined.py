@@ -4,11 +4,9 @@ import collections
 import contextlib
 import enum
 import functools
-import importlib
 import inspect
 import itertools
 import random
-import re
 import sys
 import threading
 import types
@@ -45,7 +43,6 @@ from ..source import (
     WeakRefCallSource,
 )
 from ..utils import (
-    all_hook_names,
     build_checkpoint_variable,
     check_constant_args,
     get_custom_getattr,
@@ -830,7 +827,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def var_getattr(self, tx, name):
         from .. import trace_rules
         from . import ConstantVariable
-        from .builder import VariableBuilder
 
         value = self.value
         source = AttrSource(self.source, name) if self.source else None
@@ -958,76 +954,84 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 else:
                     return trace_rules.lookup(func)(func)
 
-        if (
-            name in getattr(value, "__dict__", {})
-            or ConstantVariable.is_literal(subobj)
-            or isinstance(
-                subobj,
-                (
-                    torch.Tensor,
-                    torch.nn.Module,
-                    re.Pattern,
-                ),
-            )
-        ):
+        options = {"source": source}
+        if name == "__class__":
+            return UserDefinedClassVariable(type(self.value), **options)
+
+        if subobj is not NO_SUCH_SUBOBJ and not callable(subobj):
             if source:
                 return variables.LazyVariableTracker.create(subobj, source)
-            elif ConstantVariable.is_literal(subobj):
-                return ConstantVariable.create(subobj)
-            elif (
-                type(subobj) == torch.utils._pytree.TreeSpec
-                or type(subobj) == torch.utils._pytree.LeafSpec
-                or type(value) == torch.utils._pytree.TreeSpec
-            ):
+            else:
                 from .builder import SourcelessBuilder
 
                 return SourcelessBuilder.create(tx, subobj)
 
-        if (
-            subobj is not NO_SUCH_SUBOBJ
-            and name not in getattr(value, "__dict__", {})
-            and (
-                type(value).__module__.startswith("torch.")
-                or isinstance(subobj, re.Pattern)
-            )
-            and "torch.optim" not in type(value).__module__
-            and not callable(value)
-            and not isinstance(subobj, types.MethodDescriptorType)
-        ):
-            if not source:
-                assert getattr(
-                    importlib.import_module(type(value).__module__),
-                    type(value).__name__,
-                ) is type(value)
-                source = AttrSource(
-                    AttrSource(
-                        tx.import_source(type(value).__module__), type(value).__name__
-                    ),
-                    name,
-                )
-
-            return VariableBuilder(tx, source)(subobj)
-        options = {"source": source}
-        if isinstance(
-            subobj,
-            (
-                torch.distributions.constraints._Interval,
-                torch.distributions.constraints._Real,
-                torch.distributions.constraints.Constraint,
-            ),
-        ):
-            return UserDefinedObjectVariable(subobj, **options)
-        elif isinstance(self.value, torch.nn.Module) and name in all_hook_names:
-            assert isinstance(subobj, collections.OrderedDict)
-            if not subobj:
-                return variables.ConstDictVariable(
-                    subobj, collections.OrderedDict, **options
-                )
-
-        if name == "__class__":
-            return UserDefinedClassVariable(type(self.value), **options)
-
         return variables.GetAttrVariable(self, name, **options)
+        # if (
+        #     name in getattr(value, "__dict__", {})
+        #     or ConstantVariable.is_literal(subobj)
+        #     or isinstance(
+        #         subobj,
+        #         (
+        #             torch.Tensor,
+        #             torch.nn.Module,
+        #             re.Pattern,
+        #         ),
+        #     )
+        # ):
+        #     if source:
+        #         return variables.LazyVariableTracker.create(subobj, source)
+        #     elif ConstantVariable.is_literal(subobj):
+        #         return ConstantVariable.create(subobj)
+        #     elif (
+        #         type(subobj) == torch.utils._pytree.TreeSpec
+        #         or type(subobj) == torch.utils._pytree.LeafSpec
+        #         or type(value) == torch.utils._pytree.TreeSpec
+        #     ):
+        #         from .builder import SourcelessBuilder
+
+        #         return SourcelessBuilder.create(tx, subobj)
+
+        # if (
+        #     subobj is not NO_SUCH_SUBOBJ
+        #     and name not in getattr(value, "__dict__", {})
+        #     and (
+        #         type(value).__module__.startswith("torch.")
+        #         or isinstance(subobj, re.Pattern)
+        #     )
+        #     and "torch.optim" not in type(value).__module__
+        #     and not callable(value)
+        #     and not isinstance(subobj, types.MethodDescriptorType)
+        # ):
+        #     if not source:
+        #         assert getattr(
+        #             importlib.import_module(type(value).__module__),
+        #             type(value).__name__,
+        #         ) is type(value)
+        #         source = AttrSource(
+        #             AttrSource(
+        #                 tx.import_source(type(value).__module__), type(value).__name__
+        #             ),
+        #             name,
+        #         )
+
+        #     return VariableBuilder(tx, source)(subobj)
+        # options = {"source": source}
+        # if isinstance(
+        #     subobj,
+        #     (
+        #         torch.distributions.constraints._Interval,
+        #         torch.distributions.constraints._Real,
+        #         torch.distributions.constraints.Constraint,
+        #     ),
+        # ):
+        #     return UserDefinedObjectVariable(subobj, **options)
+        # elif isinstance(self.value, torch.nn.Module) and name in all_hook_names:
+        #     assert isinstance(subobj, collections.OrderedDict)
+        #     if not subobj:
+        #         return variables.ConstDictVariable(
+        #             subobj, collections.OrderedDict, **options
+        #         )
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         if tx.output.side_effects.is_attribute_mutation(self):
