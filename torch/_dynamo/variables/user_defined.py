@@ -958,7 +958,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if name == "__class__":
             return UserDefinedClassVariable(type(self.value), **options)
 
-        if subobj is not NO_SUCH_SUBOBJ and not callable(subobj):
+        if subobj is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(subobj):
             if source:
                 return variables.LazyVariableTracker.create(subobj, source)
             else:
@@ -967,6 +967,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return SourcelessBuilder.create(tx, subobj)
 
         return variables.GetAttrVariable(self, name, **options)
+
         # if (
         #     name in getattr(value, "__dict__", {})
         #     or ConstantVariable.is_literal(subobj)
@@ -1032,6 +1033,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         #         return variables.ConstDictVariable(
         #             subobj, collections.OrderedDict, **options
         #         )
+        # if name == "__class__":
+        #     return UserDefinedClassVariable(type(self.value), **options)
+        # return variables.GetAttrVariable(self, name, **options)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         if tx.output.side_effects.is_attribute_mutation(self):
