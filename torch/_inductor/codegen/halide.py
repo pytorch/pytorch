@@ -32,6 +32,7 @@ from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import HalideCodeCache
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
+from ..ops_handler import AddParenHandler, MockHandler
 
 from ..runtime.hints import HalideInputSpec, HalideMeta, ReductionHint
 from ..utils import (
@@ -258,6 +259,8 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def exp(x):
+        if not hasattr(x, "name"):
+            return f"hl.exp({x})"
         return f"hl.fast_exp(hl.cast(hl.Float(32), {x})) if {x.name}.type().bits() <= 32 else hl.exp({x})"
 
     @staticmethod
@@ -271,18 +274,24 @@ class HalideOverrides(OpOverrides):
     @staticmethod
     def minimum(a, b):
         # return f"hl.min({a}, {b})"  <== handles nan wrong
+        if not hasattr(a, "name"):
+            return f"hl.min({a}, {b})"
         b = f"hl.cast({a.name}.type(), {b})"
         return f"hl.select(({a}<{b})|hl.is_nan({a}), {a}, {b}) if {a.name}.type().is_float() else hl.min({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
         # return f"hl.max({a}, {b})"  <== handles nan wrong
+        if not hasattr(a, "name"):
+            return f"hl.max({a}, {b})"
         b = f"hl.cast({a.name}.type(), {b})"
         return f"hl.select(({a}>{b})|hl.is_nan({a}), {a}, {b}) if {a.name}.type().is_float() else hl.max({a}, {b})"
 
     @staticmethod
     def where(a, b, c):
-        return f"hl.select({a}, {b}, hl.cast({b.name}.type(), {c}))"
+        if hasattr(b, "name"):
+            c = f"hl.cast({b.name}.type(), {c})"
+        return f"hl.select({a}, {b}, {c})"
 
     @staticmethod
     def cos(x):
@@ -1263,6 +1272,88 @@ class HalideKernel(SIMDKernel):
             self.body.writeline(f"{unpacked[-1]} = {result_var}[{i}]")
         return tuple(unpacked)
 
+    def scan(
+        self,
+        dtypes: Tuple[torch.dtype, ...],
+        combine_fn: Callable[
+            [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
+        ],
+        values_orig: Tuple[CSEVariable, ...],
+    ) -> Tuple[CSEVariable, ...]:
+        assert self.inside_reduction
+        assert len(dtypes) == len(values_orig)
+        values: List[HalideCSEVariable] = []
+        all_used_dims = set()
+        for value in values_orig:
+            assert isinstance(value, HalideCSEVariable) and value.used_dims is not None
+            if set(value.used_dims) & set(self.reduction_renames):
+                values.append(value)
+            else:
+                values.append(
+                    self.genfunc(
+                        f"{value}", [*value.used_dims, [*self.reduction_renames][:1]]
+                    )
+                )
+            all_used_dims.update(value.used_dims)
+        result_var = self.newfunc(self.sort_used_dims(all_used_dims))
+        assert result_var.used_dims and set(result_var.used_dims) & set(
+            self.reduction_renames
+        )
+        initial = [
+            f"hl.cast({halide_acc_type(dtype)}, {value})"
+            for dtype, value in zip(dtypes, values)
+        ]
+
+        length = self.kexpr(self.rename_indexing(self.range_trees[-1].numel))
+        scan_dom = f"{result_var.name}_rdom"
+        scan = f"{scan_dom}.x"
+        self.body.writeline(f"{scan_dom} = hl.RDom([hl.Range(1, {length})])")
+
+        assert (
+            len(self.reduction_renames) == 1
+        ), "multi-dimensional scan not implemented"
+        (scan_var,) = [*self.reduction_renames]  # type: ignore[misc]
+        scan_renames_cur = {scan_var: sympy_index_symbol(scan)}
+        scan_renames_pri = {scan_var: sympy_index_symbol(scan) - 1}
+
+        if len(values) == 1:
+
+            def maybe_tuple(x):
+                return x[0]
+
+            read_left = [result_var.subs_str(scan_renames_pri)]
+            read_right = [result_var.subs_str(scan_renames_cur)]
+        else:
+
+            def maybe_tuple(x):
+                return f"hl.Tuple([{', '.join(x)}])"
+
+            read_left = [
+                result_var.subs_str(scan_renames_pri) + f"[{i}]"
+                for i in range(len(values))
+            ]
+            read_right = [
+                result_var.subs_str(scan_renames_cur) + f"[{i}]"
+                for i in range(len(values))
+            ]
+
+        self.body.writeline(f"{result_var} = {maybe_tuple(initial)}")
+
+        # Disable CSE for update fn
+        with V.set_ops_handler(AddParenHandler(HalideOverrides(MockHandler()))):
+            combine_str = combine_fn(read_left, read_right)  # type: ignore[arg-type]
+        self.body.writeline(
+            f"{result_var.subs_str(scan_renames_cur)} = {maybe_tuple(combine_str)}"
+        )
+
+        if len(values) == 1:
+            return (result_var,)
+
+        unpack_vars = [self.newfunc(self.sort_used_dims(all_used_dims)) for _ in values]
+        for i, v in enumerate(unpack_vars):
+            self.body.writeline(f"{v} = {result_var}[{i}]")
+        return tuple(unpack_vars)
+
     def genfunc(
         self, line, used_dims, *, bounds=ValueRanges.unknown()
     ) -> HalideCSEVariable:
@@ -1573,6 +1664,8 @@ class HalideScheduling(SIMDScheduling):
                 BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
             ]
         )
+        if config.halide.scan_kernels:
+            result[BackendFeature.SCAN] = None
         return result
 
     def define_kernel(self, src_code, node_schedule, kernel):
