@@ -41,9 +41,11 @@ struct TensorMetadata {
   // Sizes of a tensor. Currently, we only support static shape and use int64_t
   // to represent the sizes. In the future, we will create symbolic size and use
   // SymInt to represent it to support symbolic shape.
-  std::vector<int64_t> sizes_;
+  std::vector<std::optional<c10::SymInt>> sizes_;
   // Strides of a tensor. For symbolic shape support, it is the same as sizes_
-  std::vector<int64_t> strides_;
+  std::vector<std::optional<c10::SymInt>> strides_;
+  // Represent the layout information, such as NCHW, NHWC, etc.
+  std::optional<std::vector<int64_t>> dim_order_;
   // requires grad
   bool requires_grad_ = false;
   // TensorCheck for the tensor
@@ -63,6 +65,16 @@ struct TensorMetadata {
       c10::DispatchKeySet dispatch_key_set,
       std::vector<int64_t> sizes,
       std::vector<int64_t> strides,
+      std::vector<int64_t> dim_order,
+      bool requires_grad = false);
+  TensorMetadata(
+      bool is_symbolic,
+      c10::ScalarType dtype,
+      c10::Device device,
+      c10::DispatchKeySet dispatch_key_set,
+      std::vector<std::optional<c10::SymInt>> sizes,
+      std::vector<std::optional<c10::SymInt>> strides,
+      std::vector<int64_t> dim_order,
       bool requires_grad = false);
 
   // Build TensorCheck for the tensor by using the data fields in TensorMetadata
