@@ -11611,31 +11611,34 @@ class TestFallbackWarning(TestCase):
 
     def test_warn_on_not_implemented_with_fallback(self):
         _, _, _, op = self._get_not_implemented_op()
-        script = f"""
-import os
-# MUST happen before pytorch's import
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-import warnings
+        script = textwrap.dedent(
+            f"""
+            import warnings
+            warnings.filterwarnings("always", module=r".*torch.*")
 
-with warnings.catch_warnings(record=True) as w:
-    import torch
+            import os
+            # MUST happen before pytorch's import
+            os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
-if len(w) > 0:
-    print(w)
-    exit(1)
+            with warnings.catch_warnings(record=True) as w:
+                import torch
 
-# This should run just fine and raise warning about perf
-with warnings.catch_warnings(record=True) as w:
-    {op}
+            if len(w) > 0:
+                print(w)
+                exit(1)
 
-if len(w) != 1:
-    print(w)
-    exit(2)
+            # This should run just fine and raise warning about perf
+            with warnings.catch_warnings(record=True) as w:
+                {op}
 
-"""
+            if len(w) != 1:
+                print(w)
+                exit(2)
+            """
+        ).strip()
         try:
             subprocess.check_output(
-                [sys.executable, '-W', 'all', '-c', script],
+                [sys.executable, '-c', script],
                 stderr=subprocess.STDOUT,
                 # On Windows, opening the subprocess with the default CWD makes `import torch`
                 # fail, so just set CWD to this script's directory
