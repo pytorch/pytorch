@@ -1181,6 +1181,7 @@ class DeviceCachingAllocator {
           format_size(device_free),
           " is free. ",
           proc_info,
+          allowed_info,
           "Of the allocated memory ",
           format_size(allocated_bytes + allocated_in_private_pools),
           " is allocated by PyTorch, ",

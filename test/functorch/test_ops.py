@@ -2328,7 +2328,8 @@ class TestOperators(TestCase):
             xfail("nn.functional.max_unpool2d"),  # contiguous call
             xfail("to_sparse"),  # dispatch key issue
             xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
-            # https://github.com/pytorch/pytorch/issues/96560
+            # https://github.com/pytorch/pytorch/issues/96560#issuecomment-2151063723
+            # ** minor accuracy issue for float32 on ROCm
             decorate("xlogy", decorator=skipIfRocm),
             # numerical inconsistencies, look like bugs
             skip(
@@ -2387,6 +2388,11 @@ class TestOperators(TestCase):
                 "linalg.pinv", "hermitian", {torch.float32: tol(atol=5e-06, rtol=5e-06)}
             ),
             tol1("nn.functional.conv3d", {torch.float32: tol(atol=5e-04, rtol=9e-03)}),
+            tol1(
+                "nn.functional.conv2d",
+                {torch.float32: tol(atol=3e-05, rtol=5e-06)},
+                device_type="cuda",
+            ),
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
         ),
