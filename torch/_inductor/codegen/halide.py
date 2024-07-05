@@ -89,6 +89,9 @@ class HalidePrinter(PythonPrinter):
     def cast_float(expr):
         return f"hl.cast(hl.Float(32), {expr})"
 
+    def _print_Float(self, expr):
+        return f"hl.f32({expr})"
+
     def _print_floor(self, expr):
         assert len(expr.args) == 1
         return self.cast_index(f"hl.floor({self._print(expr.args[0])})")
@@ -202,6 +205,7 @@ pexpr = PythonPrinter().doprint
 
 _halide_type = {
     torch.bool: "hl.Bool()",
+    torch.bfloat16: "hl.BFloat(16)",
     torch.float16: "hl.Float(16)",
     torch.float32: "hl.Float(32)",
     torch.float64: "hl.Float(64)",
@@ -217,8 +221,6 @@ _halide_type = {
 
 
 def halide_type(dtype):
-    if dtype == torch.bfloat16:
-        raise Unsupported("torch.bfloat16")
     return _halide_type[dtype]
 
 
@@ -269,11 +271,13 @@ class HalideOverrides(OpOverrides):
     @staticmethod
     def minimum(a, b):
         # return f"hl.min({a}, {b})"  <== handles nan wrong
+        b = f"hl.cast({a.name}.type(), {b})"
         return f"hl.select(({a}<{b})|hl.is_nan({a}), {a}, {b}) if {a.name}.type().is_float() else hl.min({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
         # return f"hl.max({a}, {b})"  <== handles nan wrong
+        b = f"hl.cast({a.name}.type(), {b})"
         return f"hl.select(({a}>{b})|hl.is_nan({a}), {a}, {b}) if {a.name}.type().is_float() else hl.max({a}, {b})"
 
     @staticmethod
@@ -436,11 +440,13 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def isinf(x):
-        return f"hl.is_inf({x})"
+        # workaround https://github.com/halide/Halide/issues/8309
+        return f"hl.is_inf(hl.cast(hl.Float(32), {x}))"
 
     @staticmethod
     def isnan(x):
-        return f"hl.is_nan({x})"
+        # workaround https://github.com/halide/Halide/issues/8309
+        return f"hl.is_nan(hl.cast(hl.Float(32), {x}))"
 
     @staticmethod
     def round(x):
@@ -557,7 +563,7 @@ class HalideCSEVariable(CSEVariable):
 
     def index_str(self, dims):
         if len(dims) == 0:
-            return self.name
+            return f"{self.name}[()]"
         # Reversed since Halide is column major
         return f"{self.name}[{', '.join(map(str, dims))}]"
 
@@ -646,7 +652,7 @@ class HalideKernel(SIMDKernel):
         mutations: Optional[Set[str]] = None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
-        disable_persistent_reduction=False,
+        override_persistent_reduction=None,
     ):
         super().__init__(
             *groups,
@@ -654,7 +660,7 @@ class HalideKernel(SIMDKernel):
             mutations=mutations,
             reduction_hint=reduction_hint,
             pid_cache=pid_cache,
-            disable_persistent_reduction=disable_persistent_reduction,
+            override_persistent_reduction=override_persistent_reduction,
         )
         # For halide, we just write directly to the body
         self.compute = self.body
@@ -675,6 +681,7 @@ class HalideKernel(SIMDKernel):
         self.dom_renames: Dict[str, Dict[sympy.Symbol, sympy.Symbol]] = {}
         # {"in_ptr0": ["in_ptr0_view0"], ...}
         self.buffer_aliases: Dict[str, List[str]] = defaultdict(list)
+        self.has_indirect_indexing = False
 
     def create_cse_var(self, name, bounds=None):
         self.body.writeline(f"{name} = hl.Func({name!r})")
@@ -752,6 +759,10 @@ class HalideKernel(SIMDKernel):
                 )
             all_used_symbols.update(super().prepare_indexing(index).free_symbols)
 
+        self.has_indirect_indexing = any(
+            symbol_is_type(sym, SymT.INDIRECT) for sym in all_used_symbols
+        )
+
         had_fallback = False
         for tree in reversed(self.range_trees):
             nodes = [n for n in tree.nodes.values() if n.symbol() in all_used_symbols]
@@ -789,11 +800,11 @@ class HalideKernel(SIMDKernel):
                         handled_count = len(nodes)
                         had_fallback = True
                     sym = sympy_index_symbol(f"h{len(self.halide_vars)}")
-                    self.halide_vars[sym] = next_size
                     if tree.prefix == "r":
                         self.reduction_renames[sym] = sympy_index_symbol(
                             f"hr{len(self.halide_vars)}"
                         )
+                    self.halide_vars[sym] = next_size
                     added_sym_size.append((sym, next_size))
                     divisor *= next_size
                     new_sizes = [n.length for n in nodes if eq(n.divisor, divisor)]
@@ -963,14 +974,16 @@ class HalideKernel(SIMDKernel):
         dims.sort(key=lambda d: V.graph.sizevars.size_hint(d.stride, fallback=inf))  # type: ignore[arg-type]
 
         if not dims:  # scalar load/store
-            dims.append(DimensionInfo(sympy.Integer(0), 1, 1))
+            if self.has_indirect_indexing:
+                # workaround https://github.com/halide/Halide/issues/8338
+                dims.append(DimensionInfo(sympy.Integer(0), 1, 1))
         elif not V.graph.sizevars.statically_known_equals(dims[0].stride, 1):
             # Halide assumes dimension 0 is stride == 1, so add a dummy dimension
             dims.insert(
                 0, DimensionInfo(sympy.Integer(0), 1 if is_store else dims[0].stride, 1)
             )
 
-        if not is_store:
+        if dims and not is_store:
             if var in self.buffer_offsets and V.graph.sizevars.statically_known_geq(
                 offset, self.buffer_offsets[var]
             ):
@@ -1060,13 +1073,21 @@ class HalideKernel(SIMDKernel):
         assert len(ordered) == len(used_dims)
         return ordered
 
+    def make_index_str(self, dims, replacements=None, zero_vars=False):
+        index_str = ", ".join(d.index_str(replacements, zero_vars) for d in dims)
+        if len(dims) == 0:
+            index_str = "()"
+        elif len(dims) == 1:
+            # workaround for https://github.com/halide/Halide/issues/8299
+            index_str = f"{index_str},"
+        return index_str
+
     def load(self, name: str, index: sympy.Expr):
         """Codegen a load from an InputBuffer"""
         var = self.args.input(name)
         index = self.prepare_indexing(index)
         var, dims = self.indexing_to_dimensions(var, index, False)
-        index_str = ", ".join(d.index_str() for d in dims)
-        line = f"{var}[{index_str},]"  # trailing comma workaround for https://github.com/halide/Halide/issues/8299
+        line = f"{var}[{self.make_index_str(dims)}]"
         dtype = V.graph.get_dtype(name)
         if dtype in (torch.float16, torch.bfloat16):
             dtype = torch.float32
@@ -1111,21 +1132,21 @@ class HalideKernel(SIMDKernel):
         var, dims = self.indexing_to_dimensions(var, index, True)
         if self.is_indirect_indexing(index) or mode is not None:
             replacements = self.setup_dom_indexing()
-            index_str = ", ".join(d.index_str(replacements) for d in dims)
+            index_str = self.make_index_str(dims, replacements)
             value_str = value.subs_str(replacements)
-            undef_dims = ", ".join(["hl.Var()"] * len(dims))
+            undef_dims = (", ".join(["hl.Var()"] * len(dims))) or "()"
             self.body.writeline(
                 DeferredLine(name, f"{var}[{undef_dims}] = hl.undef({var}.type())")
             )
         else:
-            index_str = ", ".join(d.index_str(zero_vars=True) for d in dims)
+            index_str = self.make_index_str(dims, zero_vars=True)
             value_str = str(value)
 
+        dtype = V.graph.get_dtype(name)
         if mode is None:
-            dtype = V.graph.get_dtype(name)
-            line = f"{var}[{index_str},] = hl.cast({halide_type(dtype)}, {value_str})"
+            line = f"{var}[{index_str}] = hl.cast({halide_type(dtype)}, {value_str})"
         elif mode == "atomic_add":
-            line = f"{var}[{index_str},] += {value_str}"
+            line = f"{var}[{index_str}] += hl.cast({halide_type(dtype)}, {value_str})"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.body.writeline(DeferredLine(name, line))
@@ -1314,7 +1335,6 @@ class HalideKernel(SIMDKernel):
                     cexpr(self.rename_indexing(x.size))
                     for x in self.buffer_dimensions[arg.name]
                 ]
-                assert shape, self.buffer_dimensions
                 stride = [
                     cexpr(self.rename_indexing(x.stride))
                     for x in self.buffer_dimensions[arg.name]
@@ -1425,10 +1445,7 @@ class HalideKernel(SIMDKernel):
         def update_index(m):
             var = self.cse.varname_map[m.group(1)]
             assert var.used_dims is not None, var
-            if var.used_dims:
-                return str(var)
-            else:
-                return var.name  # a constant doesn't need to be wrapped in func
+            return str(var)
 
         for line in self.body._lines:
             if isinstance(line, str):
@@ -1450,7 +1467,7 @@ class HalideKernel(SIMDKernel):
                 range_hints = []
                 for i, dim in enumerate(dims):
                     hint = self._autoscheduler_workarounds(
-                        V.graph.sizevars.size_hint(dim.size, fallback=1)
+                        V.graph.sizevars.size_hint(dim.size, fallback=1), dims
                     )
                     range_hints.append(f"hl.Range(0, {hint})")
                     if "out" not in arg.name:
@@ -1471,31 +1488,47 @@ class HalideKernel(SIMDKernel):
 
         code.do_unindent(2)
         code.splice(
-            f"""
+            """
             if __name__ == "__main__":
                 hl.main()
-            else:
-                hl.load_plugin({HalideCodeCache.find_libautoschedule(meta.scheduler)!r})
-                target = hl.Target({meta.target!r})
-                autoscheduler = hl.AutoschedulerParams({meta.scheduler!r}, {meta.scheduler_flags!r})
-                with hl.GeneratorContext(target, autoscheduler):
-                    gen = Kernel()
-                    pipeline = gen._build_pipeline()
-                    # gen.compile_to_callable() does not run the autoscheduler
-                    pipeline.apply_autoscheduler(target, autoscheduler)
-                    kernel = pipeline.compile_to_callable([
-                            gen._get_input_parameter(a.name)._to_argument()
-                            for a in gen._get_arginfos()
-                            if a.dir == hl.ArgInfoDirection.Input
-                        ], target)
-            """
+            """.rstrip(),
         )
+        if meta.scheduler:
+            code.splice(
+                f"""
+                else:
+                    hl.load_plugin({HalideCodeCache.find_libautoschedule(meta.scheduler)!r})
+                    target = hl.Target({meta.target!r})
+                    autoscheduler = hl.AutoschedulerParams({meta.scheduler!r}, {meta.scheduler_flags!r})
+                    with hl.GeneratorContext(target, autoscheduler):
+                        gen = Kernel()
+                        pipeline = gen._build_pipeline()
+                        # gen.compile_to_callable() does not run the autoscheduler
+                        pipeline.apply_autoscheduler(target, autoscheduler)
+                        kernel = pipeline.compile_to_callable([
+                                gen._get_input_parameter(a.name)._to_argument()
+                                for a in gen._get_arginfos()
+                                if a.dir == hl.ArgInfoDirection.Input
+                            ], target)
+                """,
+                strip=True,
+            )
+        else:
+            code.splice(
+                f"""
+                  else:
+                      with hl.GeneratorContext(hl.Target({meta.target!r})):
+                          kernel = Kernel().compile_to_callable()
+                  """,
+                strip=True,
+            )
         return code.getvalue()
 
     @staticmethod
-    def _autoscheduler_workarounds(n):
+    def _autoscheduler_workarounds(n, dims):
         if (
-            config.halide.scheduler_cuda == "Anderson2021"
+            len(dims) == 1
+            and config.halide.scheduler_cuda == "Anderson2021"
             and V.graph.scheduler.get_current_device_or_throw().type == "cuda"
         ):
             # workaround https://github.com/halide/Halide/issues/8246
@@ -1537,6 +1570,7 @@ class HalideScheduling(SIMDScheduling):
             [
                 BackendFeature.TUPLE_REDUCTION,
                 BackendFeature.PREFER_STORE_LOOP_ORDER,
+                BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
             ]
         )
         return result
