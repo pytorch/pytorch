@@ -2104,6 +2104,7 @@ class CheckFunctionManager:
             guard.create(builder)
 
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
+
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
@@ -2123,6 +2124,18 @@ class CheckFunctionManager:
             assert self.guard_manager  # to make mypy happy
             self.guard_manager.id_matched_objs = builder.id_matched_objs
             self.check_fn = self.guard_manager
+
+            # Check that the guard returns True. False means that we will always
+            # recompile.
+            # TODO(anijain2305, ydwu4) - Skipping export because of following test
+            # python -s test/dynamo/test_export.py -k test_export_with_symbool_inputs
+            if not output_graph.export:
+                if not self.guard_manager.check(output_graph.local_scope):
+                    reasons = get_guard_fail_reason_helper(
+                        self.guard_manager,  # type: ignore[arg-type]
+                        output_graph.local_scope,
+                    )
+                    raise AssertionError(f"Guard check failed: {reasons}")
 
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
@@ -2458,9 +2471,8 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
     return [f"Duplicate tensors found: {reason}"]
 
 
-def get_guard_fail_reason(
+def get_guard_fail_reason_helper(
     guard_fn: GuardFn,
-    code: types.CodeType,
     f_locals: Dict[str, object],
     compile_id: CompileId,
 ) -> str:
@@ -2528,6 +2540,15 @@ def get_guard_fail_reason(
                     break
 
     reason_str = f"{compile_id}: " + "; ".join(reasons)
+    return reason_str
+
+
+def get_guard_fail_reason(
+    guard_fn: GuardFn,
+    code: types.CodeType,
+    f_locals: Dict[str, object],
+) -> str:
+    reason_str = get_guard_fail_reason_helper(guard_fn, f_locals)
     guard_failures[orig_code_map[code]].append(reason_str)
 
     try:

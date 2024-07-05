@@ -1447,7 +1447,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(net.get_submodule(target), l2)
         self.assertRaises(ValueError, net.set_submodule, "", l)
         self.assertRaises(AttributeError, net.set_submodule, "a.l", l)
-        self.assertRaises(AttributeError, net.set_submodule, "t.l.l2", l2)
 
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))

@@ -4374,7 +4374,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
         x = torch.rand([2, 2])
         opt_fn(x, x)
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertExpectedInline(cnt.frame_count, """1""")
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_arange_in_bounds(self):
@@ -4443,7 +4443,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
         x = torch.rand([2, 2])
         self.assertEqual(opt_fn(x, [5]), fn(x, [5]))
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertExpectedInline(cnt.frame_count, """1""")
 
     def test_user_ctor_ctx_manager_custom_init_graph_break(self):
         counter = [0]
@@ -4471,7 +4471,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for i in range(0, 10):
             opt_fn(x, counter)
         self.assertEqual(counter[0], 12)
-        self.assertEqual(cnt.frame_count, torch._dynamo.utils.ifdynstaticdefault(3, 2))
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(cnt.frame_count, """2""")
+        else:
+            self.assertExpectedInline(cnt.frame_count, """1""")
 
     @unittest.expectedFailure
     def test_many_overlapping_inputs_does_not_explode_guards(self):
@@ -5275,6 +5278,26 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return torch.sin(x)
 
         fn(torch.rand(4))
+
+    def test_negative_floor_div_solve(self):
+        class CompiledClass(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nums = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+                self.t = 5
+
+            def forward(self):
+                self.num = self.nums[self.t // 12]
+                self.t += 1
+                return self.num
+
+        m = CompiledClass()
+        m = torch.compile(m, backend="eager")
+
+        # the first call works
+        m()
+        # the second call causes a failure
+        m()
 
 
 instantiate_parametrized_tests(ReproTests)

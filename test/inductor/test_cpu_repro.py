@@ -3865,6 +3865,20 @@ class CPUReproTests(TestCase):
             exactly=True,
         ).run(code)
 
+    def test_convert_fp32_int64_oob_vec(self):
+        # https://github.com/pytorch/pytorch/issues/129863
+        def fn(x):
+            float32 = x.to(torch.float32)
+            return float32.to(torch.int64)
+
+        x = torch.full((32,), -9223372036854775808, dtype=torch.int64)
+        for simdlen in (None, 256):
+            with config.patch({"cpp.simdlen": simdlen}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x,))
+                check_metrics_vec_kernel_count(1)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
