@@ -1174,6 +1174,24 @@ void igammac_kernel(TensorIteratorBase& iter) {
       });
 }
 
+void igamma_grada_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, iter.dtype(), "igamma_grada_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a, scalar_t x) -> scalar_t {
+        return calc_igamma_grada(a, x);
+      });
+    });
+} 
+
+void igammac_grada_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, iter.dtype(), "igammac_grada_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a, scalar_t x) -> scalar_t {
+        return calc_igammac_grada(a, x);
+      });
+    });
+} 
+
 void nextafter_kernel(TensorIteratorBase& iter) {
   if (at::isReducedFloatingType(iter.common_dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "nextafter_cpu", [&]() {
@@ -1414,6 +1432,8 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(
     shifted_chebyshev_polynomial_w_stub,
     &shifted_chebyshev_polynomial_w_kernel);
+REGISTER_DISPATCH(igamma_grada_stub, &igamma_grada_kernel);
+REGISTER_DISPATCH(igammac_grada_stub, &igammac_grada_kernel);
 // Might enable AVX512 dispatch after enabling explicit vectorization for them.
 REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel);
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel);

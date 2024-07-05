@@ -815,11 +815,11 @@
   result: auto_element_wise
 
 - name: igamma(Tensor self, Tensor other) -> Tensor
-  self: igamma_backward(grad, result, self, other)
+  self: grad * igamma_grada(self, other)
   other: grad * exp((self - 1) * log(other) - other - lgamma(self))
 
 - name: igammac(Tensor self, Tensor other) -> Tensor
-  self: igammac_backward(grad, result, self, other)
+  self: grad * igammac_grada(self, other)
   other: -grad * exp((self - 1) * log(other) - other - lgamma(self))
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor

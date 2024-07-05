@@ -502,7 +502,7 @@ inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
       zeta<scalar_t, is_cuda>(static_cast<scalar_t>(n + 1), x);
 }
 
-// regularized lower incomplete gamma
+// regularized incomplete gamma
 // the regularized lower, upper incomplete gamma, as well as their
 // helper functions follow SciPy's implementation
 
@@ -1220,6 +1220,305 @@ C10_UNUSED inline c10::BFloat16 calc_igammac<c10::BFloat16>(c10::BFloat16 a, c10
 template <>
 C10_UNUSED inline c10::Half calc_igammac<c10::Half>(c10::Half a, c10::Half x) {
   return calc_igammac<float>(float(a), float(x));
+}
+
+// The derivative w.r.t. the first argument of the regularized upper incomplete
+// gamma function and the regularized lower incomplete gamma function
+// follow Stan's implementation:
+// https://mc-stan.org/math/namespacestan_1_1math_aa7076052d3d28135e69e58879c7117a4.html
+// https://mc-stan.org/math/namespacestan_1_1math_aea6ed1d1dc571bed0cf3a123cccab1e0.html
+
+/* References
+ * [dlmf] "The Digital Library of Mathematical Functions", dlmf.nist.gov
+ * [gautschi] Gautschi, Walter,
+ *     "A Computational Procedure for Incomplete Gamma Functions",
+ *     (1979) ACM Transactions on Mathematical Software. 5(4): 466-481.
+ *     https://www.cs.purdue.edu/homes/wxg/selected_works/section_02/068.pdf
+ */
+
+template <typename T, bool is_cuda=false>
+inline C10_HOST_DEVICE T _igammac_grada_helper_asymptotic_series(T a, T x) {
+  // Compute igammac gradient from [dlmf] 8.11.2
+  //
+  //   gammac(a,z) = (
+  //     \frac{z^{a-1} e^{-z}}{\Gamma(a)} \sum_{k=0}^{n-1} \frac{u_k}{z^k}
+  //   )
+  //
+  //   u_k = (a-1)(a-2)...(a-k) = u_{k-1} * (a-k)
+  //   (d/da)u_k = u_{k-1} + du_{k-1}/da * (a-k)
+  //
+  //   (d/da)gammac = (
+  //     gammac(a,z) (log(z) - digamma(a)) +
+  //     \frac{z^{a-1} e^{-z}}{\Gamma(a)} \sum_{k=0}^{n-1} \frac{(d/da)u_k}{z^k}
+  //   )
+  //
+  //   9 terms of expansion are used as in stan::math::gammac_grad_asymptotic
+  //
+  //   variables:
+  //     sum = \frac{(d/da)u_k}{z^k} incrementing
+  //     uk = u_k
+  //     du = (d/da)u_k
+  //     uterm = (a-k)
+  using acc_t = at::acc_type<T, is_cuda>;
+  const int NTERMS = 9;
+  constexpr acc_t ONE = acc_t{1.0};
+  acc_t logx = std::log(x);
+  acc_t sum = acc_t{0.0};
+  acc_t uk = acc_t{1.0};
+  acc_t du = acc_t{1.0};
+  acc_t uterm = acc_t{a};
+
+  for (int k = 1; k <= NTERMS; ++k) {
+    // update uterm
+    uterm -= ONE;
+
+    if (k > 1) {
+      // du(this k) = u(last k) + du(last k) * (this uterm)
+      du = uk + du * uterm;
+    }
+
+    // update falling factorial
+    uk *= uterm;
+
+    // add to rolling sum value of du / z^k
+    sum += du / std::pow(x, k);
+  }
+
+  return static_cast<T>(
+    calc_igammac(a, x) * (logx - calc_digamma(a)) + 
+      sum * std::exp((a - ONE) * logx - x - std::lgamma(a))
+  );
+}
+
+template <typename T, bool is_cuda=false>
+inline C10_HOST_DEVICE T _igammac_grada_helper_series(T a, T x) {
+  // Compute igammac gradient from [dlmf] 8.7.3
+  //
+  //   gammac(a,z) = (1 -
+  //     \frac{z^a}{\Gamma(a)} \sum_{k=0}^{\infty} \frac{(-1)^k z^k}{k! (a+k)}
+  //   )
+  //
+  //  (d/da)gammac = (
+  //    (1 - gammac(a,z)) (digamma(a) - log(z)) +
+  //    \frac{z^a}{\Gamma(a)} \sum_{k=0}^{\infty} \frac{(-1)^k z^k}{k! (a+k)^2}
+  //  )
+  //  express sum term as exp[k log(z) - 2 log(a+k) - log(k) - log(k-1) - ...]
+  //
+  //   variables:
+  //     sum = \frac{(d/da)u_k}{z^k} incrementing
+  //     sgn = (-1)^k
+  //     term = k log(z) - 2 log(a+k) - log(k) - log(k-1) - ...
+  //     subterm = log(z) + log(z) + ... - log(k) - log(k-1) - ...
+  using acc_t = at::acc_type<T, is_cuda>;
+  const int MAXITER = 2000;
+  const acc_t MACHEP = acc_t{1E-6};
+  constexpr acc_t ONE = acc_t{1.0};
+  constexpr acc_t TWO = acc_t{2.0};
+  acc_t a_plus_k = a;
+  acc_t logx = std::log(x);
+  acc_t sum = acc_t{0.0};
+  acc_t subterm = acc_t{0.0};
+  acc_t term;
+  
+  for (int k = 0; k <= MAXITER; ++k) {
+    term = std::exp(subterm - TWO * std::log(a_plus_k));
+    sum += ((k % 2) ? -ONE : +ONE) * term;
+    if (std::fabs(term) <= MACHEP) {
+      break;
+    }
+    a_plus_k += ONE;
+    subterm += logx - std::log1p(k);
+  }
+
+  return static_cast<T>(
+    (ONE - calc_igammac(a, x)) * (calc_digamma(a) - logx) + 
+      sum * std::exp(a * logx - std::lgamma(a))
+  );
+}
+
+template <typename T, bool is_cuda=false>
+inline C10_HOST_DEVICE T _igamma_grada_helper_series(T a, T x) {
+  // Compute igamma gradient from [gautschi] 5.4
+  //
+  //   gamma(a,x) = x^{a} e^{-x} \sum_{k=0}^{\infty} \frac{x^k}{\Gamma(a+k+1)}
+  //     = e^{-x} \sum_{k=0}^{\infty} exp[(a+k) log(x) - log(\Gamma(a+k+1))]
+  //
+  //  (d/da)gamma = (
+  //    e^{-x} \sum_{k=0}^{\infty} exp[...] log(x)
+  //    - e^{-x} \sum_{k=0}^{\infty} exp[...] (d/da)log(\Gamma(a+k+1))
+  //  )
+  //  second sum:
+  //    (d/da)log(\Gamma(a+k+1)) = 1/(a+k) + (d/da)log(\Gamma(a+k))
+  //    for k=0: 1/a + (d/da)log(\Gamma(a)) = 1/a + digamma(a) = digamma(a+1)
+  //    for k=1: 1/(a+1) + (d/da)log(\Gamma(a+1)) = digamma(a+1) + 1/(a+1)
+  //    for k=2: digamma(a+1) + 1/(a+1) + 1/(a+2)
+  //    ...
+  //  in expo:
+  //    log(\Gamma(a+k+1)) = log(\Gamma(a+k)) + log(a+k)
+  //    for k=0: log(\Gamma(a+1))
+  //    for k=1: log(\Gamma(a+1)) + log(a+1)
+  //    for k=2: log(\Gamma(a+1)) + log(a+1) + log(a+2)
+  //    ...
+  //
+  //   variables:
+  //     coef = (d/da)log(\Gamma(a+k+1))
+  //     expo = (a+k) logx - log(\Gamma(a+k+1))
+  //     terma = logx * exp[expo]
+  //     termb = coef * exp[expo]
+  //     suma = cumulative sum of terma until convergence
+  //     sumb = cumulative sum of termb until convergence
+  using acc_t = at::acc_type<T, is_cuda>;
+  const int MAXITER = 2000;
+  const acc_t MACHEP = acc_t{1E-6};
+  constexpr acc_t ONE = acc_t{1.0};
+  acc_t logx = std::log(x);
+  acc_t coef = calc_digamma(a + ONE);
+  acc_t expo = a * logx - std::lgamma(a + ONE);
+  acc_t a_plus_k = a;
+  acc_t terma = acc_t{1.0};
+  acc_t termb = acc_t{1.0};
+  acc_t suma = acc_t{0.0};
+  acc_t sumb = acc_t{0.0};
+
+  for (int k = 0; k <= MAXITER; ++k) {
+    if (std::fabs(terma) > MACHEP) {
+      terma = std::exp(expo);
+      suma += terma;
+    }
+    if (std::fabs(termb) > MACHEP) {
+      termb = coef * std::exp(expo);
+      sumb += termb;
+    }
+    if ((std::fabs(terma) <= MACHEP) && (std::fabs(termb) <= MACHEP)) {
+      break;
+    }
+    expo += logx - std::log1p(a_plus_k);
+    a_plus_k += ONE;
+    coef += ONE / a_plus_k;
+  }
+
+  return std::exp(-x) * (logx * suma - sumb);
+}
+
+template <typename T, bool is_cuda=false>
+inline C10_HOST_DEVICE T calc_igammac_grada(T a, T x) {
+  /* the calculation of the regularized upper incomplete gamma function's 
+   * gradient with respect to the first argument (a)
+   * is done differently based on the values of a and x:
+   * - if x and/or a is at the boundary of defined region, then assign the
+   *   result at the boundary
+   * - if x is large and a is bounded by x, then use asymptotic expansion
+   *   ([dlmf] 8.11.2)
+   * - otherwise, calculate from the series expansion ([dlmf] 8.7.3)
+   */
+  using acc_t = at::acc_type<T, is_cuda>;
+  constexpr acc_t ZERO = acc_t{0.0};
+  constexpr acc_t LARGE = acc_t{8.0};
+
+  // boundary values following Stan
+  // note that in Stan, a is strictly positive and x is non-negative
+  if (std::isnan(a) || std::isnan(x)) {
+    return std::numeric_limits<T>::quiet_NaN();
+  }
+  else if ((a <= ZERO) || (x < ZERO)) {
+    return std::numeric_limits<T>::quiet_NaN();
+  }
+  else if (std::isinf(x)) {
+    return std::numeric_limits<T>::quiet_NaN();
+  }
+  else if (std::isinf(a)) {
+    return ZERO;
+  }
+  else if (x == ZERO) {
+    return ZERO; // zero integration limit
+  }
+
+  // Asymptotic regime where x is large and a <= x, see [dlmf] 8.11.2
+  if ((x >= LARGE) && (x >= a)) {
+    return _igammac_grada_helper_asymptotic_series<T, is_cuda>(a, x);
+  }
+
+  // Series regime otherwise, see [dlmf] 8.7.3
+  return _igammac_grada_helper_series<T, is_cuda>(a, x);
+}
+
+template <typename T, bool is_cuda=false>
+inline C10_HOST_DEVICE T calc_igamma_grada(T a, T x) {
+  /* the calculation of the regularized lower incomplete gamma function's 
+   * gradient with respect to the first argument (a)
+   * is done differently based on the values of a and x:
+   * - if x and/or a is at the boundary of defined region, then assign the
+   *   result at the boundary
+   * - if x is large or other specific bounded values, 
+   *   then use negative gradient of upper incomplete gamma function
+   * - otherwise, calculate from the series expansion ([gautschi] 5.4)
+   */
+  using acc_t = at::acc_type<T, is_cuda>;
+  constexpr acc_t ZERO = acc_t{0.0};
+  constexpr acc_t TWO = acc_t{2.0};
+  constexpr acc_t SMALLA1 = acc_t{0.8};
+  constexpr acc_t LARGEX1 = acc_t{15.0};
+  constexpr acc_t SMALLA2 = acc_t{12.0};
+  constexpr acc_t LARGEX2 = acc_t{30.0};
+  constexpr acc_t RATIO2 = acc_t{-1.0};
+  constexpr acc_t RATIO1 = acc_t{+60.0};
+  constexpr acc_t RATIO0 = acc_t{-756.0};
+
+  // boundary values following Stan
+  // note that in Stan, a is strictly positive and x is non-negative
+  if (std::isnan(a) || std::isnan(x)) {
+    return std::numeric_limits<T>::quiet_NaN();
+  }
+  else if ((a <= ZERO) || (x < ZERO)) {
+    return std::numeric_limits<T>::quiet_NaN();
+  }
+  else if (std::isinf(x)) {
+    return std::numeric_limits<T>::quiet_NaN();
+  }
+  else if (std::isinf(a)) {
+    return ZERO;
+  }
+  else if (x == ZERO) {
+    return ZERO; // zero integration limit
+  }
+
+  // Regime where gammac is more computationally stable
+  if ((x > LARGEX1) && (a < SMALLA1)) {
+    return -calc_igammac_grada<T, is_cuda>(a, x);
+  }
+  else if ((x > LARGEX2) && (a < SMALLA2)) {
+    return -calc_igammac_grada<T, is_cuda>(a, x);
+  }
+  else if ((a < std::sqrt(RATIO2 * std::pow(x, TWO) + RATIO1 * x + RATIO0))) {
+    return -calc_igammac_grada<T, is_cuda>(a, x);
+  }
+
+  // Series regime otherwise, see [gautschi] 5.4
+  return _igamma_grada_helper_series<T, is_cuda>(a, x);
+}
+
+template <>
+C10_UNUSED inline c10::BFloat16 
+calc_igamma_grada<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+  return calc_igamma_grada<float>(float(a), float(x));
+}
+
+template <>
+C10_UNUSED inline c10::Half 
+calc_igamma_grada<c10::Half>(c10::Half a, c10::Half x) {
+  return calc_igamma_grada<float>(float(a), float(x));
+}
+
+template <>
+C10_UNUSED inline c10::BFloat16 
+calc_igammac_grada<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+  return calc_igammac_grada<float>(float(a), float(x));
+}
+
+template <>
+C10_UNUSED inline c10::Half 
+calc_igammac_grada<c10::Half>(c10::Half a, c10::Half x) {
+  return calc_igammac_grada<float>(float(a), float(x));
 }
 
 inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }

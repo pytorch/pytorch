@@ -9812,6 +9812,30 @@
   variants: method
   tags: pointwise
 
+- func: igamma_grada.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: igamma_grada_out
+  tags: pointwise
+
+- func: igamma_grada(Tensor self, Tensor other) -> Tensor
+  structured_delegate: igamma_grada.out
+  variants: function
+  tags: pointwise
+
+- func: igammac_grada.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: igammac_grada_out
+  tags: pointwise
+
+- func: igammac_grada(Tensor self, Tensor other) -> Tensor
+  structured_delegate: igammac_grada.out
+  variants: function
+  tags: pointwise
+
 - func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   structured_inherits: TensorIteratorBase
