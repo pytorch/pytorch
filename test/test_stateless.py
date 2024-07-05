@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import textwrap
 import unittest
 
 import torch
@@ -876,18 +877,22 @@ class TestStatelessFunctionalAPI(TestCase):
 
 class TestStatelessDeprecation(TestCase):
     def test_private_stateless_warns(self):
-        script = """
-import torch
-import warnings
+        script = textwrap.dedent(
+            """
+            import warnings
+            warnings.filterwarnings("always", module=r".*torch.*")
 
-with warnings.catch_warnings(record=True) as w:
-    from torch.nn.utils import _stateless
+            import torch
 
-exit(len(w))
-"""
+            with warnings.catch_warnings(record=True) as w:
+                from torch.nn.utils import _stateless
+
+            exit(len(w))
+            """
+        ).strip()
         try:
             subprocess.check_output(
-                [sys.executable, '-W', 'all', '-c', script],
+                [sys.executable, '-c', script],
                 stderr=subprocess.STDOUT,
                 # On Windows, opening the subprocess with the default CWD makes `import torch`
                 # fail, so just set CWD to this script's directory
