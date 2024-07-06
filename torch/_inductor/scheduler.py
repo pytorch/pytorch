@@ -1968,9 +1968,11 @@ class Scheduler:
         for node in self.nodes:
             if not config.loop_ordering_after_fusion:
                 continue
-            if (
-                not isinstance(node, (SchedulerNode, FusedSchedulerNode))
-                or node.get_device().type != "cuda"
+
+            # Even for CPU, if we are using the halide backend, we still need
+            # the merge loops steps below
+            if not isinstance(node, (SchedulerNode, FusedSchedulerNode)) or (
+                node.get_device().type != "cuda" and config.cpu_backend != "halide"
             ):
                 continue
             for snode in node.get_nodes():
