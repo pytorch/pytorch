@@ -313,40 +313,6 @@ void filterEngineConfigs(
   cudnn_frontend::filter(from, to, filter);
 }
 
-
-cudnn_frontend::ExecutionPlan get_execplan_from_heuristics_else_fall_back(cudnn_frontend::OperationGraph&& opGraph, cudnnHandle_t handle_) {
-  auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
-    .setOperationGraph(opGraph)
-    .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
-    .build();
-
-  // std::cout << "Heuristic has " << heuristics.getEngineConfigCount() << " configurations " << std::endl;
-  auto& engine_config = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
-
-  // Try engine configs returned by the heuristics and pick up the first one that works.
-  for (auto& ecfg : engine_config) {
-    try {
-      auto plan = cudnn_frontend::ExecutionPlanBuilder()
-        .setHandle(handle_)
-        .setEngineConfig(ecfg, opGraph.getTag())
-        .build();
-      return plan;
-    } catch (cudnn_frontend::cudnnException& e) {
-      continue;
-    }
-  }
-
-  {
-    // std::cout << opGraph.describe() << " has " << total_engines << " engines." << std::endl;
-    auto engine = cudnn_frontend::EngineBuilder().setGlobalEngineIdx(0).setOperationGraph(opGraph).build();
-    // std::cout << engine.describe() << std::endl;
-
-    auto engine_config = cudnn_frontend::EngineConfigBuilder().setEngine(engine).build();
-    // std::cout << engine_config.describe() << std::endl;
-
-    return cudnn_frontend::ExecutionPlanBuilder().setHandle(handle_).setEngineConfig(engine_config).build();
-  }
-}
 } // anonymous
 } // cudnn_utils
 
