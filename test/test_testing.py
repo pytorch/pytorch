@@ -11,7 +11,6 @@ import os
 import re
 import subprocess
 import sys
-import textwrap
 import unittest.mock
 from typing import Any, Callable, Iterator, List, Tuple
 
@@ -2217,16 +2216,7 @@ class TestImports(TestCase):
     @classmethod
     def _check_python_output(cls, program) -> str:
         return subprocess.check_output(
-            [
-                sys.executable,
-                "-c",
-                textwrap.dedent(
-                    """
-                    import warnings
-                    warnings.filterwarnings("always", module=r".*torch.*")
-                    """
-                ).strip() + "\n" + textwrap.dedent(program).strip(),
-            ],
+            [sys.executable, "-W", "always", "-c", program],
             stderr=subprocess.STDOUT,
             # On Windows, opening the subprocess with the default CWD makes `import torch`
             # fail, so just set CWD to this script's directory

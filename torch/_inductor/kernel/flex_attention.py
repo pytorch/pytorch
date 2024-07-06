@@ -209,8 +209,8 @@ flex_attention_template = TritonTemplate(
     # Define V Strides
     stride_vz = {{stride("V", 0)}}
     stride_vh = {{stride("V", 1)}}
-    stride_vk = {{stride("V", 2)}}
-    stride_vn = {{stride("V", 3)}}
+    stride_vn = {{stride("V", 2)}}
+    stride_vk = {{stride("V", 3)}}
 
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
@@ -267,7 +267,7 @@ flex_attention_template = TritonTemplate(
     V_block_ptr = tl.make_block_ptr(
         base=V + v_offset,
         shape=(KV_LEN, BLOCK_DMODEL),
-        strides=(stride_vk, stride_vn),
+        strides=(stride_vn, stride_vk),
         offsets=(kv_start, 0),
         block_shape=(BLOCK_N, BLOCK_DMODEL),
         order=(1, 0)
@@ -634,11 +634,11 @@ flex_attention_backward_template = TritonTemplate(
     name="flex_attention_backward",
     grid=flex_attention_backward_grid,
     source=r"""
-{{def_kernel("Q", "K", "V", "OUT", "LSE", "DELTA", "DO", "DQ", "DV", "SPARSE_KV_NUM_BLKS", "SPARSE_KV_IDX", "SPARSE_Q_NUM_BLKS", "SPARSE_Q_IDX")}}
+{{def_kernel("Q", "K", "V", "LSE", "DELTA", "DO", "DQ", "DV", "SPARSE_KV_NUM_BLKS", "SPARSE_KV_IDX", "SPARSE_Q_NUM_BLKS", "SPARSE_Q_IDX")}}
     # Sub notation for this kernel:
     #
     # Q: Query, K: Key, V: Value
-    # OUT: Forward output, LSE: logsumexp (logsumexp is always stored in fp32 regardless of the input dtype)
+    # LSE: logsumexp (logsumexp is always stored in fp32 regardless of the input dtype)
     # DELTA: Precomputed sum(OUT* DO, axis=1)
     # DO: Derivative of Output, DQ: Derivative of Query, DV: Derivative of Value
     # DK: Derivative of Key, is the written to via the store_output call due to some limitations with
@@ -667,13 +667,21 @@ flex_attention_backward_template = TritonTemplate(
     # Define K Strides
     stride_kz = {{stride("K", 0)}}
     stride_kh = {{stride("K", 1)}}
-    stride_km = {{stride("K", 2)}}
+    stride_kn = {{stride("K", 2)}}
     stride_kd = {{stride("K", 3)}}
     # Define V Strides
     stride_vz = {{stride("V", 0)}}
     stride_vh = {{stride("V", 1)}}
-    stride_vm = {{stride("V", 2)}}
+    stride_vn = {{stride("V", 2)}}
     stride_vd = {{stride("V", 3)}}
+
+    stride_doz = {{stride("DO", 0)}}
+    stride_doh = {{stride("DO", 1)}}
+    stride_dom = {{stride("DO", 2)}}
+    stride_dod = {{stride("DO", 3)}}
+
+    stride_dqz, stride_dqh, stride_dqm, stride_dqd = {{stride("DQ")}}
+    stride_dvz, stride_dvh, stride_dvm, stride_dvd = {{stride("DV")}}
 
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
@@ -699,14 +707,20 @@ flex_attention_backward_template = TritonTemplate(
     q_adj = (stride_qh * (off_hz % H) + stride_qz * (off_hz // H)).to(tl.int64)
     k_adj = (stride_kh * (off_hz % H) + stride_kz * (off_hz // H)).to(tl.int64)
     v_adj = (stride_vh * (off_hz % H) + stride_vz * (off_hz // H)).to(tl.int64)
+    do_adj = (stride_doh * (off_hz % H) + stride_doz * (off_hz // H)).to(tl.int64)
+
+    dq_adj = (stride_dqh * (off_hz % H) + stride_dqz * (off_hz // H)).to(tl.int64)
+    dv_adj = (stride_dvh * (off_hz % H) + stride_dvz * (off_hz // H)).to(tl.int64)
 
     # offset pointers for batch/head
     Q += q_adj
     K += k_adj
     V += v_adj
-    DO += q_adj
-    DQ += q_adj
-    DV += v_adj
+    DO += do_adj
+    # TODO: This does not work if DQ is not the same layout as Q (for example,
+    # if Q is broadcasted)
+    DQ += dq_adj
+    DV += dv_adj
     LSE += off_chz
     DELTA += off_chz
 
@@ -736,24 +750,23 @@ flex_attention_backward_template = TritonTemplate(
 
         q = tl.load(Q + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
         dq = tl.zeros([BLOCK_M2, BLOCK_DMODEL], dtype=tl.float32)
-        do = tl.load(DO + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
+        do = tl.load(DO + offs_m2[:, None] * stride_dom + offs_k[None, :] * stride_dod)
 
+        Di = tl.load(DELTA + offs_m2)
         lse = tl.load(LSE + offs_m2)
         lse = lse[:, None]
 
         start_n2 = kv_start
-        offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
         offs_n2 = start_n2 + tl.arange(0, BLOCK_N2)
-        kT_ptrs = K + offs_n2[None, :] * stride_km + offs_k[:, None] * stride_kd
-        vT_ptrs = V + offs_n2[None, :] * stride_vm + offs_k[:, None] * stride_vd
-        Di = tl.load(DELTA + offs_m2)
+        kT_ptrs = K + offs_n2[None, :] * stride_kn + offs_k[:, None] * stride_kd
+        vT_ptrs = V + offs_n2[None, :] * stride_vn + offs_k[:, None] * stride_vd
         # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
         tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
 
         curr_n = start_n2
         hi = sparse_kv_num_blocks * SPARSE_KV_MULTIPLE
         for start_n in range(0, hi):
-            offs_n2= curr_n + tl.arange(0, BLOCK_N2)
+            offs_n2 = curr_n + tl.arange(0, BLOCK_N2)
             kT = tl.load(kT_ptrs)
             vT = tl.load(vT_ptrs)
             qk = tl.dot(q, kT)
@@ -803,13 +816,13 @@ flex_attention_backward_template = TritonTemplate(
             jump_to_block = (next_block - cur_block ) * SPARSE_KV_BLOCK_SIZE - (SPARSE_KV_MULTIPLE - 1) * BLOCK_N2
             offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_N2
 
-            kT_ptrs += offset * stride_km
-            vT_ptrs += offset * stride_km
+            kT_ptrs += offset * stride_kn
+            vT_ptrs += offset * stride_vn
 
             curr_n += offset
 
         # Write back dQ.
-        dq_ptrs = DQ + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd
+        dq_ptrs = DQ + offs_m2[:, None] * stride_dqm + offs_k[None, :] * stride_dqd
         tl.store(dq_ptrs, dq)
     else:
         # THIS BLOCK DOES DK & DV
@@ -837,13 +850,13 @@ flex_attention_backward_template = TritonTemplate(
         dk = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
 
         # load K and V: they stay in SRAM throughout the inner loop.
-        k = tl.load(K + offs_n1[:, None] * stride_km + offs_k[None, :] * stride_kd)
-        v = tl.load(V + offs_n1[:, None] * stride_vm + offs_k[None, :] * stride_vd)
+        k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd)
+        v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd)
 
         offs_m1 = start_m1 + tl.arange(0, BLOCK_M1)
         offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
         qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
-        do_ptrs = DO + offs_m1[:, None] * stride_qm + offs_k[None, :] * stride_qd
+        do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_k[None, :] * stride_dod
         # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
         tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
 
@@ -906,11 +919,11 @@ flex_attention_backward_template = TritonTemplate(
             offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_M1
 
             qT_ptrs += offset * stride_qm
-            do_ptrs += offset * stride_qm
+            do_ptrs += offset * stride_dom
 
             curr_m += offset
 
-        dv_ptrs = DV + offs_n1[:, None] * stride_vm + offs_k[None, :] * stride_vd
+        dv_ptrs = DV + offs_n1[:, None] * stride_dvm + offs_k[None, :] * stride_dvd
         tl.store(dv_ptrs, dv)
 
         # Write back dK.
@@ -1030,7 +1043,6 @@ def flex_attention_backward(*args, **kwargs):
                 query,
                 key,
                 value,
-                out,
                 logsumexp,
                 delta,
                 grad_out,
@@ -1061,7 +1073,6 @@ def flex_attention_backward(*args, **kwargs):
         query,
         key,
         value,
-        out,
         logsumexp,
         delta,
         grad_out,
