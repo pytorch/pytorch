@@ -514,6 +514,9 @@ c10::SymInt FunctionalTensorWrapper::sym_size_custom(int64_t d) const {
 c10::SymInt FunctionalTensorWrapper::sym_storage_offset_custom() const {
   return value_.unsafeGetTensorImpl()->sym_storage_offset();
 }
+c10::Layout FunctionalTensorWrapper::layout_impl() const {
+  return value_.unsafeGetTensorImpl()->layout();
+}
 
 namespace functionalization {
 namespace impl {

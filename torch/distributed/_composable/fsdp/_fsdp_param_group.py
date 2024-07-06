@@ -165,6 +165,22 @@ class FSDPParamGroup:
         # partial reduce output (only reduce-scattered but not all-reduced)
         self._partial_reduce_output: Optional[torch.Tensor] = None
 
+        # TODO: remove this hook and hook register once 2D state dict is supported.
+        def _raise_not_implemented_if_2d(*args: Any, **kwargs: Any) -> None:
+            raise NotImplementedError(
+                "2D state_dict is under development. Please check "
+                "https://github.com/pytorch/pytorch/issues/129627 for more details."
+            )
+
+        modules_with_2d_params: Set[nn.Module] = set()
+        for fsdp_param in self.fsdp_params:
+            module = fsdp_param._module_info.module
+            if len(fsdp_param._spmd_placements) > 1:
+                modules_with_2d_params.add(module)
+        for module in modules_with_2d_params:
+            module.register_state_dict_pre_hook(_raise_not_implemented_if_2d)
+            module._register_load_state_dict_pre_hook(_raise_not_implemented_if_2d)
+
     # Initialization #
     def _init_mp_dtypes(self) -> None:
         for fsdp_param in self.fsdp_params:

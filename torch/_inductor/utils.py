@@ -281,9 +281,7 @@ def convert_shape_to_inductor(
     trivial. But for symbolic tensors, we need to map from SymIntNode into
     sympy.Expr.
     """
-    return [
-        i.node.expr if isinstance(i, torch.SymInt) else sympy.Integer(i) for i in lst
-    ]
+    return [sympy.sympify(i) for i in lst]
 
 
 def convert_shape_to_symint(
@@ -1146,6 +1144,7 @@ def _use_template_for_cpu(layout):
 def use_cpp_packed_gemm_template(layout, mat1, mat2):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
+    from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
     from .kernel.mm_common import mm_args
 
     if not _use_template_for_cpu(layout) or not _use_autotune_backend("CPP"):
@@ -1164,13 +1163,16 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         return False
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
+
+    output_dtype, _ = get_gemm_template_output_and_compute_dtype(mat1.get_dtype())
     micro_gemm = create_micro_gemm(
         "micro_gemm",
         m,
         n,
         k,
         input_dtype=mat1.get_dtype(),
-        output_dtype=torch.int32 if int8_gemm else torch.float32,
+        input2_dtype=mat2.get_dtype(),
+        output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
     )
     # TODO(jgong5): support n % n_block_size != 0

@@ -744,6 +744,61 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @unittest.skipIf(
+        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
+        "FP8 is only supported on H100+",
+    )
+    @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
+    def test_fp8_view_of_param(self):
+        # cuda only
+        if self.device != "cuda":
+            return
+
+        class Model(torch.nn.Module):
+            def __init__(self, dtype, weight):
+                super().__init__()
+                self.out_dtype = dtype
+                self.weight = weight
+
+            def forward(self, x, bias, scale_a, scale_b):
+                # test: do the view inside of the graph,
+                # AOTI needs to materialize this view before passing
+                # it into the scaled_mm extern kernel
+                weight = self.weight.T
+                output = torch._scaled_mm(
+                    x,
+                    weight,
+                    bias=input_bias,
+                    out_dtype=self.out_dtype,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                )
+                return output
+
+        dtype = torch.float16
+
+        a_scale = torch.Tensor([1.0]).to(device=self.device)
+        b_scale = torch.Tensor([1.0]).to(device=self.device)
+        input_bias = torch.rand(32, device=self.device, dtype=dtype)
+        weight_shape = (32, 16)
+        weight = torch.rand(*weight_shape, device=self.device, dtype=dtype).to(
+            torch.float8_e4m3fn
+        )
+        a_inverse_scale = 1 / a_scale
+        b_inverse_scale = 1 / b_scale
+
+        x_shape = (16, 16)
+        x = torch.rand(*x_shape, device=self.device, dtype=dtype).to(
+            torch.float8_e4m3fn
+        )
+        dim0_x = Dim("dim0_x", min=1, max=2048)
+        dynamic_shapes = ({0: dim0_x}, None, None, None)
+        self.check_model(
+            Model(dtype, weight),
+            (x, input_bias, a_inverse_scale, b_inverse_scale),
+            dynamic_shapes=dynamic_shapes,
+        )
+
     def test_poi_multiple_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self):
