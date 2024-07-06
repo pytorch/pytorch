@@ -109,7 +109,10 @@ def register_philox_rand():
     ):
         # stride arg will be useful for distributed usecase. Currently, its unused.
         assert stride is None
-        devices = [] if device.type == "cpu" else [device]
+        if device.type == "cpu":
+            devices = []
+        else:
+            devices = [device]
 
         if device.type != "cuda":
             raise throw_on_non_cuda(device)

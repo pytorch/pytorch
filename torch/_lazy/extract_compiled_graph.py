@@ -43,7 +43,10 @@ class GraphInputMatcher:
             self.graph_input_tensor_ids, self.graph_input_ivalues
         ):
             arg_idx = self.tensor_id_to_arg_idx.get(tensor_id, None)
-            inp = traced_ivalue if arg_idx is None else args[arg_idx]
+            if arg_idx is None:
+                inp = traced_ivalue
+            else:
+                inp = args[arg_idx]
             real_input.append(inp)
         return real_input
 

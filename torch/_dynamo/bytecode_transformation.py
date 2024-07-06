@@ -187,7 +187,10 @@ def add_push_null(
     with such bits (LOAD_GLOBAL 3.11+, LOAD_ATTR 3.12+, LOAD_SUPER_ATTR).
     In this case, instructions WILL be modified.
     """
-    insts = [inst_or_insts] if isinstance(inst_or_insts, Instruction) else inst_or_insts
+    if isinstance(inst_or_insts, Instruction):
+        insts = [inst_or_insts]
+    else:
+        insts = inst_or_insts
 
     def inst_has_bit_set(idx):
         assert insts[idx].arg is not None
@@ -231,7 +234,10 @@ def add_push_null_call_function_ex(
     """Like add_push_null, but the low bit of LOAD_ATTR/LOAD_SUPER_ATTR
     is not set, due to an expected CALL_FUNCTION_EX instruction.
     """
-    insts = [inst_or_insts] if isinstance(inst_or_insts, Instruction) else inst_or_insts
+    if isinstance(inst_or_insts, Instruction):
+        insts = [inst_or_insts]
+    else:
+        insts = inst_or_insts
 
     if sys.version_info < (3, 11):
         return insts

@@ -44,7 +44,10 @@ class TestXNNPACKOps(TestCase):
         data_shape = [batch_size] + list(data_shape)
         input_data = torch.rand(data_shape)
         weight = torch.rand((weight_output_dim, data_shape[-1]))
-        bias = torch.rand(weight_output_dim) if use_bias else None
+        if use_bias:
+            bias = torch.rand(weight_output_dim)
+        else:
+            bias = None
         ref_result = F.linear(input_data, weight, bias)
         packed_weight_bias = torch.ops.prepacked.linear_clamp_prepack(weight, bias)
         output_linearprepacked = torch.ops.prepacked.linear_clamp_run(
@@ -62,7 +65,10 @@ class TestXNNPACKOps(TestCase):
     def test_linear_1d_input(self, input_size, weight_output_dim, use_bias):
         input_data = torch.rand(input_size)
         weight = torch.rand((weight_output_dim, input_data.shape[-1]))
-        bias = torch.rand(weight_output_dim) if use_bias else None
+        if use_bias:
+            bias = torch.rand(weight_output_dim)
+        else:
+            bias = None
         ref_result = F.linear(input_data, weight, bias)
         packed_weight_bias = torch.ops.prepacked.linear_clamp_prepack(weight, bias)
         output_linearprepacked = torch.ops.prepacked.linear_clamp_run(
@@ -264,7 +270,10 @@ class TestXNNPACKSerDes(TestCase):
 
         data_shape = [batch_size] + list(data_shape)
         weight = torch.rand((weight_output_dim, data_shape[-1]))
-        bias = torch.rand(weight_output_dim) if use_bias else None
+        if use_bias:
+            bias = torch.rand(weight_output_dim)
+        else:
+            bias = None
         scripted_linear = torch.jit.script(Linear(weight, bias))
         scripted_linear_clamp_prepacked = torch.jit.script(
             LinearPrePacked(weight, bias)

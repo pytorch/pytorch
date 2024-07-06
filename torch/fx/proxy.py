@@ -200,7 +200,10 @@ class TracerBase:
 
         node = self.create_node(kind, target, args_, kwargs_, name, type_expr)
 
-        proxy = self.proxy(node) if not proxy_factory_fn else proxy_factory_fn(node)
+        if not proxy_factory_fn:
+            proxy = self.proxy(node)
+        else:
+            proxy = proxy_factory_fn(node)
 
         if self.record_stack_traces and not proxy.node.stack_trace:
             proxy.node.stack_trace = ''.join(CapturedTraceback.extract().format())

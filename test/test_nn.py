@@ -3514,11 +3514,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers,
                                             num_decoder_layers, dim_feedforward, dropout)
 
-            src_mask = model.generate_square_subsequent_mask(src_mask_len) if src_mask_len is not None else None
+            if src_mask_len is not None:
+                src_mask = model.generate_square_subsequent_mask(src_mask_len)
+            else:
+                src_mask = None
 
-            tgt_mask = model.generate_square_subsequent_mask(tgt_mask_len) if tgt_mask_len is not None else None
+            if tgt_mask_len is not None:
+                tgt_mask = model.generate_square_subsequent_mask(tgt_mask_len)
+            else:
+                tgt_mask = None
 
-            memory_task = torch.rand(memory_mask_size) if memory_mask_size is not None else None
+            if memory_mask_size is not None:
+                memory_task = torch.rand(memory_mask_size)
+            else:
+                memory_task = None
 
             if src_key_padding_mask_size is not None:
                 src_key_padding_mask = torch.rand(src_key_padding_mask_size) >= 0.5
@@ -12581,7 +12590,10 @@ if __name__ == '__main__':
             torch.testing.assert_close(result, ref_output, rtol=rtol, atol=atol)
         for activation, batch_first, training in product(('gelu', F.gelu, nn.GELU()), (True, False), (True, False)):
             # Fast path requires inference mode.
-            cm = contextlib.nullcontext() if training else torch.no_grad()
+            if training:
+                cm = contextlib.nullcontext()
+            else:
+                cm = torch.no_grad()
             with cm:
                 _test(activation=activation, batch_first=batch_first, training=training)
 

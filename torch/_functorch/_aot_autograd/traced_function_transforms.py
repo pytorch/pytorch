@@ -622,11 +622,10 @@ We only support storage resizing on graph inputs as long as the input either sta
     # Additionally pass in tokens as inputs
     # See Note [Side-Effectful Tokens in AOTAutograd]
     additional_token_inputs = [torch.tensor([])] * len(meta.tokens)
-    args = (
-        ([*additional_token_inputs, *args[0]], *args[1:])
-        if trace_joint
-        else [*additional_token_inputs, *args]
-    )
+    if trace_joint:
+        args = ([*additional_token_inputs, *args[0]], *args[1:])
+    else:
+        args = [*additional_token_inputs, *args]
 
     return helper, args
 

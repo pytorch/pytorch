@@ -61,7 +61,10 @@ def _get_lstm_with_individually_observed_parts(
         """
         Make a QConfig with fixed qparams observers or fake quantizes.
         """
-        weight = default_weight_fake_quant if isinstance(obs_ctr(), FakeQuantizeBase) else default_weight_observer
+        if isinstance(obs_ctr(), FakeQuantizeBase):
+            weight = default_weight_fake_quant
+        else:
+            weight = default_weight_observer
         return QConfig(activation=obs_ctr, weight=weight)
 
     quantizable_lstm = torch.ao.nn.quantizable.LSTM(

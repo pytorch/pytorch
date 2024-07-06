@@ -2102,7 +2102,10 @@ class CPUReproTests(TestCase):
                     continue
                 torch._dynamo.reset()
                 metrics.reset()
-                _args = (x,) if bitwise_fn == torch.bitwise_not else (x, y)
+                if bitwise_fn == torch.bitwise_not:
+                    _args = (x,)
+                else:
+                    _args = (x, y)
                 self.common(bitwise_fn, _args)
                 check_metrics_vec_kernel_count(1)
 

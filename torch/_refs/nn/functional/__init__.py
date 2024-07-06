@@ -1052,11 +1052,10 @@ def poisson_nll_loss(
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
     _check_reduction_value(reduction)
-    loss = (
-        torch.exp(input) - target * input
-        if log_input
-        else input - target * torch.log(input + eps)
-    )
+    if log_input:
+        loss = torch.exp(input) - target * input
+    else:
+        loss = input - target * torch.log(input + eps)
 
     if full:
         stirling_term = (

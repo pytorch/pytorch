@@ -15,9 +15,10 @@ from torch.utils.cpp_extension import (
 
 if sys.platform == "win32":
     vc_version = os.getenv("VCToolsVersion", "")
-    CXX_FLAGS = (
-        ["/sdl"] if vc_version.startswith("14.16.") else ["/sdl", "/permissive-"]
-    )
+    if vc_version.startswith("14.16."):
+        CXX_FLAGS = ["/sdl"]
+    else:
+        CXX_FLAGS = ["/sdl", "/permissive-"]
 else:
     CXX_FLAGS = ["-g"]
 

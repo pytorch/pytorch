@@ -445,7 +445,10 @@ class AutogradFunctionVariable(VariableTracker):
 
             return val
 
-        source = AttrSource(self.source, "forward") if self.source else None
+        if self.source:
+            source = AttrSource(self.source, "forward")
+        else:
+            source = None
 
         fn = self.fn_cls.forward
         ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)

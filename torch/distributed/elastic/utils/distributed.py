@@ -48,7 +48,10 @@ def create_c10d_store(
     # only retry when server_port is NOT static
     attempt = retries if server_port == -1 else 1
     while True:
-        port = server_port if server_port != -1 else get_free_port()
+        if server_port != -1:
+            port = server_port
+        else:
+            port = get_free_port()
 
         logger.info(
             "Creating c10d store on %s:%s\n"

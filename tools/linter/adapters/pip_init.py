@@ -54,7 +54,10 @@ if __name__ == "__main__":
 
     uv_available = shutil.which("uv") is not None
 
-    pip_args = ["uv", "pip", "install"] if uv_available else ["pip", "install"]
+    if uv_available:
+        pip_args = ["uv", "pip", "install"]
+    else:
+        pip_args = ["pip", "install"]
 
     # If we are in a global install, use `--user` to install so that you do not
     # need root access in order to initialize linters.

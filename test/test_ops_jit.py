@@ -210,11 +210,10 @@ class TestJit(JitCommonTestCase):
                     )
 
                     if isinstance(out, torch.Tensor) or tuple_of_tensors:
-                        sizes = (
-                            [elem.size() for elem in out]
-                            if tuple_of_tensors
-                            else out.size()
-                        )
+                        if tuple_of_tensors:
+                            sizes = [elem.size() for elem in out]
+                        else:
+                            sizes = out.size()
                         self.checkShapeAnalysis(
                             sizes, traced_fn.graph, op.assert_jit_shape_analysis
                         )

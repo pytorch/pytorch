@@ -544,7 +544,10 @@ class TestList(JitTestCase):
         def test_list_equality_as_cond():
             a = [1, 2, 3]
             b = [3]
-            c = 1 if a == b else 2
+            if a == b:
+                c = 1
+            else:
+                c = 2
             return c
 
         self.checkScript(test_list_equality_as_cond, (), optimize=True)

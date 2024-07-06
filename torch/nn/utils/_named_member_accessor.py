@@ -136,7 +136,10 @@ class NamedMemberAccessor:
             return self.memo[name]
         except KeyError:
             prefix, dot, attr = name.rpartition(".")
-            module = self.get_submodule(prefix) if dot else self.module
+            if dot:
+                module = self.get_submodule(prefix)
+            else:
+                module = self.module
             try:
                 submodule = getattr(module, attr)
             except AttributeError as ex:

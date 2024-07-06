@@ -252,9 +252,10 @@ def _single_tensor_rprop(
             prev = torch.view_as_real(prev)
             param = torch.view_as_real(param)
             step_size = torch.view_as_real(step_size)
-        sign = (
-            grad.mul(prev.clone()).sign() if differentiable else grad.mul(prev).sign()
-        )
+        if differentiable:
+            sign = grad.mul(prev.clone()).sign()
+        else:
+            sign = grad.mul(prev).sign()
 
         if capturable:
             sign.copy_(torch.where(sign.gt(0), etaplus, sign))
@@ -430,11 +431,10 @@ def rprop(
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
 
-    func = (
-        _multi_tensor_rprop
-        if foreach and not torch.jit.is_scripting()
-        else _single_tensor_rprop
-    )
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_rprop
+    else:
+        func = _single_tensor_rprop
 
     func(
         params,
