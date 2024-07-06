@@ -150,10 +150,7 @@ class DiagonalTensor:
 
     def __eq__(self, other):
         if type(other) is type(self):
-            if self._N == other._N and self._i == other._i:
-                return True
-            else:
-                return False
+            return bool(self._N == other._N and self._i == other._i)
         else:
             return False
 

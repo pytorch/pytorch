@@ -115,9 +115,7 @@ def reduction_dtype_filter(op):
         return False
 
     argspec = inspect.getfullargspec(op.op)
-    if "dtype" not in argspec.kwonlyargs:
-        return False
-    return True
+    return "dtype" in argspec.kwonlyargs
 
 
 # Create a list of operators that are a subset of _ref_test_ops but don't have a
@@ -1453,10 +1451,7 @@ class TestCommon(TestCase):
                         for a in x:
                             if _tensor_requires_grad(a):
                                 return True
-                    if isinstance(x, torch.Tensor) and x.requires_grad:
-                        return True
-
-                    return False
+                    return isinstance(x, torch.Tensor) and x.requires_grad
 
                 requires_grad = (
                     _tensor_requires_grad(sample.input)

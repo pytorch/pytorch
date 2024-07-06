@@ -354,9 +354,7 @@ aten = torch._ops.ops.aten
 
 
 def is_noncontiguous_supported(device):
-    if device is not None and device.type == "hpu":
-        return False
-    return True
+    return device is None or device.type != "hpu"
 
 
 def handle_noncontiguous_outputs(input_tlist, output):

@@ -212,10 +212,7 @@ def is_valid_mm_plus_mm(match: Match):
     if k3 != k4:
         return False
 
-    if m1 != m2 or n1 != n2:
-        return False
-
-    return True
+    return m1 == m2 and n1 == n2
 
 
 def scatter_upon_const_tensor_extra_check(m):
@@ -622,10 +619,7 @@ def is_valid_splitwithsizes_cat(match):
     cat_items_args_order = [
         get_arg_value(item_node, 1) for item_node in get_arg_value(cat_node, 0)
     ]
-    if cat_items_args_order != list(range(len(split_sizes))):
-        return False
-
-    return True
+    return cat_items_args_order == list(range(len(split_sizes)))
 
 
 def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
@@ -663,9 +657,7 @@ def register_noop_decomp(targets, nop_arg=0):
 def slice_noop(self, dim=0, start=None, end=None, step=1):
     if start is None or end is None:
         return False
-    if start == 0 and end >= 2**63 - 1 and step == 1:
-        return True
-    return False
+    return start == 0 and end >= 2**63 - 1 and step == 1
 
 
 @register_noop_decomp(aten.slice_scatter, 1)
@@ -674,9 +666,7 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
         start = 0
     if end is None:
         end = 2**63 - 1
-    if start == 0 and end >= 2**63 - 1 and step == 1:
-        return True
-    return False
+    return start == 0 and end >= 2**63 - 1 and step == 1
 
 
 @register_noop_decomp(aten.repeat)
@@ -1062,13 +1052,10 @@ class ConstructorMoverPass:
         if node.target == "output":
             return not self.allow_outputs
 
-        if not (
+        return not (
             isinstance(node.target, torch._ops.OpOverload)
             and node.target.namespace in ("prims", "aten")
-        ):
-            return True
-
-        return False
+        )
 
     def get_node_device(self, node: fx.Node) -> Optional[torch.device]:
         """

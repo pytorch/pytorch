@@ -370,7 +370,10 @@ class OptimizerSingleTensorPattern(Pattern):
         self.url = ""
 
     def match(self, event: _ProfilerEvent):
-        return any(event.name.endswith(f"_single_tensor_{optimizer}") for optimizer in self.optimizers_with_foreach)
+        return any(
+            event.name.endswith(f"_single_tensor_{optimizer}")
+            for optimizer in self.optimizers_with_foreach
+        )
 
 
 class SynchronizedDataLoaderPattern(Pattern):
@@ -541,11 +544,9 @@ class MatMulDimInFP16Pattern(Pattern):
         if not input_dtypes(event):
             return False
         arg_dtype = input_dtypes(event)[0]
-        if arg_dtype in (torch.bfloat16, torch.half) and not mutiple_of(
+        return arg_dtype in (torch.bfloat16, torch.half) and not mutiple_of(
             input_shapes(event), 8
-        ):
-            return True
-        return False
+        )
 
     def benchmark(self, events: List[_ProfilerEvent]):
         def closest_multiple(shapes, multiple):

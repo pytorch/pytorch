@@ -3699,10 +3699,7 @@ class CppScheduling(BaseScheduling):
             assert isinstance(ref_node.node, ir.ComputedBuffer)
             ranges1 = ref_node.node.data.get_size()
 
-        if ranges1 != ranges2:
-            return False
-
-        return True
+        return ranges1 == ranges2
 
     def _can_fuse_horizontal_impl(self, node1, node2):
         assert isinstance(node1, (FusedSchedulerNode, SchedulerNode))

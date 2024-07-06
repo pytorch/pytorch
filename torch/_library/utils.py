@@ -90,9 +90,7 @@ def is_functional_schema(schema: Any) -> bool:
         )
         if is_non_mutating_view:
             return False
-        if not schema.returns:
-            return False
-        return True
+        return schema.returns
 
     if isinstance(schema, torch._C.FunctionSchema):
         return is_functional(schema)

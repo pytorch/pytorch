@@ -225,10 +225,7 @@ def is_concrete_int(a: Union[int, SymInt]) -> bool:
     if isinstance(a, int):
         return True
 
-    if isinstance(a.node.expr, sympy.core.numbers.Integer):
-        return True
-
-    return False
+    return isinstance(a.node.expr, sympy.core.numbers.Integer)
 
 # In obscure Meta only situations, sympy.logic.boolalg doesn't exist at runtime.
 # So make sure only type checker evaluates this alias.
@@ -403,10 +400,7 @@ def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
     if isinstance(a, bool):
         return True
 
-    if isinstance(a.node.expr, (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse)):
-        return True
-
-    return False
+    return isinstance(a.node.expr, (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse))
 
 def is_nested_int(s):
     return isinstance(s, torch.SymInt) and s.node.is_nested_int()

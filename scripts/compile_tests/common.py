@@ -44,9 +44,7 @@ def find(testcase, condition):
 def skipped_test(testcase):
     def condition(children):
         tags = [child.tag for child in children]
-        if "skipped" in tags:
-            return True
-        return False
+        return "skipped" in tags
 
     return find(testcase, condition)
 
@@ -58,9 +56,7 @@ def passed_test(testcase):
         tags = [child.tag for child in children]
         if "skipped" in tags:
             return False
-        if "failed" in tags:
-            return False
-        return True
+        return "failed" not in tags
 
     return find(testcase, condition)
 

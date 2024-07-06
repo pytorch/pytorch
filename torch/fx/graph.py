@@ -1181,12 +1181,7 @@ class Graph:
 
             res = getattr(submod, name)
 
-            if (not isinstance(res, torch.nn.Module)
-                    and not isinstance(res, torch.nn.Parameter)
-                    and name not in submod._buffers):
-                return False
-
-            return True
+            return isinstance(res, (torch.nn.Module, torch.nn.Parameter)) or name in submod._buffers
 
         if (self.owning_module and
                 not _get_attr_reference_exists(self.owning_module, qualified_name)):

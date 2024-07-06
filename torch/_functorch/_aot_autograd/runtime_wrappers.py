@@ -1237,18 +1237,16 @@ def merge_view_inputs(
             return True
         if view1._base is None and view2._base is None:
             return False
-        if view1._base is view2._base or view1._base is view2 or view1 is view2._base:
-            return True
-        return False
+        return (
+            view1._base is view2._base or view1._base is view2 or view1 is view2._base
+        )
 
     def _same_dtype_views(view1, view2):
         if view1.dtype != view2.dtype:
             return False
         if view1._base is not None and view1.dtype != view1._base.dtype:
             return False
-        if view2._base is not None and view2.dtype != view2._base.dtype:
-            return False
-        return True
+        return view2._base is None or view2.dtype == view2._base.dtype
 
     assert len(fwd_inputs) == len(mutated_input_info)
     if not [info for info in mutated_input_info if info.mutates_data]:

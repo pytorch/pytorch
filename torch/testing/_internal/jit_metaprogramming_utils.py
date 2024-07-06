@@ -435,9 +435,7 @@ class SplitInputs:
             return False
         if self.nontensor_args != other.nontensor_args:
             return False
-        if self.nontensor_kwargs != other.nontensor_kwargs:
-            return False
-        return True
+        return self.nontensor_kwargs == other.nontensor_kwargs
 
 # make a new function where all non-tensor arguments in 'args' have been partially
 # applied, and all tensor arguments remain.

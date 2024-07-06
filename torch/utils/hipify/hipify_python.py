@@ -614,25 +614,19 @@ def is_out_of_place(rel_filepath):
         return False
     if rel_filepath.startswith("third_party/nvfuser/"):
         return False
-    if rel_filepath.startswith("tools/autograd/templates/"):
-        return False
-    return True
+    return not rel_filepath.startswith("tools/autograd/templates/")
 
 
 # Keep this synchronized with includes/ignores in build_amd.py
 def is_pytorch_file(rel_filepath):
     assert not os.path.isabs(rel_filepath)
     if rel_filepath.startswith("aten/"):
-        if rel_filepath.startswith("aten/src/ATen/core/"):
-            return False
-        return True
+        return not rel_filepath.startswith("aten/src/ATen/core/")
     if rel_filepath.startswith("torch/"):
         return True
     if rel_filepath.startswith("third_party/nvfuser/"):
         return True
-    if rel_filepath.startswith("tools/autograd/templates/"):
-        return True
-    return False
+    return rel_filepath.startswith("tools/autograd/templates/")
 
 
 def is_cusparse_file(rel_filepath):

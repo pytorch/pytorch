@@ -54,9 +54,7 @@ def ordered_set(*items):
 # This function indicates if the backend device
 # supports non-contiguous tensors
 def is_noncontiguous_supported(device):
-    if device.type == "hpu":
-        return False
-    return True
+    return device.type == "hpu"
 
 
 _like_tensor_constructors = ordered_set(
@@ -205,9 +203,7 @@ def stride_incorrect_op(op):
         return False
 
     op_name = op.name()
-    if "fft" in op_name:
-        return True
-    return False
+    return "fft" in op_name
 
 
 # These operators have meta implementations with incorrect strides
@@ -218,9 +214,7 @@ def wordaround_stride_incorrect_op(fake_mode, func, *args, **kwargs):
     def is_symbolic(x):
         if isinstance(x, FakeTensor):
             return x._has_symbolic_sizes_strides
-        if isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-            return True
-        return False
+        return isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool))
 
     # For static shapes, we can fall back to eager for the real strides
     if fake_mode.allow_fallback_kernels:

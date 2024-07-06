@@ -143,10 +143,7 @@ def skip_operator(operator):
         print(f"Skipping {operator}, no inductor impl")
         return True
 
-    if "convolution" in str(operator):
-        return True
-
-    return False
+    return "convolution" in str(operator)
 
 
 @click.command()

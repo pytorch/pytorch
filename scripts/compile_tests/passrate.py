@@ -45,9 +45,7 @@ def should_exclude(key):
         return True
     if test_file.startswith("export/"):
         return True
-    if test_file.startswith("dynamo/"):
-        return True
-    return False
+    return test_file.startswith("dynamo/")
 
 
 def compute_pass_rate(eager_dir, dynamo_dir):

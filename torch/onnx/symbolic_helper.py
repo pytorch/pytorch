@@ -1550,12 +1550,10 @@ def _flatten_helper(g: jit_utils.GraphContext, input, start_dim, end_dim, dim):
 def _is_split_static(split_size_or_sizes, _outputs):
     if _outputs is None:
         return False
-    if (
-        _is_value(split_size_or_sizes)
-        and split_size_or_sizes.node().kind() != "onnx::Constant"
-    ):
-        return False
-    return True
+    return (
+        not _is_value(split_size_or_sizes)
+        or split_size_or_sizes.node().kind() == "onnx::Constant"
+    )
 
 
 @_beartype.beartype
