@@ -141,13 +141,7 @@ def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
             shard_dim = cast(Shard, placement).dim
             shards_map[shard_dim] *= spec.mesh.size(i)
 
-    for i, dim_size in enumerate(shape):
-        # TODO: maybe we should determine is_shardable based on
-        #       whether it's evenly sharded or not
-        if shards_map[i] > 1 and dim_size < shards_map[i]:
-            return False
-
-    return True
+    return all(not (shards_map[i] > 1 and dim_size < shards_map[i]) for i, dim_size in enumerate(shape))
 
 
 def is_tensor_evenly_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
@@ -159,11 +153,7 @@ def is_tensor_evenly_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
             shard_dim = cast(Shard, placement).dim
             shards_map[shard_dim] *= spec.mesh.size(i)
 
-    for i, dim_size in enumerate(shape):
-        if shards_map[i] > 1 and (dim_size % shards_map[i] != 0):
-            return False
-
-    return True
+    return all(not (shards_map[i] > 1 and dim_size % shards_map[i] != 0) for i, dim_size in enumerate(shape))
 
 
 def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:

@@ -1145,11 +1145,7 @@ class DebuggingVariable(VariableTracker):
         )
 
         flat_args = pytree.tree_leaves([args, kwargs])
-        for arg in flat_args:
-            if not isinstance(arg, allowed_input_types):
-                return False
-
-        return True
+        return all(isinstance(arg, allowed_input_types) for arg in flat_args)
 
 
 class LoggingLoggerVariable(VariableTracker):

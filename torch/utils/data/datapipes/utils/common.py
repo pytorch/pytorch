@@ -166,10 +166,7 @@ def match_masks(name: str, masks: Union[str, List[str]]) -> bool:
     if isinstance(masks, str):
         return fnmatch.fnmatch(name, masks)
 
-    for mask in masks:
-        if fnmatch.fnmatch(name, mask):
-            return True
-    return False
+    return any(fnmatch.fnmatch(name, mask) for mask in masks)
 
 
 def get_file_pathnames_from_root(

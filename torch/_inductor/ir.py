@@ -2831,10 +2831,7 @@ class Layout(IRNode):
         for i in range(len(order)):
             stride_ordered[order[i]] = V.graph.sizevars.size_hint(stride[i])
         # check if it is in ascending order
-        for i in range(len(order) - 1):
-            if stride_ordered[i] > stride_ordered[i + 1]:
-                return False
-        return True
+        return all(stride_ordered[i] <= stride_ordered[i + 1] for i in range(len(order) - 1))
 
     def is_channels_last_stride_ordered(self):
         # create channels_last order(NCHW, NCDHW, the C is the first order).

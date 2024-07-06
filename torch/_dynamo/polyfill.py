@@ -1,8 +1,10 @@
-# mypy: ignore-errors
-
 """
 Python polyfills for common builtins.
 """
+
+# mypy: ignore-errors
+# ruff: noqa: SIM110
+
 import math
 from typing import Any, Callable, Sequence
 

@@ -296,11 +296,7 @@ class _ModuleStackMeta:
         if len(self) <= len(module_stack):
             return False
 
-        for i, parent_key in enumerate(module_stack):
-            if self[i] != parent_key:
-                return False
-
-        return True
+        return all(self[i] == parent_key for i, parent_key in enumerate(module_stack))
 
     def push(self, module_meta: _ModuleMeta) -> None:
         """Pushes a module meta to the stack."""

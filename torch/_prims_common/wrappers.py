@@ -72,10 +72,7 @@ def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
 
 def _annotation_has_type(*, typ, annotation):
     if hasattr(annotation, "__args__"):
-        for a in annotation.__args__:
-            if _annotation_has_type(typ=typ, annotation=a):
-                return True
-        return False
+        return any(_annotation_has_type(typ=typ, annotation=a) for a in annotation.__args__)
 
     return typ is annotation
 

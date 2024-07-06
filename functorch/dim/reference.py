@@ -139,10 +139,7 @@ def seq(a, b):
 
 class isin:
     def __contains__(self, item):
-        for x in self:
-            if seq(item, x):
-                return True
-        return False
+        return any(seq(item, x) for x in self)
 
     def index(self, item):
         for i, x in enumerate(self):

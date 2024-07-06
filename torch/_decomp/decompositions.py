@@ -1313,10 +1313,7 @@ def _pad_chunk(
 
 def have_same_ndims(tensors: List[Tensor]):
     ndim = tensors[0].ndim
-    for tensor in tensors:
-        if tensor.ndim != ndim:
-            return False
-    return True
+    return all(tensor.ndim == ndim for tensor in tensors)
 
 
 def leading_dimension_matches(tensors: List[Tensor], dim: int):

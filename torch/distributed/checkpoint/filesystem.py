@@ -414,11 +414,7 @@ class FileSystem(FileSystemBase):
         if "://" in str(checkpoint_id):
             return False
 
-        for p in Path(checkpoint_id).parents:
-            if p.exists() and os.access(str(p), os.W_OK):
-                return True
-
-        return False
+        return any(p.exists() and os.access(str(p), os.W_OK) for p in Path(checkpoint_id).parents)
 
     def exists(self, path: Union[str, os.PathLike]) -> bool:
         return cast(Path, path).exists()

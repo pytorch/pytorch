@@ -253,10 +253,7 @@ class LazyModuleMixin:
         # custom modules __setstate__ to add it
         params = self._parameters.values()
         buffers = self._buffers.values()
-        for param in itertools.chain(params, buffers):
-            if is_lazy(param):
-                return True
-        return False
+        return any(is_lazy(param) for param in itertools.chain(params, buffers))
 
     # torchrec tests the code consistency with the following code
     # fmt: off

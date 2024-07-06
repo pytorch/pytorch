@@ -705,10 +705,7 @@ class SplitCatSimplifier:
         return split_ranges
 
     def has_non_overlapping_ranges(self, ranges: List[_Range]) -> bool:
-        for range_, next_range in zip(ranges, ranges[1:]):
-            if range_[1] > next_range[0]:
-                return False
-        return True
+        return all(range_[1] <= next_range[0] for range_, next_range in zip(ranges, ranges[1:]))
 
     def fill_gaps(self, ranges: List[_Range], min_: int, max_: int) -> List[_Range]:
         cur = min_
