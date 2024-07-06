@@ -272,7 +272,7 @@ class ConfigModule(ModuleType):
                 config._config.update(changes)
                 config._is_dirty = dirty
 
-            def __exit__(self, exc_type, exc_val, exc_tb):
+            def __exit__(self, *args: object) -> None:
                 nonlocal dirty
                 config._config.update(prior)
                 config._is_dirty = dirty
@@ -321,7 +321,7 @@ class ContextDecorator(contextlib.ContextDecorator):
     def __enter__(self):
         raise NotImplementedError("NYI")
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: object) -> None:
         raise NotImplementedError("NYI")
 
     def __call__(self, func):

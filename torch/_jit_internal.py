@@ -656,7 +656,7 @@ class _IgnoreContextManager(contextlib.AbstractContextManager):
     def __init__(self, **kwargs):
         pass
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         pass
 
 
@@ -1338,7 +1338,7 @@ def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:  # noqa: F8
         self.hooks = torch._C._jit_get_emit_hooks()
         torch._C._jit_set_emit_hooks(None, None)
 
-    def __exit__(self, *args) -> None:
+    def __exit__(self, *args: object) -> None:
         torch._C._jit_set_emit_hooks(self.hooks[0], self.hooks[1])
 
 

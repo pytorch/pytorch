@@ -97,7 +97,7 @@ class RendezvousEnvTest(TestCase):
             def __enter__(self):
                 self.env_patcher.start()
 
-            def __exit__(self, type, value, traceback):
+            def __exit__(self, *args: object) -> None:
                 self.env_patcher.stop()
 
         def without(d, key):

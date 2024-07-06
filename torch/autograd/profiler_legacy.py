@@ -93,7 +93,7 @@ class profile:
     def _start_trace(self):
         _enable_profiler_legacy(self.config())
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: object) -> None:
         if not self.enabled:
             return
         if self.use_cuda:

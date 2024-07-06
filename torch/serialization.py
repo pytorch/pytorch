@@ -534,7 +534,7 @@ class _opener:
     def __enter__(self):
         return self.file_like
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: object) -> None:
         pass
 
 
@@ -542,7 +542,7 @@ class _open_file(_opener):
     def __init__(self, name, mode):
         super().__init__(open(name, mode))
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: object) -> None:
         self.file_like.close()
 
 
@@ -553,7 +553,7 @@ class _open_buffer_reader(_opener):
 
 
 class _open_buffer_writer(_opener):
-    def __exit__(self, *args):
+    def __exit__(self, *args: object) -> None:
         self.file_like.flush()
 
 
@@ -589,7 +589,7 @@ class _open_zipfile_writer_file(_opener):
         else:
             super().__init__(torch._C.PyTorchFileWriter(self.name))
 
-    def __exit__(self, *args) -> None:
+    def __exit__(self, *args: object) -> None:
         self.file_like.write_end_of_file()
         if self.file_stream is not None:
             self.file_stream.close()
@@ -605,7 +605,7 @@ class _open_zipfile_writer_buffer(_opener):
         self.buffer = buffer
         super().__init__(torch._C.PyTorchFileWriter(buffer))
 
-    def __exit__(self, *args) -> None:
+    def __exit__(self, *args: object) -> None:
         self.file_like.write_end_of_file()
         self.buffer.flush()
 

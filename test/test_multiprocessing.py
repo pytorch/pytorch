@@ -221,7 +221,7 @@ class leak_checker:
         self.next_fds = self._get_next_fds(10)
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: object) -> None:
         if torch.cuda.is_available():
             torch.cuda.ipc_collect()
         if args[0] is None:

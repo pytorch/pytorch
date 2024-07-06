@@ -140,7 +140,7 @@ class _DecoratorContextManager:
     def __enter__(self) -> None:
         raise NotImplementedError
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         raise NotImplementedError
 
     def clone(self):

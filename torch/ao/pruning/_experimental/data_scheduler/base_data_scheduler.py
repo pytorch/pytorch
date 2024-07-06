@@ -161,7 +161,7 @@ class BaseDataScheduler:
                 self.o._get_sp_called_within_step = True
                 return self
 
-            def __exit__(self, type, value, traceback):
+            def __exit__(self, *args: object) -> None:
                 self.o._get_sp_called_within_step = False
 
         with _enable_get_sp_call(self):

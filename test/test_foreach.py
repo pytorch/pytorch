@@ -109,7 +109,7 @@ class InplaceForeachVersionBumpCheck:
     def __enter__(self):
         pass
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, *args: object) -> None:
         # note(crcrpar): some methods e.g. `_binary_test` could call the given inplace function multiple times
         self._testcase.assertGreaterEqual(
             [t._version for t in self._tensorlist], self._orig_version_counts

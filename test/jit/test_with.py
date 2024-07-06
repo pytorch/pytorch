@@ -3,7 +3,7 @@
 import os
 import sys
 
-from typing import Any, List
+from typing import List
 
 import torch
 from torch.testing._internal.common_utils import skipIfTorchDynamo
@@ -49,9 +49,8 @@ class TestWith(JitTestCase):
                 self.count.add_(0.3)
                 return self.count
 
-            def __exit__(self, type: Any, value: Any, tb: Any) -> bool:
+            def __exit__(self, *args: object) -> None:
                 self.count.sub_(0.3)
-                return True
 
         make_global(Context)
 
@@ -207,7 +206,7 @@ class TestWith(JitTestCase):
                 self.count.add_(0.3)
                 return self.count
 
-            def __exit__(self, type: Any, value: Any, tb: Any):
+            def __exit__(self, *args: object) -> None:
                 self.count.sub_(0.3)
 
         make_global(Context)
@@ -364,7 +363,7 @@ class TestWith(JitTestCase):
                 self.count.add_(0.3)
                 return self.count
 
-            def __exit__(self, type: Any, value: Any, tb: Any):
+            def __exit__(self, *args: object) -> None:
                 self.count.sub_(0.3)
 
         make_global(Context)
@@ -463,7 +462,7 @@ class TestWith(JitTestCase):
             def __enter__(self, incr: int):  # noqa: PLE0302
                 self.count += incr
 
-            def __exit__(self, type: Any, value: Any, tb: Any):
+            def __exit__(self, *args: object) -> None:
                 pass
 
         @torch.jit.script
@@ -478,7 +477,7 @@ class TestWith(JitTestCase):
             def __enter__(self):
                 self.count += 1
 
-            def __exit__(self, type: Any, value: Any):  # noqa: PLE0302
+            def __exit__(self, *args: object) -> None:  # noqa: PLE0302
                 pass
 
         @torch.jit.script
@@ -493,7 +492,7 @@ class TestWith(JitTestCase):
             def __enter__(self):
                 self.count += 1
 
-            def __exit__(self, type: Any, value: int, tb: int):
+            def __exit__(self, *args: object) -> None:
                 pass
 
         def test_no_enter_no_exit(x: torch.Tensor, cm: NoEnterNoExit) -> torch.Tensor:

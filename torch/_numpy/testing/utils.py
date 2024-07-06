@@ -1846,8 +1846,8 @@ class clear_and_catch_warnings(warnings.catch_warnings):
                 mod_reg.clear()
         return super().__enter__()
 
-    def __exit__(self, *exc_info):
-        super().__exit__(*exc_info)
+    def __exit__(self, *args: object) -> None:
+        super().__exit__(*args)
         for mod in self.modules:
             if hasattr(mod, "__warningregistry__"):
                 mod.__warningregistry__.clear()
@@ -2062,7 +2062,7 @@ class suppress_warnings:
 
         return self
 
-    def __exit__(self, *exc_info):
+    def __exit__(self, *args: object) -> None:
         warnings.showwarning = self._orig_show
         warnings.filters = self._filters
         self._clear_registries()

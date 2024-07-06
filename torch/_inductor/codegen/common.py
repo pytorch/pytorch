@@ -1534,8 +1534,8 @@ class CodeGen:
         self.exit_stack.__enter__()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
+    def __exit__(self, *args: object) -> None:
+        self.exit_stack.__exit__(*args)
 
 
 class ScopedDict:
@@ -1975,14 +1975,14 @@ class Kernel(CodeGen):
         self.exit_stack.enter_context(V.set_kernel_handler(self))
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: object) -> None:
         """
         Note that V.graph.scheduler can be None when codegening triton template
         kernels.
         """
         if V.graph.scheduler:
             V.graph.scheduler.remove_kernel_local_buffers()
-        super().__exit__(exc_type, exc_val, exc_tb)
+        super().__exit__(*args)
 
     def rename_indexing(self, index) -> sympy.Expr:
         # adds the necessary kernel args for index expressions

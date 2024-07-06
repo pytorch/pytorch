@@ -1699,7 +1699,7 @@ class DeterministicGuard:
             warn_only=self.warn_only)
         torch.utils.deterministic.fill_uninitialized_memory = self.fill_uninitialized_memory
 
-    def __exit__(self, exception_type, exception_value, traceback):
+    def __exit__(self, *args: object) -> None:
         torch.use_deterministic_algorithms(
             self.deterministic_restore,
             warn_only=self.warn_only_restore)
@@ -1714,7 +1714,7 @@ class AlwaysWarnTypedStorageRemoval:
         self.always_warn_restore = torch.storage._get_always_warn_typed_storage_removal()
         torch.storage._set_always_warn_typed_storage_removal(self.always_warn)
 
-    def __exit__(self, exception_type, exception_value, traceback):
+    def __exit__(self, *args: object) -> None:
         torch.storage._set_always_warn_typed_storage_removal(self.always_warn_restore)
 
 # Context manager for setting cuda sync debug mode and reset it
@@ -1729,7 +1729,7 @@ class CudaSyncGuard:
         self.debug_mode_restore = torch.cuda.get_sync_debug_mode()
         torch.cuda.set_sync_debug_mode(self.mode)
 
-    def __exit__(self, exception_type, exception_value, traceback):
+    def __exit__(self, *args: object) -> None:
         torch.cuda.set_sync_debug_mode(self.debug_mode_restore)
 
 # Context manager for setting torch.__future__.set_swap_module_params_on_conversion
@@ -1743,7 +1743,7 @@ class SwapTensorsGuard:
         if self.use_swap_tensors is not None:
             torch.__future__.set_swap_module_params_on_conversion(self.use_swap_tensors)
 
-    def __exit__(self, exception_type, exception_value, traceback):
+    def __exit__(self, *args: object) -> None:
         torch.__future__.set_swap_module_params_on_conversion(self.swap_tensors_restore)
 
 # This decorator can be used for API tests that call
@@ -1792,7 +1792,7 @@ def wrapDeterministicFlagAPITest(fn):
                         self.cublas_config_restore = os.environ.get(self.cublas_var_name)
                         os.environ[self.cublas_var_name] = ':4096:8'
 
-                def __exit__(self, exception_type, exception_value, traceback):
+                def __exit__(self, *args: object) -> None:
                     if self.is_cuda10_2_or_higher:
                         cur_cublas_config = os.environ.get(self.cublas_var_name)
                         if self.cublas_config_restore is None:
@@ -2045,7 +2045,7 @@ class CudaNonDefaultStream:
                                      device_type=deviceStream.device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
-    def __exit__(self, exec_type, exec_value, traceback):
+    def __exit__(self, *args: object) -> None:
         # After completing CUDA test load previously active streams on all
         # CUDA devices.
         beforeDevice = torch.cuda.current_device()
@@ -2093,9 +2093,9 @@ class CudaMemoryLeakCheck:
             driver_mem_allocated = bytes_total - bytes_free
             self.driver_befores.append(driver_mem_allocated)
 
-    def __exit__(self, exec_type, exec_value, traceback):
+    def __exit__(self, exc_type, exc_value, exc_tb) -> None:
         # Don't check for leaks if an exception was thrown
-        if exec_type is not None:
+        if exc_type is not None:
             return
 
         # Compares caching allocator before/after statistics
@@ -2539,10 +2539,10 @@ class ObjectPair(UnittestPair):
 # behavior.  The year is 2021: this private class hierarchy hasn't changed since
 # 2010, seems low risk to inherit from.
 class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesContext):
-    def __exit__(self, exc_type, exc_value, tb):
+    def __exit__(self, exc_type, exc_value, exc_tb) -> None:
         if exc_type is not None and issubclass(exc_type, NotImplementedError):
             self.test_case.skipTest(f"not_implemented: {exc_value}")  # type: ignore[attr-defined]
-        return super().__exit__(exc_type, exc_value, tb)
+        return super().__exit__(exc_type, exc_value, exc_tb)
 
 
 @contextmanager
@@ -4442,7 +4442,7 @@ class BytesIOContext(io.BytesIO):
     def __enter__(self):
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: object) -> None:
         pass
 
 # Tentative value for nondet_tol for gradcheck when backward implementation

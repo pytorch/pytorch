@@ -398,7 +398,7 @@ class DebugContext:
         log.setLevel(min(log.level, level))
         self._stack.callback(log.removeHandler, ch)
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: object) -> None:
         if self._prof:
             self._prof.disable()
             self._save_profile_data()

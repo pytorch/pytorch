@@ -323,7 +323,7 @@ class _TorchDynamoContext:
         self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
         self.prior = set_eval_frame(self.callback)
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: object) -> None:
         assert self.prior is not unset
         set_eval_frame(self.prior)
         self.prior = unset
