@@ -6,7 +6,7 @@ import json
 import os
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Dict, List, Optional
 
 import boto3  # type: ignore[import]
 import requests
@@ -139,6 +139,21 @@ def upload_to_rockset(
         index += BATCH_SIZE
 
     print("Done!")
+
+
+def upload_to_dynamodb(
+    dynamodb_table: str,
+    repo: str,
+    docs: List[Any],
+    generate_partition_key: Optional[Callable[[str, Dict[str, Any]], str]],
+) -> None:
+    print(f"Writing {len(docs)} documents to DynamoDB {dynamodb_table}")
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/dynamodb.html#batch-writing
+    with boto3.resource("dynamodb").Table(dynamodb_table).batch_writer() as batch:
+        for doc in docs:
+            if generate_partition_key:
+                doc["dynamoKey"] = generate_partition_key(repo, doc)
+            batch.put_item(Item=doc)
 
 
 def upload_to_s3(

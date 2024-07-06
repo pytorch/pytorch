@@ -1966,11 +1966,11 @@ class suppress_warnings:
                 self._clear_registries()
 
             self._tmp_suppressions.append(
-                (category, message, re.compile(message, re.I), module, record)
+                (category, message, re.compile(message, re.IGNORECASE), module, record)
             )
         else:
             self._suppressions.append(
-                (category, message, re.compile(message, re.I), module, record)
+                (category, message, re.compile(message, re.IGNORECASE), module, record)
             )
 
         return record
@@ -2318,7 +2318,8 @@ def _parse_size(size_str):
     }
 
     size_re = re.compile(
-        r"^\s*(\d+|\d+\.\d+)\s*({})\s*$".format("|".join(suffixes.keys())), re.I
+        r"^\s*(\d+|\d+\.\d+)\s*({})\s*$".format("|".join(suffixes.keys())),
+        re.IGNORECASE,
     )
 
     m = size_re.match(size_str.lower())
