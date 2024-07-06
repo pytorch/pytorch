@@ -348,6 +348,7 @@ struct ModuleMethod {
   ModuleMethod(Module m, const GraphFunction& f, c10::QualifiedName n)
       : module(std::move(m)), function(f), exportName(std::move(n)) {}
   Module module;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const GraphFunction& function;
   c10::QualifiedName exportName;
 };
@@ -402,12 +403,10 @@ SourceRangeRecords getBackendSourceRanges(const Module& m) {
             std::get<kDebugInfoTupleSourceRangeIndex>(it.second);
         sr_records.emplace_back(
             std::numeric_limits<size_t>::max(), source_range);
-        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-        auto cs_ptr = std::get<kDebugInfoTupleInlinedCSIndex>(it.second);
+        const auto& cs_ptr = std::get<kDebugInfoTupleInlinedCSIndex>(it.second);
         if (cs_ptr) {
           for (const auto& e : cs_ptr->vec()) {
-            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-            const auto sr = std::get<kSourceRange>(e);
+            const auto& sr = std::get<kSourceRange>(e);
             sr_records.emplace_back(std::numeric_limits<size_t>::max(), sr);
           }
         }
@@ -836,7 +835,8 @@ void ExportModule(
     bool save_mobile_debug_info,
     bool use_flatbuffer) {
   auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-    out.write(static_cast<const char*>(buf), nbytes);
+    out.write(
+        static_cast<const char*>(buf), static_cast<std::streamsize>(nbytes));
     return !out ? 0 : nbytes;
   };
   ExportModule(
@@ -890,7 +890,8 @@ void save_jit_module(
   auto buffer = save_jit_module_to_bytes(module, extra_files);
   std::fstream ofile(filename, std::ios::binary | std::ios::out);
   ofile.write(
-      reinterpret_cast<char*>(buffer->data()), buffer->size()); // NOLINT
+      reinterpret_cast<char*>(buffer->data()),
+      static_cast<std::streamsize>(buffer->size()));
   ofile.close();
 }
 
@@ -938,7 +939,6 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   mobile::Module mobile_m = jitModuleToMobile(m, getOptionsFromGlobal());
   for (const auto& method : mobile_m.get_methods()) {
     for (const auto& op : method.function().get_code().op_names_) {
-      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       opnames.emplace(
           op.overload_name.empty() ? op.name
                                    : op.name + "." + op.overload_name);
