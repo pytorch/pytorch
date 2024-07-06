@@ -180,11 +180,10 @@ class TestSWAUtils(TestCase):
 
             averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, use_buffers=use_buffers)
 
-        dnn_params = (
-            list(itertools.chain(dnn.parameters(), dnn.buffers()))
-            if use_buffers
-            else list(dnn.parameters())
-        )
+        if use_buffers:
+            dnn_params = list(itertools.chain(dnn.parameters(), dnn.buffers()))
+        else:
+            dnn_params = list(dnn.parameters())
 
         averaged_params = [
             torch.zeros_like(param)

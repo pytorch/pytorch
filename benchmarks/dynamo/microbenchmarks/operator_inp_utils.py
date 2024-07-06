@@ -84,11 +84,10 @@ def deserialize_sparse_tensor(size, dtype, layout, is_coalesced, nnz=None):
 
 
 def deserialize_tensor(size, dtype, stride=None):
-    out = (
-        torch.empty_strided(size, stride, dtype=dtype)
-        if stride is not None
-        else torch.empty(size, dtype=dtype)
-    )
+    if stride is not None:
+        out = torch.empty_strided(size, stride, dtype=dtype)
+    else:
+        out = torch.empty(size, dtype=dtype)
     try:
         out.copy_(make_tensor(size, dtype=dtype, device="cpu"))
     except Exception as e:

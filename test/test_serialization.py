@@ -408,7 +408,10 @@ class SerializationMixin:
                             self.tensor.values(),
                             self.tensor.size())))
 
-        compressed_indices_name = "crow_indices" if x.layout in {torch.sparse_csr, torch.sparse_bsr} else "ccol_indices"
+        if x.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            compressed_indices_name = 'crow_indices'
+        else:
+            compressed_indices_name = 'ccol_indices'
 
         with tempfile.NamedTemporaryFile() as f:
             torch.save({"spoofed": TensorSerializationSpoofer(x)}, f)

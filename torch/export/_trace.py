@@ -1860,9 +1860,10 @@ def _export(
 
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
     original_state_dict = mod.state_dict(keep_vars=True)
-    forward_arg_names = (
-        _get_forward_arg_names(mod, args, kwargs) if not _is_torch_jit_trace else None
-    )
+    if not _is_torch_jit_trace:
+        forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
+    else:
+        forward_arg_names = None
 
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export

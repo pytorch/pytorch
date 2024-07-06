@@ -35,11 +35,10 @@ class FisherSnedecor(Distribution):
         self._gamma1 = Gamma(self.df1 * 0.5, self.df1)
         self._gamma2 = Gamma(self.df2 * 0.5, self.df2)
 
-        batch_shape = (
-            torch.Size()
-            if isinstance(df1, Number) and isinstance(df2, Number)
-            else self.df1.size()
-        )
+        if isinstance(df1, Number) and isinstance(df2, Number):
+            batch_shape = torch.Size()
+        else:
+            batch_shape = self.df1.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

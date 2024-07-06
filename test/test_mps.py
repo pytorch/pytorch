@@ -2269,7 +2269,10 @@ class TestMPS(TestCaseMPS):
     def test_adaptive_avg_pool2d_output_size_one(self):
         def helper(size, memory_format):
             x = torch.randint(1, 10, size, dtype=torch.float, device='mps', requires_grad=True)
-            x = x[::2, ::2, ::2, ::2] if memory_format == 'non_contiguous' else x.to(memory_format=memory_format)
+            if memory_format == 'non_contiguous':
+                x = x[::2, ::2, ::2, ::2]
+            else:
+                x = x.to(memory_format=memory_format)
 
             net = torch.nn.AdaptiveAvgPool2d((1, 1))
             out = net(x)
@@ -2333,7 +2336,10 @@ class TestMPS(TestCaseMPS):
             # test non-contiguous case
             dst = ((torch.randn(num_dest, num_dest, num_dest) * 10).to(dtype)).permute((2, 0, 1))
             dst2 = dst.contiguous()
-            mask = dst.abs() > 0 if dtype.is_complex else dst > 0
+            if dtype.is_complex:
+                mask = dst.abs() > 0
+            else:
+                mask = dst > 0
             self.assertFalse(dst.is_contiguous())
             self.assertTrue(dst2.is_contiguous())
             dst.masked_fill_(mask.to(mask_dtype), val)
@@ -5072,7 +5078,10 @@ class TestMPS(TestCaseMPS):
     # Test forward argmin argmax
     def test_argmin_argmax(self):
         def helper(n, c, h, w, reduction_type, dtype=torch.float32):
-            arg_reduction_fn = torch.argmax if reduction_type == 'max' else torch.argmin
+            if reduction_type == "max":
+                arg_reduction_fn = torch.argmax
+            else:
+                arg_reduction_fn = torch.argmin
 
             cpu_x = None
             x = None

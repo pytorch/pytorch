@@ -252,17 +252,15 @@ def _env_rendezvous_handler(
     master_port: int
     master_addr: str
 
-    rank = (
-        int(query_dict["rank"])
-        if "rank" in query_dict
-        else int(_get_env_or_raise("RANK"))
-    )
+    if "rank" in query_dict:
+        rank = int(query_dict["rank"])
+    else:
+        rank = int(_get_env_or_raise("RANK"))
 
-    world_size = (
-        int(query_dict["world_size"])
-        if "world_size" in query_dict
-        else int(_get_env_or_raise("WORLD_SIZE"))
-    )
+    if "world_size" in query_dict:
+        world_size = int(query_dict["world_size"])
+    else:
+        world_size = int(_get_env_or_raise("WORLD_SIZE"))
 
     master_addr = _get_env_or_raise("MASTER_ADDR")
     master_port = int(_get_env_or_raise("MASTER_PORT"))

@@ -1087,7 +1087,10 @@ def add(
         ):
             msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
-        b = prims.mul(b, alpha) if isinstance(b, TensorLike) else b * alpha
+        if isinstance(b, TensorLike):
+            b = prims.mul(b, alpha)
+        else:
+            b = b * alpha
 
     output = prims.add(a, b)
     return handle_noncontiguous_outputs([a, b], output)
@@ -1227,7 +1230,10 @@ def float_power(
     # Handles type promotion
     dtype = utils.get_higher_dtype(a, b)
     assert dtype is not None
-    dtype = torch.complex128 if utils.is_complex_dtype(dtype) else torch.float64
+    if utils.is_complex_dtype(dtype):
+        dtype = torch.complex128
+    else:
+        dtype = torch.float64
 
     # Float power has the following contiguous cast behavior to be
     # consistent with its C++ impl
@@ -5927,7 +5933,10 @@ def bucketize(
     # For first iteration through loop we can skip some checks, we have separate implementation
     mid = start + (end - start) // 2
     mid_val = boundaries[mid]
-    cond_mid = mid_val > a if right else mid_val >= a
+    if right:
+        cond_mid = mid_val > a
+    else:
+        cond_mid = mid_val >= a
     start = torch.where(cond_mid, start, mid + 1)
 
     if n_boundaries > 1:
@@ -5942,7 +5951,10 @@ def bucketize(
             # If right is true, the buckets are closed on the *left*
             # (i.e., we are doing the equivalent of std::upper_bound in C++)
             # Otherwise they are closed on the right (std::lower_bound)
-            cond_mid = mid_val > a if right else mid_val >= a
+            if right:
+                cond_mid = mid_val > a
+            else:
+                cond_mid = mid_val >= a
             start = torch.where((~cond_mid) & cond_update, mid + 1, start)
 
     return start.to(dtype=out_dtype)
@@ -6377,11 +6389,10 @@ def _infer_scalar_type(obj):
                 raise TypeError("new(): self-referential lists are incompatible")
             """
             item_scalarType = _infer_scalar_type(cur_item)  # recurse!
-            scalarType = (
-                torch.promote_types(scalarType, item_scalarType)
-                if scalarType is not None
-                else item_scalarType
-            )
+            if scalarType is not None:
+                scalarType = torch.promote_types(scalarType, item_scalarType)
+            else:
+                scalarType = item_scalarType
             if scalarType is torch.cdouble:
                 # this won't change (unless we hit undefined, but that will
                 # fail later)

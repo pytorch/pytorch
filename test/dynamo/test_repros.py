@@ -733,11 +733,10 @@ class BatchNormAct2d(torch.nn.BatchNorm2d):
         return super().forward(x)
 
     def forward(self, x):
-        x = (
-            self._forward_jit(x)
-            if torch.jit.is_scripting()
-            else self._forward_python(x)
-        )
+        if torch.jit.is_scripting():
+            x = self._forward_jit(x)
+        else:
+            x = self._forward_python(x)
         x = self.act(x)
         return x
 

@@ -262,7 +262,10 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
     dim = get_arg_value(node, 1, "dim")
     if dim is None:
         axis = node.kwargs.get("axis")
-        dim = axis if axis is not None else 0
+        if axis is not None:
+            dim = axis
+        else:
+            dim = 0
     if input is None:
         log.debug("couldn't find unbind args")
         return
@@ -297,7 +300,10 @@ def normalize_cat_default(match: Match, *args, **kwargs):
     cat_dim = get_arg_value(cat_node, 1, "dim")
     if cat_dim is None:
         cat_axis = cat_node.kwargs.get("axis")
-        cat_dim = cat_axis if cat_axis is not None else 0
+        if cat_axis is not None:
+            cat_dim = cat_axis
+        else:
+            cat_dim = 0
     if tensors is None or cat_dim is None:
         log.debug("couldn't find cat args")
         return
@@ -1621,7 +1627,10 @@ def normalize_cat_default_aten(match: Match, *args, **kwargs):
     cat_dim = get_arg_value(cat_node, 1, "dim")
     if cat_dim is None:
         cat_axis = cat_node.kwargs.get("axis")
-        cat_dim = cat_axis if cat_axis is not None else 0
+        if cat_axis is not None:
+            cat_dim = cat_axis
+        else:
+            cat_dim = 0
     if tensors is None or cat_dim is None:
         log.info("couldn't find cat args")
         return

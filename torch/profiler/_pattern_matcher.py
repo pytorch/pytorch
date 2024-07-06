@@ -109,9 +109,10 @@ class Pattern:
         return event
 
     def siblings_of(self, event: _ProfilerEvent):
-        children = (
-            event.parent.children if event.parent else self.tid_root[event.start_tid]
-        )
+        if event.parent:
+            children = event.parent.children
+        else:
+            children = self.tid_root[event.start_tid]
         index = children.index(event)
         return children[:index], children[index + 1 :]
 

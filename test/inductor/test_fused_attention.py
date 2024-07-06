@@ -517,7 +517,10 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 # unstable
                 scale_factor = scale_factor.detach()
                 y = torch.matmul(query, key.transpose(-2, -1))
-                y = y.div(scale_factor) if self.is_inv_factor else y.mul(scale_factor)
+                if self.is_inv_factor:
+                    y = y.div(scale_factor)
+                else:
+                    y = y.mul(scale_factor)
                 return y.softmax(dim=-1).matmul(value)
 
         tensor_shape = (2, 4, 4, 4)

@@ -370,9 +370,10 @@ def _single_tensor_adagrad(
                 state_sum = torch.view_as_real(state_sum)
                 param = torch.view_as_real(param)
             state_sum.addcmul_(grad, grad, value=1)
-            std = (
-                state_sum.sqrt() + eps if differentiable else state_sum.sqrt().add_(eps)
-            )
+            if differentiable:
+                std = state_sum.sqrt() + eps
+            else:
+                std = state_sum.sqrt().add_(eps)
             param.addcdiv_(grad, std, value=-clr)
             if is_complex:
                 param = torch.view_as_complex(param)

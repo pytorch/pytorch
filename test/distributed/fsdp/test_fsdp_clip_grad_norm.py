@@ -160,11 +160,10 @@ class TestClipGradNorm(FSDPTest):
         inp = ddp_model.module.get_input(device)
         for model in (ddp_model, fsdp_model):
             out = model(*inp)
-            loss = (
-                model.module.get_loss(inp, out)
-                if isinstance(model, (DDP, FSDP))
-                else model.get_loss(inp, out)
-            )
+            if isinstance(model, (DDP, FSDP)):
+                loss = model.module.get_loss(inp, out)
+            else:
+                loss = model.get_loss(inp, out)
             loss.backward()
 
         # Multiply gradients by a large factor to ensure that gradients will

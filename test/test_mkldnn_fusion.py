@@ -41,7 +41,10 @@ class TestMkldnnFusion(JitTestCase):
 
         m.eval()
         with torch.no_grad():
-            script = torch.jit.trace(m, x) if trace else torch.jit.script(m)
+            if trace:
+                script = torch.jit.trace(m, x)
+            else:
+                script = torch.jit.script(m)
         script = torch.jit.freeze(script)
 
         with torch.no_grad():

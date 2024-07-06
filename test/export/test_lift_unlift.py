@@ -91,7 +91,10 @@ class GraphBuilder:
         cur_name = ""
         nn_module_stack = OrderedDict()
         for atom in module_fqn.split("."):
-            cur_name = atom if cur_name == "" else cur_name + "." + atom
+            if cur_name == "":
+                cur_name = atom
+            else:
+                cur_name = cur_name + "." + atom
 
             if cur_name not in self.nn_module_stack_key:
                 id_counter = self.latest_id

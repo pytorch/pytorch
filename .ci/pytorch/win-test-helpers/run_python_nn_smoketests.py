@@ -32,11 +32,10 @@ GPU_TESTS = [
 
 
 if __name__ == "__main__":
-    TESTS = (
-        COMMON_TESTS + GPU_TESTS
-        if "USE_CUDA" in os.environ and os.environ["USE_CUDA"] == "1"
-        else COMMON_TESTS
-    )
+    if "USE_CUDA" in os.environ and os.environ["USE_CUDA"] == "1":
+        TESTS = COMMON_TESTS + GPU_TESTS
+    else:
+        TESTS = COMMON_TESTS
     for description, python_commands in TESTS:
         print(description)
         command_args = ["python", "-c", python_commands]

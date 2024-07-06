@@ -60,9 +60,10 @@ class TestNNAPI(TestCase):
         expected_memory_format=None,
     ):
         with torch.no_grad():
-            args = (
-                [arg_or_args] if isinstance(arg_or_args, torch.Tensor) else arg_or_args
-            )
+            if isinstance(arg_or_args, torch.Tensor):
+                args = [arg_or_args]
+            else:
+                args = arg_or_args
             module.eval()
             traced = torch.jit.trace(module, trace_args or args)
             nnapi_module = self.call_lowering_to_nnapi(traced, convert_args or args)

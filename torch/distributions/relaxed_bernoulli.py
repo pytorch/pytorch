@@ -52,7 +52,10 @@ class LogitRelaxedBernoulli(Distribution):
             is_scalar = isinstance(logits, Number)
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
-        batch_shape = torch.Size() if is_scalar else self._param.size()
+        if is_scalar:
+            batch_shape = torch.Size()
+        else:
+            batch_shape = self._param.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

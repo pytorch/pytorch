@@ -1732,7 +1732,10 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         # TODO add checking gpu count if cpuOnly_ is true or not
 
     def _test_chrome_trace_basic_helper(self, with_cuda=False):
-        device = "cuda" if with_cuda else "cpu"
+        if with_cuda:
+            device = "cuda"
+        else:
+            device = "cpu"
         x, y = (torch.rand(4, 4).to(device) for _ in range(2))
 
         with profile(with_stack=True) as p:

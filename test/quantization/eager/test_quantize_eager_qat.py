@@ -138,7 +138,10 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         # exponential_average_factor is self.momentum set to
         # (when it is available) only so that if gets updated
         # in ONNX graph when this node is exported to ONNX.
-        exponential_average_factor = 0.0 if self.momentum is None else self.momentum
+        if self.momentum is None:
+            exponential_average_factor = 0.0
+        else:
+            exponential_average_factor = self.momentum
 
         if self.training and not self.freeze_bn and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None

@@ -345,7 +345,10 @@ class JitTestCase(JitCommonTestCase):
         self.assertExpectedGraph(g, *args, **kwargs)
 
     def assertExpectedGraph(self, trace, *args, **kwargs):
-        graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
+        if isinstance(trace, torch._C.Graph):
+            graph = trace
+        else:
+            graph = trace.graph()
 
         torch._C._jit_pass_lint(graph)
         torch._C._jit_pass_dce(graph)

@@ -650,7 +650,10 @@ class SkipFunctionVariable(VariableTracker):
 
             def wraps(fn):
                 if isinstance(fn, variables.NestedUserFunctionVariable):
-                    reconstructible = args[0].source if args[0].source else args[0]
+                    if args[0].source:
+                        reconstructible = args[0].source
+                    else:
+                        reconstructible = args[0]
                     return fn.clone(wrapped_reconstructible=reconstructible)
                 unimplemented(f"functools.wraps({fn})")
 
