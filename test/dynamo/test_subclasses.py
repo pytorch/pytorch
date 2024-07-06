@@ -549,7 +549,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 return HANDLED_FUNCTIONS[func](*args, **kwargs)
 
         def _stack(input, dim=0, *, out=None):
-            return MyClass(sum(x.foo for x in input))
+            return MyClass(sum([x.foo for x in input]))
 
         HANDLED_FUNCTIONS[torch.stack] = _stack
 
