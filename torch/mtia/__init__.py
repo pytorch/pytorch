@@ -190,7 +190,6 @@ class device:
 
     def __exit__(self, *args: object) -> None:
         self.idx = torch._C._accelerator_hooks_maybe_exchange_device(self.prev_idx)
-        return False
 
 
 class StreamContext:

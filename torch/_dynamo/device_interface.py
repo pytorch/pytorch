@@ -141,7 +141,6 @@ class DeviceGuard:
     def __exit__(self, *args: object) -> None:
         if self.idx is not None:
             self.idx = self.device_interface.maybe_exchange_device(self.prev_idx)
-        return False
 
 
 class CudaInterface(DeviceInterface):
