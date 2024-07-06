@@ -4,6 +4,7 @@ from itertools import chain
 from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
+from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._tensor._op_schema import (
@@ -104,7 +105,7 @@ class ShardingPropagator:
 
         # NOTE: We must call the tracing in fake tensor mode so that it
         # avoids materializing memory
-        with FakeTensorMode():
+        with detect_fake_mode() or FakeTensorMode():
             fake_args = op_schema.gen_fake_args()
             fake_kwargs = op_schema.gen_fake_kwargs()
             fake_out = op_schema.op(*fake_args, **fake_kwargs)
