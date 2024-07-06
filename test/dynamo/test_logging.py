@@ -618,7 +618,7 @@ print("arf")
             record_str,
         )
         self.assertIn(
-            "len(L['ys']) == 2""",
+            "len(L['ys']) == 2",
             record_str,
         )
 
