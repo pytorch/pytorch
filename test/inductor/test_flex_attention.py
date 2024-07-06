@@ -19,7 +19,6 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn.attention._flex_attention import (
     _causal,
     _compose,
-    _create_block_mask,
     _create_empty_block_mask,
     _generate_alibi_bias,
     _identity,
