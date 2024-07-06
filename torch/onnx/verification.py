@@ -1740,7 +1740,10 @@ def _has_uses_by_nodes(value: torch.Value, nodes: Collection[torch.Node]) -> boo
 
 @_beartype.beartype
 def _node_has_uses_by(node: torch.Node, nodes: Collection[torch.Node]) -> bool:
-    return any(_has_uses_by_nodes(output, nodes) for output in node.outputs())
+    for output in node.outputs():  # noqa: SIM110
+        if _has_uses_by_nodes(output, nodes):
+            return True
+    return False
 
 
 @_beartype.beartype

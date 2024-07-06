@@ -114,7 +114,6 @@ def must_recompute(node: fx.Node) -> bool:
 
 
 def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
-    found = False
     return any(must_recompute(node) for node in fx_g.graph.nodes)
 
 

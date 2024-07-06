@@ -85,10 +85,10 @@ class OnDevicePTQUtils:
     @staticmethod
     def is_value_type_observer(value):
         type_name = value.type()
-        return any(
-            observer_type in type_name.str()
-            for observer_type in OnDevicePTQUtils.observer_module_name
-        )
+        for observer_type in OnDevicePTQUtils.observer_module_name:  # noqa: SIM110
+            if observer_type in type_name.str():
+                return True
+        return False
 
     @staticmethod
     def is_calculate_qparam(node):
@@ -287,10 +287,10 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
 
     def _validate_no_linear_unpack(self, model):
         quantize_forward_graph = model.quantize_forward.graph
-        return all(
-            n.kind() != "quantized::linear_unpack"
-            for n in quantize_forward_graph.nodes()
-        )
+        for n in quantize_forward_graph.nodes():
+            if n.kind() == "quantized::linear_unpack":
+                return False
+        return True
 
     def _validate_setattr_fp_weights(self, model, num_nodes):
         quantize_forward_graph = model.quantize_forward.graph
