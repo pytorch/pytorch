@@ -1363,6 +1363,9 @@ s1 > 3""",
         s = SubTensor(torch.randn(3, 10))
         f(s)
 
+    # Guard validation upsets the guard
+    # https://github.com/pytorch/pytorch/issues/129936
+    @unittest.expectedFailure
     def test_recompile_with_symbool_inputs(self):
         def f(pred: bool):
             if pred:
