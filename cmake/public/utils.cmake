@@ -461,7 +461,15 @@ function(torch_compile_options libname)
     endif()
 
     if(WERROR)
-      list(APPEND private_compile_options -Wno-strict-overflow)
+      list(APPEND private_compile_options
+        -Wno-strict-overflow
+        -Werror=inconsistent-missing-override
+        -Werror=inconsistent-missing-destructor-override
+        -Werror=unused-function
+        -Werror=unused-variable)
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        list(APPEND private_compile_options -Werror=unused-but-set-variable)
+      endif()
     endif()
   endif()
 

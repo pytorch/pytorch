@@ -2,6 +2,7 @@
 # flake8: noqa: B950
 
 import functools
+import string
 from collections import namedtuple
 from typing import Callable, Optional
 
@@ -54,12 +55,9 @@ def create_attention(score_mod, block_mask):
 
 
 def create_block_mask(score_mod, query, key):
-    if score_mod in test_score_mods:
-        block_mask = _create_block_mask(
-            score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
-        )
-    else:
-        block_mask = None
+    block_mask = _create_block_mask(
+        score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
+    )
     return block_mask
 
 
@@ -452,9 +450,10 @@ class TestFlexAttention(InductorTestCase):
             D,
         )
 
-    test_input_strides = [
+    test_strides = [
         ((H * S * D, S * D, D, 1), 997),  # offset
         ((H * D, D, B * H * D, 1), 499),  # transposed dimensions
+        ((H * S * D, D, H * D, 1), 0),  # heads/sequence transposed
         (
             (S * (D + 1), B * S * (D + 1), (D + 1), 1),
             293,
@@ -468,36 +467,42 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize(
-        "q_s", test_input_strides[:-2]
+        "q_s", test_strides[:2]
     )  # TODO: fix layout for query braodcasting
-    @common_utils.parametrize("k_s", test_input_strides)
-    @common_utils.parametrize("v_s", test_input_strides)
-    def test_strided_inputs(self, dtype: torch.dtype, q_s, k_s, v_s):
+    @common_utils.parametrize(
+        "k_s,v_s",
+        [
+            (test_strides[0], test_strides[0]),
+            (test_strides[0], test_strides[1]),
+            (test_strides[2], test_strides[3]),
+            (test_strides[3], test_strides[1]),
+            # (test_strides[2], test_strides[4]), # TODO: Doesn't work for
+            # broadcasting reasons i think
+        ],
+    )
+    @common_utils.parametrize("do_s", test_strides[:3])
+    def test_strided_inputs(self, dtype: torch.dtype, q_s, k_s, v_s, do_s):
         q1 = torch.randn((B * H * S * D * 2), dtype=dtype, device="cuda")
         k1 = torch.randn((B * H * S * D * 2), dtype=dtype, device="cuda")
         v1 = torch.randn((B * H * S * D * 2), dtype=dtype, device="cuda")
+        do1 = torch.randn((B * H * S * D * 2), dtype=dtype, device="cuda")
 
         q_shape = (B, H, S // 2, D)
         k_shape = (B, H, S, D)
         v_shape = (B, H, S, D)
+        do_shape = (B, H, S // 2, D)
 
-        q_strides, q_offset = q_s
-        q_max = [x * (y - 1) for x, y in zip(q_strides, q_shape)]
-        assert sum(q_max) + q_offset < B * H * S * D * 2
-        assert q_strides[-1] == 1
-        q = torch.as_strided(q1, q_shape, q_strides, q_offset)
+        def coerce_to_strides(val, shape, strides):
+            strides, offset = strides
+            val_max = [x * (y - 1) for x, y in zip(strides, shape)]
+            assert sum(val_max) + offset < B * H * S * D * 2
+            assert strides[-1] == 1
+            return torch.as_strided(val, shape, strides, offset).requires_grad_(True)
 
-        k_strides, k_offset = k_s
-        k_max = [x * (y - 1) for x, y in zip(k_strides, k_shape)]
-        assert sum(k_max) + k_offset < B * H * S * D * 2
-        assert k_strides[-1] == 1
-        k = torch.as_strided(k1, k_shape, k_strides, k_offset)
-
-        v_strides, v_offset = v_s
-        v_max = [x * (y - 1) for x, y in zip(v_strides, v_shape)]
-        assert sum(v_max) + v_offset < B * H * S * D * 2
-        assert v_strides[-1] == 1
-        v = torch.as_strided(v1, v_shape, v_strides, v_offset)
+        q = coerce_to_strides(q1, q_shape, q_s)
+        k = coerce_to_strides(k1, k_shape, k_s)
+        v = coerce_to_strides(v1, v_shape, v_s)
+        do = coerce_to_strides(do1, do_shape, do_s)
 
         block_mask = _create_empty_block_mask(q, k, v)
         sdpa_partial = create_attention(
@@ -510,6 +515,26 @@ class TestFlexAttention(InductorTestCase):
         tolerance = Tolerances(atol=2e-1, rtol=2e-1)
         torch.testing.assert_close(
             ref_out, compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+        ref_out.backward(do)
+        ref_grads = [q.grad, k.grad, v.grad]
+        q.grad = None
+        k.grad = None
+        v.grad = None
+
+        compiled_out.backward(do)
+        compiled_grads = [q.grad, k.grad, v.grad]
+        q.grad = None
+        k.grad = None
+        v.grad = None
+        torch.testing.assert_close(
+            compiled_grads[0], ref_grads[0], atol=tolerance.atol, rtol=tolerance.rtol
+        )
+        torch.testing.assert_close(
+            compiled_grads[1], ref_grads[1], atol=tolerance.atol, rtol=tolerance.rtol
+        )
+        torch.testing.assert_close(
+            compiled_grads[2], ref_grads[2], atol=tolerance.atol, rtol=tolerance.rtol
         )
 
     @supported_platform
@@ -594,6 +619,19 @@ class TestFlexAttention(InductorTestCase):
         # Ensure _create_block_mask_from_mask is compiled and generates 3 kernels,
         # 2 flex_attention generates 2 kernels.
         FileCheck().check_count(".run(", 5, True).run(code[0])
+
+    @supported_platform
+    def test_doc_mask_sparse(self):
+        document_id = torch.zeros(S, dtype=torch.int, device="cuda")
+        for i in range(0, S, 256):
+            document_id[i : i + 256] = i // 256
+
+        def document_masking_causal(score, b, h, q_idx, kv_idx):
+            causal_mask = q_idx >= kv_idx
+            document_mask = document_id[q_idx] == document_id[kv_idx]
+            return torch.where(causal_mask & document_mask, score, -float("inf"))
+
+        self.run_test(document_masking_causal, torch.float16)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -1065,7 +1103,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask,
+                block_mask.as_tuple(),
             )
 
         @torch.compile(backend="aot_eager")
@@ -1079,7 +1117,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask,
+                block_mask.as_tuple(),
             )
 
         ref_out, ref_lse = eager_sdpa_hop(
@@ -1136,7 +1174,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask,
+                block_mask.as_tuple(),
             )
             lse_2 = lse * 2
             return lse_2
@@ -1164,7 +1202,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask,
+                block_mask.as_tuple(),
             )
             lse_2 = lse * 2
             return out, lse_2
@@ -1217,6 +1255,46 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             torch.autograd.gradcheck(
                 func, (query, key, value, score_mod), raise_exception=True
             )
+        )
+
+    @supported_platform
+    def test_block_mask_viz(self):
+        def causal(score, b, h, q, kv):
+            return torch.where(q >= kv, score, -float("inf"))
+
+        block_mask = _create_block_mask(causal, 1, 1, 2048, 2048)
+
+        def replace_non_printable(s):
+            def replace(c):
+                if c not in string.printable:
+                    return "@"
+                elif c == " ":
+                    return "s"
+                return c
+
+            return "".join(replace(c) for c in s)
+
+        self.assertExpectedInline(
+            replace_non_printable(str(block_mask)),
+            """\
+BlockMask(sparsity=46.88%,smask=
+@@ssssssssssssssssssssssssssssss
+@@@@ssssssssssssssssssssssssssss
+@@@@@@ssssssssssssssssssssssssss
+@@@@@@@@ssssssssssssssssssssssss
+@@@@@@@@@@ssssssssssssssssssssss
+@@@@@@@@@@@@ssssssssssssssssssss
+@@@@@@@@@@@@@@ssssssssssssssssss
+@@@@@@@@@@@@@@@@ssssssssssssssss
+@@@@@@@@@@@@@@@@@@ssssssssssssss
+@@@@@@@@@@@@@@@@@@@@ssssssssssss
+@@@@@@@@@@@@@@@@@@@@@@ssssssssss
+@@@@@@@@@@@@@@@@@@@@@@@@ssssssss
+@@@@@@@@@@@@@@@@@@@@@@@@@@ssssss
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@ssss
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ss
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+)""",
         )
 
     @supported_platform
