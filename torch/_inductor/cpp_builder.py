@@ -839,7 +839,7 @@ class CppTorchOptions(CppOptions):
 
     def __init__(
         self,
-        vec_isa: VecISA,
+        vec_isa: VecISA = invalid_vec_isa,
         include_pytorch: bool = False,
         warning_all: bool = True,
         aot_mode: bool = False,
@@ -998,7 +998,7 @@ class CppTorchCudaOptions(CppTorchOptions):
 
     def __init__(
         self,
-        vec_isa: VecISA,
+        vec_isa: VecISA = invalid_vec_isa,
         include_pytorch: bool = False,
         cuda: bool = True,
         aot_mode: bool = False,
