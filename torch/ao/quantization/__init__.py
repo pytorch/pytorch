@@ -17,7 +17,6 @@ from .pt2e.export_utils import _move_exported_model_to_eval as move_exported_mod
 from .pt2e.export_utils import _move_exported_model_to_train as move_exported_model_to_train
 from .pt2e.export_utils import _allow_exported_model_train_eval as allow_exported_model_train_eval
 from .pt2e.generate_numeric_debug_handle import generate_numeric_debug_handle  # noqa: F401
-from .pt2e.generate_numeric_debug_handle import NUMERIC_DEBUG_HANDLE_KEY  # noqa: F401
 from typing import Union, List, Callable, Tuple, Optional
 from torch import Tensor
 import torch
@@ -146,7 +145,6 @@ __all__ = [
     "swap_module",
     "weight_observer_range_neg_127_to_127",
     "generate_numeric_debug_handle",
-    "NUMERIC_DEBUG_HANDLE_KEY",
 ]
 
 def default_eval_fn(model, calib_data):
