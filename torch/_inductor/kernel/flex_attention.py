@@ -401,13 +401,22 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
     default_config = None
 
     if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
-        default_config = (64, 64, 4, 3) if dtype == torch.float32 else (128, 64, 4, 3)
+        if dtype == torch.float32:
+            default_config = (64, 64, 4, 3)
+        else:
+            default_config = (128, 64, 4, 3)
         default_config = _h100_default_config.get((dtype, head_dim), default_config)
     elif head_dim <= 256 and torch.cuda.get_device_capability() >= (8, 0):  # A100
-        default_config = (64, 64, 4, 3) if dtype == torch.float32 else (128, 64, 4, 3)
+        if dtype == torch.float32:
+            default_config = (64, 64, 4, 3)
+        else:
+            default_config = (128, 64, 4, 3)
         default_config = _a100_default_config.get((dtype, head_dim), default_config)
     else:  # modest hardware or extremely large head_dim
-        default_config = (32, 16, 4, 3) if dtype == torch.float32 else (64, 32, 4, 3)
+        if dtype == torch.float32:
+            default_config = (32, 16, 4, 3)
+        else:
+            default_config = (64, 32, 4, 3)
 
     return default_config
 

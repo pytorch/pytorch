@@ -112,9 +112,10 @@ old_assert_almost_equal = assert_almost_equal
 
 
 def assert_almost_equal(a, b, single_decimal=6, double_decimal=12, **kw):
-    decimal = (
-        single_decimal if asarray(a).dtype.type in (single, csingle) else double_decimal
-    )
+    if asarray(a).dtype.type in (single, csingle):
+        decimal = single_decimal
+    else:
+        decimal = double_decimal
     old_assert_almost_equal(a, b, decimal=decimal, **kw)
 
 
@@ -350,18 +351,20 @@ def _make_generalized_cases():
             continue
 
         a = np.stack([case.a, 2 * case.a, 3 * case.a])
-        b = None if case.b is None else np.stack([case.b, 7 * case.b, 6 * case.b])
+        if case.b is None:
+            b = None
+        else:
+            b = np.stack([case.b, 7 * case.b, 6 * case.b])
         new_case = LinalgCase(
             case.name + "_tile3", a, b, tags=case.tags | {"generalized"}
         )
         new_cases.append(new_case)
 
         a = np.array([case.a] * 2 * 3).reshape((3, 2) + case.a.shape)
-        b = (
-            None
-            if case.b is None
-            else np.array([case.b] * 2 * 3).reshape((3, 2) + case.b.shape)
-        )
+        if case.b is None:
+            b = None
+        else:
+            b = np.array([case.b] * 2 * 3).reshape((3, 2) + case.b.shape)
         new_case = LinalgCase(
             case.name + "_tile213", a, b, tags=case.tags | {"generalized"}
         )
@@ -923,11 +926,10 @@ class DetCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
     def do(self, a, b, tags):
         d = linalg.det(a)
         (s, ld) = linalg.slogdet(a)
-        ad = (
-            asarray(a).astype(double)
-            if asarray(a).dtype.type in (single, double)
-            else asarray(a).astype(cdouble)
-        )
+        if asarray(a).dtype.type in (single, double):
+            ad = asarray(a).astype(double)
+        else:
+            ad = asarray(a).astype(cdouble)
         ev = linalg.eigvals(ad)
         assert_almost_equal(d, np.prod(ev, axis=-1))
         assert_almost_equal(s * np.exp(ld), np.prod(ev, axis=-1), single_decimal=5)
@@ -1914,7 +1916,10 @@ class TestMisc(TestCase):
     @xpassIfTorchDynamo  # (reason="endianness")
     def test_byteorder_check(self):
         # Byte order check should pass for native order
-        native = "<" if sys.byteorder == "little" else ">"
+        if sys.byteorder == "little":
+            native = "<"
+        else:
+            native = ">"
 
         for dtt in (np.float32, np.float64):
             arr = np.eye(4, dtype=dtt)

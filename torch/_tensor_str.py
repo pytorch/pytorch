@@ -454,16 +454,18 @@ def _str_intern(inp, *, tensor_contents=None):
         if not custom_contents_provided:
             indices_prefix = "indices=tensor("
             indices = self._indices().detach()
-            indices_str = (
-                "..." if is_meta else _tensor_str(indices, indent + len(indices_prefix))
-            )
+            if is_meta:
+                indices_str = "..."
+            else:
+                indices_str = _tensor_str(indices, indent + len(indices_prefix))
             if is_meta or indices.numel() == 0:
                 indices_str += ", size=" + str(tuple(indices.shape))
             values_prefix = "values=tensor("
             values = self._values().detach()
-            values_str = (
-                "..." if is_meta else _tensor_str(values, indent + len(values_prefix))
-            )
+            if is_meta:
+                values_str = "..."
+            else:
+                values_str = _tensor_str(values, indent + len(values_prefix))
             if is_meta or values.numel() == 0:
                 values_str += ", size=" + str(tuple(values.shape))
             tensor_str = (
@@ -514,18 +516,20 @@ def _str_intern(inp, *, tensor_contents=None):
                 )
             plain_indices_prefix = f"{pdimname[:3]}_indices=tensor("
             plain_indices = plain_indices_method(self).detach()
-            plain_indices_str = (
-                "..."
-                if is_meta
-                else _tensor_str(plain_indices, indent + len(plain_indices_prefix))
-            )
+            if is_meta:
+                plain_indices_str = "..."
+            else:
+                plain_indices_str = _tensor_str(
+                    plain_indices, indent + len(plain_indices_prefix)
+                )
             if plain_indices.numel() == 0 or is_meta:
                 plain_indices_str += ", size=" + str(tuple(plain_indices.shape))
             values_prefix = "values=tensor("
             values = self.values().detach()
-            values_str = (
-                "..." if is_meta else _tensor_str(values, indent + len(values_prefix))
-            )
+            if is_meta:
+                values_str = "..."
+            else:
+                values_str = _tensor_str(values, indent + len(values_prefix))
             if values.numel() == 0 or is_meta:
                 values_str += ", size=" + str(tuple(values.shape))
             tensor_str = (

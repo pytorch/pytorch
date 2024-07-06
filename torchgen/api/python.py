@@ -1107,9 +1107,10 @@ def returns_str_pyi(signature: PythonSignature) -> str:
 def dispatch_lambda_args(
     ps: PythonSignature, f: NativeFunction, symint: bool = True
 ) -> tuple[DispatchLambdaArgument, ...]:
-    schema = (
-        ps.deprecated_schema if isinstance(ps, PythonSignatureDeprecated) else f.func
-    )
+    if isinstance(ps, PythonSignatureDeprecated):
+        schema = ps.deprecated_schema
+    else:
+        schema = f.func
 
     # Start with cpp arguments - dispatch lambda signature always include 'self'
     cpp_args = cpp.arguments(
@@ -1214,11 +1215,10 @@ def cpp_dispatch_target(f: NativeFunction) -> str:
     if Variant.method in f.variants:
         return f"self.{name}"
     if Variant.function in f.variants:
-        namespace = (
-            "torch"
-            if has_tensor_options(f) or f.func.name.name.base.endswith("_like")
-            else "at"
-        )
+        if has_tensor_options(f) or f.func.name.name.base.endswith("_like"):
+            namespace = "torch"
+        else:
+            namespace = "at"
         return f"{namespace}::{name}"
     raise RuntimeError(f"could not dispatch, neither function nor method: {f.func}")
 

@@ -235,11 +235,10 @@ def calculate_shards(
         estimated_time_limit = serial_time % estimated_time_per_shard
     if estimated_time_limit <= 0.01:
         estimated_time_limit = estimated_time_per_shard
-    num_serial_shards = (
-        num_shards
-        if total_time == 0
-        else max(math.ceil(serial_time / total_time * num_shards), 1)
-    )
+    if total_time == 0:
+        num_serial_shards = num_shards
+    else:
+        num_serial_shards = max(math.ceil(serial_time / total_time * num_shards), 1)
 
     sharded_jobs = [ShardJob() for _ in range(num_shards)]
     shard(

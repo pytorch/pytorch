@@ -33,7 +33,10 @@ def _py_wrap_method(orig, __torch_function__):
 
 
 def wrap_type(use_c, to_patch, pattern, __torch_function__):
-    wrap_method = _wrap_method if use_c else _py_wrap_method
+    if use_c:
+        wrap_method = _wrap_method
+    else:
+        wrap_method = _py_wrap_method
 
     all = {}
     for t in reversed(pattern.mro()[:-1]):  # skip object

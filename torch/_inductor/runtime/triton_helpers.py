@@ -199,9 +199,10 @@ def bucketize_binary_search(
         mid = (high + low) // 2
         mask = mid < OFFSETS_SIZE
         bucket_upper_bound = tl.load(offsets_ptr + mid, mask=mask, other=0.0)
-        is_above = (
-            values >= bucket_upper_bound if right else values > bucket_upper_bound
-        )
+        if right:
+            is_above = values >= bucket_upper_bound
+        else:
+            is_above = values > bucket_upper_bound
 
         low = tl.where(is_above & mask, mid + 1, low)
         high = tl.where(is_above, high, mid)
@@ -296,12 +297,16 @@ def exclusive_scan_decoupled_lookback(
             exclusive_prefix = value
             prefix_valid = True
 
-        test_target = -1 if flag == 2 else test_target - 1
+        if flag == 2:
+            test_target = -1
+        else:
+            test_target = test_target - 1
 
     # Make inclusive block sum visible to other blocks
-    inclusive_prefix = (
-        combine_fn(exclusive_prefix, block_value) if prefix_valid else block_value
-    )
+    if prefix_valid:
+        inclusive_prefix = combine_fn(exclusive_prefix, block_value)
+    else:
+        inclusive_prefix = block_value
     pack = pack_value_flag(
         inclusive_prefix,
         tl.full([], 2, DTYPE_VALUE_AS_UINT),
@@ -349,12 +354,16 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
             exclusive_prefix = value
             prefix_valid = True
 
-        test_target = -1 if flag == 2 else test_target - 1
+        if flag == 2:
+            test_target = -1
+        else:
+            test_target = test_target - 1
 
     # Make inclusive block sum visible to other blocks
-    inclusive_prefix = (
-        combine_fn(exclusive_prefix, block_value) if prefix_valid else block_value
-    )
+    if prefix_valid:
+        inclusive_prefix = combine_fn(exclusive_prefix, block_value)
+    else:
+        inclusive_prefix = block_value
     inclusive_prefix_u64 = inclusive_prefix.to(tl.uint64, bitcast=True)
     tl.store(scratch_base + 3 * index + 2, inclusive_prefix_u64)
     tl.debug_barrier()
@@ -430,7 +439,10 @@ def _compare_and_swap_with_index(
     # actual compare-and-swap
     ix = x.to(idtype, bitcast=True)
 
-    cond = left < right if descending else left > right
+    if descending:
+        cond = left < right
+    else:
+        cond = left > right
 
     if stable:
         # When stable sorting, tie break by index

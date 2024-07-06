@@ -218,7 +218,10 @@ def _get_existing_inline_assertions(
 
             previous_range = existing_inline_assertions.get(symint, ValueRanges(-math.inf, math.inf))
 
-            bounds = ValueRanges(-math.inf, scalar) if symint is lhs else ValueRanges(scalar, math.inf)
+            if symint is lhs:
+                bounds = ValueRanges(-math.inf, scalar)
+            else:
+                bounds = ValueRanges(scalar, math.inf)
             existing_inline_assertions[symint] = previous_range & bounds
 
     return existing_inline_assertions

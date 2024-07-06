@@ -148,7 +148,10 @@ class TestMultiheadAttentionNN(NNTestCase):
                 d_head = random.randint(3, 10)
                 nheads = random.randint(2, 5) * 2
                 d_model = d_head * nheads
-                kv_dim = d_model if same_embed_dim else random.randint(5, 20)
+                if same_embed_dim:
+                    kv_dim = d_model
+                else:
+                    kv_dim = random.randint(5, 20)
                 dims = [batch_sz, seq_len, kv_dim]
 
                 saved_k = None

@@ -645,9 +645,10 @@ class TestInductorOpInfo(TestCase):
             dtype in inductor_one_sample.get(op_name, {})
             or dtype in inductor_one_sample.get((op_name, device_type), {})
         ) and not ALL_SAMPLES:
-            samples = (
-                [samples[0]] if isinstance(samples, (list, tuple)) else [next(samples)]
-            )
+            if isinstance(samples, (list, tuple)):
+                samples = [samples[0]]
+            else:
+                samples = [next(samples)]
 
         class HasRngOp(TorchDispatchMode):
             def __init__(self):

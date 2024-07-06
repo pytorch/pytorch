@@ -945,7 +945,10 @@ def _test_proper_exit(
     if exit_method == "worker_error" or exit_method == "worker_kill":
         assert use_workers is True
 
-    worker_error_event = mp.Event() if exit_method == "worker_error" else None
+    if exit_method == "worker_error":
+        worker_error_event = mp.Event()
+    else:
+        worker_error_event = None
 
     if is_iterable_dataset:
         ds = TestProperExitIterableDataset(7, worker_error_event)
@@ -2441,7 +2444,10 @@ except RuntimeError as e:
     @unittest.skipIf(IS_WINDOWS, "FIXME: stuck test")
     def test_partial_workers(self):
         r"""Check that workers exit even if the iterator is not exhausted."""
-        pin_memory_configs = (True, False) if TEST_CUDA else (False,)
+        if TEST_CUDA:
+            pin_memory_configs = (True, False)
+        else:
+            pin_memory_configs = (False,)
 
         for pin_memory in pin_memory_configs:
             loader = iter(
@@ -2586,7 +2592,10 @@ except RuntimeError as e:
                         "nice",
                         "ionice",
                     ]
-                    err_msg = desc if reason is None else f"{desc}: {reason}"
+                    if reason is None:
+                        err_msg = desc
+                    else:
+                        err_msg = f"{desc}: {reason}"
                     err_msg += "\nLoader info:\n\t"
                     if loader_psutil_p.is_running():
                         err_msg += str(

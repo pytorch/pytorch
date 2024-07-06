@@ -939,9 +939,10 @@ class Optimizer:
         per_device_and_dtype_grads: Optional[
             DefaultDict[torch.device, DefaultDict[torch.dtype, List[torch.Tensor]]]
         ]
-        per_device_and_dtype_grads = (
-            defaultdict(lambda: defaultdict(list)) if foreach else None
-        )
+        if foreach:
+            per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
+        else:
+            per_device_and_dtype_grads = None
 
         with torch.autograd.profiler.record_function(self._zero_grad_profile_name):
             for group in self.param_groups:

@@ -73,7 +73,10 @@ def main() -> None:
 
     repo = GithubRepo.from_string(args.repo)
     cache_dir = Path(args.cache_dir)
-    temp_dir = Path(args.temp_dir) if args.temp_dir else Path(TEMP_DIR)
+    if args.temp_dir:
+        temp_dir = Path(args.temp_dir)
+    else:
+        temp_dir = Path(TEMP_DIR)
 
     if args.upload:
         print(f"Uploading cache with args {args}")

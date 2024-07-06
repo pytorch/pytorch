@@ -130,11 +130,10 @@ def _strong_wolfe(
             # interpolation close to boundary
             if insuf_progress or t >= max(bracket) or t <= min(bracket):
                 # evaluate at 0.1 away from boundary
-                t = (
-                    max(bracket) - eps
-                    if abs(t - max(bracket)) < abs(t - min(bracket))
-                    else min(bracket) + eps
-                )
+                if abs(t - max(bracket)) < abs(t - min(bracket)):
+                    t = max(bracket) - eps
+                else:
+                    t = min(bracket) + eps
                 insuf_progress = False
             else:
                 insuf_progress = True
@@ -411,11 +410,10 @@ class LBFGS(Optimizer):
             # compute step length
             ############################################################
             # reset initial guess for step size
-            t = (
-                min(1.0, 1.0 / flat_grad.abs().sum()) * lr
-                if state["n_iter"] == 1
-                else lr
-            )
+            if state["n_iter"] == 1:
+                t = min(1.0, 1.0 / flat_grad.abs().sum()) * lr
+            else:
+                t = lr
 
             # directional derivative
             gtd = flat_grad.dot(d)  # g * d

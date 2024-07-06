@@ -79,7 +79,10 @@ if __name__ == "__main__":
 
         workload = None
         assert args.workload in ["loop", "parallel"]
-        workload = loop_workload if args.workload == "loop" else parallel_workload
+        if args.workload == "loop":
+            workload = loop_workload
+        else:
+            workload = parallel_workload
 
         if args.use_script:
             traced_workload = torch.jit.trace(workload, (input_x,))

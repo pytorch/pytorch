@@ -781,9 +781,10 @@ class TestHash(TestCase):
         for val in [np.pi, np.inf, 3, 6.0]:
             numpy_val = scalar(val)
             # Cast back to Python, in case the NumPy scalar has less precision
-            val = (
-                complex(numpy_val) if numpy_val.dtype.kind == "c" else float(numpy_val)
-            )
+            if numpy_val.dtype.kind == "c":
+                val = complex(numpy_val)
+            else:
+                val = float(numpy_val)
             assert val == numpy_val
             assert hash(val) == hash(numpy_val)
 

@@ -390,7 +390,10 @@ class _TorchDynamoContext:
         def do_nothing(*arg, **kwargs):
             pass
 
-        callback = self.callback if hasattr(self, "callback") else do_nothing
+        if hasattr(self, "callback"):
+            callback = self.callback
+        else:
+            callback = do_nothing
 
         is_jit_tracing = torch._C._is_tracing
         is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing

@@ -71,7 +71,10 @@ class CMake:
         elif cmake_version is None:
             cmake_command = "cmake3"
         else:
-            cmake_command = "cmake3" if cmake3_version >= cmake_version else "cmake"
+            if cmake3_version >= cmake_version:
+                cmake_command = "cmake3"
+            else:
+                cmake_command = "cmake"
         return cmake_command
 
     @staticmethod

@@ -90,7 +90,10 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
         # TODO(future PR): if needed, implement matching for a node
         #   having multiple output observers.
         for cls in (ObserverBase, FakeQuantizeBase):
-            new_pattern = (cls, *quant_pattern) if isinstance(quant_pattern, tuple) else (cls, quant_pattern)
+            if isinstance(quant_pattern, tuple):
+                new_pattern = (cls, *quant_pattern)
+            else:
+                new_pattern = (cls, quant_pattern)
             results.append((new_pattern, default_base_op_idx))  # type: ignore[arg-type]
 
 
