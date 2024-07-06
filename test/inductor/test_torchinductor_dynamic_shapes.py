@@ -77,6 +77,12 @@ if TEST_WITH_ROCM:
     test_failures["test_unbacked_reduction"] = TestFailure(("cpu"), is_skip=True)
 
 
+if os.getenv("BUILD_ENVIRONMENT", "").endswith("-debug"):
+    # Fails with TORCH_INTERNAL_ASSERT(!is_heap_allocated()), see https://github.com/pytorch/pytorch/issues/130073
+    test_failures["test_resize_as_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
+    test_failures["test_resize_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
+
+
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
     return make_test_cls_with_patches(
         cls,
@@ -859,7 +865,7 @@ class TestInductorDynamic(TestCase):
         f(torch.tensor([5], device=device))
 
     def test_sort_dynamic_shape_with_check(self, device):
-        if TEST_WITH_ROCM or torch.device(device).type != "cuda":
+        if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
 
             def check_count(n):
                 self.assertEqual(metrics.generated_kernel_count, 0)
