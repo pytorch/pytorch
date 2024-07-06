@@ -415,8 +415,7 @@ class FileSystem(FileSystemBase):
             return False
 
         return any(
-            p.exists() and os.access(p, os.W_OK)
-            for p in Path(checkpoint_id).parents
+            p.exists() and os.access(p, os.W_OK) for p in Path(checkpoint_id).parents
         )
 
     def exists(self, path: Union[str, os.PathLike]) -> bool:
