@@ -947,6 +947,40 @@ def forward(self, primals_1):
         self.assertTrue(torch.allclose(x_nested_compile.grad, x_nested.grad))
         self.assertTrue(torch.allclose(custom_aa_compile.grad, custom_aa.grad))
 
+    @skipIfTorchDynamo("This test suite already uses dynamo")
+    def test_composite_impl_compile(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, a):
+                return self.linear(a)
+
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        fw_graph = self.verify_aot_autograd(Foo(), inp, test_mutation=True)
+        inp = [torch.ones(3, 3, requires_grad=False)]
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, primals_1, primals_2, primals_3):
+    t = torch.ops.aten.t.default(primals_1);  primals_1 = None
+    addmm = torch.ops.aten.addmm.default(primals_2, primals_3, t);  primals_2 = None
+    return [addmm, primals_3, t]""",
+        )
+
+        with torch.inference_mode():
+            fw_graph = self.verify_aot_autograd(Foo(), inp, test_mutation=True)
+            inp = [torch.ones(3, 3, requires_grad=False)]
+            self.assertExpectedInline(
+                fw_graph.code.strip(),
+                """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    addmm = torch.ops.aten.addmm.default(arg1_1, arg2_1, t);  arg1_1 = arg2_1 = t = None
+    return (addmm,)""",
+            )
+
     def test_outputs_are_aliased(self):
         # Tensor, None, int
         def f(a):
@@ -6236,13 +6270,11 @@ class MockFXGraphCache:
 # cache miss instead of cache hitting). They will be fixed in the PRs above this.
 FAILING_CACHE_TESTS = (
     # BypassAOTAutogradCache: unsupported nodes
-    "test_backward_mutation_data",
-    "test_backward_mutation_metadata",
-    "test_custom_autograd",
-    "test_inner_grad",
-    "test_input_mutation_set__nop",
-    "test_nonidempotent_amp",  # einsum
+    "test_backward_mutation_data",  # Custom Autograd Function
+    "test_backward_mutation_metadata",  # Custom Autograd Function
+    "test_custom_autograd",  # Custom Autograd Function
     # Pickle error: OutputAliasInfo/functional tensor
+    "test_input_mutation_set__nop",
     "test_input_aliased_with_mutation_output_alias",
     "test_input_data_and_metadata_mutation",
     "test_input_mutation_aliases_and_output_alias",
