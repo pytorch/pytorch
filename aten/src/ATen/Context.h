@@ -65,6 +65,8 @@ class TORCH_API Context {
         : at::getAccelerator(true).value();
     if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks();
+    } else if (device_type == at::kXPU) {
+      return at::detail::getXPUHooks();
     } else if (device_type == at::kMPS) {
       return at::detail::getMPSHooks();
     } else if (device_type == at::kPrivateUse1) {
@@ -370,7 +372,7 @@ class TORCH_API Context {
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
-  bool enabled_cudnnSDP = false;
+  bool enabled_cudnnSDP = true;
   bool enabled_overrideable = true;
 #ifdef USE_ROCM
   bool benchmark_cudnn = true;
