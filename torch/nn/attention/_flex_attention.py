@@ -259,16 +259,12 @@ def _create_mask(
     # Working around some bugs with compiling vmap
     if _compiled:
         ctx = nullcontext()
-        b = b.view(B, 1, 1, 1)
-        h = h.view(1, H, 1, 1)
-        m = m.view(1, 1, M, 1)
-        n = n.view(1, 1, 1, N)
     else:
         ctx = TransformGetItemToIndex()  # type: ignore[assignment]
-        score_mod = torch.vmap(score_mod, in_dims=(0, None, None, None, 0))
-        score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None))
-        score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
-        score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None))
+    score_mod = torch.vmap(score_mod, in_dims=(0, None, None, None, 0))
+    score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None))
+    score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
+    score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None))
 
     with ctx:
         out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
@@ -297,7 +293,7 @@ def create_block_mask(
     device: str = "cuda",
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
-    _compiled=True,
+    _compiled=False,
 ):
     r"""This function creates a block mask tuple from a score_mod function.
 
