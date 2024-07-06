@@ -299,7 +299,7 @@ def _export(name: str):
 
     def wrapper(func):
         globals()[name] = func
-        __all__.append(name)
+        __all__.append(name)  # noqa: PYI056
         return func
 
     return wrapper
