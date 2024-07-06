@@ -45,7 +45,7 @@ def _identity(
 _DEFAULT_SPARSE_BLOCK_SIZE = 128
 
 
-class _BlockMask:
+class BlockMask:
     kv_num_blocks: torch.Tensor
     kv_indices: torch.Tensor
     q_num_blocks: torch.Tensor
@@ -163,7 +163,7 @@ class _BlockMask:
         return vis
 
 
-def broadcast_to_dim(x, dim):
+def _broadcast_to_dim(x, dim):
     while x.dim() < dim:
         x = x.unsqueeze(0)
     return x
@@ -175,7 +175,7 @@ def _convert_mask_to_block_mask(
     Q_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
 ):
     assert mask.dtype == torch.bool
-    mask = broadcast_to_dim(mask, 4)
+    mask = _broadcast_to_dim(mask, 4)
     B, H, Q, KV = mask.shape
     assert Q % Q_BLOCK_SIZE == 0
     assert KV % KV_BLOCK_SIZE == 0
@@ -203,14 +203,12 @@ def _convert_block_mask_to_mask(
     return block_mask
 
 
-def _create_block_mask_from_mask(
-    mask: torch.Tensor,
+def _create_sparse_block_from_block_mask(
+    block_mask: torch.Tensor,
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
-) -> _BlockMask:
-    block_mask = _convert_mask_to_block_mask(
-        mask, KV_BLOCK_SIZE=KV_BLOCK_SIZE, Q_BLOCK_SIZE=Q_BLOCK_SIZE
-    )
+) -> BlockMask:
+    device = block_mask.device
     block_mask = block_mask.to(dtype=torch.int8)
     kv_num_blocks = block_mask.sum(dim=3)
     kv_indices = torch.argsort(block_mask, dim=3, descending=True, stable=True)
@@ -218,11 +216,11 @@ def _create_block_mask_from_mask(
     q_indices = torch.argsort(block_mask, dim=2, descending=True, stable=True).permute(
         0, 1, 3, 2
     )
-    return _BlockMask(
-        kv_num_blocks=kv_num_blocks.to(torch.int32).to(mask.device).contiguous(),
-        kv_indices=kv_indices.to(torch.int32).to(mask.device).contiguous(),
-        q_num_blocks=q_num_blocks.to(torch.int32).to(mask.device).contiguous(),
-        q_indices=q_indices.to(torch.int32).to(mask.device).contiguous(),
+    return BlockMask(
+        kv_num_blocks=kv_num_blocks.to(torch.int32).to(device).contiguous(),
+        kv_indices=kv_indices.to(torch.int32).to(device).contiguous(),
+        q_num_blocks=q_num_blocks.to(torch.int32).to(device).contiguous(),
+        q_indices=q_indices.to(torch.int32).to(device).contiguous(),
         KV_BLOCK_SIZE=KV_BLOCK_SIZE,
         Q_BLOCK_SIZE=Q_BLOCK_SIZE,
     )
@@ -235,6 +233,7 @@ def _create_mask(
     M: int,
     N: int,
     device: str = "cuda",
+    _compiled: bool = False,
 ):
     r"""This function creates a mask tensor from a score_mod function.
 
@@ -249,21 +248,43 @@ def _create_mask(
     Returns:
         mask (Tensor): A mask tensor with shape (B, H, M, N).
     """
+    from contextlib import nullcontext
+
     b = torch.arange(0, B, device=device)
     h = torch.arange(0, H, device=device)
     m = torch.arange(0, M, device=device)
     n = torch.arange(0, N, device=device)
+    # TODO: fix this
+    # A hack required because of lack of torchfunctionmode support
+    # Working around some bugs with compiling vmap
+    if _compiled:
+        ctx = nullcontext()
+    else:
+        ctx = TransformGetItemToIndex()  # type: ignore[assignment]
     score_mod = torch.vmap(score_mod, in_dims=(0, None, None, None, 0))
     score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None))
-    with TransformGetItemToIndex():
+
+    with ctx:
         out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
-    mask = torch.where(torch.isinf(out), False, True)
+        mask = torch.where(torch.isneginf(out), False, True)
     return mask
 
 
-def _create_block_mask(
+# Done as a workaround around torch.compile not compiling what we want in the
+# presence of the torchfunctionmdoe
+def _create_block_mask_inner(
+    score_mod, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
+):
+    mask = _create_mask(score_mod, B, H, M, N, device, _compiled=True)
+    block_mask = _convert_mask_to_block_mask(
+        mask, KV_BLOCK_SIZE=KV_BLOCK_SIZE, Q_BLOCK_SIZE=Q_BLOCK_SIZE
+    )
+    return block_mask.to(dtype=torch.int8)
+
+
+def create_block_mask(
     score_mod: _score_mod_signature,
     B: int,
     H: int,
@@ -272,6 +293,7 @@ def _create_block_mask(
     device: str = "cuda",
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
+    _compiled=False,
 ):
     r"""This function creates a block mask tuple from a score_mod function.
 
@@ -289,9 +311,15 @@ def _create_block_mask(
         block_mask (tuple): A tuple of (kv_num_blocks, kv_indices, q_num_blocks, q_indices,
                             KV_BLOCK_SIZE, Q_BLOCK_SIZE) which represents the block mask.
     """
-    mask = _create_mask(score_mod, B, H, M, N, device)
-    block_mask = _create_block_mask_from_mask(mask, KV_BLOCK_SIZE, Q_BLOCK_SIZE)
-    return block_mask
+    inner_func = _create_block_mask_inner
+    # This is kind of a temporary hack to workaround some issues
+    if _compiled:
+        inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
+    with TransformGetItemToIndex():
+        block_mask = inner_func(
+            score_mod, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
+        )
+    return _create_sparse_block_from_block_mask(block_mask)
 
 
 """
@@ -302,11 +330,11 @@ def _create_block_mask(
 """
 
 
-def _create_empty_block_mask(query, key, value) -> _BlockMask:
+def _create_empty_block_mask(query, key, value) -> BlockMask:
     device = query.device
     kv_len = key.size()[-2]
     q_len = query.size()[-2]
-    return _BlockMask(
+    return BlockMask(
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
         q_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
@@ -316,12 +344,12 @@ def _create_empty_block_mask(query, key, value) -> _BlockMask:
     )
 
 
-def _flex_attention(
+def flex_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: _score_mod_signature = _identity,
-    block_mask: Optional[_BlockMask] = None,
+    block_mask: Optional[BlockMask] = None,
 ) -> torch.Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -344,7 +372,7 @@ def _flex_attention(
     Where:
         - ``score``: A scalar tensor representing the attention score,
           with the same data type and device as the query, key, and value tensors.
-        - ``batch``, ``head``, ``token_q``, ``token_kv``: Scalar tensors indicating
+        - ``b``, ``h``, ``q_idx``, ``kv_idx``: Scalar tensors indicating
           the batch index, head index, query index, and key/value index, respectively.
           These should have the ``torch.int`` data type and be located on the same device as the score tensor.
 
@@ -408,6 +436,10 @@ def _flex_attention(
                 )
                 return out
 
+
+# Shim for some temporary BC
+_flex_attention = flex_attention
+_create_block_mask = create_block_mask
 
 """Some common used score_mod functions for flex_attention in PyTorch."""
 

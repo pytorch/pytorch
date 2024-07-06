@@ -10641,6 +10641,37 @@ fn
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_descriptor(self):
+        class lazy_property:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+
+            def __get__(self, instance, obj_type=None):
+                value = self.wrapped(instance)
+                setattr(instance, self.wrapped.__name__, value)
+                return value
+
+        class UserDefined:
+            def __init__(self):
+                self.a = 3
+
+            @lazy_property
+            def length(self):
+                return 3
+
+            def run(self, x):
+                return x * self.length
+
+        obj = UserDefined()
+
+        def fn(x):
+            return obj.run(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_assert_size_stride(self):
         x = torch.randn(2, 3, 4)
         with self.assertRaisesRegex(
