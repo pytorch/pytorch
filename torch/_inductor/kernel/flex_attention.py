@@ -96,7 +96,7 @@ def index_to_other_buffers(cnt: int, graph_type: SubgraphType) -> int:
 
 
 def build_subgraph_buffer(
-    args: Tuple[IRNode],
+    other_buffers: Tuple[IRNode],
     placeholder_inps: List[TensorBox],
     subgraph: Subgraph,
     graph_type: SubgraphType,
@@ -105,7 +105,7 @@ def build_subgraph_buffer(
     The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
 
     Args:
-        args: The args that were passed into the flex_attention kernel
+        other_buffers: score_mod and mask_fn lifted args
         placeholder_inps: The list of scalar inputs, these were created on the fly through `create_placeholder`
         subgraph: The Subgraph ir for which to produce the output node
         graph_type: The type of subgraph for which we want to produce the output node, see enum above for details
@@ -122,9 +122,11 @@ def build_subgraph_buffer(
         # tuple and already have corresponding TensorBoxes passed in as args.
         if node.op == "placeholder":
             is_lifted_input = cnt >= len(placeholder_inps)
-            lifted_input_index = index_to_other_buffers(cnt, graph_type)
+            lifted_input_index = cnt - len(placeholder_inps)
             env[node] = (
-                args[lifted_input_index] if is_lifted_input else placeholder_inps[cnt]
+                other_buffers[lifted_input_index]
+                if is_lifted_input
+                else placeholder_inps[cnt]
             )
             cnt += 1
         elif node.op == "call_function":
@@ -174,7 +176,7 @@ flex_attention_template = TritonTemplate(
     name="flex_attention",
     grid=flex_attention_grid,
     source=r"""
-{{def_kernel("Q", "K", "V", "LSE", "SPARSE_KV_NUM_BLKS", "SPARSE_KV_IDX")}}
+{{def_kernel("Q", "K", "V", "LSE", "FULL_KV_NUM_BLKS", "FULL_KV_IDX", "PARTIAL_KV_NUM_BLKS", "PARTIAL_KV_IDX")}}
     # Sub notation for this kernel:
     #
     # Q: Query, K: Key, V: Value
@@ -228,8 +230,8 @@ flex_attention_template = TritonTemplate(
     k_offset = off_z * stride_kz + off_h * stride_kh
     v_offset = off_z * stride_vz + off_h * stride_vh
 
-    SPARSE_Z = {{size("SPARSE_KV_NUM_BLKS", 0)}}
-    SPARSE_H = {{size("SPARSE_KV_NUM_BLKS", 1)}}
+    SPARSE_Z = {{size("FULL_KV_NUM_BLKS", 0)}}
+    SPARSE_H = {{size("FULL_KV_NUM_BLKS", 1)}}
 
     sparse_idx_z = off_z % SPARSE_Z
     sparse_idx_h = off_h % SPARSE_H
@@ -240,13 +242,19 @@ flex_attention_template = TritonTemplate(
     SPARSE_Q_BLOCK_CNT: tl.constexpr = Q_LEN // SPARSE_Q_BLOCK_SIZE
     SPARSE_KV_BLOCK_CNT: tl.constexpr = KV_LEN // SPARSE_KV_BLOCK_SIZE
 
+    # initialize pointer to m and l
+    m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
+    l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
+    acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
+
+    # ~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # SPARSE_KV_IDX and SPARSE_KV_NUM_BLKS are always contiguous.
     sparse_hz_offset = sparse_idx_z * SPARSE_H + sparse_idx_h
     sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + start_m // SPARSE_Q_MULTIPLE
     sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (start_m // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
-    kv_indices = SPARSE_KV_IDX + sparse_kv_idx_offset
+    kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
     kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
-    sparse_kv_num_blocks = tl.load(SPARSE_KV_NUM_BLKS + sparse_kv_num_blks_offset)
+    sparse_kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
     Q_block_ptr = tl.make_block_ptr(
         base=Q + q_offset,
@@ -275,10 +283,100 @@ flex_attention_template = TritonTemplate(
     # initialize offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = kv_start + tl.arange(0, BLOCK_N)
-    # initialize pointer to m and l
-    m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
-    l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
-    acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
+    q = tl.load(Q_block_ptr)
+    if SCORE_MOD_IS_LINEAR:
+        qk_scale *= 1.44269504
+    q = (q * qk_scale).to(MATMUL_PRECISION)
+    # loop over k, v and update accumulator
+    lo = 0
+    hi = sparse_kv_num_blocks * SPARSE_KV_MULTIPLE
+    for start_n in range(0, hi):
+        # -- load k --
+        k = tl.load(K_block_ptr)
+        # -- compute qk ---
+        qk = tl.dot(q, k)
+        # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+        m = offs_m[:, None]
+        n = offs_n[None, :]
+
+        {{ modification(
+            subgraph_number=0,
+            output_name="post_mod_scores",
+            score="qk",
+            b="off_z",
+            h="off_h",
+            m="m",
+            n="n",
+            out="qk"
+        ) | indent_except_first(2) }}
+        # TODO: In the case that score_mod is linear, this can be LICMed
+        if not SCORE_MOD_IS_LINEAR:
+            post_mod_scores *= 1.44269504
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # -- compute scaling constant ---
+        m_ij = tl.maximum(m_i, tl.max(post_mod_scores, 1))
+        alpha = tl.math.exp2(m_i - m_ij)
+        p = tl.math.exp2(post_mod_scores - m_ij[:, None])
+        if not ROWS_GUARANTEED_SAFE:
+            masked_out_rows = (m_ij == float("-inf"))
+            alpha = tl.where(masked_out_rows, 0, alpha)
+            p = tl.where(masked_out_rows[:, None], 0, p)
+        # NB: l_i update is pulled up here since it's a bit faster
+        # NB: For headdim=256, it's faster to move it back down to after m_i =
+        # m_ij
+        l_i = l_i * alpha + tl.sum(p, 1)
+        # # -- scale and update acc --
+        acc = acc * alpha[:, None]
+        v = tl.load(V_block_ptr)
+        acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
+        # -- update m_i
+        m_i = m_ij
+        # update pointers
+        indices_idx = start_n // SPARSE_KV_MULTIPLE
+        cur_block = tl.load(kv_indices + indices_idx)
+        next_block = tl.load(kv_indices + indices_idx + 1)
+        needs_jump = (start_n + 1) % SPARSE_KV_MULTIPLE == 0
+        jump_to_block = (next_block - cur_block ) * SPARSE_KV_BLOCK_SIZE - (SPARSE_KV_MULTIPLE - 1) * BLOCK_N
+        offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_N
+        V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
+        K_block_ptr = tl.advance(K_block_ptr, (0, offset))
+        offs_n = offs_n + offset
+    # ~~~~~~~~~~~~~~ partially unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # SPARSE_KV_IDX and SPARSE_KV_NUM_BLKS are always contiguous.
+    sparse_hz_offset = sparse_idx_z * SPARSE_H + sparse_idx_h
+    sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + start_m // SPARSE_Q_MULTIPLE
+    sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (start_m // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
+    kv_indices = PARTIAL_KV_IDX + sparse_kv_idx_offset
+    kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
+    sparse_kv_num_blocks = tl.load(PARTIAL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
+
+    Q_block_ptr = tl.make_block_ptr(
+        base=Q + q_offset,
+        shape=(Q_LEN, BLOCK_DMODEL),
+        strides=(stride_qm, stride_qk),
+        offsets=(start_m * BLOCK_M, 0),
+        block_shape=(BLOCK_M, BLOCK_DMODEL),
+        order=(1, 0)
+    )
+    K_block_ptr = tl.make_block_ptr(
+        base=K + k_offset,
+        shape=(BLOCK_DMODEL, KV_LEN),
+        strides=(stride_kk, stride_kn),
+        offsets=(0, kv_start),
+        block_shape=(BLOCK_DMODEL, BLOCK_N),
+        order=(0, 1)
+    )
+    V_block_ptr = tl.make_block_ptr(
+        base=V + v_offset,
+        shape=(KV_LEN, BLOCK_DMODEL),
+        strides=(stride_vk, stride_vn),
+        offsets=(kv_start, 0),
+        block_shape=(BLOCK_N, BLOCK_DMODEL),
+        order=(1, 0)
+    )
+    # initialize offsets
+    offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_n = kv_start + tl.arange(0, BLOCK_N)
 
     q = tl.load(Q_block_ptr)
     if SCORE_MOD_IS_LINEAR:
@@ -297,6 +395,17 @@ flex_attention_template = TritonTemplate(
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = offs_n[None, :]
+
+        {{ modification(
+            subgraph_number=1,
+            output_name="mask_fn_output",
+            score="qk",
+            b="off_z",
+            h="off_h",
+            m="m",
+            n="n",
+        ) | indent_except_first(2) }}
+
         {{ modification(
             subgraph_number=0,
             output_name="post_mod_scores",
@@ -307,6 +416,10 @@ flex_attention_template = TritonTemplate(
             n="n",
             out="qk"
         ) | indent_except_first(2) }}
+
+        # apply mask for partially unmasked blocks
+        post_mod_scores = tl.where(mask_fn_output, post_mod_scores, float("-inf"))
+
         # TODO: In the case that score_mod is linear, this can be LICMed
         if not SCORE_MOD_IS_LINEAR:
             post_mod_scores *= 1.44269504
@@ -485,13 +598,19 @@ def flex_attention(*args, **kwargs):
         value,
         subgraph,
         block_mask,
-        *other_buffers,
+        mask_fn_graph,
+        score_mod_other_buffers,
+        mask_fn_other_buffers,
     ) = args
     (
-        sparse_kv_num_blocks,
-        sparse_kv_indices,
-        sparse_q_num_blocks,
-        sparse_q_indices,
+        full_sparse_kv_num_blocks,
+        full_sparse_kv_indices,
+        full_sparse_q_num_blocks,
+        full_sparse_q_indices,
+        partial_sparse_kv_num_blocks,
+        partial_sparse_kv_indices,
+        partial_sparse_q_num_blocks,
+        partial_sparse_q_indices,
         SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
     ) = block_mask
@@ -499,10 +618,14 @@ def flex_attention(*args, **kwargs):
         query,
         key,
         value,
-        sparse_kv_num_blocks,
-        sparse_kv_indices,
-        sparse_q_num_blocks,
-        sparse_q_indices,
+        full_sparse_kv_num_blocks,
+        full_sparse_kv_indices,
+        full_sparse_q_num_blocks,
+        full_sparse_q_indices,
+        partial_sparse_kv_num_blocks,
+        partial_sparse_kv_indices,
+        partial_sparse_q_num_blocks,
+        partial_sparse_q_indices,
     ]:
         buf.realize()
     placeholder_inps = [
@@ -516,7 +639,22 @@ def flex_attention(*args, **kwargs):
         ]
     ]
     subgraph_buffer = build_subgraph_buffer(
-        args, placeholder_inps, subgraph, graph_type=SubgraphType.FWD
+        score_mod_other_buffers, placeholder_inps, subgraph, graph_type=SubgraphType.FWD
+    )
+    mask_fn_graph_placeholder_inps = [
+        create_placeholder(name, dtype, query.get_device())
+        for name, dtype in [
+            ("b", torch.int32),
+            ("h", torch.int32),
+            ("m", torch.int32),
+            ("n", torch.int32),
+        ]
+    ]
+    mask_fn_graph_buffer = build_subgraph_buffer(
+        mask_fn_other_buffers,
+        mask_fn_graph_placeholder_inps,
+        mask_fn_graph,
+        graph_type=SubgraphType.FWD,
     )
     layout = FixedLayout(
         query.get_device(),
@@ -562,12 +700,15 @@ def flex_attention(*args, **kwargs):
                 key,
                 value,
                 logsumexp,
-                sparse_kv_num_blocks,
-                sparse_kv_indices,
+                full_sparse_kv_num_blocks,
+                full_sparse_kv_indices,
+                partial_sparse_kv_num_blocks,
+                partial_sparse_kv_indices,
             ],
             layout=layout,
             subgraphs=[
                 subgraph_buffer,
+                mask_fn_graph_buffer,
             ],
             mutated_inputs=[
                 logsumexp,
@@ -585,17 +726,29 @@ def flex_attention(*args, **kwargs):
             SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
         )
-    inputs_for_autotuning = [
-        query,
-        key,
-        value,
-        logsumexp,
-        sparse_kv_num_blocks,
-        sparse_kv_indices,
-    ] + list(other_buffers)
+    inputs_for_autotuning = (
+        [
+            query,
+            key,
+            value,
+            logsumexp,
+            full_sparse_kv_num_blocks,
+            full_sparse_kv_indices,
+            partial_sparse_kv_num_blocks,
+            partial_sparse_kv_indices,
+        ]
+        + list(score_mod_other_buffers)
+        + list(mask_fn_other_buffers)
+    )
     input_gen_fns = {
-        4: create_num_blocks_fake_generator(sparse_kv_indices),  # sparse_kv_num_blocks
-        5: create_indices_fake,  # sparse_kv_indices
+        4: create_num_blocks_fake_generator(
+            full_sparse_kv_indices
+        ),  # full_sparse_kv_num_blocks
+        5: create_indices_fake,  # full_sparse_kv_indices
+        6: create_num_blocks_fake_generator(
+            partial_sparse_kv_indices
+        ),  # partial_sparse_kv_num_blocks
+        7: create_indices_fake,  # partial_sparse_kv_indices
     }
     return (
         autotune_select_algorithm(
@@ -634,7 +787,7 @@ flex_attention_backward_template = TritonTemplate(
     name="flex_attention_backward",
     grid=flex_attention_backward_grid,
     source=r"""
-{{def_kernel("Q", "K", "V", "OUT", "LSE", "DELTA", "DO", "DQ", "DV", "SPARSE_KV_NUM_BLKS", "SPARSE_KV_IDX", "SPARSE_Q_NUM_BLKS", "SPARSE_Q_IDX")}}
+{{def_kernel("Q", "K", "V", "OUT", "LSE", "DELTA", "DO", "DQ", "DV", "FULL_KV_NUM_BLKS", "FULL_KV_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "PARTIAL_KV_NUM_BLKS", "PARTIAL_KV_IDX", "PARTIAL_Q_NUM_BLKS", "PARTIAL_Q_IDX")}}
     # Sub notation for this kernel:
     #
     # Q: Query, K: Key, V: Value
@@ -689,8 +842,8 @@ flex_attention_backward_template = TritonTemplate(
     off_z = off_hz // H # batch idx
     off_h = off_hz % H # head idx
 
-    SM_Z = {{size("SPARSE_KV_NUM_BLKS", 0)}}
-    SM_H = {{size("SPARSE_KV_NUM_BLKS", 1)}}
+    SM_Z = {{size("FULL_KV_NUM_BLKS", 0)}}
+    SM_H = {{size("FULL_KV_NUM_BLKS", 1)}}
 
     sparse_idx_z = off_z % SM_Z
     sparse_idx_h = off_h % SM_H
@@ -722,20 +875,101 @@ flex_attention_backward_template = TritonTemplate(
         SPARSE_Q_BLOCK_CNT = Q_LEN // SPARSE_Q_BLOCK_SIZE
         SPARSE_KV_BLOCK_CNT = KV_LEN // SPARSE_KV_BLOCK_SIZE
 
-        # SPARSE_KV_IDX and SPARSE_KV_NUM_BLKS are always contiguous.
+        dq = tl.zeros([BLOCK_M2, BLOCK_DMODEL], dtype=tl.float32)
+
+        # ~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # FULL_KV_IDX and FULL_KV_NUM_BLKS are always contiguous.
         sparse_hz_offset = sparse_idx_z * SM_H + sparse_idx_h
         sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + off_pid // SPARSE_Q_MULTIPLE
         sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (off_pid // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
-        kv_indices = SPARSE_KV_IDX + sparse_kv_idx_offset
+        kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
         kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
-        sparse_kv_num_blocks = tl.load(SPARSE_KV_NUM_BLKS + sparse_kv_num_blks_offset)
+        sparse_kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
+        start_m2 = off_pid * BLOCK_M2
+        offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
+        q = tl.load(Q + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
+        do = tl.load(DO + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
+        lse = tl.load(LSE + offs_m2)
+        lse = lse[:, None]
+        start_n2 = kv_start
+        offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
+        offs_n2 = start_n2 + tl.arange(0, BLOCK_N2)
+        kT_ptrs = K + offs_n2[None, :] * stride_km + offs_k[:, None] * stride_kd
+        vT_ptrs = V + offs_n2[None, :] * stride_vm + offs_k[:, None] * stride_vd
+        Di = tl.load(DELTA + offs_m2)
+        # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
+        tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
+        curr_n = start_n2
+        hi = sparse_kv_num_blocks * SPARSE_KV_MULTIPLE
+        for start_n in range(0, hi):
+            offs_n2= curr_n + tl.arange(0, BLOCK_N2)
+            kT = tl.load(kT_ptrs)
+            vT = tl.load(vT_ptrs)
+            qk = tl.dot(q, kT)
+            # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+            pre_mod_scores = qk
+            m = offs_m2[:, None]
+            n = offs_n2[None, :]
+
+            {{ modification(
+                subgraph_number=0,
+                output_name="post_mod_scores",
+                score="qk",
+                b="off_z",
+                h="off_h",
+                m="m",
+                n="n",
+                out="qk"
+            ) | indent_except_first(3) }}
+
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            if not SCORE_MOD_IS_LINEAR:
+                post_mod_scores *= 1.44269504
+            p = tl.math.exp2(post_mod_scores - lse).to(MATMUL_PRECISION)
+            # Compute dP and dS.
+            dp = tl.dot(do, vT)
+            ds = p * (dp - Di[:, None])
+            # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
+            {{ modification(
+                subgraph_number=1,
+                output_name = "grad_scores",
+                score="pre_mod_scores",
+                b="off_z",
+                h="off_h",
+                m="m",
+                n="n",
+                grad_score_mod="ds"
+            ) | indent_except_first(3) }}
+            ds = grad_scores
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            ds = ds.to(MATMUL_PRECISION)
+            # Compute dQ.
+            dq += tl.dot(ds, tl.trans(kT))
+            # Increment pointers.
+            indices_idx = start_n // SPARSE_KV_MULTIPLE
+            cur_block = tl.load(kv_indices + indices_idx)
+            next_block = tl.load(kv_indices + indices_idx + 1)
+            needs_jump = (start_n + 1) % SPARSE_KV_MULTIPLE == 0
+            jump_to_block = (next_block - cur_block ) * SPARSE_KV_BLOCK_SIZE - (SPARSE_KV_MULTIPLE - 1) * BLOCK_N2
+            offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_N2
+            kT_ptrs += offset * stride_km
+            vT_ptrs += offset * stride_km
+            curr_n += offset
+
+        # ~~~~~~~~~~~~~~~~ partially unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~
+        # PARTIAL_KV_IDX and PARTIAL_KV_NUM_BLKS are always contiguous.
+        sparse_hz_offset = sparse_idx_z * SM_H + sparse_idx_h
+        sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + off_pid // SPARSE_Q_MULTIPLE
+        sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (off_pid // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
+        kv_indices = PARTIAL_KV_IDX + sparse_kv_idx_offset
+        kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
+        sparse_kv_num_blocks = tl.load(PARTIAL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
         start_m2 = off_pid * BLOCK_M2
 
         offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
 
         q = tl.load(Q + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
-        dq = tl.zeros([BLOCK_M2, BLOCK_DMODEL], dtype=tl.float32)
         do = tl.load(DO + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
 
         lse = tl.load(LSE + offs_m2)
@@ -761,6 +995,17 @@ flex_attention_backward_template = TritonTemplate(
             pre_mod_scores = qk
             m = offs_m2[:, None]
             n = offs_n2[None, :]
+
+            {{ modification(
+                subgraph_number=2,
+                output_name="mask_fn_output",
+                score="qk",
+                b="off_z",
+                h="off_h",
+                m="m",
+                n="n",
+            ) | indent_except_first(3) }}
+
             {{ modification(
                 subgraph_number=0,
                 output_name="post_mod_scores",
@@ -771,6 +1016,10 @@ flex_attention_backward_template = TritonTemplate(
                 n="n",
                 out="qk"
             ) | indent_except_first(3) }}
+
+            # apply mask for partial masked block
+            post_mod_scores = tl.where(mask_fn_output, post_mod_scores, float("-inf"))
+
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             if not SCORE_MOD_IS_LINEAR:
                 post_mod_scores *= 1.44269504
@@ -790,6 +1039,10 @@ flex_attention_backward_template = TritonTemplate(
                 grad_score_mod="ds"
             ) | indent_except_first(3) }}
             ds = grad_scores
+
+            # (grads) apply mask for partially unmasked block
+            ds = tl.where(mask_fn_output, ds, 0.0)
+
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             ds = ds.to(MATMUL_PRECISION)
             # Compute dQ.
@@ -820,33 +1073,32 @@ flex_attention_backward_template = TritonTemplate(
         SPARSE_Q_BLOCK_CNT = Q_LEN // SPARSE_Q_BLOCK_SIZE
         SPARSE_KV_BLOCK_CNT = KV_LEN // SPARSE_KV_BLOCK_SIZE
 
-        # SPARSE_Q_IDX and SPARSE_Q_NUM_BLKS are always contiguous.
+        dv = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
+        dk = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
+
+        # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # FULL_Q_IDX and FULL_Q_NUM_BLKS are always contiguous.
         sparse_hz_offset = sparse_idx_z * SM_H + sparse_idx_h
         sparse_q_num_blks_offset = sparse_hz_offset * SPARSE_KV_BLOCK_CNT + pid // SPARSE_KV_MULTIPLE
         sparse_q_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (pid // SPARSE_KV_MULTIPLE) * SPARSE_Q_BLOCK_CNT  # noqa: B950
-        q_indices = SPARSE_Q_IDX + sparse_q_idx_offset
+        q_indices = FULL_Q_IDX + sparse_q_idx_offset
         q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
-        sparse_q_num_blocks = tl.load(SPARSE_Q_NUM_BLKS + sparse_q_num_blks_offset)
+        sparse_q_num_blocks = tl.load(FULL_Q_NUM_BLKS + sparse_q_num_blks_offset)
 
         start_n1 = pid * BLOCK_N1
         start_m1 = q_start
 
         offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
 
-        dv = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
-        dk = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
-
         # load K and V: they stay in SRAM throughout the inner loop.
         k = tl.load(K + offs_n1[:, None] * stride_km + offs_k[None, :] * stride_kd)
         v = tl.load(V + offs_n1[:, None] * stride_vm + offs_k[None, :] * stride_vd)
-
         offs_m1 = start_m1 + tl.arange(0, BLOCK_M1)
         offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
         qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
         do_ptrs = DO + offs_m1[:, None] * stride_qm + offs_k[None, :] * stride_qd
         # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
         tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
-
         curr_m = start_m1
         hi = sparse_q_num_blocks * SPARSE_Q_MULTIPLE
         for start_m in range(0, hi):
@@ -904,6 +1156,108 @@ flex_attention_backward_template = TritonTemplate(
             needs_jump = (start_m + 1) % SPARSE_Q_MULTIPLE == 0
             jump_to_block = (next_block - cur_block ) * SPARSE_Q_BLOCK_SIZE - (SPARSE_Q_MULTIPLE - 1) * BLOCK_M1
             offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_M1
+            qT_ptrs += offset * stride_qm
+            do_ptrs += offset * stride_qm
+            curr_m += offset
+
+        # ~~~~~~~~~~~~~~~~~ partially unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # PARTIAL_Q_IDX and PARTIAL_Q_NUM_BLKS are always contiguous.
+        sparse_hz_offset = sparse_idx_z * SM_H + sparse_idx_h
+        sparse_q_num_blks_offset = sparse_hz_offset * SPARSE_KV_BLOCK_CNT + pid // SPARSE_KV_MULTIPLE
+        sparse_q_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (pid // SPARSE_KV_MULTIPLE) * SPARSE_Q_BLOCK_CNT  # noqa: B950
+        q_indices = PARTIAL_Q_IDX + sparse_q_idx_offset
+        q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
+        sparse_q_num_blocks = tl.load(PARTIAL_Q_NUM_BLKS + sparse_q_num_blks_offset)
+        start_n1 = pid * BLOCK_N1
+        start_m1 = q_start
+        offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
+
+        # load K and V: they stay in SRAM throughout the inner loop.
+        k = tl.load(K + offs_n1[:, None] * stride_km + offs_k[None, :] * stride_kd)
+        v = tl.load(V + offs_n1[:, None] * stride_vm + offs_k[None, :] * stride_vd)
+
+        offs_m1 = start_m1 + tl.arange(0, BLOCK_M1)
+        offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
+        qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
+        do_ptrs = DO + offs_m1[:, None] * stride_qm + offs_k[None, :] * stride_qd
+        # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
+        tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
+
+        curr_m = start_m1
+        hi = sparse_q_num_blocks * SPARSE_Q_MULTIPLE
+        for start_m in range(0, hi):
+            qT = tl.load(qT_ptrs)
+            # Load LSE before computing qk to reduce pipeline stall.
+            offs_m1 = curr_m + tl.arange(0, BLOCK_M1)
+            lse = tl.load(LSE + offs_m1)
+            qkT = tl.dot(k, qT)
+            # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+            m = offs_m1[None, :]
+            n = offs_n1[:, None]
+            pre_mod_scores = qkT
+
+            {{ modification(
+                subgraph_number=2,
+                output_name="mask_fn_output",
+                score="qkT",
+                b="off_z",
+                h="off_h",
+                m="m",
+                n="n",
+            ) | indent_except_first(3) }}
+
+            {{ modification(
+                subgraph_number=0,
+                output_name="post_mod_scores",
+                score="qkT",
+                b="off_z",
+                h="off_h",
+                m="m",
+                n="n",
+                out="qkT"
+            ) | indent_except_first(3) }}
+
+            # apply mask for partial masked block
+            post_mod_scores = tl.where(mask_fn_output, post_mod_scores, float("-inf"))
+
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            if not SCORE_MOD_IS_LINEAR:
+                post_mod_scores *= 1.44269504
+            pT = tl.math.exp2(post_mod_scores - lse[None, :])
+            do = tl.load(do_ptrs)
+            # Compute dV.
+            ppT = pT
+            dv += tl.dot(ppT.to(MATMUL_PRECISION), do)
+            Di = tl.load(DELTA + offs_m1)
+            # Compute dP and dS.
+            dpT = tl.dot(v, tl.trans(do))
+            dsT = pT * (dpT - Di[None, :])
+            # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
+            m = offs_m1[None, :]
+            n = offs_n1[:, None]
+            {{ modification(
+                subgraph_number=1,
+                output_name = "grad_scores",
+                score="pre_mod_scores",
+                b="off_z",
+                h="off_h",
+                m="m",
+                n="n",
+                grad_score_mod="dsT"
+            ) | indent_except_first(3) }}
+            dsT = grad_scores
+
+            # (grads) apply mask for partially unmasked block
+            dsT = tl.where(mask_fn_output, dsT, 0.0)
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
+            # Increment pointers.
+            indices_idx = start_m // SPARSE_Q_MULTIPLE
+            cur_block = tl.load(q_indices + indices_idx)
+            next_block = tl.load(q_indices + indices_idx + 1)
+            needs_jump = (start_m + 1) % SPARSE_Q_MULTIPLE == 0
+            jump_to_block = (next_block - cur_block ) * SPARSE_Q_BLOCK_SIZE - (SPARSE_Q_MULTIPLE - 1) * BLOCK_M1
+            offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_M1
 
             qT_ptrs += offset * stride_qm
             do_ptrs += offset * stride_qm
@@ -938,13 +1292,19 @@ def flex_attention_backward(*args, **kwargs):
         fw_graph,
         joint_graph,
         block_mask,
-        *other_buffers,
+        mask_fn_graph,
+        score_mod_other_buffers,
+        mask_fn_other_buffers,
     ) = args
     (
-        sparse_kv_num_blocks,
-        sparse_kv_indices,
-        sparse_q_num_blocks,
-        sparse_q_indices,
+        full_sparse_kv_num_blocks,
+        full_sparse_kv_indices,
+        full_sparse_q_num_blocks,
+        full_sparse_q_indices,
+        partial_sparse_kv_num_blocks,
+        partial_sparse_kv_indices,
+        partial_sparse_q_num_blocks,
+        partial_sparse_q_indices,
         SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
     ) = block_mask
@@ -953,10 +1313,14 @@ def flex_attention_backward(*args, **kwargs):
         key,
         value,
         grad_out,
-        sparse_kv_num_blocks,
-        sparse_kv_indices,
-        sparse_q_num_blocks,
-        sparse_q_indices,
+        full_sparse_kv_num_blocks,
+        full_sparse_kv_indices,
+        full_sparse_q_num_blocks,
+        full_sparse_q_indices,
+        partial_sparse_kv_num_blocks,
+        partial_sparse_kv_indices,
+        partial_sparse_q_num_blocks,
+        partial_sparse_q_indices,
     ]:
         buf.realize()
 
@@ -974,14 +1338,35 @@ def flex_attention_backward(*args, **kwargs):
         ]
     ]
     fw_subgraph_buffer = build_subgraph_buffer(
-        args, fwd_placeholder_inps, fw_graph, graph_type=SubgraphType.JOINT_FWD
+        score_mod_other_buffers,
+        fwd_placeholder_inps,
+        fw_graph,
+        graph_type=SubgraphType.JOINT_FWD,
     )
 
     joint_placeholder_inps = fwd_placeholder_inps + [
         create_placeholder("grad_score_mod", dtype, device)
     ]
     joint_subgraph_buffer = build_subgraph_buffer(
-        args, joint_placeholder_inps, joint_graph, graph_type=SubgraphType.JOINT_BWD
+        score_mod_other_buffers,
+        joint_placeholder_inps,
+        joint_graph,
+        graph_type=SubgraphType.JOINT_BWD,
+    )
+    mask_fn_graph_placeholder_inps = [
+        create_placeholder(name, dtype, query.get_device())
+        for name, dtype in [
+            ("b", torch.int32),
+            ("h", torch.int32),
+            ("m", torch.int32),
+            ("n", torch.int32),
+        ]
+    ]
+    mask_fn_graph_buffer = build_subgraph_buffer(
+        mask_fn_other_buffers,
+        mask_fn_graph_placeholder_inps,
+        mask_fn_graph,
+        graph_type=SubgraphType.FWD,
     )
 
     layout_k = FixedLayout(
@@ -1036,13 +1421,17 @@ def flex_attention_backward(*args, **kwargs):
                 grad_out,
                 grad_query,
                 grad_value,
-                sparse_kv_num_blocks,
-                sparse_kv_indices,
-                sparse_q_num_blocks,
-                sparse_q_indices,
+                full_sparse_kv_num_blocks,
+                full_sparse_kv_indices,
+                full_sparse_q_num_blocks,
+                full_sparse_q_indices,
+                partial_sparse_kv_num_blocks,
+                partial_sparse_kv_indices,
+                partial_sparse_q_num_blocks,
+                partial_sparse_q_indices,
             ],
             layout=layout_k,  # We use store_output only for grad_key
-            subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer],
+            subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer, mask_fn_graph_buffer],
             mutated_inputs=[grad_query, grad_value],
             call_sizes=query.get_size() + [key.get_size()[2]],
             num_stages=num_stages,
@@ -1057,26 +1446,46 @@ def flex_attention_backward(*args, **kwargs):
             SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
         )
-    inputs_for_autotuning = [
-        query,
-        key,
-        value,
-        out,
-        logsumexp,
-        delta,
-        grad_out,
-        grad_query,
-        grad_value,
-        sparse_kv_num_blocks,
-        sparse_kv_indices,
-        sparse_q_num_blocks,
-        sparse_q_indices,
-    ] + list(other_buffers)
+    inputs_for_autotuning = (
+        [
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            delta,
+            grad_out,
+            grad_query,
+            grad_value,
+            full_sparse_kv_num_blocks,
+            full_sparse_kv_indices,
+            full_sparse_q_num_blocks,
+            full_sparse_q_indices,
+            partial_sparse_kv_num_blocks,
+            partial_sparse_kv_indices,
+            partial_sparse_q_num_blocks,
+            partial_sparse_q_indices,
+        ]
+        + list(score_mod_other_buffers)
+        + list(mask_fn_other_buffers)
+    )
     input_gen_fns = {
-        9: create_num_blocks_fake_generator(sparse_kv_indices),  # sparse_kv_num_blocks
+        9: create_num_blocks_fake_generator(
+            full_sparse_kv_indices
+        ),  # full_sparse_kv_num_blocks
         10: create_indices_fake,
-        11: create_num_blocks_fake_generator(sparse_q_indices),  # sparse_q_num_blocks
+        11: create_num_blocks_fake_generator(
+            full_sparse_q_indices
+        ),  # full_sparse_q_num_blocks
         12: create_indices_fake,
+        13: create_num_blocks_fake_generator(
+            partial_sparse_kv_indices
+        ),  # partial_sparse_kv_num_blocks
+        14: create_indices_fake,
+        15: create_num_blocks_fake_generator(
+            partial_sparse_q_indices
+        ),  # partial_sparse_q_num_blocks
+        16: create_indices_fake,
     }
 
     grad_key = autotune_select_algorithm(
