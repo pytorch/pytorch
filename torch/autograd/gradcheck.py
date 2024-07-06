@@ -1842,7 +1842,10 @@ def _check_analytical_numerical_equal(
     for i, all_numerical_for_input_i in enumerate(all_numerical):
         for j, n in enumerate(all_numerical_for_input_i):
             # Forward AD generates the transpose of what this function expects
-            a = all_analytical[i][j] if is_forward_ad else all_analytical[j][i]
+            if is_forward_ad:
+                a = all_analytical[i][j]
+            else:
+                a = all_analytical[j][i]
             n = n.to(device=a.device)
             updated_atol = _adjusted_atol(atol, all_u[i], all_v[j] if all_v else None)
             if not _allclose_with_type_promotion(a, n.to(a.device), rtol, updated_atol):

@@ -1796,11 +1796,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         example_inputs = (torch.randn(1),)
         m = M().train()
         m = capture_pre_autograd_graph(m, example_inputs)
-        target = (
-            torch.ops.aten.dropout_.default
-            if inplace
-            else torch.ops.aten.dropout.default
-        )
+        if inplace:
+            target = torch.ops.aten.dropout_.default
+        else:
+            target = torch.ops.aten.dropout.default
 
         # Assert that dropout op exists and is in train mode
         dropout_node = self._get_node(m, target)

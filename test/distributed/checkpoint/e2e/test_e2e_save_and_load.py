@@ -320,7 +320,16 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
                 )
                 dist.all_reduce(tensor, op=ReduceOp.SUM)
 
-        sd = {"A": Foo(), "B": Bar()} if self.rank == 0 else {"B": Bar(), "A": Foo()}
+        if self.rank == 0:
+            sd = {
+                "A": Foo(),
+                "B": Bar(),
+            }
+        else:
+            sd = {
+                "B": Bar(),
+                "A": Foo(),
+            }
 
         DCP.save(sd, checkpoint_id=self.temp_dir)
         DCP.load(sd, checkpoint_id=self.temp_dir)

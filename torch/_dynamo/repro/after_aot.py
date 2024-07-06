@@ -374,11 +374,10 @@ def isolate_fails(
     new_env = {**new_env, **env}
     stdout, stderr = TemporaryFile(), TemporaryFile()
 
-    cmd = (
-        BuckTargetWriter(file_name).write(print_msg=False)
-        if use_buck
-        else ["python", file_name]
-    )
+    if use_buck:
+        cmd = BuckTargetWriter(file_name).write(print_msg=False)
+    else:
+        cmd = ["python", file_name]
 
     p = subprocess.Popen(
         cmd,

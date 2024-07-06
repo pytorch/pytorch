@@ -61,7 +61,10 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
         ValueError
     ):  # Signature cannot be inspected, likely it is a built-in fn or written in C
         return
-    input_col_size = len(input_col) if isinstance(input_col, (list, tuple)) else 1
+    if isinstance(input_col, (list, tuple)):
+        input_col_size = len(input_col)
+    else:
+        input_col_size = 1
 
     pos = []
     var_positional = False

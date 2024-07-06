@@ -361,7 +361,10 @@ def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
             # TODO: C++ with coverage is not yet supported
             executable = []
     else:
-        executable = [sys.executable, "-bb"] if not is_cpp_test else ["pytest"]
+        if not is_cpp_test:
+            executable = [sys.executable, "-bb"]
+        else:
+            executable = ["pytest"]
 
     return executable
 

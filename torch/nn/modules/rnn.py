@@ -173,14 +173,18 @@ class RNNBase(Module):
                 b_hh = Parameter(torch.empty(gate_size, **factory_kwargs))
                 layer_params: Tuple[Tensor, ...] = ()
                 if self.proj_size == 0:
-                    layer_params = (w_ih, w_hh, b_ih, b_hh) if bias else (w_ih, w_hh)
+                    if bias:
+                        layer_params = (w_ih, w_hh, b_ih, b_hh)
+                    else:
+                        layer_params = (w_ih, w_hh)
                 else:
                     w_hr = Parameter(
                         torch.empty((proj_size, hidden_size), **factory_kwargs)
                     )
-                    layer_params = (
-                        (w_ih, w_hh, b_ih, b_hh, w_hr) if bias else (w_ih, w_hh, w_hr)
-                    )
+                    if bias:
+                        layer_params = (w_ih, w_hh, b_ih, b_hh, w_hr)
+                    else:
+                        layer_params = (w_ih, w_hh, w_hr)
 
                 suffix = "_reverse" if direction == 1 else ""
                 param_names = ["weight_ih_l{}{}", "weight_hh_l{}{}"]

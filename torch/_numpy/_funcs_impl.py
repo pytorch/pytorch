@@ -648,11 +648,10 @@ def where(
     if condition.dtype != torch.bool:
         condition = condition.to(torch.bool)
 
-    result = (
-        torch.where(condition)
-        if x is None and y is None
-        else torch.where(condition, x, y)
-    )
+    if x is None and y is None:
+        result = torch.where(condition)
+    else:
+        result = torch.where(condition, x, y)
     return result
 
 
@@ -684,11 +683,10 @@ def expand_dims(a: ArrayLike, axis):
 
 def flip(m: ArrayLike, axis=None):
     # XXX: semantic difference: np.flip returns a view, torch.flip copies
-    axis = (
-        tuple(range(m.ndim))
-        if axis is None
-        else _util.normalize_axis_tuple(axis, m.ndim)
-    )
+    if axis is None:
+        axis = tuple(range(m.ndim))
+    else:
+        axis = _util.normalize_axis_tuple(axis, m.ndim)
     return torch.flip(m, axis)
 
 
@@ -749,7 +747,10 @@ def indices(dimensions, dtype: Optional[DTypeLike] = int, sparse=False):
     dimensions = tuple(dimensions)
     N = len(dimensions)
     shape = (1,) * N
-    res = () if sparse else torch.empty((N,) + dimensions, dtype=dtype)
+    if sparse:
+        res = ()
+    else:
+        res = torch.empty((N,) + dimensions, dtype=dtype)
     for i, dim in enumerate(dimensions):
         idx = torch.arange(dim, dtype=dtype).reshape(
             shape[:i] + (dim,) + shape[i + 1 :]
@@ -1173,7 +1174,10 @@ def dot(a: ArrayLike, b: ArrayLike, out: Optional[OutArray] = None):
     a = _util.cast_if_needed(a, dtype)
     b = _util.cast_if_needed(b, dtype)
 
-    result = a * b if a.ndim == 0 or b.ndim == 0 else torch.matmul(a, b)
+    if a.ndim == 0 or b.ndim == 0:
+        result = a * b
+    else:
+        result = torch.matmul(a, b)
 
     if is_bool:
         result = result.to(torch.bool)
@@ -1547,7 +1551,10 @@ def gradient(f: ArrayLike, *varargs, axis=None, edge_order=1):
 
     varargs = _util.ndarrays_to_tensors(varargs)
 
-    axes = tuple(range(N)) if axis is None else _util.normalize_axis_tuple(axis, N)
+    if axis is None:
+        axes = tuple(range(N))
+    else:
+        axes = _util.normalize_axis_tuple(axis, N)
 
     len_axes = len(axes)
     n = len(varargs)
@@ -1954,11 +1961,10 @@ def histogramdd(
 
     from ._normalizations import normalize_array_like, normalize_seq_array_like
 
-    sample = (
-        normalize_array_like(sample).T
-        if isinstance(sample, (list, tuple))
-        else normalize_array_like(sample)
-    )
+    if isinstance(sample, (list, tuple)):
+        sample = normalize_array_like(sample).T
+    else:
+        sample = normalize_array_like(sample)
 
     sample = torch.atleast_2d(sample)
 

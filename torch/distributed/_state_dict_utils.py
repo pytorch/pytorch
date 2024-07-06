@@ -249,11 +249,10 @@ def _gather_state_dict(
             if value.local_shards()
             else cpu_device
         )
-        value = (
-            output_tensor.to(local_shard_device)
-            if output_tensor.device != local_shard_device
-            else output_tensor
-        )
+        if output_tensor.device != local_shard_device:
+            value = output_tensor.to(local_shard_device)
+        else:
+            value = output_tensor
         return value
 
     def dtensor_func(value, pg, device, companion_obj):

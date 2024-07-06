@@ -1716,9 +1716,10 @@ def native_layer_norm_backward(
     mean = _unsqueeze_to_dim(mean, input_cast.dim())  # type: ignore[union-attr]
     rstd = _unsqueeze_to_dim(rstd, input_cast.dim())  # type: ignore[union-attr]
     x_hat = (input_cast - mean) * rstd
-    grad_x_hat = (
-        grad_out_cast * weight_cast if weight_cast is not None else grad_out_cast
-    )
+    if weight_cast is not None:
+        grad_x_hat = grad_out_cast * weight_cast
+    else:
+        grad_x_hat = grad_out_cast
     a = grad_x_hat * N
     b = torch.sum(grad_x_hat, inner_dim_indices, True)
     c1 = torch.mul(grad_x_hat, x_hat)
@@ -2263,7 +2264,10 @@ def native_batch_norm_backward(
     output_mask: List[bool],
 ) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
     input_dtype = input.dtype
-    weight_dtype = weight.dtype if weight is not None else input_dtype
+    if weight is not None:
+        weight_dtype = weight.dtype
+    else:
+        weight_dtype = input_dtype
     computation_dtype = utils.get_computation_dtype(input.dtype)
     (
         grad_out_cast,
@@ -2536,7 +2540,10 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
     # We unroll the sum as we assume that the kernels are going to be small
     ret = None
     for i, j in product(range(vals.shape[-3]), range(vals.shape[-1])):
-        ret = vals[..., i, :, j] if ret is None else ret + vals[..., i, :, j]
+        if ret is None:
+            ret = vals[..., i, :, j]
+        else:
+            ret = ret + vals[..., i, :, j]
     return ret / (length_h * length_w)
 
 
@@ -2613,7 +2620,10 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
     max_size = sequences[0].size()
     trailing_dims = max_size[1:]
     max_len = max(x.size(0) for x in sequences)
-    out_dims = (sequences_size, max_len) if batch_first else (max_len, sequences_size)
+    if batch_first:
+        out_dims = (sequences_size, max_len)
+    else:
+        out_dims = (max_len, sequences_size)
     out_dims = out_dims + trailing_dims
     out = sequences[0].new_full(out_dims, padding_value)
     dim_paddings = (0, 0) * len(trailing_dims)
@@ -2668,7 +2678,10 @@ def _index_copy(
 def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
     z = torch.exp(-torch.abs(self))
-    buffer = self.new_zeros((0,)) if self.is_cuda else z
+    if self.is_cuda:
+        buffer = self.new_zeros((0,))
+    else:
+        buffer = z
     return min - torch.log1p(z), buffer
 
 
@@ -4899,7 +4912,10 @@ def isin_default(elements, test_elements, *, invert=False):
         return torch.empty_like(elements, dtype=torch.bool)
 
     x = elements.view(*elements.shape, *((1,) * test_elements.ndim))
-    cmp = x == test_elements if not invert else x != test_elements
+    if not invert:
+        cmp = x == test_elements
+    else:
+        cmp = x != test_elements
     dim = tuple(range(-1, -test_elements.ndim - 1, -1))
     return cmp.any(dim=dim)
 

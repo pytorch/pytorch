@@ -101,7 +101,10 @@ def fuse(
         maybe_last_node, pattern, matched_node_pattern, obj, node_to_subpattern = \
             fusion_pairs.get(node.name, (None, None, None, None, None))
         # get the corresponding subpattern for the current node
-        node_subpattern = node_to_subpattern.get(node, None) if node_to_subpattern is not None else None
+        if node_to_subpattern is not None:
+            node_subpattern = node_to_subpattern.get(node, None)
+        else:
+            node_subpattern = None
         if maybe_last_node is node:
             assert obj is not None
             root_node_getter = fusion_pattern_to_root_node_getter.get(pattern, default_root_node_getter)

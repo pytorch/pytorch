@@ -286,7 +286,10 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                     self.sparse1 = nn.Sequential(nn.Linear(8, 8), nn.ReLU())
 
             def forward(self, x):
-                sparse = self.sparse0(x) if dist.get_rank() == 0 else self.sparse1(x)
+                if dist.get_rank() == 0:
+                    sparse = self.sparse0(x)
+                else:
+                    sparse = self.sparse1(x)
                 dist.all_reduce(sparse)
                 return self.dense(sparse)
 

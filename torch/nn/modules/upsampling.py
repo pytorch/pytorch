@@ -185,11 +185,10 @@ class Upsample(Module):
         super().__setstate__(state)
 
     def extra_repr(self) -> str:
-        info = (
-            "scale_factor=" + repr(self.scale_factor)
-            if self.scale_factor is not None
-            else "size=" + repr(self.size)
-        )
+        if self.scale_factor is not None:
+            info = "scale_factor=" + repr(self.scale_factor)
+        else:
+            info = "size=" + repr(self.size)
         info += ", mode=" + repr(self.mode)
         return info
 

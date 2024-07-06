@@ -581,7 +581,10 @@ class TestUnion(JitTestCase):
     def test_union_type_refinement_internal_declaration(self):
         def fn(flag: bool) -> str:
             x: int | str | None = None
-            y = "foo" if flag else 1
+            if flag:
+                y = "foo"
+            else:
+                y = 1
             if isinstance(x, str):
                 return x
             else:
@@ -602,7 +605,10 @@ class TestUnion(JitTestCase):
 
     def test_union_branching_does_not_autoinfer_undeclared_union(self):
         def fn(x: int) -> str:
-            y = "foo" if x % 2 else x
+            if x % 2:
+                y = "foo"
+            else:
+                y = x
             if isinstance(y, str):
                 return y
             else:
@@ -619,7 +625,10 @@ class TestUnion(JitTestCase):
     def test_union_branching_does_not_widen_existing_inferred_type(self):
         def fn(x: int) -> str:
             y = "foo"
-            y = "bar" if x % 2 else x
+            if x % 2:
+                y = "bar"
+            else:
+                y = x
             if isinstance(y, str):
                 return y
             else:

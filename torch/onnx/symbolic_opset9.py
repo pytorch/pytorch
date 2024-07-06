@@ -1155,7 +1155,10 @@ def select(g: jit_utils.GraphContext, self, dim, index):
     """
     index = symbolic_helper._maybe_get_scalar(index)
     if (not symbolic_helper._is_value(index)) and (index < 0):
-        end_index = _constants.INT64_MAX if index == -1 else index + 1
+        if index == -1:
+            end_index = _constants.INT64_MAX
+        else:
+            end_index = index + 1
         slice_node = symbolic_helper._slice_helper(
             g, self, axes=[dim], starts=[index], ends=[end_index]
         )
@@ -3130,9 +3133,10 @@ def bucketize(
     # with leading 1s and trailing 0s.
     # e.g., 4 > [1, 3, 4] = [1, 1, 0]
     # The index of the last 1 is the bucket where the element should go.
-    cond = (
-        ge(g, self, expanded_boundaries) if right else gt(g, self, expanded_boundaries)
-    )
+    if right:
+        cond = ge(g, self, expanded_boundaries)
+    else:
+        cond = gt(g, self, expanded_boundaries)
     cond_out = g.op("Cast", cond, to_i=out_type)
     # Sum to get the number of 1s corresponding to each element,
     # which is the same as the bucket index.
@@ -3659,11 +3663,10 @@ def as_tensor(g: jit_utils.GraphContext, data, dtype=None, device=None):
 @_beartype.beartype
 def zeros(g: jit_utils.GraphContext, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device, layout and pin_memory in ONNX, so we ignore it
-    scalar_type = (
-        _type_utils.JitScalarType.FLOAT
-        if dtype is None
-        else _type_utils.JitScalarType(dtype)
-    )
+    if dtype is None:
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
     sizes_ = symbolic_helper._maybe_get_const(sizes, "is")
     if isinstance(sizes_, list) and len(sizes_) == 0:
         sizes = g.op("Constant", value_t=torch.tensor([]).to(torch.int64))
@@ -3723,11 +3726,10 @@ def zero(g: jit_utils.GraphContext, self):
 @symbolic_helper.parse_args("v", "i", "v", "v", "v")
 @_beartype.beartype
 def ones(g: jit_utils.GraphContext, sizes, dtype, layout, device, pin_memory=False):
-    scalar_type = (
-        _type_utils.JitScalarType.FLOAT
-        if dtype is None
-        else _type_utils.JitScalarType(dtype)
-    )
+    if dtype is None:
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
     sizes_ = symbolic_helper._maybe_get_const(sizes, "is")
     if isinstance(sizes_, list) and len(sizes_) == 0:
         sizes = g.op("Constant", value_t=torch.tensor([]).to(torch.int64))
@@ -3787,11 +3789,10 @@ def full(
         return add(g, tmp, value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-        scalar_type = (
-            _type_utils.JitScalarType.FLOAT
-            if dtype is None
-            else _type_utils.JitScalarType(dtype)
-        )
+        if dtype is None:
+            scalar_type = _type_utils.JitScalarType.FLOAT
+        else:
+            scalar_type = _type_utils.JitScalarType(dtype)
         sizes_ = symbolic_helper._maybe_get_const(sizes, "is")
         if isinstance(sizes_, list) and len(sizes_) == 0:
             sizes = g.op("Constant", value_t=torch.tensor([]).to(torch.int64))
@@ -4956,11 +4957,10 @@ def randint(g: jit_utils.GraphContext, low, high, shapes, dtype, *options):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     low_i = symbolic_helper._get_const(low, "i", "low")
     high_i = symbolic_helper._get_const(high, "i", "high")
-    scalar_type = (
-        _type_utils.JitScalarType.INT64
-        if dtype is None
-        else _type_utils.JitScalarType(dtype)
-    )
+    if dtype is None:
+        scalar_type = _type_utils.JitScalarType.INT64
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
     if low_i is None:
         raise symbolic_helper._onnx_unsupported("randint", low)
     if high_i is None:
@@ -5001,11 +5001,10 @@ def randint_like(g: jit_utils.GraphContext, self, low, high, dtype, *options):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     low_i = symbolic_helper._get_const(low, "i", "low")
     high_i = symbolic_helper._get_const(high, "i", "high")
-    scalar_type = (
-        _type_utils.JitScalarType.INT64
-        if dtype is None
-        else _type_utils.JitScalarType(dtype)
-    )
+    if dtype is None:
+        scalar_type = _type_utils.JitScalarType.INT64
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
     if low_i is None:
         raise symbolic_helper._onnx_unsupported("randint", low)
     if high_i is None:
@@ -5030,11 +5029,10 @@ def randint_like(g: jit_utils.GraphContext, self, low, high, dtype, *options):
 @_beartype.beartype
 def randn(g: jit_utils.GraphContext, shapes, dtype, *options):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-    scalar_type = (
-        _type_utils.JitScalarType.FLOAT
-        if dtype is None
-        else _type_utils.JitScalarType(dtype)
-    )
+    if dtype is None:
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
     shape = symbolic_helper._maybe_get_const(shapes, "is")
     if symbolic_helper._is_value(shape):
         shape_const = g.op(
@@ -5058,11 +5056,10 @@ def randn(g: jit_utils.GraphContext, shapes, dtype, *options):
 @_beartype.beartype
 def rand(g: jit_utils.GraphContext, shapes, dtype, *options):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-    scalar_type = (
-        _type_utils.JitScalarType.FLOAT
-        if dtype is None
-        else _type_utils.JitScalarType(dtype)
-    )
+    if dtype is None:
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
     shape = symbolic_helper._maybe_get_const(shapes, "is")
     if symbolic_helper._is_value(shape):
         shape_const = g.op(
@@ -5572,11 +5569,10 @@ def masked_fill_(g: jit_utils.GraphContext, self, mask, value):
 @_onnx_symbolic("aten::index")
 @_beartype.beartype
 def index(g: jit_utils.GraphContext, self, index):
-    indices = (
-        symbolic_helper._unpack_list(index)
-        if symbolic_helper._is_packed_list(index)
-        else [index]
-    )
+    if symbolic_helper._is_packed_list(index):
+        indices = symbolic_helper._unpack_list(index)
+    else:
+        indices = [index]
 
     @_beartype.beartype
     def try_mask_to_index(index):
@@ -6145,11 +6141,10 @@ def _kl_div_non_log_target_impl(g: jit_utils.GraphContext, input, target):
 @symbolic_helper.parse_args("v", "v", "i", "b")
 @_beartype.beartype
 def kl_div(g: jit_utils.GraphContext, input, target, reduction, log_target):
-    output = (
-        _kl_div_log_target_impl(g, input, target)
-        if log_target
-        else _kl_div_non_log_target_impl(g, input, target)
-    )
+    if log_target:
+        output = _kl_div_log_target_impl(g, input, target)
+    else:
+        output = _kl_div_non_log_target_impl(g, input, target)
 
     if reduction == 0:
         return output
@@ -6219,7 +6214,10 @@ def as_strided(g: jit_utils.GraphContext, self, sizes, strides, offset=None):
             tmp_ind = g.op(
                 "Mul", tmp_ind, g.op("Constant", value_t=torch.tensor([stride]))
             )
-            ind = tmp_ind if ind is None else g.op("Add", ind, tmp_ind)
+            if ind is None:
+                ind = tmp_ind
+            else:
+                ind = g.op("Add", ind, tmp_ind)
         if offset:
             ind = g.op("Add", ind, g.op("Constant", torch.tensor([offset])))
         return g.op("Gather", self_1d, ind)

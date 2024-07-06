@@ -801,15 +801,15 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
     # lock the mutex when we release variables and in Node::apply to protect thread safety
     # see Note [Thread Safety on Autograd Node]
-    thread_lock = (
-        "std::lock_guard<std::mutex> lock(mutex_);"
-        if len(release_variables) > 0
-        else ""
-    )
+    if len(release_variables) > 0:
+        thread_lock = "std::lock_guard<std::mutex> lock(mutex_);"
+    else:
+        thread_lock = ""
 
-    will_release_variables = (
-        WILL_RELEASE_VARIABLES.substitute() if uses_retain_variables(info) else ""
-    )
+    if uses_retain_variables(info):
+        will_release_variables = WILL_RELEASE_VARIABLES.substitute()
+    else:
+        will_release_variables = ""
 
     body: list[str] = []
 
@@ -842,11 +842,10 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
                     ) in ("Tensor", "Tensor?"):
                         formula = "any_grad_defined ? (" + formula + ") : Tensor()"
                         checks_any_grad_defined = True
-            derivative_template = (
-                DERIVATIVE_SINGLE_FOREACH
-                if info.name.startswith("_foreach_")
-                else DERIVATIVE_SINGLE
-            )
+            if info.name.startswith("_foreach_"):
+                derivative_template = DERIVATIVE_SINGLE_FOREACH
+            else:
+                derivative_template = DERIVATIVE_SINGLE
             return (
                 checks_any_grad_defined,
                 derivative_template.substitute(name=var_names[0], derivative=formula),
@@ -888,7 +887,10 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
             "bool any_grad_defined = any_variable_defined(grads);",
         )
 
-    superclass = "Node" if info.name in UNTRACEABLE_FUNCTIONS else "TraceableFunction"
+    if info.name in UNTRACEABLE_FUNCTIONS:
+        superclass = "Node"
+    else:
+        superclass = "TraceableFunction"
 
     all_getsetdef_structs = (
         ",\n".join(py_getsetdef_structs) + "," if len(py_getsetdef_structs) != 0 else ""
