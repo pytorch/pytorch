@@ -417,10 +417,7 @@ class TestNNInit(TestCase):
                         fan_in *= input_tensor[0, 0].numel()
                         fan_out *= input_tensor[0, 0].numel()
 
-                    if mode == "fan_in":
-                        n = fan_in
-                    else:
-                        n = fan_out
+                    n = fan_in if mode == "fan_in" else fan_out
 
                     expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
                     bounds = expected_std * math.sqrt(3.0)
@@ -448,10 +445,7 @@ class TestNNInit(TestCase):
                         fan_in *= input_tensor[0, 0].numel()
                         fan_out *= input_tensor[0, 0].numel()
 
-                    if mode == "fan_in":
-                        n = fan_in
-                    else:
-                        n = fan_out
+                    n = fan_in if mode == "fan_in" else fan_out
 
                     expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
                     assert self._is_normal(input_tensor, 0, expected_std)

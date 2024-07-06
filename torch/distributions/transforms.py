@@ -786,10 +786,11 @@ class AffineTransform(Transform):
     def log_abs_det_jacobian(self, x, y):
         shape = x.shape
         scale = self.scale
-        if isinstance(scale, numbers.Real):
-            result = torch.full_like(x, math.log(abs(scale)))
-        else:
-            result = torch.abs(scale).log()
+        result = (
+            torch.full_like(x, math.log(abs(scale)))
+            if isinstance(scale, numbers.Real)
+            else torch.abs(scale).log()
+        )
         if self.event_dim:
             result_size = result.size()[: -self.event_dim] + (-1,)
             result = result.view(result_size).sum(-1)

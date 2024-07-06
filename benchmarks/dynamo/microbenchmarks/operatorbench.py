@@ -143,10 +143,7 @@ def skip_operator(operator):
         print(f"Skipping {operator}, no inductor impl")
         return True
 
-    if "convolution" in str(operator):
-        return True
-
-    return False
+    return "convolution" in str(operator)
 
 
 @click.command()
@@ -203,10 +200,7 @@ def benchmark(
 
     dtype = torch.float16 if dtype == "float16" else torch.float32
 
-    if op == "all":
-        ops = loader.get_all_ops()
-    else:
-        ops = [eval(op)]
+    ops = loader.get_all_ops() if op == "all" else [eval(op)]
 
     max_samples = max_samples + start_idx
     for operator in ops:

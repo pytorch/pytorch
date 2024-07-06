@@ -52,6 +52,6 @@ class verbose:
         ), "Failed to set MKL into verbose mode. Please consider to disable this verbose scope."
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: object) -> None:
         torch._C._verbose.mkl_set_verbose(VERBOSE_OFF)
         return False

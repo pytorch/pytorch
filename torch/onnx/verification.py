@@ -330,10 +330,7 @@ def _prepare_input_for_pytorch(args, kwargs):
     # In-place operators will update input tensor data as well.
     # Thus inputs are replicated before every forward call.
     args = copy.deepcopy(args)
-    if kwargs:
-        kwargs = copy.deepcopy(kwargs)
-    else:
-        kwargs = {}
+    kwargs = copy.deepcopy(kwargs) if kwargs else {}
     return args, kwargs
 
 
@@ -1733,17 +1730,12 @@ def _all_nodes(nodes: Collection[torch.Node]) -> Set[torch.Node]:
 
 @_beartype.beartype
 def _has_uses_by_nodes(value: torch.Value, nodes: Collection[torch.Node]) -> bool:
-    if any(use.user in nodes for use in value.uses()):
-        return True
-    return False
+    return any(use.user in nodes for use in value.uses())
 
 
 @_beartype.beartype
 def _node_has_uses_by(node: torch.Node, nodes: Collection[torch.Node]) -> bool:
-    for output in node.outputs():
-        if _has_uses_by_nodes(output, nodes):
-            return True
-    return False
+    return any(_has_uses_by_nodes(output, nodes) for output in node.outputs())
 
 
 @_beartype.beartype

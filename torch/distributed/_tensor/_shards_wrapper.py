@@ -155,9 +155,7 @@ class LocalShardsWrapper(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new
             aten.equal.default(x, y) for x, y in zip(a.local_shards(), b.local_shards())
         ):
             return False
-        if not a.storage_metadata() == b.storage_metadata():
-            return False
-        return True
+        return a.storage_metadata() == b.storage_metadata()
 
     @staticmethod
     # pyre-fixme[3]: Return type must be annotated.

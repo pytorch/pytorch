@@ -158,10 +158,11 @@ def sympy_interp(
     if (handler_name := INDEX_DTYPE_HANDLERS.get(expr.func)) is not None:
         return getattr(analysis, handler_name)(*args, index_dtype)
 
-    if hasattr(expr.func, "_torch_handler_name"):
-        handler_name = expr.func._torch_handler_name
-    else:
-        handler_name = handlers()[expr.func]
+    handler_name = (
+        expr.func._torch_handler_name
+        if hasattr(expr.func, "_torch_handler_name")
+        else handlers()[expr.func]
+    )
     handler = getattr(analysis, handler_name)
     try:
         if handler_name in ASSOCIATIVE_OPS:

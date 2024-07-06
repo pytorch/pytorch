@@ -104,9 +104,7 @@ def maybe_set_hip_visible_devies():
 
 
 def strtobool(s):
-    if s.lower() in ["", "0", "false", "off"]:
-        return False
-    return True
+    return s.lower() not in ["", "0", "false", "off"]
 
 
 class TestChoices(list):
@@ -363,10 +361,7 @@ def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
             # TODO: C++ with coverage is not yet supported
             executable = []
     else:
-        if not is_cpp_test:
-            executable = [sys.executable, "-bb"]
-        else:
-            executable = ["pytest"]
+        executable = [sys.executable, "-bb"] if not is_cpp_test else ["pytest"]
 
     return executable
 

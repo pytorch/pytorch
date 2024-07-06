@@ -82,7 +82,7 @@ prims = torch.ops.prims
 needs_realized_inputs: Set[torch._ops.OpOverload] = set()
 foreach_ops: Set[torch._ops.OpOverload] = set()
 inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
-inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = dict()
+inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
 
 
@@ -192,10 +192,7 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
 
 
 def get_overloads(aten_fn):
-    if not isinstance(aten_fn, (list, tuple)):
-        aten_fn = [aten_fn]
-    else:
-        aten_fn = list(aten_fn)
+    aten_fn = [aten_fn] if not isinstance(aten_fn, (list, tuple)) else list(aten_fn)
 
     for fn in list(aten_fn):
         if isinstance(fn, torch._ops.OpOverloadPacket):
@@ -519,10 +516,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 output_ind,
                 args,
             ) in group:
-                if allow_alpha:
-                    output = pw_fn(*args, alpha=alpha)
-                else:
-                    output = pw_fn(*args)
+                output = pw_fn(*args, alpha=alpha) if allow_alpha else pw_fn(*args)
 
                 outputs[output_ind] = output
 
@@ -1389,10 +1383,7 @@ def cat(inputs, dim=0):
         if isinstance(x, (TensorBox, ir.StorageBox)):
             return should_lower_cat_input(unwrap_tensor(x))
 
-        if isinstance(x, ir.Pointwise):
-            return True
-
-        return False
+        return isinstance(x, ir.Pointwise)
 
     # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
     #             We will revisit this later after enabling vectorization on index_expr.
@@ -1470,10 +1461,7 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
         )
 
     base_idx = (0, 0)
-    if offset_negative:
-        base_idx = (-offset, 0)
-    else:
-        base_idx = (0, offset)
+    base_idx = (-offset, 0) if offset_negative else (0, offset)
 
     sizes = [s for i, s in enumerate(original_shape) if i not in (dim1, dim2)]
     sizes.append(diag_size)
@@ -2488,10 +2476,11 @@ def _unwrap(x):
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     assert_nyi(not pin_memory, "pin_memory")
-    if isinstance(_unwrap(data), int):
-        dtype = dtype or torch.int64
-    else:
-        dtype = dtype or torch.get_default_dtype()
+    dtype = (
+        dtype or torch.int64
+        if isinstance(_unwrap(data), int)
+        else dtype or torch.get_default_dtype()
+    )
 
     ranges: List[sympy.Expr] = []
 
@@ -2704,10 +2693,7 @@ def create_tensor_like(creation_fn):
     ):
         assert_nyi(not pin_memory, "pin_memory")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
-        if dtype is None:
-            dtype = x.get_dtype()
-        else:
-            dtype = decode_dtype(dtype)
+        dtype = x.get_dtype() if dtype is None else decode_dtype(dtype)
         device = device or x.get_device()
         size = list(x.get_size())
         return creation_fn(
@@ -3194,10 +3180,11 @@ def _unsafe_masked_index(self, mask, indices, fill):
     self_loader = self.make_loader()
 
     def inner_fn(idx):
-        if mask.dtype != torch.bool:
-            mask_val = ops.to_dtype(mask_loader(idx), torch.bool)
-        else:
-            mask_val = mask_loader(idx)
+        mask_val = (
+            ops.to_dtype(mask_loader(idx), torch.bool)
+            if mask.dtype != torch.bool
+            else mask_loader(idx)
+        )
         return ops.masked(mask_val, lambda: self_loader(_unsafe_index_fn(idx)), fill)
 
     return Pointwise.create(
@@ -3841,14 +3828,12 @@ def _low_memory_max_pool2d_with_offsets(
             val = x_loader([*prefix, ih, iw])
             if return_index:
                 index = ops.index_expr(h_inc * kernel_size[1] + w_inc, torch.int8)
-                if maxindex is None:
-                    maxindex = index
-                else:
-                    maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
-            if maxval is None:
-                maxval = val
-            else:
-                maxval = ops.maximum(val, maxval)
+                maxindex = (
+                    index
+                    if maxindex is None
+                    else ops.where(ops.gt(val, maxval), index, maxindex)
+                )
+            maxval = val if maxval is None else ops.maximum(val, maxval)
         if return_index:
             return maxindex
         else:
@@ -4136,10 +4121,7 @@ def _adaptive_pooling_fn(
                 [h_start_index, w_start_index],
                 [h_end_index, w_end_index],
             )
-            if result is None:
-                result = val
-            else:
-                result = pooling_fn(val, result)
+            result = val if result is None else pooling_fn(val, result)
         return result
 
     return fn
@@ -4183,15 +4165,13 @@ def _adaptive_pooling_fn_with_idx(
                 (h_start_index + ih) * w_in + w_start_index + iw, torch.int64
             )
 
-            if maxindex is None:
-                maxindex = index
-            else:
-                maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
+            maxindex = (
+                index
+                if maxindex is None
+                else ops.where(ops.gt(val, maxval), index, maxindex)
+            )
 
-            if maxval is None:
-                maxval = val
-            else:
-                maxval = pooling_fn(val, maxval)
+            maxval = val if maxval is None else pooling_fn(val, maxval)
 
         return maxindex
 
@@ -4441,10 +4421,7 @@ def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
                     maxindex = ops.where(
                         ops.or_(ops.gt(val, maxval), ops.isnan(val)), index, maxindex
                     )
-            if maxval is None:
-                maxval = val
-            else:
-                maxval = ops.maximum(val, maxval)
+            maxval = val if maxval is None else ops.maximum(val, maxval)
         if return_index:
             return maxindex
         else:
@@ -4637,17 +4614,11 @@ def _avg_poolnd(
         for ih in itertools.product(*[range(kernel_size[i]) for i in range(dim)]):
             inp = [b[i] * stride[i] + ih[i] - padding[i] for i in range(dim)]
             val = loader([*prefix, *inp])
-            if total is None:
-                total = val
-            else:
-                total = ops.add(val, total)
+            total = val if total is None else ops.add(val, total)
         return total
 
     if not had_padding or divisor_override:
-        if divisor_override:
-            scale = 1 / divisor_override
-        else:
-            scale = 1.0 / window_size
+        scale = 1 / divisor_override if divisor_override else 1.0 / window_size
 
         def fn(idx):
             return ops.mul(fn_sum(idx, x_loader), ops.constant(scale, dtype))
@@ -5365,10 +5336,7 @@ def pow(a, b):
 
 
 def mutate_to(changed, val, unsafe_alias=False):
-    if isinstance(changed, TensorBox):
-        changed_data = changed.data
-    else:
-        changed_data = changed
+    changed_data = changed.data if isinstance(changed, TensorBox) else changed
     if isinstance(val, TensorBox):
         val = val.data
 
@@ -5488,10 +5456,11 @@ def div_prim(a, b):
 
     if (divisor := get_constant_value(b)) is not None:
         # Replace divide by constant with multiply by reciprocal
-        if divisor.value == 0:
-            reciprocal = math.copysign(float("inf"), divisor.value)
-        else:
-            reciprocal = 1.0 / divisor.value
+        reciprocal = (
+            math.copysign(float("inf"), divisor.value)
+            if divisor.value == 0
+            else 1.0 / divisor.value
+        )
         return mul(a, reciprocal)
 
     def fn(*args):

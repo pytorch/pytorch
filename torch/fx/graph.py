@@ -245,10 +245,7 @@ def _format_target(base: str, target: str) -> str:
     elems = target.split('.')
     r = base
     for e in elems:
-        if not e.isidentifier():
-            r = f'getattr({r}, "{e}")'
-        else:
-            r = f'{r}.{e}'
+        r = f'getattr({r}, "{e}")' if not e.isidentifier() else f"{r}.{e}"
     return r
 
 class _InsertPoint:
@@ -259,7 +256,7 @@ class _InsertPoint:
     def __enter__(self):
         pass
 
-    def __exit__(self, type, value, tb):
+    def __exit__(self, *args: object) -> None:
         self.graph._insert = self.orig_insert
 
 class _node_list:
@@ -1184,12 +1181,7 @@ class Graph:
 
             res = getattr(submod, name)
 
-            if (not isinstance(res, torch.nn.Module)
-                    and not isinstance(res, torch.nn.Parameter)
-                    and name not in submod._buffers):
-                return False
-
-            return True
+            return isinstance(res, (torch.nn.Module, torch.nn.Parameter)) or name in submod._buffers
 
         if (self.owning_module and
                 not _get_attr_reference_exists(self.owning_module, qualified_name)):

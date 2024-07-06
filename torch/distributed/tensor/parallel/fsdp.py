@@ -79,10 +79,7 @@ def _create_sharded_tensor_md_from_dt(
     my_rank = dist.get_rank(dt_pg)
     scapegoat_rank = 0 if my_rank > 0 else 1
 
-    if dt.placements[0].is_shard():
-        shard_count = dt_pg.size()
-    else:
-        shard_count = 1
+    shard_count = dt_pg.size() if dt.placements[0].is_shard() else 1
 
     for i in range(shard_count):
         offsets, sizes = _get_box_for(dt, i)

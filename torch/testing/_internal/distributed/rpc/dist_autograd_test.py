@@ -166,10 +166,7 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
 def _run_trainer(rref_t1, t2, ps, rank_diff, sparse):
     with dist_autograd.context() as context_id:
         ret = rpc.rpc_sync(ps, my_rref_add, args=(rref_t1, t2))
-        if sparse:
-            loss = torch.sparse.sum(ret)
-        else:
-            loss = ret.sum()
+        loss = torch.sparse.sum(ret) if sparse else ret.sum()
         dist_autograd.backward(context_id, [loss])
         # prevent deleting dist autograd context
         rpc.rpc_sync(ps, _set_rpc_done, args=(context_id, rank_diff))
@@ -180,10 +177,7 @@ def _run_trainer(rref_t1, t2, ps, rank_diff, sparse):
 def _run_trainer_torchscript(rref_t1, t2, ps, rank_diff, sparse):
     with dist_autograd.context() as context_id:
         ret = rpc.rpc_sync(ps, my_script_ref_add, args=(rref_t1, t2))
-        if sparse:
-            loss = torch.sparse.sum(ret)
-        else:
-            loss = ret.sum()
+        loss = torch.sparse.sum(ret) if sparse else ret.sum()
         dist_autograd.backward(context_id, [loss])
         # prevent deleting dist autograd context
         rpc.rpc_sync(ps, _set_rpc_done, args=(context_id, rank_diff))
@@ -612,10 +606,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                 worker_name(self._next_rank()),
                 torch.add,
                 args=(t1, t2))
-            if sparse:
-                loss = torch.sparse.sum(loss)
-            else:
-                loss = loss.sum()
+            loss = torch.sparse.sum(loss) if sparse else loss.sum()
             dist_autograd.backward(context_id, [loss], retain_graph=True)
             self.assertIsNone(t1.grad)
             self.assertIsNone(t2.grad)
@@ -623,10 +614,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
             # Now populate .grad with local autograd engine and
             # verify dist autograd doesn't mess with it.
             loss_local = torch.add(t1, t2)
-            if sparse:
-                loss_local = torch.sparse.sum(loss_local)
-            else:
-                loss_local = loss_local.sum()
+            loss_local = torch.sparse.sum(loss_local) if sparse else loss_local.sum()
             loss_local.backward()
             self.assertIsNotNone(t1.grad)
             self.assertIsNotNone(t2.grad)
@@ -644,10 +632,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
     # tensor lives on the rref owner.
     def _backward_rref(self, callee, rref_owner, t1, t2, local_grads, sparse):
         local_ret = torch.add(t1, t2)
-        if sparse:
-            local_ret = torch.sparse.sum(local_ret)
-        else:
-            local_ret = local_ret.sum()
+        local_ret = torch.sparse.sum(local_ret) if sparse else local_ret.sum()
         local_ret.backward()
         with dist_autograd.context() as context_id:
             if sparse:
@@ -665,10 +650,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                     callee, my_nested_rref_add, args=(rref_owner, rref_t1, t2)
                 )
             ret = rref.to_here()
-            if sparse:
-                ret = torch.sparse.sum(ret)
-            else:
-                ret = ret.sum()
+            ret = torch.sparse.sum(ret) if sparse else ret.sum()
             dist_autograd.backward(context_id, [ret])
 
             # verify grads on caller
@@ -774,10 +756,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
         for exec_mode in [ExecMode.LOCAL, ExecMode.REMOTE]:
             with dist_autograd.context() as context_id:
                 loss = self._exec_func(exec_mode, torch.add, t1, t2)
-                if sparse:
-                    loss = torch.sparse.sum(loss)
-                else:
-                    loss = loss.sum()
+                loss = torch.sparse.sum(loss) if sparse else loss.sum()
                 local_grads = self._verify_backwards(
                     exec_mode, [loss], context_id, local_grads, t1, t2
                 )
@@ -789,10 +768,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
         for exec_mode in [ExecMode.LOCAL, ExecMode.REMOTE]:
             with dist_autograd.context() as context_id:
                 ret = self._exec_func(exec_mode, my_py_add, t1, t2)
-                if sparse:
-                    loss = torch.sparse.sum(ret)
-                else:
-                    loss = ret.sum()
+                loss = torch.sparse.sum(ret) if sparse else ret.sum()
                 local_grads = self._verify_backwards(
                     exec_mode, [loss], context_id, local_grads, t1, t2
                 )
@@ -809,10 +785,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
         ]:
             with dist_autograd.context() as context_id:
                 forward_ret = self._exec_func(exec_mode, my_script_add, t1, t2)
-                if sparse:
-                    loss = torch.sparse.sum(forward_ret)
-                else:
-                    loss = forward_ret.sum()
+                loss = torch.sparse.sum(forward_ret) if sparse else forward_ret.sum()
                 ret = self._verify_backwards(
                     exec_mode, [loss], context_id, local_grads, t1, t2
                 )
@@ -825,10 +798,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                 DistAutogradTest._test_nested_backward_accumulate_grads,
                 args=(t1, t2, self._next_rank()),
             )
-            if sparse:
-                loss = torch.sparse.sum(ret)
-            else:
-                loss = ret.sum()
+            loss = torch.sparse.sum(ret) if sparse else ret.sum()
             # Run backward twice.
             dist_autograd.backward(context_id, [loss], retain_graph=True)
             dist_autograd.backward(context_id, [loss])
@@ -838,10 +808,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
         t4 = t1 + t2
         res = t3 + t4
         loss = t1 * t2 * t3 * t4 * res
-        if sparse:
-            loss = torch.sparse.sum(loss)
-        else:
-            loss = loss.sum()
+        loss = torch.sparse.sum(loss) if sparse else loss.sum()
         torch.autograd.backward([loss])
 
         # Now run distributed autograd.
@@ -851,10 +818,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                 DistAutogradTest._nested_python_udf,
                 args=(t1, t2, self._next_rank()),
             )
-            if sparse:
-                loss = torch.sparse.sum(loss)
-            else:
-                loss = loss.sum()
+            loss = torch.sparse.sum(loss) if sparse else loss.sum()
             dist_autograd.backward(context_id, [loss])
             grads = dist_autograd.get_gradients(context_id)
             self.assertEqual(t1.grad, grads[t1])
@@ -867,10 +831,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                     exec_mode, DistAutogradTest._mixed_requires_grad_operaton, t1, t2
                 )
                 self.assertEqual(t1 * t2, ret)
-                if sparse:
-                    loss = torch.sparse.sum(ret)
-                else:
-                    loss = ret.sum()
+                loss = torch.sparse.sum(ret) if sparse else ret.sum()
                 dist_autograd.backward(context_id, [loss])
                 self.assertTrue(t1.requires_grad)
                 self.assertFalse(t2.requires_grad)
@@ -885,10 +846,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                 worker_name(self._next_rank()),
                 torch.add,
                 args=(t1, t2))
-            if sparse:
-                loss = torch.sparse.sum(loss)
-            else:
-                loss = loss.sum()
+            loss = torch.sparse.sum(loss) if sparse else loss.sum()
             # Run backward in a loop multiple times.
             for i in range(1000):
                 dist_autograd.backward(context_id, [loss], retain_graph=True)
@@ -932,10 +890,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                 ret = self._exec_func_with_dst(
                     dst, exec_mode, torch.add, t1, t2
                 )
-                if sparse:
-                    loss = torch.sparse.sum(ret)
-                else:
-                    loss = ret.sum()
+                loss = torch.sparse.sum(ret) if sparse else ret.sum()
                 ret = self._verify_backwards(
                     exec_mode, [loss], context_id, local_grads, t1, t2
                 )

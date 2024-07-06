@@ -188,7 +188,7 @@ class device:
     def __enter__(self):
         self.prev_idx = torch._C._accelerator_hooks_maybe_exchange_device(self.idx)
 
-    def __exit__(self, type: Any, value: Any, traceback: Any):
+    def __exit__(self, *args: object) -> None:
         self.idx = torch._C._accelerator_hooks_maybe_exchange_device(self.prev_idx)
         return False
 
@@ -236,7 +236,7 @@ class StreamContext:
                 self.dst_prev_stream = torch.mtia.current_stream(cur_stream.device)
         torch.mtia.set_stream(cur_stream)
 
-    def __exit__(self, type: Any, value: Any, traceback: Any):
+    def __exit__(self, *args: object) -> None:
         # Local cur_stream variable for type refinement
         cur_stream = self.stream
         # If stream is None or no MTIA device available, return

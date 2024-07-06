@@ -142,9 +142,7 @@ class TestTensorBuiltins(JitTestCase):
         def should_keep(tensor, name):
             if inspect.isroutine(getattr(tensor, name)):
                 return False
-            if name.startswith("_"):
-                return False
-            return True
+            return not name.startswith("_")
 
         tensor = torch.arange(4, dtype=torch.float).view(2, 2)
         keys = dir(tensor)

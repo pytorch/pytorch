@@ -225,10 +225,7 @@ def is_concrete_int(a: Union[int, SymInt]) -> bool:
     if isinstance(a, int):
         return True
 
-    if isinstance(a.node.expr, sympy.core.numbers.Integer):
-        return True
-
-    return False
+    return isinstance(a.node.expr, sympy.core.numbers.Integer)
 
 # In obscure Meta only situations, sympy.logic.boolalg doesn't exist at runtime.
 # So make sure only type checker evaluates this alias.
@@ -403,10 +400,7 @@ def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
     if isinstance(a, bool):
         return True
 
-    if isinstance(a.node.expr, (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse)):
-        return True
-
-    return False
+    return isinstance(a.node.expr, (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse))
 
 def is_nested_int(s):
     return isinstance(s, torch.SymInt) and s.node.is_nested_int()
@@ -3477,10 +3471,7 @@ class ShapeEnv:
                 symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name] = out
             return out
 
-        if do_not_specialize_zero_one:
-            specialize_zero_one = False
-        else:
-            specialize_zero_one = self.specialize_zero_one
+        specialize_zero_one = False if do_not_specialize_zero_one else self.specialize_zero_one
 
         assert isinstance(source, Source), f"{type(source)} {source}"
         assert not (positive and val < 0), f"positive set for negative value: {val}"
@@ -4452,10 +4443,7 @@ class ShapeEnv:
         # axioms with compute hint NYE
         assert not compute_hint or not axioms
 
-        if var_to_range is None:
-            var_ranges = self.var_to_range
-        else:
-            var_ranges = dict(var_to_range)
+        var_ranges = self.var_to_range if var_to_range is None else dict(var_to_range)
 
         expr = self.simplify(expr)
 

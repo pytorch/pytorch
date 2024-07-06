@@ -702,10 +702,7 @@ def _get_numerical_vJu(
 def _check_jacobians_equal(j1, j2, atol):
     # Check whether the max difference between two Jacobian tensors are within some
     # tolerance `atol`.
-    for j1_x, j2_x in zip(j1, j2):
-        if j1_x.numel() != 0 and (j1_x - j2_x).abs().max() > atol:
-            return False
-    return True
+    return all(not (j1_x.numel() != 0 and (j1_x - j2_x).abs().max() > atol) for j1_x, j2_x in zip(j1, j2))
 
 
 def _stack_and_check_tensors(
@@ -1842,10 +1839,7 @@ def _check_analytical_numerical_equal(
     for i, all_numerical_for_input_i in enumerate(all_numerical):
         for j, n in enumerate(all_numerical_for_input_i):
             # Forward AD generates the transpose of what this function expects
-            if is_forward_ad:
-                a = all_analytical[i][j]
-            else:
-                a = all_analytical[j][i]
+            a = all_analytical[i][j] if is_forward_ad else all_analytical[j][i]
             n = n.to(device=a.device)
             updated_atol = _adjusted_atol(atol, all_u[i], all_v[j] if all_v else None)
             if not _allclose_with_type_promotion(a, n.to(a.device), rtol, updated_atol):

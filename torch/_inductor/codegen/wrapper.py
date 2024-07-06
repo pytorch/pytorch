@@ -502,7 +502,7 @@ class WrapperCodeGen(CodeGen):
         self.freed: Set[BufferName] = set()
 
         # maps from reusing buffer to reused buffer
-        self.reuses: Dict[BufferName, BufferName] = dict()
+        self.reuses: Dict[BufferName, BufferName] = {}
 
         self.write_get_raw_stream = functools.lru_cache(None)(  # type: ignore[assignment]
             self.write_get_raw_stream
@@ -890,7 +890,7 @@ class WrapperCodeGen(CodeGen):
             del async_compile
         """
         )
-        scope = dict()  # type: ignore[var-annotated]
+        scope = {}  # type: ignore[var-annotated]
         tuning_code = (
             self.kernel_autotune_defs.getvalue() + self.kernel_autotune_calls.getvalue()
         )
@@ -1807,17 +1807,14 @@ class WrapperCodeGen(CodeGen):
 
     def can_reuse(self, input_buffer, output_buffer=None):
         name = input_buffer.get_name()
-        if (
+        return not (
             name in V.graph.removed_buffers
             or name in V.graph.graph_inputs
             or name in V.graph.constants
             or name in V.graph.torchbind_constants
             or name in V.graph.never_reuse_buffers
             or name in self.freed
-        ):
-            return False
-
-        return True
+        )
 
     def did_reuse(self, buffer, reused_buffer):
         # Check whether a given buffer was reused by a possible reuser in the wrapper codegen

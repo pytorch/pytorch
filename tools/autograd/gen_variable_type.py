@@ -1548,10 +1548,11 @@ def emit_body(
     ) -> str:
         call = ""
         rhs_value: str | None = None
-        if not any(r.type.is_tensor_like() for r in f.func.returns):
-            rhs_value = var
-        else:
-            rhs_value = f"std::move({var})"
+        rhs_value = (
+            var
+            if not any(r.type.is_tensor_like() for r in f.func.returns)
+            else f"std::move({var})"
+        )
         assert rhs_value is not None
         call += ASSIGN_RETURN_VALUE.substitute(
             return_values=tie_return_values(f), rhs_value=rhs_value
@@ -1920,10 +1921,7 @@ def emit_body(
                     "self_t = GradMode::is_enabled() ? self_t.clone() : self_t;"
                 )
 
-            if inplace:
-                is_inplace_str = "true"
-            else:
-                is_inplace_str = "false"
+            is_inplace_str = "true" if inplace else "false"
 
             requires_fw_grad = get_any_has_forward_grad_name(derivative.var_names)
 

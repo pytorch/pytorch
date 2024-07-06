@@ -51,10 +51,7 @@ def _frame_filter(name, filename):
     for of in omit_functions:
         if of in name:
             return False
-    for of in omit_filenames:
-        if of in filename:
-            return False
-    return True
+    return all(of not in filename for of in omit_filenames)
 
 def _frames_fmt(frames, full_filename=False, reverse=False):
     if reverse:
@@ -595,10 +592,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     def _read(name):
-        if name == '-':
-            f = sys.stdin.buffer
-        else:
-            f = open(name, 'rb')
+        f = sys.stdin.buffer if name == "-" else open(name, "rb")
         data = pickle.load(f)
         if isinstance(data, list):  # segments only...
             data = {'segments': data, 'traces': []}

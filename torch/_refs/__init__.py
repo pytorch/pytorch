@@ -354,9 +354,7 @@ aten = torch._ops.ops.aten
 
 
 def is_noncontiguous_supported(device):
-    if device is not None and device.type == "hpu":
-        return False
-    return True
+    return device is None or device.type != "hpu"
 
 
 def handle_noncontiguous_outputs(input_tlist, output):
@@ -1087,10 +1085,7 @@ def add(
         ):
             msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
-        if isinstance(b, TensorLike):
-            b = prims.mul(b, alpha)
-        else:
-            b = b * alpha
+        b = prims.mul(b, alpha) if isinstance(b, TensorLike) else b * alpha
 
     output = prims.add(a, b)
     return handle_noncontiguous_outputs([a, b], output)
@@ -1230,10 +1225,7 @@ def float_power(
     # Handles type promotion
     dtype = utils.get_higher_dtype(a, b)
     assert dtype is not None
-    if utils.is_complex_dtype(dtype):
-        dtype = torch.complex128
-    else:
-        dtype = torch.float64
+    dtype = torch.complex128 if utils.is_complex_dtype(dtype) else torch.float64
 
     # Float power has the following contiguous cast behavior to be
     # consistent with its C++ impl
@@ -3778,9 +3770,7 @@ def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
 
 @register_decomposition(aten.roll)
 @out_wrapper()
-def roll(
-    a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
-) -> TensorLikeType:
+def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
     dims = utils.canonicalize_dims(a.ndim, dims)
     # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
@@ -3940,7 +3930,7 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
         lambda: "Dimension specified as 0 but tensor has no dimensions",
     )
     if guard_size_oblivious(t.shape[dim] == 0):
-        return tuple()
+        return ()
     else:
         return tuple(
             torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim)
@@ -5935,10 +5925,7 @@ def bucketize(
     # For first iteration through loop we can skip some checks, we have separate implementation
     mid = start + (end - start) // 2
     mid_val = boundaries[mid]
-    if right:
-        cond_mid = mid_val > a
-    else:
-        cond_mid = mid_val >= a
+    cond_mid = mid_val > a if right else mid_val >= a
     start = torch.where(cond_mid, start, mid + 1)
 
     if n_boundaries > 1:
@@ -5953,10 +5940,7 @@ def bucketize(
             # If right is true, the buckets are closed on the *left*
             # (i.e., we are doing the equivalent of std::upper_bound in C++)
             # Otherwise they are closed on the right (std::lower_bound)
-            if right:
-                cond_mid = mid_val > a
-            else:
-                cond_mid = mid_val >= a
+            cond_mid = mid_val > a if right else mid_val >= a
             start = torch.where((~cond_mid) & cond_update, mid + 1, start)
 
     return start.to(dtype=out_dtype)
@@ -6391,10 +6375,11 @@ def _infer_scalar_type(obj):
                 raise TypeError("new(): self-referential lists are incompatible")
             """
             item_scalarType = _infer_scalar_type(cur_item)  # recurse!
-            if scalarType is not None:
-                scalarType = torch.promote_types(scalarType, item_scalarType)
-            else:
-                scalarType = item_scalarType
+            scalarType = (
+                torch.promote_types(scalarType, item_scalarType)
+                if scalarType is not None
+                else item_scalarType
+            )
             if scalarType is torch.cdouble:
                 # this won't change (unless we hit undefined, but that will
                 # fail later)

@@ -90,9 +90,7 @@ def is_functional_schema(schema: Any) -> bool:
         )
         if is_non_mutating_view:
             return False
-        if not schema.returns:
-            return False
-        return True
+        return schema.returns
 
     if isinstance(schema, torch._C.FunctionSchema):
         return is_functional(schema)
@@ -153,10 +151,7 @@ def mutates_and_returns_first_arg(op: OpOverload):
         return False
     if loc != next(iter(alias_set)):
         return False
-    for arg in schema.arguments[1:]:
-        if arg.alias_info is not None:
-            return False
-    return True
+    return all(arg.alias_info is None for arg in schema.arguments[1:])
 
 
 def fill_defaults(schema, args, kwargs):

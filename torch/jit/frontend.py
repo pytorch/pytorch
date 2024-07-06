@@ -594,10 +594,9 @@ def build_ignore_context_manager(ctx, stmt):
         f"torch.jit.frontend.{ignore_function_name}(" + build_args(inputs) + ")"
     )
 
-    if len(outputs) > 0:
-        assign_str = assign_str_lhs + " = " + assign_str_rhs
-    else:
-        assign_str = assign_str_rhs
+    assign_str = (
+        assign_str_lhs + " = " + assign_str_rhs if len(outputs) > 0 else assign_str_rhs
+    )
     assign_ast = ast.parse(assign_str).body[0]
     return assign_ast
 
@@ -1049,10 +1048,7 @@ class ExprBuilder(Builder):
             else:
                 cmp_expr = BinOp(op_token, lhs, rhs)
 
-            if result is None:
-                result = cmp_expr
-            else:
-                result = BinOp("and", result, cmp_expr)
+            result = cmp_expr if result is None else BinOp("and", result, cmp_expr)
         return result
 
     @staticmethod

@@ -569,18 +569,15 @@ def reference_inputs_prelu(op, device, dtype, requires_grad, **kwargs):
     yield from reference_inputs_elementwise_unary(op, device, dtype, requires_grad, **kwargs)
 
 def sample_kwargs_prelu_scalar_weight(device, dtype, input):
-    weight = torch.rand(tuple(), device=device, dtype=dtype)
+    weight = torch.rand((), device=device, dtype=dtype)
     # NumPy does not support bfloat16, so we default to float32 (only for NumPy) in that case
-    if dtype == torch.bfloat16:
-        weight_cpu = weight.to(dtype=torch.float32, device="cpu")
-    else:
-        weight_cpu = weight.cpu()
+    weight_cpu = weight.to(dtype=torch.float32, device="cpu") if dtype == torch.bfloat16 else weight.cpu()
     np_weight = weight_cpu.numpy()
     return ({'weight': weight}, {'weight': np_weight})
 
 def error_inputs_prelu(op, device):
     # Weight has numel != 1, but self.ndim is zero-dim tensor
-    inp = make_tensor(tuple(), device=device, dtype=torch.float32)
+    inp = make_tensor((), device=device, dtype=torch.float32)
     weight = make_tensor((2,), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(inp, kwargs={'weight': weight}),
                      error_regex="Not allow zero-dim input tensor.")
@@ -2265,10 +2262,7 @@ def _fill_np(a, value):
     return a
 
 def _fill_sample_kwargs(device, dtype, input):
-    if dtype is torch.bool:
-        value = True
-    else:
-        value = 3
+    value = True if dtype is torch.bool else 3
 
     return ({'value': value}, {'value': value})
 
@@ -4518,7 +4512,7 @@ def error_inputs_native_layer_norm(opinfo, device, **kwargs):
 
     err_msg1 = "Expected normalized_shape to be at least 1-dimensional"
     s1 = SampleInput(
-        make_arg(input_shape), args=(tuple(), None, None, 1e-5)
+        make_arg(input_shape), args=((), None, None, 1e-5)
     )
     yield ErrorInput(s1, error_regex=err_msg1)
 
@@ -4549,7 +4543,7 @@ def error_inputs_rms_norm(opinfo, device, **kwargs):
 
     err_msg1 = "Expected normalized_shape to be at least 1-dimensional"
     s1 = SampleInput(
-        make_arg(input_shape), args=(tuple(), None, 1e-5)
+        make_arg(input_shape), args=((), None, 1e-5)
     )
     yield ErrorInput(s1, error_regex=err_msg1)
 
@@ -5195,13 +5189,7 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, 
 
     shapes = [(), (1,), (S, S)]
     # extra parameter for add
-    if add:
-        if dtype == torch.bool:
-            alphas = (True, False)
-        else:
-            alphas = (-1, 0, 2)
-    else:
-        alphas = (None,)
+    alphas = ((True, False) if dtype == torch.bool else (-1, 0, 2)) if add else (None,)
 
     if fill:
         # A weird number to catch errors.
@@ -6560,10 +6548,7 @@ def sample_inputs_diagonal_scatter(op_info, device, dtype, requires_grad, **kwar
         input_ = make_arg(input_shape)
         # We can programmatically figure out the right shape for src:
         # It should be the same size as input.diagonal(other_args...)
-        if not isinstance(arg, tuple):
-            arg_tuple = (arg,)
-        else:
-            arg_tuple = arg
+        arg_tuple = (arg,) if not isinstance(arg, tuple) else arg
         src_shape = input_.diagonal(*arg_tuple).size()
         src = make_arg(src_shape)
         yield SampleInput(input_, args=(src, *arg_tuple))
@@ -7882,10 +7867,7 @@ def sample_inputs_dropout(op_info, device, dtype, requires_grad, *,
                           train=None, valid_input_dim=None, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    if valid_input_dim:
-        cases = ((S,) * i for i in valid_input_dim)
-    else:
-        cases = ((S, S), (S,), ())
+    cases = ((S,) * i for i in valid_input_dim) if valid_input_dim else ((S, S), (S,), ())
     p_vals = [0.0, 0.5, 1.0]
     # This is to handle special case for feature_alpha_dropout which has different
     # supported dtypes depending on `train` parameter
@@ -8610,19 +8592,19 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
 
         # shape mismatch
         (make_input(3, 5), (make_input(3, 4), make_input(3, 4)),
-         dict(),
+         {},
          RuntimeError,
          (r'(Attempting to broadcast a dimension of length|'
           r"The size of tensor a \(5\) must match the size of tensor b \(4\) "
           r"at non-singleton dimension 1)")),
         (make_input(3, 4), (make_input(3, 5), make_input(3, 4)),
-         dict(),
+         {},
          RuntimeError,
          (r'(Attempting to broadcast a dimension of length|'
           r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
           r"at non-singleton dimension 1)")),
         (make_input(3, 4), (make_input(3, 4), make_input(3, 5)),
-         dict(),
+         {},
          RuntimeError,
          (r'(Attempting to broadcast a dimension of length|'
           r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
@@ -8630,19 +8612,19 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
 
         # different dimensions
         (make_input(3,), (make_input(3, 4), make_input(3, 4)),
-         dict(),
+         {},
          RuntimeError,
          (r"The anchor, positive, and negative tensors are expected to have "
           r"the same number of dimensions, but got: anchor 1D, positive 2D, "
           r"and negative 2D inputs")),
         (make_input(3, 4), (make_input(3,), make_input(3, 4)),
-         dict(),
+         {},
          RuntimeError,
          (r"The anchor, positive, and negative tensors are expected to have "
           r"the same number of dimensions, but got: anchor 2D, positive 1D, "
           r"and negative 2D inputs")),
         (make_input(3, 4), (make_input(3, 4), make_input(3,)),
-         dict(),
+         {},
          RuntimeError,
          (r"The anchor, positive, and negative tensors are expected to have "
           r"the same number of dimensions, but got: anchor 2D, positive 2D, "

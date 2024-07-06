@@ -811,10 +811,7 @@ def prepare_n_shadows_model(
     * add examples to docblocks
     """
 
-    if custom_tracer is None:
-        tracer = quantize_fx.QuantizationTracer([], [])
-    else:
-        tracer = custom_tracer
+    tracer = quantize_fx.QuantizationTracer([], []) if custom_tracer is None else custom_tracer
     mt = torch.fx.GraphModule(model, tracer.trace(model))
     # this is necessary to ensure logger FQNs get populated
     mt._node_name_to_scope = tracer.node_name_to_scope

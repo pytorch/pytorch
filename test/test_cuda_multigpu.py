@@ -321,10 +321,9 @@ class TestCudaMultiGPU(TestCase):
 
         while not (end0 and end1):
             end0 = advance(gen0, end0)
-            if not end0:
-                gen1_max_times = torch.LongTensor(1).random_(0, 3)[0]
-            else:
-                gen1_max_times = torch.inf
+            gen1_max_times = (
+                torch.LongTensor(1).random_(0, 3)[0] if not end0 else torch.inf
+            )
             t = 0
             while t < gen1_max_times and not end1:
                 end1 = advance(gen1, end1)
@@ -1492,10 +1491,11 @@ class TestCudaComm(TestCase):
     def _test_scatter(self, input, chunk_sizes=None, dim=0):
         if not TEST_MULTIGPU:
             raise unittest.SkipTest("only one GPU detected")
-        if chunk_sizes is None:
-            ref_chunk_sizes = tuple(repeat(input.size(dim) // 2, 2))
-        else:
-            ref_chunk_sizes = chunk_sizes
+        ref_chunk_sizes = (
+            tuple(repeat(input.size(dim) // 2, 2))
+            if chunk_sizes is None
+            else chunk_sizes
+        )
 
         # test regular
         result = comm.scatter(input, (0, 1), chunk_sizes, dim)

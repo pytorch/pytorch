@@ -197,9 +197,7 @@ def doAutodiffCheck(testname):
         'test_nn_max_pool2d_with_indices',
     ]
 
-    if testname in test_exceptions:
-        return False
-    return True
+    return testname not in test_exceptions
 
 
 # TODO: enable TE in PE when all tests are fixed
@@ -262,10 +260,7 @@ def get_lstm_inputs(device, training=False, seq_length=None):
     hx = torch.randn(3, 20, dtype=torch.float, device=device, requires_grad=training)
     cx = torch.randn(3, 20, dtype=torch.float, device=device, requires_grad=training)
     module = nn.LSTMCell(10, 20).to(device, torch.float)  # Just to allocate weights with correct sizes
-    if training:
-        params = tuple(module.parameters())
-    else:
-        params = tuple(p.requires_grad_(False) for p in module.parameters())
+    params = tuple(module.parameters()) if training else tuple(p.requires_grad_(False) for p in module.parameters())
     return (input, hx, cx) + params
 
 
@@ -754,18 +749,12 @@ class TestJit(JitTestCase):
         def test_device():
             @torch.jit.script
             def func_1(x):
-                if x.device == torch.device('cuda:0'):
-                    a = 0
-                else:
-                    a = 1
+                a = 0 if x.device == torch.device("cuda:0") else 1
                 return a
 
             @torch.jit.script
             def func_2(x):
-                if x.is_cuda:
-                    a = 0
-                else:
-                    a = 1
+                a = 0 if x.is_cuda else 1
                 return a
 
             test_input(func_1, torch.tensor(0.5), 1)
@@ -1189,7 +1178,7 @@ class TestJit(JitTestCase):
                 def __enter__(self):
                     torch._C._jit_set_profiling_executor(False)
 
-                def __exit__(self, *args):
+                def __exit__(self, *args: object) -> None:
                     torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
 
             with jit_profiling_executor_false(), torch.jit.optimized_execution(True):
@@ -1208,10 +1197,7 @@ class TestJit(JitTestCase):
             # type: (Tensor, Tensor) -> Tensor
             tmp1 = torch.mul(input1, input2)
             tmp2 = torch.abs(tmp1)
-            if torch.equal(input1, input2):
-                tmp2 = torch.acos(tmp2)
-            else:
-                tmp2 = torch.atan(tmp2)
+            tmp2 = torch.acos(tmp2) if torch.equal(input1, input2) else torch.atan(tmp2)
             result = torch.add(tmp2, input2)
             return result
 
@@ -2163,10 +2149,7 @@ graph(%Ra, %Rb):
         @torch.jit.script
         def constant_prop(a):
             b = 2 + 1
-            if bool(a < 2):
-                c = b + 2
-            else:
-                c = b - 2
+            c = b + 2 if bool(a < 2) else b - 2
             return c
         out_ref = constant_prop(torch.tensor(2))
         self.run_pass('constant_propagation', constant_prop.graph)
@@ -2210,10 +2193,7 @@ graph(%Ra, %Rb):
         def constant_prop():
             a = typed_none()
             b = typed_none()
-            if (a is None and b is None):
-                a = 2
-            else:
-                a = 1
+            a = 2 if a is None and b is None else 1
             return a
 
         self.run_pass('constant_propagation', constant_prop.graph)
@@ -2224,10 +2204,7 @@ graph(%Ra, %Rb):
         def constant_prop():
             cond = True
             a = 1
-            if cond:
-                a = 1 * 2
-            else:
-                a = 1 // 0
+            a = 1 * 2 if cond else 1 // 0
             return a
 
         # testing that 1 // 0 error is not thrownn
@@ -2265,10 +2242,7 @@ graph(%Ra, %Rb):
         def test(cond):
             # type: (bool)
             a = torch.tensor([10])
-            if cond:
-                b = None
-            else:
-                b = a
+            b = None if cond else a
             if b is not None:
                 b[0] = 5
             return a.int()
@@ -2570,10 +2544,7 @@ graph(%Ra, %Rb):
             # FIXME: use 0 instead of a.
             # c = 0
             c = a
-            if bool(a < b):
-                c = b
-            else:
-                c = a
+            c = b if bool(a < b) else a
             return c
 
         @torch.jit.script
@@ -2596,10 +2567,7 @@ graph(%Ra, %Rb):
             while bool(a < 10):
                 a = a + 1
                 b = b + 1
-                if bool(a > b):
-                    c = 2
-                else:
-                    c = 3
+                c = 2 if bool(a > b) else 3
             return a + 1 + c
 
         @torch.jit.script
@@ -2705,10 +2673,7 @@ graph(%Ra, %Rb):
 
         @torch.jit.script
         def bool_fn(x, a=outer_c, flag=outer_flag):
-            if bool(flag):
-                result = x
-            else:
-                result = x + a
+            result = x if bool(flag) else x + a
             return result
 
         self.assertEqual(bool_fn(torch.ones(1)), torch.ones(1) + 9)
@@ -3150,10 +3115,7 @@ class TestScript(JitTestCase):
             @torch.jit.script
             def foo(x):
                 dim = x.dim()
-                if dim == 0:
-                    y = int(x)
-                else:
-                    y = x.size()[dim - 1]
+                y = int(x) if dim == 0 else x.size()[dim - 1]
                 return y
 
             x = torch.zeros(2)
@@ -3194,10 +3156,7 @@ class TestScript(JitTestCase):
                     x = x + 1
                     dim = x.dim()
                     disable_grad()
-                    if dim == 0:
-                        y = int(x)
-                    else:
-                        y = x.size()[dim - 1]
+                    y = int(x) if dim == 0 else x.size()[dim - 1]
                     enable_grad()
                     return y
 
@@ -4032,10 +3991,7 @@ def foo(x):
             @torch.jit.script_method
             def forward(self, x):
                 # type: (int) -> int
-                if self.training:
-                    r = x
-                else:
-                    r = x + 4
+                r = x if self.training else x + 4
                 # check double use of training
                 if self.training:
                     r = r + 1
@@ -4082,10 +4038,7 @@ def foo(x):
         @torch.jit.script
         def fn2(input, kernel_size):
             # type: (Tensor, List[int]) -> Tensor
-            if kernel_size[0] > 1:
-                _stride = [2]
-            else:
-                _stride = kernel_size
+            _stride = [2] if kernel_size[0] > 1 else kernel_size
             print(_stride, kernel_size)
             return input
 
@@ -6192,10 +6145,7 @@ a")
         @torch.jit.script
         def test_nested_bool_expression(x, y):
             # type: (Optional[int], Optional[int]) -> int
-            if x is not None and x < 2 and y is not None:
-                x = x + y
-            else:
-                x = 5
+            x = x + y if x is not None and x < 2 and y is not None else 5
             return x + 2
 
         @torch.jit.script
@@ -6210,10 +6160,7 @@ a")
         @torch.jit.script
         def test_manual_unwrap_opt(x):
             # type: (Optional[int]) -> int
-            if x is None:
-                x = 1
-            else:
-                x = torch.jit._unwrap_optional(x)
+            x = 1 if x is None else torch.jit._unwrap_optional(x)
             return x  # noqa: T484
 
         with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
@@ -6285,10 +6232,7 @@ a")
         @torch.jit.script
         def fn(x, y, b):
             # type: (Optional[Tensor], Tensor, bool) -> Tensor
-            if b:
-                res = y
-            else:
-                res = torch.jit._unwrap_optional(x)
+            res = y if b else torch.jit._unwrap_optional(x)
             return res
 
         t2 = torch.zeros(1)
@@ -6329,10 +6273,7 @@ a")
         @torch.jit.script
         def fn(x, y, b):
             # type: (Optional[List[int]], List[int], bool) -> List[int]
-            if b:
-                l = torch.jit._unwrap_optional(x)
-            else:
-                l = y
+            l = torch.jit._unwrap_optional(x) if b else y
             return l
 
         l2 = [0, 1]
@@ -6348,10 +6289,7 @@ a")
         @torch.jit.script
         def foo(x):
             # type: (bool)
-            if x:
-                a = (None,)
-            else:
-                a = ([],)
+            a = (None,) if x else ([],)
             return a
 
         @torch.jit.script
@@ -6379,10 +6317,7 @@ a")
             while a < 10:
                 a = a + 1
                 b = b + 1
-                if a > b:
-                    c = -a
-                else:
-                    c = -b
+                c = -a if a > b else -b
             return c + 1
 
         inputs = self._make_scalar_vars([-1234, 4321], torch.int64)
@@ -6563,10 +6498,7 @@ a")
         def test_script_optional_tensor_none(x=None):
             # type: (Optional[Tensor]) -> Tensor
             res = torch.zeros(1, dtype=torch.int8)
-            if x is None:
-                res = res + 1
-            else:
-                res = x
+            res = res + 1 if x is None else x
             return res
 
         fn = test_script_optional_tensor_none
@@ -6578,10 +6510,7 @@ a")
         def test_script_optional_other_none(x=None):
             # type: (Optional[float]) -> float
             res = 2.0
-            if x is None:
-                res = res + 1.0
-            else:
-                res = x
+            res = res + 1.0 if x is None else x
             return res
 
         fn = test_script_optional_other_none
@@ -7844,10 +7773,7 @@ dedent """
             self.checkScript(foo_break, (i,))
 
         def test_refine_outside_loop():
-            if 1 == 1:
-                x = None
-            else:
-                x = 1
+            x = None if 1 == 1 else 1
             i = 0
             j = 0
             while (x is None or torch.jit._unwrap_optional(x) > 3):
@@ -9892,10 +9818,7 @@ dedent """
                                     "float in the false branch"):
             @torch.jit.script
             def diff_type_used():
-                if 1 == 2:
-                    c0 = 1
-                else:
-                    c0 = 1.0
+                c0 = 1 if 1 == 2 else 1.0
                 return c0
 
         with self.assertRaisesRegex(RuntimeError, "Variable 'c0' previously had type float"):
@@ -9937,10 +9860,7 @@ dedent """
         # testing that different length lists don't throw error on cat in shape prop
         @torch.jit.script
         def test_list(x):
-            if bool(x.sum() < 1):
-                c = [x, x]
-            else:
-                c = [x, x, x]
+            c = [x, x] if bool(x.sum() < 1) else [x, x, x]
             return torch.cat(c)
 
         b = torch.zeros(2, 4)
@@ -10009,7 +9929,7 @@ dedent """
                 super().__init__()
                 x = torch.zeros(1, 3)
                 mod_fn = lambda : mod(x)  # noqa: E731
-                self.mod = torch.jit.trace(mod_fn, tuple())
+                self.mod = torch.jit.trace(mod_fn, ())
 
             @torch.jit.script_method
             def forward(self):
@@ -10312,10 +10232,7 @@ dedent """
     def test_if_define(self):
         @torch.jit.script
         def foo(a):
-            if bool(a == 0):
-                b = 1
-            else:
-                b = 0
+            b = 1 if bool(a == 0) else 0
             return b + 1
 
         @torch.jit.script
@@ -10474,10 +10391,7 @@ dedent """
 
             @torch.jit.script_method
             def forward(self, input):
-                if bool(input.sum() > 0):
-                    output = self.weight.mv(input)
-                else:
-                    output = self.weight + input
+                output = self.weight.mv(input) if bool(input.sum() > 0) else self.weight + input
                 return output
 
         m_orig = M(200, 200)
@@ -10706,10 +10620,7 @@ dedent """
 
         def t2(a):
             # mix const/non-const attributes
-            if 1 == 1:
-                b = 1
-            else:
-                b = 0
+            b = 1 if 1 == 1 else 0
             return torch.sum(a, dim=b, keepdim=False)
 
         self.checkScript(t2, (torch.zeros(1, 1, 2),))
@@ -11382,10 +11293,7 @@ dedent """
         def test_script_for_in_range_if_ast(x):
             output = x
             for i in range(20):
-                if i == 0:
-                    output = x.unsqueeze(0)
-                else:
-                    output = torch.cat((output, x.unsqueeze(0)), dim=0)
+                output = x.unsqueeze(0) if i == 0 else torch.cat((output, x.unsqueeze(0)), dim=0)
             return output
         inputs = self._make_scalar_vars([0], torch.int64)
 
@@ -12538,10 +12446,7 @@ dedent """
     def test_tuple_index_to_list(self):
         def test_non_constant_input(a):
             # type: (bool) -> int
-            if a:
-                b = 1
-            else:
-                b = 0
+            b = 1 if a else 0
             c = (0, 1)
             return c[b]
 
@@ -12552,19 +12457,13 @@ dedent """
             @torch.jit.script
             def test_non_constant_input(a):
                 # type: (bool) -> None
-                if a:
-                    b = 1
-                else:
-                    b = 0
+                b = 1 if a else 0
                 c = (0, 1.1)
                 print(c[b])
 
     def test_tuple_indexing(self):
         def tuple_index(a):
-            if bool(a):
-                b = (1, 2)
-            else:
-                b = (0, 2)
+            b = (1, 2) if bool(a) else (0, 2)
             return b[-2], b[1]
 
         self.checkScript(tuple_index, (torch.tensor([0]),))
@@ -13169,10 +13068,7 @@ dedent """
         # Only test that this compiles
         @torch.jit.script
         def fn(x):
-            if torch.backends.cudnn.enabled:
-                x = x + 2
-            else:
-                x = x + 3
+            x = x + 2 if torch.backends.cudnn.enabled else x + 3
             return x
 
     def test_inplace_add(self):
@@ -16070,10 +15966,7 @@ def add_nn_module_test(*args, **kwargs):
 
         module_name = get_nn_module_name_from_kwargs(**kwargs)
 
-        if 'constructor' in kwargs:
-            nn_module = kwargs['constructor']
-        else:
-            nn_module = getattr(torch.nn, module_name)
+        nn_module = kwargs["constructor"] if "constructor" in kwargs else getattr(torch.nn, module_name)
 
         if "FunctionalModule" in str(nn_module):
             return

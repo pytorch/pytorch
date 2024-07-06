@@ -176,10 +176,7 @@ if __name__ == "__main__":
     parser.add_argument("-save", action="store_true")
     args = parser.parse_args()
 
-    if args.e2e:
-        eval_fn = test_linear
-    else:
-        eval_fn = test_tensor
+    eval_fn = test_linear if args.e2e else test_tensor
 
     print(f"Started benchmark: {args.mode} | dtype: {args.dtype}")
     dtype = dtype_lookup[args.dtype]

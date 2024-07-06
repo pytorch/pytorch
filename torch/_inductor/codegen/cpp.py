@@ -497,7 +497,7 @@ class RecordOptimizationContext:
         self.opt_ctx.ops_name = self.func_name
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: object) -> None:
         assert self.current_node
         assert self.opt_ctx
         self.current_node.meta[OptimizationContext.key] = self.opt_ctx
@@ -2900,10 +2900,10 @@ class CppVecKernelChecker(CppVecKernel):
     def store_reduction(self, name, index, value):
         return self.simd_vec
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: object) -> None:
         # Restore the wrapper_code
         V.graph.wrapper_code = self._orig_wrapper_code  # type: ignore[assignment]
-        self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
+        self.exit_stack.__exit__(*args)
 
     def __enter__(self):
         # Record the graph wrapper code. The wrapper_code status could be
@@ -3699,10 +3699,7 @@ class CppScheduling(BaseScheduling):
             assert isinstance(ref_node.node, ir.ComputedBuffer)
             ranges1 = ref_node.node.data.get_size()
 
-        if ranges1 != ranges2:
-            return False
-
-        return True
+        return ranges1 == ranges2
 
     def _can_fuse_horizontal_impl(self, node1, node2):
         assert isinstance(node1, (FusedSchedulerNode, SchedulerNode))
@@ -4060,8 +4057,8 @@ class WorkSharing:
         self.stack.__enter__()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.stack.__exit__(exc_type, exc_val, exc_tb)
+    def __exit__(self, *args: object) -> None:
+        self.stack.__exit__(*args)
 
 
 @dataclasses.dataclass

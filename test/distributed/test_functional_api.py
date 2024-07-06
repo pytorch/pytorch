@@ -238,10 +238,11 @@ class TestTraceableCollectives(MultiThreadedTestCase):
                 self.skipTest("Not enough CUDA devices")
             torch.cuda.set_device(dist.get_rank())
 
-        if dist.get_rank() == 0:
-            tensor = torch.ones([4], device=device)
-        else:
-            tensor = torch.zeros([4], device=device)
+        tensor = (
+            torch.ones([4], device=device)
+            if dist.get_rank() == 0
+            else torch.zeros([4], device=device)
+        )
 
         mesh = dt.DeviceMesh(device, torch.arange(4))
         res = ft_c.broadcast(tensor, 0, mesh)
@@ -649,10 +650,11 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
             out = out + 0
             return out
 
-        if compile:
-            compiled = torch.compile(my_func, fullgraph=True, backend="aot_eager")
-        else:
-            compiled = my_func
+        compiled = (
+            torch.compile(my_func, fullgraph=True, backend="aot_eager")
+            if compile
+            else my_func
+        )
 
         out = compiled(t, self.world_size)
         self.assertEqual(out.shape, t.shape)
@@ -706,10 +708,11 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
             out = out * 1.0
             return out
 
-        if compile:
-            compiled = torch.compile(my_func, fullgraph=True, backend="aot_eager")
-        else:
-            compiled = my_func
+        compiled = (
+            torch.compile(my_func, fullgraph=True, backend="aot_eager")
+            if compile
+            else my_func
+        )
 
         dims_to_gather = [0, 1, 2]
         for dim in dims_to_gather:
@@ -740,10 +743,11 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
             )
             return rs_tensor
 
-        if compile:
-            compiled = torch.compile(my_func, fullgraph=True, backend="aot_eager")
-        else:
-            compiled = my_func
+        compiled = (
+            torch.compile(my_func, fullgraph=True, backend="aot_eager")
+            if compile
+            else my_func
+        )
 
         dims_to_scatter = [0, 1]
         for dim in dims_to_scatter:

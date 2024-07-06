@@ -279,10 +279,7 @@ class MemoryBudgetTest(TestCase):
                 call, memory_budget=0.6
             )  # Force it to recompute one of mm or attn
             self.assertEqual(mem, S * D)
-            if expected_recompute == "attn":
-                expected_flops = attn_flops
-            else:
-                expected_flops = mm_flops
+            expected_flops = attn_flops if expected_recompute == "attn" else mm_flops
             self.assertEqual(flops - eager_flops, expected_flops)
 
         # General behind this test is that if sequence length * 2 > D, then

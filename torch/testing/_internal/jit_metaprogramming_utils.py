@@ -435,9 +435,7 @@ class SplitInputs:
             return False
         if self.nontensor_args != other.nontensor_args:
             return False
-        if self.nontensor_kwargs != other.nontensor_kwargs:
-            return False
-        return True
+        return self.nontensor_kwargs == other.nontensor_kwargs
 
 # make a new function where all non-tensor arguments in 'args' have been partially
 # applied, and all tensor arguments remain.
@@ -673,10 +671,7 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
 
     if test_name in EXCLUDE_SCRIPT_MODULES:
         return
-    if 'constructor' in kwargs:
-        nn_module = kwargs['constructor']
-    else:
-        nn_module = getattr(torch.nn, name)
+    nn_module = kwargs['constructor'] if 'constructor' in kwargs else getattr(torch.nn, name)
 
     if "FunctionalModule" in str(nn_module):
         return

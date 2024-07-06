@@ -604,5 +604,5 @@ class _ConfigAutoWrap:
     def __enter__(self) -> None:
         self.enable_autowrap_context(self.kwargs)
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         self.disable_autowrap_context()

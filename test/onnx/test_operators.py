@@ -80,10 +80,7 @@ class TestOperators(common_utils.TestCase):
     def assertONNX(self, f, args, params=None, **kwargs):
         if params is None:
             params = ()
-        if isinstance(f, nn.Module):
-            m = f
-        else:
-            m = FuncModule(f, params)
+        m = f if isinstance(f, nn.Module) else FuncModule(f, params)
         m.eval()
         onnx_model_pbtxt = export_to_pbtxt(m, args, **kwargs)
         subname = kwargs.pop("subname", None)
@@ -133,19 +130,13 @@ class TestOperators(common_utils.TestCase):
     def assertONNXRaises(self, err, f, args, params=None, **kwargs):
         if params is None:
             params = ()
-        if isinstance(f, nn.Module):
-            m = f
-        else:
-            m = FuncModule(f, params)
+        m = f if isinstance(f, nn.Module) else FuncModule(f, params)
         self.assertExpectedRaises(err, lambda: export_to_pbtxt(m, args, **kwargs))
 
     def assertONNXRaisesRegex(self, err, reg, f, args, params=None, **kwargs):
         if params is None:
             params = ()
-        if isinstance(f, nn.Module):
-            m = f
-        else:
-            m = FuncModule(f, params)
+        m = f if isinstance(f, nn.Module) else FuncModule(f, params)
         with self.assertRaisesRegex(err, reg):
             export_to_pbtxt(m, args, **kwargs)
 

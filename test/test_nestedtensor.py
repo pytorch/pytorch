@@ -267,10 +267,9 @@ class TestNestedTensor(TestCase):
         data = []
         nested_tensor_ref_list = []
         for _ in range(batch_size):
-            if max_seq_len == 0:
-                length = 0
-            else:
-                length = np.random.randint(low=1, high=max_seq_len)
+            length = (
+                0 if max_seq_len == 0 else np.random.randint(low=1, high=max_seq_len)
+            )
             row = list(np.random.randint(low=0, high=vocab_size, size=(length,)))
             data.append(row)
             nested_tensor_ref_list.append(torch.Tensor(row))
@@ -288,10 +287,9 @@ class TestNestedTensor(TestCase):
         data = []
         nested_tensor_ref_list = []
         for _ in range(batch_size):
-            if max_seq_len == 0:
-                length = 0
-            else:
-                length = np.random.randint(low=1, high=max_seq_len)
+            length = (
+                0 if max_seq_len == 0 else np.random.randint(low=1, high=max_seq_len)
+            )
             row = list(np.random.randint(low=0, high=vocab_size, size=(length,)))
             row = [list(item * np.arange(max_seq_len)) for item in row]
             data.append(row)
@@ -310,10 +308,9 @@ class TestNestedTensor(TestCase):
         data = []
         nested_tensor_ref_list = []
         for _ in range(batch_size):
-            if max_seq_len == 0:
-                length = 0
-            else:
-                length = np.random.randint(low=1, high=max_seq_len)
+            length = (
+                0 if max_seq_len == 0 else np.random.randint(low=1, high=max_seq_len)
+            )
             row = list(
                 np.random.randint(low=0, high=vocab_size, size=(length,)).astype(float)
             )
@@ -4013,7 +4010,7 @@ class TestNestedTensorSubclass(TestCase):
             ((2, 3), (3, None), (3, None, 1, 1)),
             ((0, 1, 3), (3,), (1, 1, 3, 1)),
             ((0, 1, 2), (4,), (1, 1, 1, 4)),
-            ((0, 1, 2, 3), tuple(), (1, 1, 1, 1)),
+            ((0, 1, 2, 3), (), (1, 1, 1, 1)),
         )
         for rd, ref_shape_no_keepdim, ref_shape_keepdim in reduce_dims:
             if (0 in rd) ^ (1 in rd):

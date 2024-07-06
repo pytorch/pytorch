@@ -630,10 +630,11 @@ class NativeFunction:
             device_check_s is None or device_check_s in DeviceCheckType.__members__
         ), f"illegal device_check: {device_check_s}"
         device_check: DeviceCheckType
-        if device_check_s is None:
-            device_check = DeviceCheckType.ExactSame
-        else:
-            device_check = DeviceCheckType[device_check_s]
+        device_check = (
+            DeviceCheckType.ExactSame
+            if device_check_s is None
+            else DeviceCheckType[device_check_s]
+        )
 
         structured = e.pop("structured", False)
         assert isinstance(structured, bool), f"not a bool: {structured}"
@@ -1774,7 +1775,7 @@ class Annotation:
         assert not (
             is_write and len(alias_set) > 1
         ), f"alias set larger than 1 is not mutable, got {ann} instead."
-        after_set = tuple(m.group(5).split("|")) if m.group(5) else tuple()
+        after_set = tuple(m.group(5).split("|")) if m.group(5) else ()
         assert not (
             len(before_alias) > 1 and len(after_set) > 1
         ), f"before alias set and after alias set cannot be larger than 1 at the same time, got {ann} instead."
@@ -2283,7 +2284,7 @@ class Arguments:
             # TensorOptions are dropped in signature,
             # so we can pair factory functions with their out= variants.
             tensor_options=None,
-            post_tensor_options_kwarg_only=tuple(),
+            post_tensor_options_kwarg_only=(),
             # out arguments are dropped in signature
             out=(),
         )
@@ -2722,9 +2723,7 @@ def gets_generated_view_copy(f: NativeFunction) -> bool:
     # We -could- probably generate these as well, but the codegen will be
     # slightly different, and hand-writing these few kernels keeps codegen
     # complexity lower.
-    if f.func.name.name.base.endswith("_inverse"):
-        return False
-    return True
+    return not f.func.name.name.base.endswith("_inverse")
 
 
 # Given a NativeFunction that corresponds to a view op,

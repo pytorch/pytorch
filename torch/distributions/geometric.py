@@ -53,10 +53,11 @@ class Geometric(Distribution):
         else:
             (self.logits,) = broadcast_all(logits)
         probs_or_logits = probs if probs is not None else logits
-        if isinstance(probs_or_logits, Number):
-            batch_shape = torch.Size()
-        else:
-            batch_shape = probs_or_logits.size()
+        batch_shape = (
+            torch.Size()
+            if isinstance(probs_or_logits, Number)
+            else probs_or_logits.size()
+        )
         super().__init__(batch_shape, validate_args=validate_args)
         if self._validate_args and probs is not None:
             # Add an extra check beyond unit_interval

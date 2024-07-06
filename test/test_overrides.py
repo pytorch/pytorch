@@ -150,10 +150,7 @@ class DiagonalTensor:
 
     def __eq__(self, other):
         if type(other) is type(self):
-            if self._N == other._N and self._i == other._i:
-                return True
-            else:
-                return False
+            return bool(self._N == other._N and self._i == other._i)
         else:
             return False
 
@@ -771,10 +768,7 @@ def generate_tensor_like_override_tests(cls):
             module = "Tensor"
         else:
             module = func.__module__
-        if module:
-            name = 'test_{}_{}'.format(module.replace('.', '_'), func.__name__)
-        else:
-            name = f'test_{func.__name__}'
+        name = "test_{}_{}".format(module.replace(".", "_"), func.__name__) if module else f"test_{func.__name__}"
         test_method.__name__ = name
         setattr(cls, name, test_method)
 

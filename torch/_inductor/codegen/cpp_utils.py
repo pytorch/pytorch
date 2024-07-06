@@ -183,10 +183,7 @@ class CppPrinter(ExprPrinter):
 
     def _print_Rational(self, expr):
         # Uses float constants to perform FP div
-        if expr.q == 1:
-            r = f"{expr.p}"
-        else:
-            r = f"{expr.p}.0/{expr.q}.0"
+        r = f"{expr.p}" if expr.q == 1 else f"{expr.p}.0/{expr.q}.0"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_ceiling(self, expr):
@@ -350,9 +347,9 @@ class LocalBufferScope:
 
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: object) -> None:
         self.local_buffers.clear()
-        self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
+        self.exit_stack.__exit__(*args)
 
     def add_local_buffer(self, buffer: ir.Buffer):
         assert buffer.get_name() not in self.local_buffers

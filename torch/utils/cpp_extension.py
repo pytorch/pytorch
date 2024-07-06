@@ -104,10 +104,7 @@ def _find_cuda_home() -> Optional[str]:
             if IS_WINDOWS:
                 cuda_homes = glob.glob(
                     'C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*')
-                if len(cuda_homes) == 0:
-                    cuda_home = ''
-                else:
-                    cuda_home = cuda_homes[0]
+                cuda_home = '' if len(cuda_homes) == 0 else cuda_homes[0]
             else:
                 cuda_home = '/usr/local/cuda'
             if not os.path.exists(cuda_home):
@@ -250,10 +247,7 @@ PLAT_TO_VCVARS = {
 }
 
 def get_cxx_compiler():
-    if IS_WINDOWS:
-        compiler = os.environ.get('CXX', 'cl')
-    else:
-        compiler = os.environ.get('CXX', 'c++')
+    compiler = os.environ.get('CXX', 'cl') if IS_WINDOWS else os.environ.get('CXX', 'c++')
     return compiler
 
 def _is_binary_build() -> bool:
@@ -649,10 +643,7 @@ class BuildExtension(build_ext):
             # extra_postargs can be either:
             # - a dict mapping cxx/nvcc to extra flags
             # - a list of extra flags.
-            if isinstance(extra_postargs, dict):
-                post_cflags = extra_postargs['cxx']
-            else:
-                post_cflags = list(extra_postargs)
+            post_cflags = extra_postargs['cxx'] if isinstance(extra_postargs, dict) else list(extra_postargs)
             if IS_HIP_EXTENSION:
                 post_cflags = COMMON_HIP_FLAGS + post_cflags
             append_std17_if_no_std_present(post_cflags)
@@ -661,10 +652,7 @@ class BuildExtension(build_ext):
             cuda_cflags = None
             if with_cuda:
                 cuda_cflags = common_cflags
-                if isinstance(extra_postargs, dict):
-                    cuda_post_cflags = extra_postargs['nvcc']
-                else:
-                    cuda_post_cflags = list(extra_postargs)
+                cuda_post_cflags = extra_postargs['nvcc'] if isinstance(extra_postargs, dict) else list(extra_postargs)
                 if IS_HIP_EXTENSION:
                     cuda_post_cflags = cuda_post_cflags + _get_rocm_arch_flags(cuda_post_cflags)
                     cuda_post_cflags = COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS + cuda_post_cflags
@@ -804,10 +792,7 @@ class BuildExtension(build_ext):
             # extra_postargs can be either:
             # - a dict mapping cxx/nvcc to extra flags
             # - a list of extra flags.
-            if isinstance(extra_postargs, dict):
-                post_cflags = extra_postargs['cxx']
-            else:
-                post_cflags = list(extra_postargs)
+            post_cflags = extra_postargs['cxx'] if isinstance(extra_postargs, dict) else list(extra_postargs)
             append_std17_if_no_std_present(post_cflags)
 
             cuda_post_cflags = None
@@ -821,10 +806,7 @@ class BuildExtension(build_ext):
                     cuda_cflags.append('-Xcudafe')
                     cuda_cflags.append('--diag_suppress=' + ignore_warning)
                 cuda_cflags.extend(pp_opts)
-                if isinstance(extra_postargs, dict):
-                    cuda_post_cflags = extra_postargs['nvcc']
-                else:
-                    cuda_post_cflags = list(extra_postargs)
+                cuda_post_cflags = extra_postargs['nvcc'] if isinstance(extra_postargs, dict) else list(extra_postargs)
                 cuda_post_cflags = win_cuda_flags(cuda_post_cflags)
 
             cflags = _nt_quote_args(cflags)
@@ -885,10 +867,7 @@ class BuildExtension(build_ext):
 
     def _check_abi(self) -> Tuple[str, TorchVersion]:
         # On some platforms, like Windows, compiler_cxx is not available.
-        if hasattr(self.compiler, 'compiler_cxx'):
-            compiler = self.compiler.compiler_cxx[0]
-        else:
-            compiler = get_cxx_compiler()
+        compiler = self.compiler.compiler_cxx[0] if hasattr(self.compiler, 'compiler_cxx') else get_cxx_compiler()
         _, version = get_compiler_abi_compatibility_and_version(compiler)
         # Warn user if VC env is activated but `DISTUILS_USE_SDK` is not set.
         if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' in os.environ and 'DISTUTILS_USE_SDK' not in os.environ:
@@ -1369,9 +1348,7 @@ def check_compiler_is_gcc(compiler):
         return False
     compiler_path = os.path.realpath(results[0].strip())
     # On RHEL/CentOS c++ is a gcc compiler wrapper
-    if os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string:
-        return True
-    return False
+    return os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string
 
 def _check_and_build_extension_h_precompiler_headers(
         extra_cflags,
@@ -1435,10 +1412,7 @@ def _check_and_build_extension_h_precompiler_headers(
             # read all content of a file
             content = file.read()
             # check if string present in a file
-            if signature == content:
-                return True
-            else:
-                return False
+            return signature == content
 
     def _create_if_not_exist(path_dir):
         if not os.path.exists(path_dir):
@@ -2019,10 +1993,7 @@ def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
     _archs = os.environ.get('PYTORCH_ROCM_ARCH', None)
     if not _archs:
         archFlags = torch._C._cuda_getArchFlags()
-        if archFlags:
-            archs = archFlags.split()
-        else:
-            archs = []
+        archs = archFlags.split() if archFlags else []
     else:
         archs = _archs.replace(' ', ';').split(';')
     flags = [f'--offload-arch={arch}' for arch in archs]
@@ -2310,10 +2281,7 @@ def _write_ninja_file(path,
         if "PYTORCH_NVCC" in os.environ:
             nvcc = os.getenv("PYTORCH_NVCC")    # user can set nvcc compiler with ccache using the environment variable here
         else:
-            if IS_HIP_EXTENSION:
-                nvcc = _join_rocm_home('bin', 'hipcc')
-            else:
-                nvcc = _join_cuda_home('bin', 'nvcc')
+            nvcc = _join_rocm_home('bin', 'hipcc') if IS_HIP_EXTENSION else _join_cuda_home('bin', 'nvcc')
         config.append(f'nvcc = {nvcc}')
 
     if IS_HIP_EXTENSION:

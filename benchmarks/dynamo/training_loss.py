@@ -77,10 +77,7 @@ def model_training_evaluation(
     if evaluation:
         metric = load_metric("accuracy")
         model.eval()
-        if not backend:
-            opt_model = model
-        else:
-            opt_model = torch._dynamo.optimize(backend)(model)
+        opt_model = model if not backend else torch._dynamo.optimize(backend)(model)
         for batch in eval_dataloader:
             batch = {k: v.to(device) for k, v in batch.items()}
             with torch.no_grad():
@@ -99,10 +96,7 @@ def check_loss(ref_loss, res_loss):
     assert len(ref_loss) == len(res_loss)
     length = len(ref_loss)
     x = min(length, 10)
-    if sum(res_loss[-x:]) / 10 <= sum(ref_loss[-x:]) / 10 + 1e-1:
-        return True
-    else:
-        return False
+    return sum(res_loss[-x:]) / 10 <= sum(ref_loss[-x:]) / 10 + 0.1
 
 
 def parse_args():

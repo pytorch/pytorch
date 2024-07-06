@@ -109,10 +109,9 @@ class Pattern:
         return event
 
     def siblings_of(self, event: _ProfilerEvent):
-        if event.parent:
-            children = event.parent.children
-        else:
-            children = self.tid_root[event.start_tid]
+        children = (
+            event.parent.children if event.parent else self.tid_root[event.start_tid]
+        )
         index = children.index(event)
         return children[:index], children[index + 1 :]
 
@@ -275,10 +274,7 @@ class ForLoopIndexingPattern(Pattern):
         def same_ops(list1, list2):
             if len(list1) != len(list2):
                 return False
-            for op1, op2 in zip(list1, list2):
-                if op1.name != op2.name:
-                    return False
-            return True
+            return all(op1.name == op2.name for op1, op2 in zip(list1, list2))
 
         # Record the ops between two aten::select
         next_select_idx = index_of_first_match(next, lambda e: e.name == "aten::select")
@@ -374,10 +370,10 @@ class OptimizerSingleTensorPattern(Pattern):
         self.url = ""
 
     def match(self, event: _ProfilerEvent):
-        for optimizer in self.optimizers_with_foreach:
-            if event.name.endswith(f"_single_tensor_{optimizer}"):
-                return True
-        return False
+        return any(
+            event.name.endswith(f"_single_tensor_{optimizer}")
+            for optimizer in self.optimizers_with_foreach
+        )
 
 
 class SynchronizedDataLoaderPattern(Pattern):
@@ -548,11 +544,9 @@ class MatMulDimInFP16Pattern(Pattern):
         if not input_dtypes(event):
             return False
         arg_dtype = input_dtypes(event)[0]
-        if arg_dtype in (torch.bfloat16, torch.half) and not mutiple_of(
+        return arg_dtype in (torch.bfloat16, torch.half) and not mutiple_of(
             input_shapes(event), 8
-        ):
-            return True
-        return False
+        )
 
     def benchmark(self, events: List[_ProfilerEvent]):
         def closest_multiple(shapes, multiple):

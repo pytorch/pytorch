@@ -26,7 +26,7 @@ class DisableCuDNN:
         self.saved = torch.backends.cudnn.enabled
         torch.backends.cudnn.enabled = False
 
-    def __exit__(self, *args, **kwargs):
+    def __exit__(self, *args: object) -> None:
         torch.backends.cudnn.enabled = self.saved
 
 
@@ -34,7 +34,7 @@ class DummyContext:
     def __enter__(self):
         pass
 
-    def __exit__(self, *args, **kwargs):
+    def __exit__(self, *args: object) -> None:
         pass
 
 
@@ -45,7 +45,7 @@ class AssertNoJIT:
         enabled = os.environ.get("PYTORCH_JIT", 1)
         assert not enabled
 
-    def __exit__(self, *args, **kwargs):
+    def __exit__(self, *args: object) -> None:
         pass
 
 

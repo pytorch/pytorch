@@ -78,7 +78,7 @@ class TorchDispatchMode:
         _push_mode(self)
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: object) -> None:
         mb_dk_or_mode_key = self.__dict__.get("_dispatch_key", None)
         if mb_dk_or_mode_key is None:
             # Today, mode keys are not used at all in the per-dispatch-key-mode logic (for pre-dispatch)

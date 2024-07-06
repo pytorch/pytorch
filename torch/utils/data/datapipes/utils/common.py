@@ -61,10 +61,7 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
         ValueError
     ):  # Signature cannot be inspected, likely it is a built-in fn or written in C
         return
-    if isinstance(input_col, (list, tuple)):
-        input_col_size = len(input_col)
-    else:
-        input_col_size = 1
+    input_col_size = len(input_col) if isinstance(input_col, (list, tuple)) else 1
 
     pos = []
     var_positional = False
@@ -169,10 +166,7 @@ def match_masks(name: str, masks: Union[str, List[str]]) -> bool:
     if isinstance(masks, str):
         return fnmatch.fnmatch(name, masks)
 
-    for mask in masks:
-        if fnmatch.fnmatch(name, mask):
-            return True
-    return False
+    return any(fnmatch.fnmatch(name, mask) for mask in masks)
 
 
 def get_file_pathnames_from_root(

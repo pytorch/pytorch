@@ -493,13 +493,10 @@ def _fuse_ddp_communication(
         # 1. gradient/wait node should be directly used by the output
         # if gradient is None before bwd.
         # 2. gradient/wait node should be directly used by copy_.
-        if (
-            output not in block.wait_nodes[0].users
-            and next(iter(block.wait_nodes[0].users)).target != aten.copy_.default
-        ):
-            return False
-
-        return True
+        return (
+            output in block.wait_nodes[0].users
+            or next(iter(block.wait_nodes[0].users)).target == aten.copy_.default
+        )
 
     ops = (
         torch.ops._c10d_functional.all_reduce_.default,
@@ -586,10 +583,7 @@ def fuse_ddp_communication(
             f"fuse_ddp_communication_pass_{i}",
             config.trace.log_url_for_graph_xform,
         ):
-            if isinstance(pa, str):
-                func = globals()[pa]
-            else:
-                func = pa
+            func = globals()[pa] if isinstance(pa, str) else pa
             if "bucket_size_mb" in {
                 v.name for v in inspect.signature(func).parameters.values()
             }:

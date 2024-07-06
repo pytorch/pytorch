@@ -182,7 +182,7 @@ class DummyContextManager:
     def __enter__(self, *args, **kwargs):
         self.input.append(2)
 
-    def __exit__(self, *args, **kwargs):
+    def __exit__(self, *args: object) -> None:
         self.input.append(-1)
 
 
@@ -672,10 +672,7 @@ class TestStateDictHooks(TestCase):
         for ctor in [MyModuleContainer, lambda x: x]:
             m = ctor(MyModule())
             state_dict = m.state_dict()
-            if isinstance(m, MyModuleContainer):
-                mod = m.mod
-            else:
-                mod = m
+            mod = m.mod if isinstance(m, MyModuleContainer) else m
 
             hook_called = 0
             mod._register_load_state_dict_pre_hook(mod.my_pre_load_hook)

@@ -157,7 +157,7 @@ def _gen_ops_cached(arch, version) -> List[Any]:
             arch,
             version,
         )
-        return list()
+        return []
     arch = _normalize_cuda_arch(arch)
     args = CUTLASSArgs(architectures=arch, cuda_version=version)
     manifest = cutlass_manifest.Manifest(args)
@@ -347,8 +347,8 @@ class CUDACompileSourceCapturingContext:
         )
         return self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
 
-    def __exit__(self, *args, **kwargs):
-        return self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
+    def __exit__(self, *args: object) -> None:
+        return self._compile_patch.__exit__(*args)  # type: ignore[union-attr]
 
 
 def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):

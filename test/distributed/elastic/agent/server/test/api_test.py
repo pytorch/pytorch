@@ -170,10 +170,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
     ):
         run_id = str(uuid.uuid4().int)
         port = get_free_port()
-        if local_addr is None:
-            endpoint = f"127.0.0.1:{port}"
-        else:
-            endpoint = f"{local_addr}:{port}"
+        endpoint = f"127.0.0.1:{port}" if local_addr is None else f"{local_addr}:{port}"
 
         rdzv_params = RendezvousParameters(
             backend="static",

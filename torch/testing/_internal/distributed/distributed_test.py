@@ -435,9 +435,7 @@ def require_backend_is_available(backends):
             return dist.is_mpi_available()
         if backend == dist.Backend.UCC:
             return dist.is_ucc_available()
-        if backend in DistTestCases.backend_feature["plugin"]:
-            return True
-        return False
+        return backend in DistTestCases.backend_feature["plugin"]
 
     if BACKEND not in backends:
         return skip_but_pass_in_sandcastle(
@@ -763,10 +761,7 @@ class DistributedTest:
             self._barrier()
 
         def test_get_backend(self):
-            if dist.get_world_size() > 2:
-                group = [1, 2]
-            else:
-                group = [0, 1]
+            group = [1, 2] if dist.get_world_size() > 2 else [0, 1]
             group_id = dist.new_group(group)
             backend_str = BACKEND.lower()
             self.assertEqual(dist.get_backend(), backend_str)
@@ -792,20 +787,14 @@ class DistributedTest:
 
         # Test destroy
         def test_destroy_group(self):
-            if dist.get_world_size() > 2:
-                group = [1, 2]
-            else:
-                group = [0, 1]
+            group = [1, 2] if dist.get_world_size() > 2 else [0, 1]
             group_id = dist.new_group(group)
             self._barrier()
             dist.destroy_process_group(group_id)
 
         # Test get rank and size of group
         def test_get_rank_size_group(self):
-            if dist.get_world_size() > 2:
-                group = [1, 2]
-            else:
-                group = [0, 1]
+            group = [1, 2] if dist.get_world_size() > 2 else [0, 1]
             group_id = dist.new_group(group)
             if dist.get_rank() in group:
                 self.assertEqual(dist.get_world_size(group_id), 2)
@@ -1740,8 +1729,8 @@ class DistributedTest:
             rank = dist.get_rank()
             send_recv_size = 10
             tensor = _build_tensor(send_recv_size, value=rank)
-            recv_ranks = list()
-            irecv_ranks = list()
+            recv_ranks = []
+            irecv_ranks = []
 
             ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
@@ -3766,10 +3755,7 @@ class DistributedTest:
                     in_tensor = in_tensor.cuda(rank_to_GPU[rank][0])
                     expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
                     out_tensor = out_tensor.cuda(rank_to_GPU[rank][0])
-                if dtype == torch.complex64:
-                    tensor_shapes = [torch.view_as_real(in_tensor).shape]
-                else:
-                    tensor_shapes = [in_tensor.shape]
+                tensor_shapes = [torch.view_as_real(in_tensor).shape] if dtype == torch.complex64 else [in_tensor.shape]
                 self.call_dist_op(
                     ":all_to_all",
                     False,
@@ -7181,15 +7167,9 @@ class DistributedTest:
                     for i in range(num_iters):
                         # Use model.no_sync() to disable grad synchronization every
                         # sync_interval.
-                        if i % sync_interval != 0:
-                            context = net.no_sync()
-                        else:
-                            context = nullcontext()
+                        context = net.no_sync() if i % sync_interval != 0 else nullcontext()
                         with context:
-                            if isinstance(inp, tuple):
-                                loss = net(*inp).sum()
-                            else:
-                                loss = net(inp).sum()
+                            loss = net(*inp).sum() if isinstance(inp, tuple) else net(inp).sum()
                             loss.backward()
                             self._model_step(net)
                             # Ensure completion of GPU kernels (including allreduce). If the
@@ -7996,10 +7976,7 @@ class DistributedTest:
             grad_accumulation = 2
 
             for microbatch_idx in range(grad_accumulation):
-                if microbatch_idx < grad_accumulation - 1:
-                    context = model.no_sync
-                else:
-                    context = nullcontext
+                context = model.no_sync if microbatch_idx < grad_accumulation - 1 else nullcontext
 
                 with context():
                     input = torch.rand((1, ))
@@ -8016,10 +7993,7 @@ class DistributedTest:
             grads = torch.cat([p.grad.view(-1) for p in model.parameters()])
 
             # Gather all gradients to rank 0.
-            if rank == 0:
-                gathered_grads = [torch.zeros_like(grads) for _ in range(world_size)]
-            else:
-                gathered_grads = []
+            gathered_grads = [torch.zeros_like(grads) for _ in range(world_size)] if rank == 0 else []
 
             dist.gather(grads, gather_list=gathered_grads, dst=0)
             if rank == 0:
@@ -8047,10 +8021,7 @@ class DistributedTest:
             random_input = torch.randn(batch, dim, device=self.rank)
             ones_input = torch.ones(batch, dim, device=self.rank)
             for i in range(6):
-                if i % 2 == 0:
-                    out = model(random_input)
-                else:
-                    out = model(ones_input)
+                out = model(random_input) if i % 2 == 0 else model(ones_input)
                 loss = out.sum()
                 loss.backward()
                 # On even iterations, 2nd param goes unused, on odd iterations,
@@ -8129,10 +8100,7 @@ class DistributedTest:
             expected_err = "Your training graph has changed in this iteration"
             with self.assertRaisesRegex(RuntimeError, expected_err):
                 for i in range(2):
-                    if i % 2 == 0:
-                        out = model(random_input)
-                    else:
-                        out = model(ones_input)
+                    out = model(random_input) if i % 2 == 0 else model(ones_input)
                     loss = out.sum()
                     loss.backward()
 
@@ -8151,10 +8119,7 @@ class DistributedTest:
                 "Parameter indices which did not receive grad for",
             ):
                 for i in range(2):
-                    if i % 2 != 0:
-                        out = model(random_input)
-                    else:
-                        out = model(ones_input)
+                    out = model(random_input) if i % 2 != 0 else model(ones_input)
                     loss = out.sum()
                     loss.backward()
 
@@ -8198,10 +8163,7 @@ class DistributedTest:
             random_input = torch.randn(batch, dim, device=self.rank)
             ones_input = torch.ones(batch, dim, device=self.rank)
             for i in range(6):
-                if i % 2 == 0:
-                    out = model(random_input)
-                else:
-                    out = model(ones_input)
+                out = model(random_input) if i % 2 == 0 else model(ones_input)
                 loss = out.sum()
                 loss.backward()
                 # On even iterations, 2nd param goes unused, on odd iterations,

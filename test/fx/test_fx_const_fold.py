@@ -627,10 +627,7 @@ class TestConstFold(TestCase):
             if node.target != torch.quantize_per_tensor:
                 return False
             # If quantize_per_node -> dequantize, then skip folding.
-            for user in node.users:
-                if user.target == torch.dequantize:
-                    return True
-            return False
+            return any(user.target == torch.dequantize for user in node.users)
 
         gm_folded: const_fold.FoldedGraphModule = const_fold.split_const_subgraphs(
             gm, skip_folding_node_fn=skip_folding_quant_dequant

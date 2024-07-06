@@ -892,10 +892,7 @@ def _from_dynamic_axes_to_dynamic_shapes(
     if dynamic_axes is None:
         return None
 
-    if input_names is None:
-        input_names_set = set()
-    else:
-        input_names_set = set(input_names)
+    input_names_set = set() if input_names is None else set(input_names)
 
     dynamic_shapes: Dict[str, Optional[Any]] = {}
     for input_name, axes in dynamic_axes.items():
@@ -1629,10 +1626,7 @@ def _export(
             )
             # Normally f can be a file-like object, but for large models, the external data format requires a
             # valid `model_file_location`. Code in export.cpp will enforce this.
-            if isinstance(f, str):
-                model_file_location = f
-            else:
-                model_file_location = ""
+            model_file_location = f if isinstance(f, str) else ""
             args = _decide_input_format(model, args)
             if dynamic_axes is None:
                 dynamic_axes = {}
@@ -1843,10 +1837,7 @@ def _should_aten_fallback(
     if not name.startswith("aten::"):
         return False
 
-    if is_onnx_aten_export or (is_aten_fallback_export and not is_exportable_aten_op):
-        return True
-
-    return False
+    return is_onnx_aten_export or is_aten_fallback_export and not is_exportable_aten_op
 
 
 @_beartype.beartype

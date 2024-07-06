@@ -129,7 +129,7 @@ class GeneratedFileCleaner:
             os.mkdir(dn)
             self.dirs_to_clean.append(os.path.abspath(dn))
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, *args: object) -> None:
         if not self.keep_intermediates:
             for f in self.files_to_clean:
                 os.unlink(f)
@@ -614,25 +614,19 @@ def is_out_of_place(rel_filepath):
         return False
     if rel_filepath.startswith("third_party/nvfuser/"):
         return False
-    if rel_filepath.startswith("tools/autograd/templates/"):
-        return False
-    return True
+    return not rel_filepath.startswith("tools/autograd/templates/")
 
 
 # Keep this synchronized with includes/ignores in build_amd.py
 def is_pytorch_file(rel_filepath):
     assert not os.path.isabs(rel_filepath)
     if rel_filepath.startswith("aten/"):
-        if rel_filepath.startswith("aten/src/ATen/core/"):
-            return False
-        return True
+        return not rel_filepath.startswith("aten/src/ATen/core/")
     if rel_filepath.startswith("torch/"):
         return True
     if rel_filepath.startswith("third_party/nvfuser/"):
         return True
-    if rel_filepath.startswith("tools/autograd/templates/"):
-        return True
-    return False
+    return rel_filepath.startswith("tools/autograd/templates/")
 
 
 def is_cusparse_file(rel_filepath):
@@ -732,10 +726,7 @@ class Trie:
             else:
                 alt.append('[' + ''.join(cc) + ']')
 
-        if len(alt) == 1:
-            result = alt[0]
-        else:
-            result = "(?:" + "|".join(alt) + ")"
+        result = alt[0] if len(alt) == 1 else "(?:" + "|".join(alt) + ")"
 
         if q:
             if cconly:

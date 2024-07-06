@@ -17,10 +17,7 @@ def _get_weight_and_quantization_params(module, wn):
     weight = getattr(module, wn)
     params = [weight]
     for param_name in [wn + n for n in ["_qscheme", "_dtype", "_scale", "_zero_point", "_axis_int"]]:
-        if hasattr(module, param_name):
-            param = getattr(module, param_name)
-        else:
-            param = None
+        param = getattr(module, param_name) if hasattr(module, param_name) else None
         params.append(param)
     return params
 
@@ -385,10 +382,7 @@ class LSTM(RNNBase):
         quantized_weight_bias_dict = {}
         for wn in self._flat_weights_names:
             if hasattr(self, wn):
-                if wn.startswith("weight"):
-                    weight_or_bias = get_quantized_weight(self, wn)
-                else:
-                    weight_or_bias = getattr(self, wn)
+                weight_or_bias = get_quantized_weight(self, wn) if wn.startswith('weight') else getattr(self, wn)
             else:
                 weight_or_bias = None
             quantized_weight_bias_dict[wn] = weight_or_bias
@@ -512,10 +506,7 @@ class GRU(RNNBase):
         quantized_weight_bias_dict = {}
         for wn in self._flat_weights_names:
             if hasattr(self, wn):
-                if wn.startswith("weight"):
-                    weight_or_bias = get_quantized_weight(self, wn)
-                else:
-                    weight_or_bias = getattr(self, wn)
+                weight_or_bias = get_quantized_weight(self, wn) if wn.startswith('weight') else getattr(self, wn)
             else:
                 weight_or_bias = None
             quantized_weight_bias_dict[wn] = weight_or_bias

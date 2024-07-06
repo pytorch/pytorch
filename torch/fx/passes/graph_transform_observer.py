@@ -45,7 +45,7 @@ class GraphTransformObserver:
 
         return self
 
-    def __exit__(self, type, value, tb):
+    def __exit__(self, *args: object) -> None:
         if self.log_url is None or self.gm is None:
             return
 

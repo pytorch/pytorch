@@ -350,9 +350,7 @@ class Replicate(Placement):
     """
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Replicate):
-            return False
-        return True
+        return isinstance(other, Replicate)
 
     def __hash__(self) -> int:
         # every replicate placement is the same
@@ -547,15 +545,17 @@ class DTensorSpec:
         """
         human readable representation of the DTensorSpec
         """
-        if len(self.placements) == 1:
-            placement_str = str(self.placements[0])
-        else:
-            placement_str = str(self.placements)
+        placement_str = (
+            str(self.placements[0])
+            if len(self.placements) == 1
+            else str(self.placements)
+        )
 
-        if self.tensor_meta is not None:
-            tensor_shape = str(tuple(self.tensor_meta.shape))
-        else:
-            tensor_shape = "unknown shape"
+        tensor_shape = (
+            str(tuple(self.tensor_meta.shape))
+            if self.tensor_meta is not None
+            else "unknown shape"
+        )
 
         return f"Spec({placement_str} on {tensor_shape})"
 

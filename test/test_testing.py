@@ -113,16 +113,7 @@ class TestTesting(TestCase):
 
         self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
 
-        if dtype is torch.uint8:
-            tests = [
-                (-1, 1, False),
-                (1, -1, False)
-            ]
-        else:
-            tests = [
-                (-1, 1, True),
-                (1, -1, True)
-            ]
+        tests = [(-1, 1, False), (1, -1, False)] if dtype is torch.uint8 else [(-1, 1, True), (1, -1, True)]
 
         self._isclose_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
 
@@ -1395,7 +1386,7 @@ class TestMakeTensor(TestCase):
     )
 
     @supported_dtypes
-    @parametrize("shape", [tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
+    @parametrize("shape", [(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
     @parametrize("splat_shape", [False, True])
     def test_smoke(self, dtype, device, shape, splat_shape):
         t = torch.testing.make_tensor(*shape if splat_shape else shape, dtype=dtype, device=device)
@@ -1426,7 +1417,7 @@ class TestMakeTensor(TestCase):
 
     @supported_dtypes
     @parametrize("noncontiguous", [False, True])
-    @parametrize("shape", [tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
+    @parametrize("shape", [(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
     def test_noncontiguous(self, dtype, device, noncontiguous, shape):
         numel = functools.reduce(operator.mul, shape, 1)
 

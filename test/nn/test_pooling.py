@@ -871,10 +871,11 @@ torch.cuda.synchronize()
             x = torch.randint(
                 1, 10, size, dtype=torch.float, device=device, requires_grad=True
             )
-            if memory_format == "non_contiguous":
-                x = x[::2, ::2, ::2, ::2]
-            else:
-                x = x.to(memory_format=memory_format)
+            x = (
+                x[::2, ::2, ::2, ::2]
+                if memory_format == "non_contiguous"
+                else x.to(memory_format=memory_format)
+            )
 
             net = torch.nn.AdaptiveAvgPool2d((1, 1))
             out = net(x)

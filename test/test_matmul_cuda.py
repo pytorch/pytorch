@@ -251,10 +251,7 @@ def amax_to_scale(
     return scale
 
 def tensor_to_scale(x: torch.Tensor, float8_dtype: torch.dtype, dim=None):
-    if dim is None:
-        amax = torch.max(torch.abs(x))
-    else:
-        amax = torch.max(torch.abs(x), dim=dim, keepdim=True).values
+    amax = torch.max(torch.abs(x)) if dim is None else torch.max(torch.abs(x), dim=dim, keepdim=True).values
 
     return amax_to_scale(amax, float8_dtype, x.dtype)
 

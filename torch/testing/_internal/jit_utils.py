@@ -86,15 +86,14 @@ class _AssertRaisesRegexWithHighlightContext:
     def __enter__(self):
         return self
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, exc_type, exc_value, exc_tb) -> None:
         with self.test_case.assertRaisesRegex(self.exception_type, self.regex):
-            if type:
-                raise value
+            if exc_type:
+                raise exc_value
 
         if self.highlight:
-            FileCheck().check_source_highlighted(self.highlight).run(str(value))
+            FileCheck().check_source_highlighted(self.highlight).run(str(exc_value))
 
-        return True
 
 FUSION_GROUP = "prim::TensorExprGroup"
 
@@ -112,7 +111,7 @@ class JitTestCase(JitCommonTestCase):
             sys.stdout = self.stringio
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: object) -> None:
             self.append(str(self.stringio.getvalue()))
             del self.stringio
             sys.stdout = self.sys_stdout
@@ -127,7 +126,7 @@ class JitTestCase(JitCommonTestCase):
             sys.stderr = self.stringio
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: object) -> None:
             self.append(str(self.stringio.getvalue()))
             del self.stringio
             sys.stderr = self.sys_stderr
@@ -189,10 +188,7 @@ class JitTestCase(JitCommonTestCase):
         se = str(e)
         allowed = ("Could not export Python function",
                    "closures are not exportable")
-        for a in allowed:
-            if a in se:
-                return True
-        return False
+        return any(a in se for a in allowed)
 
     def _compared_saved_loaded(self, m):
         def extract_files(buffer):
@@ -345,10 +341,7 @@ class JitTestCase(JitCommonTestCase):
         self.assertExpectedGraph(g, *args, **kwargs)
 
     def assertExpectedGraph(self, trace, *args, **kwargs):
-        if isinstance(trace, torch._C.Graph):
-            graph = trace
-        else:
-            graph = trace.graph()
+        graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
 
         torch._C._jit_pass_lint(graph)
         torch._C._jit_pass_dce(graph)
@@ -647,7 +640,7 @@ class NoTracerWarnContextManager:
         self.prev = torch._C._jit_get_tracer_state_warn()
         torch._C._jit_set_tracer_state_warn(False)
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: object) -> None:
         torch._C._jit_set_tracer_state_warn(self.prev)
 
 @contextmanager

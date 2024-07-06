@@ -57,10 +57,7 @@ def belongs_to_base(test, base):
     if not test.startswith(base):
         return False
     candidates = [try_base for try_base in base_names if len(try_base) > len(base)]
-    for candidate in candidates:
-        if test.startswith(candidate):
-            return False
-    return True
+    return all(not test.startswith(candidate) for candidate in candidates)
 
 
 def parse_namespace(base):
@@ -104,10 +101,7 @@ def parse_base(base):
 
 
 def any_starts_with(strs, thing):
-    for s in strs:
-        if s.startswith(thing):
-            return True
-    return False
+    return any(s.startswith(thing) for s in strs)
 
 
 def get_suggested_xfails(base, tests):
@@ -120,10 +114,7 @@ def get_suggested_xfails(base, tests):
         cpu_variant = base + "_cpu_float32"
         cuda_variant = base + "_cuda_float32"
         namespace, api, variant = parse_base(base)
-        if namespace is None:
-            api = api
-        else:
-            api = f"{namespace}.{api}"
+        api = api if namespace is None else f"{namespace}.{api}"
         if cpu_variant in tests and cuda_variant in tests:
             result.append(f"xfail('{api}', '{variant}'),")
             continue
