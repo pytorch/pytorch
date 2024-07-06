@@ -248,7 +248,7 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
 
     @staticmethod
     def ceil_to_int(x, dtype):
-        return math.ceil(x)
+        return torch.sym_ite(x % 1 == 0.0, torch.sym_int(x), torch.sym_int(x + 1.0))
 
     @staticmethod
     def floor(x):
@@ -261,6 +261,10 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def truediv(a, b):
         return a / b
+
+    @staticmethod
+    def int_truediv(a, b):
+        return torch.sym_int(a / b)
 
     @staticmethod
     def pow(a, b):
@@ -280,3 +284,7 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def round_decimal(a, b):
         return round(a, ndigits=b)
+
+    @staticmethod
+    def trunc_to_int(x, dtype):
+        return torch.sym_int(x)

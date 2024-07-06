@@ -119,19 +119,6 @@ def insert_deferred_runtime_asserts(
         else:
             placeholders.add(node)
 
-    def _contains_sympy_function(expr):
-        """
-        Checks if sympy expression is or contains any args that are sympy.Functions
-        TODO(pianpwk): remove this eventually
-        """
-        if not isinstance(expr, sympy.Expr):
-            return False
-        if isinstance(expr, sympy.Function):
-            return True
-        if hasattr(expr, "args"):
-            return any(_contains_sympy_function(arg) for arg in expr.args)
-        return False
-
     def _is_intermediate_tensor_sym_call(node: fx.Node) -> bool:
         """
         If a size/stride/storage offset call on an intermediate tensor,
@@ -140,13 +127,6 @@ def insert_deferred_runtime_asserts(
         return (
             (val := _get_sym_val(node)) is not None
             and not isinstance(val, sympy.Number)
-            and not _contains_sympy_function(val)
-            # this holds back from reifying anything in torch.utils._sympy.functions.py from input shapes.
-            # TODO: figure out missing parts, too many failures on TruncToInt, CeilToInt, etc.
-            # see for example:
-            # test/dynamo/test_unspec.py test_unspec_float_precision
-            # test/dynamo/test_repros.py test_do_paste_mask
-            # test/nn/test_packed_sequence.py test_pack_padded_sequence (PYTORCH_TEST_WITH_DYNAMO=1)
             and any(
                 isinstance(arg, fx.Node)
                 and isinstance(_get_example_value(arg), (torch.Tensor, torch.Size))
