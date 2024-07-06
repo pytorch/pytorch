@@ -56,6 +56,7 @@ class Benchmarker:
         estimated_timing = time(buffer, _callable, estimation_iters)
         benchmark_iters = min(benchmark_iters, max(int(max_benchmark_duration / estimated_timing), 1))
 
+        torch.cuda._sleep(250000)
         for _ in range(memory_warmup_iters):
             buffer.zero_()
         benchmark = time(buffer, _callable, benchmark_iters)
