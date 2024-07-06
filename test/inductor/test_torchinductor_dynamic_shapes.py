@@ -77,6 +77,12 @@ if TEST_WITH_ROCM:
     test_failures["test_unbacked_reduction"] = TestFailure(("cpu"), is_skip=True)
 
 
+if os.getenv("BUILD_ENVIRONMENT", "").endswith("-debug"):
+    # Fails with TORCH_INTERNAL_ASSERT(!is_heap_allocated()), see https://github.com/pytorch/pytorch/issues/130073
+    test_failures["test_resize_as_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
+    test_failures["test_resize_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
+
+
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
     return make_test_cls_with_patches(
         cls,
