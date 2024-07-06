@@ -122,11 +122,10 @@ def get_cpp_compiler() -> str:
     else:
         if config.is_fbcode():
             return build_paths.cc()
-        search = (
-            tuple(config.cpp.cxx)
-            if isinstance(config.cpp.cxx, (list, tuple))
-            else (config.cpp.cxx,)
-        )
+        if isinstance(config.cpp.cxx, (list, tuple)):
+            search = tuple(config.cpp.cxx)
+        else:
+            search = (config.cpp.cxx,)
         compiler = cpp_compiler_search(search)
     return compiler
 
@@ -526,11 +525,10 @@ def _setup_standard_sys_libs(
         include_dirs.append(build_paths.linux_kernel())
         include_dirs.append("include")
 
-        linker_script = (
-            _LINKER_SCRIPT
-            if aot_mode and not use_absolute_path
-            else os.path.basename(_LINKER_SCRIPT)
-        )
+        if aot_mode and not use_absolute_path:
+            linker_script = _LINKER_SCRIPT
+        else:
+            linker_script = os.path.basename(_LINKER_SCRIPT)
 
         if _is_clang(cpp_compiler):
             passthough_args.append(" --rtlib=compiler-rt")

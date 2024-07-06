@@ -257,9 +257,10 @@ class TestFSDPHybridShard(FSDPTest):
         use_orig_params: bool,
         use_device_mesh: bool,
     ):
-        device_mesh = (
-            init_device_mesh("cuda", (1, self.world_size)) if use_device_mesh else None
-        )
+        if use_device_mesh:
+            device_mesh = init_device_mesh("cuda", (1, self.world_size))
+        else:
+            device_mesh = None
         hsdp_model = self._init_hsdp_model(
             hsdp_sharding_strategy,
             sharding_strategy_mode,

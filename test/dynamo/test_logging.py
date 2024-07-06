@@ -629,7 +629,10 @@ L['zs'][0] == 3.0                                             # for y, z in zip(
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
     def test_default_logging(self, records):
         def fn(a):
-            a = torch.sin(a) if a.sum() < 0 else torch.cos(a)
+            if a.sum() < 0:
+                a = torch.sin(a)
+            else:
+                a = torch.cos(a)
             print("hello")
             return a + 1
 

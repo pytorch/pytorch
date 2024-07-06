@@ -27,7 +27,10 @@ def split_result_tensors(
     """
     # When fx tracer is running, x.shape[0] will be torch.fx.Attribute but we
     # need an int even when tracing
-    splits = [0] * len(inputs) if isinstance(result, torch.fx.Proxy) else [x.shape[0] for x in inputs]
+    if isinstance(result, torch.fx.Proxy):
+        splits = [0] * len(inputs)
+    else:
+        splits = [x.shape[0] for x in inputs]
 
     return torch.split(result, splits)
 

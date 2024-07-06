@@ -319,7 +319,10 @@ def _single_tensor_nadam(
         # update step
         step_t += 1
 
-        step = step_t if capturable else _get_value(step_t)
+        if capturable:
+            step = step_t
+        else:
+            step = _get_value(step_t)
 
         bias_correction2 = 1 - beta2**step
 
@@ -610,11 +613,10 @@ def nadam(
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
 
-    func = (
-        _multi_tensor_nadam
-        if foreach and not torch.jit.is_scripting()
-        else _single_tensor_nadam
-    )
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_nadam
+    else:
+        func = _single_tensor_nadam
 
     func(
         params,

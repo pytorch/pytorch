@@ -117,7 +117,10 @@ def main():
 
     args = parser.parse_args()
 
-    submods = all_submod_list if args.all_submod else [args.submod]
+    if args.all_submod:
+        submods = all_submod_list
+    else:
+        submods = [args.submod]
 
     for mod in submods:
         run(args, mod)

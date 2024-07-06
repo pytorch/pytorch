@@ -106,11 +106,10 @@ class BatchDimAnalyzer:
         # if there's no hints from the output_dim_rules, we infer from output
         # shape to see if there's batch dim, and shard correspondingly
         node_val = node.meta["val"]
-        shapes = (
-            [val.shape for val in node_val]
-            if isinstance(node_val, (list, tuple))
-            else [node_val.shape]
-        )
+        if isinstance(node_val, (list, tuple)):
+            shapes = [val.shape for val in node_val]
+        else:
+            shapes = [node_val.shape]
 
         # for reduction op that reduces over the sharded batch dim
         # we don't generate partial, but rather, we generate shard

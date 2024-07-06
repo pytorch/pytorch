@@ -592,7 +592,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     def _read(name):
-        f = sys.stdin.buffer if name == "-" else open(name, "rb")
+        if name == '-':
+            f = sys.stdin.buffer
+        else:
+            f = open(name, 'rb')
         data = pickle.load(f)
         if isinstance(data, list):  # segments only...
             data = {'segments': data, 'traces': []}

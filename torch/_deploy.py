@@ -14,11 +14,10 @@ def _save_storages(importer, obj):
 
     importer = importer if isinstance(importer, torch.package.PackageImporter) else None
     importers: Importer
-    importers = (
-        OrderedImporter(importer, sys_importer)
-        if importer is not None
-        else sys_importer
-    )
+    if importer is not None:
+        importers = OrderedImporter(importer, sys_importer)
+    else:
+        importers = sys_importer
 
     def persistent_id(obj):
         if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
@@ -84,11 +83,10 @@ def _load_storages(id, zip_reader, obj_bytes, serialized_storages, serialized_dt
         return None
 
     importer: Importer
-    importer = (
-        OrderedImporter(_get_package(zip_reader), sys_importer)
-        if zip_reader is not None
-        else sys_importer
-    )
+    if zip_reader is not None:
+        importer = OrderedImporter(_get_package(zip_reader), sys_importer)
+    else:
+        importer = sys_importer
 
     unpickler = PackageUnpickler(importer, io.BytesIO(obj_bytes))
     unpickler.persistent_load = persistent_load  # type: ignore[method-assign]

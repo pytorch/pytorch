@@ -192,7 +192,10 @@ Generates:
 """
 @st.composite
 def tensor(draw, shapes=None, elements=None, qparams=None, dtype=np.float32):
-    _shape = draw(shapes) if isinstance(shapes, SearchStrategy) else draw(st.sampled_from(shapes))
+    if isinstance(shapes, SearchStrategy):
+        _shape = draw(shapes)
+    else:
+        _shape = draw(st.sampled_from(shapes))
     if qparams is None:
         if elements is None:
             elements = floats(-1e6, 1e6, allow_nan=False, width=32)
@@ -214,7 +217,10 @@ def tensor(draw, shapes=None, elements=None, qparams=None, dtype=np.float32):
 
 @st.composite
 def per_channel_tensor(draw, shapes=None, elements=None, qparams=None):
-    _shape = draw(shapes) if isinstance(shapes, SearchStrategy) else draw(st.sampled_from(shapes))
+    if isinstance(shapes, SearchStrategy):
+        _shape = draw(shapes)
+    else:
+        _shape = draw(st.sampled_from(shapes))
     if qparams is None:
         if elements is None:
             elements = floats(-1e6, 1e6, allow_nan=False, width=32)

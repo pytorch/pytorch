@@ -771,7 +771,10 @@ def generate_tensor_like_override_tests(cls):
             module = "Tensor"
         else:
             module = func.__module__
-        name = "test_{}_{}".format(module.replace(".", "_"), func.__name__) if module else f"test_{func.__name__}"
+        if module:
+            name = 'test_{}_{}'.format(module.replace('.', '_'), func.__name__)
+        else:
+            name = f'test_{func.__name__}'
         test_method.__name__ = name
         setattr(cls, name, test_method)
 

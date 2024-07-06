@@ -172,9 +172,10 @@ class LogXMLReruns(LogXML):
             reprcrash: Optional[ReprFileLocation] = getattr(
                 report.longrepr, "reprcrash", None
             )
-            message = (
-                reprcrash.message if reprcrash is not None else str(report.longrepr)
-            )
+            if reprcrash is not None:
+                message = reprcrash.message
+            else:
+                message = str(report.longrepr)
             message = bin_xml_escape(message)
             reporter._add_simple("rerun", message, str(report.longrepr))
 

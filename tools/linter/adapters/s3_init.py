@@ -184,7 +184,10 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    DRY_RUN = False if args.dry_run == "0" else True
+    if args.dry_run == "0":
+        DRY_RUN = False
+    else:
+        DRY_RUN = True
 
     logging.basicConfig(
         format="[DRY_RUN] %(levelname)s: %(message)s"

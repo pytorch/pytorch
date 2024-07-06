@@ -51,7 +51,10 @@ class MatMulBench(benchmark.Benchmark):
         }
 
     def compute_workload(self):
-        count = 1 if self.mode == "fwd" else 1 + (1 + 1)
+        if self.mode == "fwd":
+            count = 1
+        else:
+            count = 1 + (1 + 1)
 
         op_count = 2 * self.B * self.M * self.N * self.K
 

@@ -276,7 +276,10 @@ class TestCppExtensionJIT(common.TestCase):
     @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
     def test_jit_cudnn_extension(self):
         # implementation of CuDNN ReLU
-        extra_ldflags = ["cudnn.lib"] if IS_WINDOWS else ["-lcudnn"]
+        if IS_WINDOWS:
+            extra_ldflags = ["cudnn.lib"]
+        else:
+            extra_ldflags = ["-lcudnn"]
         module = torch.utils.cpp_extension.load(
             name="torch_test_cudnn_extension",
             sources=["cpp_extensions/cudnn_extension.cpp"],

@@ -755,11 +755,10 @@ def remove_noop_ops(graph: torch.fx.Graph):
     for node in graph.nodes:
         if node.target in noop_registry:
             cond, src_index = noop_registry[node.target]
-            src = (
-                node.args[src_index]
-                if isinstance(src_index, int)
-                else src_index(node.args)
-            )
+            if isinstance(src_index, int):
+                src = node.args[src_index]
+            else:
+                src = src_index(node.args)
             if not isinstance(src, torch.fx.Node):
                 continue
             # Don't introduce new aliasing between inputs and outputs.

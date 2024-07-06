@@ -680,11 +680,10 @@ def forward(self, arg0_1, arg1_1):
 
             def forward(self, tq, x):
                 x_cos = tq.pop() + tq.float_size() + self.linear(x)
-                x_sin = (
-                    self.linear(tq.pop()) - tq.size() + x
-                    if tq.is_empty()
-                    else tq.pop() + tq.size() + x
-                )
+                if tq.is_empty():
+                    x_sin = self.linear(tq.pop()) - tq.size() + x
+                else:
+                    x_sin = tq.pop() + tq.size() + x
                 return x_sin, x_cos, tq
 
         mod = Model()

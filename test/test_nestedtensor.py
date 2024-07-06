@@ -267,9 +267,10 @@ class TestNestedTensor(TestCase):
         data = []
         nested_tensor_ref_list = []
         for _ in range(batch_size):
-            length = (
-                0 if max_seq_len == 0 else np.random.randint(low=1, high=max_seq_len)
-            )
+            if max_seq_len == 0:
+                length = 0
+            else:
+                length = np.random.randint(low=1, high=max_seq_len)
             row = list(np.random.randint(low=0, high=vocab_size, size=(length,)))
             data.append(row)
             nested_tensor_ref_list.append(torch.Tensor(row))
@@ -287,9 +288,10 @@ class TestNestedTensor(TestCase):
         data = []
         nested_tensor_ref_list = []
         for _ in range(batch_size):
-            length = (
-                0 if max_seq_len == 0 else np.random.randint(low=1, high=max_seq_len)
-            )
+            if max_seq_len == 0:
+                length = 0
+            else:
+                length = np.random.randint(low=1, high=max_seq_len)
             row = list(np.random.randint(low=0, high=vocab_size, size=(length,)))
             row = [list(item * np.arange(max_seq_len)) for item in row]
             data.append(row)
@@ -308,9 +310,10 @@ class TestNestedTensor(TestCase):
         data = []
         nested_tensor_ref_list = []
         for _ in range(batch_size):
-            length = (
-                0 if max_seq_len == 0 else np.random.randint(low=1, high=max_seq_len)
-            )
+            if max_seq_len == 0:
+                length = 0
+            else:
+                length = np.random.randint(low=1, high=max_seq_len)
             row = list(
                 np.random.randint(low=0, high=vocab_size, size=(length,)).astype(float)
             )

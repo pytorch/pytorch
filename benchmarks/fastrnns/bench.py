@@ -82,7 +82,10 @@ def trainbench(
 ):
     def train_batch(modeldef):
         # CUDA events for timing
-        timer_class = torch.cuda.Event if device == "cuda" else Event
+        if device == "cuda":
+            timer_class = torch.cuda.Event
+        else:
+            timer_class = Event
 
         fwd_start_event = timer_class(enable_timing=True)
         fwd_end_event = timer_class(enable_timing=True)

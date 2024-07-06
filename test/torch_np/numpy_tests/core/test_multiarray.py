@@ -3509,7 +3509,10 @@ class TestClip(TestCase):
             expected_max = clip_max
 
         for T in np.sctypes[type_group]:
-            byte_orders = ["=", ">"] if sys.byteorder == "little" else ["<", "="]
+            if sys.byteorder == "little":
+                byte_orders = ["=", ">"]
+            else:
+                byte_orders = ["<", "="]
 
             for byteorder in byte_orders:
                 dtype = np.dtype(T).newbyteorder(byteorder)
@@ -4062,7 +4065,10 @@ class TestIO(TestCase):
             os.dup = old_dup
 
     def _check_from(self, s, value, filename, **kw):
-        y = np.frombuffer(s, **kw) if "sep" not in kw else np.fromstring(s, **kw)
+        if "sep" not in kw:
+            y = np.frombuffer(s, **kw)
+        else:
+            y = np.fromstring(s, **kw)
         assert_array_equal(y, value)
 
         with open(filename, "wb") as f:
@@ -5874,7 +5880,10 @@ class TestPEP3118Dtype(TestCase):
     def test_native_padding(self):
         align = np.dtype("i").alignment
         for j in range(8):
-            s = "bi" if j == 0 else "b%dxi" % j
+            if j == 0:
+                s = "bi"
+            else:
+                s = "b%dxi" % j
             self._check(
                 "@" + s, {"f0": ("i1", 0), "f1": ("i", align * (1 + j // align))}
             )

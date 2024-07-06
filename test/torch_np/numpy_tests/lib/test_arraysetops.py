@@ -477,11 +477,10 @@ class TestSetOps(TestCase):
         is_dtype2_signed = np.issubdtype(dtype2, np.signedinteger)
         ar1 = np.array([0, 0, 1, 1], dtype=dtype1)
 
-        ar2 = (
-            np.array([-128, 0, 127], dtype=dtype2)
-            if is_dtype2_signed
-            else np.array([127, 0, 255], dtype=dtype2)
-        )
+        if is_dtype2_signed:
+            ar2 = np.array([-128, 0, 127], dtype=dtype2)
+        else:
+            ar2 = np.array([127, 0, 255], dtype=dtype2)
 
         expected = np.array([True, True, False, False])
 

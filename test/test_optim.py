@@ -459,11 +459,10 @@ class TestOptimRenewed(TestCase):
 
             def eval(params, sparse_grad, w):
                 optimizer.zero_grad()
-                loss = (
-                    sum(rosenbrock(param) for param in params)
-                    if multi_tensor
-                    else rosenbrock(params[0])
-                )
+                if multi_tensor:
+                    loss = sum(rosenbrock(param) for param in params)
+                else:
+                    loss = rosenbrock(params[0])
                 loss.backward()
 
                 grads_out = [get_grad(param, sparse_grad, w) for param in params]
@@ -1275,7 +1274,10 @@ class TestOptimRenewed(TestCase):
                     else 1e-5
                 )
 
-            params = [param.clone()] if kwargs.get("differentiable", False) else [param]
+            if kwargs.get("differentiable", False):
+                params = [param.clone()]
+            else:
+                params = [param]
 
             optimizer = optim_cls(params, **kwargs)
             if optim_info.only_supports_sparse_grads:

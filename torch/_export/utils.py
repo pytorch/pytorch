@@ -544,9 +544,10 @@ def placeholder_naming_pass(
     for spec in export_graph_signature.input_specs:
         if spec.kind == InputKind.USER_INPUT:
             continue
-        base_name = (
-            "" if spec.kind == InputKind.TOKEN else _strip_name(spec.target).lower()
-        )
+        if spec.kind == InputKind.TOKEN:
+            base_name = ""
+        else:
+            base_name = _strip_name(spec.target).lower()
         base_name = re.sub(r"[^a-zA-Z0-9]", "_", base_name)
 
         _rename_without_collisions(

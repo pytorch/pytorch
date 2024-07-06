@@ -171,7 +171,10 @@ def _pipelined_all_gather_and_consume(
     # their local p2p buffer. Each rank can now copy and consume
     # remote shards.
     for step in range(1, group_size):
-        stream = torch.cuda.current_stream() if step % 2 == 0 else backend_stream
+        if step % 2 == 0:
+            stream = torch.cuda.current_stream()
+        else:
+            stream = backend_stream
         remote_rank = (step + rank) % group_size
         remote_p2p_buf = symm_mem.get_buffer(remote_rank, shard.shape, shard.dtype)
         with torch.cuda.stream(stream):

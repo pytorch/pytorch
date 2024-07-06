@@ -1158,11 +1158,10 @@ class TestFSDPOptimState(FSDPTest):
         to save CI cost since it call into the same subroutine
         :meth:`_flatten_optim_state_dict`.
         """
-        use_optim_input = (
-            [False]
-            if state_dict_type == StateDictType.SHARDED_STATE_DICT
-            else [False, True]
-        )
+        if state_dict_type == StateDictType.SHARDED_STATE_DICT:
+            use_optim_input = [False]
+        else:
+            use_optim_input = [False, True]
         self.run_subtests(
             {"use_optim_input": use_optim_input},
             self._test_shard_full_optim_state_dict_unmanaged_params,
@@ -1262,11 +1261,10 @@ class TestFSDPOptimState(FSDPTest):
         parameter IDs by checking that a wrapped model (i.e. with FSDP modules)
         can rekey its optimizer state dict to match that of an equivalent
         non-wrapped model (i.e. without FSDP modules)."""
-        use_optim_input = (
-            [False]
-            if state_dict_type == StateDictType.SHARDED_STATE_DICT
-            else [False, True]
-        )
+        if state_dict_type == StateDictType.SHARDED_STATE_DICT:
+            use_optim_input = [False]
+        else:
+            use_optim_input = [False, True]
         self.run_subtests(
             {"use_optim_input": use_optim_input},
             self._test_rekey_optim_state_dict_to_ids,
@@ -1609,7 +1607,10 @@ class TestFSDPOptimState(FSDPTest):
                     self.sparse1 = nn.Sequential(nn.Linear(8, 8), nn.ReLU())
 
             def forward(self, x):
-                sparse = self.sparse0(x) if dist.get_rank() == 0 else self.sparse1(x)
+                if dist.get_rank() == 0:
+                    sparse = self.sparse0(x)
+                else:
+                    sparse = self.sparse1(x)
                 dist.all_reduce(sparse)
                 return self.dense(sparse)
 
