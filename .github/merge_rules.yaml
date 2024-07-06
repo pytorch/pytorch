@@ -286,6 +286,7 @@
   - test/cpp/dist_autograd/**
   - test/cpp/rpc/**
   approved_by:
+  - wconstab
   - mrshenli
   - pritamdamania87
   - zhaojuanmao
@@ -311,6 +312,25 @@
   - EasyCLA
   - Lint
   - pull
+
+- name: DCP
+  patterns:
+  - torch/distributed/checkpoint/**
+  approved_by:
+  - LucasLLC
+  - fegin
+  - wz337
+  - saumishr
+  - daulet-askarov
+  - pradeepdfb
+  - kirtiteja
+  - mhorowitz
+  - saiteja64
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 
 - name: IDEEP
   patterns:
