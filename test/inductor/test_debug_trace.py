@@ -68,8 +68,8 @@ op0.sizes = ([256], [])
 arg0_1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class op0_loop_body:
-    var_ranges = {y0: 256}
-    index0 = y0
+    var_ranges = {z0: 256}
+    index0 = z0
     def body(self, ops):
         get_index = self.get_index('index0')
         load = ops.load('arg0_1', get_index)
@@ -95,8 +95,8 @@ op1.sizes = ([256], [])
 buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 buf1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class op1_loop_body:
-    var_ranges = {y0: 256}
-    index0 = y0
+    var_ranges = {z0: 256}
+    index0 = z0
     def body(self, ops):
         get_index = self.get_index('index0')
         load = ops.load('buf0', get_index)
@@ -149,8 +149,8 @@ op0.sizes = ([256], [])
 arg0_1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class op0_loop_body:
-    var_ranges = {y0: 256}
-    index0 = y0
+    var_ranges = {z0: 256}
+    index0 = z0
     def body(self, ops):
         get_index = self.get_index('index0')
         load = ops.load('arg0_1', get_index)
@@ -175,8 +175,8 @@ op1.sizes = ([256], [])
 buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 buf1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class op1_loop_body:
-    var_ranges = {y0: 256}
-    index0 = y0
+    var_ranges = {z0: 256}
+    index0 = z0
     def body(self, ops):
         get_index = self.get_index('index0')
         load = ops.load('buf0', get_index)

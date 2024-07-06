@@ -108,10 +108,10 @@ class ImplDetailTest(TestCase):
         snode = SchedulerNode(V.graph.scheduler, buf)
         snode.apply_new_loop_order([1, 0])
         prefix1 = self._get_snode_body_sym_prefix(snode)
-        self.assertTrue(prefix1 == "y")
+        self.assertTrue(prefix1 == "z")
         snode.apply_new_loop_order([1, 0])
         prefix2 = self._get_snode_body_sym_prefix(snode)
-        self.assertTrue(prefix2 == "y")
+        self.assertTrue(prefix2 == "z")
 
     def test_reorder_and_merge_loops(self):
         sizes = (1024, 2048)
@@ -154,16 +154,16 @@ class ImplDetailTest(TestCase):
         _, body = buf.simplify_and_reorder()
         new_body = body.reorder_iter_loops([1, 2, 3, 0])
 
-        y0, y1, y2, y3 = (sympy_index_symbol(f"y{i}") for i in range(4))
-        self.assertEqual(body.var_ranges, {y0: 128, y1: 4, y2: 49, y3: 49})
+        z0, z1, z2, z3 = (sympy_index_symbol(f"z{i}") for i in range(4))
+        self.assertEqual(body.var_ranges, {z0: 128, z1: 4, z2: 49, z3: 49})
         self.assertEqual(
             body.indexing_exprs["index0"],
-            y3 + 49 * y2 + 2401 * ModularIndexing(y0, 1, 64),
+            z3 + 49 * z2 + 2401 * ModularIndexing(z0, 1, 64),
         )
-        self.assertEqual(new_body.var_ranges, {y0: 4, y1: 49, y2: 49, y3: 128})
+        self.assertEqual(new_body.var_ranges, {z0: 4, z1: 49, z2: 49, z3: 128})
         self.assertEqual(
             new_body.indexing_exprs["index0"],
-            y2 + 49 * y1 + 2401 * ModularIndexing(y3, 1, 64),
+            z2 + 49 * z1 + 2401 * ModularIndexing(z3, 1, 64),
         )
 
 

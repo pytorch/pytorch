@@ -3677,7 +3677,7 @@ class ComputedBuffer(OperationBuffer):
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             iter_ranges,
             reduce_ranges,
-            prefix="y" if config.loop_ordering_after_fusion else "z",
+            prefix="z",
         )
         body = LoopBody(
             body,
@@ -6632,7 +6632,7 @@ class LoopBody:
             iter_vars,
             reduce_vars,
         ), var_ranges = dependencies.index_vars_no_squeeze(
-            iter_sizes, reduce_sizes, prefix="z"
+            iter_sizes, reduce_sizes, prefix="t"
         )
         new_body = LoopBody(
             old_body,
@@ -6641,7 +6641,16 @@ class LoopBody:
             iter_vars,
             reduce_vars,
         )
-        return new_body
+
+        # use the original symbol prefix
+        # Can try to optimize if this is a bottleneck for compilation time
+        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
+            iter_sizes, reduce_sizes, prefix="z"
+        )
+        new_body2 = LoopBody(
+            new_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
+        )
+        return new_body2
 
     def reorder_iter_loops(self, new_order) -> LoopBody:
         """
@@ -6678,7 +6687,7 @@ class LoopBody:
 
         # use the original symbol prefix so we can do multiple round of reordering
         (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
-            *new_sizes, prefix="y"
+            *new_sizes, prefix="z"
         )
         new_body = LoopBody(
             loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
