@@ -4,7 +4,6 @@ Utils for caching the outputs of AOTAutograd
 """
 from __future__ import annotations
 
-import functools
 import logging
 import os
 import pickle
@@ -25,7 +24,6 @@ from torch._inductor.codecache import (
     FxGraphCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
-    get_code_hash,
     write_atomic,
 )
 
@@ -63,11 +61,36 @@ def check_node_safe(node: Node):
     """
     Checks that the node only uses supported operators. We are starting with very
     conservative cacheability constraints, and incrementally adding more support as we expand.
+
+    [Note: AOTAutograd Cacheability checks]
+    - Our cache key is computed from the FX graph produced by Dynamo and the input example values
+    - A node is "safe" if the same cache key results in a compiled artifact that has the same behavior
+        (i.e, the set of inputs that go into our cache key is sufficient to distinguish its behavior)
+
+    To accomplish this safety check, we consider the following functions to be safe:
+        - Public functions under modules torch, torch.functional, and torch.nn.functional: these are
+        allowed in the graph by dynamo, so we can assume they are safe to cache.
+        - method calls on base tensor types
+        - Any call_module that dynamo deemed safe to allow AOTAutograd to trace
+        - Non callable nodes, such as placeholder, output, get_attr
+
+    The test suite test_aot_autograd_cache.py::AOTAutogradCachePicklerTests tries its best to fully cover/specify this behavior.
     """
+    SAFE_TORCH_MODULES = ("torch.functional", "torch.nn.functional")
+
+    def is_public_torch_api(target):
+        # Don't blindly allow private functions in the torch namespace
+        is_private = target.__name__.startswith("_")
+        return (
+            getattr(target, "__module__", None) in SAFE_TORCH_MODULES and not is_private
+        )
 
     def is_torch_function(target):
+        if isinstance(target, torch._ops.OpOverload):
+            return True
+        if is_public_torch_api(target):
+            return True
         is_builtin_fun_or_type = type(target).__name__ == "builtin_function_or_method"
-        # TODO: handle torch.nn.functional and other non inlined targets, which don't compile down to a builtin
         return is_builtin_fun_or_type
 
     def is_tensor(target):
@@ -110,12 +133,6 @@ def check_node_safe(node: Node):
         raise BypassAOTAutogradCache(f"Unsupported node op {node.op}")
 
 
-@functools.lru_cache(None)
-def get_autograd_code_hash():
-    autograd_root = os.path.dirname(__file__)
-    return get_code_hash([autograd_root])
-
-
 def check_cacheable(gm: torch.fx.GraphModule):
     """
     Checks that the graph module only uses supported operators
@@ -155,7 +172,6 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.grad_enabled = torch.is_grad_enabled()
         self.disable_amp = torch._C._is_any_autocast_enabled()
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
-        self.code_hash = get_autograd_code_hash()
         self.autograd_config = config.save_config()
         try:
             # We don't use FxGraphHashDetails to hash example_inputs because it expects

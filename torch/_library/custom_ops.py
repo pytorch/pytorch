@@ -29,7 +29,7 @@ def custom_op(
     fn: Optional[Callable] = None,
     /,
     *,
-    mutates_args: Iterable[str],
+    mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
 ) -> Callable:
@@ -50,12 +50,15 @@ def custom_op(
             in PyTorch subsystems (e.g. torch.export, FX graphs).
             To avoid name collisions, please use your project name as the namespace;
             e.g. all custom ops in pytorch/fbgemm use "fbgemm" as the namespace.
-        mutates_args (Iterable[str]): The names of args that the function mutates.
-            This MUST be accurate, otherwise, the behavior is undefined.
+        mutates_args (Iterable[str] or "unknown"): The names of args that the function mutates.
+            This MUST be accurate, otherwise, the behavior is undefined. If "unknown",
+            it pessimistically assumes that all inputs to the operator are being mutated.
         device_types (None | str | Sequence[str]): The device type(s) the function
             is valid for. If no device type is provided, then the function
             is used as the default implementation for all device types.
             Examples: "cpu", "cuda".
+            When registering a device-specific implementation for an operator that accepts no Tensors,
+            we require the operator to have a "device: torch.device argument".
         schema (None | str): A schema string for the operator. If None
             (recommended) we'll infer a schema for the operator from its type
             annotations. We recommend letting us infer a schema unless you
@@ -107,6 +110,13 @@ def custom_op(
         >>> expected = x.sin()
         >>> numpy_sin_inplace(x)
         >>> assert torch.allclose(x, expected)
+        >>>
+        >>> # Example of a factory function
+        >>> @torch.library.custom_op("mylib::bar", mutates_args={}, device_types="cpu")
+        >>> def bar(device: torch.device) -> Tensor:
+        >>>     return torch.ones(3)
+        >>>
+        >>> bar("cpu")
 
     """
 
@@ -119,6 +129,7 @@ def custom_op(
             schema_str = torch._custom_op.impl.infer_schema(fn, mutates_args)
         else:
             schema_str = schema
+
         namespace, opname = name.split("::")
         result = CustomOpDef(namespace, opname, schema_str, fn)
         if schema is not None:
@@ -266,6 +277,16 @@ class CustomOpDef:
                         )
                 self._backend_fns[device_type] = fn
             return fn
+
+        from torch._library.utils import get_device_arg_index, has_tensor_arg
+
+        if device_types is not None and not has_tensor_arg(self._opoverload._schema):
+            device_arg_index = get_device_arg_index(self._opoverload._schema)
+            if device_arg_index is None:
+                raise ValueError(
+                    "Functions without tensor inputs are required to have a `device: torch.device` argument"
+                )
+            self._register_backend_select_dispatcher(device_arg_index)
 
         # See NOTE: [Supporting decorator and non-decorator usage]
         if fn is None:
@@ -501,6 +522,26 @@ class CustomOpDef:
                 "ADInplaceOrView",
                 with_keyset=True,
             )
+
+    def _register_backend_select_dispatcher(self, device_arg_index: int):
+        """
+        Switch on the device argument to select the correct backend to dispatch to.
+        """
+
+        def backend_select(keyset, *args, **kwargs):
+            device = args[device_arg_index].type
+            if device not in self._backend_fns:
+                raise RuntimeError(
+                    f"{self._name} does not have a kernel registered for {device}. "
+                    "Please use register_kernel to do so."
+                )
+            dispatch_key = _C._dispatch_key_for_device(device)
+            dispatch_key = getattr(_C.DispatchKey, dispatch_key)
+            return self._opoverload.redispatch(
+                _C.DispatchKeySet(dispatch_key), *args, **kwargs
+            )
+
+        self._lib.impl(self._name, backend_select, "BackendSelect", with_keyset=True)
 
     def __call__(self, *args, **kwargs):
         return self._opoverload(*args, **kwargs)
