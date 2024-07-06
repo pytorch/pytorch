@@ -72,11 +72,10 @@ class TestConvolutionNNDeviceType(NNTestCase):
             dtype=dtype,
             requires_grad=not no_weight,
         )
-        bias = (
-            torch.randn(chan_out, device=device, dtype=dtype, requires_grad=True)
-            if use_bias
-            else None
-        )
+        if use_bias:
+            bias = torch.randn(chan_out, device=device, dtype=dtype, requires_grad=True)
+        else:
+            bias = None
 
         def func(*inputs):
             if use_bias:
@@ -87,7 +86,10 @@ class TestConvolutionNNDeviceType(NNTestCase):
             out = F.conv2d(lx, lweight, lbias, stride, padding, dilation, groups)
             return out
 
-        inputs = (x, weight, bias) if use_bias else (x, weight)
+        if use_bias:
+            inputs = x, weight, bias
+        else:
+            inputs = x, weight
 
         dummy_out = func(*inputs)
         grad_y = torch.randn_like(

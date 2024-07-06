@@ -388,11 +388,10 @@ class DataLoader(Generic[_T_co]):
         self.generator = generator
 
         if collate_fn is None:
-            collate_fn = (
-                _utils.collate.default_collate
-                if self._auto_collation
-                else _utils.collate.default_convert
-            )
+            if self._auto_collation:
+                collate_fn = _utils.collate.default_collate
+            else:
+                collate_fn = _utils.collate.default_convert
 
         self.collate_fn = collate_fn
         self.persistent_workers = persistent_workers
@@ -524,11 +523,10 @@ class DataLoader(Generic[_T_co]):
             ):  # IterableDataset doesn't allow custom sampler or batch_sampler
                 from math import ceil
 
-                length = (
-                    length // self.batch_size
-                    if self.drop_last
-                    else ceil(length / self.batch_size)
-                )
+                if self.drop_last:
+                    length = length // self.batch_size
+                else:
+                    length = ceil(length / self.batch_size)
             return length
         else:
             return len(self._index_sampler)

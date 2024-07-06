@@ -414,7 +414,10 @@ def gather_leaf_tensors(args, kwargs):
 
 
 def compute_expected_grads(op, args, kwargs, output_process_fn_grad=None, gradcheck_wrapper=None):
-    results = op(*args, **kwargs) if gradcheck_wrapper is None else gradcheck_wrapper(op, *args, **kwargs)
+    if gradcheck_wrapper is None:
+        results = op(*args, **kwargs)
+    else:
+        results = gradcheck_wrapper(op, *args, **kwargs)
 
     if output_process_fn_grad is not None:
         results = output_process_fn_grad(results)

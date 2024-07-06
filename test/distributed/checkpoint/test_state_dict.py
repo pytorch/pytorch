@@ -178,7 +178,10 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             orig_model = CompositeParamModel(device=torch.device("cuda"))
             orig_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
             copy_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
-            strategy = set(wrapping) if wrapping else {UnitModule}
+            if wrapping:
+                strategy = set(wrapping)
+            else:
+                strategy = {UnitModule}
             if use_composable:
                 dist_model = fully_shard(
                     copy.deepcopy(orig_model), policy=ModuleWrapPolicy(strategy)
@@ -283,11 +286,10 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             orig_model = CompositeParamModel(device=torch.device("cuda"))
             orig_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
             copy_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
-            dist_model = (
-                replicate(copy.deepcopy(orig_model))
-                if use_composable
-                else DDP(copy.deepcopy(orig_model))
-            )
+            if use_composable:
+                dist_model = replicate(copy.deepcopy(orig_model))
+            else:
+                dist_model = DDP(copy.deepcopy(orig_model))
             dist_optim = optimizer_class(dist_model.parameters(), lr=1e-3)
             return orig_model, orig_optim, copy_optim, dist_model, dist_optim
 

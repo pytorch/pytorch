@@ -545,17 +545,15 @@ class DTensorSpec:
         """
         human readable representation of the DTensorSpec
         """
-        placement_str = (
-            str(self.placements[0])
-            if len(self.placements) == 1
-            else str(self.placements)
-        )
+        if len(self.placements) == 1:
+            placement_str = str(self.placements[0])
+        else:
+            placement_str = str(self.placements)
 
-        tensor_shape = (
-            str(tuple(self.tensor_meta.shape))
-            if self.tensor_meta is not None
-            else "unknown shape"
-        )
+        if self.tensor_meta is not None:
+            tensor_shape = str(tuple(self.tensor_meta.shape))
+        else:
+            tensor_shape = "unknown shape"
 
         return f"Spec({placement_str} on {tensor_shape})"
 

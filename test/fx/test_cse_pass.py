@@ -30,7 +30,10 @@ def check(self, f, t, delta, check_val=True, graph_input=False, P=None):
         graph_input: True is f is type GraphModule
         P: the pass to use. If None, use P_default
     """
-    fx_g = f if graph_input else make_fx(f)(t)
+    if graph_input:
+        fx_g = f
+    else:
+        fx_g = make_fx(f)(t)
 
     if P is None:
         P = P_default

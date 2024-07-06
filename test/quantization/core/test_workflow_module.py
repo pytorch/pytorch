@@ -435,7 +435,10 @@ class TestObserver(QuantizationTestCase):
                     MovingAveragePerChannelMinMaxObserver, HistogramObserver,
                     FakeQuantize, FixedQParamsObserver]
         for obs_cls in obs_list:
-            obs = obs_cls(0.1, 0) if obs_cls is FixedQParamsObserver else obs_cls()
+            if obs_cls is FixedQParamsObserver:
+                obs = obs_cls(0.1, 0)
+            else:
+                obs = obs_cls()
             x = torch.tensor([])
             # verify no crash
             x = obs(x)

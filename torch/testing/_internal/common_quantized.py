@@ -220,5 +220,8 @@ def _fake_quantize_per_channel_affine_grad_reference(dY, X, per_channel_scale, p
     return res.to(dtype)
 
 def to_tensor(X, device):
-    X = torch.tensor(X) if not isinstance(X, torch.Tensor) else X.clone().detach()
+    if not isinstance(X, torch.Tensor):
+        X = torch.tensor(X)
+    else:
+        X = X.clone().detach()
     return X.to(device=torch.device(device), dtype=torch.float32)

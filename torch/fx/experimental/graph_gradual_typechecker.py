@@ -496,7 +496,10 @@ def flatten_check(tensor_type, start_dim, end_dim):
         lhs = my_args[0:start_dim]
         rhs = my_args[end_dim:]
         mid = my_args[start_dim:end_dim]
-        mid = [Dyn] if Dyn in mid else [reduce(operator.mul, my_args[start_dim:end_dim])]
+        if Dyn in mid:
+            mid = [Dyn]
+        else:
+            mid = [reduce(operator.mul, my_args[start_dim:end_dim])]
         new_type_list = lhs + mid + rhs
         return TensorType(tuple(new_type_list))
     else:

@@ -200,7 +200,10 @@ def benchmark(
 
     dtype = torch.float16 if dtype == "float16" else torch.float32
 
-    ops = loader.get_all_ops() if op == "all" else [eval(op)]
+    if op == "all":
+        ops = loader.get_all_ops()
+    else:
+        ops = [eval(op)]
 
     max_samples = max_samples + start_idx
     for operator in ops:

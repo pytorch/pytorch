@@ -484,9 +484,10 @@ def _do_annotate_conv_bn(
         def _conv_bn(x, conv_weight, conv_bias, bn_weight, bn_bias, bn_rm, bn_rv):
             conv = conv_fn(x, conv_weight, conv_bias)
             bn = F.batch_norm(conv, bn_rm, bn_rv, bn_weight, bn_bias, training=True)
-            output = (
-                (F.relu_(bn) if relu_is_inplace else F.relu(bn)) if has_relu else bn
-            )
+            if has_relu:
+                output = F.relu_(bn) if relu_is_inplace else F.relu(bn)
+            else:
+                output = bn
             return output, {
                 "input": x,
                 "conv": conv,
