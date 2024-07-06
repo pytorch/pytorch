@@ -6943,7 +6943,6 @@ class CommonTemplate:
             ],
         )
 
-    @skip_if_halide  # rng
     def test_bernoulli2(self):
         def fn(a):
             return aten.bernoulli(a)
@@ -8258,7 +8257,6 @@ class CommonTemplate:
         result = fn(torch.randn([1, 2, 16, 4]).requires_grad_())
         result.sum().backward()
 
-    @skip_if_halide  # rand
     def test_dropout2(self):
         n = 100000
         weight = torch.ones(
@@ -8297,7 +8295,11 @@ class CommonTemplate:
         torch.manual_seed(1234)
         weight.grad.zero_()
         r2, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(ones))
-        if self.device == GPU_TYPE:
+        if is_halide_backend(self.device):
+            raise
+            self.assertEqual(fw_code.count("hl.random_float"), 1)
+            self.assertEqual(bw_code.count("hl.random_float"), 0)
+        elif self.device == GPU_TYPE:
             self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         g2 = weight.grad.clone()
@@ -8315,7 +8317,6 @@ class CommonTemplate:
         self.assertTrue(same(g2, g3))
 
     @config.patch(search_autotune_cache=False)
-    @skip_if_halide  # rand
     def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -8334,16 +8335,14 @@ class CommonTemplate:
             lambda: run(torch.randn([8, 32], device=self.device))
         )
 
-        if self.device == GPU_TYPE:
+        if is_halide_backend(self.device):
+            self.assertEqual(fw_code.count("halide_helpers.rand"), 2)
+            self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
+        elif self.device == GPU_TYPE:
             self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
-        expected_kernel = 4
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
-        self.assertEqual(
-            torch._inductor.metrics.generated_kernel_count, expected_kernel
-        )
-
-    @skip_if_halide  # rand
     def test_randint_kernel_count(self):
         @torch._dynamo.optimize_assert("inductor")
         def fn1():
