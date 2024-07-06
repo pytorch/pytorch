@@ -57,10 +57,7 @@ def remove_no_ops(
     def fake_tensors_eq(t1, t2, fields=("shape", "dtype", "device")):
         if any(not isinstance(t, torch.Tensor) for t in (t1, t2)):
             return False
-        for field in fields:
-            if getattr(t1, field) != getattr(t2, field):
-                return False
-        return True
+        return all(getattr(t1, field) == getattr(t2, field) for field in fields)
 
     def replace_no_op(node, replace_input_index):
         replacement = node.args[replace_input_index]

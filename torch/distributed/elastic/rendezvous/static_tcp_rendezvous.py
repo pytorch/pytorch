@@ -118,10 +118,11 @@ def create_rdzv_handler(params: RendezvousParameters) -> RendezvousHandler:
     world_size = params.max_nodes
     rank = cast(int, params.config.get("rank"))
     run_id = params.run_id
-    if "timeout" in params.config:
-        timeout = int(params.config["timeout"])
-    else:
-        timeout = _default_timeout_seconds
+    timeout = (
+        int(params.config["timeout"])
+        if "timeout" in params.config
+        else _default_timeout_seconds
+    )
     return StaticTCPRendezvous(
         master_addr, master_port, rank, world_size, run_id, timeout
     )

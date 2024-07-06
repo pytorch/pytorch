@@ -843,7 +843,7 @@ class concat_license_files:
                 os.path.relpath(third_party_path), f1, include_files=self.include_files
             )
 
-    def __exit__(self, exception_type, exception_value, traceback):
+    def __exit__(self, *args: object) -> None:
         """Restore content of f1"""
         with open(self.f1, "w") as f:
             f.write(self.bsd_text)

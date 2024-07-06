@@ -18,7 +18,7 @@ class _InsertPoint:
         self.prev_insert_point = self.g.insertPoint()
         self.g.setInsertPoint(self.insert_point)
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: object) -> None:
         self.g.setInsertPoint(self.prev_insert_point)
 
 

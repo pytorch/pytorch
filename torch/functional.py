@@ -1785,10 +1785,7 @@ def norm(  # noqa: F811
         torch.utils.backend_registration._privateuse1_backend_name,
     ):
         if dim is not None:
-            if isinstance(dim, (int, torch.SymInt)):
-                _dim = [dim]
-            else:
-                _dim = dim
+            _dim = [dim] if isinstance(dim, (int, torch.SymInt)) else dim
         else:
             _dim = None  # type: ignore[assignment]
 
@@ -1840,10 +1837,7 @@ def norm(  # noqa: F811
     # remove the overloads where dim is an int and replace with BraodcastingList1
     # and remove next four lines, replace _dim with dim
     if dim is not None:
-        if isinstance(dim, (int, torch.SymInt)):
-            _dim = [dim]
-        else:
-            _dim = dim
+        _dim = [dim] if isinstance(dim, (int, torch.SymInt)) else dim
     else:
         _dim = None  # type: ignore[assignment]
 

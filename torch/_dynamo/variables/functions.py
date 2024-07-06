@@ -57,7 +57,7 @@ def wrap_args_kwargs(tx, result):
 
 
 def init_cellvars(parent, result, code):
-    closure_cells = dict()
+    closure_cells = {}
     side_effects = parent.output.side_effects
 
     # for name in itertools.chain(code.co_cellvars, code.co_freevars):
@@ -650,10 +650,7 @@ class SkipFunctionVariable(VariableTracker):
 
             def wraps(fn):
                 if isinstance(fn, variables.NestedUserFunctionVariable):
-                    if args[0].source:
-                        reconstructible = args[0].source
-                    else:
-                        reconstructible = args[0]
+                    reconstructible = args[0].source if args[0].source else args[0]
                     return fn.clone(wrapped_reconstructible=reconstructible)
                 unimplemented(f"functools.wraps({fn})")
 

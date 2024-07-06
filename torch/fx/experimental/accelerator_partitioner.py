@@ -590,10 +590,7 @@ class Partitioner:
             # it outputs its result to 'getitem' nodes.
             # Those 'getitem' nodes are the output node for this node.
             # Otherwise, the output node is this node itself.
-            if len(node.users) > 1:
-                output_nodes = list(node.users)
-            else:
-                output_nodes = [node]
+            output_nodes = list(node.users) if len(node.users) > 1 else [node]
             partition_id = int(node.name.rsplit("_", 1)[-1])
             device_ids = self.partitions[partition_id].logical_device_ids
             size_bytes = self.partitions[partition_id].used_mem_bytes

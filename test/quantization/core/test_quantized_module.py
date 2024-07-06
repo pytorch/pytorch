@@ -1421,10 +1421,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         groups = 1
         padding_mode = 'zeros'
 
-        if qengine_is_qnnpack():
-            reduce_range = False
-        else:
-            reduce_range = True
+        reduce_range = False if qengine_is_qnnpack() else True
 
         X_fp32 = torch.randn(*([in_channels] * dim))
         s, z = _calculate_dynamic_qparams(X_fp32, dtype, reduce_range)

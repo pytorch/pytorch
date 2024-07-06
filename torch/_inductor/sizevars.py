@@ -56,8 +56,8 @@ class SizeVarAllocator:
         # which potentially could have already had a precomputed replacement
         # on it, we are obligated to invert the precomputed replacements
         # (inv_precomputed_replacements).
-        self.precomputed_replacements: Dict[Expr, sympy.Symbol] = dict()
-        self.inv_precomputed_replacements: Dict[sympy.Symbol, Expr] = dict()
+        self.precomputed_replacements: Dict[Expr, sympy.Symbol] = {}
+        self.inv_precomputed_replacements: Dict[sympy.Symbol, Expr] = {}
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
@@ -69,7 +69,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict[Tuple[Any, ...], Expr] = dict()
+        cache: Dict[Tuple[Any, ...], Expr] = {}
         replacement_count = len(self.replacements)
 
         def simplify_with_ranges(expr: Expr, var_ranges: VarRanges) -> Expr:
@@ -91,7 +91,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict[Tuple[Any, ...], Any] = dict()
+        cache: Dict[Tuple[Any, ...], Any] = {}
         replacement_count = len(self.replacements)
 
         def simplify_loops(index_vars, sizes, index_formulas):

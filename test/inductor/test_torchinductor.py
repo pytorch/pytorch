@@ -355,10 +355,7 @@ def clone_preserve_strides(x, device=None):
     buffer = torch.as_strided(
         x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
     )
-    if not device:
-        buffer = buffer.clone()
-    else:
-        buffer = buffer.to(device, copy=True)
+    buffer = buffer.clone() if not device else buffer.to(device, copy=True)
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     return out
 
@@ -549,10 +546,11 @@ def check_model(
         else:
             actual_grad = compute_grads(example_inputs, kwargs, actual, grads)
 
-            if reference_in_float:
-                expect_grad = reference_to_expect(actual_grad, correct_grad)
-            else:
-                expect_grad = correct_grad
+            expect_grad = (
+                reference_to_expect(actual_grad, correct_grad)
+                if reference_in_float
+                else correct_grad
+            )
 
             self.assertEqual(
                 actual_grad,
@@ -3313,10 +3311,9 @@ class CommonTemplate:
                 )
 
             def forward(self, x):
-                if self.momentum is None:
-                    exponential_average_factor = 0.0
-                else:
-                    exponential_average_factor = self.momentum
+                exponential_average_factor = (
+                    0.0 if self.momentum is None else self.momentum
+                )
 
                 if self.training and self.track_running_stats:
                     # TODO: if statement only here to tell the jit to skip emitting this when it is None
@@ -3328,12 +3325,11 @@ class CommonTemplate:
                             )
                         else:  # use exponential moving average
                             exponential_average_factor = self.momentum
-                if self.training:
-                    bn_training = True
-                else:
-                    bn_training = (self.running_mean is None) and (
-                        self.running_var is None
-                    )
+                bn_training = (
+                    True
+                    if self.training
+                    else self.running_mean is None and self.running_var is None
+                )
                 x = F.batch_norm(
                     x,
                     # If buffers are not to be tracked, ensure that they won't be updated
@@ -3697,10 +3693,7 @@ class CommonTemplate:
     def test_to_device_constant(self):
         def fn(a):
             d1 = a.device.type
-            if d1 == "cpu":
-                d2 = GPU_TYPE
-            else:
-                d2 = "cpu"
+            d2 = GPU_TYPE if d1 == "cpu" else "cpu"
 
             const1 = torch.as_tensor(list(range(64)), device=d2)
             return (
@@ -9832,10 +9825,9 @@ class CommonTemplate:
                 # assume shape
                 return functools.reduce(lambda x, y: x * y, size_or_y, 1)
 
-        if deterministic:
-            nele_check = correct.numel()
-        else:
-            nele_check = min(x_numel, get_numel(size_or_y))
+        nele_check = (
+            correct.numel() if deterministic else min(x_numel, get_numel(size_or_y))
+        )
 
         correct_values = correct.as_strided((nele_check,), (1,))
         actual_values = actual.as_strided((nele_check,), (1,))
@@ -11067,10 +11059,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 #             NO_ALIGN ALIGN     ALIGN
                 # def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr)
 
-                if offset % 4 == 0:
-                    expected_aligned = (0, 1, 2)
-                else:
-                    expected_aligned = (1, 2)
+                expected_aligned = (0, 1, 2) if offset % 4 == 0 else (1, 2)
                 self.assertEqual(arguments_that_are_divisible_by_16, expected_aligned)
 
             # If input isn't a view, storage offset != , inductor will assume alignment.

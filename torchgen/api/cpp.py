@@ -299,10 +299,11 @@ def return_names(f: NativeFunction, *, fallback_name: str = "result") -> Sequenc
             name_conflict = any(
                 r.name == a.name for a in f.func.schema_order_arguments()
             )
-            if name_conflict and not f.func.is_out_fn():
-                name = f"{r.name}_return"
-            else:
-                name = r.name
+            name = (
+                f"{r.name}_return"
+                if name_conflict and not f.func.is_out_fn()
+                else r.name
+            )
         # If there is no explicit name and no fallback name was passed in, we just name the output result,
         # unless it's a multi-return, in which case it's result0,
         # result1, etc (zero-indexed)

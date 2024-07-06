@@ -430,10 +430,7 @@ def convert_1x1_conv_to_mm(x, weight, bias):
     x = L[aten.permute](x, x_permute)
     *sizes, in_chan = x.get_size()
     x = L[aten.reshape](x, [sympy_product(sizes), in_chan])
-    if bias is None:
-        result = L[aten.mm](x, weight)
-    else:
-        result = L[aten.addmm](bias, x, weight)
+    result = L[aten.mm](x, weight) if bias is None else L[aten.addmm](bias, x, weight)
     result = L[aten.reshape](result, [*sizes, -1])
     result_permute = list(range(rank))
     result_permute.insert(1, result_permute.pop(-1))

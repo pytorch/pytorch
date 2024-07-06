@@ -147,10 +147,7 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
             if self.qscheme in (torch.per_channel_symmetric, torch.per_tensor_symmetric):
                 self.zero_point.data.zero_()
 
-            if self.use_grad_scaling:
-                grad_factor = 1.0 / (X.numel() * self.quant_max) ** 0.5
-            else:
-                grad_factor = 1.0
+            grad_factor = 1.0 / (X.numel() * self.quant_max) ** 0.5 if self.use_grad_scaling else 1.0
             if self.qscheme in (
                     torch.per_channel_symmetric, torch.per_channel_affine):
                 X = torch._fake_quantize_learnable_per_channel_affine(

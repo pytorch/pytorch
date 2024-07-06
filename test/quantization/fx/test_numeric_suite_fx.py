@@ -638,10 +638,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # 4. go through the ops mapped to each QuantizeHandler type, and verify
         # correctness.
         def _op_in_base_sets_of_related_ops(op):
-            for ops in base_name_to_sets_of_related_ops.values():
-                if op in ops:
-                    return True
-            return False
+            return any(op in ops for ops in base_name_to_sets_of_related_ops.values())
 
         unmatchable_types_map = get_unmatchable_types_map()
         FUNS_UNMATCHABLE = unmatchable_types_map['funs_unmatchable']

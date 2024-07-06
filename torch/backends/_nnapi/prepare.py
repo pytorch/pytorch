@@ -139,10 +139,11 @@ def convert_model_to_nnapi(
     wrapper_model = torch.jit.script(wrapper_model_py)
     # TODO: Maybe make these names match the original.
     arg_list = ", ".join(f"arg_{idx}" for idx in range(len(inputs)))
-    if retval_count < 0:
-        ret_expr = "retvals[0]"
-    else:
-        ret_expr = "".join(f"retvals[{idx}], " for idx in range(retval_count))
+    ret_expr = (
+        "retvals[0]"
+        if retval_count < 0
+        else "".join(f"retvals[{idx}], " for idx in range(retval_count))
+    )
     wrapper_model.define(
         f"def forward(self, {arg_list}):\n"
         f"    retvals = self.mod([{arg_list}])\n"

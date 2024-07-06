@@ -966,10 +966,7 @@ terrible spacing
             else:
                 constructor = test_params["constructor"]
 
-            if "constructor_args" not in test_params:
-                args = ()
-            else:
-                args = test_params["constructor_args"]
+            args = () if "constructor_args" not in test_params else test_params["constructor_args"]
 
             mod = constructor(*args)
             # Skip modules that are not standard `torch.nn`
@@ -1712,7 +1709,7 @@ class TestModule(torch.nn.Module):
                 "include_last_offset",
             },
         )
-        self.assertEqual(norm_args_and_kwargs.args, tuple())
+        self.assertEqual(norm_args_and_kwargs.args, ())
 
     def test_normalize_args_op_overload(self):
         for target in [torch.ops.aten.resize_as_.default, torch.ops.aten.resize_as_]:

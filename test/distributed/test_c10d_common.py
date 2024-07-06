@@ -396,10 +396,11 @@ class CommonDistributedDataParallelTest:
         self, model, input_var, target, loss, run_checkpoint=False, use_reentrant=True
     ):
         model.train()
-        if run_checkpoint:
-            output = checkpoint(model, input_var, use_reentrant=use_reentrant)
-        else:
-            output = model(input_var)
+        output = (
+            checkpoint(model, input_var, use_reentrant=use_reentrant)
+            if run_checkpoint
+            else model(input_var)
+        )
         l = loss(output, target)
         l.backward()
 

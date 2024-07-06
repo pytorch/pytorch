@@ -810,10 +810,11 @@ def _get_device_index(
             # the current device index is `get_current_device_index()` which can
             # be scripted. We use is_scripting to check the mode we are in and call the
             # appropriate API.
-            if torch.jit.is_scripting():
-                device_idx = get_current_device_index()
-            else:
-                device_idx = _get_current_device_index()
+            device_idx = (
+                get_current_device_index()
+                if torch.jit.is_scripting()
+                else _get_current_device_index()
+            )
         else:
             raise ValueError(
                 f"Expected a torch.device with a specified index or an integer, but got:{device}"
@@ -920,10 +921,7 @@ def _get_device_module(device_type: str):
 def _dummy_type(name: str) -> type:
     def get_err_fn(is_init: bool):
         def err_fn(obj, *args, **kwargs):
-            if is_init:
-                class_name = obj.__class__.__name__
-            else:
-                class_name = obj.__name__
+            class_name = obj.__class__.__name__ if is_init else obj.__name__
             raise RuntimeError(f"Tried to instantiate dummy base class {class_name}")
 
         return err_fn

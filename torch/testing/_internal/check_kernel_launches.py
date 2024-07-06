@@ -63,10 +63,7 @@ def find_matching_paren(s: str, startpos: int) -> int:
 
 
 def should_exclude_file(filename) -> bool:
-    for exclude_suffix in exclude_files:
-        if filename.endswith(exclude_suffix):
-            return True
-    return False
+    return any(filename.endswith(exclude_suffix) for exclude_suffix in exclude_files)
 
 
 def check_code_for_cuda_kernel_launches(code, filename=None):

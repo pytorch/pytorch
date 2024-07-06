@@ -130,7 +130,7 @@ class _server_process_global_profile(profile):
         _enable_server_process_global_profiler(profiler_config)
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: object) -> None:
         """
         Turn off server-side process-global profiling.
         Aggregate all profiling events recorded by RPC threads.

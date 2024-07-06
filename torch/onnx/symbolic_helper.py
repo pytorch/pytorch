@@ -349,14 +349,16 @@ def quantized_args(
         def wrapper(g, *args, **kwargs):
             nonlocal scale
             nonlocal zero_point
-            if scale is not None:
-                _scale = g.op("Constant", value_t=torch.tensor(scale))
-            else:
-                _scale = None
-            if zero_point is not None:
-                _zero_point = g.op("Constant", value_t=torch.tensor(zero_point))
-            else:
-                _zero_point = None
+            _scale = (
+                g.op("Constant", value_t=torch.tensor(scale))
+                if scale is not None
+                else None
+            )
+            _zero_point = (
+                g.op("Constant", value_t=torch.tensor(zero_point))
+                if zero_point is not None
+                else None
+            )
 
             # Support variable length arguments by marking unspecified ones as non-quantized
             arg_q_descriptors_extended = arg_q_descriptors + (False,) * (
@@ -368,7 +370,7 @@ def quantized_args(
                 return descriptor and _is_value(arg) and _is_tuple_construct(arg)
 
             # Run regular symbolic function if none of the argument is QTensor.
-            is_quantized = list()
+            is_quantized = []
             for descriptor, arg in descriptor_args:
                 # ListConstruct
                 if _is_packed_list(arg):
@@ -1504,10 +1506,9 @@ def check_training_mode(op_train_mode: int, op_name: str) -> None:
     if GLOBALS.training_mode == _C_onnx.TrainingMode.PRESERVE:
         return
 
-    if op_train_mode:
-        op_mode_enum = _C_onnx.TrainingMode.TRAINING
-    else:
-        op_mode_enum = _C_onnx.TrainingMode.EVAL
+    op_mode_enum = (
+        _C_onnx.TrainingMode.TRAINING if op_train_mode else _C_onnx.TrainingMode.EVAL
+    )
     if op_mode_enum == GLOBALS.training_mode:
         # The modes agree. Do nothing
         return
@@ -1600,10 +1601,11 @@ def dequantize_helper(
     axis_i = _get_const(axis, "i", "axis")
     input_qdtype = _type_utils.JitScalarType.from_value(tensor)
     if qdtype is None:
-        if input_qdtype is not None:
-            qdtype = input_qdtype.onnx_type()
-        else:
-            qdtype = _C_onnx.TensorProtoDataType.UINT8
+        qdtype = (
+            input_qdtype.onnx_type()
+            if input_qdtype is not None
+            else _C_onnx.TensorProtoDataType.UINT8
+        )
     value = g.op("Cast", tensor, to_i=qdtype)
     scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     zero_point = g.op("Cast", zero_point, to_i=qdtype)
@@ -1801,7 +1803,7 @@ def _reduce_op_symbolic_helper(onnx_op_name, allow_multi_dim_support=True):
     @_beartype.beartype
     def symbolic(g, self, dim=None, keepdim=None):
         self = _maybe_cast_reduce_op_input(g, self)
-        if dim is None or dim == tuple():
+        if dim is None or dim == ():
             # Dim can be 0, which will cause (not dim) == True. So we don't want to do
             # (not dim)
             # all-reduce path

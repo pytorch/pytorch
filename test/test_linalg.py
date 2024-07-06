@@ -182,10 +182,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_linalg_lstsq(self, device, dtype):
         from torch.testing._internal.common_utils import random_well_conditioned_matrix
-        if self.device_type == 'cpu':
-            drivers = ('gels', 'gelsy', 'gelsd', 'gelss', None)
-        else:
-            drivers = ('gels', None)
+        drivers = ('gels', 'gelsy', 'gelsd', 'gelss', None) if self.device_type == 'cpu' else ('gels', None)
 
         def check_solution_correctness(a, b, sol):
             sol2 = a.pinverse() @ b
@@ -737,10 +734,7 @@ class TestLinalg(TestCase):
                 b_np = b.cpu().numpy()
                 m_np = m.cpu().numpy()
                 exact_dtype = True
-            if beta == 0:
-                expected = alpha * np.outer(a_np, b_np)
-            else:
-                expected = beta * m_np + alpha * np.outer(a_np, b_np)
+            expected = alpha * np.outer(a_np, b_np) if beta == 0 else beta * m_np + alpha * np.outer(a_np, b_np)
 
             res = torch.addr(m, a, b, beta=beta, alpha=alpha)
             self.assertEqual(res, expected, exact_dtype=exact_dtype)
@@ -1242,10 +1236,7 @@ class TestLinalg(TestCase):
         ]
 
         def vector_norm_reference(input, ord, dim=None, keepdim=False, dtype=None):
-            if dim is None:
-                input_maybe_flat = input.flatten(0, -1)
-            else:
-                input_maybe_flat = input
+            input_maybe_flat = input.flatten(0, -1) if dim is None else input
 
             result = torch.linalg.norm(input_maybe_flat, ord, dim=dim, keepdim=keepdim, dtype=dtype)
             if keepdim and dim is None:
@@ -2172,14 +2163,14 @@ class TestLinalg(TestCase):
                 self.target_test.precision_overrides = {torch.float: 1e-4, torch.cfloat: 2e-4}
                 return self.target_test.precision_overrides
 
-            def __exit__(self, type, value, tb) -> bool:
+            def __exit__(self, *args: object) -> None:
                 if 'nuc' != self.norm:
-                    return True
+                    return
                 if self.saved_overrides is None:
                     delattr(self.target_test, 'precision_overrides')
                 else:
                     self.target_test.precision_overrides = self.saved_overrides
-                return True
+
 
         for keepdim in [False, True]:
             # full reduction
@@ -4175,10 +4166,7 @@ class TestLinalg(TestCase):
                     B.transpose_(-2, -1)
 
                 X = torch.linalg.solve_triangular(A, B, upper=upper, left=left, unitriangular=uni)
-                if left:
-                    B_other = A @ X
-                else:
-                    B_other = X @ A
+                B_other = A @ X if left else X @ A
 
                 self.assertEqual(*torch.broadcast_tensors(B, B_other))
 
@@ -5200,10 +5188,7 @@ class TestLinalg(TestCase):
                     # Vector case when left = False is not allowed
                     if not left and rhs == ():
                         continue
-                    if left:
-                        shape_B = A.shape[:-1] + rhs
-                    else:
-                        shape_B = A.shape[:-2] + rhs + A.shape[-1:]
+                    shape_B = A.shape[:-1] + rhs if left else A.shape[:-2] + rhs + A.shape[-1:]
                     B = make_arg(shape_B)
 
                     # Test linalg.lu_solve. It does not support vectors as rhs

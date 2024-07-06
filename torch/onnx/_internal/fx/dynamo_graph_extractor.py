@@ -49,7 +49,7 @@ class _PyTreeExtensionContext:
             )
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: object) -> None:
         for class_type in self._extensions:
             pytree.SUPPORTED_NODES.pop(class_type)
 

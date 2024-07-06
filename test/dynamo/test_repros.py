@@ -733,10 +733,11 @@ class BatchNormAct2d(torch.nn.BatchNorm2d):
         return super().forward(x)
 
     def forward(self, x):
-        if torch.jit.is_scripting():
-            x = self._forward_jit(x)
-        else:
-            x = self._forward_python(x)
+        x = (
+            self._forward_jit(x)
+            if torch.jit.is_scripting()
+            else self._forward_python(x)
+        )
         x = self.act(x)
         return x
 
@@ -4363,7 +4364,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             def __enter__(self):
                 return 1
 
-            def __exit__(self, exc_type, exc_val, exc_tb):
+            def __exit__(self, *args: object) -> None:
                 pass
 
         def fn(x, y):
@@ -4432,7 +4433,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             def __enter__(self):
                 return 1
 
-            def __exit__(self, exc_type, exc_val, exc_tb):
+            def __exit__(self, *args: object) -> None:
                 pass
 
         def fn(x, y):
@@ -4455,7 +4456,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             def __enter__(self):
                 return 1
 
-            def __exit__(self, exc_type, exc_val, exc_tb):
+            def __exit__(self, *args: object) -> None:
                 pass
 
         def fn(x, counter):

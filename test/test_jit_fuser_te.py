@@ -1316,10 +1316,11 @@ class TestTEFuser(JitTestCase):
         torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuser_state)
 
     def data_for(self, dtype, device="cuda", size=None):
-        if size is None:
-            v = torch.arange(1, 3, dtype=torch.float, device=device)
-        else:
-            v = torch.rand(*size, device=device)
+        v = (
+            torch.arange(1, 3, dtype=torch.float, device=device)
+            if size is None
+            else torch.rand(*size, device=device)
+        )
         if dtype == torch.bool:
             return v > 2
         elif dtype in [torch.qint8, torch.quint8, torch.qint32]:

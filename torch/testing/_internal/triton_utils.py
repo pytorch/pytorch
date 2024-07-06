@@ -335,10 +335,7 @@ if has_triton():
         mask = offsets < n_elements
         x = tl.load(in_ptr0 + offsets, mask=mask)
         y = tl.load(in_ptr1 + offsets, mask=mask)
-        if tl.program_id(0) == 0:
-            output = x + y
-        else:
-            output = x * y
+        output = x + y if tl.program_id(0) == 0 else x * y
         tl.store(out_ptr + offsets, output, mask=mask)
 
     @triton.jit

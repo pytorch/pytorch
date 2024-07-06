@@ -218,10 +218,7 @@ class CUTLASSTemplate(CUDATemplate):
 
     def cute_int(self, int_str: str, var_name: str) -> str:
         res = ""
-        if int_str in {"1", "1L"}:
-            res = "cute::Int<1>{}"
-        else:
-            res = int_str
+        res = "cute::Int<1>{}" if int_str in {"1", "1L"} else int_str
 
         return f"{res} /* {var_name} */"
 

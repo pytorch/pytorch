@@ -323,7 +323,7 @@ class _TorchDynamoContext:
         self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
         self.prior = set_eval_frame(self.callback)
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: object) -> None:
         assert self.prior is not unset
         set_eval_frame(self.prior)
         self.prior = unset
@@ -390,10 +390,7 @@ class _TorchDynamoContext:
         def do_nothing(*arg, **kwargs):
             pass
 
-        if hasattr(self, "callback"):
-            callback = self.callback
-        else:
-            callback = do_nothing
+        callback = self.callback if hasattr(self, "callback") else do_nothing
 
         is_jit_tracing = torch._C._is_tracing
         is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
@@ -1337,7 +1334,7 @@ def export(
                         **named_parameters,
                         **named_buffers,
                     }
-                    fake_params_buffers = dict()
+                    fake_params_buffers = {}
 
                     for name, value in params_and_buffers.items():
                         fake_params_buffers[name] = ambient_fake_mode.from_tensor(

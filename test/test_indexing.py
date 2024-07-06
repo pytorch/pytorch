@@ -1516,10 +1516,11 @@ class TestIndexing(TestCase):
                     shape, device=device, dtype=dtype, noncontiguous=noncontiguous
                 )
                 for dim in list(range(t.ndim)) + [None]:
-                    if dim is None:
-                        indices = torch.argsort(t.view(-1))
-                    else:
-                        indices = torch.argsort(t, dim=dim)
+                    indices = (
+                        torch.argsort(t.view(-1))
+                        if dim is None
+                        else torch.argsort(t, dim=dim)
+                    )
 
                 _test_against_numpy(t, indices, dim)
 

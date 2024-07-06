@@ -206,10 +206,7 @@ def sparse_semi_structured_to_dense_cutlass(sparse, meta_reordered):
         raise RuntimeError(f"Invalid datatype {meta_dtype} of meta matrix")
     quadbits_per_meta_elem = meta_dtype.itemsize * 8 // 4
 
-    if sparse.dtype != torch.float:
-        ksparse = 4
-    else:
-        ksparse = 2
+    ksparse = 4 if sparse.dtype != torch.float else 2
 
     meta_nrows, meta_ncols = meta_reordered.shape
     if meta_nrows != m:

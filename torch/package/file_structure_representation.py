@@ -83,10 +83,7 @@ class Directory:
         str_list.append(f"{preamble}{dir_ptr}{self.name}\n")
 
         # add directory's children representations
-        if dir_ptr == tee:
-            preamble = preamble + branch
-        else:
-            preamble = preamble + space
+        preamble = preamble + branch if dir_ptr == tee else preamble + space
 
         file_keys: List[str] = []
         dir_keys: List[str] = []

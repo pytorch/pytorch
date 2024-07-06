@@ -320,10 +320,11 @@ def flatten(g: jit_utils.GraphContext, input, start_dim, end_dim):
 
 
 def _constant_fill(g: jit_utils.GraphContext, sizes, dtype: int, const_value):
-    if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
-    else:
-        scalar_type = _type_utils.JitScalarType(dtype)
+    scalar_type = (
+        _type_utils.JitScalarType.FLOAT
+        if dtype is None
+        else _type_utils.JitScalarType(dtype)
+    )
     if not scalar_type.dtype().is_floating_point:
         result = g.op(
             "ConstantFill",

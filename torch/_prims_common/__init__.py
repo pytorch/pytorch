@@ -648,10 +648,7 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
     if idx >= 0 and idx < rank:
         return idx
 
-    if idx < 0:
-        _idx = idx + rank
-    else:
-        _idx = idx
+    _idx = idx + rank if idx < 0 else idx
 
     if _idx < 0 or _idx >= rank:
         # Same error message as in aten/src/ATen/WrapDimUtils.h:49
@@ -1874,10 +1871,7 @@ def is_expandable_to(shape: ShapeType, desired: ShapeType) -> bool:
     # aten/src/ATen/ExpandUtils.h:is_expandable_to
     if len(shape) > len(desired):
         return False
-    for i in range(len(shape)):
-        if shape[-i - 1] != desired[-i - 1] and shape[-i - 1] != 1:
-            return False
-    return True
+    return all(not (shape[-i - 1] != desired[-i - 1] and shape[-i - 1] != 1) for i in range(len(shape)))
 
 
 def mask_tensor(mask: TensorLikeType, t: TensorLikeType):

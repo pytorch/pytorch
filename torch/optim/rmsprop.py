@@ -311,10 +311,7 @@ def _single_tensor_rmsprop(
         else:
             avg = square_avg.sqrt()
 
-        if differentiable:
-            avg = avg.add(eps)
-        else:
-            avg = avg.add_(eps)
+        avg = avg.add(eps) if differentiable else avg.add_(eps)
 
         if momentum > 0:
             buf = momentum_buffer_list[i]
@@ -485,10 +482,11 @@ def rmsprop(
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
 
-    if foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_rmsprop
-    else:
-        func = _single_tensor_rmsprop
+    func = (
+        _multi_tensor_rmsprop
+        if foreach and not torch.jit.is_scripting()
+        else _single_tensor_rmsprop
+    )
 
     func(
         params,

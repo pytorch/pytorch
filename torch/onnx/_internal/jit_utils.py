@@ -186,10 +186,11 @@ def add_op_with_blocks(
     """
 
     output_values = graph_context.op(opname, *inputs, outputs=outputs, **attributes)
-    if isinstance(output_values, Sequence):
-        node = output_values[0].node()
-    else:
-        node = output_values.node()
+    node = (
+        output_values[0].node()
+        if isinstance(output_values, Sequence)
+        else output_values.node()
+    )
 
     new_contexts = []
     for _ in range(n_blocks):

@@ -175,10 +175,11 @@ def get_v_for(model: Callable, inp: InputsType, task: str) -> VType:
         out = model(*inp)
         v = torch.rand_like(out)
     elif task in ["jvp", "hvp", "vhp"]:
-        if isinstance(inp, tuple):
-            v = tuple(torch.rand_like(i) for i in inp)
-        else:
-            v = torch.rand_like(inp)
+        v = (
+            tuple(torch.rand_like(i) for i in inp)
+            if isinstance(inp, tuple)
+            else torch.rand_like(inp)
+        )
     else:
         v = None
 
@@ -188,10 +189,11 @@ def get_v_for(model: Callable, inp: InputsType, task: str) -> VType:
 def run_once(model: Callable, inp: InputsType, task: str, v: VType, **kwargs) -> None:
     func = get_task_func(task)
 
-    if v is not None:
-        res = func(model, inp, v=v, strict=True)
-    else:
-        res = func(model, inp, strict=True)
+    res = (
+        func(model, inp, v=v, strict=True)
+        if v is not None
+        else func(model, inp, strict=True)
+    )
 
 
 def run_once_functorch(
@@ -199,17 +201,19 @@ def run_once_functorch(
 ) -> None:
     func = get_task_functorch(task)
 
-    if v is not None:
-        res = func(model, inp, v=v, strict=True)
-    else:
-        res = func(model, inp, strict=True)
+    res = (
+        func(model, inp, v=v, strict=True)
+        if v is not None
+        else func(model, inp, strict=True)
+    )
 
     if maybe_check_consistency:
         af_func = get_task_func(task)
-        if v is not None:
-            expected = af_func(model, inp, v=v, strict=True)
-        else:
-            expected = af_func(model, inp, strict=True)
+        expected = (
+            af_func(model, inp, v=v, strict=True)
+            if v is not None
+            else af_func(model, inp, strict=True)
+        )
         atol = 1e-2 if task == "vhp" else 5e-3
         torch.testing.assert_close(
             res,

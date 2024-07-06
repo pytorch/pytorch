@@ -129,7 +129,7 @@ class GeneratedFileCleaner:
             os.mkdir(dn)
             self.dirs_to_clean.append(os.path.abspath(dn))
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, *args: object) -> None:
         if not self.keep_intermediates:
             for f in self.files_to_clean:
                 os.unlink(f)
@@ -732,10 +732,7 @@ class Trie:
             else:
                 alt.append('[' + ''.join(cc) + ']')
 
-        if len(alt) == 1:
-            result = alt[0]
-        else:
-            result = "(?:" + "|".join(alt) + ")"
+        result = alt[0] if len(alt) == 1 else "(?:" + "|".join(alt) + ")"
 
         if q:
             if cconly:

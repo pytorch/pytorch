@@ -152,10 +152,7 @@ def split_const_subgraphs(
     attributes on the module prior to running the non-constant portion of the
     graph.
     """
-    if not isinstance(module, torch.fx.GraphModule):
-        mod_traced = torch.fx.symbolic_trace(module)
-    else:
-        mod_traced = module
+    mod_traced = torch.fx.symbolic_trace(module) if not isinstance(module, torch.fx.GraphModule) else module
 
     # Build up a list of const_nodes, defined as nodes that are themselves
     # get_attrs, or have all get_attr or other constant node inputs.

@@ -624,10 +624,7 @@ class TestOperators(TestCase):
         VJP_DECOMP = {
             "nn.functional.logsigmoid",
         }
-        if op.name in VJP_DECOMP:
-            fixme_ref_jvp_local = simulate_jvp
-        else:
-            fixme_ref_jvp_local = ref_jvp
+        fixme_ref_jvp_local = simulate_jvp if op.name in VJP_DECOMP else ref_jvp
 
         if not op.supports_forward_ad and op.name not in VJP_DECOMP:
             self.skipTest("Skipped! Forward AD not supported.")
@@ -2137,10 +2134,11 @@ class TestOperators(TestCase):
             for input, kwargs in self._arg_and_kwarg_options(
                 (input_options,), kwargs_options
             ):
-                if weight_shape is None:
-                    weight = None
-                else:
-                    weight = torch.randn(weight_shape, device=device)
+                weight = (
+                    None
+                    if weight_shape is None
+                    else torch.randn(weight_shape, device=device)
+                )
                 target = torch.randint(0, C, target_shape, device=device)
                 target[
                     0
@@ -2241,10 +2239,11 @@ class TestOperators(TestCase):
             for input, kwargs in self._arg_and_kwarg_options(
                 (input_options,), kwargs_options
             ):
-                if weight_shape is None:
-                    weight = None
-                else:
-                    weight = torch.randn(weight_shape, device=device)
+                weight = (
+                    None
+                    if weight_shape is None
+                    else torch.randn(weight_shape, device=device)
+                )
 
                 if input_shape == target_shape:
                     target = torch.rand(target_shape, device=device)

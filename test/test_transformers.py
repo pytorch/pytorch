@@ -476,17 +476,11 @@ class TestTransformers(NNTestCase):
                 x = torch.cos(torch.arange(0, sz).float().view(shape))
                 p.data.copy_(x)
 
-        if training:
-            model = model.train()
-        else:
-            model = model.eval()
+        model = model.train() if training else model.eval()
         x = torch.arange(0, 16).reshape(2, 2, 4).to(torch.get_default_dtype()).to(device)
         src_mask = torch.Tensor([[0, 1], [0, 0]]).to(torch.bool).to(device)
 
-        if with_no_grad:
-            cm = torch.no_grad()
-        else:
-            cm = contextlib.nullcontext()
+        cm = torch.no_grad() if with_no_grad else contextlib.nullcontext()
         with cm:
             result = model(x, mask=src_mask)
 
@@ -3697,10 +3691,7 @@ class TestSDPAPrivateUse1Only(NNTestCase):
             grad_input_mask, output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, dropout_p=0.0,
             is_causal=False, philox_seed=philox_seed, philox_offset=philox_offset)
 
-if NOTEST_CPU:
-    device_types = ("cuda", )
-else:
-    device_types = ("cpu", "cuda")
+device_types = ('cuda',) if NOTEST_CPU else ('cpu', 'cuda')
 
 instantiate_device_type_tests(TestTransformers, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types)

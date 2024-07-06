@@ -522,10 +522,11 @@ class BuiltinVariable(VariableTracker):
             def compare_via_method(tx, left, right):
                 return left.call_method(tx, f"__{op.__name__}__", [right], {})
 
-            if op.__name__.startswith("is_"):
-                compare_user_defined = compare_by_value
-            else:
-                compare_user_defined = compare_via_method
+            compare_user_defined = (
+                compare_by_value
+                if op.__name__.startswith("is_")
+                else compare_via_method
+            )
 
             op_var = BuiltinVariable(op)
             result.extend(
@@ -628,10 +629,7 @@ class BuiltinVariable(VariableTracker):
         self.fn = fn
 
     def __str__(self):
-        if self.fn is None:
-            name = "None"
-        else:
-            name = self.fn.__name__
+        name = "None" if self.fn is None else self.fn.__name__
 
         return f"{self.__class__.__name__}({name})"
 
@@ -997,10 +995,11 @@ class BuiltinVariable(VariableTracker):
         # Handle cases like int(torch.seed())
         # Also handle sym_float to sym_int cases
         if isinstance(arg, (SymNodeVariable, variables.TensorVariable)):
-            if isinstance(arg, variables.TensorVariable):
-                item = arg.call_method(tx, "item", [], {})
-            else:
-                item = arg
+            item = (
+                arg.call_method(tx, "item", [], {})
+                if isinstance(arg, variables.TensorVariable)
+                else arg
+            )
             fn_ = sym_int if self.fn is int else sym_float
             from torch._dynamo.variables.builder import wrap_fx_proxy
 
@@ -1100,14 +1099,14 @@ class BuiltinVariable(VariableTracker):
                 if any(isinstance(val, FakeItemVariable) for val in [a, b]):
                     return variables.FakeItemVariable.from_tensor_variable(result)
 
-                if b.is_python_constant():
-                    raw_b = b.as_python_constant()
-                else:
-                    raw_b = b.raw_value
-                if self.fn is max:
-                    raw_res = max(a.raw_value, raw_b)
-                else:
-                    raw_res = min(a.raw_value, raw_b)
+                raw_b = (
+                    b.as_python_constant() if b.is_python_constant() else b.raw_value
+                )
+                raw_res = (
+                    max(a.raw_value, raw_b)
+                    if self.fn is max
+                    else min(a.raw_value, raw_b)
+                )
 
                 need_unwrap = any(
                     x.need_unwrap

@@ -52,8 +52,8 @@ def install_config_module(module):
             else:
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 
-    config: Dict[str, Any] = dict()
-    default: Dict[str, Any] = dict()
+    config: Dict[str, Any] = {}
+    default: Dict[str, Any] = {}
 
     compile_ignored_keys = get_assignments_with_compile_ignored_comments(module)
 
@@ -272,7 +272,7 @@ class ConfigModule(ModuleType):
                 config._config.update(changes)
                 config._is_dirty = dirty
 
-            def __exit__(self, exc_type, exc_val, exc_tb):
+            def __exit__(self, *args: object) -> None:
                 nonlocal dirty
                 config._config.update(prior)
                 config._is_dirty = dirty
@@ -321,7 +321,7 @@ class ContextDecorator(contextlib.ContextDecorator):
     def __enter__(self):
         raise NotImplementedError("NYI")
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: object) -> None:
         raise NotImplementedError("NYI")
 
     def __call__(self, func):

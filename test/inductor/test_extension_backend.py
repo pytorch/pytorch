@@ -146,10 +146,11 @@ class ExtensionBackendTests(TestCase):
                 metrics.reset()
                 opt_fn = torch.compile()(fn)
                 _, code = run_and_get_cpp_code(opt_fn, x, y, z)
-                if cpu_vec_isa.valid_vec_isa_list():
-                    load_expr = "loadu"
-                else:
-                    load_expr = " = in_ptr0[static_cast<long>(i0)];"
+                load_expr = (
+                    "loadu"
+                    if cpu_vec_isa.valid_vec_isa_list()
+                    else " = in_ptr0[static_cast<long>(i0)];"
+                )
                 FileCheck().check("void").check(load_expr).check(
                     "extension_device"
                 ).run(code)

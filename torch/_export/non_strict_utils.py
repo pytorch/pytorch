@@ -189,10 +189,9 @@ def make_fake_inputs(
 
     with fake_mode:
         # FIXME(ycao) ScriptMethod doesn't have signature, I am using an empty one to unblock
-        if not _is_torch_jit_trace:
-            original_signature = inspect.signature(nn_module.forward)
-        else:
-            original_signature = None
+        original_signature = (
+            inspect.signature(nn_module.forward) if not _is_torch_jit_trace else None
+        )
         sources: Dict[Tuple[int, int], List[Source]] = defaultdict(list)
         fake_args, fake_kwargs = tree_map_with_path(
             lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),

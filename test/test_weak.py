@@ -192,10 +192,7 @@ class WeakTest(TestCase):
 
         def dict_copy(d, exc):
             try:
-                if deepcopy is True:
-                    _ = copy.deepcopy(d)
-                else:
-                    _ = d.copy()
+                _ = copy.deepcopy(d) if deepcopy is True else d.copy()
             except Exception as ex:
                 exc.append(ex)
 

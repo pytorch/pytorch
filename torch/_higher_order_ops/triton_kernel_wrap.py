@@ -31,9 +31,9 @@ log = logging.getLogger("torch._dynamo")
 # Use a side table.
 # We use two dicts so that fetching both the kernel and id are O(1)
 class KernelSideTable:
-    id_to_kernel: Dict[int, Any] = dict()
-    kernel_to_id: Dict[Any, int] = dict()
-    constant_args: Dict[int, Any] = dict()
+    id_to_kernel: Dict[int, Any] = {}
+    kernel_to_id: Dict[Any, int] = {}
+    constant_args: Dict[int, Any] = {}
     lock = threading.Lock()
 
     # Returns index on the table
@@ -70,9 +70,9 @@ class KernelSideTable:
     # Resets the table (only meant to be used in unit tests)
     # This is only safe assuming single threaded execution
     def reset_table(self) -> None:
-        self.id_to_kernel = dict()
-        self.kernel_to_id = dict()
-        self.constant_args = dict()
+        self.id_to_kernel = {}
+        self.kernel_to_id = {}
+        self.constant_args = {}
 
 
 kernel_side_table = KernelSideTable()
@@ -169,7 +169,7 @@ def generate_ttir(kernel, kwargs):
     context = triton._C.libtriton.ir.context()
     target = triton.runtime.driver.active.get_current_target()
     backend = triton.compiler.compiler.make_backend(target)
-    options = backend.parse_options(dict())
+    options = backend.parse_options({})
     triton._C.libtriton.ir.load_dialects(context)
     backend.load_dialects(context)
 
