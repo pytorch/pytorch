@@ -40,6 +40,7 @@ except ImportError:
 
 make_halide = config.patch(
     {
+        "halide.scan_kernels": True,
         "cpu_backend": "halide",
         "cuda_backend": "halide",
         "fallback_random": True,  # TODO(jansel): support random

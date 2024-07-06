@@ -2,6 +2,7 @@
 
 import os
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._dynamo
@@ -532,6 +533,37 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(
             BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
         )
+
+    def test_private_namespace(self):
+        # TODO: anyone who monkeypatches a **public** function into torch namespace with @allow_in_graph
+        # could still break our sanity check and cache something bad. But that's an edge case we'll take the risk on.
+        # Monkeypatch some random private function into torch, see that it fails
+        @torch._dynamo.allow_in_graph
+        def my_private_fun(x):
+            return x.sin()
+
+        with patch("torch._my_priv", new=my_private_fun, create=True):
+
+            def fn(x):
+                return torch._my_priv(x)
+
+            config = self.default_config()
+            self.assertRaises(
+                BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
+            )
+
+    def test_private_builtin(self):
+        # _foreach_add is a private torch function, but
+        # it's also a builtin_function_or_method, so it should be allowed to be cached
+        # since dynamo allows it in the graph
+        def fn(x, b):
+            y = (x, x)
+            return torch._foreach_add(y, b)
+
+        config = self.default_config()
+        r1 = self.gen_cache_key(fn, config, inputs=[torch.ones(3), 1])
+        r2 = self.gen_cache_key(fn, config, inputs=[torch.ones(3), 2])
+        self.assertNotEqual(r1, r2)
 
     def test_normal_torch_function(self):
         @torch._dynamo.allow_in_graph
