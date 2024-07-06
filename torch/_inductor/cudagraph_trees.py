@@ -1656,9 +1656,7 @@ def format_tb(frames):
 
 
 def check_memory_pool(device, pool_id, live_storages_ptrs: List[StorageWeakRefWrapper]):
-    assert all(
-        isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs
-    )  # noqa: C419
+    assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)
     unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}
 
     # check if there is a divergence first, then do the expensive snapshot call after

@@ -540,10 +540,8 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             ):
                 if kwargs is None:
                     kwargs = {}
-                if func not in HANDLED_FUNCTIONS or not all(  # noqa: C419
-                    [  # noqa: C419
-                        issubclass(t, (torch.Tensor, MyClass)) for t in types
-                    ]
+                if func not in HANDLED_FUNCTIONS or not all(
+                    issubclass(t, (torch.Tensor, MyClass)) for t in types
                 ):
                     return NotImplemented
                 return HANDLED_FUNCTIONS[func](*args, **kwargs)
