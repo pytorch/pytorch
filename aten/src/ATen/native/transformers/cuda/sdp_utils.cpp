@@ -24,7 +24,7 @@
 #include <c10/core/SymInt.h>
 #include <c10/util/string_view.h>
 
-#if USE_ROCM
+#if defined(USE_ROCM) && (defined(USE_MEM_EFF_ATTENTION) || defined(USE_FLASH_ATTENTION))
 #include <aotriton/flash.h>
 #endif
 
@@ -207,7 +207,7 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
   // Check that the gpu is capable of running flash attention
   using sm80 = SMVersion<8, 0>;
   using sm90 = SMVersion<9, 0>;
-#if USE_ROCM
+#if defined(USE_ROCM) && defined(USE_FLASH_ATTENTION)
   auto stream = at::cuda::getCurrentCUDAStream().stream();
   if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
       auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -238,7 +238,7 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   // Mem Efficient attention supports hardware in the range [sm_50, sm_90]
   using sm50 = SMVersion<5, 0>;
   using sm90 = SMVersion<9, 0>;
-#if USE_ROCM
+#if defined(USE_ROCM) && defined(USE_MEM_EFF_ATTENTION)
   auto stream = at::cuda::getCurrentCUDAStream().stream();
   if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
       auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -623,7 +623,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
   constexpr auto less_than_sm80_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat);
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && defined(USE_MEM_EFF_ATTENTION)
   constexpr auto aotriton_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
 #endif
@@ -668,7 +668,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
     }
   }
 
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && defined(USE_MEM_EFF_ATTENTION)
   return check_tensor_dtype(params, aotriton_mem_efficient_dtypes, debug);
 #else
   auto dprop = at::cuda::getCurrentDeviceProperties();
