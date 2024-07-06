@@ -27,10 +27,7 @@ except ImportError:
     print("DEBUG: cannot find python protobuf install.")
     python_protobuf_installed = False
 
-if os.name == "nt":
-    protoc_name = "protoc.exe"
-else:
-    protoc_name = "protoc"
+protoc_name = "protoc.exe" if os.name == "nt" else "protoc"
 
 try:
     p = Popen([protoc_name, "--version"], stdout=PIPE, stderr=PIPE)

@@ -104,8 +104,8 @@ class ShapeEnvEvent:
             return ShapeEnv(**self.kwargs)
 
         assert shape_env is not None
-        args = list(self.args or list())
-        kwargs = dict(self.kwargs or dict())
+        args = list(self.args or [])
+        kwargs = dict(self.kwargs or {})
 
         # Replace any argument of type ShapeEnv by the given one.
         args, kwargs = pytree.tree_map_only(

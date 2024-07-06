@@ -463,10 +463,9 @@ class TestPythonRegistration(TestCase):
 
         # check functional_result includes mutable_result
         mutable_result = mutable_op(*cloned_args)
-        if mutable_result is None:
-            flat_mutable_result = []
-        else:
-            flat_mutable_result = pytree.tree_leaves(mutable_result)
+        flat_mutable_result = (
+            [] if mutable_result is None else pytree.tree_leaves(mutable_result)
+        )
         flat_functional_result = pytree.tree_leaves(functional_result)
         assert len(flat_functional_result) > len(flat_mutable_result)
         self.assertEqual(

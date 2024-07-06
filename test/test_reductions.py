@@ -546,10 +546,7 @@ class TestReductions(TestCase):
             for i in range(a.ndim):
                 actual = torch.logcumsumexp(a, dim=i)
                 # if the expected is not given, then revert to scipy's logsumexp
-                if expected is None:
-                    expected2 = logcumsumexp_slow(a, dim=i)
-                else:
-                    expected2 = expected
+                expected2 = logcumsumexp_slow(a, dim=i) if expected is None else expected
 
                 # move the imaginary values to (0, 2 * pi)
                 actual = standardize_phase(actual)
@@ -1408,10 +1405,7 @@ class TestReductions(TestCase):
         # xc is a channels last tensor
         xc = input_generator_fn(device)
         # xc is not memory dense, but looks like channels last
-        if memory_format == torch.channels_last:
-            xc = xc[..., ::2, ::2]
-        else:
-            xc = xc[..., ::2, ::2, ::2]
+        xc = xc[..., ::2, ::2] if memory_format == torch.channels_last else xc[..., ::2, ::2, ::2]
 
         clone = transformation_fn(xc, memory_format=torch.preserve_format)
         self.assertFalse(clone.is_contiguous())
@@ -2490,10 +2484,7 @@ class TestReductions(TestCase):
                 numpy_op = np.median if op == torch.median else np.nanmedian
                 res = op(t)
                 num_nan = t.isnan().sum()
-                if op == torch.median and num_nan > 0:
-                    k = t.numel() - 1
-                else:
-                    k = int((t.numel() - num_nan - 1) / 2)
+                k = t.numel() - 1 if op == torch.median and num_nan > 0 else int((t.numel() - num_nan - 1) / 2)
                 self.assertEqual(res, t.view(-1).sort()[0][k])
                 if (t.numel() - num_nan) % 2 == 1:
                     # We can only test agains numpy for odd reductions because numpy

@@ -147,10 +147,7 @@ def construct_and_record_rdzv_event(
     del callstack
 
     # Set up error trace if this is an exception
-    if node_state == NodeState.FAILED:
-        error_trace = traceback.format_exc()
-    else:
-        error_trace = ""
+    error_trace = traceback.format_exc() if node_state == NodeState.FAILED else ""
 
     # Initialize event object
     event = RdzvEvent(

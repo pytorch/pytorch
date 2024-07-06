@@ -907,10 +907,11 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         data = [torch.rand(1, 3, 10, 10, dtype=torch.float)]
         result = {False: [1, 2, 2], True: [2, 1, 0]}
         for tracing in [True, False]:
-            if tracing:
-                m = torch.jit.trace(M(), data).eval()
-            else:
-                m = torch.jit.script(M()).eval()
+            m = (
+                torch.jit.trace(M(), data).eval()
+                if tracing
+                else torch.jit.script(M()).eval()
+            )
             m = prepare_jit(m, {"": default_qconfig})
             assert (
                 len(
@@ -971,10 +972,11 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         data = torch.rand((1, 3, 10, 10), dtype=torch.float)
         result = {True: 3, False: 1}
         for tracing in [True, False]:
-            if tracing:
-                m = torch.jit.trace(M(), data).eval()
-            else:
-                m = torch.jit.script(M()).eval()
+            m = (
+                torch.jit.trace(M(), data).eval()
+                if tracing
+                else torch.jit.script(M()).eval()
+            )
             m = prepare_jit(m, {"": default_qconfig})
             assert len(attrs_with_prefix(m, "_observer_")) == result[tracing]
 
@@ -1017,18 +1019,16 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         data = torch.rand((1, 3, 5, 5), dtype=torch.float)
         options = list(itertools.product([True, False], [True, False]))
         for cond, tracing in options:
-            if tracing:
-                m = torch.jit.trace(M(cond), data)
-            else:
-                m = torch.jit.script(M(cond))
+            m = torch.jit.trace(M(cond), data) if tracing else torch.jit.script(M(cond))
             m = prepare_jit(m, {"": default_qconfig})
             assert len(attrs_with_prefix(m, "_observer_")) == 2
 
         for cond, tracing in options:
-            if tracing:
-                m = torch.jit.trace(M2(cond), data)
-            else:
-                m = torch.jit.script(M2(cond))
+            m = (
+                torch.jit.trace(M2(cond), data)
+                if tracing
+                else torch.jit.script(M2(cond))
+            )
             m = prepare_jit(m, {"": default_qconfig})
             num_observers = 2 if tracing and not cond else 3
             assert len(attrs_with_prefix(m, "_observer_")) == num_observers
@@ -1190,10 +1190,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
             def forward(self, x):
                 x = torch.dequantize(x)
-                if self.cond:
-                    x = self.conv(x)
-                else:
-                    x = x + 3
+                x = self.conv(x) if self.cond else x + 3
                 return x
 
         x = torch.randn([1, 3, 10, 10], dtype=torch.float)
@@ -3474,10 +3471,11 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
         offsets = torch.tensor([0, 19, 20, 28, 28, 32])
         dummy_inputs = (indices, offsets, indices, offsets)
         for trace in [True, False]:
-            if trace:
-                m = torch.jit.trace(module, dummy_inputs)
-            else:
-                m = torch.jit.script(module)
+            m = (
+                torch.jit.trace(module, dummy_inputs)
+                if trace
+                else torch.jit.script(module)
+            )
             int4_qconfig = QConfig(
                 activation=PlaceholderObserver.with_args(
                     dtype=torch.float, custom_op_name="embedding_bag_4bit"
@@ -3546,10 +3544,11 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
         for trace, qconfig in itertools.product(
             [True, False], [int4_qconfig, int8_qconfig]
         ):
-            if trace:
-                m = torch.jit.trace(module, dummy_inputs)
-            else:
-                m = torch.jit.script(module)
+            m = (
+                torch.jit.trace(module, dummy_inputs)
+                if trace
+                else torch.jit.script(module)
+            )
             m = prepare_jit(m, {"embedding": qconfig})
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 m = convert_jit(m)

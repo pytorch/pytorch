@@ -341,10 +341,7 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(t)
 
-        if op.ndimensional in (SpectralFuncType.ND, SpectralFuncType.TwoD):
-            kwargs = {'s': (12, 12)}
-        else:
-            kwargs = {'n': 12}
+        kwargs = {"s": (12, 12)} if op.ndimensional in (SpectralFuncType.ND, SpectralFuncType.TwoD) else {"n": 12}
 
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(t, **kwargs)
@@ -422,10 +419,7 @@ class TestFFT(TestCase):
             x = torch.randn(*shape, device=device, dtype=dtype)
 
             for (forward, backward), norm in product(fft_functions, norm_modes):
-                if isinstance(dim, tuple):
-                    s = [x.size(d) for d in dim]
-                else:
-                    s = x.size() if dim is None else x.size(dim)
+                s = [x.size(d) for d in dim] if isinstance(dim, tuple) else x.size() if dim is None else x.size(dim)
 
                 kwargs = {'s': s, 'dim': dim, 'norm': norm}
                 y = backward(forward(x, **kwargs), **kwargs)
@@ -923,10 +917,7 @@ class TestFFT(TestCase):
             raise unittest.SkipTest('librosa not found')
 
         def librosa_stft(x, n_fft, hop_length, win_length, window, center):
-            if window is None:
-                window = np.ones(n_fft if win_length is None else win_length)
-            else:
-                window = window.cpu().numpy()
+            window = np.ones(n_fft if win_length is None else win_length) if window is None else window.cpu().numpy()
             input_1d = x.dim() == 1
             if input_1d:
                 x = x.view(1, -1)
@@ -949,10 +940,7 @@ class TestFFT(TestCase):
         def _test(sizes, n_fft, hop_length=None, win_length=None, win_sizes=None,
                   center=True, expected_error=None):
             x = torch.randn(*sizes, dtype=dtype, device=device)
-            if win_sizes is not None:
-                window = torch.randn(*win_sizes, dtype=dtype, device=device)
-            else:
-                window = None
+            window = torch.randn(*win_sizes, dtype=dtype, device=device) if win_sizes is not None else None
             if expected_error is None:
                 result = x.stft(n_fft, hop_length, win_length, window,
                                 center=center, return_complex=False)
@@ -997,10 +985,7 @@ class TestFFT(TestCase):
             raise unittest.SkipTest('librosa not found')
 
         def librosa_istft(x, n_fft, hop_length, win_length, window, length, center):
-            if window is None:
-                window = np.ones(n_fft if win_length is None else win_length)
-            else:
-                window = window.cpu().numpy()
+            window = np.ones(n_fft if win_length is None else win_length) if window is None else window.cpu().numpy()
 
             return librosa.istft(x.cpu().numpy(), n_fft=n_fft, hop_length=hop_length,
                                  win_length=win_length, length=length, window=window, center=center)
@@ -1008,10 +993,7 @@ class TestFFT(TestCase):
         def _test(size, n_fft, hop_length=None, win_length=None, win_sizes=None,
                   length=None, center=True):
             x = torch.randn(size, dtype=dtype, device=device)
-            if win_sizes is not None:
-                window = torch.randn(*win_sizes, dtype=dtype, device=device)
-            else:
-                window = None
+            window = torch.randn(*win_sizes, dtype=dtype, device=device) if win_sizes is not None else None
 
             x_stft = x.stft(n_fft, hop_length, win_length, window, center=center,
                             onesided=True, return_complex=True)

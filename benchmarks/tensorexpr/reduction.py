@@ -27,10 +27,7 @@ class ReduceBench(benchmark.Benchmark):
             raise ValueError(f"invalid case: {case}")
 
     def forward(self, inputs):
-        if self.skip_input_transform:
-            x = inputs
-        else:
-            x = self.add(inputs, 0.001)
+        x = inputs if self.skip_input_transform else self.add(inputs, 0.001)
         y = self.sum(x, self.dims)
         return y
 

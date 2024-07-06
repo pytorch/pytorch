@@ -80,10 +80,7 @@ class Categorizer:
             return []
 
         features = self.features(commit)
-        if "Reverted" in features.labels:
-            reasons = {"GithubBot": "Reverted"}
-        else:
-            reasons = {}
+        reasons = {"GithubBot": "Reverted"} if "Reverted" in features.labels else {}
 
         index = commits.index(commit)
         # -8 to remove the (#35011)
@@ -101,10 +98,9 @@ class Categorizer:
 
     def handle_commit(self, commit, i, total, commits):
         potential_reverts = self.potential_reverts_of(commit, commits)
-        if potential_reverts:
-            potential_reverts = f"!!!POTENTIAL REVERTS!!!: {potential_reverts}"
-        else:
-            potential_reverts = ""
+        potential_reverts = (
+            f"!!!POTENTIAL REVERTS!!!: {potential_reverts}" if potential_reverts else ""
+        )
 
         features = self.features(commit)
         if self.classifier is not None:

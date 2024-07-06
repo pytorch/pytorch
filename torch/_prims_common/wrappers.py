@@ -72,10 +72,7 @@ def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
 
 def _annotation_has_type(*, typ, annotation):
     if hasattr(annotation, "__args__"):
-        for a in annotation.__args__:
-            if _annotation_has_type(typ=typ, annotation=a):
-                return True
-        return False
+        return any(_annotation_has_type(typ=typ, annotation=a) for a in annotation.__args__)
 
     return typ is annotation
 
@@ -260,10 +257,11 @@ def out_wrapper(
                     out_attr = getattr(out, k)
                     if k not in kwargs:
                         kwargs[k] = out_attr
-            if pass_is_out:
-                result = fn(*args, is_out=(out is not None), **kwargs)
-            else:
-                result = fn(*args, **kwargs)
+            result = (
+                fn(*args, is_out=out is not None, **kwargs)
+                if pass_is_out
+                else fn(*args, **kwargs)
+            )
             assert (
                 isinstance(result, TensorLike)
                 and is_tensor

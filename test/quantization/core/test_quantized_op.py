@@ -1905,10 +1905,7 @@ class TestQuantizedOps(TestCase):
             H, W = X.shape[-2:]
             output_size_h = min(output_size_h, H)
             output_size_w = min(output_size_w, W)
-            if output_size_h == output_size_w:
-                output_size = output_size_h
-            else:
-                output_size = (output_size_h, output_size_w)
+            output_size = output_size_h if output_size_h == output_size_w else (output_size_h, output_size_w)
 
             if X.shape[1] < 176:
                 X = np.repeat(X, 176 / X.shape[1], 1)
@@ -1987,10 +1984,7 @@ class TestQuantizedOps(TestCase):
 
             for dim in dim_to_check:
                 if dim == 2:
-                    if output_size_h == output_size_w:
-                        output_size = output_size_h
-                    else:
-                        output_size = (output_size_h, output_size_w)
+                    output_size = output_size_h if output_size_h == output_size_w else (output_size_h, output_size_w)
                 elif dim == 3:
                     if output_size_d == output_size_h == output_size_w:
                         output_size = output_size_h
@@ -2359,10 +2353,7 @@ class TestQuantizedOps(TestCase):
         with override_quantized_engine("qnnpack"):
             # using multiple of 4 sizes to satisfy pytorch_q8gavgpool_ukernel_up8xm__sse2() 4-byte alignment demand under ASAN
             in_dim = (4, 4, 4, 4)
-            if keep:
-                out_dim = (4, 4, 1, 1)
-            else:
-                out_dim = (4, 4)
+            out_dim = (4, 4, 1, 1) if keep else (4, 4)
             X = torch.ones(in_dim)
             Y = torch.ones(out_dim)
             XQ = torch.quantize_per_tensor(X, scale=0.2, zero_point=0, dtype=torch.quint8)
@@ -3125,10 +3116,7 @@ class TestDynamicQuantizedOps(TestCase):
             reduce_range = False
 
         qlinear_prepack = torch.ops.quantized.linear_prepack
-        if use_relu:
-            qlinear_dynamic = torch.ops.quantized.linear_relu_dynamic
-        else:
-            qlinear_dynamic = torch.ops.quantized.linear_dynamic
+        qlinear_dynamic = torch.ops.quantized.linear_relu_dynamic if use_relu else torch.ops.quantized.linear_dynamic
 
         if use_multi_dim_input:
             batch_size *= 3  # Test the multi-dim input tensor
@@ -3488,10 +3476,7 @@ class TestDynamicQuantizedOps(TestCase):
                 if torch.backends.quantized.engine in ('qnnpack', 'onednn') and dtype == torch.float16:
                     continue
 
-                if torch.backends.quantized.engine == 'qnnpack':
-                    reduce_range = False
-                else:
-                    reduce_range = True
+                reduce_range = False if torch.backends.quantized.engine == "qnnpack" else True
                 Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size,
                                                   hidden_size, num_directions, reduce_range)
                 Wq1, Wq2, b1, b2 = self._get_rnn_weights_and_bias(input_size,
@@ -3622,10 +3607,7 @@ class TestDynamicQuantizedOps(TestCase):
                 if torch.backends.quantized.engine in ('qnnpack', 'onednn') and dtype == torch.float16:
                     continue
 
-                if torch.backends.quantized.engine == 'qnnpack':
-                    reduce_range = False
-                else:
-                    reduce_range = True
+                reduce_range = False if torch.backends.quantized.engine == "qnnpack" else True
 
                 Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, 1, reduce_range)
                 Wq1, Wq2, b1, b2 = self._get_rnn_weights_and_bias(
@@ -3668,10 +3650,7 @@ class TestDynamicQuantizedOps(TestCase):
         if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
             return  # not supported by QNNPACK
 
-        if qengine_is_qnnpack():
-            reduce_range = False
-        else:
-            reduce_range = True
+        reduce_range = False if qengine_is_qnnpack() else True
 
         X_fp32 = torch.randn(*([2] * dim))
         s, z = _calculate_dynamic_qparams(X_fp32, dtype, reduce_range)
@@ -4059,10 +4038,7 @@ class TestQuantizedLinear(TestCase):
     def test_qlinear_cudnn(self, batch_size, input_channels, output_channels, use_bias,
                            use_relu, use_multi_dim_input, use_channelwise):
         qlinear_prepack = torch.ops.quantized.linear_prepack
-        if use_relu:
-            qlinear_op = torch.ops.quantized.linear_relu
-        else:
-            qlinear_op = torch.ops.quantized.linear
+        qlinear_op = torch.ops.quantized.linear_relu if use_relu else torch.ops.quantized.linear
         X_scale = 1.5
         X_zp = 0
         X_value_min = -128
@@ -4294,10 +4270,7 @@ class TestQuantizedLinear(TestCase):
                     w_scales = torch.Tensor([w_scale])
                     w_zps = torch.Tensor([w_zp]).to(dtype=torch.int)
                     qw = torch.quantize_per_tensor(w, w_scale, w_zp, torch.qint8)
-                if use_bias:
-                    b = torch.rand(oc) * 10
-                else:
-                    b = None
+                b = torch.rand(oc) * 10 if use_bias else None
 
                 x_ref = qx.dequantize()
                 w_ref = qw.dequantize()
@@ -4423,10 +4396,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         data_type = weights.dtype
 
         qtype = torch.quint8
-        if bit_rate == 8:
-            w_packed = pack_fn(weights)
-        else:
-            w_packed = pack_fn(weights, optimized_qparams=optimized_qparams)
+        w_packed = pack_fn(weights) if bit_rate == 8 else pack_fn(weights, optimized_qparams=optimized_qparams)
         w_unpacked = unpack_fn(w_packed)
 
         if (bit_rate == 8 or bit_rate == 4) and data_type != torch.float16:
@@ -4807,10 +4777,7 @@ class TestQuantizedConv(TestCase):
             W_q = torch.quantize_per_tensor(
                 W, scale=W_scale, zero_point=W_zero_point, dtype=W_qtype)
 
-        if isinstance(strides, int):
-            dilations = [1]
-        else:
-            dilations = (1,) * len(strides)
+        dilations = [1] if isinstance(strides, int) else (1,) * len(strides)
 
         if transposed:
             W_packed = qconv_prepack_fn(W_q, bias, strides, i_pads, o_pads,

@@ -189,10 +189,7 @@ class JitTestCase(JitCommonTestCase):
         se = str(e)
         allowed = ("Could not export Python function",
                    "closures are not exportable")
-        for a in allowed:
-            if a in se:
-                return True
-        return False
+        return any(a in se for a in allowed)
 
     def _compared_saved_loaded(self, m):
         def extract_files(buffer):
@@ -345,10 +342,7 @@ class JitTestCase(JitCommonTestCase):
         self.assertExpectedGraph(g, *args, **kwargs)
 
     def assertExpectedGraph(self, trace, *args, **kwargs):
-        if isinstance(trace, torch._C.Graph):
-            graph = trace
-        else:
-            graph = trace.graph()
+        graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
 
         torch._C._jit_pass_lint(graph)
         torch._C._jit_pass_dce(graph)

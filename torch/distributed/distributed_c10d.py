@@ -1189,10 +1189,7 @@ def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
         The backend configuration of the given process group as a lower case string.
 
     """
-    if group is None:
-        pg = _get_default_group()
-    else:
-        pg = group
+    pg = _get_default_group() if group is None else group
     if _rank_not_in_group(pg):
         raise ValueError("Invalid process group specified")
     backend_config = _world.pg_backend_config.get(pg)
@@ -1212,10 +1209,7 @@ def get_backend(group: Optional[ProcessGroup] = None) -> Backend:
         The backend of the given process group as a lower case string.
 
     """
-    if group is None:
-        pg = _get_default_group()
-    else:
-        pg = group
+    pg = _get_default_group() if group is None else group
     if _rank_not_in_group(pg):
         raise ValueError("Invalid process group specified")
     pg_store = _world.pg_map[pg] if pg in _world.pg_map else None
@@ -1238,10 +1232,7 @@ def _get_pg_config(group: Optional[ProcessGroup] = None) -> Dict[str, Any]:
     Return the pg configuration of the given process group.
 
     """
-    if group is None:
-        pg = _get_default_group()
-    else:
-        pg = group
+    pg = _get_default_group() if group is None else group
     return {
         "pg_name": _get_process_group_name(pg),
         "pg_desc": pg.group_desc,
@@ -1458,10 +1449,7 @@ def init_process_group(
     elif init_method is None:
         init_method = "env://"
 
-    if backend:
-        backend = Backend(backend)
-    else:
-        backend = Backend("undefined")
+    backend = Backend(backend) if backend else Backend("undefined")
 
     if timeout is None:
         timeout = _get_default_timeout(backend)
@@ -1881,10 +1869,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
     if group == GroupMember.NON_GROUP_MEMBER:
         return
 
-    if group is None:
-        pg = GroupMember.WORLD
-    else:
-        pg = group
+    pg = GroupMember.WORLD if group is None else group
 
     assert pg is not None
     if _world.pg_map.get(pg, None) is None:
@@ -2077,10 +2062,7 @@ def irecv(
     if tensor.is_complex():
         tensor = torch.view_as_real(tensor)
 
-    if group is None or group is GroupMember.WORLD:
-        pg = _get_default_group()
-    else:
-        pg = group
+    pg = _get_default_group() if group is None or group is GroupMember.WORLD else group
 
     if src is None:
         return pg.recv_anysource([tensor], tag)
@@ -2167,10 +2149,7 @@ def recv(
     if tensor.is_complex():
         tensor = torch.view_as_real(tensor)
 
-    if group is None:
-        pg = _get_default_group()
-    else:
-        pg = group
+    pg = _get_default_group() if group is None else group
 
     if src is None:
         work = pg.recv_anysource([tensor], tag)
@@ -4434,10 +4413,7 @@ def _new_group_with_tag(
                     "The new group's rank should be within "
                     "the world_size set by init_process_group"
                 )
-        if global_rank in ranks:
-            group_rank = ranks.index(global_rank)
-        else:
-            group_rank = None
+        group_rank = ranks.index(global_rank) if global_rank in ranks else None
     else:
         ranks = list(range(global_world_size))
         group_world_size = global_world_size

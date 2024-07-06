@@ -705,7 +705,7 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
 def get_device_type_test_bases():
     # set type to List[Any] due to mypy list-of-union issue:
     # https://github.com/python/mypy/issues/3351
-    test_bases: List[Any] = list()
+    test_bases: List[Any] = []
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:
@@ -1086,12 +1086,11 @@ class ops(_TestParametrizer):
             elif self.opinfo_dtypes == OpDTypes.any_common_cpu_cuda_one:
                 # Tries to pick a dtype that supports both CPU and CUDA
                 supported = set(op.dtypes).intersection(op.dtypesIfCUDA)
-                if supported:
-                    dtypes = {
-                        next(dtype for dtype in ANY_DTYPE_ORDER if dtype in supported)
-                    }
-                else:
-                    dtypes = {}
+                dtypes = (
+                    {next(dtype for dtype in ANY_DTYPE_ORDER if dtype in supported)}
+                    if supported
+                    else {}
+                )
 
             elif self.opinfo_dtypes == OpDTypes.none:
                 dtypes = {None}
@@ -1264,10 +1263,9 @@ def _has_sufficient_memory(device, size):
         raise unittest.SkipTest("Need psutil to determine if memory is sufficient")
 
     # The sanitizers have significant memory overheads
-    if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
-        effective_size = size * 10
-    else:
-        effective_size = size
+    effective_size = (
+        size * 10 if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN else size
+    )
 
     if psutil.virtual_memory().available < effective_size:
         gc.collect()

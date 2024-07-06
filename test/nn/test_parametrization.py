@@ -1612,20 +1612,22 @@ class TestNNParametrization(NNTestCase):
                 can_initialize = use_trivialization or parametrization == "householder"
 
                 # We generate them every time to always start with fresh weights
-                if use_linear:
-                    m = nn.Linear(*shape, dtype=dtype)
-                else:
-                    m = nn.Conv2d(2, 3, shape, dtype=dtype)
+                m = (
+                    nn.Linear(*shape, dtype=dtype)
+                    if use_linear
+                    else nn.Conv2d(2, 3, shape, dtype=dtype)
+                )
 
                 # We do not support householder for complex inputs
                 # See Note [Householder complex]
 
                 # When using the swap_tensors path, this is needed so that the autograd
                 # graph is not alive anymore.
-                if get_swap_module_params_on_conversion():
-                    w_init = m.weight.clone().detach()
-                else:
-                    w_init = m.weight.clone()
+                w_init = (
+                    m.weight.clone().detach()
+                    if get_swap_module_params_on_conversion()
+                    else m.weight.clone()
+                )
                 if parametrization == "householder" and m.weight.is_complex():
                     msg = "householder parametrization does not support complex tensors"
                     with self.assertRaisesRegex(ValueError, msg):
@@ -1683,10 +1685,11 @@ class TestNNParametrization(NNTestCase):
                     grad = m.parametrizations.weight.original.grad
                     self.assertIsNotNone(grad)
                     # We do not update the upper triangular part of the matrix if tall tril if wide
-                    if grad.size(-2) >= grad.size(-1):
-                        zeros_grad = grad.triu(1)
-                    else:
-                        zeros_grad = grad.tril(-1)
+                    zeros_grad = (
+                        grad.triu(1)
+                        if grad.size(-2) >= grad.size(-1)
+                        else grad.tril(-1)
+                    )
                     self.assertEqual(zeros_grad, torch.zeros_like(zeros_grad))
                     # The gradient in the diagonal can only be imaginary because a skew-Hermitian
                     # matrix has imaginary diagonal

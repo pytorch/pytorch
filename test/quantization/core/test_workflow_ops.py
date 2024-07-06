@@ -975,10 +975,7 @@ class TestFakeQuantizeOps(TestCase):
         torch.random.manual_seed(NP_RANDOM_SEED)
         torch_types = [torch.qint8, torch.quint8]
         float_types = [torch.float, torch.float16, torch.float64]
-        if test_type == "per_channel":
-            zero_types = [torch.int, torch.float, torch.float16]
-        else:
-            zero_types = [torch.int]
+        zero_types = [torch.int, torch.float, torch.float16] if test_type == "per_channel" else [torch.int]
         devices = [torch.device('cpu'), torch.device('cuda')] if torch.cuda.is_available() else [torch.device('cpu')]
         axis = 1
         for i in range(20):

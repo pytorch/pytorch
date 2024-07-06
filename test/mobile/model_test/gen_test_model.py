@@ -170,10 +170,11 @@ def getModuleFromName(model_name):
 
     has_bundled_inputs = False  # module.find_method("get_all_bundled_inputs")
 
-    if model_name in models_need_trace:
-        module = torch.jit.trace(module, [])
-    else:
-        module = torch.jit.script(module)
+    module = (
+        torch.jit.trace(module, [])
+        if model_name in models_need_trace
+        else torch.jit.script(module)
+    )
 
     ops = torch.jit.export_opnames(module)
     print(ops)

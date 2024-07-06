@@ -1460,10 +1460,7 @@ def _isinstance(obj, target_type) -> bool:
                 "`torch.jit.isinstance` must be a type "
                 "or a tuple of types"
             )
-        for t_type in target_type:
-            if _isinstance(obj, t_type):
-                return True
-        return False
+        return any(_isinstance(obj, t_type) for t_type in target_type)
 
     origin_type = get_origin(target_type)
     if origin_type:

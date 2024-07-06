@@ -1349,10 +1349,11 @@ class TestClip(TestCase):
 
     def _neg_byteorder(self, a):
         a = np.asarray(a)
-        if sys.byteorder == "little":
-            a = a.astype(a.dtype.newbyteorder(">"))
-        else:
-            a = a.astype(a.dtype.newbyteorder("<"))
+        a = (
+            a.astype(a.dtype.newbyteorder(">"))
+            if sys.byteorder == "little"
+            else a.astype(a.dtype.newbyteorder("<"))
+        )
         return a
 
     def _generate_non_native_data(self, n, m):
@@ -2270,10 +2271,7 @@ class TestLikeFuncs(TestCase):
                 assert_(np.all(dz == value))
 
     def check_like_function(self, like_function, value, fill_value=False):
-        if fill_value:
-            fill_kwarg = {"fill_value": value}
-        else:
-            fill_kwarg = {}
+        fill_kwarg = {"fill_value": value} if fill_value else {}
         for d, dtype in self.data:
             # default (K) order, dtype
             dz = like_function(d, dtype=dtype, **fill_kwarg)

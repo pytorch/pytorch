@@ -920,10 +920,11 @@ def _input_mask(input: Union[Tensor, MaskedTensor], *args, **kwargs) -> Tensor:
         if input.layout == torch.strided:
             mask = mask.to_dense()
         elif input.layout == torch.sparse_coo:
-            if mask.layout == torch.strided:
-                mask = mask.to_sparse(input.sparse_dim())
-            else:
-                mask = mask.to_sparse()
+            mask = (
+                mask.to_sparse(input.sparse_dim())
+                if mask.layout == torch.strided
+                else mask.to_sparse()
+            )
         else:
             assert input.layout == torch.sparse_csr
             mask = mask.to_sparse_csr()

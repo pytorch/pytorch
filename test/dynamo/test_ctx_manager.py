@@ -1227,10 +1227,11 @@ class GraphModule(torch.nn.Module):
                         return x.sin()
 
                     with ctx_wrapper_inverse():
-                        if call:
-                            inner_func = ctx_wrapper()(inner_func)
-                        else:
-                            inner_func = ctx_wrapper(inner_func)
+                        inner_func = (
+                            ctx_wrapper()(inner_func)
+                            if call
+                            else ctx_wrapper(inner_func)
+                        )
 
                         # Calling no_grad or enabled_grad should not mutate global state
                         assert torch.is_grad_enabled() == mode_inverse

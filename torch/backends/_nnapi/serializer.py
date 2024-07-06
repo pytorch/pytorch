@@ -671,10 +671,7 @@ class _NnapiSerializer:
     ):
         strides = self.get_size_arg(stride)
         paddings = self.get_size_arg(padding)
-        if dilation is None:
-            dilations = [1, 1]
-        else:
-            dilations = self.get_size_arg(dilation)
+        dilations = [1, 1] if dilation is None else self.get_size_arg(dilation)
         if group is not None:
             _, group_num = self.get_constant_value(group, "IntType")
         else:
@@ -1792,10 +1789,11 @@ class _NnapiSerializer:
         # TODO: Transform at load time to share weights with CPU model.
         _, weight_tensor = self.get_constant_value(jit_weight, "TensorType")
         assert len(weight_tensor.shape) == 2
-        if transpose_weight:
-            nnapi_weight_tensor = weight_tensor.t().contiguous()
-        else:
-            nnapi_weight_tensor = weight_tensor.contiguous()
+        nnapi_weight_tensor = (
+            weight_tensor.t().contiguous()
+            if transpose_weight
+            else weight_tensor.contiguous()
+        )
         weight_id = self.add_tensor_operand_for_weight(nnapi_weight_tensor)
         weight_oper = self.operands[weight_id]
 
@@ -2080,10 +2078,7 @@ class _NnapiSerializer:
         if args.group == 1:
             # Full convolution
             depthwise = False
-            if transpose:
-                weight_permutation = (1, 2, 3, 0)
-            else:
-                weight_permutation = (0, 2, 3, 1)
+            weight_permutation = (1, 2, 3, 0) if transpose else (0, 2, 3, 1)
         elif args.group == in_c:
             # Depthwise convolution
             depthwise = True
@@ -2137,10 +2132,11 @@ class _NnapiSerializer:
             opcode = NNAPI_OperationCode.DEPTHWISE_CONV_2D
         else:
             num_args = 11
-            if transpose:
-                opcode = NNAPI_OperationCode.TRANSPOSE_CONV_2D
-            else:
-                opcode = NNAPI_OperationCode.CONV_2D
+            opcode = (
+                NNAPI_OperationCode.TRANSPOSE_CONV_2D
+                if transpose
+                else NNAPI_OperationCode.CONV_2D
+            )
 
         inputs = [None] * num_args
         inputs[0] = image_id

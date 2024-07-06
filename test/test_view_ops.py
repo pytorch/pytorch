@@ -241,11 +241,11 @@ class TestViewOps(TestCase):
 
                 # NumPy's dtype view requires contiguous input if target
                 # dtype is a different size
-                if equal_element_size:
-                    a_np_view = a_np.view(np_view_dtype)
-
-                else:
-                    a_np_view = a_np_contiguous.view(np_view_dtype)
+                a_np_view = (
+                    a_np.view(np_view_dtype)
+                    if equal_element_size
+                    else a_np_contiguous.view(np_view_dtype)
+                )
 
                 self.assertEqual(a_view, a_np_view)
 
@@ -449,10 +449,7 @@ class TestViewOps(TestCase):
     def test_real_imag_view(self, device, dtype):
         def compare_with_numpy(contiguous_input=True):
             t = torch.randn(3, 3, dtype=dtype, device=device)
-            if not contiguous_input:
-                u = t.T
-            else:
-                u = t
+            u = t.T if not contiguous_input else t
 
             re = u.real
             exp = torch.from_numpy(u.cpu().numpy().real).to(device=device)
@@ -1704,10 +1701,7 @@ class TestOldViewOps(TestCase):
             # s0.dim() <= s1.dim(), reverse s0 and s1 to compare trailing dimension
             s0 = tuple(reversed(s0))
             s1 = tuple(reversed(s1))
-            for i in range(len(s0)):
-                if s0[i] != 1 and s0[i] != s1[i]:
-                    return False
-            return True
+            return all(not (s0[i] != 1 and s0[i] != s1[i]) for i in range(len(s0)))
 
         sizes = ((), (1,), (2,), (1, 1), (3, 1), (3, 2), (4, 1, 1), (4, 3, 2))
         for s0, s1 in combinations(sizes, r=2):

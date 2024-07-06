@@ -900,10 +900,7 @@ class TestJitTraceAutocast(JitTestCase):
     def test_scripted_aliasing(self):
         # torch.is_autocast_enabled should not be able to move inside of the autocast context.
         def fn(x):
-            if torch.is_autocast_enabled():
-                y = True
-            else:
-                y = False
+            y = True if torch.is_autocast_enabled() else False
             with torch.cuda.amp.autocast(enabled=True):
                 z = x.relu()
             return y, z

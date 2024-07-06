@@ -1233,10 +1233,7 @@ class TestNamedTensor(TestCase):
 
         def test_out_variant(op, output_lambda, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            if output_lambda:
-                out = output_lambda(t)
-            else:
-                out = torch.empty([0], device=device)
+            out = output_lambda(t) if output_lambda else torch.empty([0], device=device)
             op(t, 'C', out=out)
             check_output(out, ['N', 'L'])
 

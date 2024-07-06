@@ -575,7 +575,7 @@ num_guards_executed=0)
         guard_manager = RootGuardManager()
         # Check a[3] which is tuple_iterator_getitem(foo, 2)
         guard_manager.add_tuple_iterator_length_guard(
-            5, id_type(iter(tuple())), ["len == 5"]
+            5, id_type(iter(())), ["len == 5"]
         )
         guard_manager.tuple_iterator_getitem_manager(
             2, "", foo, default_mgr_enum

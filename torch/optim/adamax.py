@@ -440,10 +440,11 @@ def adamax(
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
 
-    if foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_adamax
-    else:
-        func = _single_tensor_adamax
+    func = (
+        _multi_tensor_adamax
+        if foreach and not torch.jit.is_scripting()
+        else _single_tensor_adamax
+    )
 
     func(
         params,

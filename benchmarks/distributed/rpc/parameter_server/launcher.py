@@ -81,10 +81,7 @@ def get_server_rref(server_rank, args, extra_args):
     """
     server = server_map[args.server]
     name = get_name(server_rank, args)
-    if extra_args is not None:
-        server_args = extra_args.values()
-    else:
-        server_args = []
+    server_args = extra_args.values() if extra_args is not None else []
     if server_rank >= args.ntrainer + args.ncudatrainer + args.nserver:
         trainer_count = args.ncudatrainer / args.ncudaserver
         use_cuda_rpc = True
@@ -115,10 +112,7 @@ def run_trainer(args, extra_args, data, rank, server_rref):
         server_rref (dict): a dictionary containing server RRefs
     """
     trainer_class = trainer_map[args.trainer]
-    if extra_args is not None:
-        trainer_args = extra_args.values()
-    else:
-        trainer_args = []
+    trainer_args = extra_args.values() if extra_args is not None else []
     trainer_count = args.ntrainer + args.ncudatrainer
     store = c10d.FileStore(args.filestore, trainer_count)
     if args.backend == "gloo":

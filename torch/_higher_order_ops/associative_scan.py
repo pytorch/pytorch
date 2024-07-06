@@ -202,10 +202,11 @@ def associative_scan_batch_rule(interpreter, input, dim, combine_fn):
     input_unwrapped = []
     for x, bdim in zip(input, input_bdims):
         unwrap = get_unwrapped(x)
-        if dim is None:
-            unwrap = unwrap.unsqueeze(0).expand(batch_size, *x.shape)
-        else:
-            unwrap = unwrap.movedim(bdim, 0)
+        unwrap = (
+            unwrap.unsqueeze(0).expand(batch_size, *x.shape)
+            if dim is None
+            else unwrap.movedim(bdim, 0)
+        )
         input_unwrapped.append(unwrap)
 
     res = associative_scan_op(combine_fn, input_unwrapped, dim + 1)

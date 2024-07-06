@@ -501,10 +501,11 @@ class PipelineScheduleSingle(_PipelineSchedule):
         args_split, kwargs_split = self._split_inputs(args, kwargs)
 
         # Split target into microbatches
-        if target is not None:
-            targets_split = list(torch.tensor_split(target, self._n_microbatches))
-        else:
-            targets_split = None
+        targets_split = (
+            list(torch.tensor_split(target, self._n_microbatches))
+            if target is not None
+            else None
+        )
 
         # Run microbatches
         self._step_microbatches(args_split, kwargs_split, targets_split, losses)
@@ -895,10 +896,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
         args_split, kwargs_split = self._split_inputs(args, kwargs)
 
         # Split target into microbatches
-        if target is not None:
-            targets_split = list(torch.tensor_split(target, self._n_microbatches))
-        else:
-            targets_split = None
+        targets_split = (
+            list(torch.tensor_split(target, self._n_microbatches))
+            if target is not None
+            else None
+        )
 
         # Run microbatches
         self._step_microbatches(args_split, kwargs_split, targets_split, losses)

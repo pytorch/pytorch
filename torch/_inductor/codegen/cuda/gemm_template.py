@@ -744,7 +744,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         import cutlass_library.library as cutlass_lib
 
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
-        res: Dict[str, cutlass_gemm_op.GemmOperation] = dict()
+        res: Dict[str, cutlass_gemm_op.GemmOperation] = {}
         for op_dict in ops.values():
             for op_list in op_dict.values():
                 for op in op_list:
@@ -922,10 +922,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         inputs = [X, W, Bias]
         names = ["X", "W", "Bias"] + ["Y"]
         names_str = ",".join(names)
-        if self.input_reorder is not None:
-            input_reorder = self.input_reorder
-        else:
-            input_reorder = None
+        input_reorder = self.input_reorder if self.input_reorder is not None else None
         kernel_call_signature = kernel.def_kernel(
             inputs=inputs, outputs=[Y], names_str=names_str, input_reorder=input_reorder  # type: ignore[arg-type]
         )

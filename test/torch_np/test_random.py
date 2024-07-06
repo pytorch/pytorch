@@ -66,10 +66,11 @@ class TestScalarReturn(TestCase):
     )
     def test_rndm_array(self, func, use_numpy):
         with control_stream(use_numpy):
-            if func in (tnp.random.rand, tnp.random.randn):
-                r = func(10)
-            else:
-                r = func(size=10)
+            r = (
+                func(10)
+                if func in (tnp.random.rand, tnp.random.randn)
+                else func(size=10)
+            )
         assert isinstance(r, tnp.ndarray)
 
 

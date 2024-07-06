@@ -84,10 +84,11 @@ def deserialize_sparse_tensor(size, dtype, layout, is_coalesced, nnz=None):
 
 
 def deserialize_tensor(size, dtype, stride=None):
-    if stride is not None:
-        out = torch.empty_strided(size, stride, dtype=dtype)
-    else:
-        out = torch.empty(size, dtype=dtype)
+    out = (
+        torch.empty_strided(size, stride, dtype=dtype)
+        if stride is not None
+        else torch.empty(size, dtype=dtype)
+    )
     try:
         out.copy_(make_tensor(size, dtype=dtype, device="cpu"))
     except Exception as e:
@@ -113,18 +114,11 @@ def serialize_torch_args(e):
 
 
 def contains_tensor(elems):
-    for elem in pytree.tree_leaves(elems):
-        if isinstance(elem, torch.Tensor):
-            return True
-    return False
+    return any(isinstance(elem, torch.Tensor) for elem in pytree.tree_leaves(elems))
 
 
 def skip_args(elems):
-    for i in pytree.tree_leaves(elems):
-        # only shows up in constructors and ops like that
-        if isinstance(i, (torch.memory_format, torch.storage.UntypedStorage)):
-            return True
-    return False
+    return any(isinstance(i, (torch.memory_format, torch.storage.UntypedStorage)) for i in pytree.tree_leaves(elems))
 
 
 def contains_tensor_types(type):

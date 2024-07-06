@@ -86,9 +86,9 @@ class TestTakeAlongAxis(TestCase):
         a = rand(3, 4, 5)
 
         funcs = [
-            (np.sort, np.argsort, dict()),
-            (_add_keepdims(np.min), _add_keepdims(np.argmin), dict()),
-            (_add_keepdims(np.max), _add_keepdims(np.argmax), dict()),
+            (np.sort, np.argsort, {}),
+            (_add_keepdims(np.min), _add_keepdims(np.argmin), {}),
+            (_add_keepdims(np.max), _add_keepdims(np.argmax), {}),
             #  FIXME           (np.partition, np.argpartition, dict(kth=2)),
         ]
 

@@ -64,10 +64,7 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
     """
     Return the default QConfigMapping for the given quantization type and backend.
     """
-    if is_qat:
-        qconfig = get_default_qat_qconfig(backend, version)
-    else:
-        qconfig = get_default_qconfig(backend, version)
+    qconfig = get_default_qat_qconfig(backend, version) if is_qat else get_default_qconfig(backend, version)
     default_weight = default_weight_fake_quant if is_qat else default_weight_observer
 
     # default_per_channel_weight_observer is not currently compatible with fbgemm backend
@@ -102,10 +99,7 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
         if observer in fixed_qparams_observer_to_qconfig:
             fixed_qparams_qconfig = fixed_qparams_observer_to_qconfig[observer]
         else:
-            if is_qat:
-                activation = FixedQParamsFakeQuantize.with_args(observer=observer)
-            else:
-                activation = observer
+            activation = FixedQParamsFakeQuantize.with_args(observer=observer) if is_qat else observer
             fixed_qparams_qconfig = QConfig(activation=activation, weight=default_weight)
             fixed_qparams_observer_to_qconfig[observer] = fixed_qparams_qconfig
         qconfig_mapping.set_object_type(fixed_qparams_op, fixed_qparams_qconfig)
@@ -162,10 +156,7 @@ def _get_default_qconfig_mapping_with_default_qconfig(
     """
     Return a QConfigMapping that uses the provided qconfig as the default QConfig.
     """
-    if is_qat:
-        qconfig_mapping = get_default_qat_qconfig_mapping(backend)
-    else:
-        qconfig_mapping = get_default_qconfig_mapping(backend)
+    qconfig_mapping = get_default_qat_qconfig_mapping(backend) if is_qat else get_default_qconfig_mapping(backend)
     qconfig_mapping.set_global(default_qconfig)
     for pattern in qconfig_mapping.object_type_qconfigs.keys():
         if pattern not in _FIXED_QPARAMS_OP_TO_OBSERVER:

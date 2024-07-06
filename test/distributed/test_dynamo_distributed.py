@@ -1289,10 +1289,11 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 self._param = nn.Parameter(torch.randn((3,), device="cuda"))
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
-                if self._use_self:
-                    z = self._add(x, self._param)
-                else:
-                    z = ModuleWithStaticMethod._add(x, self._param)
+                z = (
+                    self._add(x, self._param)
+                    if self._use_self
+                    else ModuleWithStaticMethod._add(x, self._param)
+                )
                 z *= 2
                 return z
 
