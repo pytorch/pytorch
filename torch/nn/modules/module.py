@@ -777,8 +777,10 @@ class Module:
 
             mod = getattr(mod, item)
 
-            if type(mod) is not torch.nn.Module:
+            # Use isinstance instead of type here to also handle subclass of nn.Module
+            if not isinstance(mod, torch.nn.Module):
                 raise AttributeError("`" + item + "` is not an nn.Module")
+
         setattr(mod, name, module)
 
     def get_parameter(self, target: str) -> "Parameter":

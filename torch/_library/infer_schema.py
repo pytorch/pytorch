@@ -100,7 +100,7 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
             default_repr = None
             if param.default is None or isinstance(param.default, (int, float, bool)):
                 default_repr = str(param.default)
-            elif isinstance(param.default, str):
+            elif isinstance(param.default, (str, torch.device)):
                 default_repr = f'"{param.default}"'
             elif isinstance(param.default, torch.dtype):
                 dtype_repr = str(param.default)
@@ -186,6 +186,9 @@ SUPPORTED_RETURN_TYPES = {
 def parse_return(annotation, error_fn):
     if annotation is None:
         return "()"
+
+    if annotation is inspect.Parameter.empty:
+        error_fn("No return type annotation was provided. Please add one.")
 
     origin = typing.get_origin(annotation)
     if origin is not tuple:
