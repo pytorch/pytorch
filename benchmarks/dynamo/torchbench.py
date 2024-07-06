@@ -321,6 +321,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 extra_args=extra_args,
                 model_kwargs=model_kwargs,
             )
+            use_eval_mode = True
         elif is_training:
             benchmark = benchmark_cls(
                 test="train",

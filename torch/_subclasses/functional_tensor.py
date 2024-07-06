@@ -106,6 +106,11 @@ class FunctionalTensor(torch.Tensor):
         torch.ops.aten.feature_dropout.default,  # type: ignore[has-type]
         torch.ops.aten.feature_alpha_dropout.default,  # type: ignore[has-type]
         torch.ops.aten.unsafe_chunk.default,  # type: ignore[has-type]
+        # `scaled_dot_product_attention` is not aliasing or mutating, but it would
+        # decompose into in-place ops, so we're adding it to this list to force decomposingdecomposing for it.
+        # https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/transformers/attention.cpp#L530-L531
+        # Related to https://github.com/pytorch/pytorch/issues/129418
+        torch.ops.aten.scaled_dot_product_attention.default,  # type: ignore[has-type]
     ]
 
     def __new__(cls, elem):

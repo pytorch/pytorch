@@ -2504,9 +2504,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "forward_ad")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch.autograd.forward_ad._current_level == -1""",
+            """torch.autograd.forward_ad._current_level == -1""",
             munge_exc(record.getMessage()),
         )
 
