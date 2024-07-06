@@ -164,7 +164,7 @@ def _validate_pipeline_order(
             )
 
             if action is not None:
-                computation_type, mb_index, stage_index = action
+                computation_type = action.computation_type
                 if computation_type != _ComputationType.WEIGHT:
                     current_timestep_actions.append(action)
 
@@ -247,16 +247,19 @@ def _validate_pipeline_order(
             return
 
         for rank in range(len(pipeline_order)):
-            backward_steps = set()
-            weight_steps = set()
+            backward_steps: Set[Tuple[int, int]] = set()
+            weight_steps: Set[Tuple[int, int]] = set()
 
             for action in pipeline_order[rank]:
                 if action is None:
                     continue
 
-                computation_type, mb_index, stage_index = action
+                stage_index = action.stage_index
+                computation_type = action.computation_type
+                mb_index = action.microbatch_index
                 if computation_type == _ComputationType.BACKWARD:
-                    backward_steps.add((mb_index, stage_index))
+                    if mb_index is not None:
+                        backward_steps.add((mb_index, stage_index))
                 elif computation_type == _ComputationType.WEIGHT:
                     if (mb_index, stage_index) not in backward_steps:
                         error_msg.append(
@@ -266,7 +269,8 @@ def _validate_pipeline_order(
                         error_msg.append(
                             f"{mb_index=}, {stage_index=} Duplicated weight step"
                         )
-                    weight_steps.add((mb_index, stage_index))
+                    if mb_index is not None:
+                        weight_steps.add((mb_index, stage_index))
 
             if len(backward_steps) != len(weight_steps):
                 error_msg.append("Length weight steps != Length bwd steps")
@@ -1253,7 +1257,7 @@ def _get_1f1b_rank_ops(
                 ) + 1
                 rank_ops.append(
                     _Action(
-                        _ComputationType.WEIGHT, weight_mb_index, weight_stage_index
+                        weight_stage_index, _ComputationType.WEIGHT, weight_mb_index
                     )
                 )
                 weight_op_count += 1
@@ -1282,7 +1286,7 @@ def _get_1f1b_rank_ops(
                 ) + 1
                 rank_ops.append(
                     _Action(
-                        _ComputationType.WEIGHT, weight_mb_index, weight_stage_index
+                        weight_stage_index, _ComputationType.WEIGHT, weight_mb_index
                     )
                 )
                 weight_op_count += 1
@@ -1293,7 +1297,7 @@ def _get_1f1b_rank_ops(
             weight_mb_index := weight_stage_mb_index[weight_stage_index]
         ) + 1
         rank_ops.append(
-            _Action(_ComputationType.WEIGHT, weight_mb_index, weight_stage_index)
+            _Action(weight_stage_index, _ComputationType.WEIGHT, weight_mb_index)
         )
         weight_op_count += 1
 
@@ -1401,6 +1405,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             forward_stage_index,
             backward_stage_index,
         )
+
 
 class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
     """
@@ -1554,7 +1559,7 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
                 return (stage + 1, op, microbatch) not in seen_ops
             return False
 
-        seen_ops: Set[Tuple[int, _Action, int]] = set()
+        seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
         result: Dict[int, List[Optional[_Action]]] = {}
         next_pointer: Dict[int, int] = {}
         bubbles_added: Dict[int, int] = {}
@@ -1568,7 +1573,7 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
         while True:
             should_stop = True
 
-            temp_seen_ops: Set[Tuple[int, _Action, int]] = set()
+            temp_seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
 
             for rank in range(self.pp_group_size):
                 timestamp = next_pointer[rank]
@@ -1577,22 +1582,23 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
 
                 should_stop = False
 
-                if actions[rank][timestamp] is None:
-                    next_pointer[rank] += 1
-                    result[rank].append(None)
-                    continue
-
-                op, microbatch, stage_index = actions[rank][timestamp]
-
-                if not need_bubble(
-                    stage_index, op, microbatch, num_stages_global, seen_ops
-                ):
-                    result[rank].append(actions[rank][timestamp])
-                    temp_seen_ops.add((stage_index, op, microbatch))
-                    next_pointer[rank] += 1
+                if actions[rank][timestamp] is not None:
+                    temp_action = actions[rank][timestamp]
+                    assert temp_action is not None
+                    stage_index, op, microbatch = temp_action
+                    if not need_bubble(
+                        stage_index, op, microbatch, num_stages_global, seen_ops
+                    ):
+                        result[rank].append(actions[rank][timestamp])
+                        if microbatch is not None:
+                            temp_seen_ops.add((stage_index, op, microbatch))
+                        next_pointer[rank] += 1
+                    else:
+                        result[rank].append(None)
+                        bubbles_added[rank] += 1
                 else:
+                    next_pointer[rank] += 1
                     result[rank].append(None)
-                    bubbles_added[rank] += 1
 
             seen_ops.update(temp_seen_ops)
             if should_stop:
@@ -1600,6 +1606,6 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
 
         if total_bubbles_added > 0:
             logger.warning(
-                f"Non zero bubbles added: {total_bubbles_added=} {bubbles_added=}" # noqa: G004
+                f"Non zero bubbles added: {total_bubbles_added=} {bubbles_added=}"  # noqa: G004
             )
         return result

@@ -161,18 +161,18 @@ class MLPModuleWithDw(torch.nn.Module):
 
     def forward(self, x):
         if not self.use_custom_logic:
-            self.hidden = CustomLinearDxDw.apply(
-                x, self.fc1_weight, self.fc1_bias
-            )
+            self.hidden = CustomLinearDxDw.apply(x, self.fc1_weight, self.fc1_bias)
             self.hidden = torch.nn.functional.relu(self.hidden)
-            output = CustomLinearDxDw.apply(
-                self.hidden, self.fc2_weight, self.fc2_bias
-            )
+            output = CustomLinearDxDw.apply(self.hidden, self.fc2_weight, self.fc2_bias)
             return output
 
-        self.hidden = CustomLinearDx.apply(x, self.fc1_weight, self.fc1_bias, self, 'fc1')
+        self.hidden = CustomLinearDx.apply(
+            x, self.fc1_weight, self.fc1_bias, self, "fc1"
+        )
         self.hidden = torch.nn.functional.relu(self.hidden)
-        output = CustomLinearDx.apply(self.hidden, self.fc2_weight, self.fc2_bias, self, 'fc2')
+        output = CustomLinearDx.apply(
+            self.hidden, self.fc2_weight, self.fc2_bias, self, "fc2"
+        )
         return output
 
     def compute_dW(self):
@@ -227,7 +227,7 @@ class MultiMLPWithDw(torch.nn.Module):
 
     def compute_dW(self):
         if not self.use_custom_logic:
-            raise Exception("Need to call toggle() to enable custom backward and dW")
+            raise RuntimeError("Need to call toggle() to enable custom backward and dW")
 
         for i in reversed(range(len(self.layers))):
             self.layers[i].compute_dW()

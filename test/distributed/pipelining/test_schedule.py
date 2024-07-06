@@ -1,16 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import logging
-<<<<<<< HEAD
-=======
-import os
-import sys
-import tempfile
-import unittest
-
-from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw
-from schedule_registry import ScheduleUnbalanced, ScheduleVShaped, ScheduleWithW
->>>>>>> afbffd8cab0 (Added zb1p schedule)
 
 import torch
 from torch.distributed.pipelining import (
@@ -53,7 +43,7 @@ class MockPipelineStage(_PipelineStageBase):
         pass
 
 
-class TestSchedulePlan(unittest.TestCase):
+class TestSchedulePlan(TestCase):
     def setUp(self):
         # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
         # These should succeed since num_microbatches % group_size == 0
