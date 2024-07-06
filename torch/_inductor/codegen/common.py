@@ -1555,7 +1555,7 @@ class CodeGen:
         return self
 
     def __exit__(self, *args: object) -> None:
-        self.exit_stack.__exit__(*args)
+        self.exit_stack.__exit__(*args)  # type: ignore[arg-type]
 
 
 class ScopedDict:
