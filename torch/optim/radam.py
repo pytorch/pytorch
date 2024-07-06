@@ -321,11 +321,10 @@ def _single_tensor_radam(
 
         def _compute_adaptive_lr():
             exp_avg_sq_sqrt = exp_avg_sq.sqrt()
-            exp_avg_sq_sqrt = (
-                exp_avg_sq_sqrt.add(eps)
-                if differentiable
-                else exp_avg_sq_sqrt.add_(eps)
-            )
+            if differentiable:
+                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
+            else:
+                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
 
             return (bias_correction2**0.5) / exp_avg_sq_sqrt
 
@@ -575,11 +574,10 @@ def radam(
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
 
-    func = (
-        _multi_tensor_radam
-        if foreach and not torch.jit.is_scripting()
-        else _single_tensor_radam
-    )
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_radam
+    else:
+        func = _single_tensor_radam
 
     func(
         params,

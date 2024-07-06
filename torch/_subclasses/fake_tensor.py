@@ -402,11 +402,10 @@ class FakeTensorConverter:
                 value = t.item()
             if not math.isnan(value):
                 # Peephole strip out unnecessary torch.as_tensor(x).item()
-                item_source = (
-                    source.base
-                    if isinstance(source, FloatTensorSource)
-                    else CallMethodItemSource(source)
-                )
+                if isinstance(source, FloatTensorSource):
+                    item_source = source.base
+                else:
+                    item_source = CallMethodItemSource(source)
                 symbol = shape_env.create_unspecified_symbol(
                     value,
                     source=item_source,

@@ -882,7 +882,10 @@ def transpose_int(func, *args, **kwargs):
             raise ValueError(
                 "Transpose is not supported on the batch dimension for jagged NT"
             )
-        to_dim = dim1 if dim0 == inp._ragged_idx else dim0
+        if dim0 == inp._ragged_idx:
+            to_dim = dim1
+        else:
+            to_dim = dim0
         inp_kwargs = extract_kwargs(inp)
         inp_kwargs["_ragged_idx"] = to_dim
         return NestedTensor(

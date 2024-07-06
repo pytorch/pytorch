@@ -517,7 +517,13 @@ class TestTyping(JitTestCase):
         @torch.jit.script
         def test_unify(weight, bias):
             # type: (Optional[int], Optional[int]) -> Optional[int]
-            opt = None if weight is not None else 1 if bias is not None else None
+            if weight is not None:
+                opt = None
+            else:
+                if bias is not None:
+                    opt = 1
+                else:
+                    opt = None
 
             return opt
 
@@ -547,7 +553,10 @@ class TestTyping(JitTestCase):
         @torch.jit.script
         def unify_to_optional(x):
             # type: (bool) -> Optional[int]
-            a = None if x else 2
+            if x:
+                a = None
+            else:
+                a = 2
             return a
 
         self.assertEqual(unify_to_optional(True), None)
@@ -573,7 +582,10 @@ class TestTyping(JitTestCase):
     def test_optional_tuple(self):
         def fn(x=None):
             # type: (Optional[Tuple[int, int]]) -> Tuple[int, int]
-            new_x = (1, 2) if x is None else x
+            if x is None:
+                new_x = (1, 2)
+            else:
+                new_x = x
             return new_x
 
         self.checkScript(fn, ((3, 4),))

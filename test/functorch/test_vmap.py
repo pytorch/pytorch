@@ -1099,9 +1099,10 @@ class TestVmapAPI(TestCase):
         self.assertEqual(o, torch.square(t))
 
     def _test_vmap_autocast(self, device):
-        amp_dtype = (
-            torch.bfloat16 if torch.device(device).type == "cpu" else torch.float16
-        )
+        if torch.device(device).type == "cpu":
+            amp_dtype = torch.bfloat16
+        else:
+            amp_dtype = torch.float16
 
         a_float32 = torch.rand(4, 2, 3, device=device)
         b_float32 = torch.rand(4, 3, 2, device=device)
@@ -5934,9 +5935,10 @@ class TestTransformFailure(TestCase):
         def f(x):
             return Test.apply(x)
 
-        input = (
-            torch.tensor(4.0) if transform in (grad, grad_and_value) else torch.randn(5)
-        )
+        if transform in (grad, grad_and_value):
+            input = torch.tensor(4.0)
+        else:
+            input = torch.randn(5)
 
         if transform == vjp:
             transform = functools.partial(transform, f)

@@ -70,7 +70,10 @@ def draw_buffers(nodes: List[BaseSchedulerNode], print_graph=False, fname=None):
             continue
         group = node.meta["fusion_meta"].group
         if isinstance(group, tuple):
-            group = (group[1],) if isinstance(group[1], int) else group[1]
+            if isinstance(group[1], int):
+                group = (group[1],)
+            else:
+                group = group[1]
 
         # gather meta data
         dtype = None
@@ -496,7 +499,10 @@ class DebugFormatter:
         from .ir import FixedLayout
 
         def build_node_info(node: ir.IRNode):
-            node_name = node.name if hasattr(node, "name") else ""
+            if hasattr(node, "name"):
+                node_name = node.name
+            else:
+                node_name = ""
             node_info = {
                 "name": node_name,
                 "type": type(node).__name__,

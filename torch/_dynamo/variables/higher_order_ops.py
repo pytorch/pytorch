@@ -1702,11 +1702,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # bwd tracer a child of the fwd tracer, because backward may rely on
         # tensors/attrs created in the fwd tracer.
 
-        bwd_args = (
-            [ctx, *fwd_out.items]
-            if isinstance(fwd_out, variables.BaseListVariable)
-            else [ctx, fwd_out]
-        )
+        if isinstance(fwd_out, variables.BaseListVariable):
+            bwd_args = [ctx, *fwd_out.items]
+        else:
+            bwd_args = [ctx, fwd_out]
 
         bwd_src = AttrSource(self.parent_source, member="backward")
         if isinstance(self.bwd_graph, types.FunctionType):
@@ -1815,11 +1814,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 else:
                     bwd_proxy_of_fwd_freevars.append(k)
         else:
-            bwd_proxy_of_fwd_freevars = (
-                bwd_freevars[bwd_out_proxy]
-                if bwd_out_proxy in bwd_freevars
-                else bwd_out_proxy
-            )
+            if bwd_out_proxy in bwd_freevars:
+                bwd_proxy_of_fwd_freevars = bwd_freevars[bwd_out_proxy]
+            else:
+                bwd_proxy_of_fwd_freevars = bwd_out_proxy
 
         # Remove bwd output for non-Tensor args.
         output_proxy = bwd_proxy_of_fwd_freevars

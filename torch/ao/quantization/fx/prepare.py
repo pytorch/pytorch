@@ -457,7 +457,10 @@ def _insert_obs_or_fq(
     if model_device:
         obs_or_fq.to(model_device)
     # add obs_or_fq module as attribute
-    prefix = node.name + "_equalization_process_" if is_equalization_observer(obs_or_fq) else "activation_post_process_"
+    if is_equalization_observer(obs_or_fq):
+        prefix = node.name + '_equalization_process_'
+    else:
+        prefix = 'activation_post_process_'
     get_new_obs_or_fq_name = get_new_attr_name_with_prefix(prefix)
     obs_or_fq_name = get_new_obs_or_fq_name(model)
     setattr(model, obs_or_fq_name, obs_or_fq)
@@ -1157,7 +1160,10 @@ def propagate_dtypes_for_known_nodes(
 
                 # when an argument is a tuple, it does not show up as another node so we need to go through
                 # all elements of the tuple manually
-                arg_list = list(arg) if isinstance(arg, (tuple, list)) else [arg]
+                if isinstance(arg, (tuple, list)):
+                    arg_list = list(arg)
+                else:
+                    arg_list = [arg]
 
                 for cur_arg in arg_list:
                     # hard coded arguments show up but aren't `Node` typed and do not need dtype propagated

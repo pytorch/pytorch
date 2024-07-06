@@ -510,9 +510,10 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         m2 = M2(self.conv_class, self.bn_class)
 
         assert self.dim in [1, 2]
-        example_inputs = (
-            (torch.randn(3, 3, 5),) if self.dim == 1 else (torch.randn(3, 3, 5, 5),)
-        )
+        if self.dim == 1:
+            example_inputs = (torch.randn(3, 3, 5),)
+        else:
+            example_inputs = (torch.randn(3, 3, 5, 5),)
 
         self._verify_symmetric_xnnpack_qat_graph(
             m1,
@@ -565,9 +566,10 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
                 return x
 
         assert self.dim in [1, 2]
-        example_inputs = (
-            (torch.randn(1, 1, 3),) if self.dim == 1 else (torch.randn(1, 1, 3, 3),)
-        )
+        if self.dim == 1:
+            example_inputs = (torch.randn(1, 1, 3),)
+        else:
+            example_inputs = (torch.randn(1, 1, 3, 3),)
 
         m = M(self.conv_class)
         self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
@@ -687,9 +689,10 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
                 return x
 
         assert self.dim in [1, 2]
-        example_inputs = (
-            (torch.randn(1, 5, 10),) if self.dim == 1 else (torch.randn(1, 5, 10, 10),)
-        )
+        if self.dim == 1:
+            example_inputs = (torch.randn(1, 5, 10),)
+        else:
+            example_inputs = (torch.randn(1, 5, 10, 10),)
 
         # QAT prepare + convert
         backbone = self._get_conv_bn_model(has_relu=True)

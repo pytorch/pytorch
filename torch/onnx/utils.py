@@ -892,7 +892,10 @@ def _from_dynamic_axes_to_dynamic_shapes(
     if dynamic_axes is None:
         return None
 
-    input_names_set = set() if input_names is None else set(input_names)
+    if input_names is None:
+        input_names_set = set()
+    else:
+        input_names_set = set(input_names)
 
     dynamic_shapes: Dict[str, Optional[Any]] = {}
     for input_name, axes in dynamic_axes.items():
@@ -1626,7 +1629,10 @@ def _export(
             )
             # Normally f can be a file-like object, but for large models, the external data format requires a
             # valid `model_file_location`. Code in export.cpp will enforce this.
-            model_file_location = f if isinstance(f, str) else ""
+            if isinstance(f, str):
+                model_file_location = f
+            else:
+                model_file_location = ""
             args = _decide_input_format(model, args)
             if dynamic_axes is None:
                 dynamic_axes = {}

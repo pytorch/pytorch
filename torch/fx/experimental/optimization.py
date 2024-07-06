@@ -58,7 +58,10 @@ def fuse(model: torch.nn.Module, inplace=False, no_trace=False) -> torch.nn.Modu
                 (nn.Conv3d, nn.BatchNorm3d)]
     if not inplace:
         model = copy.deepcopy(model)
-    fx_model = fx.symbolic_trace(model) if not no_trace or not isinstance(model, torch.fx.GraphModule) else model
+    if not no_trace or not isinstance(model, torch.fx.GraphModule):
+        fx_model = fx.symbolic_trace(model)
+    else:
+        fx_model = model
     modules = dict(fx_model.named_modules())
     new_graph = copy.deepcopy(fx_model.graph)
 

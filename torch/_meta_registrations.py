@@ -1106,7 +1106,10 @@ def linalg_lu_meta(A: Tensor, *, pivot: bool = True) -> Tuple[Tensor, Tensor, Te
     k = min(m, n)
 
     sizes[-1] = m
-    P = A.new_empty(sizes) if pivot else A.new_empty([0])
+    if pivot:
+        P = A.new_empty(sizes)
+    else:
+        P = A.new_empty([0])
 
     sizes[-1] = k
     L = A.new_empty(sizes)
@@ -1235,7 +1238,10 @@ def lu_unpack_meta(
     n = sizes[-1]
     k = min(m, n)
     sizes[-1] = m
-    P = LU.new_empty(sizes) if unpack_pivots else LU.new_empty([0])
+    if unpack_pivots:
+        P = LU.new_empty(sizes)
+    else:
+        P = LU.new_empty([0])
     if unpack_data:
         sizes[-1] = k
         L = LU.new_empty(sizes)
@@ -3433,11 +3439,10 @@ def meta_embedding_bag(
     if device_hint(offsets) != "cpu":
         offset2bag = indices.new_empty(indices.size(0))
         bag_size = indices.new_empty(offsets.size())
-        max_indices = (
-            indices.new_empty(num_bags, weight.size(1))
-            if mode == MODE_MAX
-            else indices.new_empty(0)
-        )
+        if mode == MODE_MAX:
+            max_indices = indices.new_empty(num_bags, weight.size(1))
+        else:
+            max_indices = indices.new_empty(0)
     else:
         fast_path_sum = is_fast_path(weight, per_sample_weights, output, padding_idx)
         if mode in (MODE_MEAN, MODE_MAX) or not fast_path_sum:
@@ -4243,7 +4248,10 @@ def meta_fractional_max_pool2d(self_, kernel_size, output_size, random_samples):
     input_channels = self_.size(-3)
     input_height = self_.size(-2)
     input_width = self_.size(-1)
-    input_batch = self_.size(0) if ndim == 4 else 1
+    if ndim == 4:
+        input_batch = self_.size(0)
+    else:
+        input_batch = 1
 
     torch._check(
         self_.dtype == random_samples.dtype,
@@ -4706,11 +4714,10 @@ def grid_sampler_2d_backward_meta(
     output_mask,
 ):
     input_requires_grad = output_mask[0]
-    grad_input = (
-        torch.zeros_like(input, memory_format=torch.contiguous_format)
-        if input_requires_grad
-        else None
-    )
+    if input_requires_grad:
+        grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
+    else:
+        grad_input = None
     grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
     return (grad_input, grad_grid)
 
@@ -4748,11 +4755,12 @@ def grid_sampler_3d_backward(
     check_grid_sampler_common(input, grid)
     check_grid_sampler_3d(input, grid, interpolation_mode)
     input_requires_grad = output_mask[0]
-    grad_input = (
-        torch.zeros_like(input, memory_format=torch.legacy_contiguous_format)
-        if input_requires_grad
-        else None
-    )
+    if input_requires_grad:
+        grad_input = torch.zeros_like(
+            input, memory_format=torch.legacy_contiguous_format
+        )
+    else:
+        grad_input = None
     grad_grid = torch.empty_like(grid, memory_format=torch.legacy_contiguous_format)
     return grad_input, grad_grid
 
@@ -5666,7 +5674,10 @@ def _cudnn_rnn(
     output = input.new_empty(out_shape)
 
     cell_shape = [num_layers * num_directions, mini_batch, hidden_size]
-    cy = torch.empty(0, device=input.device) if cx is None else cx.new_empty(cell_shape)
+    if cx is None:
+        cy = torch.empty(0, device=input.device)
+    else:
+        cy = cx.new_empty(cell_shape)
 
     hy = hx.new_empty([num_layers * num_directions, mini_batch, out_size])
 
@@ -5705,12 +5716,14 @@ def mkldnn_rnn_layer(
         else [seq_length, mini_batch, output_chanels]
     )
     output = input.new_empty(out_shape)
-    hy = (
-        torch.empty(0, device=input.device) if hx_ is None else hx_.new_empty(hx_.shape)
-    )
-    cy = (
-        torch.empty(0, device=input.device) if cx_ is None else cx_.new_empty(cx_.shape)
-    )
+    if hx_ is None:
+        hy = torch.empty(0, device=input.device)
+    else:
+        hy = hx_.new_empty(hx_.shape)
+    if cx_ is None:
+        cy = torch.empty(0, device=input.device)
+    else:
+        cy = cx_.new_empty(cx_.shape)
     workspace = torch.empty(0, device=input.device, dtype=torch.uint8)
     return output, hy, cy, workspace
 
