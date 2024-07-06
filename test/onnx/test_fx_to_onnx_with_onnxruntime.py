@@ -437,7 +437,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
-    @pytorch_test_common.xfail_dynamic_fx_test  # no dynamic shapes present
+    @pytorch_test_common.xfail(
+        error_message=("Unsupported FX nodes: {'call_function': [")
+    )
     def test_squeeze_runtime_dim(self):
         class Squeeze(torch.nn.Module):
             def forward(self, d1, d2):
@@ -642,6 +644,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.tensor([1]), torch.randn(3, 4))
         )
 
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        error_message="Unsupported FX nodes: {'call_function': ['aten._assert_async.msg']}",
+        reason="https://github.com/pytorch/pytorch/issues/112622",
+    )
     def test_operator_with_dynamic_output_shape(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
