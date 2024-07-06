@@ -48,11 +48,10 @@ class Net(nn.Module):
         self.use_checkpoint = checkpoint
 
     def forward(self, x):
-        _fc1 = (
-            checkpoint(self.fc1, x, use_reentrant=False)
-            if self.use_checkpoint
-            else self.fc1(x)
-        )
+        if self.use_checkpoint:
+            _fc1 = checkpoint(self.fc1, x, use_reentrant=False)
+        else:
+            _fc1 = self.fc1(x)
         return self.fc4(self.fc3(self.fc2(_fc1)))
 
 

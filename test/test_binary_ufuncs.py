@@ -1042,7 +1042,10 @@ class TestBinaryUfuncs(TestCase):
             dtype=dtype,
         )
         exact_dtype = dtype != torch.bfloat16
-        an = a.cpu().numpy() if exact_dtype else a.float().cpu().numpy()
+        if exact_dtype:
+            an = a.cpu().numpy()
+        else:
+            an = a.float().cpu().numpy()
 
         zero = torch.zeros_like(a)
 
@@ -2488,17 +2491,15 @@ class TestBinaryUfuncs(TestCase):
         def _test_copysign_numpy(a, b):
             torch_result = torch.copysign(a, b)
 
-            np_a = (
-                a.to(torch.float).cpu().numpy()
-                if a.dtype == torch.bfloat16
-                else a.cpu().numpy()
-            )
+            if a.dtype == torch.bfloat16:
+                np_a = a.to(torch.float).cpu().numpy()
+            else:
+                np_a = a.cpu().numpy()
 
-            np_b = (
-                b.to(torch.float).cpu().numpy()
-                if b.dtype == torch.bfloat16
-                else b.cpu().numpy()
-            )
+            if b.dtype == torch.bfloat16:
+                np_b = b.to(torch.float).cpu().numpy()
+            else:
+                np_b = b.cpu().numpy()
             expected = torch.from_numpy(np.copysign(np_a, np_b))
             # To handle inconsistencies of type promotion between PyTorch and Numpy
             # Applied for both arguments having integral precision and bfloat16

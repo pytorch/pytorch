@@ -343,7 +343,10 @@ class TestPeephole(JitTestCase):
 
         @torch.jit.script
         def foo(x: List[int], b: List[int]):
-            x1 = True if len(x) == 5 else len(b) != 4
+            if len(x) == 5:
+                x1 = True
+            else:
+                x1 = len(b) != 4
             assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
             return len(x), len(b)
 
@@ -354,7 +357,10 @@ class TestPeephole(JitTestCase):
 
         @torch.jit.script
         def foo(x: List[int], b: List[int]):
-            x1 = False if len(x) == 5 else len(b) != 4
+            if len(x) == 5:
+                x1 = False
+            else:
+                x1 = len(b) != 4
             assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
             return len(x), len(b)
 
@@ -365,7 +371,10 @@ class TestPeephole(JitTestCase):
 
         @torch.jit.script
         def foo(x: List[int], b: List[int]):
-            x1 = True if len(x) == 5 else len(b) == 4
+            if len(x) == 5:
+                x1 = True
+            else:
+                x1 = len(b) == 4
             assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
             return len(x), len(b)
 
@@ -376,7 +385,10 @@ class TestPeephole(JitTestCase):
 
         @torch.jit.script
         def foo(x: List[int], b: List[int]):
-            x1 = True if len(x) == 5 else len(b) != 4
+            if len(x) == 5:
+                x1 = True
+            else:
+                x1 = len(b) != 4
             assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
             return len(x), len(b)
 
@@ -388,7 +400,10 @@ class TestPeephole(JitTestCase):
         # swap branches
         @torch.jit.script
         def foo(x: List[int], b: List[int]):
-            x1 = len(b) != 4 if len(x) != 5 else True
+            if len(x) != 5:
+                x1 = len(b) != 4
+            else:
+                x1 = True
             assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
             return len(x), len(b)
 
@@ -400,7 +415,10 @@ class TestPeephole(JitTestCase):
         # use __not__
         @torch.jit.script
         def foo(x: List[int], b: List[int]):
-            x1 = len(b) != 4 if len(x) != 5 else True
+            if len(x) != 5:
+                x1 = len(b) != 4
+            else:
+                x1 = True
             assert not x1
             return len(x), len(b)
 

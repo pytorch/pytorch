@@ -427,11 +427,10 @@ class BenchmarkRunner:
                     f"# Benchmarking {test_case.framework}: {test_case.op_bench.module_name()}"
                 )
 
-                launch_func = (
-                    self._launch_backward
-                    if op_test_config.run_backward
-                    else self._launch_forward
-                )
+                if op_test_config.run_backward:
+                    launch_func = self._launch_backward
+                else:
+                    launch_func = self._launch_forward
 
                 # Warmup
                 launch_func(

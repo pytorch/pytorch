@@ -294,11 +294,10 @@ def gen_static_dispatch_backend_call_signature(
     cpp_sigs = CppSignatureGroup.from_native_function(
         f, method=False, fallback_binding=False
     )
-    cpp_sig = (
-        cpp_sigs.symint_signature
-        if sig.symint and f.func.has_symint()
-        else cpp_sigs.signature
-    )
+    if sig.symint and f.func.has_symint():
+        cpp_sig = cpp_sigs.symint_signature
+    else:
+        cpp_sig = cpp_sigs.signature
     assert cpp_sig is not None
     return cpp_sig
 

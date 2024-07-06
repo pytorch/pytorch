@@ -437,7 +437,10 @@ class TestDecomp(TestCase):
 
         # in general, the methods take varargs and not (always?) the function
         # variants, the exception to this rule are the factory functions
-        fn = op.op if op.is_factory_function else op.method_variant
+        if op.is_factory_function:
+            fn = op.op
+        else:
+            fn = op.method_variant
         with TorchRefsMode():
             gm = make_fx(fn)(*all_args[:-1], *all_args[-1])
 

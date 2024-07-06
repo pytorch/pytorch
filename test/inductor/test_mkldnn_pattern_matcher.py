@@ -92,11 +92,10 @@ def cal_conv_generated_kernel_number(mod, input, dtype):
     #       So there will be a to_contiguous for output if eager output is contiguouse
     mod = copy.deepcopy(mod)
     input = input.clone()
-    maybe_autocast = (
-        contextlib.nullcontext()
-        if dtype == torch.float32
-        else torch.cpu.amp.autocast(dtype=dtype)
-    )
+    if dtype == torch.float32:
+        maybe_autocast = contextlib.nullcontext()
+    else:
+        maybe_autocast = torch.cpu.amp.autocast(dtype=dtype)
     with torch.no_grad(), maybe_autocast:
         output = mod(input)
     input_kernel, output_kernel = 0, 0
@@ -277,7 +276,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtype,
         ) in options:
             metrics.reset()
-            x_shape = (1, 3, 56, 56) if dim == 4 else (1, 3, 20, 56, 56)
+            if dim == 4:
+                x_shape = (1, 3, 56, 56)
+            else:
+                x_shape = (1, 3, 20, 56, 56)
             mod = M(unary_fn).to(memory_format=memory_format).eval()
 
             v = (
@@ -467,7 +469,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         for unary_fn, memory_format, dtype in options:
             metrics.reset()
-            x_shape = (1, 3, 28, 28) if dim == 4 else (1, 3, 17, 28, 28)
+            if dim == 4:
+                x_shape = (1, 3, 28, 28)
+            else:
+                x_shape = (1, 3, 17, 28, 28)
             mod = M(unary_fn).eval()
 
             v = torch.randn(x_shape, dtype=torch.float32).to(
@@ -548,7 +553,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtype,
         ) in options:
             metrics.reset()
-            x_shape = (1, 3, 56, 56) if dim == 4 else (1, 3, 20, 56, 56)
+            if dim == 4:
+                x_shape = (1, 3, 56, 56)
+            else:
+                x_shape = (1, 3, 20, 56, 56)
             mod = M(binary_fn, has_relu).eval()
             v = (
                 torch.randn(x_shape, dtype=torch.float32, requires_grad=True)

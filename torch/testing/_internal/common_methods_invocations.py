@@ -571,7 +571,10 @@ def reference_inputs_prelu(op, device, dtype, requires_grad, **kwargs):
 def sample_kwargs_prelu_scalar_weight(device, dtype, input):
     weight = torch.rand((), device=device, dtype=dtype)
     # NumPy does not support bfloat16, so we default to float32 (only for NumPy) in that case
-    weight_cpu = weight.to(dtype=torch.float32, device="cpu") if dtype == torch.bfloat16 else weight.cpu()
+    if dtype == torch.bfloat16:
+        weight_cpu = weight.to(dtype=torch.float32, device="cpu")
+    else:
+        weight_cpu = weight.cpu()
     np_weight = weight_cpu.numpy()
     return ({'weight': weight}, {'weight': np_weight})
 
@@ -2262,7 +2265,10 @@ def _fill_np(a, value):
     return a
 
 def _fill_sample_kwargs(device, dtype, input):
-    value = True if dtype is torch.bool else 3
+    if dtype is torch.bool:
+        value = True
+    else:
+        value = 3
 
     return ({'value': value}, {'value': value})
 
@@ -5189,7 +5195,13 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, 
 
     shapes = [(), (1,), (S, S)]
     # extra parameter for add
-    alphas = ((True, False) if dtype == torch.bool else (-1, 0, 2)) if add else (None,)
+    if add:
+        if dtype == torch.bool:
+            alphas = (True, False)
+        else:
+            alphas = (-1, 0, 2)
+    else:
+        alphas = (None,)
 
     if fill:
         # A weird number to catch errors.
@@ -6548,7 +6560,10 @@ def sample_inputs_diagonal_scatter(op_info, device, dtype, requires_grad, **kwar
         input_ = make_arg(input_shape)
         # We can programmatically figure out the right shape for src:
         # It should be the same size as input.diagonal(other_args...)
-        arg_tuple = (arg,) if not isinstance(arg, tuple) else arg
+        if not isinstance(arg, tuple):
+            arg_tuple = (arg,)
+        else:
+            arg_tuple = arg
         src_shape = input_.diagonal(*arg_tuple).size()
         src = make_arg(src_shape)
         yield SampleInput(input_, args=(src, *arg_tuple))
@@ -7867,7 +7882,10 @@ def sample_inputs_dropout(op_info, device, dtype, requires_grad, *,
                           train=None, valid_input_dim=None, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    cases = ((S,) * i for i in valid_input_dim) if valid_input_dim else ((S, S), (S,), ())
+    if valid_input_dim:
+        cases = ((S,) * i for i in valid_input_dim)
+    else:
+        cases = ((S, S), (S,), ())
     p_vals = [0.0, 0.5, 1.0]
     # This is to handle special case for feature_alpha_dropout which has different
     # supported dtypes depending on `train` parameter

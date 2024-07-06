@@ -194,7 +194,10 @@ def run_functionalized_fw_and_collect_metadata(
                     "tensor subclasses"
                 )
 
-            new_arg = arg if not isinstance(arg, Tensor) else from_fun(f_arg)
+            if not isinstance(arg, Tensor):
+                new_arg = arg
+            else:
+                new_arg = from_fun(f_arg)
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )

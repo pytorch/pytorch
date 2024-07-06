@@ -314,11 +314,10 @@ def fill_output(output: dict[str, object], options: object) -> None:
     # If no canonical_root_ops exist, don't compute the transitive closure
     # otherwise, we will include __BASE__ and __ROOT__ ops and mark them as required
     # for inference.
-    closure_op_list = (
-        gen_transitive_closure(dept_graph, canonical_root_ops)
-        if len(canonical_root_ops) > 0
-        else set()
-    )
+    if len(canonical_root_ops) > 0:
+        closure_op_list = gen_transitive_closure(dept_graph, canonical_root_ops)
+    else:
+        closure_op_list = set()
 
     canonical_training_root_ops = canonical_opnames(static_training_root_ops)
     # If no canonical_training_root_ops exist, don't compute the transitive closure

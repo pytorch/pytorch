@@ -386,7 +386,10 @@ class TestPySymInt(TestCase):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
         expand_x = x.expand(x.shape[0], x.shape[0])
-        result = expand_x + expand_x if expand_x.shape[0] > 3 else expand_x + expand_x
+        if expand_x.shape[0] > 3:
+            result = expand_x + expand_x
+        else:
+            result = expand_x + expand_x
 
         gt_op, _bt = shape_env.guards[-1]
         self.assertTrue(isinstance(gt_op, sympy.core.relational.StrictGreaterThan))
@@ -1160,14 +1163,18 @@ class TestSymNumberMagicMethods(TestCase):
 
         # Get reference result
         with maybe_xfail(inp1, inp2):
-            ref_out = lambda_apply(inp1) if is_unary_fn else lambda_apply(inp1, inp2)
+            if is_unary_fn:
+                ref_out = lambda_apply(inp1)
+            else:
+                ref_out = lambda_apply(inp1, inp2)
 
         # Symified first arg
         sym_inp1 = get_sym_inp(inp1)
         with maybe_xfail(sym_inp1, inp2):
-            out = (
-                lambda_apply(sym_inp1) if is_unary_fn else lambda_apply(sym_inp1, inp2)
-            )
+            if is_unary_fn:
+                out = lambda_apply(sym_inp1)
+            else:
+                out = lambda_apply(sym_inp1, inp2)
             if fn not in sym_node.alternate_impl_if_hinted_methods:
                 self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)

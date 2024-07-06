@@ -71,7 +71,10 @@ def process_failures():
     failures = [process_failure_string(s, SYMBOLIC_TRACE_MATCH) for s in failures]
 
     def create_normalized_name(op):
-        s = op.name if op.variant_test_name == "" else f"{op.name}.{op.variant_test_name}"
+        if op.variant_test_name == '':
+            s = op.name
+        else:
+            s = f"{op.name}.{op.variant_test_name}"
         return s.replace('.', '_')
 
     remap_opinfo = {create_normalized_name(op): (op.name, op.variant_test_name) for op in op_db}

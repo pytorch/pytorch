@@ -344,7 +344,10 @@ def _single_tensor_sgd(
             else:
                 buf.mul_(momentum).add_(grad, alpha=1 - dampening)
 
-            grad = grad.add(buf, alpha=momentum) if nesterov else buf
+            if nesterov:
+                grad = grad.add(buf, alpha=momentum)
+            else:
+                grad = buf
 
         param.add_(grad, alpha=-lr)
 

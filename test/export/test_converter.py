@@ -29,7 +29,10 @@ class TestConverter(TestCase):
         if option is None:
             option = ["trace", "script"]
 
-        num_iterations = 10 if check_persistent else 1
+        if check_persistent:
+            num_iterations = 10
+        else:
+            num_iterations = 1
 
         ep_list = []
         for opt in option:
@@ -328,7 +331,10 @@ class TestConverter(TestCase):
             def forward(self, x: torch.Tensor, y: torch.Tensor):
                 z = y * y
 
-                res = self.true_fn(y, z) if x else self.false_fn(y, z)
+                if x:
+                    res = self.true_fn(y, z)
+                else:
+                    res = self.false_fn(y, z)
 
                 return res[0] + res[1]
 

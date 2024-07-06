@@ -368,7 +368,10 @@ class TestDtypeCustomRules(TestDtypeBase):
     def test_custom_rules_ints(self, device, dtype, op):
         # This is done because opinfos currently only runs on floats.
         # Return fn, inputs_fn for all
-        dtype = torch.int32 if dtype == torch.float32 else torch.int64
+        if dtype == torch.float32:
+            dtype = torch.int32
+        else:
+            dtype = torch.int64
 
         # Because ints are not always implemented, we need to allow for eager to fail
         self.custom_rules_test_base(device, dtype, op, allow_eager_fail=True)

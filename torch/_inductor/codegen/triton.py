@@ -1691,27 +1691,24 @@ class TritonKernel(SIMDKernel):
         elif not is_coalesced:
             ep = ", eviction_policy='evict_last'"
         elif self.inside_reduction and self.range_trees[-1].is_loop:
-            names = (
-                set(self.args.inplace_buffers[name].other_names)
-                if name in self.args.inplace_buffers
-                else {name}
-            )
+            if name in self.args.inplace_buffers:
+                names = set(self.args.inplace_buffers[name].other_names)
+            else:
+                names = {name}
             last_use = len(names & self.last_usage) > 0
             evict_last = not last_use and (has_rindex or indirect_indexing)
-            ep = (
-                ", eviction_policy='evict_last'"
-                if evict_last
-                else ", eviction_policy='evict_first'"
-            )
+            if evict_last:
+                ep = ", eviction_policy='evict_last'"
+            else:
+                ep = ", eviction_policy='evict_first'"
         else:
             ep = ""
 
         if (has_tmpmask or has_rindex) and indexing.has_mask():
-            other = (
-                f", other={constant_repr(self._load_other)}"
-                if self._load_other
-                else ", other=0.0"
-            )
+            if self._load_other:
+                other = f", other={constant_repr(self._load_other)}"
+            else:
+                other = ", other=0.0"
         else:
             other = ""
 
@@ -2401,9 +2398,10 @@ class TritonKernel(SIMDKernel):
                 extra_args.append(expr)
                 if tree.prefix != "r":
                     grid.append(expr)
-            extra_args_str = (
-                ", ".join(map(str, extra_args)) + ", " if self.need_numel_args() else ""
-            )
+            if self.need_numel_args():
+                extra_args_str = ", ".join(map(str, extra_args)) + ", "
+            else:
+                extra_args_str = ""
             grid_arg = f"{extra_args_str}grid=grid({', '.join(grid)})"
         else:
             grid_arg = f"grid={grid}"

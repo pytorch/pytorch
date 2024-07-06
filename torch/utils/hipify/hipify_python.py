@@ -732,7 +732,10 @@ class Trie:
             else:
                 alt.append('[' + ''.join(cc) + ']')
 
-        result = alt[0] if len(alt) == 1 else "(?:" + "|".join(alt) + ")"
+        if len(alt) == 1:
+            result = alt[0]
+        else:
+            result = "(?:" + "|".join(alt) + ")"
 
         if q:
             if cconly:

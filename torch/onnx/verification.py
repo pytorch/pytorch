@@ -330,7 +330,10 @@ def _prepare_input_for_pytorch(args, kwargs):
     # In-place operators will update input tensor data as well.
     # Thus inputs are replicated before every forward call.
     args = copy.deepcopy(args)
-    kwargs = copy.deepcopy(kwargs) if kwargs else {}
+    if kwargs:
+        kwargs = copy.deepcopy(kwargs)
+    else:
+        kwargs = {}
     return args, kwargs
 
 

@@ -64,11 +64,10 @@ qadaptive_avgpool2d_short_configs = op_bench.config_list(
 class _QPool2dBenchmarkBase(op_bench.TorchBenchmarkBase):
     def setup(self, N, C, H, W, dtype, contig):
         # Input
-        f_input = (
-            (torch.rand(C, H, W) - 0.5) * 256
-            if N == 0
-            else (torch.rand(N, C, H, W) - 0.5) * 256
-        )
+        if N == 0:
+            f_input = (torch.rand(C, H, W) - 0.5) * 256
+        else:
+            f_input = (torch.rand(N, C, H, W) - 0.5) * 256
 
         scale = 1.0
         zero_point = 0

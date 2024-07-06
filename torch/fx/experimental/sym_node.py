@@ -1002,11 +1002,10 @@ def method_to_operator(method):
 def _make_node_magic(method, func):
     func = lru_cache(256)(func)
 
-    method_attr = (
-        f"{method}_"
-        if method in magic_methods_on_operator_with_trailing_underscore
-        else method
-    )
+    if method in magic_methods_on_operator_with_trailing_underscore:
+        method_attr = f"{method}_"
+    else:
+        method_attr = method
 
     def binary_magic_impl(self, other):
         from torch.fx.experimental.symbolic_shapes import safe_expand
@@ -1179,7 +1178,10 @@ def _make_node_magic(method, func):
 
             out = safe_expand(out)
 
-            pytype = int if ndigits is None else self.pytype
+            if ndigits is None:
+                pytype = int
+            else:
+                pytype = self.pytype
 
             out_hint = None
             if self.hint is not None:
@@ -1243,7 +1245,10 @@ def _make_node_sizes_strides(method, func):
 
         # NB: This is the indicator function, not the actual bool!
         pytype: Type
-        pytype = int if method.endswith("_indicator") else bool
+        if method.endswith("_indicator"):
+            pytype = int
+        else:
+            pytype = bool
         return SymNode(out, self.shape_env, pytype, out_hint)
 
     setattr(SymNode, f"_{method}", sizes_strides_impl)
@@ -1293,11 +1298,10 @@ def _make_user_magic(method, user_type):
     # User magic takes care of wrapping the other operand into a node,
     # so that our internal logic can assume everything is nodes
 
-    method_attr = (
-        f"sym_{method}"
-        if method in magic_methods_on_operator_with_trailing_underscore
-        else method
-    )
+    if method in magic_methods_on_operator_with_trailing_underscore:
+        method_attr = f"sym_{method}"
+    else:
+        method_attr = method
 
     def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
         if isinstance(x, (int, float, bool)):

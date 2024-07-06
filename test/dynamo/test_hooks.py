@@ -435,7 +435,10 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             count = 0
 
             def do_stuff(self, grad):
-                r = grad * grad if self.count % 2 == 0 else grad + grad
+                if self.count % 2 == 0:
+                    r = grad * grad
+                else:
+                    r = grad + grad
                 self.count += 1
                 return r
 
@@ -480,7 +483,10 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
             def write_grad_as_str_and_do_stuff(self, grad):
                 self.grad_as_str = str(grad)
-                r = grad * grad if self.count % 2 == 0 else grad + grad
+                if self.count % 2 == 0:
+                    r = grad * grad
+                else:
+                    r = grad + grad
                 print("Break!")
                 self.count += 1
                 return r

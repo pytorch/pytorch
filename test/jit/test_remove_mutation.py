@@ -89,7 +89,10 @@ class TestRemoveMutation(JitTestCase):
 
     def test_if_output(self):
         def foo(x, cond: bool):
-            y = x + 5 if cond else x + 2
+            if cond:
+                y = x + 5
+            else:
+                y = x + 2
             y.add_(4)
             return y
 
@@ -119,7 +122,10 @@ class TestRemoveMutation(JitTestCase):
 
         @torch.jit.script
         def foo(cond: bool, y):
-            x = y if cond else torch.tensor(2)
+            if cond:
+                x = y
+            else:
+                x = torch.tensor(2)
             z = x.add_(2)
             return z
 
