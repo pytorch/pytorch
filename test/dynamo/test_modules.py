@@ -2254,8 +2254,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def _forward_hook_test_helper(self, model):
         forward_handles = {}
-        compiled_activations = dict()
-        eager_activations = dict()
+        compiled_activations = {}
+        eager_activations = {}
         activations = None
 
         def save_activations(name, mod, inp, out):

@@ -455,7 +455,7 @@ class NNModuleVariable(VariableTracker):
             mod_proxy = tx.output.create_proxy(
                 "get_attr",
                 self.module_key,
-                tuple(),
+                (),
                 {},
             )
             set_example_value(mod_proxy.node, module)

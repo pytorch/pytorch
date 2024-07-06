@@ -1167,7 +1167,7 @@ def try_script(model, example_inputs):
 
 
 class AOTInductorModelCache:
-    cache = dict()
+    cache = {}
 
     @classmethod
     def load(cls, model, example_inputs, device):

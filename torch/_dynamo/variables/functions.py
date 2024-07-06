@@ -57,7 +57,7 @@ def wrap_args_kwargs(tx, result):
 
 
 def init_cellvars(parent, result, code):
-    closure_cells = dict()
+    closure_cells = {}
     side_effects = parent.output.side_effects
 
     # for name in itertools.chain(code.co_cellvars, code.co_freevars):

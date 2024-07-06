@@ -367,7 +367,7 @@ if __name__ == "__main__":
                         num_stages=num_stages,
                         num_warps=num_warps,
                     ),
-                ).get(op, dict())
+                ).get(op, {})
 
                 meta_str = ";".join(
                     f"{k}={v}" for k, v in meta.items() if v is not None

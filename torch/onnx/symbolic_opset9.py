@@ -3634,7 +3634,7 @@ def tensor(
             dtype = _type_utils.JitScalarType.from_value(
                 symbolic_helper._unpack_list(data)[0]
             )
-        input_list = list()
+        input_list = []
         for t in symbolic_helper._unpack_list(data):
             shape_reference = g.op("Constant", value_t=torch.LongTensor([1]))
             t = symbolic_helper._reshape_helper(g, t, shape_reference)
@@ -4300,7 +4300,7 @@ def repeat_interleave(
     else:
         raise errors.SymbolicValueError("repeats must be 0-dim or 1-dim tensor", self)
 
-    final_splits = list()
+    final_splits = []
     r_splits = symbolic_helper._repeat_interleave_split_helper(g, repeats, reps, 0)
     i_splits = symbolic_helper._repeat_interleave_split_helper(g, self, reps, dim)
     input_sizes[dim], input_sizes_temp[dim] = -1, 1

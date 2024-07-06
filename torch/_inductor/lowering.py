@@ -82,7 +82,7 @@ prims = torch.ops.prims
 needs_realized_inputs: Set[torch._ops.OpOverload] = set()
 foreach_ops: Set[torch._ops.OpOverload] = set()
 inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
-inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = dict()
+inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
 
 

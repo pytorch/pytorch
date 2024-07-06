@@ -1560,7 +1560,7 @@ def split_aot_inductor_output_path(path: str) -> Tuple[str, str]:
 
 @clear_on_fresh_inductor_cache
 class CudaKernelParamCache:
-    cache: Dict[str, Dict[str, str]] = dict()
+    cache: Dict[str, Dict[str, str]] = {}
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
@@ -2903,8 +2903,8 @@ def touch(filename):
 
 @clear_on_fresh_inductor_cache
 class PyCodeCache:
-    cache: Dict[str, ModuleType] = dict()
-    linemaps: Dict[str, List[Tuple[Any, ...]]] = dict()
+    cache: Dict[str, ModuleType] = {}
+    linemaps: Dict[str, List[Tuple[Any, ...]]] = {}
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
@@ -3194,7 +3194,7 @@ class CUDACodeCache:
         input_path: str
         output_path: str
 
-    cache: Dict[str, CacheEntry] = dict()
+    cache: Dict[str, CacheEntry] = {}
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cu"
 
@@ -3279,7 +3279,7 @@ class ROCmCodeCache:
         input_path: str
         output_path: str
 
-    cache: Dict[str, CacheEntry] = dict()
+    cache: Dict[str, CacheEntry] = {}
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cpp"
     _logged_compiler_version = False

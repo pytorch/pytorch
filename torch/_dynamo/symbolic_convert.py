@@ -1668,7 +1668,7 @@ class InstructionTranslatorBase(
 
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
         seqs = self.popn(inst.argval)
-        items = list()
+        items = []
         for seq in seqs:
             try:
                 items.extend(seq.unpack_var_sequence(self))
@@ -1690,7 +1690,7 @@ class InstructionTranslatorBase(
         items = self.popn(inst.argval)
         # ensure everything is a dict
         items = [BuiltinVariable(dict).call_function(self, [x], {}) for x in items]
-        result = dict()
+        result = {}
         for x in items:
             assert isinstance(x, ConstDictVariable)
             result.update(x.items)
@@ -2442,7 +2442,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                     self.symbolic_locals
                 )
 
-            self._freevars_ids = dict()
+            self._freevars_ids = {}
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])

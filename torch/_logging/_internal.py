@@ -656,7 +656,7 @@ Valid settings:
 @functools.lru_cache
 def _parse_log_settings(settings):
     if settings == "":
-        return dict()
+        return {}
 
     if settings == "help":
         raise ValueError(help_message(verbose=False))

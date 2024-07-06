@@ -2347,7 +2347,7 @@ def gen_source_files(
             else:
                 raise AssertionError(f"unrecognized {dispatch_key} for ufunc")
 
-        structured_func_group_dict = dict()
+        structured_func_group_dict = {}
         for func_group in structured_native_functions:
             for func in func_group.functions():
                 if func.structured_delegate is not None:
@@ -2355,7 +2355,7 @@ def gen_source_files(
                     break
 
         if dispatch_key in (DispatchKey.CPU, DispatchKey.CUDA):
-            fallbacks = dict()
+            fallbacks = {}
             for func in native_functions:
                 op_name = get_fallback_op_name(func)
                 if op_name in inductor_fallback_ops:

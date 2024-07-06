@@ -112,8 +112,8 @@ class GroupBatchFusionBase:
         raise NotImplementedError("fuse called on base")
 
 
-PRE_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = dict()
-POST_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = dict()
+PRE_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = {}
+POST_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = {}
 
 
 def register_fusion(name: str, pre_grad=True):

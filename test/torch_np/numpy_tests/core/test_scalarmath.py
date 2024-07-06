@@ -439,7 +439,7 @@ class TestComplexDivision(TestCase):
         for t in [np.complex64, np.complex128]:
             # tupled (numerator, denominator, expected)
             # for testing as expected == numerator/denominator
-            data = list()
+            data = []
 
             # trigger branch: real(fabs(denom)) > imag(fabs(denom))
             # followed by else condition as neither are == 0

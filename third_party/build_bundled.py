@@ -119,15 +119,15 @@ def identify_license(f, exception=''):
             return 'Public Domain'
         elif squeeze("Clarified Artistic License") in txt:
             return 'Clarified Artistic License'
-        elif all([squeeze(m) in txt.lower() for m in bsd3_txt]):
+        elif all(squeeze(m) in txt.lower() for m in bsd3_txt):
             return 'BSD-3-Clause'
-        elif all([squeeze(m) in txt.lower() for m in bsd3_v1_txt]):
+        elif all(squeeze(m) in txt.lower() for m in bsd3_v1_txt):
             return 'BSD-3-Clause'
-        elif all([squeeze(m) in txt.lower() for m in bsd2_txt]):
+        elif all(squeeze(m) in txt.lower() for m in bsd2_txt):
             return 'BSD-2-Clause'
-        elif all([squeeze(m) in txt.lower() for m in bsd3_src_txt]):
+        elif all(squeeze(m) in txt.lower() for m in bsd3_src_txt):
             return 'BSD-Source-Code'
-        elif any([squeeze(m) in txt.lower() for m in mit_txt]):
+        elif any(squeeze(m) in txt.lower() for m in mit_txt):
             return 'MIT'
         else:
             raise ValueError('unknown license')

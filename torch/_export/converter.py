@@ -129,19 +129,19 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
     """
 
     # A map from a block to its expected to be lifted arguments.
-    blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]] = dict()
+    blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]] = {}
 
     # Reference map stores the input (i.e., src) and output (i.e., dest) IR of a
     # GetAttr node. By traversing this reference map, we can figure out the
     # full IR aliasing pass and figure out the FQN of an attribute.
     # E.g., %2 = GetAttr(linear)[%1] --> node_to_parent_map["%2"] = "%1"
-    node_to_parent_map: Dict[str, str] = dict()
+    node_to_parent_map: Dict[str, str] = {}
 
     # Used for reconstructing the FQN of an attribute based on the reference map.
     # In nutshell, for each GetAttr call, GetAttr(input IR, attribute name) -> output IR
     # This name map stores which attribute name is called for a src IR --> dest IR action.
     # E.g., %2 = GetAttr(linear)[%1] --> node_to_attr_name["%2"] = "linear"
-    node_to_attr_name: Dict[str, str] = dict()
+    node_to_attr_name: Dict[str, str] = {}
 
     def _dfs_get_attr_dependency(entry):
         """
@@ -674,7 +674,7 @@ class TS2FXGraphConverter:
         subgraph_nodes = []
         for block in node.blocks():
             subgraph_converter = TS2FXGraphConverter(
-                block, dict(), dict(), self.blocks_to_lifted_attrs, dict()
+                block, {}, {}, self.blocks_to_lifted_attrs, {}
             )
             subgraph_converter.constant_map = self.constant_map
             subgraph_converter.name_to_attribute_fqn = self.name_to_attribute_fqn
@@ -915,14 +915,14 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
         self.name_to_param_map: Dict[str, torch.Tensor] = (
             dict(ts_model.named_parameters())
             if isinstance(ts_model, torch.jit.ScriptModule)
-            else dict()
+            else {}
         )
         self.name_to_buffer_map: Dict[str, torch.Tensor] = (
             dict(ts_model.named_buffers())
             if isinstance(ts_model, torch.jit.ScriptModule)
-            else dict()
+            else {}
         )
-        self.name_to_non_tensor_attributes: Dict[str, Any] = dict()
+        self.name_to_non_tensor_attributes: Dict[str, Any] = {}
 
         self.lift_tensor_constants_to_buffer()
 

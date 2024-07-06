@@ -230,7 +230,7 @@ def _add_onnxscript_fn(
 
     # Iterate graph nodes to insert only the included custom
     # function_proto into model_proto
-    onnx_function_list = list()  # type: ignore[var-annotated]
+    onnx_function_list = []  # type: ignore[var-annotated]
     included_node_func = set()  # type: Set[str]
     # onnx_function_list and included_node_func are expanded in-place
     _find_onnxscript_op(

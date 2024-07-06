@@ -40,8 +40,8 @@ _TransformParam: TypeAlias = Tuple[
 _Range: TypeAlias = Tuple[int, int]
 
 
-PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
-POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
+PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
+POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
 
 pre_grad_pass_names = [
     "normalization_pass",
