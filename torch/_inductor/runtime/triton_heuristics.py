@@ -663,7 +663,7 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        return benchmarker.lazy_benchmark_gpu(kernel_call)
+        return benchmarker.benchmark_gpu(kernel_call)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides

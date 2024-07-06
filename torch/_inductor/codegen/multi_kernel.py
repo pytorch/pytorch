@@ -343,7 +343,7 @@ class MultiKernelCall:
         be picked.
         """
         return [
-            benchmarker.lazy_benchmark_gpu(lambda: kernel_call(True))
+            benchmarker.benchmark_gpu(lambda: kernel_call(True))
             for kernel_call in kernel_calls
         ]
 

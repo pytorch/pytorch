@@ -151,11 +151,11 @@ class PerfTestBetweenGoodAndBadShape(TestCaseBase):
         m_bad_shape_opt = torch.compile(m_bad_shape)
         m_good_shape_opt = torch.compile(m_good_shape)
 
-        latency_good_shape = benchmarker.benchmark(
-            lambda: forward_and_backward_pass(m_good_shape_opt, inputs_good_shape), [], {}
+        latency_good_shape = benchmarker.benchmark_gpu(
+            lambda: forward_and_backward_pass(m_good_shape_opt, inputs_good_shape)
         )
-        latency_bad_shape = benchmarker.benchmark(
-            lambda: forward_and_backward_pass(m_bad_shape_opt, inptus_bad_shape), [], {}
+        latency_bad_shape = benchmarker.benchmark_gpu(
+            lambda: forward_and_backward_pass(m_bad_shape_opt, inptus_bad_shape)
         )
         print(
             f"Latency for good shape v.s. bad shape: {latency_good_shape:.3f}ms v.s. {latency_bad_shape:.3f}ms"
@@ -195,9 +195,9 @@ class PerfTestBetweenGoodAndBadShape(TestCaseBase):
         f_bad_shape, inputs_bad_shape = create_model(30522)
 
         print("benchmark for good shape")
-        latency_good_shape = benchmarker.benchmark(lambda: f_good_shape(**inputs_good_shape), [], {})
+        latency_good_shape = benchmarker.benchmark_gpu(lambda: f_good_shape(**inputs_good_shape))
         print("benchmark for bad shape")
-        latency_bad_shape = benchmarker.benchmark(lambda: f_bad_shape(**inputs_bad_shape), [], {})
+        latency_bad_shape = benchmarker.benchmark_gpu(lambda: f_bad_shape(**inputs_bad_shape))
         print(
             f"Latency with good and bad shape: {latency_good_shape:.3f} v.s. {latency_bad_shape:.3f}"
         )
@@ -267,8 +267,8 @@ class PerfTestWithAndWithoutPadding(TestCaseBase):
                 opt_f_with_padding = torch.compile(
                     get_f(m_copy_with_padding, optim_with_padding)
                 )
-                latency_with_padding = benchmarker.benchmark(
-                    lambda: opt_f_with_padding(*perf_args, **perf_kwargs), [], {}
+                latency_with_padding = benchmarker.benchmark_gpu(
+                    lambda: opt_f_with_padding(*perf_args, **perf_kwargs)
                 )
             latency_without_padding = None
             print("bencmark without padding")
@@ -278,8 +278,8 @@ class PerfTestWithAndWithoutPadding(TestCaseBase):
                 opt_f_without_padding = torch.compile(
                     get_f(m_copy_without_padding, optim_without_padding)
                 )
-                latency_without_padding = benchmarker.benchmark(
-                    lambda: opt_f_without_padding(*perf_args, **perf_kwargs), [], {}
+                latency_without_padding = benchmarker.benchmark_gpu(
+                    lambda: opt_f_without_padding(*perf_args, **perf_kwargs)
                 )
             print(
                 f"Latency with and without padding: {latency_with_padding:.3f} v.s. {latency_without_padding:.3f}"
@@ -369,7 +369,7 @@ class PaddingTest(TestCaseBase):
         ):
             a = torch.randn(M, K)
             b = torch.randn(K, N)
-            ms = benchmarker.benchmark(lambda: f(a, b), [], {})
+            ms = benchmarker.benchmark_gpu(lambda: f(a, b))
             print(f"MxKxN {M}x{K}x{N} {f.__name__}: {ms:.3f}ms")
 
     @unittest.skipIf(not DO_PERF_TEST, "Perf test not enabled")
@@ -395,8 +395,8 @@ class PaddingTest(TestCaseBase):
             mat2 = pad_dim(mat2, 6, 0)
             return torch.ops.aten.mm(mat1, mat2)
 
-        ori_time = benchmarker.benchmark(f, [], {})
-        pad_time = benchmarker.benchmark(g, [], {})
+        ori_time = benchmarker.benchmark_gpu(f)
+        pad_time = benchmarker.benchmark_gpu(g)
 
         print(
             f"Latency between origional matmul and padded matmul: {ori_time:.3f} v.s. {pad_time:.3f}"
@@ -429,8 +429,8 @@ class PaddingTest(TestCaseBase):
         f2 = torch.compile(
             functools.partial(f, x_bad_shape, weight_bad_shape, out_bad_shape)
         )
-        latency_good_shape = benchmarker.benchmark(f1, [], {})
-        latency_bad_shape = benchmarker.benchmark(f2, [], {})
+        latency_good_shape = benchmarker.benchmark_gpu(f1)
+        latency_bad_shape = benchmarker.benchmark_gpu(f2)
         print(
             f"Latency with good and bad shapes: {latency_good_shape:.3f} v.s. {latency_bad_shape:.3f}"
         )
@@ -464,8 +464,8 @@ class PaddingTest(TestCaseBase):
         )
 
         if DO_PERF_TEST:
-            latency = benchmarker.benchmark(
-                lambda: forward_and_backward_pass(m_bad_shape_opt, inputs_bad_shape), [], {}
+            latency = benchmarker.benchmark_gpu(
+                lambda: forward_and_backward_pass(m_bad_shape_opt, inputs_bad_shape)
             )
             print(f"latency: {latency:.3f}ms")
 
@@ -587,8 +587,8 @@ class PaddingTest(TestCaseBase):
         act = fun(x2, weight)
         self.check_close(ref, act)
         if DO_PERF_TEST:
-            latency_with_padding = benchmarker.benchmark(lambda: fun(x2, weight), [], {})
-            latency_without_padding = benchmarker.benchmark(lambda: fun(x1, weight), [], {})
+            latency_with_padding = benchmarker.benchmark_gpu(lambda: fun(x2, weight))
+            latency_without_padding = benchmarker.benchmark_gpu(lambda: fun(x1, weight))
             print(
                 f"Latency with and without padding: {latency_with_padding:.3f} v.s. {latency_without_padding:.3f}"
             )
@@ -616,8 +616,8 @@ class PaddingTest(TestCaseBase):
         with config.patch("triton.cudagraphs", False):
             opt_f = torch.compile(f)
             opt_f(x)
-        eager_time = benchmarker.benchmark(lambda: f(x), [], {})
-        opt_time = benchmarker.benchmark(lambda: opt_f(x), [], {})
+        eager_time = benchmarker.benchmark_gpu(lambda: f(x))
+        opt_time = benchmarker.benchmark_gpu(lambda: opt_f(x))
         print(
             f"Latency between eager and compiled: {eager_time:.3f} v.s. {opt_time:.3f}"
         )
