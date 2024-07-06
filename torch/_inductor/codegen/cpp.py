@@ -2903,7 +2903,7 @@ class CppVecKernelChecker(CppVecKernel):
     def __exit__(self, *args: object) -> None:
         # Restore the wrapper_code
         V.graph.wrapper_code = self._orig_wrapper_code  # type: ignore[assignment]
-        self.exit_stack.__exit__(*args)
+        self.exit_stack.__exit__(*args)  # type: ignore[arg-type]
 
     def __enter__(self):
         # Record the graph wrapper code. The wrapper_code status could be
@@ -4058,7 +4058,7 @@ class WorkSharing:
         return self
 
     def __exit__(self, *args: object) -> None:
-        self.stack.__exit__(*args)
+        self.stack.__exit__(*args)  # type: ignore[arg-type]
 
 
 @dataclasses.dataclass
