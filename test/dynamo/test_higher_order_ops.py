@@ -2470,9 +2470,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([])""",
+            """torch._functorch.pyfunctorch.compare_functorch_state([])""",
             munge_exc(record.getMessage()),
         )
 
@@ -2502,9 +2500,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "forward_ad")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch.autograd.forward_ad._current_level == -1""",
+            """torch.autograd.forward_ad._current_level == -1""",
             munge_exc(record.getMessage()),
         )
 
@@ -2534,17 +2530,13 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         if self.hasRecord(records, "pyfunctorch"):
             record = self.getRecord(records, "pyfunctorch")
             self.assertIn(
-                """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([])""",
+                """torch._functorch.pyfunctorch.compare_functorch_state([])""",
                 munge_exc(record.getMessage()),
             )
         elif self.hasRecord(records, "forward_ad"):
             record = self.getRecord(records, "forward_ad")
             self.assertIn(
-                """\
-    triggered by the following guard failure(s):
-    - torch.autograd.forward_ad._current_level == -1""",
+                """torch.autograd.forward_ad._current_level == -1""",
                 munge_exc(record.getMessage()),
             )
 
@@ -2588,9 +2580,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])""",
+            """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])""",
             record.getMessage(),
         )
 
@@ -2614,9 +2604,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
+            """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
             record.getMessage(),
         )
 
@@ -2644,9 +2632,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
+            """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
             munge_exc(record.getMessage()),
         )
 
@@ -2665,9 +2651,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])""",
+            """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])""",
             munge_exc(record.getMessage()),
         )
 
