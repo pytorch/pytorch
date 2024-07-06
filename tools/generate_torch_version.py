@@ -88,7 +88,10 @@ if __name__ == "__main__":
     # Attempt to get tag first, fall back to sha if a tag was not found
     tagged_version = get_tag(pytorch_root)
     sha = get_sha(pytorch_root)
-    version = get_torch_version(sha) if tagged_version == UNKNOWN else tagged_version
+    if tagged_version == UNKNOWN:
+        version = get_torch_version(sha)
+    else:
+        version = tagged_version
 
     with open(version_path, "w") as f:
         f.write("from typing import Optional\n\n")

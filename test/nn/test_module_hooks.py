@@ -672,7 +672,10 @@ class TestStateDictHooks(TestCase):
         for ctor in [MyModuleContainer, lambda x: x]:
             m = ctor(MyModule())
             state_dict = m.state_dict()
-            mod = m.mod if isinstance(m, MyModuleContainer) else m
+            if isinstance(m, MyModuleContainer):
+                mod = m.mod
+            else:
+                mod = m
 
             hook_called = 0
             mod._register_load_state_dict_pre_hook(mod.my_pre_load_hook)

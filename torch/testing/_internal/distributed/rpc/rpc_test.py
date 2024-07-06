@@ -1666,7 +1666,10 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # Test rpc barrier when some processes are not involved in the barrier
         info = rpc.get_worker_info()
         all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
-        names = [worker.name for worker in all_worker_info if worker.id % 2] if info.id % 2 else [f"worker{info.id}"]
+        if info.id % 2:
+            names = [worker.name for worker in all_worker_info if worker.id % 2]
+        else:
+            names = [f"worker{info.id}"]
         self._test_barrier_helper(info, names)
 
     @dist_init

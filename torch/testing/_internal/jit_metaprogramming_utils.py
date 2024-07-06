@@ -673,7 +673,10 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
 
     if test_name in EXCLUDE_SCRIPT_MODULES:
         return
-    nn_module = kwargs['constructor'] if 'constructor' in kwargs else getattr(torch.nn, name)
+    if 'constructor' in kwargs:
+        nn_module = kwargs['constructor']
+    else:
+        nn_module = getattr(torch.nn, name)
 
     if "FunctionalModule" in str(nn_module):
         return

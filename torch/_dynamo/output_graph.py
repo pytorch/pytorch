@@ -711,7 +711,10 @@ class OutputGraph:
         assert keys
         obj: Union[torch.nn.Module, Dict[str, torch.nn.Module]] = self.nn_modules
         for k in keys.split("."):
-            obj = obj[k] if isinstance(obj, dict) else getattr(obj, k)
+            if isinstance(obj, dict):
+                obj = obj[k]
+            else:
+                obj = getattr(obj, k)
         return obj
 
     def new_var(self, name="tmp"):
@@ -2068,11 +2071,10 @@ class SubgraphTracer(fx.Tracer):
         if self.input_name_to_proxy:
             prev_name = next(reversed(self.input_name_to_proxy))
             node = self.input_name_to_proxy[prev_name].node
-            ctx = (
-                self.graph.inserting_before(node)
-                if before
-                else self.graph.inserting_after(node)
-            )
+            if before:
+                ctx = self.graph.inserting_before(node)
+            else:
+                ctx = self.graph.inserting_after(node)
         else:
             ctx = self.graph.inserting_before(None)
         with ctx:

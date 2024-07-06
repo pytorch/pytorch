@@ -873,7 +873,10 @@ def bsr_dense_addmm(
     n_block_cols = dense.size(-3)
 
     full_grid = (n_batches, n_block_cols, n_block_rows)
-    grid_blocks = tuple(max_grid[:3][::-1]) + (None,) * (3 - len(max_grid[:3])) if max_grid is not None else None
+    if max_grid is not None:
+        grid_blocks = tuple(max_grid[:3][::-1]) + (None,) * (3 - len(max_grid[:3]))
+    else:
+        grid_blocks = None
 
     tensor_dims_map = {
         values: (0, None, None),
@@ -1177,7 +1180,10 @@ if has_triton():
         n_block_rows = crow_indices.size(-1) - 1
 
         full_grid = (n_batches, n_block_rows)
-        grid_blocks = tuple(max_grid[:2][::-1]) + (None,) * (2 - len(max_grid[:2])) if max_grid is not None else None
+        if max_grid is not None:
+            grid_blocks = tuple(max_grid[:2][::-1]) + (None,) * (2 - len(max_grid[:2]))
+        else:
+            grid_blocks = None
         tensor_dims_map = {
             values: (0, None),
             crow_indices: (0, -1),
@@ -1430,7 +1436,10 @@ if has_triton():
         nnz = input._nnz()
         row_block, col_block = input.values().shape[-2:]
 
-        max_row_nnz = triton.next_power_of_2(n) if max_row_nnz is None else triton.next_power_of_2(max_row_nnz)
+        if max_row_nnz is None:
+            max_row_nnz = triton.next_power_of_2(n)
+        else:
+            max_row_nnz = triton.next_power_of_2(max_row_nnz)
 
         crow_indices = input.crow_indices().unsqueeze(0).flatten(0, -2)
         # reshape values from
@@ -1737,7 +1746,10 @@ if has_triton():
         if force_contiguous:
             blocks = blocks.contiguous()
             others = others.contiguous()
-            accumulators_ = accumulators.contiguous() if not accumulators.is_contiguous() else accumulators
+            if not accumulators.is_contiguous():
+                accumulators_ = accumulators.contiguous()
+            else:
+                accumulators_ = accumulators
         else:
             accumulators_ = accumulators
 

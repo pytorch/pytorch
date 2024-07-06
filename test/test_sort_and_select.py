@@ -389,11 +389,10 @@ class TestSortAndSelect(TestCase):
 
         for sample, dim in generate_samples():
             _, idx_torch = sample.sort(dim=dim, stable=True)
-            sample_numpy = (
-                sample.float().cpu().numpy()
-                if dtype is torch.bfloat16
-                else sample.cpu().numpy()
-            )
+            if dtype is torch.bfloat16:
+                sample_numpy = sample.float().cpu().numpy()
+            else:
+                sample_numpy = sample.cpu().numpy()
             idx_numpy = np.argsort(sample_numpy, axis=dim, kind="stable")
             self.assertEqual(idx_torch, idx_numpy)
 

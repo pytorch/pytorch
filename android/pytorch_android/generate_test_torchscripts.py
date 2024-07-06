@@ -119,21 +119,19 @@ class Test(torch.jit.ScriptModule):
     @torch.jit.script_method
     def conv2d(self, x: Tensor, w: Tensor, toChannelsLast: bool) -> Tensor:
         r = torch.nn.functional.conv2d(x, w)
-        r = (
-            r.contiguous(memory_format=torch.channels_last)
-            if toChannelsLast
-            else r.contiguous()
-        )
+        if toChannelsLast:
+            r = r.contiguous(memory_format=torch.channels_last)
+        else:
+            r = r.contiguous()
         return r
 
     @torch.jit.script_method
     def conv3d(self, x: Tensor, w: Tensor, toChannelsLast: bool) -> Tensor:
         r = torch.nn.functional.conv3d(x, w)
-        r = (
-            r.contiguous(memory_format=torch.channels_last_3d)
-            if toChannelsLast
-            else r.contiguous()
-        )
+        if toChannelsLast:
+            r = r.contiguous(memory_format=torch.channels_last_3d)
+        else:
+            r = r.contiguous()
         return r
 
     @torch.jit.script_method
