@@ -118,7 +118,10 @@ def contains_tensor(elems):
 
 
 def skip_args(elems):
-    return any(isinstance(i, (torch.memory_format, torch.storage.UntypedStorage)) for i in pytree.tree_leaves(elems))
+    return any(
+        isinstance(i, (torch.memory_format, torch.storage.UntypedStorage))
+        for i in pytree.tree_leaves(elems)
+    )
 
 
 def contains_tensor_types(type):
