@@ -3336,8 +3336,7 @@ void* convert_to_root_guard_manager(py::object root) {
 }
 
 bool run_root_guard_manager(void* root, PyObject* f_locals) {
-  bool result = ((RootGuardManager*)root)->check_nopybind(f_locals);
-  return result;
+  return ((RootGuardManager*)root)->check_nopybind(f_locals);
 }
 
 PyObject* torch_c_dynamo_guards_init() {
