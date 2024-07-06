@@ -933,7 +933,7 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     ):
         os.environ["CUDA_HOME"] = build_paths.cuda()
     """
-    from torch._inductor.codecache import _set_gpu_runtime_env, cpp_prefix_path
+    from torch._inductor.codecache import cpp_prefix_path
 
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
