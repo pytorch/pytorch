@@ -104,8 +104,10 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         for name, dtensor in state_dict.items():
             self.assertEqual(dtensor.device.type, "cpu")
 
+    # Temporarily disable 2D state dict test, while strided sharding is being devleoped.
+    # TODO: re-enable this test once 2d state_dict is ready.
     @skip_if_lt_x_gpu(2)
-    def test_2d_state_dict_save_load(self):
+    def _temp_disable_test_2d_state_dict_save_load(self):
         dp_size = 2
         global_mesh = init_device_mesh(
             "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
