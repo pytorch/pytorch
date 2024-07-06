@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import inspect
-import pathlib
 import sys
 import typing
 from collections import defaultdict
+from pathlib import Path
 from types import CodeType
 from typing import Dict, Iterable, List, Optional
 
@@ -190,5 +190,5 @@ def jit_code_filter(code: CodeType) -> bool:
     ):
         return False
 
-    filename = pathlib.Path(code.co_filename).resolve()
+    filename = Path(code.co_filename).resolve()
     return not any(_startswith(filename, lib_path) for lib_path in LIB_PATHS)
