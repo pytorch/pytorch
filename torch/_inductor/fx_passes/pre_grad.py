@@ -73,10 +73,10 @@ def save_inductor_dict(pass_to_compare=None):
 
 
 def is_same_dict(inductor_dict, optimus_dict):
-    return all(
-        count == dict(inductor_dict).get(pass_name, 0)
-        for pass_name, count in optimus_dict.items()
-    )
+    for pass_name, count in optimus_dict.items():  # noqa: SIM110
+        if count != dict(inductor_dict).get(pass_name, 0):
+            return False
+    return True
 
 
 def fuse_parallel_linear_pass(graph):
