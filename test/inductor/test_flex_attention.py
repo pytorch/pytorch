@@ -20,13 +20,13 @@ from torch.nn.attention._flex_attention import (
     _causal,
     _compose,
     _create_block_mask,
-    _create_block_mask_from_mask,
     _create_empty_block_mask,
-    _flex_attention,
     _generate_alibi_bias,
     _identity,
     _rel_bias,
     _rel_causal,
+    create_block_mask,
+    flex_attention,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -49,13 +49,11 @@ index = torch.ops.aten.index
 
 
 def create_attention(score_mod, block_mask):
-    return functools.partial(
-        _flex_attention, score_mod=score_mod, block_mask=block_mask
-    )
+    return functools.partial(flex_attention, score_mod=score_mod, block_mask=block_mask)
 
 
-def create_block_mask(score_mod, query, key):
-    block_mask = _create_block_mask(
+def create_block_mask_test(score_mod, query, key):
+    block_mask = create_block_mask(
         score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
     )
     return block_mask
@@ -227,7 +225,7 @@ class TestFlexAttention(InductorTestCase):
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
-        block_mask = create_block_mask(score_mod, q, k)
+        block_mask = create_block_mask_test(score_mod, q, k)
         sdpa_partial = create_attention(score_mod, block_mask)
         compiled_sdpa = torch.compile(sdpa_partial)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
@@ -538,6 +536,8 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
+<<<<<<< HEAD
+=======
     def test_create_block_mask_is_compiled(self):
         make_tensor = functools.partial(
             torch.randn,
@@ -560,7 +560,7 @@ class TestFlexAttention(InductorTestCase):
                 128,
             )
 
-            out = _flex_attention(
+            out = flex_attention(
                 q,
                 k,
                 v,
@@ -599,14 +599,14 @@ class TestFlexAttention(InductorTestCase):
                 128,
             )
 
-            q = _flex_attention(
+            q = flex_attention(
                 q,
                 k,
                 v,
                 _causal,
                 block_mask,
             )
-            out = _flex_attention(
+            out = flex_attention(
                 q,
                 k2,
                 v2,
@@ -621,6 +621,7 @@ class TestFlexAttention(InductorTestCase):
         FileCheck().check_count(".run(", 5, True).run(code[0])
 
     @supported_platform
+>>>>>>> 73bab28c44 (Made FlexAttention and create_block_mask public)
     def test_doc_mask_sparse(self):
         document_id = torch.zeros(S, dtype=torch.int, device="cuda")
         for i in range(0, S, 256):
@@ -790,8 +791,8 @@ class TestFlexAttention(InductorTestCase):
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         # floor_div is not decomposed in decompostion_table is empty
-        flex_attention = functools.partial(_flex_attention, score_mod=score_mod_func)
-        gm = make_fx(flex_attention, decomposition_table={})(query, key, value)
+        attention = functools.partial(flex_attention, score_mod=score_mod_func)
+        gm = make_fx(attention, decomposition_table={})(query, key, value)
         self.assertExpectedInline(
             gm.sdpa_score0.code.strip(),
             """\
@@ -803,7 +804,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
         # floor_div is decomposed for core_aten_decompositions
-        gm = make_fx(flex_attention, decomposition_table=core_aten_decompositions())(
+        gm = make_fx(attention, decomposition_table=core_aten_decompositions())(
             query, key, value
         )
         self.assertExpectedInline(
@@ -897,8 +898,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return torch.where(q >= kv, qk, -float("inf"))
 
         def f(q, k1, k2, v1, v2):
-            q2 = _flex_attention(q, k1, v1, score_mod=scoremod_1)
-            return _flex_attention(q2, k2, v2, score_mod=scoremod_2)
+            q2 = flex_attention(q, k1, v1, score_mod=scoremod_1)
+            return flex_attention(q2, k2, v2, score_mod=scoremod_2)
 
         out = f(query, *keys, *values)
         out2 = torch.compile(f)(query, *keys, *values)
@@ -923,12 +924,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def scoremod_2(qk, b, h, q, kv):
             return torch.where(q >= kv, qk, -float("inf"))
 
-        attention1 = functools.partial(_flex_attention, score_mod=scoremod_1)
+        attention1 = functools.partial(flex_attention, score_mod=scoremod_1)
 
         def f(q, k1, k2, k3, v1, v2, v3):
             q2 = attention1(q, k1, v1)
-            q3 = _flex_attention(q2, k2, v2, score_mod=scoremod_2)
-            return _flex_attention(q3, k3, v3, score_mod=scoremod_1)
+            q3 = flex_attention(q2, k2, v2, score_mod=scoremod_2)
+            return flex_attention(q3, k3, v3, score_mod=scoremod_1)
 
         out = f(query, *keys, *values)
         out2 = torch.compile(f)(query, *keys, *values)
@@ -943,7 +944,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             def func(qk, b, h, q, kv):
                 return qk + x[q]
 
-            return _flex_attention(q.sin(), k, v, score_mod=func).cos()
+            return flex_attention(q.sin(), k, v, score_mod=func).cos()
 
         q, k, v = (
             torch.randn(1, 8, 1024, 64, device="cuda", requires_grad=True)
@@ -964,8 +965,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def causal_mask(score, b, h, q_idx, kv_idx):
             return torch.where(q_idx >= kv_idx, score, -float("inf"))
 
-        block_mask_a = _create_block_mask(causal_mask, 1, 1, 512, 512, _compiled=True)
-        block_mask_b = _create_block_mask(causal_mask, 1, 1, 512, 512, _compiled=False)
+        block_mask_a = create_block_mask(causal_mask, 1, 1, 512, 512, _compiled=True)
+        block_mask_b = create_block_mask(causal_mask, 1, 1, 512, 512, _compiled=False)
         self.assertEqual(block_mask_a.kv_num_blocks, block_mask_b.kv_num_blocks)
         self.assertEqual(block_mask_a.kv_indices, block_mask_b.kv_indices)
         self.assertEqual(block_mask_a.q_num_blocks, block_mask_b.q_num_blocks)
@@ -974,7 +975,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_epilogue_fused(self):
         @torch.compile
         def f(q, k, v):
-            out = _flex_attention(q, k, v)
+            out = flex_attention(q, k, v)
             return out.cos()
 
         q, k, v = (torch.randn(1, 8, 1024, 64, device="cuda") for _ in range(3))
@@ -1031,7 +1032,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         with self.assertRaisesRegex(
             ValueError, "Expected query, key, and value to have the same dtype"
         ):
-            _flex_attention(query, key, value, _identity)
+            flex_attention(query, key, value, _identity)
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
@@ -1079,7 +1080,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def score_mod(score, b, h, q, kv):
             return ApplyMask.apply(score, q <= kv)
 
-        func = torch.compile(_flex_attention, fullgraph=True)
+        func = torch.compile(flex_attention, fullgraph=True)
 
         q, k, v = (
             torch.randn(1, 8, 1024, 64, device="cuda", requires_grad=True)
@@ -1236,7 +1237,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
-        func = torch.compile(_flex_attention, backend="aot_eager", fullgraph=True)
+        func = torch.compile(flex_attention, backend="aot_eager", fullgraph=True)
 
         self.assertTrue(
             torch.autograd.gradcheck(
@@ -1259,7 +1260,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
-        func = torch.compile(_flex_attention, backend=mode, fullgraph=True)
+        func = torch.compile(flex_attention, backend=mode, fullgraph=True)
         score_mod = captured_buffers_map[score_mod_name](torch.float64)
 
         self.assertTrue(
@@ -1273,7 +1274,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def causal(score, b, h, q, kv):
             return torch.where(q >= kv, score, -float("inf"))
 
-        block_mask = _create_block_mask(causal, 1, 1, 2048, 2048)
+        block_mask = create_block_mask(causal, 1, 1, 2048, 2048)
 
         def replace_non_printable(s):
             def replace(c):
@@ -1320,7 +1321,7 @@ BlockMask(sparsity=46.88%,smask=
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
-        func = torch.compile(_flex_attention, backend=cnt, fullgraph=True)
+        func = torch.compile(flex_attention, backend=cnt, fullgraph=True)
         out = func(query, key, value, _squared)
         out.sum().backward()
         self.assertEqual(cnt.frame_count, 1)
