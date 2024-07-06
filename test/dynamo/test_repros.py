@@ -967,7 +967,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         # (dynamic shapes, static shapes)
         self.assertIn(cnt.frame_count, (5, 7))
-        self.assertIn(cnt.op_count, (104, 106, 127))
+        self.assertIn(cnt.op_count, (94, 106, 121))
 
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
@@ -1010,7 +1010,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """1""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """6""")
+            self.assertExpectedInline(cnt.op_count, """2""")
 
     def _reformer(self, nopython):
         input = torch.randn([1, 64, 256])
@@ -1238,13 +1238,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         if torch._dynamo.config.assume_static_by_default:
             if torch._dynamo.config.automatic_dynamic_shapes:
                 self.assertExpectedInline(cnt.frame_count, """2""")
-                self.assertExpectedInline(cnt.op_count, """14""")
+                self.assertExpectedInline(cnt.op_count, """8""")
             else:
                 self.assertExpectedInline(cnt.frame_count, """2""")
                 self.assertExpectedInline(cnt.op_count, """4""")
         else:
             self.assertExpectedInline(cnt.frame_count, """2""")
-            self.assertExpectedInline(cnt.op_count, """35""")
+            self.assertExpectedInline(cnt.op_count, """21""")
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -1609,12 +1609,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertEqual(opt_fn(cfg), 64)
         # With unspec int, maximum computation is preserved
-        if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """3""")
-        else:
-            self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """4""")
+        self.assertExpectedInline(cnt.frame_count, """1""")
+        self.assertExpectedInline(cnt.op_count, """3""")
 
     def test_reformer_sorting(self):
         x = torch.zeros([1, 12, 4096], dtype=torch.int64)
@@ -1629,7 +1625,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """14""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """27""")
+            self.assertExpectedInline(cnt.op_count, """16""")
 
     def test_recursive_map(self):
         # https://github.com/pytorch/torchdynamo/issues/132

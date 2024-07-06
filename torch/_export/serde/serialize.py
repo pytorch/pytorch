@@ -1859,6 +1859,8 @@ class GraphModuleDeserializer(metaclass=Final):
     def sync_fx_node(self, name: str, fx_node: torch.fx.Node):
         if name in self.serialized_name_to_node:
             raise SerializeError(f"Node {name} has already been deserialized before.")
+        # overwrite name
+        fx_node.name = name
         self.serialized_name_to_node[name] = fx_node
         assert "val" not in fx_node.meta
         fx_node.meta["val"] = self.serialized_name_to_meta[name]
