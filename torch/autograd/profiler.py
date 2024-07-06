@@ -379,7 +379,6 @@ class profile:
         if old_function_events:
             for evt in old_function_events:
                 self.function_events.append(evt)
-        return False
 
     def __repr__(self):
         if self.function_events is None:
@@ -820,7 +819,6 @@ class emit_itt:
             return
         _disable_profiler()
         _run_on_profiler_stop()
-        return False
 
 
 class emit_nvtx:
@@ -941,7 +939,6 @@ class emit_nvtx:
         torch.cuda.synchronize()
         _disable_profiler()
         _run_on_profiler_stop()
-        return False
 
 
 def load_nvprof(path):

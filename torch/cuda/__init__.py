@@ -420,7 +420,6 @@ class _DeviceGuard:
 
     def __exit__(self, *args: object) -> None:
         self.idx = torch.cuda._maybe_exchange_device(self.prev_idx)
-        return False
 
 
 class device:
@@ -440,7 +439,6 @@ class device:
 
     def __exit__(self, *args: object) -> None:
         self.idx = torch.cuda._maybe_exchange_device(self.prev_idx)
-        return False
 
 
 class device_of(device):

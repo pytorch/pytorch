@@ -179,5 +179,3 @@ class _server_process_global_profile(profile):
         self.function_events._build_tree()
 
         self.process_global_function_events = process_global_function_events
-
-        return False

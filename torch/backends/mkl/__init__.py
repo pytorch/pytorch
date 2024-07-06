@@ -54,4 +54,3 @@ class verbose:
 
     def __exit__(self, *args: object) -> None:
         torch._C._verbose.mkl_set_verbose(VERBOSE_OFF)
-        return False

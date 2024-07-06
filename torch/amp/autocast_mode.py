@@ -356,7 +356,6 @@ class autocast:
         torch.set_autocast_enabled(self.device, self.prev)
         torch.set_autocast_dtype(self.device, self.prev_fastdtype)
         torch.set_autocast_cache_enabled(self.prev_cache_enabled)
-        return False
 
     def __call__(self, func):
         if torch._jit_internal.is_scripting():
