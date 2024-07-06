@@ -56,18 +56,37 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
-from torch._inductor.cpu_vec_isa import (
-    get_compiler_version_info,
-    invalid_vec_isa,
-    pick_vec_isa,
-    VecISA,
+
+from .cpp_builder import (
+    _get_python_include_dirs,
+    get_cpp_compiler,
+    homebrew_libomp,
+    is_apple_clang,
+    is_clang,
+    is_conda_llvm_openmp_installed,
 )
+
+
+"""
+codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
+https://github.com/pytorch/pytorch/issues/124245#issuecomment-2197778902
+"""
+from torch._inductor.cpp_builder import (
+    _set_gpu_runtime_env,
+    _transform_cuda_paths,
+    CppBuilder,
+    CppOptions,
+    CppTorchCudaOptions,
+    get_compiler_version_info,
+    get_name_and_dir_from_output_file_path,
+)
+from torch._inductor.cpu_vec_isa import invalid_vec_isa, pick_vec_isa, VecISA
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
     _reload_python_module_in_subproc,
 )
-from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import ALIGN_BYTES, clear_on_fresh_inductor_cache, is_linux
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
@@ -83,7 +102,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.graph import GraphLowering
     from torch._inductor.ir import ChoiceCaller
-    from torch._inductor.runtime.hints import HalideMeta
+    from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 
 
 _HERE = os.path.abspath(__file__)
@@ -604,33 +623,35 @@ def build_code_hash(roots, prefix, hasher):
             build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
 
 
-def get_code_hash(roots, extra_files=()):
-    hasher = hashlib.sha256()
-    hasher.update(torch.__version__.encode("utf-8"))
-    build_code_hash(roots, "", hasher)
-    for path in extra_files:
-        if os.path.exists(path):
-            with open(path, "rb") as f:
-                hasher.update(f.read())
-    return hasher.digest()
-
-
 @functools.lru_cache(None)
 def torch_key():
     """
     Compute a key that contains relevant information about torch source files
     """
     if not config.is_fbcode():
-        inductor_root = os.path.dirname(__file__)
-        extra_files = (
-            "codegen/aoti_runtime/interface.cpp",
-            "codegen/aoti_runtime/implementation.cpp",
-            "codegen/cpp_prefix.h",
-            "script.ld",
-        )
-        return get_code_hash(
-            [inductor_root], [os.path.join(inductor_root, x) for x in extra_files]
-        )
+
+        def get_code_hash(root):
+            # This function isn't meant to be used outside of torch_key, just a
+            # helper for clarity. Instead, use torch_key() directly when you need
+            # a hash representing the state of the source code.
+            extra_files = (
+                "codegen/aoti_runtime/interface.cpp",
+                "codegen/aoti_runtime/implementation.cpp",
+                "codegen/cpp_prefix.h",
+                "script.ld",
+            )
+            inductor_root = os.path.dirname(__file__)
+            extra_files = [os.path.join(inductor_root, x) for x in extra_files]
+            hasher = hashlib.sha256()
+            hasher.update(torch.__version__.encode("utf-8"))
+            build_code_hash([root], "", hasher)
+            for path in extra_files:
+                if os.path.exists(path):
+                    with open(path, "rb") as f:
+                        hasher.update(f.read())
+            return hasher.digest()
+
+        return get_code_hash(_TORCH_PATH)
 
     from libfb.py import parutil
 
@@ -1178,87 +1199,9 @@ class CompiledFxGraph:
         return self.current_callable(inputs)
 
 
-def cpp_compiler() -> str:
-    if config.is_fbcode():
-        return build_paths.cc() if torch.version.hip is None else build_paths.clang()
-    if isinstance(config.cpp.cxx, (list, tuple)):
-        search = tuple(config.cpp.cxx)
-    else:
-        search = (config.cpp.cxx,)
-    return cpp_compiler_search(search)
-
-
-@functools.lru_cache(1)
-def cpp_compiler_search(search: str) -> str:
-    for cxx in search:
-        try:
-            if cxx is None:
-                # gxx package is only available for Linux
-                # according to https://anaconda.org/conda-forge/gxx/
-                if sys.platform != "linux":
-                    continue
-                # Do not install GXX by default
-                if not os.getenv("TORCH_INDUCTOR_INSTALL_GXX"):
-                    continue
-                from filelock import FileLock
-
-                lock_dir = get_lock_dir()
-                lock = FileLock(
-                    os.path.join(lock_dir, "g++.lock"), timeout=LOCK_TIMEOUT
-                )
-                with lock:
-                    cxx = install_gcc_via_conda()
-            subprocess.check_output([cxx, "--version"])
-            return cxx
-        except (subprocess.SubprocessError, FileNotFoundError, ImportError):
-            continue
-    raise exc.InvalidCxxCompiler
-
-
-def install_gcc_via_conda() -> str:
-    """On older systems, this is a quick way to get a modern compiler"""
-    prefix = os.path.join(cache_dir(), "gcc")
-    cxx_path = os.path.join(prefix, "bin", "g++")
-    if not os.path.exists(cxx_path):
-        log.info("Downloading GCC via conda")
-        conda = os.environ.get("CONDA_EXE", "conda")
-        if conda is None:
-            conda = shutil.which("conda")
-        if conda is not None:
-            subprocess.check_call(
-                [
-                    conda,
-                    "create",
-                    f"--prefix={prefix}",
-                    "--channel=conda-forge",
-                    "--quiet",
-                    "-y",
-                    "python=3.8",
-                    "gxx",
-                ],
-                stdout=subprocess.PIPE,
-            )
-    return cxx_path
-
-
-def is_gcc() -> bool:
-    if sys.platform == "darwin" and is_apple_clang():
-        return False
-    return bool(re.search(r"(gcc|g\+\+)", cpp_compiler()))
-
-
-@functools.lru_cache(None)
-def is_apple_clang() -> bool:
-    cxx = cpp_compiler()
-    version_string = subprocess.check_output([cxx, "--version"]).decode("utf8")
-    return "Apple" in version_string.splitlines()[0]
-
-
-def is_clang() -> bool:
-    # Mac OS apple clang maybe named as gcc, need check compiler info.
-    if sys.platform == "darwin":
-        return is_apple_clang()
-    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler()))
+"""
+TODO: will remove old cpp builder when we switch to the new one.
+"""
 
 
 def get_compile_only(compile_only: bool = True) -> str:
@@ -1270,7 +1213,7 @@ def get_shared(shared: bool = True, compile_only: bool = False) -> str:
         return ""
     if compile_only:
         return "-fPIC"
-    if platform.system() == "Darwin" and "clang" in cpp_compiler():
+    if platform.system() == "Darwin" and "clang" in get_cpp_compiler():
         # This causes undefined symbols to behave the same as linux
         return "-shared -fPIC -undefined dynamic_lookup"
     else:
@@ -1354,76 +1297,6 @@ def use_standard_sys_dir_headers() -> str:
         return "-nostdinc"
     else:
         return ""
-
-
-@functools.lru_cache(None)
-def is_conda_llvm_openmp_installed() -> bool:
-    try:
-        command = "conda list llvm-openmp --json"
-        output = subprocess.check_output(command.split()).decode("utf8")
-        return len(json.loads(output)) > 0
-    except subprocess.SubprocessError:
-        return False
-
-
-@functools.lru_cache(None)
-def homebrew_libomp() -> Tuple[bool, str]:
-    try:
-        # check if `brew` is installed
-        subprocess.check_output(["which", "brew"])
-        # get the location of `libomp` if it is installed
-        # this is the location that `libomp` **would** be installed
-        # see https://github.com/Homebrew/brew/issues/10261#issuecomment-756563567 for details
-        libomp_path = (
-            subprocess.check_output(["brew", "--prefix", "libomp"])
-            .decode("utf8")
-            .strip()
-        )
-        # check if `libomp` is installed
-        omp_available = os.path.exists(libomp_path)
-        return omp_available, libomp_path
-    except subprocess.SubprocessError:
-        return False, ""
-
-
-def _set_gpu_runtime_env() -> None:
-    if (
-        config.is_fbcode()
-        and torch.version.hip is None
-        and "CUDA_HOME" not in os.environ
-        and "CUDA_PATH" not in os.environ
-    ):
-        os.environ["CUDA_HOME"] = build_paths.cuda()
-
-
-def _get_python_include_dirs():
-    include_dir = Path(sysconfig.get_path("include"))
-    # On Darwin Python executable from a framework can return
-    # non-existing /Library/Python/... include path, in which case
-    # one should use Headers folder from the framework
-    if not include_dir.exists() and platform.system() == "Darwin":
-        std_lib = Path(sysconfig.get_path("stdlib"))
-        include_dir = (std_lib.parent.parent / "Headers").absolute()
-    if not (include_dir / "Python.h").exists():
-        warnings.warn(f"Can't find Python.h in {str(include_dir)}")
-    return [str(include_dir)]
-
-
-def _transform_cuda_paths(lpaths):
-    # This handles two cases:
-    # 1. Meta internal cuda-12 where libs are in lib/cuda-12 and lib/cuda-12/stubs
-    # 2. Linux machines may have CUDA installed under either lib64/ or lib/
-    for i, path in enumerate(lpaths):
-        if (
-            "CUDA_HOME" in os.environ
-            and path.startswith(os.environ["CUDA_HOME"])
-            and not os.path.exists(f"{path}/libcudart_static.a")
-        ):
-            for root, dirs, files in os.walk(path):
-                if "libcudart_static.a" in files:
-                    lpaths[i] = os.path.join(path, root)
-                    lpaths.append(os.path.join(lpaths[i], "stubs"))
-                    break
 
 
 def get_include_and_linking_paths(
@@ -1654,7 +1527,7 @@ def cpp_compile_command(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} {inp_name_str} {get_shared(shared, compile_only)}
+            {get_cpp_compiler()} {inp_name_str} {get_shared(shared, compile_only)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {get_glibcxx_abi_build_flags()}
             {ipaths_str} {lpaths} {libs} {build_arch_flags}
@@ -1727,15 +1600,22 @@ class AotCodeCompiler:
         cuda: bool,
     ) -> str:
         picked_vec_isa = pick_vec_isa()
-        cpp_command = repr(
-            cpp_compile_command(
-                "i",
-                "o",
+        vec_isa_cmd_gen = CppBuilder(
+            name="o",
+            sources="i",
+            BuildOption=CppTorchCudaOptions(
                 vec_isa=picked_vec_isa,
                 cuda=cuda,
                 aot_mode=graph.aot_mode,
-            )
+            ),
         )
+        # write function will calc source_code hash, the same source code with different
+        # ISA level should be generate different hash.
+        # So we need get a command_line which contains isa related parameter as a part of hash key.
+        # And then pass the command_line to below write function as extra parameter to
+        # guarantee the source code hash contains ISA difference.
+        cpp_command = repr(vec_isa_cmd_gen.get_command_line())
+
         fbcode_aot_cpu_re = False
         use_absolute_path = False
         if config.is_fbcode():
@@ -1870,7 +1750,7 @@ class AotCodeCompiler:
                 specified_dir=specified_output_path,
             )
             consts_o = os.path.splitext(consts_path)[0] + ".o"
-            cmd = f"{cpp_compiler()} -c -o {consts_o} {consts_path}"
+            cmd = f"{get_cpp_compiler()} -c -o {consts_o} {consts_path}"
             run_command_and_check(cmd)
             if is_large_consts:
                 with open(consts_o, "r+b") as f:
@@ -1985,7 +1865,6 @@ class AotCodeCompiler:
                 "linux": _compile_consts_linux,
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
-
             link_cmd = cpp_compile_command(
                 input=[output_o, consts_o],
                 output=output_so,
@@ -2183,9 +2062,7 @@ class CppCodeCache:
 
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
-        from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
-
-        dummy_builder = CppBuilder(
+        command_gen = CppBuilder(
             name="o", sources="i", BuildOption=CppTorchCudaOptions(**compile_command)
         )
         # write function will calc source_code hash, the same source code with different
@@ -2193,8 +2070,8 @@ class CppCodeCache:
         # So we need get a command_line which contains isa related parameter as a part of hash key.
         # And then pass the command_line to below write function as extra parameter to
         # guarantee the source code hash contains ISA difference.
-        dummy_cmd = repr(dummy_builder.get_command_line())
-        key, input_path = write(source_code, "cpp", extra=dummy_cmd)
+        vec_isa_cmd = repr(command_gen.get_command_line())
+        key, input_path = write(source_code, "cpp", extra=vec_isa_cmd)
 
         if key not in cls.cache:
             from filelock import FileLock
@@ -2292,6 +2169,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             if(result == -1 && PyErr_Occurred())
                 [[unlikely]] throw std::runtime_error("expected int arg");
             return result;
+        }
+        template <> inline uintptr_t parse_arg<uintptr_t>(PyObject* args, size_t n) {
+            auto result = PyLong_AsVoidPtr(PyTuple_GET_ITEM(args, n));
+            if(result == reinterpret_cast<void*>(-1) && PyErr_Occurred())
+                [[unlikely]] throw std::runtime_error("expected int arg");
+            return reinterpret_cast<uintptr_t>(result);
         }
 
         %s
@@ -2489,17 +2372,27 @@ def _do_validate_cpp_commands(
     compile_only: bool,
     mmap_weights: bool,
     use_absolute_path: bool,
+    aot_mode: bool,
 ):
     # PreCI will failed if test machine can't run cuda.
     temp_dir = tempfile.TemporaryDirectory()
     test_dir_path = temp_dir.name
     test_cuda = torch.cuda.is_available() and cuda
-    input_path = os.path.join(test_dir_path, "dummy_input.cpp")
-    output_path = os.path.join(test_dir_path, "dummy_output.so")
+    input_path = os.path.join(test_dir_path, "dummy_file.cpp")
+    output_path = os.path.join(test_dir_path, "dummy_file.so")
     extra_flags = ["-D TEST_EXTRA_FLAGS"]
     if compile_only:
-        output_path = os.path.join(test_dir_path, "dummy_output.o")
+        output_path = os.path.join(test_dir_path, "dummy_file.o")
     picked_isa = pick_vec_isa()
+
+    # Simulate fb_code env:
+    if not (aot_mode and not use_absolute_path):
+        input_path = os.path.basename(input_path)
+        output_path = os.path.basename(output_path)
+
+    # Fix test_new_cpp_build_logical failed on MacOS
+    if sys.platform != "linux":
+        aot_mode = False
 
     old_cmd = cpp_compile_command(
         input=input_path,
@@ -2507,19 +2400,20 @@ def _do_validate_cpp_commands(
         include_pytorch=include_pytorch,
         vec_isa=picked_isa,
         cuda=test_cuda,
-        aot_mode=False,
+        aot_mode=aot_mode,
         compile_only=compile_only,
         use_absolute_path=use_absolute_path,
         use_mmap_weights=mmap_weights,
         extra_flags=extra_flags,
     ).split(" ")
 
-    from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
+    name, dir = get_name_and_dir_from_output_file_path(input_path)
 
     dummy_build_option = CppTorchCudaOptions(
         vec_isa=picked_isa,
         include_pytorch=include_pytorch,
         cuda=test_cuda,
+        aot_mode=aot_mode,
         compile_only=compile_only,
         use_absolute_path=use_absolute_path,
         use_mmap_weights=mmap_weights,
@@ -2527,10 +2421,10 @@ def _do_validate_cpp_commands(
     )
 
     dummy_builder = CppBuilder(
-        name="dummy_output",
+        name=name,
         sources=input_path,
+        output_dir=dir,
         BuildOption=dummy_build_option,
-        output_dir=test_dir_path,
     )
     new_cmd = dummy_builder.get_command_line().split(" ")
 
@@ -2547,62 +2441,168 @@ def validate_new_cpp_commands():
     compile_only = [True, False]
     include_pytorch = [True, False]
     use_absolute_path = [True, False]
+    aot_mode = [False, True]
 
     for x in cuda:
         for y in use_mmap_weights:
             for z in compile_only:
                 for m in include_pytorch:
                     for n in use_absolute_path:
-                        print(
-                            f"!!! cuda:{x}, use_mmap_weights:{y}, compile_only:{z}, include_pytorch:{m}， use_absolute_path:{n}"
-                        )
-                        _do_validate_cpp_commands(
-                            include_pytorch=m,
-                            cuda=x,
-                            mmap_weights=y,
-                            compile_only=z,
-                            use_absolute_path=n,
-                        )
+                        for o in aot_mode:
+                            print(
+                                f"!!! cuda:{x}, use_mmap_weights:{y}, compile_only:{z}, include_pytorch:{m},"
+                                f" use_absolute_path:{n}, aot_mode:{o}"
+                            )
+                            _do_validate_cpp_commands(
+                                include_pytorch=m,
+                                cuda=x,
+                                mmap_weights=y,
+                                compile_only=z,
+                                use_absolute_path=n,
+                                aot_mode=o,
+                            )
 
 
 @clear_on_fresh_inductor_cache
 class HalideCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Callable[[], Union[ModuleType, CDLL]]] = {}
     cache_clear = staticmethod(cache.clear)
-    glue_template = textwrap.dedent(
+    _standalone_runtime_path: Optional[str] = None
+    prefix = textwrap.dedent(
         """
-        #include "{halidebuffer_h}"
+        #include "{halideruntime_h}"
         #include "{headerfile}"
         #include <stdexcept>
         #include <cmath>
-        void kernel({argdefs}) {{
-            {buffers}
-            int err = halide_kernel({buffer_names});
-            if(err != 0) {{
-                throw std::runtime_error("halide_kernel failed");
+
+        namespace c10 {{
+            inline long div_floor_integer(long a, long b) {{
+                if ((a<0) != (b<0)) {{
+                    const auto quot = a / b;
+                    const auto rem = a % b;
+                    return rem ? quot - 1 : quot;
+                }}
+                return a / b;
             }}
         }}
         """
     )
+    glue_template_cpp = prefix + textwrap.dedent(
+        """
+        void kernel({argdefs}) {{
+            {buffers}
+            int err = halide_kernel({buffer_names});
+            if(err != 0) throw std::runtime_error("halide_kernel failed");
+        }}
+        """
+    )
+    glue_template_cuda = prefix + textwrap.dedent(
+        """
+        #include <cuda.h>
+        static const halide_device_interface_t* cuda_interface = halide_cuda_device_interface();
+
+        void kernel({argdefs}, uintptr_t stream) {{
+            {buffers}
+            int err = halide_kernel(reinterpret_cast<void*>(stream), {buffer_names});
+            if(err != 0) throw std::runtime_error("halide_kernel failed");
+        }}
+        """
+    )
+    standalone_runtime_cuda_init = textwrap.dedent(
+        """
+        #include "{}"
+        #include <cuda.h>
+
+        static int acquire_context(void* user_context,
+                                   void** cuda_context_out,
+                                   bool create) {{
+            return cuCtxGetCurrent(reinterpret_cast<CUcontext*>(cuda_context_out));
+        }}
+
+        static int release_context(void* user_context) {{
+            return 0;
+        }}
+
+        static int get_stream(void* user_context,
+                              void* cuda_context,
+                              void** stream_out) {{
+            *stream_out = user_context;
+            return 0;
+        }}
+
+        static int register_halide_hooks() {{
+            halide_set_cuda_acquire_context(&acquire_context);
+            halide_set_cuda_release_context(&release_context);
+            halide_set_cuda_get_stream(&get_stream);
+            return 0;
+        }}
+
+        int inductor_register_halide_hooks_result = register_halide_hooks();
+        """
+    )
 
     @classmethod
-    def _codegen_glue(cls, argtypes, headerfile):
+    def _codegen_buffer(cls, name: str, arg: HalideInputSpec, cuda: bool):
+        assert arg.shape is not None
+        assert arg.stride is not None and len(arg.shape) == len(arg.stride)
+        assert arg.offset is not None
+        data_ptr = f"{arg.alias_of or arg.name} + {arg.offset}"
+        if cuda:
+            device = f"reinterpret_cast<uint64_t>({data_ptr})"
+            device_interface = "cuda_interface"
+            host = "nullptr"
+            flags = "halide_buffer_flag_device_dirty"
+        else:
+            device = "0"
+            device_interface = "nullptr"
+            host = f"reinterpret_cast<uint8_t*>({data_ptr})"
+            flags = "halide_buffer_flag_host_dirty"
+
+        dims = []
+        for size, stride in zip(arg.shape, arg.stride):
+            dims.append(f"halide_dimension_t(0, {size}, {stride})")
+
+        return [
+            f"halide_buffer_t {name};",
+            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};",
+            f"{name}.device = {device};",
+            f"{name}.device_interface = {device_interface};",
+            f"{name}.host = {host};",
+            f"{name}.flags = {flags};",
+            f"{name}.type = {arg.halide_type()};",
+            f"{name}.dimensions = {len(dims)};",
+            f"{name}.dim = {name}_dims;",
+            f"{name}.padding = nullptr;",
+        ]
+
+    @classmethod
+    def _codegen_glue(cls, meta, headerfile):
+        is_cuda = meta.is_cuda()
+        assert is_cuda is ("user_context" in meta.target)
+        assert "no_runtime" in meta.target
         buffers = []
         buffer_names = []
-        for i, arg in enumerate(argtypes):
-            if arg.numel:
-                buffer_names.append(f"hl_buf_{i}")
-                buffers.append(
-                    f"    Halide::Runtime::Buffer {buffer_names[-1]}({arg.halide_type()}, {arg.name}, {arg.numel});"
-                )
+        for i, arg in enumerate(meta.argtypes):
+            if arg.is_buffer():
+                buffer_names.append(f"&hl_buf_{i}")
+                buffers.extend(cls._codegen_buffer(f"hl_buf_{i}", arg, is_cuda))
             else:
                 assert "*" not in arg.ctype
                 buffer_names.append(arg.name)
-        glue_code = cls.glue_template.format(
-            halidebuffer_h=cls.find_header("HalideBuffer.h"),
+        buffers = "\n".join([f"    {line}" for line in buffers]).lstrip()
+
+        glue_template = cls.glue_template_cuda if is_cuda else cls.glue_template_cpp
+        glue_code = glue_template.format(
+            halideruntime_h=cls.find_header(
+                "HalideRuntimeCuda.h" if is_cuda else "HalideRuntime.h"
+            ),
             headerfile=headerfile,
-            argdefs=", ".join(f"{a.bindings_type()} {a.name}" for a in argtypes),
-            buffers="\n".join(buffers).lstrip(),
+            argdefs=", ".join(
+                f"{a.bindings_type()} {a.name}"
+                for a in meta.argtypes
+                if a.alias_of is None
+            ),
+            buffers=buffers,
             buffer_names=", ".join(buffer_names),
         )
         return glue_code
@@ -2610,45 +2610,30 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     @classmethod
     @functools.lru_cache(None)
     def config_hash(cls):
-        from torch._inductor.cpp_builder import CppBuilder, CppOptions
-
         command_gen = CppBuilder(
             name="O",
             sources="I",
-            BuildOption=CppOptions(compile_only=False),
+            BuildOption=CppOptions(),
         )
         command_line = command_gen.get_command_line()
         return sha256_hash(
             "\n".join(
                 [
-                    cls.glue_template,
-                    f"{cls.cpu_cache_size()}",
+                    cls.glue_template_cpp,
+                    cls.glue_template_cuda,
+                    cls.standalone_runtime_cuda_init,
                     command_line,
                 ]
             ).encode("utf-8")
         )
 
     @staticmethod
-    @functools.lru_cache(None)
-    def cpu_cache_size():
-        try:
-            cpuinfo = open("/proc/cpuinfo").read()
-        except OSError:
-            return 16777216
-        m = re.search(r"cache size\s*: (\d+) KB", cpuinfo)
-        if m:
-            return int(m.group(1)) * 1024
-        m = re.search(r"cache size\s*: (\d+) MB", cpuinfo)
-        if m:
-            return int(m.group(1)) * 1024 * 1024
-        raise RuntimeError("failed to find 'cache size: ... KB' in /proc/cpuinfo")
-
-    @staticmethod
     def _search_for_file(suffix, errmsg):
+        spec = importlib.machinery.PathFinder.find_spec("halide")
+        if spec is None or not spec.submodule_search_locations:
+            raise RuntimeError("halide python bindings not installed")
         try:
-            search, *_ = importlib.machinery.PathFinder.find_spec(  # type: ignore[union-attr,misc]
-                "halide"
-            ).submodule_search_locations
+            search = spec.submodule_search_locations[0]
             for file in os.listdir(search):
                 if file.endswith(".so"):
                     try:
@@ -2717,35 +2702,36 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         lockfile = str(dirpath / "lock")
         need_compile = not os.path.exists(donefile)
         jobs = []
-
         if need_compile:
             write_atomic(genfile, source_code)
-            jobs.append(
-                functools.partial(
-                    subprocess.check_call,
-                    [
-                        sys.executable,
-                        genfile,
-                        "-g",
-                        "kernel",
-                        "-o",
-                        f"{dirpath}",
-                        "-f",
-                        "halide_kernel",
-                        "-e",
-                        "static_library,h,schedule,pytorch_wrapper",
-                        "-p",
-                        cls.find_libautoschedule(meta.scheduler),
-                        *meta.args(),
-                    ],
-                )
-            )
+            cmd = [
+                sys.executable,
+                genfile,
+                "-g",
+                "kernel",
+                "-o",
+                f"{dirpath}",
+                "-f",
+                "halide_kernel",
+                "-e",
+                "static_library,h,schedule",
+            ]
+            if meta.scheduler:
+                cmd.extend(["-p", cls.find_libautoschedule(meta.scheduler)])
+            cmd.extend(meta.args())
+            jobs.append(functools.partial(subprocess.check_call, cmd))
 
+        binding_types = [
+            arg.bindings_type() for arg in meta.argtypes if arg.alias_of is None
+        ]
+        if meta.is_cuda():
+            binding_types.append("uintptr_t")  # stream
         bindings_future = cls.load_pybinding_async(
-            [arg.bindings_type() for arg in meta.argtypes],
-            cls._codegen_glue(meta.argtypes, headerfile),
-            extra_flags=(libfile,),
+            binding_types,
+            cls._codegen_glue(meta, headerfile),
+            extra_flags=(libfile, cls.build_standalone_runtime()),
             submit_fn=jobs.append if need_compile else None,
+            cuda=meta.is_cuda(),
         )
 
         if need_compile:
@@ -2767,13 +2753,92 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     def generate_halide(cls, *args, **kwargs):
         return cls.generate_halide_async(*args, **kwargs)()
 
+    @classmethod
+    def build_standalone_runtime(cls):
+        if cls._standalone_runtime_path and os.path.exists(
+            cls._standalone_runtime_path
+        ):
+            return cls._standalone_runtime_path
+        is_cuda = torch.cuda.is_available()
+        libname = "libStandaloneHalideRuntime.so"
+        target = "host-cuda" if is_cuda else "host"
+        if cls._standalone_runtime_path:
+            assert not os.path.exists(cls._standalone_runtime_path)
+            # We hit this case in unittests when we run with fresh_inductor_cache()
+            # Generating a fresh runtime over and over causes errors because we initialize
+            # cuda hundreds of times in the same process and run out of file descriptors.
+            # Workaround by jail breaking the current fresh_inductor_cache().
+            base = default_cache_dir()
+        else:
+            base = cache_dir()
+        dirpath = Path(base) / f"halide-runtime-{target}-{cls.config_hash()}"
+        os.makedirs(dirpath, exist_ok=True)
+        donefile = str(dirpath / "done")
+        lockfile = str(dirpath / "lock")
+        hookfile = str(dirpath / "hooks.cpp")
+        afile = str(dirpath / "standalone_halide_runtime.a")
+        sofile = str(dirpath / libname)
+        if not os.path.exists(donefile):
+            import filelock
+            import halide as hl  # type: ignore[import-untyped,import-not-found]
+
+            with filelock.FileLock(lockfile, LOCK_TIMEOUT):
+                if not os.path.exists(donefile):
+                    with open(hookfile, "w") as f:
+                        if is_cuda:
+                            f.write(
+                                cls.standalone_runtime_cuda_init.format(
+                                    cls.find_header("HalideRuntimeCuda.h")
+                                )
+                            )
+                    hl.compile_standalone_runtime(afile, hl.Target(target))
+                    subprocess.check_call(
+                        shlex.split(
+                            cpp_compile_command([hookfile, afile], sofile, cuda=is_cuda)
+                        )
+                    )
+                    touch(donefile)
+        assert os.path.exists(sofile)
+        cls._standalone_runtime_path = sofile
+        return sofile
+
 
 def _worker_task_halide(lockfile, jobs):
     from filelock import FileLock
 
-    with FileLock(lockfile, LOCK_TIMEOUT):
-        for job in jobs:
-            job()
+    try:
+        with FileLock(lockfile, LOCK_TIMEOUT):
+            for job in jobs:
+                job()
+    except subprocess.SubprocessError as e:
+        if os.environ.get("HALIDE_REPRO") == "1":
+            python, script, *cmd = getattr(e, "cmd", ("", "", ""))
+            if os.path.basename(python).startswith("python"):
+                code = open(script).read()
+                main = "    hl.main()"
+                assert code.count(main) == 1
+
+                class Out:
+                    def __repr__(self):
+                        return "out"
+
+                cmd[cmd.index("-o") + 1] = Out()  # type: ignore[call-overload]
+                repl = textwrap.indent(
+                    textwrap.dedent(
+                        f"""\
+                        import sys, tempfile
+                        with tempfile.TemporaryDirectory() as out:
+                            sys.argv = {["repro.py", *cmd]!r}
+                            hl.main()
+                        """
+                    ),
+                    "    ",
+                )
+                code = code.replace(main, repl)
+                with open("repro.py", "w") as fd:
+                    fd.write(code.lstrip())
+                raise RuntimeError(f"wrote repro.py: {e}") from e
+        raise
 
 
 def touch(filename):

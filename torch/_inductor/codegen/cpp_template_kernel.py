@@ -8,7 +8,7 @@ from sympy.parsing.sympy_parser import parse_expr
 import torch
 from torch.utils._sympy.symbol import SymT
 
-from .. import codecache, config, ir, lowering as L
+from .. import config, cpp_builder, ir, lowering as L
 from ..autotune_process import CppBenchmarkRequest
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
@@ -174,7 +174,7 @@ class CppTemplateKernel(CppKernel):
             return ""
 
     def unroll_pragma(self, unroll):
-        if codecache.is_gcc():
+        if cpp_builder.is_gcc():
             return f"#pragma GCC unroll {unroll}"
         else:
             return f"#pragma unroll {unroll}"
