@@ -134,7 +134,10 @@ class DistributedDataParallelSingleProcessTest(TestCase):
             backend="gloo", store=store, rank=self.rank, world_size=self.world_size
         )
         process_group = c10d.distributed_c10d._get_default_group()
-        device_ids = [torch.cuda.current_device()] if inp[0].is_cuda else None
+        if inp[0].is_cuda:
+            device_ids = [torch.cuda.current_device()]
+        else:
+            device_ids = None
 
         ddp = nn.parallel.DistributedDataParallel(
             copy.deepcopy(net), device_ids=device_ids, process_group=process_group

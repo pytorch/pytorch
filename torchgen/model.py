@@ -630,11 +630,10 @@ class NativeFunction:
             device_check_s is None or device_check_s in DeviceCheckType.__members__
         ), f"illegal device_check: {device_check_s}"
         device_check: DeviceCheckType
-        device_check = (
-            DeviceCheckType.ExactSame
-            if device_check_s is None
-            else DeviceCheckType[device_check_s]
-        )
+        if device_check_s is None:
+            device_check = DeviceCheckType.ExactSame
+        else:
+            device_check = DeviceCheckType[device_check_s]
 
         structured = e.pop("structured", False)
         assert isinstance(structured, bool), f"not a bool: {structured}"

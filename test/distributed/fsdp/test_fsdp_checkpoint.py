@@ -90,9 +90,10 @@ class TestFSDPCheckpoint(FSDPTest):
             l3 = nn.Linear(3, 3).cuda()
 
             if checkpoint_layer:
-                ckpt_wrapper = (
-                    offload_wrapper if offload_activations else checkpoint_wrapper
-                )
+                if offload_activations:
+                    ckpt_wrapper = offload_wrapper
+                else:
+                    ckpt_wrapper = checkpoint_wrapper
 
                 l1 = ckpt_wrapper(l1)
                 l2 = ckpt_wrapper(l2)
@@ -141,7 +142,10 @@ class TestFSDPCheckpoint(FSDPTest):
         use_orig_params: bool,
     ):
         # Test checkpoint(FSDP(layer1), FSDP(layer2), ....)
-        wrapper_to_use = offload_wrapper if offload_activations else checkpoint_wrapper
+        if offload_activations:
+            wrapper_to_use = offload_wrapper
+        else:
+            wrapper_to_use = checkpoint_wrapper
 
         fsdp_kwargs = {"cpu_offload": cpu_offload, "use_orig_params": use_orig_params}
         ckpt_sequential_wrapped_fsdp = wrapper_to_use(
@@ -210,9 +214,10 @@ class TestFSDPCheckpoint(FSDPTest):
             # Runs FSDP with no checkpointing
             fsdp_only_seq = FSDP(deepcopy(seq), **fsdp_kwargs)
             # Runs checkpoint-wrapped FSDP
-            wrapper_to_use = (
-                offload_wrapper if offload_activations else checkpoint_wrapper
-            )
+            if offload_activations:
+                wrapper_to_use = offload_wrapper
+            else:
+                wrapper_to_use = checkpoint_wrapper
 
             checkpointed_fsdp = wrapper_to_use(
                 FSDP(deepcopy(seq), **fsdp_kwargs),

@@ -162,7 +162,10 @@ class _BatchNorm(_NormBase):
         # exponential_average_factor is set to self.momentum
         # (when it is available) only so that it gets updated
         # in ONNX graph when this node is exported to ONNX.
-        exponential_average_factor = 0.0 if self.momentum is None else self.momentum
+        if self.momentum is None:
+            exponential_average_factor = 0.0
+        else:
+            exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
@@ -177,11 +180,10 @@ class _BatchNorm(_NormBase):
         Decide whether the mini-batch stats should be used for normalization rather than the buffers.
         Mini-batch stats are used in training mode, and in eval mode when buffers are None.
         """
-        bn_training = (
-            True
-            if self.training
-            else self.running_mean is None and self.running_var is None
-        )
+        if self.training:
+            bn_training = True
+        else:
+            bn_training = (self.running_mean is None) and (self.running_var is None)
 
         r"""
         Buffers are only updated if they are to be tracked and we are in training mode. Thus they only need to be
@@ -732,7 +734,10 @@ class SyncBatchNorm(_BatchNorm):
         # exponential_average_factor is set to self.momentum
         # (when it is available) only so that it gets updated
         # in ONNX graph when this node is exported to ONNX.
-        exponential_average_factor = 0.0 if self.momentum is None else self.momentum
+        if self.momentum is None:
+            exponential_average_factor = 0.0
+        else:
+            exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
             assert self.num_batches_tracked is not None
@@ -746,11 +751,10 @@ class SyncBatchNorm(_BatchNorm):
         Decide whether the mini-batch stats should be used for normalization rather than the buffers.
         Mini-batch stats are used in training mode, and in eval mode when buffers are None.
         """
-        bn_training = (
-            True
-            if self.training
-            else self.running_mean is None and self.running_var is None
-        )
+        if self.training:
+            bn_training = True
+        else:
+            bn_training = (self.running_mean is None) and (self.running_var is None)
 
         r"""
         Buffers are only updated if they are to be tracked and we are in training mode. Thus they only need to be

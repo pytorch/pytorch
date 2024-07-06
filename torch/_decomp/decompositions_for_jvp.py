@@ -105,7 +105,10 @@ def trace(self: Tensor) -> Tensor:
 def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
     z = torch.exp(-torch.abs(self))
-    buffer = self.new_zeros((0,)) if self.is_cuda else z
+    if self.is_cuda:
+        buffer = self.new_zeros((0,))
+    else:
+        buffer = z
     return min - torch.log1p(z), buffer
 
 
@@ -159,7 +162,10 @@ def native_layer_norm_backward(
     mean_, rstd_ = recompute_mean_var(input, rstd, inner_dim_indices, keepdim=True)
 
     x_hat = (input - mean_) * rstd_
-    grad_x_hat = grad_out * weight if weight is not None else grad_out
+    if weight is not None:
+        grad_x_hat = grad_out * weight
+    else:
+        grad_x_hat = grad_out
     a = grad_x_hat * N
     b = torch.sum(grad_x_hat, inner_dim_indices, True)
     c1 = torch.mul(grad_x_hat, x_hat)

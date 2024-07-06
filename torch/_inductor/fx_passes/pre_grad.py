@@ -622,7 +622,10 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
 def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
     for node in module.graph.find_nodes(op="call_method", target="permute"):
         if check_permute(node):
-            input_node = node.args[0] if len(node.args) > 0 else node.kwargs["input"]
+            if len(node.args) > 0:
+                input_node = node.args[0]
+            else:
+                input_node = node.kwargs["input"]
             if (
                 input_node.op == "call_function"
                 and input_node.target == torch.nn.functional.linear
@@ -661,18 +664,20 @@ def permute_linear_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
     for node in module.graph.find_nodes(
         op="call_function", target=torch.nn.functional.linear
     ):
-        input_node = node.args[0] if len(node.args) > 0 else node.kwargs["input"]
+        if len(node.args) > 0:
+            input_node = node.args[0]
+        else:
+            input_node = node.kwargs["input"]
         if (
             input_node.op == "call_method"
             and input_node.target == "permute"
             and check_permute(input_node)
         ):
             normalized = NormalizedLinearNode(node)
-            input = (
-                input_node.args[0]
-                if len(input_node.args) > 0
-                else input_node.kwargs["input"]
-            )
+            if len(input_node.args) > 0:
+                input = input_node.args[0]
+            else:
+                input = input_node.kwargs["input"]
             weight = normalized.get_weight()
             bias = normalized.get_bias()
             with module.graph.inserting_before(node):

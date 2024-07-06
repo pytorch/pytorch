@@ -291,7 +291,10 @@ _ddp_optimization_mode = [
 def _get_optimize_ddp_mode():
     m = sys.modules[__name__]
     if isinstance(m.optimize_ddp, bool):
-        mode = "ddp_optimizer" if m.optimize_ddp else "no_optimization"
+        if m.optimize_ddp:
+            mode = "ddp_optimizer"
+        else:
+            mode = "no_optimization"
     elif isinstance(m.optimize_ddp, str):
         mode = m.optimize_ddp
     else:

@@ -834,7 +834,10 @@ class Tracer(TracerBase):
         new_tracer = Tracer.__new__(Tracer)
 
         for k, v in self.__dict__.items():
-            new_obj = copy.copy(v) if k in {"_autowrap_search"} else copy.deepcopy(v, memo)
+            if k in {'_autowrap_search'}:
+                new_obj = copy.copy(v)
+            else:
+                new_obj = copy.deepcopy(v, memo)
 
             new_tracer.__dict__[k] = new_obj
 
@@ -1074,7 +1077,10 @@ def _patch_wrapped_functions(patcher: _Patcher):
     the listed global functions in the `_create_wrapped_func` wrapper.
     """
     for (_, name), frame_dict in _wrapped_fns_to_patch.copy().items():
-        orig_fn = getattr(builtins, name) if name not in frame_dict and hasattr(builtins, name) else frame_dict[name]
+        if name not in frame_dict and hasattr(builtins, name):
+            orig_fn = getattr(builtins, name)
+        else:
+            orig_fn = frame_dict[name]
         patcher.patch(frame_dict, name, _create_wrapped_func(orig_fn))
 
     for cls, name in _wrapped_methods_to_patch:

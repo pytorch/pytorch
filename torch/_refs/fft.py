@@ -445,9 +445,10 @@ def _canonicalize_fft_c2r_shape_and_dim_args(
     (shape, dim) = _canonicalize_fft_shape_and_dim_args(input, s, dim)
     torch._check(len(shape) > 0, lambda: f"{fname} must transform at least one axis")
 
-    last_dim_size = (
-        2 * (input.shape[dim[-1]] - 1) if s is None or s[-1] == -1 else shape[-1]
-    )
+    if s is None or s[-1] == -1:
+        last_dim_size = 2 * (input.shape[dim[-1]] - 1)
+    else:
+        last_dim_size = shape[-1]
 
     torch._check(
         last_dim_size >= 1,

@@ -430,11 +430,10 @@ def adadelta(
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
 
-    func = (
-        _multi_tensor_adadelta
-        if foreach and not torch.jit.is_scripting()
-        else _single_tensor_adadelta
-    )
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_adadelta
+    else:
+        func = _single_tensor_adadelta
 
     func(
         params,

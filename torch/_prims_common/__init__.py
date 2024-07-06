@@ -648,7 +648,10 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
     if idx >= 0 and idx < rank:
         return idx
 
-    _idx = idx + rank if idx < 0 else idx
+    if idx < 0:
+        _idx = idx + rank
+    else:
+        _idx = idx
 
     if _idx < 0 or _idx >= rank:
         # Same error message as in aten/src/ATen/WrapDimUtils.h:49

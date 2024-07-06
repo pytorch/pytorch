@@ -329,7 +329,10 @@ class TransformerWithSharedParams(FSDPTestModel):
         if fsdp_kwargs is None:
             fsdp_kwargs = {}
         if fsdp_init_mode == FSDPInitMode.NO_FSDP:
-            pg = group[0] if isinstance(group, tuple) else group
+            if isinstance(group, tuple):
+                pg = group[0]
+            else:
+                pg = group
             return TransformerWithSharedParams(
                 pg, cuda_init_mode, add_bn, deterministic
             )
@@ -355,7 +358,10 @@ class TransformerWithSharedParams(FSDPTestModel):
             else:
                 fsdp_pg = group
 
-            tformer_pg = group[0] if isinstance(group, tuple) else group
+            if isinstance(group, tuple):
+                tformer_pg = group[0]
+            else:
+                tformer_pg = group
 
             m = TransformerWithSharedParams(
                 tformer_pg, cuda_init_mode, add_bn, deterministic
@@ -1208,11 +1214,10 @@ class FSDPTest(MultiProcessTestCase):
                 # Inputs always cuda regardless of cpu offloading, or model.device
                 input = model.module.get_input(torch.device("cuda"))
                 if use_pure_fp16 or (mixed_precision and not isinstance(model, FSDP)):
-                    input = (
-                        input.half()
-                        if isinstance(input, torch.Tensor)
-                        else tuple(x.half() for x in input)
-                    )
+                    if isinstance(input, torch.Tensor):
+                        input = input.half()
+                    else:
+                        input = tuple(x.half() for x in input)
                 output = model(*input)
                 # Post-forward, if CPU offloading model param should be on CPU.
                 if (
@@ -1315,11 +1320,10 @@ class FSDPTest(MultiProcessTestCase):
             deterministic=True,
             **init_kwargs,
         )
-        ref_model = (
-            DDP(model, device_ids=[rank], output_device=rank)
-            if ref_init_fn is None
-            else ref_init_fn(model)
-        )
+        if ref_init_fn is None:
+            ref_model = DDP(model, device_ids=[rank], output_device=rank)
+        else:
+            ref_model = ref_init_fn(model)
         if use_pure_fp16:
             ref_model = ref_model.half()
         ref_loss = self._train_for_several_steps(

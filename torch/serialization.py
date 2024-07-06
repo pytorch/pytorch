@@ -612,11 +612,10 @@ class _open_zipfile_writer_buffer(_opener):
 
 def _open_zipfile_writer(name_or_buffer):
     container: Type[_opener]
-    container = (
-        _open_zipfile_writer_file
-        if _is_path(name_or_buffer)
-        else _open_zipfile_writer_buffer
-    )
+    if _is_path(name_or_buffer):
+        container = _open_zipfile_writer_file
+    else:
+        container = _open_zipfile_writer_buffer
     return container(name_or_buffer)
 
 
@@ -875,9 +874,10 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             if storage_key not in serialized_storages:
                 serialized_storages[storage_key] = (storage, dtype)
             is_view = storage._cdata != storage._cdata
-            view_metadata = (
-                (str(storage._cdata), offset, storage.nbytes()) if is_view else None
-            )
+            if is_view:
+                view_metadata = (str(storage._cdata), offset, storage.nbytes())
+            else:
+                view_metadata = None
 
             res = (
                 "storage",
@@ -1205,11 +1205,10 @@ def load(
                             "f must be a file path in order to use the mmap argument"
                         )
                     size = os.path.getsize(f)
-                    shared = (
-                        get_default_mmap_options() == MAP_SHARED
-                        if not IS_WINDOWS
-                        else False
-                    )
+                    if not IS_WINDOWS:
+                        shared = get_default_mmap_options() == MAP_SHARED
+                    else:
+                        shared = False
                     overall_storage = torch.UntypedStorage.from_file(
                         os.fspath(f), shared, size
                     )
@@ -1667,9 +1666,10 @@ def _load(
             typename == "storage"
         ), f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
         storage_type, key, location, numel = data
-        dtype = (
-            torch.uint8 if storage_type is torch.UntypedStorage else storage_type.dtype
-        )
+        if storage_type is torch.UntypedStorage:
+            dtype = torch.uint8
+        else:
+            dtype = storage_type.dtype
 
         if key in loaded_storages:
             typed_storage = loaded_storages[key]
