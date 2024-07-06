@@ -702,7 +702,10 @@ def _get_numerical_vJu(
 def _check_jacobians_equal(j1, j2, atol):
     # Check whether the max difference between two Jacobian tensors are within some
     # tolerance `atol`.
-    return all(not (j1_x.numel() != 0 and (j1_x - j2_x).abs().max() > atol) for j1_x, j2_x in zip(j1, j2))
+    return all(
+        not (j1_x.numel() != 0 and (j1_x - j2_x).abs().max() > atol)
+        for j1_x, j2_x in zip(j1, j2)
+    )
 
 
 def _stack_and_check_tensors(
