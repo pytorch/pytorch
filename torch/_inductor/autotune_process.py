@@ -588,10 +588,11 @@ class GPUDeviceBenchmarkRequest(BenchmarkRequest):
             and tensor.device.index is not None
         }
         assert len(device_idx_set) <= 1, f"Can not mix devices {device_idx_set}"
-        if len(device_idx_set) == 1:
-            device_idx = next(iter(device_idx_set))
-        else:
-            device_idx = torch.cuda.current_device()
+        device_idx = (
+            next(iter(device_idx_set))
+            if len(device_idx_set) == 1
+            else torch.cuda.current_device()
+        )
 
         with torch.cuda.device(device_idx):
             out = do_bench_gpu(fn)

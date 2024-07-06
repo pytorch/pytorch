@@ -178,10 +178,7 @@ class TestFlexAttention(InductorTestCase):
         with torch.no_grad():
             # Note, it seems like we really are less accurate than the float32
             # computation, likely due to the online softmax
-            if dtype == torch.float32:
-                fudge_factor = 10.0
-            else:
-                fudge_factor = 1.1
+            fudge_factor = 10.0 if dtype == torch.float32 else 1.1
 
             # Checkout output
             self._check_equal(golden_out, ref_out, compiled_out, fudge_factor, "Out")
@@ -385,10 +382,7 @@ class TestFlexAttention(InductorTestCase):
 
         # Note, it seems like we really are less accurate than the float32
         # computation, likely due to the online softmax
-        if dtype == torch.float32:
-            fudge_factor = 10.0
-        else:
-            fudge_factor = 1.1
+        fudge_factor = 10.0 if dtype == torch.float32 else 1.1
 
         # The first batch.
         compiled_sdpa = torch.compile(sdpa_partial)

@@ -1052,10 +1052,11 @@ def poisson_nll_loss(
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
     _check_reduction_value(reduction)
-    if log_input:
-        loss = torch.exp(input) - target * input
-    else:
-        loss = input - target * torch.log(input + eps)
+    loss = (
+        torch.exp(input) - target * input
+        if log_input
+        else input - target * torch.log(input + eps)
+    )
 
     if full:
         stirling_term = (
@@ -1102,7 +1103,7 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
         weight = weight[0] if weight.ndim == 1 else weight
     else:
         weight = prims.broadcast_in_dim(
-            weight, a.shape, tuple() if weight.ndim == 0 else (0 if a.ndim == 1 else 1,)
+            weight, a.shape, () if weight.ndim == 0 else (0 if a.ndim == 1 else 1,)
         )
 
     return torch.where(a > 0, a, a * weight)

@@ -103,7 +103,7 @@ def make_stubs_from_exported_methods(mod):
 
 def jit_ignored_properties(module):
     user_annotated_ignored_attributes = getattr(
-        module, "__jit_ignored_attributes__", list()
+        module, "__jit_ignored_attributes__", []
     )
 
     def get_properties_names(module):
@@ -206,7 +206,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
     # Get user-annotated ignored attributes.
     user_annotated_ignored_attributes = getattr(
-        nn_module, "__jit_ignored_attributes__", list()
+        nn_module, "__jit_ignored_attributes__", []
     )
     concrete_type_builder.add_ignored_attributes(user_annotated_ignored_attributes)
     ignored_properties = jit_ignored_properties(nn_module)
@@ -574,7 +574,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     hook_stubs, pre_hook_stubs = get_hook_stubs(nn_module)
 
     user_annotated_ignored_attributes = getattr(
-        nn_module, "__jit_ignored_attributes__", list()
+        nn_module, "__jit_ignored_attributes__", []
     )
     ignored_properties = jit_ignored_properties(nn_module)
 
@@ -841,7 +841,7 @@ def infer_methods_to_compile(nn_module):
     """
     check_module_initialized(nn_module)
     user_annotated_ignored_attributes = getattr(
-        nn_module, "__jit_ignored_attributes__", list()
+        nn_module, "__jit_ignored_attributes__", []
     )
     ignored_properties = jit_ignored_properties(nn_module)
 

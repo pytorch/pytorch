@@ -1324,10 +1324,7 @@ else:
                 if dtype.is_floating_point or dtype.is_complex:
                     self.assertTrue(fill_section.isnan().all())
                 else:
-                    if dtype == torch.bool:
-                        max_val = True
-                    else:
-                        max_val = torch.iinfo(dtype).max
+                    max_val = True if dtype == torch.bool else torch.iinfo(dtype).max
                     self.assertTrue(fill_section.eq(max_val).all())
             else:
                 self.assertEqual(old_tensor, new_tensor)
@@ -1354,10 +1351,7 @@ else:
             if dtype.is_floating_point or dtype.is_complex:
                 self.assertTrue(res.isnan().all())
             else:
-                if dtype == torch.bool:
-                    max_val = True
-                else:
-                    max_val = torch.iinfo(dtype).max
+                max_val = True if dtype == torch.bool else torch.iinfo(dtype).max
                 self.assertTrue(res.eq(max_val).all())
 
     # FIXME: update OpInfos to support "nondeterministic samples" and port these tests
@@ -4022,10 +4016,7 @@ else:
             mask_list = (mask, mask.t())
             out_dc = torch.empty(size * size, device=device)[::2]
             for v, m in product(vals_list, mask_list):
-                if m.is_contiguous():
-                    expected = v[:, ::2].clone().reshape((-1, ))
-                else:
-                    expected = v[::2].clone().reshape((-1, ))
+                expected = v[:, ::2].clone().reshape((-1,)) if m.is_contiguous() else v[::2].clone().reshape((-1,))
                 out = torch.masked_select(v, m)
                 self.assertEqual(out, expected, atol=0, rtol=0)
                 torch.masked_select(v, m, out=out_dc)
@@ -4057,10 +4048,7 @@ else:
         # test non-contiguous case
         dst = ((torch.randn(num_dest, num_dest, num_dest) * 10).to(dtype)).permute((2, 0, 1))
         dst2 = dst.contiguous()
-        if dtype.is_complex:
-            mask = dst.abs() > 0
-        else:
-            mask = dst > 0
+        mask = dst.abs() > 0 if dtype.is_complex else dst > 0
         self.assertTrue(not dst.is_contiguous())
         self.assertTrue(dst2.is_contiguous())
         dst.masked_fill_(mask.to(mask_dtype), val)
@@ -5408,10 +5396,7 @@ else:
         # xc is not memory dense, but looks like channels last
         # We don't preserve non-dense striding
         if not TEST_WITH_TORCHINDUCTOR:
-            if memory_format == torch.channels_last:
-                xc = xc[..., ::2, ::2]
-            else:
-                xc = xc[..., ::2, ::2, ::2]
+            xc = xc[..., ::2, ::2] if memory_format == torch.channels_last else xc[..., ::2, ::2, ::2]
 
         clone = transformation_fn(xc, memory_format=torch.preserve_format)
 
@@ -7725,10 +7710,7 @@ class TestTorch(TestCase):
 
                 else:
 
-                    if s.is_cuda:
-                        s_other_device = s.cpu()
-                    else:
-                        s_other_device = s.cuda()
+                    s_other_device = s.cpu() if s.is_cuda else s.cuda()
 
                     with self.assertRaisesRegex(RuntimeError, r"Device of 'wrap_storage' must be"):
                         storage_class(wrap_storage=s_other_device.untyped())
@@ -8140,10 +8122,7 @@ class TestTorch(TestCase):
                 continue  # Fix once fill is enabled for bfloat16
             if t.is_cuda and not torch.cuda.is_available():
                 continue
-            if t == torch.BoolStorage or t == torch.cuda.BoolStorage:
-                obj = t(100).fill_(True)
-            else:
-                obj = t(100).fill_(1)
+            obj = t(100).fill_(True) if t == torch.BoolStorage or t == torch.cuda.BoolStorage else t(100).fill_(1)
             obj.__repr__()
             str(obj)
 
@@ -9585,13 +9564,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertEqual(deterministic, torch.are_deterministic_algorithms_enabled())
             self.assertEqual(warn_only, torch.is_deterministic_algorithms_warn_only_enabled())
 
-            if deterministic:
-                if warn_only:
-                    debug_mode = 1
-                else:
-                    debug_mode = 2
-            else:
-                debug_mode = 0
+            debug_mode = (1 if warn_only else 2) if deterministic else 0
 
             self.assertEqual(debug_mode, torch.get_deterministic_debug_mode())
 
@@ -9717,10 +9690,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                          types.BuiltinFunctionType, types.BuiltinMethodType)
 
         def _test_namespace(ns, *skips):
-            if isinstance(ns, object):
-                ns_name = ns.__class__.__name__
-            else:
-                ns_name = ns.__name__
+            ns_name = ns.__class__.__name__ if isinstance(ns, object) else ns.__name__
             skip_regexes = []
             for r in skips:
                 if isinstance(r, str):

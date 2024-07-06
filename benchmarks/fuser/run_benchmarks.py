@@ -273,14 +273,10 @@ def with_legacy():
 @click.option("--operators", default=None)
 @click.option("--shapes", default=None)
 def run_benchmarks(operators, shapes):
-    if operators is None:
-        operators = OPERATORS
-    else:
-        operators = [globals()[k] for k in operators.split(",")]
-    if shapes is None:
-        shapes = SHAPES
-    else:
-        shapes = [globals()[k] for k in shapes.split(",")]
+    operators = (
+        OPERATORS if operators is None else [globals()[k] for k in operators.split(",")]
+    )
+    shapes = SHAPES if shapes is None else [globals()[k] for k in shapes.split(",")]
 
     print("fuser,device,operator,shape,time")
     results = []

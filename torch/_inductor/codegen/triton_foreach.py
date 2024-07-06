@@ -115,10 +115,7 @@ class ForeachKernel(Kernel):
         upper_bound_x_pid = self.x_block_count + num_x_blocks
         lower_bound_x_pid = self.x_block_count
 
-        if self.x_block_count == 0:
-            cond = "if"
-        else:
-            cond = "elif"
+        cond = "if" if self.x_block_count == 0 else "elif"
 
         x_pid_bounds_check = (
             f"xpid >= {lower_bound_x_pid} and xpid < {upper_bound_x_pid}"

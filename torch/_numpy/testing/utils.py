@@ -694,10 +694,11 @@ def assert_array_compare(
                 # used by assert_allclose (found in np.isclose)
                 # Filter values where the divisor would be zero
                 nonzero = bool_(y != 0)
-                if all(~nonzero):
-                    max_rel_error = array(inf)
-                else:
-                    max_rel_error = max(error[nonzero] / abs(y[nonzero]))
+                max_rel_error = (
+                    array(inf)
+                    if all(~nonzero)
+                    else max(error[nonzero] / abs(y[nonzero]))
+                )
                 remarks.append(
                     "Max relative difference: " + array2string(max_rel_error.item())
                 )
@@ -1167,10 +1168,11 @@ def decorate_methods(cls, decorator, testmatch=None):
         first.
 
     """
-    if testmatch is None:
-        testmatch = re.compile(rf"(?:^|[\\b_\\.{os.sep}-])[Tt]est")
-    else:
-        testmatch = re.compile(testmatch)
+    testmatch = (
+        re.compile(f"(?:^|[\\\\b_\\\\.{os.sep}-])[Tt]est")
+        if testmatch is None
+        else re.compile(testmatch)
+    )
     cls_attr = cls.__dict__
 
     # delayed import to reduce startup time
@@ -1179,10 +1181,11 @@ def decorate_methods(cls, decorator, testmatch=None):
     methods = [_m for _m in cls_attr.values() if isfunction(_m)]
     for function in methods:
         try:
-            if hasattr(function, "compat_func_name"):
-                funcname = function.compat_func_name
-            else:
-                funcname = function.__name__
+            funcname = (
+                function.compat_func_name
+                if hasattr(function, "compat_func_name")
+                else function.__name__
+            )
         except AttributeError:
             # not a function
             continue

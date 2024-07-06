@@ -960,11 +960,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self._test_default_dict_helper(dict)
 
     def test_default_dict_lambda(self):
-        self._test_default_dict_helper(lambda: dict())
+        self._test_default_dict_helper(dict)
 
     def test_default_dict_closure(self):
         def factory():
-            return dict()
+            return {}
 
         self._test_default_dict_helper(factory)
 
@@ -972,7 +972,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         param = torch.nn.Parameter(torch.ones([2, 2]))
 
         def fn(x):
-            dd = collections.defaultdict(lambda: dict())
+            dd = collections.defaultdict(dict)
             dd["a"] = x + 1
             dd[param] = 123
             dd["c"] = x * 2
@@ -1011,7 +1011,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_call_dict1(x):
-        d1 = dict()
+        d1 = {}
         d1["x"] = x + 1
         d2 = collections.OrderedDict()
         d2["x"] = x + 2
@@ -1019,7 +1019,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_call_dict2(x):
-        d1 = dict()
+        d1 = {}
         d1["x"] = x
         d2 = collections.OrderedDict(d1)
         if isinstance(d2, collections.OrderedDict):
@@ -1195,14 +1195,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_set_contains(a, b):
         vals = set(["a", "b", "c"])
-        if "a" in vals:
-            x = a + b
-        else:
-            x = a - b
-        if "d" in vals:
-            y = a + b
-        else:
-            y = a - b
+        x = a + b if "a" in vals else a - b
+        y = a + b if "d" in vals else a - b
         return x, y
 
     def test_set_isdisjoint(self):
@@ -1695,14 +1689,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_flat_param_same_storage_size(x, y):
         import torch.distributed.fsdp._flat_param as flat_param
 
-        if flat_param._same_storage_size(x, 100):
-            x = x + 1
-        else:
-            x = x - 1
-        if flat_param._same_storage_size(y, 123):
-            y = y + 1
-        else:
-            y = y - 1
+        x = x + 1 if flat_param._same_storage_size(x, 100) else x - 1
+        y = y + 1 if flat_param._same_storage_size(y, 123) else y - 1
         return x, y
 
     @parametrize(
@@ -2261,10 +2249,7 @@ class GraphModule(torch.nn.Module):
         # each should produce an identical arg
         self.assertEqual(cnts_2.frame_count, 1)
 
-        if typ is float:
-            dt_extra = np.dtype(np.float16)
-        else:
-            dt_extra = np.dtype(np.int16)
+        dt_extra = np.dtype(np.float16) if typ is float else np.dtype(np.int16)
         info_extra = info_func(dt_extra)
 
         eager_result_dtype = func_dtype(a, dt_extra)

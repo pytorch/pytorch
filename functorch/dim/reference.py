@@ -344,10 +344,11 @@ def _wrap(
         t, levels = self._tensor, llist(self._levels)
         dims = _dims(dim, self._batchtensor.ndim, keepdim, single_dim)
         dim_indices = tuple(levels.index(d) for d in dims)
-        if reduce and not keepdim:
-            new_levels = [l for i, l in enumerate(levels) if i not in dim_indices]
-        else:
-            new_levels = levels
+        new_levels = (
+            [l for i, l in enumerate(levels) if i not in dim_indices]
+            if reduce and not keepdim
+            else levels
+        )
 
         if len(dim_indices) == 1:
             dim_indices = dim_indices[
@@ -425,10 +426,7 @@ def t__getitem__(self, input):
             return _orig_getitem(self, input)
 
     # can further optimize this case
-    if not isinstance(input, tuple):
-        input = [input]
-    else:
-        input = list(input)
+    input = [input] if not isinstance(input, tuple) else list(input)
 
     dims_indexed = 0
     expanding_object = None
@@ -558,10 +556,9 @@ def t__getitem__(self, input):
     for i, levels in to_expand.items():
         flat_inputs[i] = _match_levels(flat_inputs[i], levels, index_levels)
 
-    if requires_getindex:
-        result = _orig_getitem(ptensor_self, flat_inputs)
-    else:
-        result = ptensor_self
+    result = (
+        _orig_getitem(ptensor_self, flat_inputs) if requires_getindex else ptensor_self
+    )
 
     next_positional = -1
     if to_pad > 0:

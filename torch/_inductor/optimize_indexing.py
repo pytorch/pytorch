@@ -15,10 +15,7 @@ def val_expressable_in_32_bits(val):
 
     if isinstance(val, sympy.Expr):
         assert val.is_number
-        if val.is_Integer or val.is_Boolean:
-            val = int(val)
-        else:
-            val = float(val)
+        val = int(val) if val.is_Integer or val.is_Boolean else float(val)
 
     # bound within mantissa
     if isinstance(val, float):

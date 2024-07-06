@@ -20,15 +20,9 @@ class SimpleMegatronLM(nn.Module):
         return self.fc2(self.gelu(self.fc1(inp)))
 
     def get_weights(self):
-        if isinstance(self.fc1.weight, ShardedTensor):
-            weight1 = self.fc1.weight.local_tensor()
-        else:
-            weight1 = self.fc1.weight
+        weight1 = self.fc1.weight.local_tensor() if isinstance(self.fc1.weight, ShardedTensor) else self.fc1.weight
 
-        if isinstance(self.fc2.weight, ShardedTensor):
-            weight2 = self.fc2.weight.local_tensor()
-        else:
-            weight2 = self.fc2.weight
+        weight2 = self.fc2.weight.local_tensor() if isinstance(self.fc2.weight, ShardedTensor) else self.fc2.weight
 
         return (weight1, weight2)
 

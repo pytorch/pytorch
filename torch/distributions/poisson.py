@@ -45,10 +45,7 @@ class Poisson(ExponentialFamily):
 
     def __init__(self, rate, validate_args=None):
         (self.rate,) = broadcast_all(rate)
-        if isinstance(rate, Number):
-            batch_shape = torch.Size()
-        else:
-            batch_shape = self.rate.size()
+        batch_shape = torch.Size() if isinstance(rate, Number) else self.rate.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

@@ -40,8 +40,8 @@ _TransformParam: TypeAlias = Tuple[
 _Range: TypeAlias = Tuple[int, int]
 
 
-PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
-POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
+PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
+POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
 
 pre_grad_pass_names = [
     "normalization_pass",
@@ -262,10 +262,7 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
     dim = get_arg_value(node, 1, "dim")
     if dim is None:
         axis = node.kwargs.get("axis")
-        if axis is not None:
-            dim = axis
-        else:
-            dim = 0
+        dim = axis if axis is not None else 0
     if input is None:
         log.debug("couldn't find unbind args")
         return
@@ -300,10 +297,7 @@ def normalize_cat_default(match: Match, *args, **kwargs):
     cat_dim = get_arg_value(cat_node, 1, "dim")
     if cat_dim is None:
         cat_axis = cat_node.kwargs.get("axis")
-        if cat_axis is not None:
-            cat_dim = cat_axis
-        else:
-            cat_dim = 0
+        cat_dim = cat_axis if cat_axis is not None else 0
     if tensors is None or cat_dim is None:
         log.debug("couldn't find cat args")
         return
@@ -1627,10 +1621,7 @@ def normalize_cat_default_aten(match: Match, *args, **kwargs):
     cat_dim = get_arg_value(cat_node, 1, "dim")
     if cat_dim is None:
         cat_axis = cat_node.kwargs.get("axis")
-        if cat_axis is not None:
-            cat_dim = cat_axis
-        else:
-            cat_dim = 0
+        cat_dim = cat_axis if cat_axis is not None else 0
     if tensors is None or cat_dim is None:
         log.info("couldn't find cat args")
         return

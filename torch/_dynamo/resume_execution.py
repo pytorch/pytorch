@@ -354,7 +354,7 @@ class ContinueExecutionCache:
     @classmethod
     def lookup(cls, code, lineno, *key):
         if code not in cls.cache:
-            cls.cache[code] = dict()
+            cls.cache[code] = {}
         key = tuple(key)
         if key not in cls.cache[code]:
             cls.cache[code][key] = cls.generate(code, lineno, *key)
@@ -422,7 +422,7 @@ class ContinueExecutionCache:
                         "co_qualname"
                     ] = f"{module_name}.{TORCH_DYNAMO_RESUME_IN_PREFIX}_{co_name}_at_{lineno}"
             code_options["co_firstlineno"] = lineno
-            code_options["co_cellvars"] = tuple()
+            code_options["co_cellvars"] = ()
             code_options["co_freevars"] = freevars
             code_options["co_argcount"] = len(args)
             code_options["co_posonlyargcount"] = 0

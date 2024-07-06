@@ -1552,10 +1552,7 @@ class TestClassType(JitTestCase):
                 self.mod2 = ValHolder("2")
 
             def forward(self, cond: bool):
-                if cond:
-                    mod = self.mod1
-                else:
-                    mod = self.mod2
+                mod = self.mod1 if cond else self.mod2
                 return mod.val
 
         with self.assertRaisesRegexWithHighlight(

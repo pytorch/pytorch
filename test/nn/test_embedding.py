@@ -837,10 +837,11 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             )
             offsets = torch.full((2, 0, 0, 6, 6), 0, dtype=torch.int64, device=device)
 
-            if i == 0:
-                error_msg = "input has to be 1D or 2D Tensor"
-            else:
-                error_msg = "input has to be a 1D or 2D Tensor"
+            error_msg = (
+                "input has to be 1D or 2D Tensor"
+                if i == 0
+                else "input has to be a 1D or 2D Tensor"
+            )
             torch._dynamo.disable(self.assertRaisesRegex)(
                 err_type, error_msg, lambda: f(weight, indices, offsets)
             )
@@ -950,10 +951,9 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                         bags.append(embeddings.narrow(0, offset, length).max(0)[0])
         else:
             for index, offset in enumerate(offsets):
-                if index + 1 < len(offsets):
-                    next_offset = offsets[index + 1]
-                else:
-                    next_offset = len(long_input)
+                next_offset = (
+                    offsets[index + 1] if index + 1 < len(offsets) else len(long_input)
+                )
                 length = next_offset - offset
                 if length == 0:
                     bags.append(

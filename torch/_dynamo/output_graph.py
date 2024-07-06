@@ -321,7 +321,7 @@ class OutputGraph:
             int, List[Source]
         ] = collections.defaultdict(list)
         # Stores the full fqn of a param or buffer to the relevant source.
-        self.param_name_to_source: Optional[Dict[str, Source]] = dict()
+        self.param_name_to_source: Optional[Dict[str, Source]] = {}
         self.side_effects = SideEffects()
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
@@ -711,10 +711,7 @@ class OutputGraph:
         assert keys
         obj: Union[torch.nn.Module, Dict[str, torch.nn.Module]] = self.nn_modules
         for k in keys.split("."):
-            if isinstance(obj, dict):
-                obj = obj[k]
-            else:
-                obj = getattr(obj, k)
+            obj = obj[k] if isinstance(obj, dict) else getattr(obj, k)
         return obj
 
     def new_var(self, name="tmp"):
@@ -795,7 +792,7 @@ class OutputGraph:
 
                 vt = wrap_fx_proxy(
                     self.root_tx,
-                    tracer.create_proxy("get_attr", module_key, tuple(), {}),
+                    tracer.create_proxy("get_attr", module_key, (), {}),
                     example_value=target,
                     **options,
                 )
@@ -833,7 +830,7 @@ class OutputGraph:
             def wrap_name(module_key):
                 return SymNodeVariable.create(
                     self,
-                    self.create_proxy("get_attr", module_key, tuple(), {}),
+                    self.create_proxy("get_attr", module_key, (), {}),
                     sym_num=target,
                     **options,
                 )
@@ -1030,7 +1027,7 @@ class OutputGraph:
         restore_vars = []
         val_to_names: Dict[VariableTracker, List[str]] = {}
         if stack_values:
-            val_to_names[stack_values[-1]] = list()
+            val_to_names[stack_values[-1]] = []
         # NB: Typically (i.e., for graph compile from RETURN_VALUE),
         # symbolic_locals will be empty at this point, as prune_dead_locals
         # will clear out all of symbolic_locals because RETURN_VALUE is the
@@ -1053,7 +1050,7 @@ class OutputGraph:
                 # A variable should never be NULL in < 3.12
                 assert not type.__instancecheck__(NullVariable, v)
             if v not in val_to_names:
-                val_to_names[v] = list()
+                val_to_names[v] = []
             val_to_names[v].append(k)
         for v in val_to_names.keys():
             restore_vars.extend(val_to_names[v])
@@ -2071,10 +2068,11 @@ class SubgraphTracer(fx.Tracer):
         if self.input_name_to_proxy:
             prev_name = next(reversed(self.input_name_to_proxy))
             node = self.input_name_to_proxy[prev_name].node
-            if before:
-                ctx = self.graph.inserting_before(node)
-            else:
-                ctx = self.graph.inserting_after(node)
+            ctx = (
+                self.graph.inserting_before(node)
+                if before
+                else self.graph.inserting_after(node)
+            )
         else:
             ctx = self.graph.inserting_before(None)
         with ctx:

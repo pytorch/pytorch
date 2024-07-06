@@ -323,10 +323,7 @@ class TestDeviceAnalysis(JitTestCase):
         def test_fn(x, y, z: bool, a: bool):
             c = x
             while a:
-                if z:
-                    c = x + 3
-                else:
-                    c = y * 2
+                c = x + 3 if z else y * 2
                 a = False
             return c
 

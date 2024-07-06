@@ -96,10 +96,7 @@ def _propagate_module_bias(module: nn.Module, mask: Tensor) -> Optional[Tensor]:
         module.bias = nn.Parameter(cast(Tensor, module._bias)[mask])
 
     # get pruned biases to propagate to subsequent layer
-    if getattr(module, "_bias", None) is not None:
-        pruned_biases = cast(Tensor, module._bias)[~mask]
-    else:
-        pruned_biases = None
+    pruned_biases = cast(Tensor, module._bias)[~mask] if getattr(module, "_bias", None) is not None else None
 
     if hasattr(module, "_bias"):
         delattr(module, "_bias")

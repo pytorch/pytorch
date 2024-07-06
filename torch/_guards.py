@@ -274,7 +274,7 @@ class Guard:
 
     def set_export_info(self, guard_type, guarded_class, code_list, obj_weakref):
         if not self.guard_types:
-            self.guard_types = list()
+            self.guard_types = []
 
         self.guard_types.append(guard_type)
 

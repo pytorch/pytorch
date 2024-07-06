@@ -300,10 +300,11 @@ def _unique(
         if dim is None:
             arg.unique_memo = nnz
 
-    if dim is None:
-        ret = [arg.new_empty((nnz,))]
-    else:
-        ret = [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim + 1 :])]
+    ret = (
+        [arg.new_empty((nnz,))]
+        if dim is None
+        else [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim + 1 :])]
+    )
 
     return_if_dim_and_cpu = dim is not None and arg.fake_device == torch.device("cpu")
     if return_inverse or return_if_dim_and_cpu:

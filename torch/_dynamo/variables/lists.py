@@ -86,10 +86,11 @@ class BaseListVariable(VariableTracker):
     def getitem_const(self, arg: VariableTracker):
         from .tensor import SymNodeVariable
 
-        if isinstance(arg, SymNodeVariable):
-            index = arg.sym_num
-        else:
-            index = arg.as_python_constant()
+        index = (
+            arg.sym_num
+            if isinstance(arg, SymNodeVariable)
+            else arg.as_python_constant()
+        )
 
         if isinstance(index, slice):
             if self.source is not None:
@@ -218,10 +219,11 @@ class RangeVariable(BaseListVariable):
             upper = length
 
         # Compute start
-        if slice.start is None:
-            start = upper if step_is_negative else lower
-        else:
-            start = slice.start
+        start = (
+            (upper if step_is_negative else lower)
+            if slice.start is None
+            else slice.start
+        )
 
         if start < 0:
             start += length
@@ -347,10 +349,11 @@ class CommonListMethodsVariable(BaseListVariable):
         elif name == "insert" and self.mutable_local:
             assert not kwargs
             idx, value = args
-            if isinstance(idx, SymNodeVariable):
-                const_idx = idx.evaluate_expr()
-            else:
-                const_idx = idx.as_python_constant()
+            const_idx = (
+                idx.evaluate_expr()
+                if isinstance(idx, SymNodeVariable)
+                else idx.as_python_constant()
+            )
             tx.output.side_effects.mutation(self)
             self.items.insert(const_idx, value)
             return ConstantVariable.create(None)
@@ -659,10 +662,11 @@ class SizeVariable(TupleVariable):
     def get_item_dyn(self, tx, arg: VariableTracker):
         from .tensor import SymNodeVariable
 
-        if isinstance(arg, SymNodeVariable):
-            index = arg.sym_num
-        else:
-            index = arg.as_python_constant()
+        index = (
+            arg.sym_num
+            if isinstance(arg, SymNodeVariable)
+            else arg.as_python_constant()
+        )
         if isinstance(index, slice):
             return SizeVariable(self.items[index])
         else:

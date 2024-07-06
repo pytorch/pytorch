@@ -2841,13 +2841,14 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 
 @functools.lru_cache(None)
 def get_torch_obj_rule_map():
-    d: Dict[Any, VariableTracker] = dict()
+    d: Dict[Any, VariableTracker] = {}
     for m in torch_name_rule_map:
         for k, v in m.items():  # type: ignore[attr-defined]
-            if ".py#" not in k:
-                obj = load_object(k)
-            else:
-                obj = _module_dir(torch) + k[len("torch/") :]
+            obj = (
+                load_object(k)
+                if ".py#" not in k
+                else _module_dir(torch) + k[len("torch/") :]
+            )
             if obj is not None:
                 if obj in d and d[obj] != v:
                     raise AssertionError(
@@ -2998,7 +2999,7 @@ def _builtin_function_ids() -> Dict[int, str]:
 
 @FunctionIdSet
 def _numpy_function_ids() -> Dict[int, str]:
-    rv = dict()
+    rv = {}
     for mod in NP_SUPPORTED_MODULES:
         rv.update(
             {

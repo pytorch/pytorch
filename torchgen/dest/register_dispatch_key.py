@@ -103,10 +103,11 @@ def gen_empty_impl_names(
 
 
 def gen_create_out_helper(backend_index: BackendIndex) -> list[str]:
-    if backend_index.dispatch_key == DispatchKey.Meta:
-        empty_options = "options.device(at::kMeta)"
-    else:
-        empty_options = "options"
+    empty_options = (
+        "options.device(at::kMeta)"
+        if backend_index.dispatch_key == DispatchKey.Meta
+        else "options"
+    )
 
     empty_impl, empty_strided_impl = gen_empty_impl_names(backend_index)
     if empty_impl is None:
@@ -892,10 +893,11 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             for i, out_arg in enumerate(out_args):
                 assert ConstRefCType(BaseCType(tensorT)) == out_arg.nctype.type
 
-                if k is SchemaKind.out:
-                    expr = f"op.maybe_get_output({i})"
-                else:
-                    expr = f"op.outputs_[{i}]"
+                expr = (
+                    f"op.maybe_get_output({i})"
+                    if k is SchemaKind.out
+                    else f"op.outputs_[{i}]"
+                )
 
                 context.append(
                     Expr(

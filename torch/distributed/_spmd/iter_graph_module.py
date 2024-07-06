@@ -567,20 +567,18 @@ class IterGraph(fx.Graph):
     def node_add_user(self, node: fx.Node, user: Any) -> None:
         for graph in self._all_graphs:
             actual_node = self._lookup_node(node, graph)
-            if isinstance(user, fx.Node):
-                actual_user_node = self._lookup_node(user, graph)
-            else:
-                actual_user_node = user
+            actual_user_node = (
+                self._lookup_node(user, graph) if isinstance(user, fx.Node) else user
+            )
             assert actual_node is not None
             actual_node.users[actual_user_node] = None  # type: ignore[index]
 
     def node_remove_user(self, node: fx.Node, user: Any) -> None:
         for graph in self._all_graphs:
             actual_node = self._lookup_node(node, graph)
-            if isinstance(user, fx.Node):
-                actual_user_node = self._lookup_node(user, graph)
-            else:
-                actual_user_node = user
+            actual_user_node = (
+                self._lookup_node(user, graph) if isinstance(user, fx.Node) else user
+            )
             assert actual_node is not None
             del actual_node.users[actual_user_node]  # type: ignore[arg-type]
 
@@ -668,7 +666,7 @@ class IterGraphModule(nn.Module):
 
         self._iter = 0
         self._max_iters = max_iters
-        self._previous_output: Tuple[Any, ...] = tuple()
+        self._previous_output: Tuple[Any, ...] = ()
         self._num_extra_output = 0
         self._is_frozen = False
         self._enable_inductor = enable_inductor

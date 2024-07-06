@@ -1321,7 +1321,7 @@ def forward(self, getitem, const):
             compiled_ret = torch.compile(
                 control_flow.map, backend=backend, fullgraph=True
             )(inner, x)
-            eager_sin, eager_transpose, eager_view = map_dense(inner, (x,), tuple())
+            eager_sin, eager_transpose, eager_view = map_dense(inner, (x,), ())
 
             map_node = next(
                 node
@@ -1521,7 +1521,7 @@ def forward(self, getitem, const):
             def false_fn():
                 return torch.cos(x)
 
-            return control_flow.cond(x.sum() > 0, true_fn, false_fn, tuple())
+            return control_flow.cond(x.sum() > 0, true_fn, false_fn, ())
 
         graphs = self._check_cond_graph_and_extract(fn, (torch.randn(4, 5),))
         if graphs is not None:
@@ -1564,7 +1564,7 @@ def forward(self, l_x_):
             def false_fn():
                 return torch.ones(3, 4).sin()
 
-            return control_flow.cond(x.sum() > 0, true_fn, false_fn, tuple())
+            return control_flow.cond(x.sum() > 0, true_fn, false_fn, ())
 
         self._check_cond_graph_and_extract(fn, (torch.randn(4, 5),))
         graphs = self._check_cond_graph_and_extract(fn, (torch.randn(4, 5),))
@@ -2170,7 +2170,7 @@ class GraphModule(torch.nn.Module):
 
         model = ToyModel()
         forward_handles = {}
-        activations = dict()
+        activations = {}
 
         def save_activations(mod, inp, out):
             activations[name] = inp

@@ -284,10 +284,11 @@ def _compute_quantities_for_vmap_test(
 
     batched_args, kwarg_values = maybe_clone_inputs()
 
-    if compute_loop_out:
-        loop_out = loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values)
-    else:
-        loop_out = None
+    loop_out = (
+        loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values)
+        if compute_loop_out
+        else None
+    )
 
     # Used for debugging the resulting operations
     # from functorch import make_fx

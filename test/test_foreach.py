@@ -974,10 +974,7 @@ class TestForeach(TestCase):
 
         import math
 
-        if op.name == "_foreach_norm":
-            ords = (1, 2, math.inf)
-        else:
-            ords = (None,)
+        ords = (1, 2, math.inf) if op.name == "_foreach_norm" else (None,)
 
         for ord in ords:
             kwargs = {"ord": ord} if ord else {}

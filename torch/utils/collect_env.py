@@ -76,10 +76,7 @@ def run(command):
                          stderr=subprocess.PIPE, shell=shell)
     raw_output, raw_err = p.communicate()
     rc = p.returncode
-    if get_platform() == 'win32':
-        enc = 'oem'
-    else:
-        enc = locale.getpreferredencoding()
+    enc = 'oem' if get_platform() == 'win32' else locale.getpreferredencoding()
     output = raw_output.decode(enc)
     err = raw_err.decode(enc)
     return rc, output.strip(), err.strip()
@@ -310,10 +307,7 @@ def get_cpu_info(run_lambda):
     elif get_platform() == 'darwin':
         rc, out, err = run_lambda("sysctl -n machdep.cpu.brand_string")
     cpu_info = 'None'
-    if rc == 0:
-        cpu_info = out
-    else:
-        cpu_info = err
+    cpu_info = out if rc == 0 else err
     return cpu_info
 
 

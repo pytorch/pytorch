@@ -52,10 +52,11 @@ class Uniform(Distribution):
     def __init__(self, low, high, validate_args=None):
         self.low, self.high = broadcast_all(low, high)
 
-        if isinstance(low, Number) and isinstance(high, Number):
-            batch_shape = torch.Size()
-        else:
-            batch_shape = self.low.size()
+        batch_shape = (
+            torch.Size()
+            if isinstance(low, Number) and isinstance(high, Number)
+            else self.low.size()
+        )
         super().__init__(batch_shape, validate_args=validate_args)
 
         if self._validate_args and not torch.lt(self.low, self.high).all():

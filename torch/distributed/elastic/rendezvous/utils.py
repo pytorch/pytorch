@@ -44,10 +44,7 @@ def _parse_rendezvous_config(config_str: str) -> Dict[str, str]:
             )
 
         value: Optional[str]
-        if values:
-            value = values[0].strip()
-        else:
-            value = None
+        value = values[0].strip() if values else None
         if not value:
             raise ValueError(
                 f"The rendezvous configuration option '{key}' must have a value specified."

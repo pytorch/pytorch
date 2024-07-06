@@ -284,10 +284,7 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertTrue(eq_result)
 
         # tensors are different on some shards
-        if self.rank == 0:
-            input_tensor_2 = torch.ones(4, 4)
-        else:
-            input_tensor_2 = torch.randn(4, 4)
+        input_tensor_2 = torch.ones(4, 4) if self.rank == 0 else torch.randn(4, 4)
         dist_tensor_2 = DTensor.from_local(input_tensor_2, device_mesh, shard_spec)
 
         eq_result = dist_tensor_1.equal(dist_tensor_2)

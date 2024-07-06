@@ -88,10 +88,11 @@ def fuse_conv_bn_weights(
         bn_b = torch.zeros_like(bn_rm)
     bn_var_rsqrt = torch.rsqrt(bn_rv + bn_eps)
 
-    if transpose:
-        shape = [1, -1] + [1] * (len(conv_w.shape) - 2)
-    else:
-        shape = [-1, 1] + [1] * (len(conv_w.shape) - 2)
+    shape = (
+        [1, -1] + [1] * (len(conv_w.shape) - 2)
+        if transpose
+        else [-1, 1] + [1] * (len(conv_w.shape) - 2)
+    )
 
     fused_conv_w = (conv_w * (bn_w * bn_var_rsqrt).reshape(shape)).to(
         dtype=conv_weight_dtype

@@ -27,10 +27,7 @@ class Linear(torch.nn.Module):
         self.in_features = in_features
         self.out_features = out_features
 
-        if bias:
-            bias = torch.zeros(self.out_features, dtype=torch.float)
-        else:
-            bias = None
+        bias = torch.zeros(self.out_features, dtype=torch.float) if bias else None
 
         qweight = torch._empty_affine_quantized([out_features, in_features],
                                                 scale=1, zero_point=0, dtype=torch.qint8)

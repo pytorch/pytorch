@@ -1644,10 +1644,11 @@ class CyclicLR(LRScheduler):
 
         cycle = math.floor(1 + self.last_epoch / self.total_size)
         x = 1.0 + self.last_epoch / self.total_size - cycle
-        if x <= self.step_ratio:
-            scale_factor = x / self.step_ratio
-        else:
-            scale_factor = (x - 1) / (self.step_ratio - 1)
+        scale_factor = (
+            x / self.step_ratio
+            if x <= self.step_ratio
+            else (x - 1) / (self.step_ratio - 1)
+        )
 
         lrs = []
         for base_lr, max_lr in zip(self.base_lrs, self.max_lrs):

@@ -84,10 +84,7 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
         # create new fsdp group for resharding
         fsdp_0 = dist.new_group(ranks=group1)
         fsdp_1 = dist.new_group(ranks=group2)
-        if dist.get_rank() % 2 == 0:
-            my_fsdp = fsdp_0
-        else:
-            my_fsdp = fsdp_1
+        my_fsdp = fsdp_0 if dist.get_rank() % 2 == 0 else fsdp_1
 
         return my_fsdp
 

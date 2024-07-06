@@ -254,7 +254,7 @@ class TestList(JitTestCase):
         self.checkScript(foo, ())
 
         def foo2():
-            x: List[int] = list()
+            x: List[int] = []
             x.append(1)
             return (x,)
 
@@ -330,7 +330,7 @@ class TestList(JitTestCase):
 
     def test_dict_keyword_is_correctly_typed(self):
         def fn():
-            x: Dict[str, int] = dict()
+            x: Dict[str, int] = {}
             x["foo"] = 1
             return x
 
@@ -544,10 +544,7 @@ class TestList(JitTestCase):
         def test_list_equality_as_cond():
             a = [1, 2, 3]
             b = [3]
-            if a == b:
-                c = 1
-            else:
-                c = 2
+            c = 1 if a == b else 2
             return c
 
         self.checkScript(test_list_equality_as_cond, (), optimize=True)
@@ -2025,7 +2022,7 @@ class TestDict(JitTestCase):
         test_func(no_args, ())
 
         def test_dict_constructor():
-            a = dict()
+            a = {}
             a["one"] = torch.tensor(1)
             return a, dict([(1, 2), (2, 3), (1, 4)])  # noqa: C406
 
@@ -2041,7 +2038,7 @@ class TestDict(JitTestCase):
         test_func(test_dict_initializer_list, ())
 
         def test_dict_error():
-            a = dict()
+            a = {}
             a[1] = 2
             return a
 
