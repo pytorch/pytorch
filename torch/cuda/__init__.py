@@ -418,7 +418,7 @@ class _DeviceGuard:
     def __enter__(self):
         self.prev_idx = torch.cuda._exchange_device(self.idx)
 
-    def __exit__(self, type: Any, value: Any, traceback: Any):
+    def __exit__(self, *args: object) -> None:
         self.idx = torch.cuda._maybe_exchange_device(self.prev_idx)
         return False
 
@@ -438,7 +438,7 @@ class device:
     def __enter__(self):
         self.prev_idx = torch.cuda._exchange_device(self.idx)
 
-    def __exit__(self, type: Any, value: Any, traceback: Any):
+    def __exit__(self, *args: object) -> None:
         self.idx = torch.cuda._maybe_exchange_device(self.prev_idx)
         return False
 
@@ -576,7 +576,7 @@ class StreamContext:
                 self.dst_prev_stream = torch.cuda.current_stream(cur_stream.device)
         torch.cuda.set_stream(cur_stream)
 
-    def __exit__(self, type: Any, value: Any, traceback: Any):
+    def __exit__(self, *args: object) -> None:
         # Local cur_stream variable for type refinement
         cur_stream = self.stream
         # If stream is None or no CUDA device available, return

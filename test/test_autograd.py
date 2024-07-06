@@ -5055,7 +5055,7 @@ Done""",
                 sys.stderr = self.stderr_new
                 return self
 
-            def __exit__(self, *args):
+            def __exit__(self, *args: object) -> None:
                 self.captured = self.stderr_new.getvalue()
                 sys.stderr = self.stderr_orig
 
@@ -7723,10 +7723,7 @@ for shape in [(1,), ()]:
         class IdOneOutput(Function):
             @staticmethod
             def forward(ctx, a, b, make_view):
-                if make_view:
-                    a = a.narrow(0, 0, 2)
-                else:
-                    a = a.clone()
+                a = a.narrow(0, 0, 2) if make_view else a.clone()
                 return a
 
             @staticmethod
@@ -7737,10 +7734,7 @@ for shape in [(1,), ()]:
         class IdTwoOutput(Function):
             @staticmethod
             def forward(ctx, a, b, make_view):
-                if make_view:
-                    a = a.narrow(0, 0, 2)
-                else:
-                    a = a.clone()
+                a = a.narrow(0, 0, 2) if make_view else a.clone()
                 return a, a + b
 
             @staticmethod
@@ -7756,10 +7750,7 @@ for shape in [(1,), ()]:
             @staticmethod
             def forward(ctx, a, make_view):
                 ctx.save_for_backward(a)
-                if make_view:
-                    a = a.narrow(0, 0, 2)
-                else:
-                    a = a.clone()
+                a = a.narrow(0, 0, 2) if make_view else a.clone()
                 b = a.clone()
                 return b.select(0, 0)
 
@@ -8962,10 +8953,7 @@ for shape in [(1,), ()]:
 
         def scope():
             a = torch.tensor(1.0, requires_grad=True)
-            if use_custom_function:
-                b = Function.apply(a)
-            else:
-                b = a.clone()
+            b = Function.apply(a) if use_custom_function else a.clone()
             grad_fn_b = b.grad_fn
             obj = Test()
 
@@ -9885,10 +9873,11 @@ get_out().sum().backward()
                     # forward view_func
                     new_inp = inp.clone()
                     _assert_match_metadata(new_inp, inp)
-                    if use_unsafe_view_func:
-                        new_out = out._view_func_unsafe(new_inp)
-                    else:
-                        new_out = out._view_func(new_inp)
+                    new_out = (
+                        out._view_func_unsafe(new_inp)
+                        if use_unsafe_view_func
+                        else out._view_func(new_inp)
+                    )
                     _assert_match_metadata(new_out, out)
                     self.assertEqual(new_out, out)
 
@@ -12160,16 +12149,18 @@ class TestAutogradInferenceMode(TestCase):
 
         for mode, use_kwarg in product((True, False, None), (True, False)):
             if mode is None:
-                if use_kwarg:
-                    decorated = torch.inference_mode(mode=func)
-                else:
-                    decorated = torch.inference_mode(func)
+                decorated = (
+                    torch.inference_mode(mode=func)
+                    if use_kwarg
+                    else torch.inference_mode(func)
+                )
                 mode = True
             else:
-                if use_kwarg:
-                    decorated = torch.inference_mode(mode=mode)(func)
-                else:
-                    decorated = torch.inference_mode(mode)(func)
+                decorated = (
+                    torch.inference_mode(mode=mode)(func)
+                    if use_kwarg
+                    else torch.inference_mode(mode)(func)
+                )
 
             for requires_grad in (True, False):
                 c = torch.ones(1, 2, 3, requires_grad=requires_grad)

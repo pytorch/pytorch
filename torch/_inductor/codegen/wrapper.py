@@ -502,7 +502,7 @@ class WrapperCodeGen(CodeGen):
         self.freed: Set[BufferName] = set()
 
         # maps from reusing buffer to reused buffer
-        self.reuses: Dict[BufferName, BufferName] = dict()
+        self.reuses: Dict[BufferName, BufferName] = {}
 
         self.write_get_raw_stream = functools.lru_cache(None)(  # type: ignore[assignment]
             self.write_get_raw_stream
@@ -890,7 +890,7 @@ class WrapperCodeGen(CodeGen):
             del async_compile
         """
         )
-        scope = dict()  # type: ignore[var-annotated]
+        scope = {}  # type: ignore[var-annotated]
         tuning_code = (
             self.kernel_autotune_defs.getvalue() + self.kernel_autotune_calls.getvalue()
         )

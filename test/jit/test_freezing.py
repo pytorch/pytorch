@@ -1507,10 +1507,7 @@ class TestFreezing(JitTestCase):
                 self.mod2 = ValHolder(2)
 
             def forward(self, cond: bool):
-                if cond:
-                    mod = self.mod1
-                else:
-                    mod = self.mod2
+                mod = self.mod1 if cond else self.mod2
                 return mod.val
 
         mod = Mod()
@@ -2096,10 +2093,11 @@ class TestFrozenOptimizations(JitTestCase):
 
             inp = torch.rand(inps)
 
-            if tracing:
-                scripted_mod = torch.jit.trace(mod_eager, (inp))
-            else:
-                scripted_mod = torch.jit.script(mod_eager)
+            scripted_mod = (
+                torch.jit.trace(mod_eager, inp)
+                if tracing
+                else torch.jit.script(mod_eager)
+            )
 
             self.run_pass("inline", scripted_mod.graph)
             self.run_pass("peephole", scripted_mod.graph)
@@ -2237,10 +2235,11 @@ class TestFrozenOptimizations(JitTestCase):
 
             inp = torch.rand(inps)
 
-            if tracing:
-                scripted_mod = torch.jit.trace(mod_eager, (inp,))
-            else:
-                scripted_mod = torch.jit.script(mod_eager)
+            scripted_mod = (
+                torch.jit.trace(mod_eager, (inp,))
+                if tracing
+                else torch.jit.script(mod_eager)
+            )
 
             self.run_pass("inline", scripted_mod.graph)
             op_str = "aten::" + op.__name__
@@ -2381,10 +2380,11 @@ class TestFrozenOptimizations(JitTestCase):
 
             inp = torch.rand(inps)
 
-            if tracing:
-                scripted_mod = torch.jit.trace(mod_eager, (inp))
-            else:
-                scripted_mod = torch.jit.script(mod_eager)
+            scripted_mod = (
+                torch.jit.trace(mod_eager, inp)
+                if tracing
+                else torch.jit.script(mod_eager)
+            )
 
             self.run_pass("inline", scripted_mod.graph)
             self.run_pass("peephole", scripted_mod.graph)
@@ -2449,10 +2449,11 @@ class TestFrozenOptimizations(JitTestCase):
 
             inp = torch.rand(input_shape)
 
-            if tracing:
-                scripted_mod = torch.jit.trace(mod_eager, (inp))
-            else:
-                scripted_mod = torch.jit.script(mod_eager)
+            scripted_mod = (
+                torch.jit.trace(mod_eager, inp)
+                if tracing
+                else torch.jit.script(mod_eager)
+            )
 
             self.run_pass("inline", scripted_mod.graph)
             self.run_pass("peephole", scripted_mod.graph)
@@ -2519,10 +2520,11 @@ class TestFrozenOptimizations(JitTestCase):
 
             x = torch.rand(inps, dtype=torch.half).cuda()
 
-            if tracing:
-                scripted_mod = torch.jit.trace(mod_eager, (x))
-            else:
-                scripted_mod = torch.jit.script(mod_eager)
+            scripted_mod = (
+                torch.jit.trace(mod_eager, x)
+                if tracing
+                else torch.jit.script(mod_eager)
+            )
             scripted_mod = torch.jit.freeze(scripted_mod)
             FileCheck().check("linear").check_not("aten::batch_norm").run(
                 scripted_mod.graph
@@ -2769,10 +2771,9 @@ class TestFrozenOptimizations(JitTestCase):
                     inps.append(inps[-1])
 
                 inp = torch.rand(inps)
-                if trace:
-                    scripted_mod = torch.jit.script(mod)
-                else:
-                    scripted_mod = torch.jit.trace(mod, (inp,))
+                scripted_mod = (
+                    torch.jit.script(mod) if trace else torch.jit.trace(mod, (inp,))
+                )
 
                 self.run_pass("inline", scripted_mod.graph)
 
@@ -3006,10 +3007,11 @@ class TestFrozenOptimizations(JitTestCase):
                     inps.append(inps[-1])
                 inp = torch.rand(inps).cuda()
 
-                if tracing:
-                    scripted_mod = torch.jit.trace(mod_eager, (inp))
-                else:
-                    scripted_mod = torch.jit.script(mod_eager)
+                scripted_mod = (
+                    torch.jit.trace(mod_eager, inp)
+                    if tracing
+                    else torch.jit.script(mod_eager)
+                )
 
                 frozen_mod = torch.jit.optimize_for_inference(scripted_mod)
                 if TEST_WITH_ROCM:

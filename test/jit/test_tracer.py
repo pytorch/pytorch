@@ -2199,10 +2199,7 @@ class TestTracer(JitTestCase):
                 self.norm = nn.GroupNorm(num_groups=32, num_channels=32)
 
             def forward(self, x, y):
-                if y is None:
-                    y = x
-                else:
-                    y = self.norm(y)
+                y = x if y is None else self.norm(y)
                 y = y * 2
                 return y
 

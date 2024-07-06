@@ -1356,10 +1356,7 @@ class X86InductorQuantizer(Quantizer):
 
             def is_all_inputs_connected_to_quantized_op(input_nodes):
                 # Ensure all the inputs connect to fusion pattern or quantized node
-                for input_node in input_nodes:
-                    if not _is_quantized_op_pt2e(input_node):
-                        return False
-                return True
+                return all(_is_quantized_op_pt2e(input_node) for input_node in input_nodes)
 
             if _skip_annotate([node], filter_fn):
                 return

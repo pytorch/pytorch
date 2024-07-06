@@ -126,10 +126,7 @@ class SchedulerBuffer:
         assert self.node is not None
         if isinstance(self.node.layout, ir.NoneLayout):
             return False
-        for use in self.users:
-            if isinstance(use.node, OutputNode):
-                return False
-        return True
+        return all(not isinstance(use.node, OutputNode) for use in self.users)
 
     def set_users(self, users: List[NodeUser]) -> None:
         # deduplicate
@@ -1587,7 +1584,7 @@ class Scheduler:
                 items: Optional[List[T]] = None,
                 membership: Optional[Set[T]] = None,
             ) -> None:
-                self.items = items or list()
+                self.items = items or []
                 self.membership = membership or set()
 
             def append(self, node_user: T) -> None:

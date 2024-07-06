@@ -1163,10 +1163,10 @@ class KernelArgs:
         return odict[name]
 
     def __init__(self, sizevars=None):
-        self.input_buffers = dict()
-        self.output_buffers = dict()
-        self.inplace_buffers = dict()
-        self.sizevars = sizevars or dict()
+        self.input_buffers = {}
+        self.output_buffers = {}
+        self.inplace_buffers = {}
+        self.sizevars = sizevars or {}
         self.workspace_arg = None
 
     def __repr__(self):
@@ -1506,10 +1506,11 @@ class CSE:
                     buffer.splice(expr)
                     buffer.writeline(self.suffix)
                 else:
-                    if assignment:
-                        line = f"{self.prefix}{var} = {expr}{self.suffix}"
-                    else:
-                        line = f"{expr}{self.suffix}"
+                    line = (
+                        f"{self.prefix}{var} = {expr}{self.suffix}"
+                        if assignment
+                        else f"{expr}{self.suffix}"
+                    )
                     buffer.writeline(line)
         else:
             var.bounds = var.bounds.tighten(bounds)
@@ -1533,8 +1534,8 @@ class CodeGen:
         self.exit_stack.__enter__()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
+    def __exit__(self, *args: object) -> None:
+        self.exit_stack.__exit__(*args)
 
 
 class ScopedDict:
@@ -1594,7 +1595,7 @@ class Kernel(CodeGen):
         # key: the buffer to write
         # value: the buffer to read and whose memory can be reused for
         #   the buffer specified by key
-        self.inplace_update_buffers = dict()
+        self.inplace_update_buffers = {}
         # Set minimum number of elements processed per thread.
         self.min_elem_per_thread = 1
         self.kernel_name = None
@@ -1974,14 +1975,14 @@ class Kernel(CodeGen):
         self.exit_stack.enter_context(V.set_kernel_handler(self))
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: object) -> None:
         """
         Note that V.graph.scheduler can be None when codegening triton template
         kernels.
         """
         if V.graph.scheduler:
             V.graph.scheduler.remove_kernel_local_buffers()
-        super().__exit__(exc_type, exc_val, exc_tb)
+        super().__exit__(*args)
 
     def rename_indexing(self, index) -> sympy.Expr:
         # adds the necessary kernel args for index expressions

@@ -6757,10 +6757,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                         self.relu_or_id = torch.nn.Identity()
 
                 def forward(self, x):
-                    if self.use_bias:
-                        x = F.linear(x, self.w, self.b)
-                    else:
-                        x = F.linear(x, self.w)
+                    x = F.linear(x, self.w, self.b) if self.use_bias else F.linear(x, self.w)
                     x = self.relu_or_id(x)
                     return x
 
@@ -6852,10 +6849,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                         self.relu = torch.nn.Identity()
 
                 def forward(self, x):
-                    if self.use_bias:
-                        x = F.linear(x, self.w, self.b)
-                    else:
-                        x = F.linear(x, self.w)
+                    x = F.linear(x, self.w, self.b) if self.use_bias else F.linear(x, self.w)
                     x = self.relu(x)
                     return x
 
@@ -6907,10 +6901,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                     self.relu = torch.nn.Identity()
 
             def forward(self, x):
-                if self.use_bias:
-                    x = F.linear(x, self.w, self.b)
-                else:
-                    x = F.linear(x, self.w)
+                x = F.linear(x, self.w, self.b) if self.use_bias else F.linear(x, self.w)
                 x = self.relu(x)
                 return x
 
@@ -9080,10 +9071,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 return x + bias
 
         for backend in ["fbgemm", "qnnpack"]:
-            if backend == "fbgemm":
-                backend_config = get_fbgemm_backend_config()
-            else:
-                backend_config = get_qnnpack_backend_config()
+            backend_config = get_fbgemm_backend_config() if backend == 'fbgemm' else get_qnnpack_backend_config()
             qconfig_mapping = get_default_qconfig_mapping(backend)
             model = MyModel()
             m = prepare_fx(
@@ -9119,10 +9107,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 return x + bias
 
         for backend in ["fbgemm", "qnnpack"]:
-            if backend == "fbgemm":
-                backend_config = get_fbgemm_backend_config()
-            else:
-                backend_config = get_qnnpack_backend_config()
+            backend_config = get_fbgemm_backend_config() if backend == 'fbgemm' else get_qnnpack_backend_config()
             qconfig_mapping = get_default_qconfig_mapping(backend)
             model = MyModel()
             m = prepare_fx(
@@ -9160,10 +9145,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 return x + bias
 
         for backend in ["fbgemm", "qnnpack"]:
-            if backend == "fbgemm":
-                backend_config = get_fbgemm_backend_config()
-            else:
-                backend_config = get_qnnpack_backend_config()
+            backend_config = get_fbgemm_backend_config() if backend == 'fbgemm' else get_qnnpack_backend_config()
             qconfig_mapping = get_default_qconfig_mapping(backend)
             model = MyModel()
             m = prepare_fx(
@@ -9295,10 +9277,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
         output_value = torch.randint(0, 1, (1,))
 
         # print('quantizing:', name, ' mode:', mode)
-        if name == 'inception_v3':
-            input_value = input_tensor_inception
-        else:
-            input_value = input_tensor
+        input_value = input_tensor_inception if name == 'inception_v3' else input_tensor
 
         qconfig = default_qconfig if mode == 'static' else default_qat_qconfig
         qconfig_dict = {'': qconfig}

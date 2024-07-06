@@ -335,10 +335,11 @@ class TestSaveLoadForOpVersion(JitTestCase):
                 m_result = self._try_fn(m, a, b)
                 fn_result = None
                 # Reverses argument order for torch.div
-                if fn is torch.div:
-                    fn_result = self._try_fn(torch.div, b, a)
-                else:
-                    fn_result = self._try_fn(fn, a, b)
+                fn_result = (
+                    self._try_fn(torch.div, b, a)
+                    if fn is torch.div
+                    else self._try_fn(fn, a, b)
+                )
 
                 if isinstance(m_result, Exception):
                     self.assertTrue(isinstance(fn_result, Exception))

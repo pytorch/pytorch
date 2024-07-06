@@ -991,10 +991,11 @@ class SIMDScheduling(BaseScheduling):
             if config.triton.tiling_prevents_pointwise_fusion:
                 cond = True
                 if len(tiling1) > 2:
-                    if len(tiling2) > 2:
-                        cond = tiling1 == tiling2 == tiling3
-                    else:
-                        cond = tiling1 == tiling3
+                    cond = (
+                        tiling1 == tiling2 == tiling3
+                        if len(tiling2) > 2
+                        else tiling1 == tiling3
+                    )
                 elif len(tiling2) > 2:
                     cond = tiling2 == tiling3
                 if not cond:
@@ -1263,10 +1264,11 @@ class SIMDScheduling(BaseScheduling):
         )
         if len(reductions) > 0:
             hints = [self.reduction_hint(n) for n in reductions]
-            if hints.count(hints[0]) == len(hints):
-                reduction_hint_val = hints[0]
-            else:
-                reduction_hint_val = ReductionHint.DEFAULT
+            reduction_hint_val = (
+                hints[0]
+                if hints.count(hints[0]) == len(hints)
+                else ReductionHint.DEFAULT
+            )
 
             if (
                 reduction_hint_val == ReductionHint.INNER

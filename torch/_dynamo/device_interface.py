@@ -138,7 +138,7 @@ class DeviceGuard:
         if self.idx is not None:
             self.prev_idx = self.device_interface.exchange_device(self.idx)
 
-    def __exit__(self, type: Any, value: Any, traceback: Any):
+    def __exit__(self, *args: object) -> None:
         if self.idx is not None:
             self.idx = self.device_interface.maybe_exchange_device(self.prev_idx)
         return False

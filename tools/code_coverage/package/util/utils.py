@@ -79,10 +79,7 @@ def replace_extension(filename: str, ext: str) -> str:
 
 # a file is related if it's in one of the test_list folder
 def related_to_test_list(file_name: str, test_list: TestList) -> bool:
-    for test in test_list:
-        if test.name in file_name:
-            return True
-    return False
+    return any(test.name in file_name for test in test_list)
 
 
 def get_raw_profiles_folder() -> str:

@@ -438,10 +438,7 @@ elif opts.fused:
     else:
         filename = "embedding_lookup_fused_8bit_rowwise_avx2.cc"
 else:
-    if opts.use_offsets:
-        filename = "embedding_lookup_idx_avx2.cc"
-    else:
-        filename = "embedding_lookup_avx2.cc"
+    filename = "embedding_lookup_idx_avx2.cc" if opts.use_offsets else "embedding_lookup_avx2.cc"
 
 options = [
     ["int32_t", "int", "float", "float", "float", "float"],

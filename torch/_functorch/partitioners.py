@@ -115,10 +115,7 @@ def must_recompute(node: fx.Node) -> bool:
 
 def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
     found = False
-    for node in fx_g.graph.nodes:
-        if must_recompute(node):
-            return True
-    return False
+    return any(must_recompute(node) for node in fx_g.graph.nodes)
 
 
 def has_recomputable_rng_ops(fx_g: fx.GraphModule) -> bool:
@@ -645,7 +642,7 @@ def functionalize_rng_ops(
     joint_graph_rng_ops = get_rng_ops(joint_module)
     fw_graph_rng_ops = get_rng_ops(fw_module)
     bw_graph_rng_ops = get_rng_ops(bw_module)
-    recomputable_rng_ops_map = dict()
+    recomputable_rng_ops_map = {}
     for node in joint_module.graph.nodes:
         if (
             must_recompute(node)
@@ -1510,7 +1507,7 @@ def choose_saved_values_set(
         return runtime_optimized_saved_values
 
     def estimate_activations_size(saved_values: List[fx.Node]) -> float:
-        return sum([_size_of(i) for i in saved_values]) / 1e9
+        return sum(_size_of(i) for i in saved_values) / 1e9
 
     min_act_size = estimate_activations_size(node_info.inputs)
     max_act_size = estimate_activations_size(runtime_optimized_saved_values)

@@ -24,8 +24,8 @@ if __name__ == "__main__":
 
     # Calculate mean and standard deviation for a subset of metrics
     metrics = ["warmup_latency", "average_latency", "throughput", "gpu_util"]
-    means = dict()
-    stds = dict()
+    means = {}
+    stds = {}
 
     for metric in metrics:
         means[metric] = df[metric].mean()

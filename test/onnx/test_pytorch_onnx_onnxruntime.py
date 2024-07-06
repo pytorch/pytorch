@@ -4907,10 +4907,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             inputs.append(h0)
             if packed_sequence != 0:
                 inputs.append(torch.IntTensor(seq_lengths))
-            if len(inputs) == 1:
-                input = inputs[0]
-            else:
-                input = tuple(inputs)
+            input = inputs[0] if len(inputs) == 1 else tuple(inputs)
             return input
 
         layers = [1, 3, 1, 3, 1, 3]
@@ -8338,10 +8335,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         class IfFoldModel(torch.nn.Module):
             def forward(self, y):
-                if y.numel() > 1:
-                    y = y + 4
-                else:
-                    y = y + 2
+                y = y + 4 if y.numel() > 1 else y + 2
                 return y
 
         x = torch.ones((3, 4), dtype=torch.int)
@@ -8361,10 +8355,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         class IfFoldModel(torch.nn.Module):
             def forward(self, y):
-                if y.dim() >= 1:
-                    y = y + 4
-                else:
-                    y = y - 1
+                y = y + 4 if y.dim() >= 1 else y - 1
                 return y
 
         x = torch.ones((3, 4), dtype=torch.int)
@@ -8372,10 +8363,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         class IfFoldModel(torch.nn.Module):
             def forward(self, y):
-                if y.dim() <= 1:
-                    y = y + 4
-                else:
-                    y = y + 2
+                y = y + 4 if y.dim() <= 1 else y + 2
                 return y
 
         x = torch.ones((3, 4), dtype=torch.int)
@@ -8419,10 +8407,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         class IfFoldModel(torch.nn.Module):
             def forward(self, x, y):
-                if x.numel() == y.numel():
-                    y = x + y
-                else:
-                    y = y - x
+                y = x + y if x.numel() == y.numel() else y - x
                 return y
 
         x = torch.ones((3, 4), dtype=torch.int)
@@ -8431,10 +8416,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         class IfFoldModel(torch.nn.Module):
             def forward(self, x, y):
-                if x.numel() != y.numel():
-                    y = x + y
-                else:
-                    y = y - x
+                y = x + y if x.numel() != y.numel() else y - x
                 return y
 
         x = torch.ones((3, 4), dtype=torch.int)
@@ -9964,10 +9946,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class IfModel(torch.nn.Module):
             def forward(self, x, y, cond):
                 res = []
-                if cond:
-                    res = res + [x]
-                else:
-                    res = res + [y]
+                res = res + [x] if cond else res + [y]
                 return res
 
         x = torch.randn(2, 3)
@@ -9980,10 +9959,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class IfModel(torch.nn.Module):
             def forward(self, x, y, cond):
                 bs, seq = y.shape[:2]
-                if cond:
-                    res = x.view(bs, seq, -1)
-                else:
-                    res = y
+                res = x.view(bs, seq, -1) if cond else y
                 return res.transpose(1, 2)
 
         x = torch.randn(2, 16, 2, 2)
@@ -10192,10 +10168,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             if packed_sequence != 0:
                 inputs.append(torch.IntTensor(seq_lengths))
                 input_names.append("seq_lengths")
-            if len(inputs) == 1:
-                input = inputs[0]
-            else:
-                input = tuple(inputs)
+            input = inputs[0] if len(inputs) == 1 else tuple(inputs)
             return input, input_names
 
         input, input_names = make_input(RNN_BATCH_SIZE)
@@ -10268,10 +10241,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             if packed_sequence != 0:
                 inputs.append(torch.IntTensor(seq_lengths))
                 input_names.append("seq_lengths")
-            if len(inputs) == 1:
-                input = inputs[0]
-            else:
-                input = tuple(inputs)
+            input = inputs[0] if len(inputs) == 1 else tuple(inputs)
             return input, input_names
 
         input, input_names = make_input(RNN_BATCH_SIZE)
@@ -10418,10 +10388,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             if packed_sequence != 0:
                 inputs.append(torch.IntTensor(seq_lengths))
                 input_names.append("seq_lengths")
-            if len(inputs) == 1:
-                input = inputs[0]
-            else:
-                input = tuple(inputs)
+            input = inputs[0] if len(inputs) == 1 else tuple(inputs)
             return input, input_names
 
         input, input_names = make_input(RNN_BATCH_SIZE)
@@ -12598,7 +12565,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         model_export = M()
         model_onnx = io.BytesIO()
-        test_inputs = tuple()
+        test_inputs = ()
         torch.onnx.export(
             model_export, test_inputs, model_onnx, opset_version=self.opset_version
         )

@@ -372,10 +372,11 @@ def get_path(
     basename: str, extension: str, specified_dir: str = ""
 ) -> Tuple[str, str, str]:
     if specified_dir:
-        if os.path.isabs(specified_dir):
-            subdir = specified_dir
-        else:
-            subdir = os.path.join(cache_dir(), specified_dir)
+        subdir = (
+            specified_dir
+            if os.path.isabs(specified_dir)
+            else os.path.join(cache_dir(), specified_dir)
+        )
     else:
         subdir = os.path.join(cache_dir(), basename[1:3])
     path = os.path.join(subdir, f"{basename}.{extension}")
@@ -1560,7 +1561,7 @@ def split_aot_inductor_output_path(path: str) -> Tuple[str, str]:
 
 @clear_on_fresh_inductor_cache
 class CudaKernelParamCache:
-    cache: Dict[str, Dict[str, str]] = dict()
+    cache: Dict[str, Dict[str, str]] = {}
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
@@ -2903,8 +2904,8 @@ def touch(filename):
 
 @clear_on_fresh_inductor_cache
 class PyCodeCache:
-    cache: Dict[str, ModuleType] = dict()
-    linemaps: Dict[str, List[Tuple[Any, ...]]] = dict()
+    cache: Dict[str, ModuleType] = {}
+    linemaps: Dict[str, List[Tuple[Any, ...]]] = {}
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
@@ -3180,7 +3181,7 @@ class DLLWrapper:
     def __enter__(self):
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: object) -> None:
         self.close()
 
     def __del__(self):
@@ -3194,7 +3195,7 @@ class CUDACodeCache:
         input_path: str
         output_path: str
 
-    cache: Dict[str, CacheEntry] = dict()
+    cache: Dict[str, CacheEntry] = {}
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cu"
 
@@ -3279,7 +3280,7 @@ class ROCmCodeCache:
         input_path: str
         output_path: str
 
-    cache: Dict[str, CacheEntry] = dict()
+    cache: Dict[str, CacheEntry] = {}
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cpp"
     _logged_compiler_version = False

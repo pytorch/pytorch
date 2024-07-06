@@ -16,9 +16,9 @@ class assert_raises_regex:
     def __enter__(self):
         pass
 
-    def __exit__(self, exc_type, exc_val, traceback):
+    def __exit__(self, exc_type, exc_value, exc_tb) -> None:
         if exc_type == self.exception_cls:
-            msg = str(exc_val)
+            msg = str(exc_value)
             if not re.search(self.regex, msg):
                 raise AssertionError(
                     f"Expected exception to match regex. regex: {self.regex}, exception: {msg}")

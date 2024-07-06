@@ -85,10 +85,11 @@ class TestLiteScriptModule(TestCase):
             x = torch.rand((2, 3))
             y = torch.rand((2, 3))
             z = torch.rand((2, 3))
-            if export_method == "trace":
-                trace_module = torch.jit.trace(B(), [x, y, z])
-            else:
-                trace_module = torch.jit.script(B())
+            trace_module = (
+                torch.jit.trace(B(), [x, y, z])
+                if export_method == "trace"
+                else torch.jit.script(B())
+            )
             exported_module = trace_module._save_to_buffer_for_lite_interpreter(
                 _save_mobile_debug_info=True
             )

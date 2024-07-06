@@ -187,10 +187,7 @@ class LayerNormLSTMCell(jit.ScriptModule):
         self.weight_hh = Parameter(torch.randn(4 * hidden_size, hidden_size))
         # The layernorms provide learnable biases
 
-        if decompose_layernorm:
-            ln = LayerNorm
-        else:
-            ln = nn.LayerNorm
+        ln = LayerNorm if decompose_layernorm else nn.LayerNorm
 
         self.layernorm_i = ln(4 * hidden_size)
         self.layernorm_h = ln(4 * hidden_size)

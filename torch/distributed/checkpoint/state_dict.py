@@ -445,7 +445,7 @@ def _maybe_full_or_cpu_state_dict(
 ) -> Dict[str, Any]:
     if info.full_state_dict:
         ranks_only = (
-            tuple()
+            ()
             if (not info.cpu_offload or not torch.distributed.is_initialized())
             else (0,)
         )
@@ -973,7 +973,7 @@ def get_model_state_dict(
     with _gc_context():
         info = _verify_options(
             model,
-            tuple(),
+            (),
             optim_only=False,
             submodules=submodules,
             options=options,
@@ -1183,7 +1183,7 @@ def set_model_state_dict(
         model, model_state_dict
     )
     with _gc_context():
-        info = _verify_options(model, tuple(), optim_only=False, options=options)
+        info = _verify_options(model, (), optim_only=False, options=options)
 
         _verify_state_dict(model_state_dict, {}, info)
         return _load_model_state_dict(model, model_state_dict, info)

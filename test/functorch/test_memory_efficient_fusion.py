@@ -197,10 +197,7 @@ class TestMemoryEfficientOpAuthoring(TestCase):
 # delta is an integer >= -1. If delta = -1, only check if the new graph
 #   has less or equal number of nodes
 def check(f, t, delta, check_val=True, graph_input=False):
-    if graph_input:
-        fx_g = f
-    else:
-        fx_g = make_fx(f)(t)
+    fx_g = f if graph_input else make_fx(f)(t)
     new_graph = fx_graph_cse(fx_g.graph)
     new_g = fx.GraphModule(fx_g, new_graph)
 

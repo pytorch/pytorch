@@ -453,10 +453,7 @@ def module_inputs_torch_nn_PoissonNLLLoss(module_info, device, dtype, requires_g
     ]
 
     def poissonnllloss_reference_fn(i, t, log_input=True, full=False, reduction='mean', eps=1e-8):
-        if log_input:
-            result = i.exp() - t.mul(i)
-        else:
-            result = i - t.mul((i + eps).log())
+        result = i.exp() - t.mul(i) if log_input else i - t.mul((i + eps).log())
 
         if full:
             result += (t.mul(t.log()) - t + 0.5 * (2. * math.pi * t).log()).masked_fill(t <= 1, 0)

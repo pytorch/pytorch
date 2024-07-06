@@ -161,10 +161,7 @@ class TestScatterGather(TestCase):
         dst = make_tensor((2, 2), device=device, dtype=dtype)
         idx = torch.tensor((), device=device, dtype=torch.long)
         src = make_tensor((2, 2), device=device, dtype=dtype)
-        if reduction is not None:
-            actual = fn(dst, 0, idx, src, reduce=reduction)
-        else:
-            actual = fn(dst, 0, idx, src)
+        actual = fn(dst, 0, idx, src, reduce=reduction) if reduction is not None else fn(dst, 0, idx, src)
         self.assertEqual(actual, dst, atol=0, rtol=0)
 
     @dtypes(torch.float16, torch.float32, torch.complex64)

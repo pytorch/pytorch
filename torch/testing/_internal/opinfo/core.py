@@ -679,10 +679,10 @@ class OpInfo:
     # the following metadata are test directives for skipping or modifying tests
 
     # information about which tests to skip
-    skips: Tuple = tuple()
+    skips: Tuple = ()
 
     # decorators to apply to generated tests
-    decorators: Tuple = tuple()
+    decorators: Tuple = ()
 
     # the following are pointers to functions to generate certain classes of inputs
 
@@ -1446,7 +1446,7 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
     # TODO(@heitorschueroff) Once all reduction operators are using ReductionOpInfo
     # use op_info.generate_args_kwargs directly.
     generate_args_kwargs = kwargs.get(
-        "generate_args_kwargs", lambda *args, **kwargs: (yield tuple(), {})
+        "generate_args_kwargs", lambda *args, **kwargs: (yield (), {})
     )
 
     for t in _generate_reduction_inputs(device, dtype, requires_grad):
@@ -1526,7 +1526,7 @@ class ReductionOpInfo(OpInfo):
         # kwargs to use when calling the op. This is required for operators that
         # have other required parameters besides the input tensor.
         generate_args_kwargs: Callable = lambda t, dim=None, keepdim=False: (
-            yield tuple(),
+            yield (),
             {},
         ),
         # Options from the OpInfo base class
@@ -2131,7 +2131,7 @@ class BinaryUfuncInfo(OpInfo):
                 "test_numpy_refs",
             ),
         )
-        kwargs["skips"] = kwargs.get("skips", tuple()) + common_skips
+        kwargs["skips"] = kwargs.get("skips", ()) + common_skips
         super().__init__(
             name,
             sample_inputs_func=sample_inputs_func,

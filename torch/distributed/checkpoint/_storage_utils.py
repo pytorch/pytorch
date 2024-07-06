@@ -22,14 +22,7 @@ def _storage_setup(
         )
 
     targets: List[Type[Union[StorageReader, StorageWriter]]] = []
-    if reader:
-        targets = [
-            FileSystemReader,
-        ]
-    else:
-        targets = [
-            FileSystemWriter,
-        ]
+    targets = [FileSystemReader] if reader else [FileSystemWriter]
     try:
         from ._fsspec_filesystem import FsspecReader, FsspecWriter
 

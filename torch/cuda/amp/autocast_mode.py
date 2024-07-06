@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Any
 from typing_extensions import deprecated
 
 import torch
@@ -40,10 +39,10 @@ class autocast(torch.amp.autocast_mode.autocast):
         return super().__enter__()
 
     # TODO: discuss a unified TorchScript-friendly API for autocast
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
+    def __exit__(self, *args: object) -> None:
         if torch._jit_internal.is_scripting():
             return
-        return super().__exit__(exc_type, exc_val, exc_tb)
+        return super().__exit__(*args)
 
     def __call__(self, func):
         if torch._jit_internal.is_scripting():

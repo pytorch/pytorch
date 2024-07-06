@@ -126,7 +126,7 @@ class ONNXTorchPatcher:
                 self.safetensors_torch_load_file_wrapper
             )
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, *args: object) -> None:
         torch.load = self.torch_load
         torch.fx._symbolic_trace._wrapped_methods_to_patch = (
             self.torch_fx__symbolic_trace__wrapped_methods_to_patch

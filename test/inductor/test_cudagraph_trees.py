@@ -71,7 +71,7 @@ class capture_stderr(list):
         sys.stderr = self.stringio
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: object) -> None:
         self.append(str(self.stringio.getvalue()))
         del self.stringio
         sys.stderr = self.sys_stderr

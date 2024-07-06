@@ -3861,10 +3861,7 @@ class TestAsArray(TestCase):
         # 3. Given the specified target device, we first check whether
         # its type is the same, and then if its index is the same (if it
         # is not None)
-        if same_device:
-            device = original.device
-        else:
-            device = torch.device(kwargs.get("device", "cpu"))
+        device = original.device if same_device else torch.device(kwargs.get('device', 'cpu'))
 
         # Compare the target device type, and its index
         self.assertEqual(device.type, result.device.type)

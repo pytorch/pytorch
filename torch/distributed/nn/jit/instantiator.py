@@ -41,10 +41,9 @@ def get_arg_return_types_from_interface(module_interface):
     for argument in method_schema.arguments:
         arg_str_list.append(argument.name)
 
-        if argument.has_default_value():
-            default_value_str = f" = {argument.default_value}"
-        else:
-            default_value_str = ""
+        default_value_str = (
+            f" = {argument.default_value}" if argument.has_default_value() else ""
+        )
         arg_type_str = f"{argument.name}: {argument.type}{default_value_str}"
         arg_type_str_list.append(arg_type_str)
 

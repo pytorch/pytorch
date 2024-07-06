@@ -364,7 +364,7 @@ else:
             return self
 
         # pyre-fixme[2]: Parameter must be annotated.
-        def __exit__(self, exc_type, exc_value, exc_traceback) -> None:
+        def __exit__(self, *args: object) -> None:
             # pop this mesh from mesh env
             _mesh_resources.mesh_stack.pop()
 

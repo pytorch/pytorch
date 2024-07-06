@@ -87,7 +87,7 @@ def clone_subgraph(
     This API currently does not support inserting after ``target``.
     """
     all_nodes = set(subgraph)
-    mapping: Dict[fx.Node, fx.Node] = dict()
+    mapping: Dict[fx.Node, fx.Node] = {}
     cloned_subgraph = []
     with graph.inserting_before(target):
         for node in subgraph:
