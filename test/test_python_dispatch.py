@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     first_sample,
     IS_WINDOWS,
     run_tests,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.custom_op_db import custom_op_db
