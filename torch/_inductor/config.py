@@ -938,6 +938,10 @@ class halide:
     # Controls `debug` flag passed to Halide target
     debug = False
 
+    # Enable (or fallback on) scan kernels such as cumsum
+    # Halide autoschedulers struggle with these kernels
+    scan_kernels = False
+
 
 # create a directory containing lots of debug information
 class trace:
