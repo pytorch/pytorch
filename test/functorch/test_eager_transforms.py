@@ -1169,10 +1169,9 @@ class TestAutogradFunction(TestCase):
 
             @staticmethod
             def setup_context(ctx, inputs, output):
-                if save_for == "jvp":
-                    save_fn = ctx.save_for_forward
-                else:
-                    save_fn = ctx.save_for_backward
+                save_fn = (
+                    ctx.save_for_forward if save_for == "jvp" else ctx.save_for_backward
+                )
 
                 if mark_dirty:
                     ctx.mark_dirty(inputs[0])
@@ -1192,10 +1191,7 @@ class TestAutogradFunction(TestCase):
             def jvp(ctx, x_t):
                 # NB: the logic to check ctx.save_for_forward happens
                 #     before we reach this!
-                if mark_dirty:
-                    ret = x_t.add_(0)
-                else:
-                    ret = x_t.view_as(x_t)
+                ret = x_t.add_(0) if mark_dirty else x_t.view_as(x_t)
                 return ret
 
         def fn(x):

@@ -100,10 +100,7 @@ class IsTrainingCheck(torch.nn.Module):
         self.train(True)
 
     def forward(self, x):
-        if self.training:
-            mod = self.linear1
-        else:
-            mod = self.linear2
+        mod = self.linear1 if self.training else self.linear2
         return F.relu(mod(x))
 
 
@@ -1093,10 +1090,11 @@ class ModuleComparison(torch.nn.Module):
     def forward(self, x):
         for layer in self.encoder_layers:
             output = layer(x)
-            if layer is None or layer == self.layer0:
-                output = F.relu6(output)
-            else:
-                output = F.relu(output)
+            output = (
+                F.relu6(output)
+                if layer is None or layer == self.layer0
+                else F.relu(output)
+            )
         return output
 
 

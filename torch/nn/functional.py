@@ -992,16 +992,12 @@ def max_unpool1d(
             output_size=output_size,
         )
     kernel_size = _single(kernel_size)
-    if stride is not None:
-        _stride = _single(stride)
-    else:
-        _stride = kernel_size
+    _stride = _single(stride) if stride is not None else kernel_size
     padding = _single(padding)
     output_size = _unpool_output_size(input, kernel_size, _stride, padding, output_size)
-    if isinstance(output_size, list):
-        output_size = output_size + [1]
-    else:
-        output_size = output_size + (1,)
+    output_size = (
+        output_size + [1] if isinstance(output_size, list) else output_size + (1,)
+    )
     return torch._C._nn.max_unpool2d(
         input.unsqueeze(-1), indices.unsqueeze(-1), output_size
     ).squeeze(-1)
@@ -1031,10 +1027,7 @@ def max_unpool2d(
             output_size=output_size,
         )
     kernel_size = _pair(kernel_size)
-    if stride is not None:
-        _stride = _pair(stride)
-    else:
-        _stride = kernel_size
+    _stride = _pair(stride) if stride is not None else kernel_size
     padding = _pair(padding)
     output_size = _unpool_output_size(input, kernel_size, _stride, padding, output_size)
     return torch._C._nn.max_unpool2d(input, indices, output_size)
@@ -1064,10 +1057,7 @@ def max_unpool3d(
             output_size=output_size,
         )
     kernel_size = _triple(kernel_size)
-    if stride is not None:
-        _stride = _triple(stride)
-    else:
-        _stride = kernel_size
+    _stride = _triple(stride) if stride is not None else kernel_size
     padding = _triple(padding)
     output_size = _unpool_output_size(input, kernel_size, _stride, padding, output_size)
     return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding)
@@ -1668,10 +1658,11 @@ def _threshold(
         return handle_torch_function(
             _threshold, (input,), input, threshold, value, inplace=inplace
         )
-    if inplace:
-        result = _VF.threshold_(input, threshold, value)
-    else:
-        result = _VF.threshold(input, threshold, value)
+    result = (
+        _VF.threshold_(input, threshold, value)
+        if inplace
+        else _VF.threshold(input, threshold, value)
+    )
     return result
 
 
@@ -1698,10 +1689,7 @@ def relu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     """
     if has_torch_function_unary(input):
         return handle_torch_function(relu, (input,), input, inplace=inplace)
-    if inplace:
-        result = torch.relu_(input)
-    else:
-        result = torch.relu(input)
+    result = torch.relu_(input) if inplace else torch.relu(input)
     return result
 
 
@@ -1786,10 +1774,7 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     """
     if has_torch_function_unary(input):
         return handle_torch_function(relu6, (input,), input, inplace=inplace)
-    if inplace:
-        result = torch._C._nn.relu6_(input)
-    else:
-        result = torch._C._nn.relu6(input)
+    result = torch._C._nn.relu6_(input) if inplace else torch._C._nn.relu6(input)
     return result
 
 
@@ -1800,10 +1785,9 @@ def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
     """
     if has_torch_function_unary(input):
         return handle_torch_function(elu, (input,), input, alpha=alpha, inplace=inplace)
-    if inplace:
-        result = torch._C._nn.elu_(input, alpha)
-    else:
-        result = torch._C._nn.elu(input, alpha)
+    result = (
+        torch._C._nn.elu_(input, alpha) if inplace else torch._C._nn.elu(input, alpha)
+    )
     return result
 
 
@@ -1829,10 +1813,7 @@ def selu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     """
     if has_torch_function_unary(input):
         return handle_torch_function(selu, (input,), input, inplace=inplace)
-    if inplace:
-        result = torch.selu_(input)
-    else:
-        result = torch.selu(input)
+    result = torch.selu_(input) if inplace else torch.selu(input)
     return result
 
 
@@ -1862,10 +1843,7 @@ def celu(
         return handle_torch_function(
             celu, (input,), input, alpha=alpha, inplace=inplace
         )
-    if inplace:
-        result = torch.celu_(input, alpha)
-    else:
-        result = torch.celu(input, alpha)
+    result = torch.celu_(input, alpha) if inplace else torch.celu(input, alpha)
     return result
 
 
@@ -1957,10 +1935,11 @@ def rrelu(
             training=training,
             inplace=inplace,
         )
-    if inplace:
-        result = torch.rrelu_(input, lower, upper, training)
-    else:
-        result = torch.rrelu(input, lower, upper, training)
+    result = (
+        torch.rrelu_(input, lower, upper, training)
+        if inplace
+        else torch.rrelu(input, lower, upper, training)
+    )
     return result
 
 
@@ -2060,10 +2039,7 @@ def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
         "Change the call to include dim=X as an argument.",
         stacklevel=stacklevel,
     )
-    if ndim == 0 or ndim == 1 or ndim == 3:
-        ret = 0
-    else:
-        ret = 1
+    ret = 0 if ndim == 0 or ndim == 1 or ndim == 3 else 1
     return ret
 
 
@@ -2093,10 +2069,7 @@ def softmin(
         )
     if dim is None:
         dim = _get_softmax_dim("softmin", input.dim(), _stacklevel)
-    if dtype is None:
-        ret = (-input).softmax(dim)
-    else:
-        ret = (-input).softmax(dim, dtype=dtype)
+    ret = (-input).softmax(dim) if dtype is None else (-input).softmax(dim, dtype=dtype)
     return ret
 
 
@@ -2136,10 +2109,7 @@ def softmax(
         )
     if dim is None:
         dim = _get_softmax_dim("softmax", input.dim(), _stacklevel)
-    if dtype is None:
-        ret = input.softmax(dim)
-    else:
-        ret = input.softmax(dim, dtype=dtype)
+    ret = input.softmax(dim) if dtype is None else input.softmax(dim, dtype=dtype)
     return ret
 
 
@@ -2244,10 +2214,9 @@ def log_softmax(
         )
     if dim is None:
         dim = _get_softmax_dim("log_softmax", input.dim(), _stacklevel)
-    if dtype is None:
-        ret = input.log_softmax(dim)
-    else:
-        ret = input.log_softmax(dim, dtype=dtype)
+    ret = (
+        input.log_softmax(dim) if dtype is None else input.log_softmax(dim, dtype=dtype)
+    )
     return ret
 
 
@@ -3373,10 +3342,11 @@ def kl_div(
             )
 
         # special case for batchmean
-        if reduction == "batchmean":
-            reduction_enum = _Reduction.get_enum("sum")
-        else:
-            reduction_enum = _Reduction.get_enum(reduction)
+        reduction_enum = (
+            _Reduction.get_enum("sum")
+            if reduction == "batchmean"
+            else _Reduction.get_enum(reduction)
+        )
 
     reduced = torch.kl_div(input, target, reduction_enum, log_target=log_target)
 
@@ -6181,10 +6151,9 @@ def multi_head_attention_forward(
             .expand(-1, num_heads, -1, -1)
             .reshape(bsz * num_heads, 1, src_len)
         )
-        if attn_mask is None:
-            attn_mask = key_padding_mask
-        else:
-            attn_mask = attn_mask + key_padding_mask
+        attn_mask = (
+            key_padding_mask if attn_mask is None else attn_mask + key_padding_mask
+        )
 
     # adjust dropout probability
     if not training:

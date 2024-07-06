@@ -583,15 +583,15 @@ def help_message(verbose=False):
         assert len(s) <= length
         return s + " " * (length - len(s))
 
-    if verbose:
-        printed_artifacts = log_registry.artifact_names
-    else:
-        printed_artifacts = log_registry.visible_artifacts
+    printed_artifacts = (
+        log_registry.artifact_names if verbose else log_registry.visible_artifacts
+    )
 
-    if verbose:
-        heading = "All registered names"
-    else:
-        heading = "Visible registered names (use TORCH_LOGS='+help' for full list)"
+    heading = (
+        "All registered names"
+        if verbose
+        else "Visible registered names (use TORCH_LOGS='+help' for full list)"
+    )
     lines = (
         ["all"]
         + sorted(log_registry.log_alias_to_log_qnames.keys())

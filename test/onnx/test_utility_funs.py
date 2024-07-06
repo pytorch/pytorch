@@ -1455,10 +1455,7 @@ class TestUtilityFuns(_BaseTestCase):
         class PrimModule(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                if isinstance(x, list):
-                    y = x
-                else:
-                    y = [x]
+                y = x if isinstance(x, list) else [x]
                 return y
 
         x = torch.tensor([2])

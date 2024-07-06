@@ -183,10 +183,7 @@ class CppPrinter(ExprPrinter):
 
     def _print_Rational(self, expr):
         # Uses float constants to perform FP div
-        if expr.q == 1:
-            r = f"{expr.p}"
-        else:
-            r = f"{expr.p}.0/{expr.q}.0"
+        r = f"{expr.p}" if expr.q == 1 else f"{expr.p}.0/{expr.q}.0"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_ceiling(self, expr):

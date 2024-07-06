@@ -142,10 +142,11 @@ class SpeculationEntry:
         Start tracing of the current frame over again, and don't take this branch.
         """
         self.failed = True
-        if self.reason is not None:
-            restart_reason = self.reason.reason
-        else:
-            restart_reason = "Unknown fail_and_restart_analysis"
+        restart_reason = (
+            self.reason.reason
+            if self.reason is not None
+            else "Unknown fail_and_restart_analysis"
+        )
         raise exc.SpeculationRestartAnalysis(restart_reason=restart_reason)
 
 
@@ -1870,10 +1871,7 @@ class InstructionTranslatorBase(
 
     def FORMAT_VALUE(self, inst):
         flags = inst.arg
-        if (flags & 0x04) == 0x04:
-            fmt_spec = self.pop()
-        else:
-            fmt_spec = ConstantVariable.create("")
+        fmt_spec = self.pop() if flags & 4 == 4 else ConstantVariable.create("")
 
         value = self.pop()
         if isinstance(value, SymNodeVariable):
@@ -1915,10 +1913,7 @@ class InstructionTranslatorBase(
 
     def IS_OP(self, inst):
         assert inst.argval == 0 or inst.argval == 1
-        if inst.argval == 0:
-            new_argval = "is"
-        else:
-            new_argval = "is not"
+        new_argval = "is" if inst.argval == 0 else "is not"
         new_inst = create_instruction("COMPARE_OP", argval=new_argval)
         self.COMPARE_OP(new_inst)
 

@@ -220,10 +220,11 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
 
         if n.op == "call_module":
             real_mod = self.fetch_attr(n.target)
-            if self.fake_mode:
-                curr_submod = deepcopy_to_fake_tensor(real_mod, self.fake_mode)
-            else:
-                curr_submod = real_mod
+            curr_submod = (
+                deepcopy_to_fake_tensor(real_mod, self.fake_mode)
+                if self.fake_mode
+                else real_mod
+            )
 
             ddp_graph_log.debug("\n---%s graph---\n%s", n.target, curr_submod.graph)
 

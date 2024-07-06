@@ -717,10 +717,11 @@ def record_compilation_metrics(
 ):
     global _compilation_metrics
     _compilation_metrics.append(compilation_metrics)
-    if isinstance(compilation_metrics, CompilationMetrics):
-        name = "compilation_metrics"
-    else:
-        name = "bwd_compilation_metrics"
+    name = (
+        "compilation_metrics"
+        if isinstance(compilation_metrics, CompilationMetrics)
+        else "bwd_compilation_metrics"
+    )
     torch._logging.trace_structured(
         name,
         lambda: {
@@ -1018,10 +1019,7 @@ def checkpoint_params(gm):
 
 
 def timed(model, example_inputs, times=1):
-    if torch.cuda.is_available():
-        synchronize = torch.cuda.synchronize
-    else:
-        synchronize = nothing
+    synchronize = torch.cuda.synchronize if torch.cuda.is_available() else nothing
 
     synchronize()
     gc.collect()
@@ -1235,12 +1233,11 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
                     return ConstantVariable.create(True)
         else:
             check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
-            if found is None:
-                found = check
-            else:
-                found = BuiltinVariable(operator.or_).call_function(
-                    tx, [check, found], {}
-                )
+            found = (
+                check
+                if found is None
+                else BuiltinVariable(operator.or_).call_function(tx, [check, found], {})
+            )
     if found is None:
         found = ConstantVariable.create(False)
     return found

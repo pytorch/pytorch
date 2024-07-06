@@ -610,10 +610,11 @@ def _sharded_pre_load_state_dict_hook(
     )
 
     for fqn, _, _ in _param_name_infos(module, fsdp_state):
-        if not _is_composable(fsdp_state):
-            fqn_from_global_root = f"{prefix}{FSDP_PREFIX}{fqn}"
-        else:
-            fqn_from_global_root = f"{prefix}{fqn}"
+        fqn_from_global_root = (
+            f"{prefix}{FSDP_PREFIX}{fqn}"
+            if not _is_composable(fsdp_state)
+            else f"{prefix}{fqn}"
+        )
         try:
             param = state_dict.pop(fqn_from_global_root)
         except KeyError:

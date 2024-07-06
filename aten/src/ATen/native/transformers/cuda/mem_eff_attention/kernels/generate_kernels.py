@@ -378,10 +378,7 @@ void dispatch_{family_name}(T cb, int cc = 0) {{
 
 
 def main(output_dir: Optional[str]) -> None:
-    if output_dir is None:
-        output_dir = Path(__file__).parent
-    else:
-        output_dir = Path(output_dir)
+    output_dir = Path(__file__).parent if output_dir is None else Path(output_dir)
     write_decl_impl(
         FwdKernel.get_all(),
         "cutlassF",

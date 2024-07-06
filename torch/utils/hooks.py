@@ -184,10 +184,7 @@ class BackwardHook:
         for idx, val in zip(tensors_idx, new_tensors):
             arg_list[idx] = val
 
-        if type(args) is tuple:
-            out = tuple(arg_list)
-        else:
-            out = type(args)(*arg_list)
+        out = tuple(arg_list) if type(args) is tuple else type(args)(*arg_list)
         return out, tensors_idx
 
     def setup_input_hook(self, args):

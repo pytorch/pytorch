@@ -344,10 +344,7 @@ class TestSparse(TestSparseBase):
 
             new_indices = sorted(value_map.keys())
             _new_values = [value_map[idx] for idx in new_indices]
-            if t._values().ndimension() < 2:
-                new_values = t._values().new(_new_values)
-            else:
-                new_values = torch.stack(_new_values)
+            new_values = t._values().new(_new_values) if t._values().ndimension() < 2 else torch.stack(_new_values)
 
             new_indices = t._indices().new(new_indices).t()
             tg = t.new(new_indices, new_values, t.size())
@@ -2703,10 +2700,7 @@ class TestSparse(TestSparseBase):
                             if test_empty_tensor:
                                 values = torch.empty(1, 0).to(dtype)
                             else:
-                                if use_tensor_val:
-                                    values = torch.tensor([1.], dtype=dtype)
-                                else:
-                                    values = 1.
+                                values = torch.tensor([1.0], dtype=dtype) if use_tensor_val else 1.0
                             if include_size:
                                 sparse_tensor = torch.sparse_coo_tensor(indices, values, size, dtype=dtype,
                                                                         device=device, requires_grad=True)
@@ -3450,10 +3444,7 @@ class TestSparse(TestSparseBase):
                 x_.requires_grad_(True)
 
                 if log:
-                    if x_.is_sparse:
-                        y = torch.sparse.log_softmax(x_, dim)
-                    else:
-                        y = F.log_softmax(x_, dim)
+                    y = torch.sparse.log_softmax(x_, dim) if x_.is_sparse else F.log_softmax(x_, dim)
                 else:
                     if x_.is_sparse:
                         y = torch.sparse.softmax(x_, dim)
@@ -3945,10 +3936,7 @@ class TestSparse(TestSparseBase):
         def check_valid(diags, offsets, shape, layout=None):
             ref_out = reference(diags, offsets, shape)
             out = torch.sparse.spdiags(diags, offsets, shape, layout=layout)
-            if layout is None:
-                ex_layout = torch.sparse_coo
-            else:
-                ex_layout = layout
+            ex_layout = torch.sparse_coo if layout is None else layout
             out_dense = out.to_dense()
             self.assertTrue(out.layout == ex_layout, f"Output layout {out.layout} expected {ex_layout}")
             self.assertEqual(out_dense, ref_out, f"Result:\n{out_dense} does not match reference:\n{ref_out}")
@@ -4530,10 +4518,7 @@ class TestSparseAny(TestCase):
                 shape = (2, 2)
                 compressed_indices = torch.tensor([0, 0, 1])
                 invalid_plain_indices = torch.tensor([3])  # index is out of range
-                if layout in {torch.sparse_bsr, torch.sparse_bsc}:
-                    values = torch.tensor([[[1]]])
-                else:
-                    values = torch.tensor([1])
+                values = torch.tensor([[[1]]]) if layout in {torch.sparse_bsr, torch.sparse_bsc} else torch.tensor([1])
                 if check_invariants is None:
                     return torch.sparse_compressed_tensor(compressed_indices, invalid_plain_indices, values, shape, layout=layout)
                 else:
@@ -4651,10 +4636,7 @@ class TestSparseAny(TestCase):
                 # all layouts must produce semantically the same tensors
                 self.assertEqual(t, tensors[0])
 
-                if t.layout is torch.strided:
-                    is_hybrid = None
-                else:
-                    is_hybrid = t.dense_dim() > 0
+                is_hybrid = None if t.layout is torch.strided else t.dense_dim() > 0
                 if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
                     is_batch = t.crow_indices().ndim > 1
                 elif t.layout in {torch.sparse_csc, torch.sparse_bsc}:

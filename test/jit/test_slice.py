@@ -127,10 +127,7 @@ class TestSlice(JitTestCase):
 
     def test_tuple_slicing(self):
         def tuple_slice(a):
-            if bool(a):
-                b = (1, 2, 3, 4)
-            else:
-                b = (4, 3, 2, 1)
+            b = (1, 2, 3, 4) if bool(a) else (4, 3, 2, 1)
             c = b[-4:4]
             e = c[1:-1]
             return e

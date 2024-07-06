@@ -224,10 +224,11 @@ def get_op_overload(node: torch._C.Node):
     try:
         op_overload_mod = getattr(torch.ops, ns)
         op_overload_packet = getattr(op_overload_mod, op_name)
-        if override:
-            op_overload = getattr(op_overload_packet, override)
-        else:
-            op_overload = op_overload_packet.default
+        op_overload = (
+            getattr(op_overload_packet, override)
+            if override
+            else op_overload_packet.default
+        )
     except Exception as e:
         raise RuntimeError(
             f"Unable to find operator {node.kind()} with schema {node.schema}"

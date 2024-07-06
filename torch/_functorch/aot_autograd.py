@@ -576,10 +576,11 @@ def create_aot_dispatcher_function(
             # nonsensical. This does not affect the collection of metadata.
             with patch("torch.cuda.set_rng_state", lambda *args: None):
                 mod = root_module_when_exporting_non_strict(flat_fn)
-                if mod is not None:
-                    ctx = _detect_attribute_assignment(mod)
-                else:
-                    ctx = nullcontext()
+                ctx = (
+                    _detect_attribute_assignment(mod)
+                    if mod is not None
+                    else nullcontext()
+                )
                 with ctx:
                     fw_metadata = run_functionalized_fw_and_collect_metadata(
                         flat_fn,

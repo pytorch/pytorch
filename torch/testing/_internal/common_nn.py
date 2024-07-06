@@ -2711,10 +2711,7 @@ for non_linear_activation in non_linear_activations_no_batch:
 
 
 def kldivloss_reference(input, target, reduction='mean', log_target=False):
-    if log_target:
-        result = torch.exp(target) * (target - input)
-    else:
-        result = target * (target.log() - input)
+    result = torch.exp(target) * (target - input) if log_target else target * (target.log() - input)
     if reduction == 'mean':
         return result.mean()
     elif reduction == 'sum':

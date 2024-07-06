@@ -966,10 +966,7 @@ terrible spacing
             else:
                 constructor = test_params["constructor"]
 
-            if "constructor_args" not in test_params:
-                args = ()
-            else:
-                args = test_params["constructor_args"]
+            args = () if "constructor_args" not in test_params else test_params["constructor_args"]
 
             mod = constructor(*args)
             # Skip modules that are not standard `torch.nn`

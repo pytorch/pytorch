@@ -454,10 +454,9 @@ def jagged_from_tensor_and_lengths(
     )
 
     # Reshape buffer to flatten the 1st and 2nd dimension (view used to enforce non-copy)
-    if len(tensor.shape) > 2:
-        values = tensor.view(-1, *tensor.shape[2:])
-    else:
-        values = tensor.view(-1)
+    values = (
+        tensor.view(-1, *tensor.shape[2:]) if len(tensor.shape) > 2 else tensor.view(-1)
+    )
 
     # Check if offsets and lengths make it possibly contiguous and return a regular NT
     is_contiguous = True

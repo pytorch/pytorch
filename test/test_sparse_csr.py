@@ -232,14 +232,8 @@ class TestSparseCompressed(TestCase):
             torch.sparse_bsc: torch.sparse_bsc_tensor,
         }[layout]
         compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[layout]
-        if input_kind == 'list':
-            index_dtypes = [torch.int64]
-        else:
-            index_dtypes = [torch.int32, torch.int64]
-        if dtype.is_floating_point or dtype.is_complex:
-            requires_grad_lst = [False, True]
-        else:
-            requires_grad_lst = [False]
+        index_dtypes = [torch.int64] if input_kind == 'list' else [torch.int32, torch.int64]
+        requires_grad_lst = [False, True] if dtype.is_floating_point or dtype.is_complex else [False]
         for index_dtype in index_dtypes:
             for expected_device in expected_devices:
                 for (compressed_indices, plain_indices, values), kwargs in self.generate_simple_inputs(
@@ -1643,10 +1637,7 @@ class TestSparseCSR(TestCase):
 
                 def to_sp_block_compressed(t):
 
-                    if t.layout is torch.sparse_bsc:
-                        tt = t.transpose(-1, -2)
-                    else:
-                        tt = t
+                    tt = t.transpose(-1, -2) if t.layout is torch.sparse_bsc else t
 
                     t_sp_bsr = sp.bsr_matrix(
                         (
@@ -1687,10 +1678,7 @@ class TestSparseCSR(TestCase):
             else:
                 return res
 
-        if dtype in (torch.half, torch.bfloat16):
-            ref = ref_half_bfloat16
-        else:
-            ref = ref_sp_numpy
+        ref = ref_half_bfloat16 if dtype in (torch.half, torch.bfloat16) else ref_sp_numpy
 
         for (m, n, k) in itertools.product([2, 5], repeat=3):
             nnz = random.randint(0, m * k)
@@ -3852,10 +3840,7 @@ class TestSparseCompressedTritonKernels(TestCase):
         import triton
         from torch.sparse._triton_ops import bsr_scatter_mm, bsr_scatter_mm_indices_data
         from functools import partial
-        if isinstance(blocksize, str):
-            blocksize = tuple(map(int, blocksize.split('x')))
-        else:
-            blocksize = (blocksize,) * 2
+        blocksize = tuple(map(int, blocksize.split('x'))) if isinstance(blocksize, str) else (blocksize,) * 2
         # Note that each value in a non-zero block is in range blocksize * [low^2, high^2).
         tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
 

@@ -300,10 +300,11 @@ def _nll_loss_forward_handler(
         local_weight = weight.redistribute(spec.mesh, sharded_placements)._local_tensor
         assert local_weight.shape[0] == x._local_tensor.shape[channel_dim]
 
-    if reduction == Reduction.NONE.value:
-        output_placements = target_placements
-    else:
-        output_placements = all_replicate_placements
+    output_placements = (
+        target_placements
+        if reduction == Reduction.NONE.value
+        else all_replicate_placements
+    )
 
     # tensor inputs to _propagate_tensor_meta need to be DTensors
     args = list(args)

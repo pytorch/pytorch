@@ -57,10 +57,7 @@ def register_op_strategy(op, schema_info=None):
     ]
 
     def wrapper(impl):
-        if isinstance(op, list):
-            overloads = op
-        else:
-            overloads = [op]
+        overloads = op if isinstance(op, list) else [op]
 
         for overload in overloads:
             curr_schema_info = None

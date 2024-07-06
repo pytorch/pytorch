@@ -143,10 +143,11 @@ class TestOneArrAndAxesTuple(TestCase):
         assert isinstance(ta, w.ndarray)
 
         # a np.transpose -specific test
-        if axes is None:
-            newshape = (3, 2, 1)
-        else:
-            newshape = tuple(t.shape[axes[i]] for i in range(w.ndim(t)))
+        newshape = (
+            (3, 2, 1)
+            if axes is None
+            else tuple(t.shape[axes[i]] for i in range(w.ndim(t)))
+        )
         assert ta.shape == newshape
 
     @parametrize("func", [w.transpose])
@@ -163,10 +164,11 @@ class TestOneArrAndAxesTuple(TestCase):
         ta = func(t, axes=axes)
         assert isinstance(ta, w.ndarray)
 
-        if axes is None:
-            newshape = (3, 2, 1)
-        else:
-            newshape = tuple(t.shape[axes[i]] for i in range(t.ndim))
+        newshape = (
+            (3, 2, 1)
+            if axes is None
+            else tuple(t.shape[axes[i]] for i in range(t.ndim))
+        )
         assert ta.shape == newshape
 
 

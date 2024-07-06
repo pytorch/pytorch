@@ -506,10 +506,7 @@ class TestFxGraphCache(TestCase):
     def test_cache_with_symint_non_arg_guard(self):
         def fn(x, ref_id):
             self_id = 22
-            if self_id == ref_id:
-                x = torch.mul(x, 1.0)
-            else:
-                x = torch.mul(x, 0)
+            x = torch.mul(x, 1.0) if self_id == ref_id else torch.mul(x, 0)
             return x
 
         x = torch.ones(2)

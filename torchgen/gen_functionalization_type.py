@@ -802,10 +802,12 @@ def gen_functionalization_registration(
 
     elif isinstance(g, NativeFunctionsGroup):
         # Gets a hand-written functionalization kernel
-        if g.inplace is not None and str(g.inplace.func.name) == "set_.source_Tensor":
-            fns = []
-        else:
-            fns = list(g.functions())
+        fns = (
+            []
+            if g.inplace is not None
+            and str(g.inplace.func.name) == "set_.source_Tensor"
+            else list(g.functions())
+        )
     else:
         if str(g.func.name) in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION:
             return []

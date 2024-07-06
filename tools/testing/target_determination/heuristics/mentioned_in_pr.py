@@ -35,10 +35,7 @@ class MentionedInPR(HeuristicInterface):
             commit_messages = ""
         try:
             pr_number = get_pr_number()
-            if pr_number is not None:
-                pr_body = get_issue_or_pr_body(pr_number)
-            else:
-                pr_body = ""
+            pr_body = get_issue_or_pr_body(pr_number) if pr_number is not None else ""
         except Exception as e:
             print(f"Can't get PR body due to {e}")
             pr_body = ""

@@ -233,10 +233,7 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     intraHw = NCCL_HW.NVLINK
 
     if coll == NCCL_COLL.ALL_REDUCE:
-        if nNodes > 1:
-            nInterSteps = 2 * nNodes
-        else:
-            nInterSteps = 0
+        nInterSteps = 2 * nNodes if nNodes > 1 else 0
     elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER):
         nInterSteps = nNodes - 1
 

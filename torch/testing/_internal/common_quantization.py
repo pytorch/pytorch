@@ -1055,10 +1055,7 @@ class QuantizationTestCase(TestCase):
                 qconfig_mapping = QConfigMapping().set_global(qconfig)
                 model.eval()
 
-            if quant_type == QuantType.QAT:
-                prepare = prepare_qat_fx
-            else:
-                prepare = prepare_fx
+            prepare = prepare_qat_fx if quant_type == QuantType.QAT else prepare_fx
 
             # overwrite qconfig_dict with custom_qconfig_dict
             if custom_qconfig_dict is not None:
@@ -1113,10 +1110,7 @@ class QuantizationTestCase(TestCase):
     def checkEmbeddingSerialization(self, qemb, num_embeddings, embedding_dim, indices, offsets,
                                     set_qconfig, is_emb_bag, dtype=torch.quint8):
         # Test serialization of dynamic EmbeddingBag module using state_dict
-        if is_emb_bag:
-            inputs = [indices, offsets]
-        else:
-            inputs = [indices]
+        inputs = [indices, offsets] if is_emb_bag else [indices]
         emb_dict = qemb.state_dict()
         b = io.BytesIO()
         torch.save(emb_dict, b)
@@ -1261,10 +1255,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             dynamic_shapes=dynamic_shapes if export_with_dynamic_shape else None,
         )
 
-        if is_qat:
-            m = prepare_qat_pt2e(m, quantizer)
-        else:
-            m = prepare_pt2e(m, quantizer)
+        m = prepare_qat_pt2e(m, quantizer) if is_qat else prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
         m = convert_pt2e(m)
@@ -1314,10 +1305,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m,
             example_inputs,
         )
-        if is_qat:
-            m = prepare_qat_pt2e(m, quantizer)
-        else:
-            m = prepare_pt2e(m, quantizer)
+        m = prepare_qat_pt2e(m, quantizer) if is_qat else prepare_pt2e(m, quantizer)
         m(*example_inputs)
         m = convert_pt2e(m)
         return m
@@ -1747,33 +1735,18 @@ class ConvBnAddReluModel(torch.nn.Module):
                 else:
                     x = torch.add(self.conv(x1), self.conv2(x1))
             else:
-                if self.with_bn:
-                    x = self.bn(self.conv(x1)) + self.conv2(x1)
-                else:
-                    x = self.conv(x1) + self.conv2(x1)
+                x = self.bn(self.conv(x1)) + self.conv2(x1) if self.with_bn else self.conv(x1) + self.conv2(x1)
         else:
             if self.use_torch_add:
                 if self.left_conv:
-                    if self.with_bn:
-                        x = torch.add(self.bn(self.conv(x1)), x2)
-                    else:
-                        x = torch.add(self.conv(x1), x2)
+                    x = torch.add(self.bn(self.conv(x1)), x2) if self.with_bn else torch.add(self.conv(x1), x2)
                 else:
-                    if self.with_bn:
-                        x = torch.add(x2, self.bn(self.conv(x1)))
-                    else:
-                        x = torch.add(x2, self.conv(x1))
+                    x = torch.add(x2, self.bn(self.conv(x1))) if self.with_bn else torch.add(x2, self.conv(x1))
             else:
                 if self.left_conv:
-                    if self.with_bn:
-                        x = self.bn(self.conv(x1)) + x2
-                    else:
-                        x = self.conv(x1) + x2
+                    x = self.bn(self.conv(x1)) + x2 if self.with_bn else self.conv(x1) + x2
                 else:
-                    if self.with_bn:
-                        x = x2 + self.bn(self.conv(x1))
-                    else:
-                        x = x2 + self.conv(x1)
+                    x = x2 + self.bn(self.conv(x1)) if self.with_bn else x2 + self.conv(x1)
         if self.with_relu:
             x = self.relu(x)
         return x

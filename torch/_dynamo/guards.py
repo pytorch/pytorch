@@ -1077,10 +1077,7 @@ class GuardBuilder(GuardBuilderBase):
     # you reference in the actual guard closure (oops!)
     def arg_ref(self, guard: Union[str, Guard]) -> str:
         name: str
-        if isinstance(guard, str):
-            name = guard
-        else:
-            name = guard.name
+        name = guard if isinstance(guard, str) else guard.name
         base = strip_getattr_getitem(strip_function_call(name))
         if base not in self.argnames:
             if re.match(r"[a-zA-Z0-9_]+", base):
@@ -1111,10 +1108,7 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(base)
         val = hasattr(self.get(base), attr)
         code = None
-        if val:
-            code = f"hasattr({ref}, {attr!r})"
-        else:
-            code = f"not hasattr({ref}, {attr!r})"
+        code = f"hasattr({ref}, {attr!r})" if val else f"not hasattr({ref}, {attr!r})"
         self._set_guard_export_info(
             guard, [code], provided_guarded_object=self.get(base)
         )

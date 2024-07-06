@@ -241,11 +241,11 @@ class TestViewOps(TestCase):
 
                 # NumPy's dtype view requires contiguous input if target
                 # dtype is a different size
-                if equal_element_size:
-                    a_np_view = a_np.view(np_view_dtype)
-
-                else:
-                    a_np_view = a_np_contiguous.view(np_view_dtype)
+                a_np_view = (
+                    a_np.view(np_view_dtype)
+                    if equal_element_size
+                    else a_np_contiguous.view(np_view_dtype)
+                )
 
                 self.assertEqual(a_view, a_np_view)
 
@@ -449,10 +449,7 @@ class TestViewOps(TestCase):
     def test_real_imag_view(self, device, dtype):
         def compare_with_numpy(contiguous_input=True):
             t = torch.randn(3, 3, dtype=dtype, device=device)
-            if not contiguous_input:
-                u = t.T
-            else:
-                u = t
+            u = t.T if not contiguous_input else t
 
             re = u.real
             exp = torch.from_numpy(u.cpu().numpy().real).to(device=device)

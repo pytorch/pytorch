@@ -432,10 +432,11 @@ def _prim_elementwise_meta(
             if utils.is_integer_dtype(dtype) or utils.is_boolean_dtype(dtype):
                 dtype = torch.get_default_dtype()
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
-            if utils.is_complex_dtype(dtype):
-                dtype = utils.corresponding_real_dtype(dtype)
-            else:
-                dtype = dtype
+            dtype = (
+                utils.corresponding_real_dtype(dtype)
+                if utils.is_complex_dtype(dtype)
+                else dtype
+            )
 
         assert shape is not None
         return torch.empty_permuted(shape, l2p_perm, device=device, dtype=dtype)  # type: ignore[return-value]
@@ -1385,10 +1386,7 @@ def _collapse_view_helper(
             continue
 
         length = length * shape[idx]
-        if guard_size_oblivious(stride < strides[idx]):
-            stride = stride
-        else:
-            stride = strides[idx]
+        stride = stride if guard_size_oblivious(stride < strides[idx]) else strides[idx]
 
         if (
             guard_size_oblivious(a.numel() > 0)
@@ -2339,10 +2337,11 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
 
 
 def _var_reduction_meta(inp, dims, correction):
-    if utils.is_complex_dtype(inp.dtype):
-        output_dtype = utils.corresponding_real_dtype(inp.dtype)
-    else:
-        output_dtype = inp.dtype
+    output_dtype = (
+        utils.corresponding_real_dtype(inp.dtype)
+        if utils.is_complex_dtype(inp.dtype)
+        else inp.dtype
+    )
     return _reduction_meta(inp, dims, output_dtype=output_dtype)
 
 

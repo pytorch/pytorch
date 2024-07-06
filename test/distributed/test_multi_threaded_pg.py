@@ -163,10 +163,11 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
             self.assertEqual(cloned_input, torch.ones(3, 3) * rank)
 
     def test_scatter(self):
-        if dist.get_rank() == 0:
-            scatter_list = [torch.ones(3, 3) * rank for rank in range(self.world_size)]
-        else:
-            scatter_list = None
+        scatter_list = (
+            [torch.ones(3, 3) * rank for rank in range(self.world_size)]
+            if dist.get_rank() == 0
+            else None
+        )
         output_tensor = torch.empty(3, 3)
 
         dist.scatter(output_tensor, scatter_list)
@@ -279,10 +280,11 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         t.join()
 
     def test_gather(self):
-        if dist.get_rank() == 0:
-            gather_list = [torch.empty(3, 3) for _ in range(self.world_size)]
-        else:
-            gather_list = None
+        gather_list = (
+            [torch.empty(3, 3) for _ in range(self.world_size)]
+            if dist.get_rank() == 0
+            else None
+        )
         input_tensor = torch.ones(3, 3) * dist.get_rank()
 
         dist.gather(input_tensor, gather_list)

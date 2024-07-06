@@ -749,10 +749,9 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     device = torch.device(device)
 
     drivers: Tuple[str, ...]
-    if device.type == "cuda":
-        drivers = ("gels",)
-    else:
-        drivers = ("gels", "gelsy", "gelss", "gelsd")
+    drivers = (
+        ("gels",) if device.type == "cuda" else ("gels", "gelsy", "gelss", "gelsd")
+    )
 
     # we generate matrices of shape (..., n + delta, n)
     deltas: Tuple[int, ...]
@@ -1006,10 +1005,7 @@ def sample_inputs_linalg_solve(
 
     batches = [(), (0,), (2,)]
     ns = [5, 0]
-    if vector_rhs_allowed:
-        nrhs = [(), (1,), (3,)]
-    else:
-        nrhs = [(1,), (3,)]
+    nrhs = [(), (1,), (3,)] if vector_rhs_allowed else [(1,), (3,)]
 
     for n, batch, rhs in product(ns, batches, nrhs):
         yield SampleInput(make_a(*batch, n, n), args=(make_b(batch + (n,) + rhs),))

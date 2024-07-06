@@ -110,10 +110,11 @@ class EvalEnv:
 
 
 def get_signature(fn, rcb, loc, is_method):
-    if isinstance(fn, OpOverloadPacket):
-        signature = try_real_annotations(fn.op, loc)
-    else:
-        signature = try_real_annotations(fn, loc)
+    signature = (
+        try_real_annotations(fn.op, loc)
+        if isinstance(fn, OpOverloadPacket)
+        else try_real_annotations(fn, loc)
+    )
     if signature is not None and is_method:
         # If this is a method, then the signature will include a type for
         # `self`, but type comments do not contain a `self`. So strip it
@@ -432,10 +433,7 @@ def try_ann_to_type(ann, loc, rcb=None):
             )
         return DictType(key, value)
     if is_optional(ann):
-        if issubclass(ann_args[1], type(None)):
-            contained = ann_args[0]
-        else:
-            contained = ann_args[1]
+        contained = ann_args[0] if issubclass(ann_args[1], type(None)) else ann_args[1]
         valid_type = try_ann_to_type(contained, loc)
         msg = "Unsupported annotation {} could not be resolved because {} could not be resolved. At\n{}"
         assert valid_type, msg.format(repr(ann), repr(contained), repr(loc))

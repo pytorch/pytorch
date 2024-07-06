@@ -1506,10 +1506,11 @@ class CSE:
                     buffer.splice(expr)
                     buffer.writeline(self.suffix)
                 else:
-                    if assignment:
-                        line = f"{self.prefix}{var} = {expr}{self.suffix}"
-                    else:
-                        line = f"{expr}{self.suffix}"
+                    line = (
+                        f"{self.prefix}{var} = {expr}{self.suffix}"
+                        if assignment
+                        else f"{expr}{self.suffix}"
+                    )
                     buffer.writeline(line)
         else:
             var.bounds = var.bounds.tighten(bounds)

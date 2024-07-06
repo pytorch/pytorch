@@ -234,10 +234,7 @@ class NNModuleVariable(VariableTracker):
     def var_getattr(self, tx, name):
         from .builder import VariableBuilder
 
-        if self.source:
-            source = AttrSource(self.source, name)
-        else:
-            source = None
+        source = AttrSource(self.source, name) if self.source else None
 
         base = tx.output.get_submodule(self.module_key)
         base_dict = object.__getattribute__(base, "__dict__")
@@ -857,10 +854,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     name = "forward"
                     fn = self.value_type.forward
 
-        if self.source:
-            source = AttrSource(AttrSource(self.source, "__class__"), name)
-        else:
-            source = None
+        source = (
+            AttrSource(AttrSource(self.source, "__class__"), name)
+            if self.source
+            else None
+        )
 
         guard_to_detect_forward_monkeypatching(self.source, mod)
 
@@ -939,10 +937,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
-            if self.source:
-                source = AttrSource(AttrSource(self.source, "__class__"), name)
-            else:
-                source = None
+            source = (
+                AttrSource(AttrSource(self.source, "__class__"), name)
+                if self.source
+                else None
+            )
 
             return variables.UserFunctionVariable(fn, source=source).call_function(
                 tx, [self] + list(args), kwargs

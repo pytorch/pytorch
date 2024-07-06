@@ -77,10 +77,7 @@ def model_training_evaluation(
     if evaluation:
         metric = load_metric("accuracy")
         model.eval()
-        if not backend:
-            opt_model = model
-        else:
-            opt_model = torch._dynamo.optimize(backend)(model)
+        opt_model = model if not backend else torch._dynamo.optimize(backend)(model)
         for batch in eval_dataloader:
             batch = {k: v.to(device) for k, v in batch.items()}
             with torch.no_grad():

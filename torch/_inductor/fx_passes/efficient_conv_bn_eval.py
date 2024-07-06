@@ -39,20 +39,13 @@ def efficient_conv_bn_eval(
     # These lines of code are designed to deal with various cases
     # like bn without affine transform, and conv without bias
     weight_on_the_fly = conv.weight
-    if conv.bias is not None:
-        bias_on_the_fly = conv.bias
-    else:
-        bias_on_the_fly = torch.zeros_like(bn.running_var)
+    bias_on_the_fly = (
+        conv.bias if conv.bias is not None else torch.zeros_like(bn.running_var)
+    )
 
-    if bn.weight is not None:
-        bn_weight = bn.weight
-    else:
-        bn_weight = torch.ones_like(bn.running_var)
+    bn_weight = bn.weight if bn.weight is not None else torch.ones_like(bn.running_var)
 
-    if bn.bias is not None:
-        bn_bias = bn.bias
-    else:
-        bn_bias = torch.zeros_like(bn.running_var)
+    bn_bias = bn.bias if bn.bias is not None else torch.zeros_like(bn.running_var)
 
     # shape of [C_out, 1, 1, 1] in Conv2d
     target_shape = [-1] + [1] * (conv.weight.ndim - 1)
@@ -104,20 +97,13 @@ def efficient_conv_bn_eval_decomposed(
     # These lines of code are designed to deal with various cases
     # like bn without affine transform, and conv without bias
     weight_on_the_fly = conv_weight
-    if conv_bias is not None:
-        bias_on_the_fly = conv_bias
-    else:
-        bias_on_the_fly = torch.zeros_like(bn_running_var)
+    bias_on_the_fly = (
+        conv_bias if conv_bias is not None else torch.zeros_like(bn_running_var)
+    )
 
-    if bn_weight is not None:
-        bn_weight = bn_weight
-    else:
-        bn_weight = torch.ones_like(bn_running_var)
+    bn_weight = bn_weight if bn_weight is not None else torch.ones_like(bn_running_var)
 
-    if bn_bias is not None:
-        bn_bias = bn_bias
-    else:
-        bn_bias = torch.zeros_like(bn_running_var)
+    bn_bias = bn_bias if bn_bias is not None else torch.zeros_like(bn_running_var)
 
     # shape of [C_out, 1, 1, 1] in Conv2d
     target_shape = [-1] + [1] * (conv_weight.ndim - 1)
@@ -347,10 +333,7 @@ def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
         return
 
     # Check if the input is Conv
-    if bn_node.args:
-        input_node = bn_node.args[0]
-    else:
-        input_node = bn_node.kwargs["input"]
+    input_node = bn_node.args[0] if bn_node.args else bn_node.kwargs["input"]
     if input_node.op != "call_module":  # type: ignore[union-attr]
         return
     if not hasattr(gm, input_node.target):  # type: ignore[arg-type, union-attr]

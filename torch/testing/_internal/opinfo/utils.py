@@ -235,10 +235,11 @@ def reference_reduction_numpy(f, supports_keepdims=True):
         if "identity" in keys:
             identity = kwargs.pop("identity")
             if identity is not None:
-                if identity.dtype is torch.bfloat16:
-                    identity = identity.cpu().to(torch.float32)
-                else:
-                    identity = identity.cpu()
+                identity = (
+                    identity.cpu().to(torch.float32)
+                    if identity.dtype is torch.bfloat16
+                    else identity.cpu()
+                )
                 kwargs["initial"] = identity.numpy()
 
         result = f(x, *args, **kwargs)

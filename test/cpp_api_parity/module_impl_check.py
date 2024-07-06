@@ -247,10 +247,9 @@ def test_forward_backward(unit_test_class, test_params):
 
 def compute_module_name(test_params_dict):
     fullname = test_params_dict.get("fullname", None)
-    if fullname:
-        module_name = fullname.split("_")[0]
-    else:
-        module_name = test_params_dict.get("module_name")
+    module_name = (
+        fullname.split("_")[0] if fullname else test_params_dict.get("module_name")
+    )
     return module_name
 
 

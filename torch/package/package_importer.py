@@ -544,10 +544,7 @@ class PackageImporter(Importer):
         if hasattr(module, "__path__"):
             for x in fromlist:
                 if not isinstance(x, str):
-                    if recursive:
-                        where = module_name + ".__all__"
-                    else:
-                        where = "``from list''"
+                    where = module_name + ".__all__" if recursive else "``from list''"
                     raise TypeError(
                         f"Item in {where} must be str, " f"not {type(x).__name__}"
                     )

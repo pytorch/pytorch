@@ -113,16 +113,7 @@ class TestTesting(TestCase):
 
         self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
 
-        if dtype is torch.uint8:
-            tests = [
-                (-1, 1, False),
-                (1, -1, False)
-            ]
-        else:
-            tests = [
-                (-1, 1, True),
-                (1, -1, True)
-            ]
+        tests = [(-1, 1, False), (1, -1, False)] if dtype is torch.uint8 else [(-1, 1, True), (1, -1, True)]
 
         self._isclose_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
 

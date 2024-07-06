@@ -563,15 +563,9 @@ def build_summary(args):
 def archive_data(archive_name):
     if archive_name is not None:
         prefix_match = re.search(r"\w+(?=_performance)", archive_name)
-        if prefix_match is not None:
-            prefix = prefix_match.group(0)
-        else:
-            prefix = ""
+        prefix = prefix_match.group(0) if prefix_match is not None else ""
         day_match = re.search(r"day_(\d+)_", archive_name)
-        if day_match is not None:
-            day = day_match.group(1)
-        else:
-            day = "000"
+        day = day_match.group(1) if day_match is not None else "000"
     else:
         now = datetime.now(tz=timezone(timedelta(hours=-8)))
         day = now.strftime("%j")

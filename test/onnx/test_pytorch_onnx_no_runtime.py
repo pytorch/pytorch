@@ -291,13 +291,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 # we cannot use `True` as the condition. Constant prop
                 # would remove the `if` statements.
                 c = torch.sum(x) > 4
-                if bool(c):
-                    if bool(c):
-                        y = self.m(x)
-                    else:
-                        y = self.m(x)
-                else:
-                    y = self.m(x)
+                y = (self.m(x) if bool(c) else self.m(x)) if bool(c) else self.m(x)
                 return y
 
         linear = torch.jit.trace(

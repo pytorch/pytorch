@@ -3477,10 +3477,7 @@ class ShapeEnv:
                 symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name] = out
             return out
 
-        if do_not_specialize_zero_one:
-            specialize_zero_one = False
-        else:
-            specialize_zero_one = self.specialize_zero_one
+        specialize_zero_one = False if do_not_specialize_zero_one else self.specialize_zero_one
 
         assert isinstance(source, Source), f"{type(source)} {source}"
         assert not (positive and val < 0), f"positive set for negative value: {val}"
@@ -4452,10 +4449,7 @@ class ShapeEnv:
         # axioms with compute hint NYE
         assert not compute_hint or not axioms
 
-        if var_to_range is None:
-            var_ranges = self.var_to_range
-        else:
-            var_ranges = dict(var_to_range)
+        var_ranges = self.var_to_range if var_to_range is None else dict(var_to_range)
 
         expr = self.simplify(expr)
 

@@ -174,10 +174,7 @@ class FakeQuantize(FakeQuantizeBase):
         self.quant_min = self.activation_post_process.quant_min
         self.quant_max = self.activation_post_process.quant_max
         self.is_dynamic = self.activation_post_process.is_dynamic
-        if _is_float_qparams(self.activation_post_process.qscheme):
-            zero_point_dtype = torch.float
-        else:
-            zero_point_dtype = torch.int
+        zero_point_dtype = torch.float if _is_float_qparams(self.activation_post_process.qscheme) else torch.int
         self.register_buffer('scale', torch.tensor([1.0], dtype=torch.float))
         self.register_buffer('zero_point', torch.tensor([0], dtype=zero_point_dtype))
         self.dtype = self.activation_post_process.dtype

@@ -586,10 +586,7 @@ def fuse_ddp_communication(
             f"fuse_ddp_communication_pass_{i}",
             config.trace.log_url_for_graph_xform,
         ):
-            if isinstance(pa, str):
-                func = globals()[pa]
-            else:
-                func = pa
+            func = globals()[pa] if isinstance(pa, str) else pa
             if "bucket_size_mb" in {
                 v.name for v in inspect.signature(func).parameters.values()
             }:

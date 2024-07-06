@@ -260,10 +260,11 @@ def out_wrapper(
                     out_attr = getattr(out, k)
                     if k not in kwargs:
                         kwargs[k] = out_attr
-            if pass_is_out:
-                result = fn(*args, is_out=(out is not None), **kwargs)
-            else:
-                result = fn(*args, **kwargs)
+            result = (
+                fn(*args, is_out=out is not None, **kwargs)
+                if pass_is_out
+                else fn(*args, **kwargs)
+            )
             assert (
                 isinstance(result, TensorLike)
                 and is_tensor

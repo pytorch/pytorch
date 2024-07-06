@@ -438,10 +438,11 @@ def generate_static_dispatch_fallback_call(
     cpp_sigs = CppSignatureGroup.from_native_function(
         f, method=False, fallback_binding=False
     )
-    if sig.symint and f.func.has_symint():
-        cpp_sig = cpp_sigs.symint_signature
-    else:
-        cpp_sig = cpp_sigs.signature
+    cpp_sig = (
+        cpp_sigs.symint_signature
+        if sig.symint and f.func.has_symint()
+        else cpp_sigs.signature
+    )
     assert cpp_sig is not None
     name = cpp_sig.name()
     exprs = translate_args(sig, cpp_sig)
@@ -673,10 +674,7 @@ class ComputeFunction:
             exprs = translate(sig.arguments(), target_sig.arguments())
             exprs_str = ", ".join([e.expr for e in exprs])
 
-            if sig.symint:
-                intlike_t = "c10::SymInt"
-            else:
-                intlike_t = "int64_t"
+            intlike_t = "c10::SymInt" if sig.symint else "int64_t"
 
             if Variant.function in f.variants:
                 result += f"""

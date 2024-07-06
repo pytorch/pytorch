@@ -2017,10 +2017,7 @@ def null_experiment(args, model_iter_fn, model, example_inputs):
 
 def cast_to(dtype, model, inputs):
     # cast model and inputs to fp16
-    if dtype == torch.float16:
-        model = model.half()
-    else:
-        model = model.to(dtype)
+    model = model.half() if dtype == torch.float16 else model.to(dtype)
 
     inputs = tree_map(
         lambda x: x.to(dtype)
@@ -2342,10 +2339,11 @@ class BenchmarkRunner:
 
     def decay_batch_exp(self, batch_size, factor=0.5, divisor=2):
         out_batch_size = batch_size * factor
-        if out_batch_size > divisor:
-            out_batch_size = (out_batch_size + 1) // divisor * divisor
-        else:
-            out_batch_size = batch_size - 1
+        out_batch_size = (
+            (out_batch_size + 1) // divisor * divisor
+            if out_batch_size > divisor
+            else batch_size - 1
+        )
         return max(0, int(out_batch_size))
 
     def batch_size_finder(self, device, model_name, initial_batch_size=1024):
@@ -2708,10 +2706,11 @@ class BenchmarkRunner:
                 is_same = False
 
             if not is_same:
-                if self.args.skip_accuracy_check:
-                    accuracy_status = "pass_due_to_skip"
-                else:
-                    accuracy_status = "fail_accuracy"
+                accuracy_status = (
+                    "pass_due_to_skip"
+                    if self.args.skip_accuracy_check
+                    else "fail_accuracy"
+                )
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
         return record_status(accuracy_status, dynamo_start_stats=start_stats)
@@ -2972,10 +2971,11 @@ class BenchmarkRunner:
 
         self.check_accuracy(name, model, example_inputs, optimize_ctx, experiment, tag)
 
-        if self.args.output_directory:
-            repro_dir = self.args.output_directory
-        else:
-            repro_dir = torch._dynamo.config.base_dir
+        repro_dir = (
+            self.args.output_directory
+            if self.args.output_directory
+            else torch._dynamo.config.base_dir
+        )
 
         try:
             shutil.move("repro.py", f"{repro_dir}/{name}_repro.py")

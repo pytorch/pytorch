@@ -203,10 +203,7 @@ def replicate(
             "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
         )
 
-    if ignored_modules is None:
-        ignored_modules = {}
-    else:
-        ignored_modules = set(ignored_modules)
+    ignored_modules = {} if ignored_modules is None else set(ignored_modules)
 
     state = cast(_ReplicateState, replicate.state(module))
     module.register_forward_pre_hook(state.forward_pre_hook, with_kwargs=True)
