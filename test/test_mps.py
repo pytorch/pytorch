@@ -9,7 +9,6 @@ import unittest
 import warnings
 import subprocess
 import tempfile
-import textwrap
 import os
 import copy
 import gc
@@ -11578,18 +11577,7 @@ class TestFallbackWarning(TestCase):
     # TODO: Remove once test_testing.py is running on MPS devices
     def test_no_warning_on_import(self):
         out = subprocess.check_output(
-            [
-                sys.executable,
-                "-c",
-                textwrap.dedent(
-                    """
-                    import warnings
-                    warnings.filterwarnings("always", module=r".*torch.*")
-
-                    import torch
-                    """
-                ).strip(),
-            ],
+            [sys.executable, "-W", "always", "-c", "import torch"],
             stderr=subprocess.STDOUT,
             # On Windows, opening the subprocess with the default CWD makes `import torch`
             # fail, so just set CWD to this script's directory
