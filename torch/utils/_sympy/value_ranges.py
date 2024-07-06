@@ -829,9 +829,10 @@ class SymPyValueRangeAnalysis:
         init_range = None
         for expr_range, cond_range in ranges:
             if sympy.true in cond_range:
-                init_range = (
-                    expr_range if init_range is None else init_range | expr_range
-                )
+                if init_range is None:
+                    init_range = expr_range
+                else:
+                    init_range = init_range | expr_range
         return init_range
 
     @staticmethod

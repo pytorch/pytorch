@@ -371,7 +371,10 @@ class CachingAutotuner(KernelInterface):
             )
 
             cc_str = str(compile_meta["cc"])
-            rocm_warp_size = 32 if "gfx10" in cc_str or "gfx11" in cc_str else 64
+            if "gfx10" in cc_str or "gfx11" in cc_str:
+                rocm_warp_size = 32
+            else:
+                rocm_warp_size = 64
 
             if GPUTarget:
                 target = GPUTarget(
@@ -842,11 +845,10 @@ class CachingAutotuner(KernelInterface):
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
             # grid can be a tuple of ints or a string.
-            grid_info = (
-                str(grid)
-                if isinstance(grid, tuple)
-                else getattr(grid, "grid_fn_str", "")
-            )
+            if isinstance(grid, tuple):
+                grid_info = str(grid)
+            else:
+                grid_info = getattr(grid, "grid_fn_str", "")
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
                 args,

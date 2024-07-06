@@ -65,7 +65,10 @@ def get_dlrm_model(sparse_dlrm=False):
         'weighted_pooling': None,
         'loss_function': 'bce'
     }
-    dlrm_model = SparseDLRM(**dlrm_model_config) if sparse_dlrm else DLRM_Net(**dlrm_model_config)
+    if sparse_dlrm:
+        dlrm_model = SparseDLRM(**dlrm_model_config)
+    else:
+        dlrm_model = DLRM_Net(**dlrm_model_config)
     return dlrm_model
 
 

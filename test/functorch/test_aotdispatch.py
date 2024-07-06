@@ -3280,22 +3280,20 @@ def forward(self, tangents_1):
             fake_x = fake_mode.from_tensor(x)
             fake_y = fake_mode.from_tensor(y)
 
-        fxy = (
-            aot_module_simplified(F(), (fake_x, fake_y), nop)
-            if fake
-            else aot_module_simplified(F(), (x, y), nop)
-        )
+        if fake:
+            fxy = aot_module_simplified(F(), (fake_x, fake_y), nop)
+        else:
+            fxy = aot_module_simplified(F(), (x, y), nop)
 
         fxy(x, y)
         x = torch.randn(3, 3, requires_grad=True).clone()
         y = torch.randn(3, 3, requires_grad=True).clone()
         fxy(x, x)  # is ok!
 
-        fxx = (
-            aot_module_simplified(F(), (fake_x, fake_x), nop)
-            if fake
-            else aot_module_simplified(F(), (x, x), nop)
-        )
+        if fake:
+            fxx = aot_module_simplified(F(), (fake_x, fake_x), nop)
+        else:
+            fxx = aot_module_simplified(F(), (x, x), nop)
 
         x = torch.randn(3, 3, requires_grad=True).clone()
         y = torch.randn(3, 3, requires_grad=True).clone()
@@ -3338,20 +3336,18 @@ def forward(self, tangents_1):
             fake_y = fake_mode.from_tensor(y)
             fake_z = fake_mode.from_tensor(z)
 
-        fxy = (
-            aot_module_simplified(F(), (fake_x, fake_y), nop)
-            if fake
-            else aot_module_simplified(F(), (x, y), nop)
-        )
+        if fake:
+            fxy = aot_module_simplified(F(), (fake_x, fake_y), nop)
+        else:
+            fxy = aot_module_simplified(F(), (x, y), nop)
 
         compare_equal_outs_and_grads(self, F(), fxy, (x, y))
         compare_equal_outs_and_grads(self, F(), fxy, (x, z))
 
-        fxz = (
-            aot_module_simplified(F(), (fake_x, fake_z), nop)
-            if fake
-            else aot_module_simplified(F(), (x, z), nop)
-        )
+        if fake:
+            fxz = aot_module_simplified(F(), (fake_x, fake_z), nop)
+        else:
+            fxz = aot_module_simplified(F(), (x, z), nop)
 
         compare_equal_outs_and_grads(self, F(), fxz, (x, z))
 

@@ -106,11 +106,10 @@ class PlacementStrategy:
         return self.input_specs[index]
 
     def __str__(self) -> str:
-        input_specs_str = (
-            f"{_pretty_print_spec(self.input_specs)} -> "
-            if self.input_specs is not None
-            else ""
-        )
+        if self.input_specs is not None:
+            input_specs_str = f"{_pretty_print_spec(self.input_specs)} -> "
+        else:
+            input_specs_str = ""
         output_spec_str = _pretty_print_spec(self.output_specs)
         return f"{input_specs_str}{output_spec_str}"
 

@@ -972,11 +972,10 @@ def mm(g: jit_utils.GraphContext, self, other):
 @_onnx_symbolic("aten::index")
 @_beartype.beartype
 def index(g: jit_utils.GraphContext, self, index):
-    indices = (
-        symbolic_helper._unpack_list(index)
-        if symbolic_helper._is_packed_list(index)
-        else [index]
-    )
+    if symbolic_helper._is_packed_list(index):
+        indices = symbolic_helper._unpack_list(index)
+    else:
+        indices = [index]
 
     # Handle single mask index.
     if len(indices) == 1:

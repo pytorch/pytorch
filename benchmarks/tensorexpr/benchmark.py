@@ -145,7 +145,10 @@ class Benchmark:
 
     def run_impl(self, use_fuser):
         warmups = 10
-        iters = 1000 if self.device == "cuda" else 10
+        if self.device == "cuda":
+            iters = 1000
+        else:
+            iters = 10
         engine = tensor_engine.get_engine()
 
         self.bm_jit = None

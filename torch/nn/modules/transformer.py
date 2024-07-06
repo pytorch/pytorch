@@ -1190,10 +1190,9 @@ def _detect_is_causal_mask(
 
         # Do not use `torch.equal` so we handle batched masks by
         # broadcasting the comparison.
-        make_causal = (
-            bool((mask == causal_comparison).all())
-            if mask.size() == causal_comparison.size()
-            else False
-        )
+        if mask.size() == causal_comparison.size():
+            make_causal = bool((mask == causal_comparison).all())
+        else:
+            make_causal = False
 
     return make_causal

@@ -356,11 +356,10 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
             # Premul sum
             if torch.cuda.nccl.version() >= (2, 11, 1):
                 for factor in (3.0, torch.tensor([5.0], device=local_device_id)):
-                    factor_ref = (
-                        factor.cpu().item()
-                        if isinstance(factor, torch.Tensor)
-                        else factor
-                    )
+                    if isinstance(factor, torch.Tensor):
+                        factor_ref = factor.cpu().item()
+                    else:
+                        factor_ref = factor
                     float_tensors = [
                         torch.tensor(
                             [self.rank + 1.0], device=f"cuda:{local_device_id}"
@@ -473,11 +472,10 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
         def gather(output_t, input_t, rootRank):
             opts = c10d.GatherOptions()
             opts.rootRank = rootRank
-            work = (
-                pg.gather(output_t, input_t, opts)
-                if rootRank == self.rank
-                else pg.gather([], input_t, opts)
-            )
+            if rootRank == self.rank:
+                work = pg.gather(output_t, input_t, opts)
+            else:
+                work = pg.gather([], input_t, opts)
             work.wait()
 
         # init input
@@ -509,11 +507,10 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
         def gather(output_t, input_t, rootRank):
             opts = c10d.GatherOptions()
             opts.rootRank = rootRank
-            work = (
-                pg.gather(output_t, input_t, opts)
-                if rootRank == self.rank
-                else pg.gather([], input_t, opts)
-            )
+            if rootRank == self.rank:
+                work = pg.gather(output_t, input_t, opts)
+            else:
+                work = pg.gather([], input_t, opts)
             work.wait()
 
         stress_length = 1000
@@ -588,11 +585,10 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
         def scatter(output_t, input_t, rootRank):
             opts = c10d.ScatterOptions()
             opts.rootRank = rootRank
-            work = (
-                pg.scatter(output_t, input_t, opts)
-                if rootRank == self.rank
-                else pg.scatter(output_t, [], opts)
-            )
+            if rootRank == self.rank:
+                work = pg.scatter(output_t, input_t, opts)
+            else:
+                work = pg.scatter(output_t, [], opts)
             work.wait()
 
         # init output
@@ -624,11 +620,10 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
         def scatter(output_t, input_t, rootRank):
             opts = c10d.ScatterOptions()
             opts.rootRank = rootRank
-            work = (
-                pg.scatter(output_t, input_t, opts)
-                if rootRank == self.rank
-                else pg.scatter(output_t, [], opts)
-            )
+            if rootRank == self.rank:
+                work = pg.scatter(output_t, input_t, opts)
+            else:
+                work = pg.scatter(output_t, [], opts)
             work.wait()
 
         stress_length = 1000
@@ -837,9 +832,10 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
 
         if torch.cuda.nccl.version() >= (2, 11, 1):
             for factor in (3.0, torch.tensor([5.0], device=self.rank)):
-                factor_ref = (
-                    factor.cpu().item() if isinstance(factor, torch.Tensor) else factor
-                )
+                if isinstance(factor, torch.Tensor):
+                    factor_ref = factor.cpu().item()
+                else:
+                    factor_ref = factor
                 output = [t.float() for t in output]
                 tensor_lists = [[t.float() for t in tl] for tl in tensor_lists]
                 output_ref = [t.float() for t in output]

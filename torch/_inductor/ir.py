@@ -236,7 +236,10 @@ def ir_node_to_tensor(x, guard_shape=True):
         return None
 
     shape_fn: Callable[[Expr], Union[int, Expr]]
-    shape_fn = V.graph.sizevars.size_hint if not guard_shape else identity
+    if not guard_shape:
+        shape_fn = V.graph.sizevars.size_hint
+    else:
+        shape_fn = identity
     size = [shape_fn(s) for s in x.get_size()]
     stride: StrideType
     if is_storage_and_layout(x):
@@ -645,11 +648,10 @@ def get_reduction_combine_fn(reduction_type, dtype, arg_break_ties_left=True):
             a_value, a_index = a
             b_value, b_index = b
 
-            mask = (
-                ops.lt(a_value, b_value)
-                if reduction_type == "argmin"
-                else ops.gt(a_value, b_value)
-            )
+            if reduction_type == "argmin":
+                mask = ops.lt(a_value, b_value)
+            else:
+                mask = ops.gt(a_value, b_value)
 
             equal = ops.eq(a_value, b_value)
             if is_float_dtype(dtype):
@@ -4077,11 +4079,10 @@ class ConcatKernel(NopKernel):
             )
             concat_kernel.inputs.append(input_buffer)
 
-            input_unwrapped = (
-                inputs[i].data.unwrap_view()
-                if isinstance(inputs[i].data, BaseView)
-                else inputs[i].data
-            )
+            if isinstance(inputs[i].data, BaseView):
+                input_unwrapped = inputs[i].data.unwrap_view()
+            else:
+                input_unwrapped = inputs[i].data
 
             if (
                 input_unwrapped.is_input_buffer()
@@ -6602,11 +6603,10 @@ class LoopBody:
 
     def add_submodule(self, block, prefix):
         """Not actually for nn.Modules, but subblocks in generated code are mapped to FX call_module opcodes"""
-        name = (
-            prefix
-            if prefix[-1].isnumeric() and prefix not in self.submodules
-            else f"{prefix}{len(self.submodules)}"
-        )
+        if prefix[-1].isnumeric() and prefix not in self.submodules:
+            name = prefix
+        else:
+            name = f"{prefix}{len(self.submodules)}"
         self.submodules[name] = block
         return name
 

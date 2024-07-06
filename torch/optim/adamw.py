@@ -395,9 +395,10 @@ def _single_tensor_adamw(
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
-                max_exp_avg_sq = (
-                    max_exp_avg_sqs[i].clone() if differentiable else max_exp_avg_sqs[i]
-                )
+                if differentiable:
+                    max_exp_avg_sq = max_exp_avg_sqs[i].clone()
+                else:
+                    max_exp_avg_sq = max_exp_avg_sqs[i]
 
                 max_exp_avg_sqs[i].copy_(torch.maximum(max_exp_avg_sq, exp_avg_sq))
 
