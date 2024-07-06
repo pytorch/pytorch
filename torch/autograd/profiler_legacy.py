@@ -108,7 +108,6 @@ class profile:
             with_flops=self.with_flops,
         )
         self.function_events._build_tree()
-        return False
 
     def __repr__(self):
         if self.function_events is None:
