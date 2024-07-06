@@ -81,6 +81,76 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph()
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    def test_no_tensor_computation_fail(self):
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Failed to produce a graph",
+        ):
+            inp = [torch.randn(3)]
+            inp2 = 2
+            inps = [inp, inp2]
+
+            def func(x, y):
+                return x
+
+            exported = torch._dynamo.export(func, same_signature=False)(*inps)
+
+    def test_no_tensor_computation(self):
+        inp = [torch.randn(3)]
+        inp2 = 2
+        inps = [inp, inp2]
+
+        def func(x, y):
+            return x
+
+        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func)(*inps)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertExpectedInline(
+            out_graph.code.strip(),
+            """\
+def forward(self, x, y):
+    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    x = arg0
+    return pytree.tree_unflatten([x], self._out_spec)""",
+        )
+
+    def test_no_tensor_computation_2(self):
+        inp = torch.randn(3)
+        inp2 = 2
+        inps = [inp, inp2]
+
+        def func(x, y):
+            return y
+
+        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func)(*inps)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertExpectedInline(
+            out_graph.code.strip(),
+            """\
+def forward(self, x, y):
+    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    x = arg0
+    return pytree.tree_unflatten([2], self._out_spec)""",
+        )
+
     def test_export_mismatched_out(self):
         def func(x):
             y = x + 1
@@ -607,6 +677,62 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph()
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_no_tensor_computation_with_aten_graph(self):
+        inp = [torch.randn(3)]
+        inp2 = 2
+        inps = [inp, inp2]
+
+        def func(x, y):
+            return x
+
+        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func, aten_graph=True)(*inps)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertExpectedInline(
+            out_graph.code.strip(),
+            """\
+def forward(self, x, y):
+    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    arg0_1 = arg0
+    return pytree.tree_unflatten([arg0_1], self._out_spec)""",
+        )
+
+    def test_no_tensor_computation_2_with_aten_graph(self):
+        inp = torch.randn(3)
+        inp2 = 2
+        inps = [inp, inp2]
+
+        def func(x, y):
+            return y
+
+        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func, aten_graph=True)(*inps)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertExpectedInline(
+            out_graph.code.strip(),
+            """\
+def forward(self, x, y):
+    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    arg0_1 = arg0
+    return pytree.tree_unflatten([2], self._out_spec)""",
+        )
 
     def test_export_mismatched_out_with_aten_graph(self):
         def func(x):

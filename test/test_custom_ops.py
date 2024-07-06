@@ -3092,6 +3092,61 @@ Please use `add.register_fake` to add an fake impl.""",
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             numpy_sin_inplace(x)
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_factory_function(self):
+        @torch.library.custom_op(
+            "_torch_testing::f", mutates_args={}, device_types="cpu"
+        )
+        def f(device: torch.device) -> Tensor:
+            return torch.ones(3)
+
+        result = f(device="cpu")
+        self.assertEqual(result.device, torch.device("cpu"))
+        self.assertEqual(result, torch.ones(3))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "f does not have a kernel registered for cuda"
+        ):
+            f("cuda")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Functions without tensor inputs are required to have a `device: torch.device` argument",
+        ):
+
+            @torch.library.custom_op(
+                "_torch_testing::f2", mutates_args={}, device_types="cpu"
+            )
+            def f2() -> Tensor:
+                return torch.ones(3)
+
+        @torch.library.custom_op("_torch_testing::f3", mutates_args={})
+        def f3() -> Tensor:
+            raise NotImplementedError("NYI")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Functions without tensor inputs are required to have a `device: torch.device` argument",
+        ):
+
+            @f3.register_kernel("cpu")
+            def _():
+                return torch.zeros(3)
+
+            result = f(x)
+
+        @torch.library.custom_op("_torch_testing::f4", mutates_args={})
+        def f4(device: torch.device) -> Tensor:
+            raise NotImplementedError("NYI")
+
+        @f4.register_kernel("cpu")
+        def _(device: torch.device):
+            return torch.zeros(3)
+
+        result = f(device="cpu")
+        self.assertEqual(result.device, torch.device("cpu"))
+        self.assertEqual(result, torch.ones(3))
+
 
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"
