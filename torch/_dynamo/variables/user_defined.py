@@ -955,8 +955,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     return trace_rules.lookup(func)(func)
 
         options = {"source": source}
-        if name == "__class__":
-            return UserDefinedClassVariable(type(self.value), **options)
 
         if subobj is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(subobj):
             if source:
