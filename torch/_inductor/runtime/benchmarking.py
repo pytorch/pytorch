@@ -41,7 +41,7 @@ class Benchmarker:
         return benchmark
     
     def benchmark_gpu(self, _callable: Callable[[], Any], estimation_iters: int = 5, memory_warmup_iters: int = 1000, benchmark_iters: int = 100, max_benchmark_duration: int = 25) -> float:        
-        def time(buffer, _callable, iters, measure_launch_overhead=False):
+        def benchmark(buffer, _callable, iters, measure_launch_overhead=False):
             event_pairs = self.get_event_pairs(iters)
             if measure_launch_overhead:
                 torch.cuda.synchronize()
@@ -66,7 +66,7 @@ class Benchmarker:
 
         buffer = torch.empty(int(self.get_cache_size() // 4), dtype=torch.int, device="cuda")
 
-        estimated_timing, launch_overhead = time(buffer, _callable, estimation_iters, measure_launch_overhead=True)
+        estimated_timing, launch_overhead = benchmark(buffer, _callable, estimation_iters, measure_launch_overhead=True)
         benchmark_iters = min(benchmark_iters, max(int(max_benchmark_duration / estimated_timing), 1))
 
         required_sleep_cycles = get_required_sleep_cycles(launch_overhead, memory_warmup_iters, benchmark_iters)
@@ -74,11 +74,11 @@ class Benchmarker:
 
         for _ in range(memory_warmup_iters):
             buffer.zero_()
-        benchmark = time(buffer, _callable, benchmark_iters)
+        timing = benchmark(buffer, _callable, benchmark_iters)
         
         del buffer
 
-        return benchmark
+        return time
 
     @functools.lru_cache(None)
     def get_cache_size(self) -> int:
