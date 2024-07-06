@@ -3147,6 +3147,47 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertEqual(result.device, torch.device("cpu"))
         self.assertEqual(result, torch.ones(3))
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_disable_kernel(self):
+        x = torch.ones(1)
+
+        @torch.library.custom_op("mylib::f", mutates_args=())
+        def f(x: Tensor) -> Tensor:
+            return x + 1
+
+        self.assertEqual(f(x), x + 1)
+
+        with self.assertWarnsOnceRegex(
+            RuntimeWarning, r".*no kernel was registered for this device type.*"
+        ):
+            with f.disable_kernel("gpu", disable=True):
+                self.assertEqual(f(x), x + 1)
+
+        @f.register_kernel("cpu")
+        def _(x):
+            return x + 2
+
+        self.assertEqual(f(x), x + 2)
+
+        with self.assertWarnsOnceRegex(RuntimeWarning, r".*already enabled.*"):
+            with f.disable_kernel("cpu", disable=False):
+                self.assertEqual(f(x), x + 2)
+
+        with f.disable_kernel("cpu", disable=True):
+            self.assertEqual(f(x), x + 1)
+
+            with self.assertWarnsOnceRegex(RuntimeWarning, r".*already disabled.*"):
+                with f.disable_kernel("cpu", disable=True):
+                    self.assertEqual(f(x), x + 1)
+
+            self.assertEqual(f(x), x + 1)
+
+        with f.disable_kernel("cpu", disable=False):
+            self.assertEqual(f(x), x + 2)
+
+        with f.disable_kernel("cpu", disable=True):
+            self.assertEqual(f(x), x + 1)
+
 
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"
