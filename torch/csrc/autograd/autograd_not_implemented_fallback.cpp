@@ -388,7 +388,9 @@ static void autogradNotImplementedFallbackImpl(
         // Skip test_parallel_materialize
         // For details see https://github.com/pytorch/pytorch/issues/130073
         if (op_name == "aten::_test_parallel_materialize" ||
-            op_name == "aten::_test_optional_intlist")
+            op_name == "aten::_test_optional_intlist" ||
+            op_name == "aten::_test_optional_filled_intlist" ||
+            op_name == "aten::_test_optional_floatlist")
           return;
         if (!is_inplace_output[idx_ret])
           TORCH_INTERNAL_ASSERT(
