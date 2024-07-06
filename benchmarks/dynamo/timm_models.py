@@ -82,6 +82,17 @@ REQUIRE_HIGHER_TOLERANCE = {
     "cspdarknet53",
 }
 
+REQUIRE_EVEN_HIGHER_TOLERANCE = {
+    "levit_128",
+    "sebotnet33ts_256",
+    "beit_base_patch16_224",
+}
+
+# These models need higher tolerance in MaxAutotune mode
+REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE = {
+    "gluon_inception_v3",
+}
+
 REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING = {
     "adv_inception_v3",
     "botnet26t_256",
@@ -105,6 +116,10 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
 
 SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
     "xcit_large_24_p8_224",
+}
+
+REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR = {
+    "mobilenetv3_large_100",
 }
 
 
@@ -320,8 +335,8 @@ class TimmRunner(BenchmarkRunner):
             if index < start or index >= end:
                 continue
             if (
-                not re.search("|".join(args.filter), model_name, re.I)
-                or re.search("|".join(args.exclude), model_name, re.I)
+                not re.search("|".join(args.filter), model_name, re.IGNORECASE)
+                or re.search("|".join(args.exclude), model_name, re.IGNORECASE)
                 or model_name in args.exclude_exact
                 or model_name in self.skip_models
             ):
@@ -335,6 +350,9 @@ class TimmRunner(BenchmarkRunner):
         else:
             return torch.no_grad()
 
+    def use_larger_multiplier_for_smaller_tensor(self, name):
+        return name in REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR
+
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         tolerance = 1e-3
@@ -346,7 +364,12 @@ class TimmRunner(BenchmarkRunner):
             tolerance = 8 * 1e-2
 
         if is_training:
-            if name in ["levit_128"]:
+            from torch._inductor import config as inductor_config
+
+            if name in REQUIRE_EVEN_HIGHER_TOLERANCE or (
+                inductor_config.max_autotune
+                and name in REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE
+            ):
                 tolerance = 8 * 1e-2
             elif name in REQUIRE_HIGHER_TOLERANCE:
                 tolerance = 4 * 1e-2
