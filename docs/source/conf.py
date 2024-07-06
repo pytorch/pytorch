@@ -3511,7 +3511,7 @@ def coverage_post_process(app, exception):
 
     def is_not_internal(modname):
         split_name = modname.split(".")
-        return all(name[0] != '_' for name in split_name)
+        return all(name[0] != "_" for name in split_name)
 
     # The walk function does not return the top module
     if "torch" not in modules:
