@@ -226,7 +226,7 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
 
         if config.functionalize_rng_ops:
             PhiloxStateTracker.mark_beginning_of_backward()
-        backward_out: Tuple[Tensor, ...] = tuple()
+        backward_out: Tuple[Tensor, ...] = ()
         # Call the backwards pass
         if grad_primals:
             with fx_traceback.preserve_node_meta():
@@ -765,7 +765,7 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
 
         if not isinstance(out, (tuple, list)):
             raise RuntimeError(
-                "Graph output must be a tuple(). This is so that we can avoid "
+                "Graph output must be a (). This is so that we can avoid "
                 "pytree processing of the outputs. Please change the module to "
                 "have tuple outputs or use aot_module instead."
             )

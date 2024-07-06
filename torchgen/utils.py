@@ -73,7 +73,7 @@ T = TypeVar("T")
 S = TypeVar("S")
 
 # These two functions purposely return generators in analogy to map()
-# so that you don't mix up when you need to list() them
+# so that you don't mix up when you need to [] them
 
 
 # Map over function that may return None; omit Nones from output sequence

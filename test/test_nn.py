@@ -91,7 +91,7 @@ class TestNN(NNTestCase):
 
     def _forward_criterion(self, criterion, input, target, extra_args=None):
         if extra_args is None:
-            extra_args = tuple()
+            extra_args = ()
         if isinstance(input, tuple):
             args = input + (target,) + extra_args
             output = criterion(*args)
@@ -101,7 +101,7 @@ class TestNN(NNTestCase):
 
     def _backward_criterion(self, criterion, input, output, target, gradOutput=None, extra_args=None):
         if extra_args is None:
-            extra_args = tuple()
+            extra_args = ()
         input_tuple = input if isinstance(input, tuple) else (input,)
         output_tuple = output if isinstance(output, tuple) else (output,)
         for i in input_tuple:
@@ -2291,7 +2291,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(state_dict['bias'].data_ptr(), l.bias.data_ptr())
 
         # Reference https://github.com/pytorch/pytorch/pull/75507#issuecomment-1110291545
-        self.assertNotWarn(lambda: l.state_dict(destination=dict()), "Should not warn kwarg destination w/o _metadata")
+        self.assertNotWarn(lambda: l.state_dict(destination={}), "Should not warn kwarg destination w/o _metadata")
 
     def test_extra_state(self):
 

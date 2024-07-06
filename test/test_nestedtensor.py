@@ -4013,7 +4013,7 @@ class TestNestedTensorSubclass(TestCase):
             ((2, 3), (3, None), (3, None, 1, 1)),
             ((0, 1, 3), (3,), (1, 1, 3, 1)),
             ((0, 1, 2), (4,), (1, 1, 1, 4)),
-            ((0, 1, 2, 3), tuple(), (1, 1, 1, 1)),
+            ((0, 1, 2, 3), (), (1, 1, 1, 1)),
         )
         for rd, ref_shape_no_keepdim, ref_shape_keepdim in reduce_dims:
             if (0 in rd) ^ (1 in rd):

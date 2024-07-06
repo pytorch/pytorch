@@ -569,7 +569,7 @@ def reference_inputs_prelu(op, device, dtype, requires_grad, **kwargs):
     yield from reference_inputs_elementwise_unary(op, device, dtype, requires_grad, **kwargs)
 
 def sample_kwargs_prelu_scalar_weight(device, dtype, input):
-    weight = torch.rand(tuple(), device=device, dtype=dtype)
+    weight = torch.rand((), device=device, dtype=dtype)
     # NumPy does not support bfloat16, so we default to float32 (only for NumPy) in that case
     if dtype == torch.bfloat16:
         weight_cpu = weight.to(dtype=torch.float32, device="cpu")
@@ -580,7 +580,7 @@ def sample_kwargs_prelu_scalar_weight(device, dtype, input):
 
 def error_inputs_prelu(op, device):
     # Weight has numel != 1, but self.ndim is zero-dim tensor
-    inp = make_tensor(tuple(), device=device, dtype=torch.float32)
+    inp = make_tensor((), device=device, dtype=torch.float32)
     weight = make_tensor((2,), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(inp, kwargs={'weight': weight}),
                      error_regex="Not allow zero-dim input tensor.")
@@ -4518,7 +4518,7 @@ def error_inputs_native_layer_norm(opinfo, device, **kwargs):
 
     err_msg1 = "Expected normalized_shape to be at least 1-dimensional"
     s1 = SampleInput(
-        make_arg(input_shape), args=(tuple(), None, None, 1e-5)
+        make_arg(input_shape), args=((), None, None, 1e-5)
     )
     yield ErrorInput(s1, error_regex=err_msg1)
 
@@ -4549,7 +4549,7 @@ def error_inputs_rms_norm(opinfo, device, **kwargs):
 
     err_msg1 = "Expected normalized_shape to be at least 1-dimensional"
     s1 = SampleInput(
-        make_arg(input_shape), args=(tuple(), None, 1e-5)
+        make_arg(input_shape), args=((), None, 1e-5)
     )
     yield ErrorInput(s1, error_regex=err_msg1)
 
@@ -8610,19 +8610,19 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
 
         # shape mismatch
         (make_input(3, 5), (make_input(3, 4), make_input(3, 4)),
-         dict(),
+         {},
          RuntimeError,
          (r'(Attempting to broadcast a dimension of length|'
           r"The size of tensor a \(5\) must match the size of tensor b \(4\) "
           r"at non-singleton dimension 1)")),
         (make_input(3, 4), (make_input(3, 5), make_input(3, 4)),
-         dict(),
+         {},
          RuntimeError,
          (r'(Attempting to broadcast a dimension of length|'
           r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
           r"at non-singleton dimension 1)")),
         (make_input(3, 4), (make_input(3, 4), make_input(3, 5)),
-         dict(),
+         {},
          RuntimeError,
          (r'(Attempting to broadcast a dimension of length|'
           r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
@@ -8630,19 +8630,19 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
 
         # different dimensions
         (make_input(3,), (make_input(3, 4), make_input(3, 4)),
-         dict(),
+         {},
          RuntimeError,
          (r"The anchor, positive, and negative tensors are expected to have "
           r"the same number of dimensions, but got: anchor 1D, positive 2D, "
           r"and negative 2D inputs")),
         (make_input(3, 4), (make_input(3,), make_input(3, 4)),
-         dict(),
+         {},
          RuntimeError,
          (r"The anchor, positive, and negative tensors are expected to have "
           r"the same number of dimensions, but got: anchor 2D, positive 1D, "
           r"and negative 2D inputs")),
         (make_input(3, 4), (make_input(3, 4), make_input(3,)),
-         dict(),
+         {},
          RuntimeError,
          (r"The anchor, positive, and negative tensors are expected to have "
           r"the same number of dimensions, but got: anchor 2D, positive 2D, "

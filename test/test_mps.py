@@ -11494,7 +11494,7 @@ class TestRNNMPS(TestCaseMPS):
                                      f"mismatch in cpu:{cpu_name} vs mps:{mps_name}, layers: {num_layers}")
 
     LSTM_TEST_CASES = [
-        dict(),  # default
+        {},  # default
         dict(batch_first=True),
         dict(bias=False),
         dict(bidirectional=True),

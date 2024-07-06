@@ -368,7 +368,7 @@ def quantized_args(
                 return descriptor and _is_value(arg) and _is_tuple_construct(arg)
 
             # Run regular symbolic function if none of the argument is QTensor.
-            is_quantized = list()
+            is_quantized = []
             for descriptor, arg in descriptor_args:
                 # ListConstruct
                 if _is_packed_list(arg):
@@ -1801,7 +1801,7 @@ def _reduce_op_symbolic_helper(onnx_op_name, allow_multi_dim_support=True):
     @_beartype.beartype
     def symbolic(g, self, dim=None, keepdim=None):
         self = _maybe_cast_reduce_op_input(g, self)
-        if dim is None or dim == tuple():
+        if dim is None or dim == ():
             # Dim can be 0, which will cause (not dim) == True. So we don't want to do
             # (not dim)
             # all-reduce path
