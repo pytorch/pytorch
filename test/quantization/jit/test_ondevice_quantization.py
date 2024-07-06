@@ -287,10 +287,10 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
 
     def _validate_no_linear_unpack(self, model):
         quantize_forward_graph = model.quantize_forward.graph
-        for n in quantize_forward_graph.nodes():
-            if n.kind() == "quantized::linear_unpack":
-                return False
-        return True
+        return all(
+            n.kind() != "quantized::linear_unpack"
+            for n in quantize_forward_graph.nodes()
+        )
 
     def _validate_setattr_fp_weights(self, model, num_nodes):
         quantize_forward_graph = model.quantize_forward.graph
