@@ -78,7 +78,7 @@ class EnableVmapFallbackWarnings:
         self.prev_state = torch._C._debug_only_are_vmap_fallback_warnings_enabled()
         torch._C._debug_only_display_vmap_fallback_warnings(True)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *ignored):
         torch._C._debug_only_display_vmap_fallback_warnings(self.prev_state)
 
 

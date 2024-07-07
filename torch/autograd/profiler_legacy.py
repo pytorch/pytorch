@@ -93,7 +93,7 @@ class profile:
     def _start_trace(self):
         _enable_profiler_legacy(self.config())
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
         if self.use_cuda:
@@ -108,6 +108,7 @@ class profile:
             with_flops=self.with_flops,
         )
         self.function_events._build_tree()
+        return False
 
     def __repr__(self):
         if self.function_events is None:

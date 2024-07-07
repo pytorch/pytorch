@@ -1635,7 +1635,7 @@ class CompileProfiler:
     def __enter__(self):
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, typ, val, traceback):
         pass
 
     def get_metrics(self):
