@@ -253,7 +253,7 @@ class LazyModuleMixin:
         # custom modules __setstate__ to add it
         params = self._parameters.values()
         buffers = self._buffers.values()
-        for param in itertools.chain(params, buffers):  # noqa: SIM110
+        for param in itertools.chain(params, buffers):
             if is_lazy(param):
                 return True
         return False

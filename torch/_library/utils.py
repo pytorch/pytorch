@@ -153,7 +153,10 @@ def mutates_and_returns_first_arg(op: OpOverload):
         return False
     if loc != next(iter(alias_set)):
         return False
-    return all(arg.alias_info is None for arg in schema.arguments[1:])
+    for arg in schema.arguments[1:]:
+        if arg.alias_info is not None:
+            return False
+    return True
 
 
 def fill_defaults(schema, args, kwargs):

@@ -103,7 +103,7 @@ def dtypes_dispatch_hint(dtypes):
 
     # CUDA is not available, dtypes will be empty.
     if len(dtypes) == 0:
-        return return_type((), str(()))
+        return return_type((), str(tuple()))
 
     set_dtypes = set(dtypes)
     for dispatch in COMPLETE_DTYPES_DISPATCH:

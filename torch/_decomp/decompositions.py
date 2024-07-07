@@ -1313,7 +1313,7 @@ def _pad_chunk(
 
 def have_same_ndims(tensors: List[Tensor]):
     ndim = tensors[0].ndim
-    for tensor in tensors:  # noqa: SIM110
+    for tensor in tensors:
         if tensor.ndim != ndim:
             return False
     return True
