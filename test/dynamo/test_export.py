@@ -3126,7 +3126,10 @@ def forward(self, x):
         )
 
         def has_aten_op(gm, op):
-            return any(node.target == op for node in gm.graph.nodes)
+            for node in gm.graph.nodes:
+                if node.target == op:
+                    return True
+            return False
 
         self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.msg))
 
@@ -4363,7 +4366,10 @@ def forward(self, x):
         )
 
         def _constais_op(gm, target):
-            return any(nd.target == target for nd in gm.graph.nodes)
+            for nd in gm.graph.nodes:
+                if nd.target == target:
+                    return True
+            return False
 
         self.assertTrue(_constais_op(gm_edit, torch.cos))
         self.assertTrue(_constais_op(gm_edit, torch.sin))

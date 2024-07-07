@@ -1408,7 +1408,7 @@ class TestCommon(TestCase):
         unsupported_dtypes = set()
         supported_backward_dtypes = set()
         unsupported_backward_dtypes = set()
-        dtype_error: Dict[torch.dtype, Exception] = {}
+        dtype_error: Dict[torch.dtype, Exception] = dict()
 
         def unsupported(dtype, e):
             dtype_error[dtype] = e

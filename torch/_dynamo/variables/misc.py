@@ -276,7 +276,7 @@ class ComptimeVariable(VariableTracker):
                 # a free variable that we actually DO have the runtime
                 # value for
                 # tuple(make_cell(ComptimeVar(i)) for i in fn.closure.items)
-                (),
+                tuple(),
             )
             func(ComptimeContext(tx))
         else:
@@ -580,7 +580,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 for x in args
             )
         proxy = tx.output.create_proxy(
-            "call_function", torch.autograd.function.FunctionCtx, (), {}
+            "call_function", torch.autograd.function.FunctionCtx, tuple(), {}
         )
         out = tx.output.side_effects.track_object_new(
             None,
@@ -1148,7 +1148,11 @@ class DebuggingVariable(VariableTracker):
         )
 
         flat_args = pytree.tree_leaves([args, kwargs])
-        return all(isinstance(arg, allowed_input_types) for arg in flat_args)
+        for arg in flat_args:
+            if not isinstance(arg, allowed_input_types):
+                return False
+
+        return True
 
 
 class LoggingLoggerVariable(VariableTracker):
