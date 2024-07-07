@@ -137,6 +137,6 @@ class ModuleTracker:
         self._fw_post_handle = register_module_forward_hook(self._fw_post_hook)
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *args):
         self._fw_pre_handle.remove()
         self._fw_post_handle.remove()

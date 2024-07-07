@@ -33,7 +33,7 @@ class LinearBlockSparsePattern:
     def __enter__(self):
         pass
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_value, backtrace):
         LinearBlockSparsePattern.row_block_size = LinearBlockSparsePattern.prev_row_block_size
         LinearBlockSparsePattern.col_block_size = LinearBlockSparsePattern.prev_col_block_size
         LinearBlockSparsePattern.rlock.release()

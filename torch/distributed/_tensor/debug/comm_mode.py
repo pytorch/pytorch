@@ -103,7 +103,7 @@ class CommModeModuleTracker(ModuleTracker):
         self._fw_pre_handle = register_module_forward_pre_hook(self._fw_pre_hook)
         self._fw_post_handle = register_module_forward_hook(super()._fw_post_hook)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *args):
         super().__exit__(*args)
 
     def print_paramater_info(self):
@@ -282,7 +282,7 @@ class CommDebugMode(TorchDispatchMode):
         self.advanced_module_tracker.__enter__()
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *args):
         self.advanced_module_tracker.__exit__()
         super().__exit__(*args)
 

@@ -124,9 +124,8 @@ class TestAliasAnalysis(JitTestCase):
             def __enter__(self):
                 return [x.__enter__() for x in self.ctxs]
 
-            def __exit__(self, *args: object) -> None:
-                for x in self.ctxs:
-                    x.__exit__(*args)
+            def __exit__(self, exc_type, exc_value, traceback):
+                return [x.__exit__(exc_type, exc_value, traceback) for x in self.ctxs]
 
         class ModuleWrapper(torch.nn.Module):
             def __init__(self, module_list):

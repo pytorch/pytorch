@@ -771,10 +771,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.enter_stack.append(maybe_prev_proxy_mode)
         return super().__enter__()
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_value, traceback):
         m = self._managers.pop()
         # ...exit us first, then sym mode
-        b = super().__exit__(*args)
+        b = super().__exit__(exc_type, exc_value, traceback)
 
         # Re-enable the previous proxy mode, if there was one.
         mb_previous_proxy_mode = self.enter_stack.pop()
@@ -782,7 +782,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             _push_mode(mb_previous_proxy_mode)
 
         if not b:
-            return m.__exit__(*args)
+            return m.__exit__(exc_type, exc_value, traceback)
         else:
             return m.__exit__(None, None, None)
 
