@@ -43,7 +43,7 @@ def _apply_docstring_templates(func):
         func.__doc__ = doc_string
 
     # Expose function as public symbol
-    __all__.append(func.__name__)
+    __all__.append(func.__name__)  # noqa: PYI056
 
     return func
 

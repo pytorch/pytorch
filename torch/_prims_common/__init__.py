@@ -690,10 +690,7 @@ def is_valid_permutation(rank: int, perm: DimsSequenceType) -> bool:
     if not isinstance(perm, Sequence):
         return False
 
-    if not (tuple(sorted(perm)) == tuple(range(0, rank))):
-        return False
-
-    return True
+    return tuple(sorted(perm)) == tuple(range(0, rank))
 
 
 def is_same_shape(a: Sequence, b: Sequence) -> bool:

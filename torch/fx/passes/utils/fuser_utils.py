@@ -83,10 +83,7 @@ def validate_partition(partition: NodeList) -> bool:
 
     # Use all output nodes as roots to traverse
     # the graph to check cycles.
-    if bfs_find_cycle(outputs):
-        return False
-
-    return True
+    return not bfs_find_cycle(outputs)
 
 
 @compatibility(is_backward_compatible=False)

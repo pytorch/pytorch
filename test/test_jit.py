@@ -197,9 +197,7 @@ def doAutodiffCheck(testname):
         'test_nn_max_pool2d_with_indices',
     ]
 
-    if testname in test_exceptions:
-        return False
-    return True
+    return testname not in test_exceptions
 
 
 # TODO: enable TE in PE when all tests are fixed

@@ -398,10 +398,7 @@ class TestPDT(JitTestCase):
         self.assertEqual(scripted_fn_bool(True), test_bool(True))
 
         def test_str(a):
-            if a == "":
-                return False
-            else:
-                return True
+            return not a == ""
 
         make_global(test_str)
         scripted_fn_str = torch.jit.script(test_str, example_inputs=[("",)])

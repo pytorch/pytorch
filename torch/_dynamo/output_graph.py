@@ -1492,9 +1492,7 @@ class OutputGraph:
             # should be DCE'able
             if not all(is_symnode_arg(a) for a in node.args):
                 return False
-            if not all(is_symnode_arg(a) for a in node.kwargs.values()):
-                return False
-            return True
+            return all(is_symnode_arg(a) for a in node.kwargs.values())
 
         # NB: You could try to expand this to cover more cases by simply
         # detecting whenever you have an int output, but this is a bit
@@ -1507,7 +1505,7 @@ class OutputGraph:
                 and node.target in ["size", "stride", "storage_offset", "item"]
             ):
                 return True
-            if node.op == "call_function" and node.target in [
+            return node.op == "call_function" and node.target in [
                 torch.ops.aten.sym_size,
                 torch.ops.aten.sym_size.default,
                 torch.ops.aten.sym_size.int,
@@ -1516,9 +1514,7 @@ class OutputGraph:
                 torch.ops.aten.sym_stride.int,
                 torch.ops.aten.sym_storage_offset,
                 torch.ops.aten.sym_storage_offset.default,
-            ]:
-                return True
-            return False
+            ]
 
         for node in reversed(list(self.graph.nodes)):
             if len(list(node.users)) == 0:

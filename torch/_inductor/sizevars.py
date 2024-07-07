@@ -312,9 +312,7 @@ class SizeVarAllocator:
         """
         if len(left) != len(right):
             return False
-        if all(self.statically_known_equals(l, r) for l, r in zip(left, right)):
-            return True
-        return False
+        return all(self.statically_known_equals(l, r) for l, r in zip(left, right))
 
     # See Note - [On Statically Known]
     def statically_known_leq(self, left: Expr, right: Union[Expr, int]) -> bool:
