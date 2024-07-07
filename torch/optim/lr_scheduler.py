@@ -280,7 +280,7 @@ class _enable_get_lr_call:
         self.o._get_lr_called_within_step = True
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_value, exc_tb):
         self.o._get_lr_called_within_step = False
 
 

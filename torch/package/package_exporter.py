@@ -969,7 +969,7 @@ class PackageExporter:
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_value, exc_tb) -> None:
+    def __exit__(self, exc_type, exc_value, exc_tb):
         # If __exit__ was called because an exception was raised, we do not
         # attempt to finalize the package. Instead, control is returned to the
         # caller to continue raising the exception.

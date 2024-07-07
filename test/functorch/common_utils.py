@@ -558,7 +558,7 @@ class DisableVmapFallback:
         self.prev_state = torch._C._functorch._is_vmap_fallback_enabled()
         torch._C._functorch._set_vmap_fallback_enabled(False)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         torch._C._functorch._set_vmap_fallback_enabled(self.prev_state)
 
 

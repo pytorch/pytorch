@@ -182,7 +182,7 @@ class DummyContextManager:
     def __enter__(self, *args, **kwargs):
         self.input.append(2)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         self.input.append(-1)
 
 

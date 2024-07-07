@@ -207,7 +207,7 @@ class Errors:
             def __enter__(self):
                 parent_self.context.append(msg)
 
-            def __exit__(self, *args: object) -> None:
+            def __exit__(self, exc_type, exc_value, exc_tb):
                 parent_self.context.pop()
 
         return AddContext()
@@ -215,7 +215,7 @@ class Errors:
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_value, exc_tb) -> None:
+    def __exit__(self, exc_type, exc_value, exc_tb):
         if self.errors:
             errors_msg = "\n\n".join("ERROR: " + x for x in self.errors)
             final_msg = "{}\n{}\n{}".format(self.msg, "-" * 70, errors_msg)

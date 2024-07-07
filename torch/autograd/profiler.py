@@ -60,7 +60,7 @@ except ImportError:
         def __enter__(self):
             raise NotImplementedError
 
-        def __exit__(self, *args: object) -> None:
+        def __exit__(self, exc_type, exc_value, exc_tb):
             raise NotImplementedError
 
         def __call__(self, func):
@@ -333,7 +333,7 @@ class profile:
         self._stats.profiler_enable_call_duration_us = int((t1 - t0) / 1000)
         self.profiling_start_time_ns = t1
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_value, exc_tb):
         if not self.enabled:
             return
         if self.use_device and hasattr(torch, self.use_device):
@@ -690,7 +690,7 @@ class record_function(_ContextDecorator):
         )
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type: Any, exc_value: Any, exc_tb: Any) -> None:
         if not self.run_callbacks_on_exit:
             return
 
@@ -814,7 +814,7 @@ class emit_itt:
         )
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_value, exc_tb):
         if not self.enabled:
             return
         _disable_profiler()
@@ -933,7 +933,7 @@ class emit_nvtx:
         )
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_value, exc_tb):
         if not self.enabled:
             return
         torch.cuda.synchronize()

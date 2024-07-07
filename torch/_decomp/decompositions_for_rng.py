@@ -124,7 +124,7 @@ class PhiloxStateTracker:
         PhiloxStateTracker.reset()
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_value, exc_tb):
         PhiloxStateTracker.reset()
 
     @classmethod

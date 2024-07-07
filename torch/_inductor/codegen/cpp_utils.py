@@ -350,9 +350,9 @@ class LocalBufferScope:
 
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_value, exc_tb):
         self.local_buffers.clear()
-        self.exit_stack.__exit__(*args)  # type: ignore[arg-type]
+        self.exit_stack.__exit__(exc_type, exc_value, exc_tb)
 
     def add_local_buffer(self, buffer: ir.Buffer):
         assert buffer.get_name() not in self.local_buffers

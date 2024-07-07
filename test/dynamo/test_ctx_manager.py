@@ -21,7 +21,7 @@ class CutomizedCtxManager:
     def __enter__(self):
         torch._C._set_grad_enabled(self.mode)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_value, exc_tb):
         torch._C._set_grad_enabled(self.prev)
 
 

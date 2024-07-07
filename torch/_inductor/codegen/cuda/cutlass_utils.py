@@ -347,8 +347,8 @@ class CUDACompileSourceCapturingContext:
         )
         return self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
 
-    def __exit__(self, *args: object) -> None:
-        return self._compile_patch.__exit__(*args)  # type: ignore[union-attr]
+    def __exit__(self, *exc_info: object) -> None:
+        return self._compile_patch.__exit__(*exc_info)  # type: ignore[union-attr]
 
 
 def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):

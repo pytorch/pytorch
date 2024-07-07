@@ -87,7 +87,7 @@ class detect_anomaly:
     def __enter__(self) -> None:  # noqa: D105
         torch.set_anomaly_enabled(True, self.check_nan)
 
-    def __exit__(self, *args: object) -> None:  # noqa: D105
+    def __exit__(self, *exc_info: object) -> None:  # noqa: D105
         torch.set_anomaly_enabled(self.prev, self.prev_check_nan)
 
 
@@ -116,5 +116,5 @@ class set_detect_anomaly:
     def __enter__(self) -> None:  # noqa: D105
         pass
 
-    def __exit__(self, *args: object) -> None:  # noqa: D105
+    def __exit__(self, *exc_info: object) -> None:  # noqa: D105
         torch.set_anomaly_enabled(self.prev, self.prev_check_nan)

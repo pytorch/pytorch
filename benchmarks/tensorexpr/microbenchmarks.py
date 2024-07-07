@@ -15,7 +15,7 @@ class kernel_arena_scope:
     def __enter__(self):
         self.scope = te.KernelScope()
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         self.scope = None
 
 

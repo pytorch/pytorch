@@ -1,4 +1,5 @@
 import textwrap
+from typing import Any
 
 import gdb  # type: ignore[import]
 
@@ -17,7 +18,7 @@ class DisableBreakpoints:
                 b.enabled = False
                 self.disabled_breakpoints.append(b)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type: Any, exc_value: Any, exc_tb: Any) -> None:
         for b in self.disabled_breakpoints:
             b.enabled = True
 

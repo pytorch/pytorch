@@ -819,7 +819,7 @@ class serialization_method:
 
         torch.save = wrapper
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         torch.save = self.torch_save
 
 Point = namedtuple('Point', ['x', 'y'])

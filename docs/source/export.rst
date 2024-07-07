@@ -272,7 +272,7 @@ know the python code is not exactly needed for computation. For example:
             self.count = 0
         def __enter__(self):
             self.count += 1
-        def __exit__(self, exc_type, exc_value, traceback):
+        def __exit__(self, exc_type, exc_value, exc_tb):
             self.count -= 1
 
     class M(torch.nn.Module):

@@ -134,7 +134,7 @@ class BaseScheduler:
                 self.o._get_sl_called_within_step = True
                 return self
 
-            def __exit__(self, *args: object) -> None:
+            def __exit__(self, exc_type, exc_value, exc_tb):
                 self.o._get_sl_called_within_step = False
 
         with _enable_get_sl_call(self):

@@ -317,10 +317,10 @@ class FunctionalTensorMode(TorchDispatchMode):
             self.enter_stack.append(False)
             return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_value, exc_tb):
         is_on_stack = self.enter_stack.pop()
         if is_on_stack:
-            super().__exit__(*args)
+            super().__exit__(exc_type, exc_value, exc_tb)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:

@@ -37,7 +37,7 @@ class SymDispatchMode:
         SYM_FUNCTION_MODE = self
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_value, exc_tb):
         global SYM_FUNCTION_MODE
         SYM_FUNCTION_MODE = self.inner
 

@@ -584,12 +584,12 @@ class FSDPMemTracker(MemTracker):
         TorchDispatchMode.__enter__(self)
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         self._deregister_module_and_optimizer_hooks()
         self._restore_collectives()
         self._restore_resize()
-        TorchDispatchMode.__exit__(self, *args)
-        self._mod_tracker.__exit__(*args)
+        TorchDispatchMode.__exit__(self, *exc_info)
+        self._mod_tracker.__exit__(*exc_info)
 
     def __torch_dispatch__(self, func, types, args=..., kwargs=None):  # type: ignore[no-untyped-def]
         res = func(*args, **kwargs or {})

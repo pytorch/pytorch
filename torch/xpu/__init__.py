@@ -147,7 +147,7 @@ class _DeviceGuard:
     def __enter__(self):
         self.prev_idx = torch.xpu._exchange_device(self.idx)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type: Any, exc_value: Any, exc_tb: Any):
         self.idx = torch.xpu._maybe_exchange_device(self.prev_idx)
 
 
@@ -166,7 +166,7 @@ class device:
     def __enter__(self):
         self.prev_idx = torch.xpu._exchange_device(self.idx)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type: Any, exc_value: Any, exc_tb: Any):
         self.idx = torch.xpu._maybe_exchange_device(self.prev_idx)
 
 
@@ -300,7 +300,7 @@ class StreamContext:
                 self.dst_prev_stream = torch.xpu.current_stream(cur_stream.device)
         torch.xpu.set_stream(cur_stream)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type: Any, exc_value: Any, exc_tb: Any):
         cur_stream = self.stream
         if cur_stream is None or self.idx == -1:
             return

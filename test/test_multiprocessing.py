@@ -221,10 +221,10 @@ class leak_checker:
         self.next_fds = self._get_next_fds(10)
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         if torch.cuda.is_available():
             torch.cuda.ipc_collect()
-        if args[0] is None:
+        if exc_info[0] is None:
             # Check that the 10th available file-descriptor at the end of the
             # test is no more than 4 higher than the 10th available at the
             # start. This attempts to catch file descriptor leaks, but allows
@@ -234,7 +234,6 @@ class leak_checker:
             # self.test_case.assertLessEqual(
             #     available_fds[-1] - self.next_fds[-1], 5)
             self.test_case.assertFalse(self.has_shm_files())
-        return False
 
     def check_pid(self, pid):
         self.checked_pids.append(pid)

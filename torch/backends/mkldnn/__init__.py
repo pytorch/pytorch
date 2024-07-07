@@ -60,7 +60,7 @@ class verbose:
         ), "Failed to set MKLDNN into verbose mode. Please consider to disable this verbose scope."
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_value, exc_tb):
         torch._C._verbose.mkldnn_set_verbose(VERBOSE_OFF)
 
 

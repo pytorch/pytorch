@@ -259,7 +259,7 @@ class _InsertPoint:
     def __enter__(self):
         pass
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_value, exc_tb):
         self.graph._insert = self.orig_insert
 
 class _node_list:

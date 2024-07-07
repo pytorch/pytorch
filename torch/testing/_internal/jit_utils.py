@@ -86,7 +86,7 @@ class _AssertRaisesRegexWithHighlightContext:
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_value, exc_tb) -> None:
+    def __exit__(self, exc_type, exc_value, exc_tb) -> bool:
         with self.test_case.assertRaisesRegex(self.exception_type, self.regex):
             if exc_type:
                 raise exc_value
@@ -94,6 +94,7 @@ class _AssertRaisesRegexWithHighlightContext:
         if self.highlight:
             FileCheck().check_source_highlighted(self.highlight).run(str(exc_value))
 
+        return True
 
 FUSION_GROUP = "prim::TensorExprGroup"
 
@@ -111,7 +112,7 @@ class JitTestCase(JitCommonTestCase):
             sys.stdout = self.stringio
             return self
 
-        def __exit__(self, *args: object) -> None:
+        def __exit__(self, *exc_info: object) -> None:
             self.append(str(self.stringio.getvalue()))
             del self.stringio
             sys.stdout = self.sys_stdout
@@ -126,7 +127,7 @@ class JitTestCase(JitCommonTestCase):
             sys.stderr = self.stringio
             return self
 
-        def __exit__(self, *args: object) -> None:
+        def __exit__(self, *exc_info: object) -> None:
             self.append(str(self.stringio.getvalue()))
             del self.stringio
             sys.stderr = self.sys_stderr
@@ -646,7 +647,7 @@ class NoTracerWarnContextManager:
         self.prev = torch._C._jit_get_tracer_state_warn()
         torch._C._jit_set_tracer_state_warn(False)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         torch._C._jit_set_tracer_state_warn(self.prev)
 
 @contextmanager

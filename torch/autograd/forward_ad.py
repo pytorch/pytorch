@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import os
 from collections import namedtuple
+from typing import Any
 
 import torch
 from .grad_mode import _DecoratorContextManager
@@ -208,7 +209,7 @@ class dual_level(_DecoratorContextManager):
     def __enter__(self):
         return enter_dual_level()
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type: Any, exc_value: Any, exc_tb: Any) -> None:
         exit_dual_level()
 
 
@@ -226,5 +227,5 @@ class _set_fwd_grad_enabled(_DecoratorContextManager):
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type: Any, exc_value: Any, exc_tb: Any) -> None:
         torch._C._set_fwd_grad_enabled(self.prev)

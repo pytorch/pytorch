@@ -5055,7 +5055,7 @@ Done""",
                 sys.stderr = self.stderr_new
                 return self
 
-            def __exit__(self, *args: object) -> None:
+            def __exit__(self, *exc_info: object) -> None:
                 self.captured = self.stderr_new.getvalue()
                 sys.stderr = self.stderr_orig
 
