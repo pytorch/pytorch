@@ -105,7 +105,10 @@ class CommitList:
 
     @staticmethod
     def keywordInFile(file, keywords):
-        return any(key in file for key in keywords)
+        for key in keywords:
+            if key in file:
+                return True
+        return False
 
     @staticmethod
     def gen_commit(commit_hash):

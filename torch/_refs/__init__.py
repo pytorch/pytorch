@@ -354,7 +354,9 @@ aten = torch._ops.ops.aten
 
 
 def is_noncontiguous_supported(device):
-    return device is None or device.type != "hpu"
+    if device is not None and device.type == "hpu":
+        return False
+    return True
 
 
 def handle_noncontiguous_outputs(input_tlist, output):
@@ -3776,7 +3778,9 @@ def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
 
 @register_decomposition(aten.roll)
 @out_wrapper()
-def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLikeType:
+def roll(
+    a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
+) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
     dims = utils.canonicalize_dims(a.ndim, dims)
     # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
@@ -3936,7 +3940,7 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
         lambda: "Dimension specified as 0 but tensor has no dimensions",
     )
     if guard_size_oblivious(t.shape[dim] == 0):
-        return ()
+        return tuple()
     else:
         return tuple(
             torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim)

@@ -844,7 +844,9 @@ class TestSubgraphRewriter(JitTestCase):
                     if input_idx == 1:
                         num_node = node
                     input_idx += 1
-            return isinstance(match.nodes_map[num_node], (int, float))
+            if not isinstance(match.nodes_map[num_node], (int, float)):
+                return False
+            return True
 
         def check_replacement_nodes(self, traced, matches):
             replacement_nodes_in_graph = [

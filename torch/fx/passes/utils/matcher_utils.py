@@ -164,7 +164,7 @@ class SubgraphMatcher:
         return True
 
     def _remove_overlapping_matches(self, matches: List[InternalMatch]) -> List[InternalMatch]:
-        non_overlapping_matches: List[InternalMatch] = []
+        non_overlapping_matches: List[InternalMatch] = list()
         nodes_matched: Set[Node] = set()
 
         for match in matches:

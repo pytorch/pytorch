@@ -435,7 +435,9 @@ def require_backend_is_available(backends):
             return dist.is_mpi_available()
         if backend == dist.Backend.UCC:
             return dist.is_ucc_available()
-        return backend in DistTestCases.backend_feature["plugin"]
+        if backend in DistTestCases.backend_feature["plugin"]:
+            return True
+        return False
 
     if BACKEND not in backends:
         return skip_but_pass_in_sandcastle(
@@ -1738,8 +1740,8 @@ class DistributedTest:
             rank = dist.get_rank()
             send_recv_size = 10
             tensor = _build_tensor(send_recv_size, value=rank)
-            recv_ranks = []
-            irecv_ranks = []
+            recv_ranks = list()
+            irecv_ranks = list()
 
             ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:

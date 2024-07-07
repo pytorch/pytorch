@@ -1843,7 +1843,10 @@ def _should_aten_fallback(
     if not name.startswith("aten::"):
         return False
 
-    return is_onnx_aten_export or is_aten_fallback_export and not is_exportable_aten_op
+    if is_onnx_aten_export or (is_aten_fallback_export and not is_exportable_aten_op):
+        return True
+
+    return False
 
 
 @_beartype.beartype

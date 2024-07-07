@@ -389,7 +389,10 @@ def _can_insert_copy_of_subgraph_a(
             arg_a = return_first_non_observer_node(node_a_arg, gm_a)
             if arg_a.op == 'call_method':
                 return arg_a.target in ('dequantize', 'to')
-            return arg_a.op == 'get_attr'
+            elif arg_a.op == 'get_attr':
+                return True
+            else:
+                return False
         elif isinstance(node_a_arg, (list, tuple)):
             for el in node_a_arg:
                 if not isinstance(el, Node):

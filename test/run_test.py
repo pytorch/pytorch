@@ -104,7 +104,9 @@ def maybe_set_hip_visible_devies():
 
 
 def strtobool(s):
-    return s.lower() not in ["", "0", "false", "off"]
+    if s.lower() in ["", "0", "false", "off"]:
+        return False
+    return True
 
 
 class TestChoices(list):

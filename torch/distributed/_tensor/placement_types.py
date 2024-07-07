@@ -350,7 +350,9 @@ class Replicate(Placement):
     """
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, Replicate)
+        if not isinstance(other, Replicate):
+            return False
+        return True
 
     def __hash__(self) -> int:
         # every replicate placement is the same
