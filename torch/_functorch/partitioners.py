@@ -114,7 +114,11 @@ def must_recompute(node: fx.Node) -> bool:
 
 
 def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
-    return any(must_recompute(node) for node in fx_g.graph.nodes)
+    found = False
+    for node in fx_g.graph.nodes:
+        if must_recompute(node):
+            return True
+    return False
 
 
 def has_recomputable_rng_ops(fx_g: fx.GraphModule) -> bool:
@@ -641,7 +645,7 @@ def functionalize_rng_ops(
     joint_graph_rng_ops = get_rng_ops(joint_module)
     fw_graph_rng_ops = get_rng_ops(fw_module)
     bw_graph_rng_ops = get_rng_ops(bw_module)
-    recomputable_rng_ops_map = {}
+    recomputable_rng_ops_map = dict()
     for node in joint_module.graph.nodes:
         if (
             must_recompute(node)

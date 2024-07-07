@@ -690,7 +690,10 @@ def is_valid_permutation(rank: int, perm: DimsSequenceType) -> bool:
     if not isinstance(perm, Sequence):
         return False
 
-    return tuple(sorted(perm)) == tuple(range(0, rank))
+    if not (tuple(sorted(perm)) == tuple(range(0, rank))):
+        return False
+
+    return True
 
 
 def is_same_shape(a: Sequence, b: Sequence) -> bool:
@@ -1871,10 +1874,10 @@ def is_expandable_to(shape: ShapeType, desired: ShapeType) -> bool:
     # aten/src/ATen/ExpandUtils.h:is_expandable_to
     if len(shape) > len(desired):
         return False
-    return all(
-        shape[-i - 1] == desired[-i - 1] or shape[-i - 1] == 1
-        for i in range(len(shape))
-    )
+    for i in range(len(shape)):
+        if shape[-i - 1] != desired[-i - 1] and shape[-i - 1] != 1:
+            return False
+    return True
 
 
 def mask_tensor(mask: TensorLikeType, t: TensorLikeType):

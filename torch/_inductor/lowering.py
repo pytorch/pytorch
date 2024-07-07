@@ -82,7 +82,7 @@ prims = torch.ops.prims
 needs_realized_inputs: Set[torch._ops.OpOverload] = set()
 foreach_ops: Set[torch._ops.OpOverload] = set()
 inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
-inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
+inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = dict()
 quantized_decomposed = torch.ops.quantized_decomposed
 
 
@@ -1389,7 +1389,10 @@ def cat(inputs, dim=0):
         if isinstance(x, (TensorBox, ir.StorageBox)):
             return should_lower_cat_input(unwrap_tensor(x))
 
-        return isinstance(x, ir.Pointwise)
+        if isinstance(x, ir.Pointwise):
+            return True
+
+        return False
 
     # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
     #             We will revisit this later after enabling vectorization on index_expr.

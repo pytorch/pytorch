@@ -125,7 +125,9 @@ def _is_valid_annotation(annotation: QuantizationAnnotation) -> bool:
         return False
     input_qspec_map = annotation.input_qspec_map
     output_qspec = annotation.output_qspec
-    return len(input_qspec_map) != 0 or output_qspec is not None
+    if len(input_qspec_map) == 0 and output_qspec is None:
+        return False
+    return True
 
 
 def _get_tensor_constant_from_node(node, m):

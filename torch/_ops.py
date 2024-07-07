@@ -92,10 +92,10 @@ class OperatorBase:
         return k in self.py_kernels
 
     def has_kernel_for_any_dispatch_key(self, ks):
-        return any(
-            not torch._C._dispatch_is_alias_key(k) and ks.has(k)
-            for k in self.py_kernels
-        )
+        for k in self.py_kernels:
+            if not torch._C._dispatch_is_alias_key(k) and ks.has(k):
+                return True
+        return False
 
     def py_impl(self, k):
         def inner(fn):

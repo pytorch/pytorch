@@ -558,7 +558,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         # have to write the test function in this funny way.
         # See https://github.com/pytorch/pytorch/issues/111918
         def test(y):
-            if y > 2:  # noqa: SIM103
+            if y > 2:
                 return True
             else:
                 return False

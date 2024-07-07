@@ -481,7 +481,7 @@ class ArgumentHandler:
     def __init__(self):
         self.dataptrs_read: Set[DataPtr] = set()
         self.dataptrs_written: Set[DataPtr] = set()
-        self.tensor_aliases: Dict[DataPtr, List[str]] = {}
+        self.tensor_aliases: Dict[DataPtr, List[str]] = dict()
         self.outputs: Set[DataPtr] = set()
 
     def _handle_argument(

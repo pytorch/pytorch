@@ -115,4 +115,7 @@ def check_for_type_equality(g1, g2):
     We do not use graph equality but instead type
     equality.
     """
-    return all(n.type == m.type for n, m in zip(g1.nodes, g2.nodes))
+    for n, m in zip(g1.nodes, g2.nodes):
+        if n.type != m.type:
+            return False
+    return True

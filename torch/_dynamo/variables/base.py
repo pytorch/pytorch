@@ -146,7 +146,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Walk value and call fn on all the VariableTracker instances
         """
         if cache is None:
-            cache = {}
+            cache = dict()
 
         idx = id(value)
         if idx in cache:

@@ -414,9 +414,11 @@ class FileSystem(FileSystemBase):
         if "://" in str(checkpoint_id):
             return False
 
-        return any(
-            p.exists() and os.access(p, os.W_OK) for p in Path(checkpoint_id).parents
-        )
+        for p in Path(checkpoint_id).parents:
+            if p.exists() and os.access(str(p), os.W_OK):
+                return True
+
+        return False
 
     def exists(self, path: Union[str, os.PathLike]) -> bool:
         return cast(Path, path).exists()
@@ -572,7 +574,7 @@ class _FileSystemWriter(StorageWriter):
             return fut
 
     def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
-        storage_md = {}
+        storage_md = dict()
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
         metadata.storage_data = storage_md
@@ -618,21 +620,21 @@ class FileSystemReader(StorageReader):
         super().__init__()
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
-        self.storage_data: Dict[MetadataIndex, _StorageInfo] = {}
+        self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
         self.load_id = _generate_uuid()
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
         return _create_file_view(file, sinfo.offset, sinfo.length)
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
-        self.storage_data = {}
+        self.storage_data = dict()
         if checkpoint_id:
             self.path = self.fs.init_path(checkpoint_id)
         self.load_id = _generate_uuid()
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
-        per_file: Dict[str, List[ReadItem]] = {}
+        per_file: Dict[str, List[ReadItem]] = dict()
         for read_item in plan.items:
             item_md = self.storage_data[read_item.storage_index]
             path = item_md.relative_path
