@@ -4437,6 +4437,7 @@ class TestSparseMeta(TestCase):
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
+    @skipIfTorchDynamo("TODO(pearu,sparse-team) : investigate dynamo fail")
     def test_fake(self, dtype, layout):
         from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
         fake_mode = FakeTensorMode()

@@ -1383,7 +1383,7 @@ class VariableBuilder:
             unimplemented("torch.compile does not support strided NestedTensor")
 
         # TODO(pearu,sparse-team) - Add the corresponding SPARSE_TENSOR_MATCH guards
-        if value.is_sparse and not self.tx.export:
+        if isinstance(value, torch.Tensor) and value.is_sparse and not self.tx.export:
             # A hot fix for sparse tensors + torch.compile. There is some
             # support for export + coo tensor. We need to create
             # SPARSE_TENSOR_GUARDS for guards to work propertly.
