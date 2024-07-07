@@ -1874,10 +1874,10 @@ def is_expandable_to(shape: ShapeType, desired: ShapeType) -> bool:
     # aten/src/ATen/ExpandUtils.h:is_expandable_to
     if len(shape) > len(desired):
         return False
-    return all(
-        shape[-i - 1] == desired[-i - 1] or shape[-i - 1] == 1
-        for i in range(len(shape))
-    )
+    for i in range(len(shape)):
+        if shape[-i - 1] != desired[-i - 1] and shape[-i - 1] != 1:
+            return False
+    return True
 
 
 def mask_tensor(mask: TensorLikeType, t: TensorLikeType):

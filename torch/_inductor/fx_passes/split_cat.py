@@ -40,8 +40,8 @@ _TransformParam: TypeAlias = Tuple[
 _Range: TypeAlias = Tuple[int, int]
 
 
-PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
-POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
+PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
+POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
 
 pre_grad_pass_names = [
     "normalization_pass",
@@ -711,9 +711,10 @@ class SplitCatSimplifier:
         return split_ranges
 
     def has_non_overlapping_ranges(self, ranges: List[_Range]) -> bool:
-        return all(
-            range_[1] <= next_range[0] for range_, next_range in zip(ranges, ranges[1:])
-        )
+        for range_, next_range in zip(ranges, ranges[1:]):
+            if range_[1] > next_range[0]:
+                return False
+        return True
 
     def fill_gaps(self, ranges: List[_Range], min_: int, max_: int) -> List[_Range]:
         cur = min_
