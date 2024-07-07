@@ -3724,7 +3724,10 @@ class TestSparse(TestSparseBase):
         def can_broadcast(s0, s1):
             s0 = tuple(reversed(s0))
             s1 = tuple(reversed(s1))
-            return all(not (s0[i] != 1 and s0[i] != s1[i]) for i in range(len(s0)))
+            for i in range(len(s0)):
+                if s0[i] != 1 and s0[i] != s1[i]:
+                    return False
+            return True
         sizes = (
             (), (1,), (2,), (1, 1), (3, 1), (3, 2), (4, 1, 1), (4, 3, 2)
         )

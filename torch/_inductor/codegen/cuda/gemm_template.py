@@ -742,7 +742,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         import cutlass_library.library as cutlass_lib
 
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
-        res: Dict[str, cutlass_gemm_op.GemmOperation] = {}
+        res: Dict[str, cutlass_gemm_op.GemmOperation] = dict()
         for op_dict in ops.values():
             for op_list in op_dict.values():
                 for op in op_list:

@@ -295,7 +295,10 @@ class TestPublicBindings(TestCase):
     @staticmethod
     def _is_mod_public(modname):
         split_strs = modname.split(".")
-        return all(not elem.startswith("_") for elem in split_strs)
+        for elem in split_strs:
+            if elem.startswith("_"):
+                return False
+        return True
 
     @unittest.skipIf(
         IS_WINDOWS or IS_MACOS,

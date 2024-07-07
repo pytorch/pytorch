@@ -24,7 +24,7 @@ def topo_sort(nodes: NodeList) -> NodeList:
         if indegree_map[node] == 0:
             candidates.put(node)
 
-    sorted_nodes: NodeList = []
+    sorted_nodes: NodeList = list()
     while not candidates.empty():
         node = candidates.get()
         sorted_nodes.append(node)
@@ -47,7 +47,7 @@ def validate_partition(partition: NodeList) -> bool:
 
     partition_set = set(partition)
 
-    outputs: NodeList = []
+    outputs: NodeList = list()
     for node in partition_set:
         for user_node in node.users:
             if user_node not in partition_set:

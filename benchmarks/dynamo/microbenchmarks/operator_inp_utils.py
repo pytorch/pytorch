@@ -113,14 +113,14 @@ def serialize_torch_args(e):
 
 
 def contains_tensor(elems):
-    for elem in pytree.tree_iter(elems):  # noqa: SIM110
+    for elem in pytree.tree_leaves(elems):
         if isinstance(elem, torch.Tensor):
             return True
     return False
 
 
 def skip_args(elems):
-    for i in pytree.tree_iter(elems):  # noqa: SIM110
+    for i in pytree.tree_leaves(elems):
         # only shows up in constructors and ops like that
         if isinstance(i, (torch.memory_format, torch.storage.UntypedStorage)):
             return True

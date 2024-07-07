@@ -168,6 +168,4 @@ __all__ = [
     "register_kl",
     "transform_to",
 ]
-
-
-__all__ += transforms.__all__
+__all__.extend(transforms.__all__)

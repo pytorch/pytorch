@@ -35,7 +35,10 @@ def bisect(cmd):
 
     # Test if there are any unskipped commits in (last_good, first_bad)
     def keep_going():
-        return any(limit not in skips for limit in range(last_good + 1, first_bad))
+        for limit in range(last_good + 1, first_bad):
+            if limit not in skips:
+                return True
+        return False
 
     while keep_going():
         test_limit = test_mid = (last_good + first_bad) // 2

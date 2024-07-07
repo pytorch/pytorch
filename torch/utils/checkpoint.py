@@ -769,7 +769,7 @@ class _Handle:
 
 class _Holder:
     def __init__(self):
-        self.handles: Dict[int, Optional[_Handle]] = {}
+        self.handles: Dict[int, Optional[_Handle]] = dict()
 
 
 class _NoopSaveInputs(torch.autograd.Function):
@@ -1153,7 +1153,10 @@ def _is_compiling(func, args, kwargs):
     # Check if we are under AOTAutograd tracing
     # There should probably be a better way to do this...
     # TODO: unify _is_compiling across all compile stacks
-    return any(isinstance(arg, torch.Tensor) and is_fun(arg) for arg in args)
+    for arg in args:
+        if isinstance(arg, torch.Tensor) and is_fun(arg):
+            return True
+    return False
 
 
 class _VersionWrapper:

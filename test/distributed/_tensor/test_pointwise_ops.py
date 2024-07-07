@@ -76,7 +76,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         placements: Sequence[Placement],
         op: Callable,
         pre_op_fn: Optional[Callable] = None,
-        args: Sequence[Any] = (),
+        args: Sequence[Any] = tuple(),
         kwargs: Optional[Dict[str, Any]] = None,
     ):
         if pre_op_fn is None:
