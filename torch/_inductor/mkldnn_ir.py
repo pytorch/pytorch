@@ -113,7 +113,7 @@ def _prepare_convolution_fusion_create(
         else:
             assert 0 < len(output_padding) <= dims
             output_padding = pad_listlike(output_padding, dims)
-        assert isinstance(groups, int)
+        assert isinstance(groups, (int, sympy.core.numbers.Integer))
         if transposed:
             # When transposed, the size of the prepacked oneDNN weight is different
             # from the PyTorch weight. We're not able to run aten conv with such
