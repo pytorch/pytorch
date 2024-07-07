@@ -15,7 +15,7 @@ class CompiledFn(Protocol):
 
 CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
 
-_BACKENDS: Dict[str, CompilerFn] = {}
+_BACKENDS: Dict[str, CompilerFn] = dict()
 
 
 def register_backend(
@@ -111,5 +111,5 @@ def _lazy_import_entry_point(backend_name: str):
         if backend_name in backend_eps.names:
             compiler_fn = backend_eps[backend_name].load()
 
-    if compiler_fn is not None and backend_name not in list_backends(()):
+    if compiler_fn is not None and backend_name not in list_backends(tuple()):
         register_backend(compiler_fn=compiler_fn, name=backend_name)

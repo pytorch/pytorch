@@ -130,7 +130,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             all_uninitialized = True
             all_cuda = True
 
-            for p in group.get("params", []):
+            for p in group.get("params", list()):
                 all_cuda &= p.is_cuda
                 all_uninitialized &= p not in self.value.state
 

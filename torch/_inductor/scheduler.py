@@ -1584,7 +1584,7 @@ class Scheduler:
                 items: Optional[List[T]] = None,
                 membership: Optional[Set[T]] = None,
             ) -> None:
-                self.items = items or []
+                self.items = items or list()
                 self.membership = membership or set()
 
             def append(self, node_user: T) -> None:
