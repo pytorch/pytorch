@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-r"""Implementation for Stochastic Gradient Descent optimizer."""
+r"""Implementation for SignSGD optimizer."""
 from typing import List, Optional
 
 import torch
@@ -16,10 +16,10 @@ from .optimizer import (
     Optimizer,
 )
 
-__all__ = ["SGD", "sgd"]
+__all__ = ["SignSGD", "sign_sgd"]
 
 
-class SGD(Optimizer):  # noqa: D101
+class SignSGD(Optimizer):  # noqa: D101
     def __init__(
         self,
         params,
@@ -121,7 +121,7 @@ class SGD(Optimizer):  # noqa: D101
                 group, params, grads, momentum_buffer_list
             )
 
-            sgd(
+            sign_sgd(
                 params,
                 grads,
                 momentum_buffer_list,
@@ -147,8 +147,8 @@ class SGD(Optimizer):  # noqa: D101
         return loss
 
 
-SGD.__doc__ = (
-    r"""Implements stochastic gradient descent (optionally with momentum).
+signSGD.__doc__ = (
+    r"""Implements sign stochastic gradient descent (optionally with momentum).
 
     .. math::
        \begin{aligned}
@@ -201,7 +201,7 @@ SGD.__doc__ = (
 
     Example:
         >>> # xdoctest: +SKIP
-        >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+        >>> optimizer = torch.optim.signSGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> optimizer.zero_grad()
         >>> loss_fn(model(input), target).backward()
         >>> optimizer.step()
@@ -209,7 +209,7 @@ SGD.__doc__ = (
     __ http://www.cs.toronto.edu/%7Ehinton/absps/momentum.pdf
 
     .. note::
-        The implementation of SGD with Momentum/Nesterov subtly differs from
+        The implementation of signSGD with Momentum/Nesterov subtly differs from
         Sutskever et al. and implementations in some other frameworks.
 
         Considering the specific case of Momentum, the update can be written as
@@ -242,7 +242,7 @@ SGD.__doc__ = (
 )
 
 
-def sgd(
+def sign_sgd(
     params: List[Tensor],
     d_p_list: List[Tensor],
     momentum_buffer_list: List[Optional[Tensor]],
@@ -261,9 +261,9 @@ def sgd(
     nesterov: bool,
     maximize: bool,
 ):
-    r"""Functional API that performs SGD algorithm computation.
+    r"""Functional API that performs signSGD algorithm computation.
 
-    See :class:`~torch.optim.SGD` for details.
+    See :class:`~torch.optim.signSGD` for details.
     """
     # Respect when the user inputs False/True for foreach or fused. We only want to change
     # the default when neither have been user-specified. Note that we default to foreach
@@ -290,11 +290,11 @@ def sgd(
         raise RuntimeError("torch.jit.script not supported with fused optimizers")
 
     if foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_sgd
+        func = _multi_tensor_sign_sgd
     elif fused and not torch.jit.is_scripting():
-        func = _fused_sgd
+        func = _fused_sign_sgd
     else:
-        func = _single_tensor_sgd
+        func = _single_tensor_sign_sgd
 
     func(
         params,
@@ -312,7 +312,7 @@ def sgd(
     )
 
 
-def _single_tensor_sgd(
+def _single_tensor_sign_sgd(
     params: List[Tensor],
     grads: List[Tensor],
     momentum_buffer_list: List[Optional[Tensor]],
@@ -352,7 +352,7 @@ def _single_tensor_sgd(
         param.add_(grad, alpha=-lr)
 
 
-def _multi_tensor_sgd(
+def _multi_tensor_sign_sgd(
     params: List[Tensor],
     grads: List[Tensor],
     momentum_buffer_list: List[Optional[Tensor]],
@@ -441,7 +441,7 @@ def _multi_tensor_sgd(
                 device_params[i].add_(device_grads[i], alpha=-lr)
 
 
-def _fused_sgd(
+def _fused_sign_sgd(
     params: List[Tensor],
     grads: List[Tensor],
     momentum_buffer_list: List[Optional[Tensor]],
@@ -459,7 +459,7 @@ def _fused_sgd(
     if not params:
         return
     if has_sparse_grad:
-        raise RuntimeError("`_fused_sgd` does not support sparse gradients")
+        raise RuntimeError("`_fused_sign_sgd` does not support sparse gradients")
     grad_scale_dict: DeviceDict = (
         {grad_scale.device: grad_scale} if grad_scale is not None else {}
     )
@@ -488,7 +488,7 @@ def _fused_sgd(
             )
         if found_inf_dict is not None and found_inf is not None:
             device_found_inf = found_inf_dict.setdefault(device, found_inf.to(device))
-        torch._fused_sgd_(
+        torch._fused_sign_sgd_(
             device_params,
             device_grads,
             [] if no_momentum_buffer else device_momentum_buffer_list,
