@@ -188,7 +188,7 @@ jobs:
         run: |
           pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
           # shellcheck disable=SC2046,SC2102
-          python3 -mpip install $(echo *.whl)[opt-einsum,optree]
+          python3 -mpip install $(echo *.whl)[opt-einsum,optree] optree==0.12.1
           popd
 
           .ci/pytorch/win-test.sh
