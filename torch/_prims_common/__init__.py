@@ -687,7 +687,7 @@ def is_valid_permutation(rank: int, perm: DimsSequenceType) -> bool:
     Validates that perm is a permutation of length rank.
     """
 
-    return isinstance(perm, Sequence) and sorted(perm) == list(range(0, rank))
+    return isinstance(perm, Sequence) and sorted(perm) == list(range(rank))
 
 
 def is_same_shape(a: Sequence, b: Sequence) -> bool:
