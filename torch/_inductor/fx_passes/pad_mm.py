@@ -240,12 +240,12 @@ def set_cached_should_pad(key: str, value: bool):
     return get_pad_cache().set_value(key, value=value)
 
 
-def get_cached_base_mm_benchmark_time(key: str) -> float:	
-    return get_pad_cache().lookup(key)	
+def get_cached_base_mm_benchmark_time(key: str) -> float:
+    return get_pad_cache().lookup(key)
 
 
-def set_cached_base_mm_benchmark_time(key: str, value: float):	
-    return get_pad_cache().set_value(key, value=value)	
+def set_cached_base_mm_benchmark_time(key: str, value: float):
+    return get_pad_cache().set_value(key, value=value)
 
 
 def should_pad_bench_key(
