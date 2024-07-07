@@ -53,7 +53,9 @@ def evaluate_platform_supports_flash_attention():
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
         return evaluate_gfx_arch_exact('gfx90a:sramecc+:xnack-') or evaluate_gfx_arch_exact('gfx942:sramecc+:xnack-')
-    return TEST_CUDA
+    if TEST_CUDA:
+        return True
+    return False
 
 def evaluate_platform_supports_cudnn_attention():
     return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
@@ -115,7 +117,9 @@ def tf32_is_not_fp32():
         return False
     if torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
         return False
-    return int(torch.version.cuda.split(".")[0]) >= 11
+    if int(torch.version.cuda.split('.')[0]) < 11:
+        return False
+    return True
 
 
 @contextlib.contextmanager

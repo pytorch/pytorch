@@ -705,7 +705,7 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
 def get_device_type_test_bases():
     # set type to List[Any] due to mypy list-of-union issue:
     # https://github.com/python/mypy/issues/3351
-    test_bases: List[Any] = []
+    test_bases: List[Any] = list()
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:

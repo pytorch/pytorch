@@ -547,7 +547,11 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
             if len(short_list) > len(long_list):
                 return False
 
-            return all(short_list[i] in long_list[i] for i in range(len(short_list)))
+            for i in range(len(short_list)):
+                if short_list[i] not in long_list[i]:
+                    return False
+
+            return True
 
         def loop(x, y):
             for i in range(int(y)):

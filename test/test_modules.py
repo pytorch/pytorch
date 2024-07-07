@@ -365,7 +365,9 @@ class TestModule(TestCase):
             elif isinstance(obj, dict):
                 return any(_can_be_noncontiguous(o) for o in obj.values())
             # scalar tensors can not be non-contiguous
-            return isinstance(obj, torch.Tensor) and obj.dim() != 0
+            if not isinstance(obj, torch.Tensor) or obj.dim() == 0:
+                return False
+            return True
 
         for module_input in module_inputs:
             if module_input.forward_input is None:

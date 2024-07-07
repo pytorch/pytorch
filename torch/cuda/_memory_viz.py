@@ -51,7 +51,10 @@ def _frame_filter(name, filename):
     for of in omit_functions:
         if of in name:
             return False
-    return all(of not in filename for of in omit_filenames)
+    for of in omit_filenames:
+        if of in filename:
+            return False
+    return True
 
 def _frames_fmt(frames, full_filename=False, reverse=False):
     if reverse:

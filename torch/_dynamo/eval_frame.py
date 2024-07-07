@@ -1337,7 +1337,7 @@ def export(
                         **named_parameters,
                         **named_buffers,
                     }
-                    fake_params_buffers = {}
+                    fake_params_buffers = dict()
 
                     for name, value in params_and_buffers.items():
                         fake_params_buffers[name] = ambient_fake_mode.from_tensor(

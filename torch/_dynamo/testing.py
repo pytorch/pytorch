@@ -57,8 +57,8 @@ def collect_results(model, prediction, loss, example_inputs):
     #         f"High loss value alert - {loss:.2f}. Can result in unstable gradients."
     #     )
 
-    grads = {}
-    params = {}
+    grads = dict()
+    params = dict()
     for name, param in model.named_parameters():
         if isinstance(model, eval_frame.OptimizedModule):
             name = remove_optimized_module_prefix(name)
@@ -71,7 +71,7 @@ def collect_results(model, prediction, loss, example_inputs):
         params[name] = param_copy
     results.append(grads)
     results.append(params)
-    buffers = {}
+    buffers = dict()
     for name, buffer in model.named_buffers():
         if isinstance(model, eval_frame.OptimizedModule):
             name = remove_optimized_module_prefix(name)

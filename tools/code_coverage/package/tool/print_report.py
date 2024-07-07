@@ -24,12 +24,18 @@ def is_intrested_file(file_path: str, interested_folders: list[str]) -> bool:
         return False
     if "aten/gen_aten" in file_path or "aten/aten_" in file_path:
         return False
-    return any(folder in file_path for folder in interested_folders)
+    for folder in interested_folders:
+        if folder in file_path:
+            return True
+    return False
 
 
 def is_this_type_of_tests(target_name: str, test_set_by_type: set[str]) -> bool:
     # tests are divided into three types: success / partial success / fail to collect coverage
-    return any(target_name in test for test in test_set_by_type)
+    for test in test_set_by_type:
+        if target_name in test:
+            return True
+    return False
 
 
 def print_test_by_type(

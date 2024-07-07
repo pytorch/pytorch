@@ -197,7 +197,9 @@ def doAutodiffCheck(testname):
         'test_nn_max_pool2d_with_indices',
     ]
 
-    return testname not in test_exceptions
+    if testname in test_exceptions:
+        return False
+    return True
 
 
 # TODO: enable TE in PE when all tests are fixed
@@ -10007,7 +10009,7 @@ dedent """
                 super().__init__()
                 x = torch.zeros(1, 3)
                 mod_fn = lambda : mod(x)  # noqa: E731
-                self.mod = torch.jit.trace(mod_fn, ())
+                self.mod = torch.jit.trace(mod_fn, tuple())
 
             @torch.jit.script_method
             def forward(self):

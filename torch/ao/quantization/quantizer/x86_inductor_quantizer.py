@@ -119,7 +119,10 @@ def _skip_annotate(nodes: List[Node], filter_fn: Optional[FilterFn] = None) -> b
 
     # 2) Proceed annotate if a) a filter function is provided
     # and b) the given nodes list passes the filter function check.
-    return not (filter_fn and filter_fn(nodes))
+    if filter_fn and filter_fn(nodes):
+        return False
+
+    return True
 
 
 def _create_module_name_filter(module_name: str) -> FilterFn:
@@ -1353,9 +1356,10 @@ class X86InductorQuantizer(Quantizer):
 
             def is_all_inputs_connected_to_quantized_op(input_nodes):
                 # Ensure all the inputs connect to fusion pattern or quantized node
-                return all(
-                    _is_quantized_op_pt2e(input_node) for input_node in input_nodes
-                )
+                for input_node in input_nodes:
+                    if not _is_quantized_op_pt2e(input_node):
+                        return False
+                return True
 
             if _skip_annotate([node], filter_fn):
                 return

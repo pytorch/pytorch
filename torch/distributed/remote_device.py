@@ -113,11 +113,14 @@ class _remote_device:
         if not isinstance(other, _remote_device):
             return False
 
-        return (
+        if (
             self._worker_name == other._worker_name
             and self._device == other._device
             and self._rank == other._rank
-        )
+        ):
+            return True
+
+        return False
 
     def __hash__(self):
         return hash(self._worker_name) ^ hash(self._device) ^ hash(self._rank)

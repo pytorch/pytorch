@@ -216,7 +216,7 @@ def has_tensor_in_frame(frame):
             if np and config.trace_numpy and (obj is np or is_numpy(obj)):
                 return True
 
-    seen_ids: Dict[int, bool] = {}
+    seen_ids: Dict[int, bool] = dict()
 
     def has_tensor(obj):
         """Recursively check if the obj has a tensor"""

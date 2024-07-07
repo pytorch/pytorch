@@ -82,7 +82,10 @@ def has_aliasing(op: OpType):
     for arg in op._schema.arguments:
         if arg.alias_info is not None:
             return True
-    return any(arg.alias_info is not None for arg in op._schema.returns)
+    for arg in op._schema.returns:
+        if arg.alias_info is not None:
+            return True
+    return False
 
 
 def has_effects(op, args, kwargs) -> bool:

@@ -267,7 +267,10 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
             else:
                 unflattened_keys.append(unflattened_key)
 
-        return any(unflattened_key in self.keys for unflattened_key in unflattened_keys)
+        if any(unflattened_key in self.keys for unflattened_key in unflattened_keys):
+            return True
+
+        return False
 
     def set_up_planner(
         self,

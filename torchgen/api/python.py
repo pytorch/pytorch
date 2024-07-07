@@ -1230,7 +1230,7 @@ def cpp_dispatch_exprs(
 ) -> tuple[str, ...]:
     cpp_args: Sequence[Binding] = _cpp_signature(f, method=False).arguments()
 
-    exprs: tuple[str, ...] = ()
+    exprs: tuple[str, ...] = tuple()
     if not isinstance(python_signature, PythonSignatureDeprecated):
         # By default the exprs are consistent with the C++ signature.
         exprs = tuple(a.name for a in cpp_args)

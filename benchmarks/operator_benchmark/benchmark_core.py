@@ -339,12 +339,16 @@ class BenchmarkRunner:
         return cmd_flag is None or test_flag == cmd_flag
 
     def _check_operator_first_char(self, test_flag, cmd_flag):
-        return cmd_flag is None or test_flag[:1].lower() in cmd_flag
+        if cmd_flag is None or test_flag[:1].lower() in cmd_flag:
+            return True
+        return False
 
     def _check_keep_list(self, test_flag, cmd_flag_list):
-        return cmd_flag_list is None or any(
+        if cmd_flag_list is None or any(
             test_flag == cmd_flag for cmd_flag in cmd_flag_list
-        )
+        ):
+            return True
+        return False
 
     def _keep_test(self, test_case):
         # TODO: consider regex matching for test filtering.
@@ -358,7 +362,7 @@ class BenchmarkRunner:
         )
 
         # Filter framework, operator, test_name, tag, forward_only
-        return (
+        if (
             self._check_keep(op_test_config.test_name, self.args.test_name)
             and self._check_keep_list(test_case.op_bench.module_name(), operators)
             and self._check_operator_first_char(
@@ -377,7 +381,10 @@ class BenchmarkRunner:
                 or "device" not in test_case.test_config.input_config
                 or self.args.device in op_test_config.test_name
             )
-        )
+        ):
+            return True
+
+        return False
 
     def _print_test_case_info(self, test_case):
         # Print out the test name and skip the real execution
