@@ -145,6 +145,7 @@ def skip_operator(operator):
 
     if "convolution" in str(operator):
         return True
+
     return False
 
 
