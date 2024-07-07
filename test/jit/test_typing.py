@@ -53,20 +53,14 @@ class TestTyping(JitTestCase):
 
         def test_not_in_dict(a):
             # type: (Dict[str, int]) -> bool
-            if "hello" not in a:
-                return False
-            else:
-                return True
+            return "hello" in a
 
         self.checkScript(test_not_in_dict, ({"hello": 1, "world": 2},))
         self.checkScript(test_not_in_dict, ({"world": 2},))
 
         def test_dict_tensor_key(a, t):
             # type: (Dict[Tensor, int], Tensor) -> bool
-            if t in a:
-                return True
-            else:
-                return False
+            return t in a
 
         inp1 = torch.tensor(3)
         inp2 = torch.tensor(5)

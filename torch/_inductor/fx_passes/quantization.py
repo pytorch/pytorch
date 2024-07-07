@@ -606,18 +606,10 @@ def _is_valid_quantized_op_binary_optimization_pattern(
                 else match.kwargs["accum_after_dequant"]
             )
         )
-        if (
-            len(
-                _get_remaining_users(
-                    extra_input_of_pattern,
-                    compute_node,
-                )
-            )
-            > 1
-            or extra_input_of_pattern == compute_node.args[0]
-        ):
-            return False
-        return True
+        return (
+            len(_get_remaining_users(extra_input_of_pattern, compute_node)) <= 1
+            and extra_input_of_pattern != compute_node.args[0]
+        )
 
     return fn
 

@@ -1369,9 +1369,7 @@ def check_compiler_is_gcc(compiler):
         return False
     compiler_path = os.path.realpath(results[0].strip())
     # On RHEL/CentOS c++ is a gcc compiler wrapper
-    if os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string:
-        return True
-    return False
+    return os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string
 
 def _check_and_build_extension_h_precompiler_headers(
         extra_cflags,
@@ -1435,10 +1433,7 @@ def _check_and_build_extension_h_precompiler_headers(
             # read all content of a file
             content = file.read()
             # check if string present in a file
-            if signature == content:
-                return True
-            else:
-                return False
+            return signature == content
 
     def _create_if_not_exist(path_dir):
         if not os.path.exists(path_dir):

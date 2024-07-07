@@ -1389,10 +1389,7 @@ def cat(inputs, dim=0):
         if isinstance(x, (TensorBox, ir.StorageBox)):
             return should_lower_cat_input(unwrap_tensor(x))
 
-        if isinstance(x, ir.Pointwise):
-            return True
-
-        return False
+        return isinstance(x, ir.Pointwise)
 
     # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
     #             We will revisit this later after enabling vectorization on index_expr.

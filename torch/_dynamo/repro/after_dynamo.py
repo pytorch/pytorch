@@ -364,9 +364,7 @@ def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
         return False
     except Exception as e:
         new_failure = str(e)
-        if SequenceMatcher(None, orig_failure, new_failure).ratio() > 0.5:
-            return True
-        return False
+        return SequenceMatcher(None, orig_failure, new_failure).ratio() > 0.5
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #

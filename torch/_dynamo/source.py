@@ -638,9 +638,7 @@ def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
         )
     if not isinstance(source, LocalSource):
         return False
-    if not allow_cell_or_freevar and source.cell_or_freevar:
-        return False
-    return True
+    return allow_cell_or_freevar or not source.cell_or_freevar
 
 
 def is_from_flatten_script_object_source(source: Source):

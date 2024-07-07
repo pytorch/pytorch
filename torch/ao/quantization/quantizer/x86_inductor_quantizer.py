@@ -119,10 +119,7 @@ def _skip_annotate(nodes: List[Node], filter_fn: Optional[FilterFn] = None) -> b
 
     # 2) Proceed annotate if a) a filter function is provided
     # and b) the given nodes list passes the filter function check.
-    if filter_fn and filter_fn(nodes):
-        return False
-
-    return True
+    return not (filter_fn and filter_fn(nodes))
 
 
 def _create_module_name_filter(module_name: str) -> FilterFn:

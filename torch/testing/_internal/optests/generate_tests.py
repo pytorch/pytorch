@@ -40,9 +40,7 @@ def dontGenerateOpCheckTests(reason: str):
 def is_abstract(tensor: torch.Tensor) -> bool:
     if tensor.is_meta:
         return True
-    if torch._subclasses.fake_tensor.is_fake(tensor):
-        return True
-    return False
+    return torch._subclasses.fake_tensor.is_fake(tensor)
 
 
 def safe_schema_check(

@@ -1733,9 +1733,7 @@ def _all_nodes(nodes: Collection[torch.Node]) -> Set[torch.Node]:
 
 @_beartype.beartype
 def _has_uses_by_nodes(value: torch.Value, nodes: Collection[torch.Node]) -> bool:
-    if any(use.user in nodes for use in value.uses()):
-        return True
-    return False
+    return any(use.user in nodes for use in value.uses())
 
 
 @_beartype.beartype

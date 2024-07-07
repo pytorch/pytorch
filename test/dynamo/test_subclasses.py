@@ -540,16 +540,14 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             ):
                 if kwargs is None:
                     kwargs = {}
-                if func not in HANDLED_FUNCTIONS or not all(  # noqa: C419
-                    [  # noqa: C419
-                        issubclass(t, (torch.Tensor, MyClass)) for t in types
-                    ]
+                if func not in HANDLED_FUNCTIONS or not all(
+                    issubclass(t, (torch.Tensor, MyClass)) for t in types
                 ):
                     return NotImplemented
                 return HANDLED_FUNCTIONS[func](*args, **kwargs)
 
         def _stack(input, dim=0, *, out=None):
-            return MyClass(sum([x.foo for x in input]))
+            return MyClass(sum(x.foo for x in input))
 
         HANDLED_FUNCTIONS[torch.stack] = _stack
 

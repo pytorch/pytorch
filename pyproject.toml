@@ -72,7 +72,6 @@ ignore = [
     "PYI024",
     "PYI036",
     "PYI041",
-    "PYI056",
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
     "SIM113", # please fix
     "SIM105", # these ignores are from flake8-simplify. please fix or ignore with commented reason
