@@ -688,7 +688,7 @@ class FlopCounterMode(TorchDispatchMode):
         super().__enter__()
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *args):
         super().__exit__(*args)
         self.mod_tracker.__exit__()
         if self.display:

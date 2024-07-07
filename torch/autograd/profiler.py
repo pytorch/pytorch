@@ -60,7 +60,7 @@ except ImportError:
         def __enter__(self):
             raise NotImplementedError
 
-        def __exit__(self, *args: object) -> None:
+        def __exit__(self, exc_type, exc_val, exc_tb):
             raise NotImplementedError
 
         def __call__(self, func):
@@ -333,7 +333,7 @@ class profile:
         self._stats.profiler_enable_call_duration_us = int((t1 - t0) / 1000)
         self.profiling_start_time_ns = t1
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
         if self.use_device and hasattr(torch, self.use_device):
@@ -379,6 +379,7 @@ class profile:
         if old_function_events:
             for evt in old_function_events:
                 self.function_events.append(evt)
+        return False
 
     def __repr__(self):
         if self.function_events is None:
@@ -690,7 +691,7 @@ class record_function(_ContextDecorator):
         )
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
         if not self.run_callbacks_on_exit:
             return
 
@@ -814,11 +815,12 @@ class emit_itt:
         )
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
         _disable_profiler()
         _run_on_profiler_stop()
+        return False
 
 
 class emit_nvtx:
@@ -933,12 +935,13 @@ class emit_nvtx:
         )
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
         torch.cuda.synchronize()
         _disable_profiler()
         _run_on_profiler_stop()
+        return False
 
 
 def load_nvprof(path):

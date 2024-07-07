@@ -182,9 +182,9 @@ class graph:
             *self.pool, capture_error_mode=self.capture_error_mode
         )
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_value, traceback):
         self.cuda_graph.capture_end()
-        self.stream_ctx.__exit__(*args)
+        self.stream_ctx.__exit__(exc_type, exc_value, traceback)
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
 
 

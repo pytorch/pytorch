@@ -49,5 +49,5 @@ class context:
         self.autograd_context = _new_context()
         return self.autograd_context._context_id()
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, type, value, traceback):
         _release_context(self.autograd_context._context_id())

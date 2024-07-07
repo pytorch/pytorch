@@ -4361,7 +4361,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             def __enter__(self):
                 return 1
 
-            def __exit__(self, *args: object) -> None:
+            def __exit__(self, exc_type, exc_val, exc_tb):
                 pass
 
         def fn(x, y):
@@ -4430,7 +4430,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             def __enter__(self):
                 return 1
 
-            def __exit__(self, *args: object) -> None:
+            def __exit__(self, exc_type, exc_val, exc_tb):
                 pass
 
         def fn(x, y):
@@ -4453,7 +4453,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             def __enter__(self):
                 return 1
 
-            def __exit__(self, *args: object) -> None:
+            def __exit__(self, exc_type, exc_val, exc_tb):
                 pass
 
         def fn(x, counter):
