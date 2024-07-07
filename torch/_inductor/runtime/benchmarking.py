@@ -84,7 +84,9 @@ class Benchmarker:
 
     @functools.lru_cache(None)
     def get_cache_size(self) -> int:
-        return 50 * 1024 * 1024
+        device = torch.cuda.current_device()
+        properties = torch.cuda.get_device_properties(device)
+        return properties.l2CacheSize
     
     @functools.lru_cache(None)
     def get_time_per_million_sleep_cycles(self) -> float:

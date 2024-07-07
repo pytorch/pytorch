@@ -2988,20 +2988,20 @@ class TritonScheduling(SIMDScheduling):
         src_code = self.generate_kernel_code_from_nodes(nodes, benchmark_kernel=True)
         mod = PyCodeCache.load(src_code)
 
-        def cache_file_path():	
-            assert mod.__file__ is not None	
-            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"	
+        def cache_file_path():
+            assert mod.__file__ is not None
+            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"
 
-        def load_cache():	
-            path = cache_file_path()	
-            if os.path.exists(path):	
-                with open(path) as fd:	
-                    return float(fd.read())	
-            return None	
+        def load_cache():
+            path = cache_file_path()
+            if os.path.exists(path):
+                with open(path) as fd:
+                    return float(fd.read())
+            return None
 
-        def store_cache():	
-            path = cache_file_path()	
-            with open(path, "w") as fd:	
+        def store_cache():
+            path = cache_file_path()
+            with open(path, "w") as fd:
                 fd.write(str(ms))
 
         log.debug(
@@ -3009,8 +3009,8 @@ class TritonScheduling(SIMDScheduling):
             {n.get_name() for n in nodes},
             mod.__file__,
         )
-        ms = load_cache()	
-        if ms is not None:	
+        ms = load_cache()
+        if ms is not None:
             return ms, mod.__file__
 
         args = mod.get_args()
