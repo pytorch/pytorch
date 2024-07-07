@@ -89,10 +89,10 @@ class SGD(Optimizer):  # noqa: D101
         for p in group["params"]:
             if p.grad is not None:
                 params.append(p)
-                grads.append(p.grad)
+                grads.append(torch.sign(p.grad))
                 if p.grad.is_sparse:
                     has_sparse_grad = True
-
+                
                 if group["momentum"] != 0:
                     state = self.state[p]
                     momentum_buffer_list.append(state.get("momentum_buffer"))
