@@ -90,8 +90,13 @@ def get_random_dim(min_power2: int = 1, max_power2: int = 16) -> int:
         return random.randint(lower, upper)
 
 
+def is_aligned(dim: int, align_size: int) -> bool:
+    return dim % align_size == 0
+
+
 def get_m_k_n(dtype: Any) -> Tuple[int, int, int]:
     uniform = random.choices([True, False], [0.5, 0.5])[0]
+    align_size = get_alignment_size_dtype(dtype)
 
     # repeat until tensors fit in memory
     while True:
@@ -103,6 +108,10 @@ def get_m_k_n(dtype: Any) -> Tuple[int, int, int]:
             m = get_random_dim()
             k = get_random_dim()
             n = get_random_dim()
+
+        if all(is_aligned(dim, align_size) for dim in [m, k, n]):
+            # skip if already aligned
+            continue
 
         if fits_in_memory(dtype, m, k, n):
             return (m, k, n)
@@ -145,11 +154,6 @@ def main(num_samples: int) -> None:
         dtype = get_dtype()
         set_precision(dtype)
         m, k, n = get_m_k_n(dtype)
-
-        align_size = get_alignment_size_dtype(dtype)
-        if m % align_size == 0 and k % align_size == 0 and n % align_size == 0:
-            # skip if already aligned
-            continue
 
         (transpose_left, transpose_right) = transpose_tensors()
         prepadded_left = prepadded()
