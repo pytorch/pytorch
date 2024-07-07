@@ -126,7 +126,10 @@ class SchedulerBuffer:
         assert self.node is not None
         if isinstance(self.node.layout, ir.NoneLayout):
             return False
-        return all(not isinstance(use.node, OutputNode) for use in self.users)
+        for use in self.users:
+            if isinstance(use.node, OutputNode):
+                return False
+        return True
 
     def set_users(self, users: List[NodeUser]) -> None:
         # deduplicate
@@ -704,7 +707,7 @@ def pformat(obj: Any) -> str:
         obj = sorted(obj, key=str)
     result = pprint.pformat(obj, indent=4)
     if "\n" in result:
-        return f"\n{textwrap.indent(result, ' ' * 4)}"
+        return f"\n{textwrap.indent(result, ' '*4)}"
     return result
 
 
@@ -1584,7 +1587,7 @@ class Scheduler:
                 items: Optional[List[T]] = None,
                 membership: Optional[Set[T]] = None,
             ) -> None:
-                self.items = items or []
+                self.items = items or list()
                 self.membership = membership or set()
 
             def append(self, node_user: T) -> None:

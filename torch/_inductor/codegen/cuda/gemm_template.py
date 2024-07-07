@@ -323,7 +323,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 remaining_size = 1
                 for i in range(len(A_size) - 1, len(C_size)):
                     remaining_size *= C_size[i]
-                return N == remaining_size or remaining_size == 1
+                if N != remaining_size and remaining_size != 1:
+                    return False
+                return True
             assert len(C_size) == len(A_size)
             if M != C_size[-2] and C_size[-2] != 1:
                 return False
@@ -742,7 +744,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         import cutlass_library.library as cutlass_lib
 
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
-        res: Dict[str, cutlass_gemm_op.GemmOperation] = {}
+        res: Dict[str, cutlass_gemm_op.GemmOperation] = dict()
         for op_dict in ops.values():
             for op_list in op_dict.values():
                 for op in op_list:

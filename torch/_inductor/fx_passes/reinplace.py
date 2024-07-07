@@ -448,9 +448,12 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             ):
                 return False
 
-            return not any_use_of_views_after_node(
+            if any_use_of_views_after_node(
                 node, shared_view_nodes, copy_node=copy_node
-            )
+            ):
+                return False
+
+            return True
         elif any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
             # If mutated arg is view of any of the inputs of the graph,
             # do not allow for inplacing.

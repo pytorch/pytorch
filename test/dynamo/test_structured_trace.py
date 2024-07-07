@@ -56,7 +56,9 @@ ARGS = (torch.ones(1000, 1000, requires_grad=True),)
 
 class StructuredTraceTestingFilter(logging.Filter):
     def filter(self, record):
-        return "str" not in record.metadata
+        if "str" in record.metadata:
+            return False
+        return True
 
 
 class StructuredTraceTestingFormatter(logging.Formatter):

@@ -1733,12 +1733,14 @@ def _all_nodes(nodes: Collection[torch.Node]) -> Set[torch.Node]:
 
 @_beartype.beartype
 def _has_uses_by_nodes(value: torch.Value, nodes: Collection[torch.Node]) -> bool:
-    return any(use.user in nodes for use in value.uses())
+    if any(use.user in nodes for use in value.uses()):
+        return True
+    return False
 
 
 @_beartype.beartype
 def _node_has_uses_by(node: torch.Node, nodes: Collection[torch.Node]) -> bool:
-    for output in node.outputs():  # noqa: SIM110
+    for output in node.outputs():
         if _has_uses_by_nodes(output, nodes):
             return True
     return False

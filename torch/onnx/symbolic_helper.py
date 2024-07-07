@@ -368,7 +368,7 @@ def quantized_args(
                 return descriptor and _is_value(arg) and _is_tuple_construct(arg)
 
             # Run regular symbolic function if none of the argument is QTensor.
-            is_quantized = []
+            is_quantized = list()
             for descriptor, arg in descriptor_args:
                 # ListConstruct
                 if _is_packed_list(arg):
@@ -1549,10 +1549,12 @@ def _flatten_helper(g: jit_utils.GraphContext, input, start_dim, end_dim, dim):
 def _is_split_static(split_size_or_sizes, _outputs):
     if _outputs is None:
         return False
-    return (
-        not _is_value(split_size_or_sizes)
-        or split_size_or_sizes.node().kind() == "onnx::Constant"
-    )
+    if (
+        _is_value(split_size_or_sizes)
+        and split_size_or_sizes.node().kind() != "onnx::Constant"
+    ):
+        return False
+    return True
 
 
 @_beartype.beartype
@@ -1799,7 +1801,7 @@ def _reduce_op_symbolic_helper(onnx_op_name, allow_multi_dim_support=True):
     @_beartype.beartype
     def symbolic(g, self, dim=None, keepdim=None):
         self = _maybe_cast_reduce_op_input(g, self)
-        if dim is None or dim == ():
+        if dim is None or dim == tuple():
             # Dim can be 0, which will cause (not dim) == True. So we don't want to do
             # (not dim)
             # all-reduce path

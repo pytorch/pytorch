@@ -99,7 +99,10 @@ def check_loss(ref_loss, res_loss):
     assert len(ref_loss) == len(res_loss)
     length = len(ref_loss)
     x = min(length, 10)
-    return sum(res_loss[-x:]) / 10 <= sum(ref_loss[-x:]) / 10 + 0.1
+    if sum(res_loss[-x:]) / 10 <= sum(ref_loss[-x:]) / 10 + 1e-1:
+        return True
+    else:
+        return False
 
 
 def parse_args():

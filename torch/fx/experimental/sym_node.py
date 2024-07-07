@@ -554,7 +554,7 @@ for name in math_op_names:
     setattr(SymNode, sym_name, _get_sym_node_fn(name))
     METHOD_TO_OPERATOR[sym_name] = getattr(torch, priv_sym_name)
     unary_magic_methods.add(sym_name)
-    __all__.append(sym_name)  # noqa: PYI056
+    __all__.append(sym_name)
 
 
 # Unary methods that are not magic methods

@@ -24,7 +24,9 @@ class LlvmCoverageParser:
         This is repo-specific and only makes sense for the current state of
         ovrsource.
         """
-        return "/third-party/" in path
+        if "/third-party/" in path:
+            return True
+        return False
 
     @staticmethod
     def _collect_coverage(

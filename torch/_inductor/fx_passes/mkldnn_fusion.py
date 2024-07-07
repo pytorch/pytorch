@@ -209,7 +209,9 @@ if torch._C._has_mkldnn:
 
             if len(computation_nodes) < 1:
                 return False
-            return not any(n.args[-3] != "none" for n in computation_nodes)
+            if any(n.args[-3] != "none" for n in computation_nodes):
+                return False
+            return True
 
         return fn
 
@@ -374,13 +376,17 @@ if torch._C._has_mkldnn:
         ):
             return False
         # check args[0] and args[1] is not same
-        return not any(n.args[0] == n.args[1] for n in binary_nodes)
+        if any(n.args[0] == n.args[1] for n in binary_nodes):
+            return False
+        return True
 
     def _is_valid_computation_binary(computation_op, binary_op, other_index=None):
         def fn(match):
             if not _is_single_computation_op(computation_op)(match):
                 return False
-            return _is_valid_binary(match, binary_op)
+            if not _is_valid_binary(match, binary_op):
+                return False
+            return True
 
         return fn
 
@@ -452,10 +458,12 @@ if torch._C._has_mkldnn:
 
             if any(_other_input_not_inplaceable(n, other_index) for n in binary_nodes):
                 return False
-            return not any(
+            if any(
                 n.args[other_index].op in ["placeholder", "output"]
                 for n in binary_nodes
-            )
+            ):
+                return False
+            return True
 
         return fn
 
@@ -857,11 +865,14 @@ if torch._C._has_mkldnn:
             for POS_ARG in POS_ARGS
         ):
             return False
-        return not any(
+        if any(
             lstm_node.args[POS_ARG].meta.get("val").dtype == torch.float16
             and not mkldnn._is_mkldnn_fp16_supported()
             for POS_ARG in POS_ARGS
-        )
+        ):
+            return False
+
+        return True
 
     def _is_packable_convolution(match):
         """

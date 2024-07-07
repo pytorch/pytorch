@@ -2456,7 +2456,9 @@ class TestQuantizedOps(TestCase):
             else:
                 raise NotImplementedError("Don't know what to do with",
                                           qX.qscheme())
-            return (qX.int_repr().to(float) == qX2.int_repr().to(float)).all()
+            if (qX.int_repr().to(float) != qX2.int_repr().to(float)).any():
+                return False
+            return True
 
         self.assertEqual(qX.equal(qX), equal_ref(qX, qX))
         self.assertEqual(qX.equal(qX2), equal_ref(qX, qX2))

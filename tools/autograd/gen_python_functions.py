@@ -205,7 +205,10 @@ def should_generate_py_binding(f: NativeFunction) -> bool:
             return False
 
     signature = str(f.func)
-    return all(pattern != signature for pattern in SKIP_PYTHON_BINDINGS_SIGNATURES)
+    for pattern in SKIP_PYTHON_BINDINGS_SIGNATURES:
+        if pattern == signature:
+            return False
+    return True
 
 
 def get_pycname(name: BaseOperatorName) -> str:

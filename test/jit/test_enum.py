@@ -175,7 +175,10 @@ class TestEnum(JitTestCase):
         make_global(Color)
 
         def enum_const(x: Color) -> bool:
-            return x == Color.PURPLE
+            if x == Color.PURPLE:
+                return True
+            else:
+                return False
 
         with self.assertRaisesRegexWithHighlight(
             RuntimeError, "has no attribute 'PURPLE'", "Color.PURPLE"

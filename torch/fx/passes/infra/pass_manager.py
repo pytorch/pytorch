@@ -137,7 +137,9 @@ def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable
     """
 
     def depends_on(a: Callable, b: Callable):
-        return a != that or b != this
+        if a == that and b == this:
+            return False
+        return True
 
     return depends_on
 
