@@ -282,7 +282,7 @@ def minimize(
         return dict(zip(sorted(parameters), key))
 
     if all_values is None:
-        all_values = {}
+        all_values = dict()
 
     directions = list(range(-max_step, max_step + 1))
     names = sorted(initial_parameters)

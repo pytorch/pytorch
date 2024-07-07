@@ -157,7 +157,7 @@ def _gen_ops_cached(arch, version) -> List[Any]:
             arch,
             version,
         )
-        return []
+        return list()
     arch = _normalize_cuda_arch(arch)
     args = CUTLASSArgs(architectures=arch, cuda_version=version)
     manifest = cutlass_manifest.Manifest(args)

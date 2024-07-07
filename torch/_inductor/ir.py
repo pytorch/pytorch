@@ -4952,7 +4952,7 @@ class UserDefinedTritonKernel(ExternKernel):
 
     def __init__(self, *, kernel_idx, grid, kernel_args):
         inputs = []
-        kwargs = {}
+        kwargs = dict()
         constant_args = []
         for k, v in kernel_args.items():
             if isinstance(v, TensorBox):

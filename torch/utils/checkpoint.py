@@ -769,7 +769,7 @@ class _Handle:
 
 class _Holder:
     def __init__(self):
-        self.handles: Dict[int, Optional[_Handle]] = {}
+        self.handles: Dict[int, Optional[_Handle]] = dict()
 
 
 class _NoopSaveInputs(torch.autograd.Function):
