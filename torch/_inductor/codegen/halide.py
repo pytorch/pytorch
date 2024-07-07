@@ -31,6 +31,7 @@ from ...utils._sympy.symbol import symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import HalideCodeCache
+from ..ir import get_reduction_combine_fn
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
 from ..ops_handler import AddParenHandler, MockHandler
 
@@ -1170,7 +1171,6 @@ class HalideKernel(SIMDKernel):
         """Codegen a reduction operation"""
         assert self.inside_reduction
         assert not self._load_mask
-
         cache_key = (src_dtype, reduction_type, value)
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
@@ -1207,29 +1207,16 @@ class HalideKernel(SIMDKernel):
                     parts[-1] += f"*{stride}"
                 stride *= self.halide_vars[sym]
             self.body.writeline(f"{result_var} = {' + '.join(parts)}")
-        elif reduction_type in ("sum", "prod", "min", "max", "any"):
-            fn = {
-                "sum": "sum",
-                "prod": "product",
-                "min": "minimum",
-                "max": "maximum",
-                "any": "maximum",
-            }[reduction_type]
-            self.body.writeline(f"{result_var} = hl.{fn}(rdom, {value_str})")
-        elif reduction_type == "xor_sum":
-            result_var_init = result_var
-            if not result_var.used_dims:  # need a fake dim
-                result_var_init = result_var.index_str([sympy.Symbol("hl.Var()")])
-                result_var.used_dims = [sympy.Integer(0)]
-            self.body.writeline(
-                f"{result_var_init} = hl.cast({acc_type}, {halide_constant(default)})"
-            )
-            self.body.writeline(f"{result_var} = {result_var} ^ {value_str}")
         elif reduction_type == "welford_reduce":
             # TODO(jansel): implement welford_reduce without fallback
             result_var = self.welford_reduce_fallback(dtype, value)
         else:
-            raise Unsupported(reduction_type)
+            combine_fn = get_reduction_combine_fn(reduction_type, acc_type)
+            with V.set_ops_handler(AddParenHandler(HalideOverrides(MockHandler()))):
+                combine_str = combine_fn(result_var, value_str)  # type: ignore[arg-type]
+            default_str = f"hl.cast({acc_type}, {halide_constant(default)})"
+            self.body.writeline(f"{result_var} = {default_str}")
+            self.body.writeline(f"{result_var} = {combine_str}")
 
         self.cse.reduction_cache[cache_key] = result_var
         return result_var
