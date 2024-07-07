@@ -497,7 +497,7 @@ class RecordOptimizationContext:
         self.opt_ctx.ops_name = self.func_name
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.current_node
         assert self.opt_ctx
         self.current_node.meta[OptimizationContext.key] = self.opt_ctx
@@ -2900,10 +2900,10 @@ class CppVecKernelChecker(CppVecKernel):
     def store_reduction(self, name, index, value):
         return self.simd_vec
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_val, exc_tb):
         # Restore the wrapper_code
         V.graph.wrapper_code = self._orig_wrapper_code  # type: ignore[assignment]
-        self.exit_stack.__exit__(*args)  # type: ignore[arg-type]
+        self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):
         # Record the graph wrapper code. The wrapper_code status could be
@@ -4057,8 +4057,8 @@ class WorkSharing:
         self.stack.__enter__()
         return self
 
-    def __exit__(self, *args: object) -> None:
-        self.stack.__exit__(*args)  # type: ignore[arg-type]
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stack.__exit__(exc_type, exc_val, exc_tb)
 
 
 @dataclasses.dataclass

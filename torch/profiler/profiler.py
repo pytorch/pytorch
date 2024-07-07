@@ -703,7 +703,7 @@ class profile(_KinetoProfile):
         self.start()
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
         prof.KinetoStepTracker.erase_step_count(PROFILER_STEP_NAME)
         if self.execution_trace_observer:

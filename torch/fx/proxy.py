@@ -80,7 +80,7 @@ class ScopeContextManager:
     def __enter__(self):
         return self._scope
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *args):
         self._scope.module_path = self._prev_scope.module_path
         self._scope.module_type = self._prev_scope.module_type
         return

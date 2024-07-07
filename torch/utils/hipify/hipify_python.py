@@ -129,7 +129,7 @@ class GeneratedFileCleaner:
             os.mkdir(dn)
             self.dirs_to_clean.append(os.path.abspath(dn))
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, type, value, traceback):
         if not self.keep_intermediates:
             for f in self.files_to_clean:
                 os.unlink(f)

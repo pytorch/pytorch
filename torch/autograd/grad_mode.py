@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from typing import Any
 
 import torch
 
@@ -80,7 +81,7 @@ class no_grad(_NoParamDecoratorContextManager):
         self.prev = torch.is_grad_enabled()
         torch.set_grad_enabled(False)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch.set_grad_enabled(self.prev)
 
 
@@ -135,7 +136,7 @@ class enable_grad(_NoParamDecoratorContextManager):
         self.prev = torch.is_grad_enabled()
         torch._C._set_grad_enabled(True)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
 
 
@@ -192,7 +193,7 @@ class set_grad_enabled(_DecoratorContextManager):
     def __enter__(self) -> None:
         torch._C._set_grad_enabled(self.mode)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
 
     def clone(self) -> "set_grad_enabled":
@@ -269,8 +270,8 @@ class inference_mode(_DecoratorContextManager):
         self._inference_mode_context = torch._C._InferenceMode(self.mode)
         self._inference_mode_context.__enter__()
 
-    def __exit__(self, *args: object) -> None:
-        self._inference_mode_context.__exit__(*args)
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        self._inference_mode_context.__exit__(exc_type, exc_value, traceback)
 
     def clone(self) -> "inference_mode":
         r"""
@@ -315,7 +316,7 @@ class set_multithreading_enabled(_DecoratorContextManager):
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_multithreading_enabled(self.prev)
 
     def clone(self) -> "set_multithreading_enabled":
@@ -355,7 +356,7 @@ class _force_original_view_tracking(_DecoratorContextManager):
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_view_replay_enabled(self.prev)
 
     def clone(self):
@@ -392,5 +393,5 @@ class _unsafe_preserve_version_counter(_DecoratorContextManager):
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *args) -> None:
         torch._C._autograd._unsafe_set_version_counter(self.tensor, self.prev_version)

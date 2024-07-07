@@ -492,7 +492,7 @@ class check_sparse_tensor_invariants:
         self.saved_state = self.is_enabled()
         torch._C._set_check_sparse_tensor_invariants(self.state)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, type, value, traceback):
         assert self.saved_state is not None
         torch._C._set_check_sparse_tensor_invariants(self.saved_state)
         self.saved_state = None

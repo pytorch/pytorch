@@ -29,7 +29,7 @@ class MemoryDelta(ContextDecorator):
         )
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *exc):
         self.active_memory_exit = (
             torch.cuda.memory_stats()["active_bytes.all.current"]
             if self.device.type == "cuda"
