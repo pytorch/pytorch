@@ -233,6 +233,6 @@ class ModTracker:
         )
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *args):
         self._fw_pre_handle.remove()
         self._fw_post_handle.remove()

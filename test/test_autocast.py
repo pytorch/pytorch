@@ -297,9 +297,9 @@ class WeightDTypeCastCounterMode(TorchDispatchMode):
         torch.clear_autocast_cache = lambda: None
         return super().__enter__()
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_val, exc_tb):
         torch.clear_autocast_cache = self.old_clear_cache
-        return super().__exit__(*args)
+        return super().__exit__(exc_type, exc_val, exc_tb)
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")

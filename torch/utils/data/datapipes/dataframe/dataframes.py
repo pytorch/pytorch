@@ -212,7 +212,7 @@ class CaptureLikeMock:
         capt = CaptureA(name=self.name, real_attribute=self.save)
         setattr(self.get_target(), self.attribute, capt)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *exc_info):
         setattr(self.get_target(), self.attribute, self.save)
 
 

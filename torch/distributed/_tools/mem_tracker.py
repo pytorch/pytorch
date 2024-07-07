@@ -924,7 +924,7 @@ class MemTracker(TorchDispatchMode):
         super().__enter__()
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *args: Any) -> None:
         self._deregister_param_and_optimizer_hooks()
         self._mod_tracker.clear_user_hooks()
         self._restore_resize()

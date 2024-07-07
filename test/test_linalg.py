@@ -2172,14 +2172,14 @@ class TestLinalg(TestCase):
                 self.target_test.precision_overrides = {torch.float: 1e-4, torch.cfloat: 2e-4}
                 return self.target_test.precision_overrides
 
-            def __exit__(self, *args: object) -> None:
+            def __exit__(self, type, value, tb) -> bool:
                 if 'nuc' != self.norm:
-                    return
+                    return True
                 if self.saved_overrides is None:
                     delattr(self.target_test, 'precision_overrides')
                 else:
                     self.target_test.precision_overrides = self.saved_overrides
-
+                return True
 
         for keepdim in [False, True]:
             # full reduction

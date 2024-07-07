@@ -539,7 +539,7 @@ class OpCheckMode(TorchFunctionMode):
         os.environ["TORCHDYNAMO_DISABLE"] = "1"
         return super().__enter__(*args, **kwargs)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *args, **kwargs):
         _is_inside_opcheck_mode.value = self.prev_is_opcheck_mode
         os.environ["TORCHDYNAMO_DISABLE"] = self.prev_dynamo_disable
         try:
@@ -547,7 +547,7 @@ class OpCheckMode(TorchFunctionMode):
             if should_update_failures_dict():
                 self.failures_dict.save()
         finally:
-            result = super().__exit__(*args)
+            result = super().__exit__(*args, **kwargs)
         return result
 
     def run_test_util(self, op, args, kwargs):

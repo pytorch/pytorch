@@ -67,10 +67,10 @@ class DeviceContext(TorchFunctionMode):
         CURRENT_DEVICE = self.device
         return super().__enter__()
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_val, exc_tb):
         global CURRENT_DEVICE
         CURRENT_DEVICE = self.old_device
-        return super().__exit__(*args)
+        return super().__exit__(exc_type, exc_val, exc_tb)
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
