@@ -138,7 +138,7 @@ class StreamContext(AbstractContextManager):
         self.prev_stream = _current_stream
         _current_stream = cur_stream
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, type: Any, value: Any, traceback: Any) -> None:
         cur_stream = self.stream
         if cur_stream is None:
             return

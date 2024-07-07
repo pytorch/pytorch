@@ -294,7 +294,7 @@ class DiagnosticContext(Generic[_Diagnostic]):
         self.logger.setLevel(self.options.verbosity_level)
         return self
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, exc_type, exc_val, exc_tb):
         self.logger.setLevel(self._previous_log_level)
         return None
 

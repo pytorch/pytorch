@@ -100,9 +100,9 @@ class IterGraph(fx.Graph):
             def __enter__(self):
                 pass
 
-            def __exit__(self, *args: object) -> None:
+            def __exit__(self, type, value, tb):
                 for insert_point in self.insert_points:
-                    insert_point.__exit__(*args)
+                    insert_point.__exit__(type, value, tb)
 
         insert_points = []
         for graph in self._all_graphs:

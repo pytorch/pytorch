@@ -1187,7 +1187,7 @@ class TestJit(JitTestCase):
                 def __enter__(self):
                     torch._C._jit_set_profiling_executor(False)
 
-                def __exit__(self, *args: object) -> None:
+                def __exit__(self, *args):
                     torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
 
             with jit_profiling_executor_false(), torch.jit.optimized_execution(True):
