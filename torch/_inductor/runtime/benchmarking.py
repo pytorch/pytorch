@@ -20,6 +20,8 @@ class Benchmarker:
             return self.benchmark_gpu(_callable, **kwargs)
     
     def benchmark_cpu(self, _callable: Callable[[], Any], warmup_iters: int = 5, benchmark_iters: int = 20) -> float:
+        # this function borrowed from original implementation in torch._inductor.runtime.runtime_utils
+
         timings = []
 
         for _ in range(warmup_iters):
@@ -70,20 +72,32 @@ class Benchmarker:
             required_sleep_cycles = (memory_warmup_overhead + benchmarking_overhead) / self.get_time_per_gpu_sleep_cycle()
             return int(required_sleep_cycles)
         
+        # make sure these functions are initialized, do it before we initialize buffer and
+        # after we're sure that we're on GPU. launch in this specific order to minimize
+        # potential overhead, as self.get_launch_overhead_per_cache_clear() doesn't
+        # call torch.cuda.synchronize() on exit
         self.get_launch_overhead_per_cache_clear()
         self.get_cache_size()
         self.get_time_per_gpu_sleep_cycle()
         
+        # initialize _callable, usually the first call is significantly slower than others
         _callable()
 
+        # initialize buffer, like _callable usually the first buffer.zero_() is the sloweest
         buffer = torch.empty(int(self.get_cache_size() // 4), dtype=torch.int, device="cuda")
         buffer.zero_()
 
+        # estimate the running time of _callable and shrink the size of benchmark_iters to ensure that
+        # the benchmarking finishes in roughly max_benchmark_duration or less. we also take advantage of
+        # the estimation loop to measure the launch overhead of _callable
         estimated_timing, launch_overhead = benchmark(buffer, _callable, estimation_iters, measure_launch_overhead=True)
         benchmark_iters = min(benchmark_iters, max(int(max_benchmark_duration / estimated_timing), 1))
 
-        required_sleep_cycles = calculate_required_gpu_sleep_cycles(launch_overhead, memory_warmup_iters, benchmark_iters)
-        torch.cuda._sleep(required_sleep_cycles)
+        # calculcate the number of GPU sleep cycles required to completely overlap the overhead of
+        # memory_warmup_iters and benchmark_iters. this can reduce measurement inaccuracy by preloading
+        # the stream with a large number of events
+        required_gpu_sleep_cycles = calculate_required_gpu_sleep_cycles(launch_overhead, memory_warmup_iters, benchmark_iters)
+        torch.cuda._sleep(required_gpu_sleep_cycles)
 
         for _ in range(memory_warmup_iters):
             buffer.zero_()
