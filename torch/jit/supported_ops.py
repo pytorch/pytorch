@@ -62,7 +62,9 @@ def _get_tensor_ops():
         self = schema.arguments[0]
         if self.name != "self":
             return False
-        return self.type.isSubtypeOf(torch._C.TensorType.get())
+        if not self.type.isSubtypeOf(torch._C.TensorType.get()):
+            return False
+        return True
 
     methods = []
     # discover methods

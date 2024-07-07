@@ -41,11 +41,7 @@ def should_exclude(key):
     if test_file == "UNKNOWN":
         return True
     # Policy: "pass rate" does not include inductor, export, or dynamo tests.
-    if test_file.startswith("inductor/"):
-        return True
-    if test_file.startswith("export/"):
-        return True
-    return test_file.startswith("dynamo/")
+    return test_file.startswith(("inductor/", "export/", "dynamo/"))
 
 
 def compute_pass_rate(eager_dir, dynamo_dir):

@@ -2722,7 +2722,9 @@ def gets_generated_view_copy(f: NativeFunction) -> bool:
     # We -could- probably generate these as well, but the codegen will be
     # slightly different, and hand-writing these few kernels keeps codegen
     # complexity lower.
-    return not f.func.name.name.base.endswith("_inverse")
+    if f.func.name.name.base.endswith("_inverse"):
+        return False
+    return True
 
 
 # Given a NativeFunction that corresponds to a view op,

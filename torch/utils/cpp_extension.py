@@ -1369,7 +1369,9 @@ def check_compiler_is_gcc(compiler):
         return False
     compiler_path = os.path.realpath(results[0].strip())
     # On RHEL/CentOS c++ is a gcc compiler wrapper
-    return os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string
+    if os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string:
+        return True
+    return False
 
 def _check_and_build_extension_h_precompiler_headers(
         extra_cflags,

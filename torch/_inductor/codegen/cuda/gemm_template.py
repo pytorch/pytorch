@@ -323,7 +323,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 remaining_size = 1
                 for i in range(len(A_size) - 1, len(C_size)):
                     remaining_size *= C_size[i]
-                return N == remaining_size or remaining_size == 1
+                if N != remaining_size and remaining_size != 1:
+                    return False
+                return True
             assert len(C_size) == len(A_size)
             if M != C_size[-2] and C_size[-2] != 1:
                 return False

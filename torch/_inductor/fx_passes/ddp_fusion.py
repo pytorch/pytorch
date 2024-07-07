@@ -493,10 +493,13 @@ def _fuse_ddp_communication(
         # 1. gradient/wait node should be directly used by the output
         # if gradient is None before bwd.
         # 2. gradient/wait node should be directly used by copy_.
-        return (
-            output in block.wait_nodes[0].users
-            or next(iter(block.wait_nodes[0].users)).target == aten.copy_.default
-        )
+        if (
+            output not in block.wait_nodes[0].users
+            and next(iter(block.wait_nodes[0].users)).target != aten.copy_.default
+        ):
+            return False
+
+        return True
 
     ops = (
         torch.ops._c10d_functional.all_reduce_.default,

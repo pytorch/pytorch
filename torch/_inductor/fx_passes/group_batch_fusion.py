@@ -562,9 +562,7 @@ class BatchLinearLHSFusion(BatchFusion):
 
 
 def is_node_meta_valid(node: Optional[torch.fx.Node]):
-    if node is None:
-        return True
-    return "example_value" in node.meta or "val" in node.meta
+    return node is None or "example_value" in node.meta or "val" in node.meta
 
 
 # Poor person's check for if a node in the graph mutates its input.

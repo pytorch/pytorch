@@ -278,7 +278,9 @@ def filter_vmap_implementable(reg):
         return False
     if "sparse" in reg:
         return False
-    return "::is_" not in reg
+    if "::is_" in reg:
+        return False
+    return True
 
 
 class TestFunctorchDispatcher(TestCase):

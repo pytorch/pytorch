@@ -110,10 +110,7 @@ class _remote_device:
                 raise RuntimeError("Invalid state!")
 
     def __eq__(self, other):
-        if not isinstance(other, _remote_device):
-            return False
-
-        return (
+        return isinstance(other, _remote_device) and (
             self._worker_name == other._worker_name
             and self._device == other._device
             and self._rank == other._rank

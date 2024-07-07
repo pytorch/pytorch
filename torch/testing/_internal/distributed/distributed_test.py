@@ -435,7 +435,9 @@ def require_backend_is_available(backends):
             return dist.is_mpi_available()
         if backend == dist.Backend.UCC:
             return dist.is_ucc_available()
-        return backend in DistTestCases.backend_feature["plugin"]
+        if backend in DistTestCases.backend_feature["plugin"]:
+            return True
+        return False
 
     if BACKEND not in backends:
         return skip_but_pass_in_sandcastle(

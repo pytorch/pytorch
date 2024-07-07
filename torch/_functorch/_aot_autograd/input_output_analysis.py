@@ -336,7 +336,8 @@ def _tensors_definitely_do_not_overlap(x, y):
             #   y: size=(4, 4), stride=(9, 1), offset=25 (this would overlap)
             # If the interval [modded_offset, modded_offset + x_size] falls entirely
             # without
-            return offset_delta_mod + y.size(1) <= x.stride(0)
+            if offset_delta_mod + y.size(1) <= x.stride(0):
+                return True
     return False
 
 
