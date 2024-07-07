@@ -8,9 +8,7 @@ from torch._inductor.utils import is_cpu_device
 
 class Benchmarker:
     def __init__(self) -> None:
-        self.get_cache_size()
-        self.get_time_per_gpu_sleep_cycle()
-        self.get_launch_overhead_per_cache_clear()
+        pass
 
     def benchmark(self, fn: Callable[..., Any], fn_args: List[Any], fn_kwargs: Dict[str, Any], **kwargs: Dict[str, Any]) -> float:
         _callable = lambda: fn(*fn_args, **fn_kwargs)
@@ -42,7 +40,7 @@ class Benchmarker:
 
         return timing
     
-    def benchmark_gpu(self, _callable: Callable[[], Any], estimation_iters: int = 5, memory_warmup_iters: int = 500, benchmark_iters: int = 25, max_benchmark_duration: int = 25) -> float:        
+    def benchmark_gpu(self, _callable: Callable[[], Any], estimation_iters: int = 5, memory_warmup_iters: int = 100, benchmark_iters: int = 25, max_benchmark_duration: int = 25) -> float:        
         def benchmark(buffer, _callable, iters, measure_launch_overhead=False):
             event_pairs = self.get_event_pairs(iters)
 
@@ -71,6 +69,10 @@ class Benchmarker:
             benchmarking_overhead = launch_overhead * benchmark_iters
             required_sleep_cycles = (memory_warmup_overhead + benchmarking_overhead) / self.get_time_per_gpu_sleep_cycle()
             return int(required_sleep_cycles)
+        
+        self.get_launch_overhead_per_cache_clear()
+        self.get_cache_size()
+        self.get_time_per_gpu_sleep_cycle()
         
         _callable()
 
