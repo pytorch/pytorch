@@ -1400,6 +1400,7 @@ class HalideKernel(SIMDKernel):
         code.splice(
             """
             import halide as hl
+            from torch._inductor.runtime import halide_helpers
             from math import inf, nan
 
             @hl.generator(name="kernel")

@@ -8296,9 +8296,8 @@ class CommonTemplate:
         weight.grad.zero_()
         r2, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(ones))
         if is_halide_backend(self.device):
-            raise
-            self.assertEqual(fw_code.count("hl.random_float"), 1)
-            self.assertEqual(bw_code.count("hl.random_float"), 0)
+            self.assertEqual(fw_code.count("halide_helpers.rand"), 1)
+            self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
         elif self.device == GPU_TYPE:
             self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)

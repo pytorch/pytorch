@@ -1,6 +1,8 @@
-import halide as hl
+# mypy: allow-untyped-defs
+import halide as hl  # type: ignore[import-untyped]
 
 N_ROUNDS_DEFAULT = 10  # Default number of rounds for philox
+
 
 def _pair_uniform_to_normal(u1, u2):
     """Box-Muller transform"""
@@ -8,6 +10,7 @@ def _pair_uniform_to_normal(u1, u2):
     th = 6.283185307179586 * u2
     r = hl.sqrt(-2.0 * hl.log(u1))
     return r * hl.cos(th), r * hl.sin(th)
+
 
 def _uint_to_uniform_float(x):
     """
@@ -21,31 +24,31 @@ def _uint_to_uniform_float(x):
         # maximum value such that `MAX_INT * scale < 1.0` (with float rounding)
         x = hl.cast(hl.Int(32), x)
         scale = hl.f64(4.6566127342e-10)
-    else:
-        #tl.static_assert(tl.constexpr(x.dtype == tl.uint64) or tl.constexpr(x.dtype == tl.int64))
+    elif x.type() in (hl.UInt(64), hl.Int(64)):
         x = hl.cast(hl.Int(64), x)
         scale = hl.f64(1.0842020432385337e-19)
+    else:
+        raise TypeError(f"Unsupported type {x.type()} in philox")
     x = hl.select(x < 0, -x - 1, x)
     return x * scale
+
 
 def philox_impl(c0, c1, c2, c3, k0, k1, n_rounds):
     def umulhi(a, b):
         a = hl.cast(hl.UInt(64), a)
         b = hl.cast(hl.UInt(64), b)
-        return hl.cast(hl.UInt(32), ((a * b) >> 32) & hl.u64(0xffffffff))
-    
+        return hl.cast(hl.UInt(32), ((a * b) >> 32) & hl.u64(0xFFFFFFFF))
 
-    if c0.type() == hl.UInt(64):
-        PHILOX_KEY_A = hl.u64(0x9E3779B97F4A7C15)
-        PHILOX_KEY_B = hl.u64(0xBB67AE8584CAA73B)
-        PHILOX_ROUND_A = hl.u64(0xD2E7470EE14C6C93)
-        PHILOX_ROUND_B = hl.u64(0xCA5A826395121157)
-    else:
+    if c0.type() == hl.UInt(32):
         PHILOX_KEY_A = hl.u32(0x9E3779B9)
         PHILOX_KEY_B = hl.u32(0xBB67AE85)
         PHILOX_ROUND_A = hl.u32(0xD2511F53)
         PHILOX_ROUND_B = hl.u32(0xCD9E8D57)
-    
+    else:
+        PHILOX_KEY_A = hl.u64(0x9E3779B97F4A7C15)
+        PHILOX_KEY_B = hl.u64(0xBB67AE8584CAA73B)
+        PHILOX_ROUND_A = hl.u64(0xD2E7470EE14C6C93)
+        PHILOX_ROUND_B = hl.u64(0xCA5A826395121157)
 
     for _ in range(n_rounds):
         _c0, _c2 = c0, c2
@@ -58,67 +61,48 @@ def philox_impl(c0, c1, c2, c3, k0, k1, n_rounds):
         k0 = k0 + PHILOX_KEY_A
         k1 = k1 + PHILOX_KEY_B
 
-        print(f"{_} round")
-
     return c0, c1, c2, c3
+
 
 def halide_philox(seed, c0, c1, c2, c3, n_rounds):
     seed = hl.cast(hl.UInt(64), seed)
-    
-    if c0.type() == hl.UInt(64):
+
+    if c0.type().bits() == 32:
+        seed_hi = hl.cast(hl.UInt(32), (seed >> 32) & hl.u64(0xFFFFFFFF))
+        seed_lo = hl.cast(hl.UInt(32), seed & hl.u64(0xFFFFFFFF))
+    elif c0.type().bits() == 64:
         seed_hi = hl.u64(1)
         seed_lo = seed
     else:
-        seed_hi = hl.cast(hl.UInt(32), (seed >> 32) & hl.u64(0xffffffff))
-        seed_lo = hl.cast(hl.UInt(32), seed & hl.u64(0xffffffff))
-    
+        raise TypeError(f"Unsupported type {c0.type()} in philox")
+
     return philox_impl(c0, c1, c2, c3, seed_lo, seed_hi, n_rounds)
 
-def randint4x(seed: hl.Expr, offsets: hl.Expr, n_rounds = 10):
+
+def randint4x(seed: hl.Expr, offsets: hl.Expr, n_rounds=10):
+    offsets = hl.cast(hl.UInt(32), offsets)
     _0 = offsets * hl.u32(0)
-    y = halide_philox(seed, offsets, _0, _0, _0, n_rounds)
-    return y
+    return halide_philox(seed, offsets, _0, _0, _0, n_rounds)
 
-def rand4x(seed, offsets, n_rounds = 10):
-    """
-    Given a :code:`seed` scalar and an :code:`offsets` block,
-    returns 4 blocks of random :code:`float32` in :math:`U(0, 1)`.
 
-    :param seed: The seed for generating random numbers.
-    :param offsets: The offsets to generate random numbers for.
-    """
-
-    i1, i2, i3, i4 = randint4x(seed, offsets, N_ROUNDS_DEFAULT)
+def rand4x(seed, offsets, n_rounds=N_ROUNDS_DEFAULT):
+    i1, i2, i3, i4 = randint4x(seed, offsets, n_rounds)
     u1 = _uint_to_uniform_float(i1)
     u2 = _uint_to_uniform_float(i2)
     u3 = _uint_to_uniform_float(i3)
     u4 = _uint_to_uniform_float(i4)
     return u1, u2, u3, u4
 
-def randint(seed, offset, n_rounds = N_ROUNDS_DEFAULT):
-    """
-    Given a :code:`seed` scalar and an :code:`offset` block, returns a single
-    block of random :code:`int32`.
 
-    If you need multiple streams of random numbers,
-    using `randint4x` is likely to be faster than calling `randint` 4 times.
-
-    :param seed: The seed for generating random numbers.
-    :param offset: The offsets to generate random numbers for.
-    """
+def randint(seed, offset, n_rounds=N_ROUNDS_DEFAULT):
     ret, _, _, _ = randint4x(seed, offset, n_rounds)
     return ret
 
-def rand(seed, offset, n_rounds = N_ROUNDS_DEFAULT):
-    """
-    Given a :code:`seed` scalar and an :code:`offset` block,
-    returns a block of random :code:`float32` in :math:`U(0, 1)`.
 
-    :param seed: The seed for generating random numbers.
-    :param offsets: The offsets to generate random numbers for.
-    """
+def rand(seed, offset, n_rounds=N_ROUNDS_DEFAULT):
     source = randint(seed, offset, n_rounds)
     return _uint_to_uniform_float(source)
+
 
 def randn(seed, offset):
     i1, i2, _, _ = randint4x(seed, offset, N_ROUNDS_DEFAULT)
@@ -126,6 +110,7 @@ def randn(seed, offset):
     u2 = _uint_to_uniform_float(i2)
     n1, _ = _pair_uniform_to_normal(u1, u2)
     return n1
+
 
 def randint64(seed: hl.Expr, offsets: hl.Expr, low, high):
     r0, r1, r2, r3 = randint4x(seed, offsets)
@@ -138,11 +123,13 @@ def randint64(seed: hl.Expr, offsets: hl.Expr, low, high):
     result = hl.cast(hl.UInt(64), result) + low
     return result
 
+
 def main(seed: int, offsets: list[int]):
     import numpy as np
+
     seed_var = hl.Var("seed")
     offset_var = hl.Var("offset")
-    
+
     seed_input = hl.Buffer(np.array([seed], dtype=np.uint32))
     offset_input = hl.Buffer(np.array(offsets, dtype=np.uint32))
 
@@ -151,17 +138,18 @@ def main(seed: int, offsets: list[int]):
 
     randints = hl.Func("randints")
 
-    # y = randint4x(seed_input, offset_input, N_ROUNDS_DEFAULT) ok
+    y = randint4x(seed_input, offset_input, N_ROUNDS_DEFAULT)
     # y = rand4x(seed_input, offset_input, N_ROUNDS_DEFAULT) ok
     # y = randint64(seed_input, offset_input, 0, 1000) ok
     # y = randint(seed_input, offset_input, n_rounds)
     # y = rand(seed_input, offset_input, n_rounds)
-    y = randn(seed_input, offset_input)
+    # y = randn(seed_input, offset_input)
 
     randints[seed_var, offset_var] = y
 
     out = randints.realize([1, len(offsets)])
     return np.asanyarray(out)
+
 
 if __name__ == "__main__":
     out = main(5123, [0, 1, 2, 100])
