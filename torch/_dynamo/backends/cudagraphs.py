@@ -42,7 +42,11 @@ def find_input_mutations(g):
                 inputs[StorageWeakRef(meta_fk(n.meta)._typed_storage())].add(input_idx)
             input_idx += 1
         elif n.op == "call_function":
-            if n.target is operator.getitem:
+            if n.target in [
+                operator.getitem,
+                operator.ge,
+                operator.le,  # runtime asserts
+            ]:
                 continue
             schema = n.target._schema
             for i, arg in enumerate(schema.arguments):

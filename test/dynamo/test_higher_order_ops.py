@@ -294,7 +294,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             f,
             default_args_generator((x,)),
             ifdynstaticdefault(2, 3),
-            expected_opcount=ifdynstaticdefault(2, 3),
+            expected_opcount=2,
         )
 
     def test_wrap_pytree_args_nested(self):
@@ -356,7 +356,7 @@ class GraphModule(torch.nn.Module):
             f,
             default_args_generator((x, y)),
             ifdynstaticdefault(2, 3),
-            expected_opcount=ifdynstaticdefault(2, 3),
+            expected_opcount=2,
             return_graph=True,
         )
         if torch._dynamo.config.assume_static_by_default:
@@ -387,10 +387,8 @@ class GraphModule(torch.nn.Module):
     def forward(self, s0: "Sym(s0)", L_x_: "f32[s0, 1]"):
         l_x_ = L_x_
 
-        size: "Sym(s0)" = l_x_.size(0)
-
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, size);  wrap_body_0 = l_x_ = size = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, s0);  wrap_body_0 = l_x_ = s0 = None
         getitem: "f32[s0]" = wrap[0];  wrap = None
         return (getitem,)
 
