@@ -1,6 +1,5 @@
 #include <cuda_fp16.h>
 #include <array>
-#include <type_traits>
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
