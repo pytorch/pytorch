@@ -839,6 +839,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             options = {"source": source}
             return variables.GetAttrVariable(self, name, **options)
 
+        # TODO(anijain2305) - Investigate if we need specialization for more
+        # dunder attrs. inspect.getattr_static does not return correct value for
+        # them.
+        if name == "__class__":
+            options = {"source": source}
+            return UserDefinedClassVariable(type(self.value), **options)
+
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
@@ -954,8 +961,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 else:
                     return trace_rules.lookup(func)(func)
 
-        options = {"source": source}
-
         if subobj is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(subobj):
             if source:
                 return variables.LazyVariableTracker.create(subobj, source)
@@ -964,6 +969,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
                 return SourcelessBuilder.create(tx, subobj)
 
+        options = {"source": source}
         return variables.GetAttrVariable(self, name, **options)
 
         # if (
