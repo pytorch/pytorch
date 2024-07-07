@@ -379,9 +379,9 @@ class TritonTemplateKernel(TritonKernel):
                     subgraph, ir.ComputedBuffer
                 ), f"Expected the subgraph to be a ComputedBuffer, got {type(subgraph)}"
                 if isinstance(subgraph.data, ir.InputBuffer):
-                    out = subgraph.data.make_loader()((1,))
+                    out = subgraph.data.make_loader()(())
                 else:
-                    out = subgraph.data.inner_fn((1,))
+                    out = subgraph.data.inner_fn(())
 
             self.codegen_body()
             self.body.writeline(f"{output_name} = {out.value}")
