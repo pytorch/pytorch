@@ -40,7 +40,7 @@ class Benchmarker:
 
         return benchmark
     
-    def benchmark_gpu(self, _callable: Callable[[], Any], estimation_iters: int = 5, memory_warmup_iters: int = 100, benchmark_iters: int = 25, max_benchmark_duration: int = 25) -> float:        
+    def benchmark_gpu(self, _callable: Callable[[], Any], estimation_iters: int = 5, memory_warmup_iters: int = 500, benchmark_iters: int = 25, max_benchmark_duration: int = 25) -> float:        
         def benchmark(buffer, _callable, iters, measure_launch_overhead=False):
             event_pairs = self.get_event_pairs(iters)
             if measure_launch_overhead:
@@ -61,6 +61,7 @@ class Benchmarker:
         def get_required_sleep_cycles(launch_overhead, memory_warmup_iters, benchmark_iters) -> int:
             total_overhead = (launch_overhead * benchmark_iters) + (self.get_launch_overhead_per_buffer_clear() * memory_warmup_iters)
             required_sleep_cycles = (total_overhead / self.get_time_per_million_sleep_cycles()) * 1000000
+            required_sleep_cycles *= 1.5
             return int(required_sleep_cycles)
         
         _callable()
@@ -84,9 +85,7 @@ class Benchmarker:
 
     @functools.lru_cache(None)
     def get_cache_size(self) -> int:
-        device = torch.cuda.current_device()
-        properties = torch.cuda.get_device_properties(device)
-        return properties.l2CacheSize
+        return 50 * 1024 * 1024
     
     @functools.lru_cache(None)
     def get_time_per_million_sleep_cycles(self) -> float:
