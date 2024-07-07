@@ -1451,6 +1451,7 @@ class TestCommon(TestCase):
                                 return True
                     if isinstance(x, torch.Tensor) and x.requires_grad:
                         return True
+
                     return False
 
                 requires_grad = (

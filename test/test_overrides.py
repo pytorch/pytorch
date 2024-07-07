@@ -149,7 +149,7 @@ class DiagonalTensor:
         return cls.handled_functions[func](*args, **kwargs)
 
     def __eq__(self, other):
-        return type(other) is type(self) and  self._N == other._N and self._i == other._i
+        return type(other) is type(self) and self._N == other._N and self._i == other._i
 
 @implements_diagonal(torch.mean)
 def mean(mat):
