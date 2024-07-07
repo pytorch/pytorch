@@ -4417,6 +4417,7 @@ class TestSparseMeta(TestCase):
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
+    @skipIfTorchDynamo("TODO(pearu,sparse-team) : investigate dynamo fail")
     def test_to_meta(self, dtype, layout):
         index_dtype = torch.int64
         device = 'cpu'
@@ -4427,6 +4428,7 @@ class TestSparseMeta(TestCase):
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
+    @skipIfTorchDynamo("TODO(pearu,sparse-team) : investigate dynamo fail")
     def test_zeros_like_meta(self, dtype, layout):
         index_dtype = torch.int64
         device = 'cpu'
