@@ -60,9 +60,8 @@ class Benchmarker:
         
         def get_required_sleep_cycles(launch_overhead, memory_warmup_iters, benchmark_iters) -> int:
             total_overhead = (launch_overhead * benchmark_iters) + (self.get_launch_overhead_per_buffer_clear() * memory_warmup_iters)
-            required_sleep_cycles = (total_overhead / self.get_time_per_million_sleep_cycles()) * 1000000
-            required_sleep_cycles *= 1.5
-            return int(required_sleep_cycles)
+            required_sleep_cycles = int((total_overhead / self.get_time_per_million_sleep_cycles()) * 1000000)
+            return required_sleep_cycles
         
         _callable()
 
