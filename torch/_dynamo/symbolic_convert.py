@@ -1496,6 +1496,8 @@ class InstructionTranslatorBase(
             assert isinstance(null, NullVariable)
 
         if isinstance(fn, GetAttrVariable) and isinstance(fn.obj, TensorVariable):
+            # realize is requires for Python 3.8
+            kwargsvars = kwargsvars.realize()
             if fn.name == "view" and isinstance(
                 argsvars, (ConstantVariable, TensorVariable)
             ):
