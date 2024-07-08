@@ -136,6 +136,7 @@ class TestStridedSharding(DTensorTestBase):
 
     @with_comms
     def test_1d_mesh_strided_sharding(self):
+        mesh_1d = init_device_mesh(self.device_type, (self.world_size,))
         # Test 1: 1-d tensor over 1-d mesh
         x = torch.arange(2 * self.world_size, device=self.device_type)
         """
@@ -148,6 +149,14 @@ class TestStridedSharding(DTensorTestBase):
         tensor_list, _ = shard_placement._split_tensor(x, self.world_size)
         shard_x = tensor_list[self.rank]
         self.assertEqual(shard_x, x.view(self.world_size, -1)[self.rank])
+        # shard_to_replicate
+        full_tensor = shard_placement._to_replicate_tensor(
+            shard_x,
+            mesh_1d,
+            mesh_dim=0,
+            current_logical_shape=list(x.shape),
+        )
+        self.assertEqual(full_tensor, x)
 
         """
         strided sharding: [0, 4 | 1, 5 | 2, 6 | 3, 7]
@@ -161,6 +170,14 @@ class TestStridedSharding(DTensorTestBase):
         self.assertEqual(
             shard_x, x.view(-1, self.world_size).swapdims(-1, 0)[self.rank]
         )
+        # shard_to_replicate
+        full_tensor = shard_placement._to_replicate_tensor(
+            shard_x,
+            mesh_1d,
+            mesh_dim=0,
+            current_logical_shape=list(x.shape),
+        )
+        self.assertEqual(full_tensor, x)
 
     @with_comms
     def test_2d_mesh_strided_sharding(self):
@@ -181,18 +198,38 @@ class TestStridedSharding(DTensorTestBase):
         """
         split_factor = 1
         # shard on mesh dim-0
-        shard_placement = _StridedShard(0, _total_split=(split_factor * mesh_dim0_size))
-        tensor_list, _ = shard_placement._split_tensor(x, mesh_dim0_size)
-        expected_shard = x.view(mesh_dim0_size, -1)[mesh_dim0_local_rank]
+        shard_placement_dim0 = _StridedShard(
+            0, _total_split=(split_factor * mesh_dim0_size)
+        )
+        tensor_list, _ = shard_placement_dim0._split_tensor(x, mesh_dim0_size)
+        expected_shard_dim0 = x.view(mesh_dim0_size, -1)[mesh_dim0_local_rank]
         shard_x = tensor_list[mesh_dim0_local_rank]
-        self.assertEqual(shard_x, expected_shard)
+        self.assertEqual(shard_x, expected_shard_dim0)
 
         # shard on mesh dim-1
-        shard_placement = _StridedShard(0, _total_split=mesh_dim1_size)
-        tensor_list, _ = shard_placement._split_tensor(shard_x, mesh_dim1_size)
-        expected_shard = shard_x.view(mesh_dim1_size, -1)[mesh_dim1_local_rank]
+        shard_placement_dim1 = _StridedShard(0, _total_split=mesh_dim1_size)
+        tensor_list, _ = shard_placement_dim1._split_tensor(shard_x, mesh_dim1_size)
+        expected_shard_dim1 = shard_x.view(mesh_dim1_size, -1)[mesh_dim1_local_rank]
         shard_x = tensor_list[mesh_dim1_local_rank]
-        self.assertEqual(shard_x, expected_shard)
+        self.assertEqual(shard_x, expected_shard_dim1)
+
+        # shard_to_replicate on mesh dim-1
+        full_tensor = shard_placement_dim1._to_replicate_tensor(
+            shard_x,
+            mesh_2d,
+            mesh_dim=1,
+            current_logical_shape=list(expected_shard_dim0.shape),
+        )
+        self.assertEqual(full_tensor, expected_shard_dim0)
+
+        # shard_to_replicate on mesh dim-0
+        full_tensor = shard_placement_dim0._to_replicate_tensor(
+            full_tensor,
+            mesh_2d,
+            mesh_dim=0,
+            current_logical_shape=list(x.shape),
+        )
+        self.assertEqual(full_tensor, x)
 
         """
         strided sharding: [
@@ -202,9 +239,11 @@ class TestStridedSharding(DTensorTestBase):
         """
         split_factor = 2
         # shard on mesh dim-0
-        shard_placement = _StridedShard(0, _total_split=(split_factor * mesh_dim0_size))
-        tensor_list, _ = shard_placement._split_tensor(x, mesh_dim0_size)
-        expected_shard = (
+        shard_placement_dim0 = _StridedShard(
+            0, _total_split=(split_factor * mesh_dim0_size)
+        )
+        tensor_list, _ = shard_placement_dim0._split_tensor(x, mesh_dim0_size)
+        expected_shard_dim0 = (
             x.view(mesh_dim0_size, -1)
             .swapdims(0, 1)
             .reshape(mesh_dim0_size, -1)[mesh_dim0_local_rank]
@@ -213,14 +252,32 @@ class TestStridedSharding(DTensorTestBase):
             .reshape(-1)
         )
         shard_x = tensor_list[mesh_dim0_local_rank]
-        self.assertEqual(shard_x, expected_shard)
+        self.assertEqual(shard_x, expected_shard_dim0)
 
         # shard on mesh dim-1
-        shard_placement = _StridedShard(0, _total_split=mesh_dim1_size)
-        tensor_list, _ = shard_placement._split_tensor(shard_x, mesh_dim1_size)
-        expected_shard = shard_x.view(mesh_dim1_size, -1)[mesh_dim1_local_rank]
+        shard_placement_dim1 = _StridedShard(0, _total_split=mesh_dim1_size)
+        tensor_list, _ = shard_placement_dim1._split_tensor(shard_x, mesh_dim1_size)
+        expected_shard_dim1 = shard_x.view(mesh_dim1_size, -1)[mesh_dim1_local_rank]
         shard_x = tensor_list[mesh_dim1_local_rank]
-        self.assertEqual(shard_x, expected_shard)
+        self.assertEqual(shard_x, expected_shard_dim1)
+
+        # shard_to_replicate on mesh dim-1
+        full_tensor = shard_placement_dim1._to_replicate_tensor(
+            shard_x,
+            mesh_2d,
+            mesh_dim=1,
+            current_logical_shape=list(expected_shard_dim0.shape),
+        )
+        self.assertEqual(full_tensor, expected_shard_dim0)
+
+        # shard_to_replicate on mesh dim-0
+        full_tensor = shard_placement_dim0._to_replicate_tensor(
+            full_tensor,
+            mesh_2d,
+            mesh_dim=0,
+            current_logical_shape=list(x.shape),
+        )
+        self.assertEqual(full_tensor, x)
 
 
 class Test2DStridedLocalShard(DTensorTestBase):

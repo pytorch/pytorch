@@ -468,6 +468,44 @@ class _StridedShard(Shard):
 
         return tensor_list, []
 
+    def _to_replicate_tensor(
+        self,
+        local_tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        current_logical_shape: List[int],
+    ) -> torch.Tensor:
+        """
+        Note: currently _StridedShard does not support padding
+        """
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
+        # NOTE: we require Strided Sharding to be even for now
+        assert current_logical_shape[self.dim] % num_chunks == 0, (
+            "_StridedShard requires even sharding but got tensor size "
+            f"{current_logical_shape[self.dim]} on dim {self.dim} and "
+            f"num_chunks {num_chunks}"
+        )
+
+        result = funcol.all_gather_tensor(
+            local_tensor,
+            gather_dim=self.dim,
+            group=(mesh, mesh_dim),
+        ).wait()
+        tensor_shard_list = torch.chunk(result, self._total_split, dim=self.dim)
+        # rearrange the order
+        new_tensor_shard_list = []
+        stride = self._total_split // num_chunks
+        for idx in range(len(tensor_shard_list)):
+            # the shard split of index `idx` is assigned a new index within
+            # _StridedShard._split_tensor:
+            # the original tensor was split into `self._total_split` chunks,
+            # all chunks with the same `idx % num_chunks` are merged into one
+            # new shard and placed on mesh's local rank `idx % num_chunks`
+            idx_after_split = idx % num_chunks * stride + idx // num_chunks
+            new_tensor_shard_list.append(tensor_shard_list[idx_after_split])
+
+        return torch.cat(new_tensor_shard_list, dim=self.dim).contiguous()
+
 
 @dataclass(frozen=True)
 class Replicate(Placement):

@@ -417,6 +417,14 @@ class RedistributeTest(DTensorTestBase):
                 local_expected_dt = expected_dt.to_local()
                 self.assertEqual(out_dt.to_local(), expected_dt.to_local())
 
+    @with_comms
+    def test_strided_shard_to_replicate_forward_backward(self):
+        # 1) test strided shard -> replicate forward
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        replicate = [Replicate()]
+
+        expected_tensor = torch.arange(2 * self.world_size)
+
 
 class MultiDimRedistributeTest(DTensorTestBase):
     @property
