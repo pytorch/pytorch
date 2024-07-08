@@ -255,7 +255,6 @@ inline void tinygemm_kernel_(
     c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
       C[m * ldc + i] = reduce(c_val[i]) * vgetq_lane_f32(scale_val, i);
     });
-  }
 #else
     // Workaround GCCs inability to infer lane index at compile time
     // See https://github.com/pytorch/pytorch/issues/126283
@@ -263,6 +262,7 @@ inline void tinygemm_kernel_(
       C[m * ldc + i] = reduce(c_val[i]) * float(scales[i]);
     });
 #endif
+  }
 }
 
 template <int BLOCK_M, int BLOCK_N>

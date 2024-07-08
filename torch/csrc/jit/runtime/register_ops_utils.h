@@ -32,7 +32,6 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
-#include <c10/util/string_utils.h>
 
 namespace torch::jit {
 constexpr inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {

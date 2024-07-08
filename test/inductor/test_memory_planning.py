@@ -56,13 +56,12 @@ class TestMemoryPlanning(TestCase):
         ).check_next(
             "buf0 = alloc_from_pool(pool1, 0, torch.float32, (s0, s0), (s0, 1))"
         ).check(
-            "buf1 = alloc_from_pool(pool1, align((4*s0) + (4*s0*((-1) + s0))),"
+            "buf1 = alloc_from_pool(pool1, align(4*(s0*s0)),"
         ).run(
             code
         )
         self.assertTrue(same(f(*args), result))
 
-    @skipIfRocm
     def test_cpp_wrapper(self):
         f, args = self._generate(device="cuda")
         compiled = torch.compile(f, dynamic=True)
@@ -74,7 +73,7 @@ class TestMemoryPlanning(TestCase):
         ).check_next(
             "auto buf0 = alloc_from_pool(pool1, 0, at::kFloat, {s0, s0}, {s0, 1L});"
         ).check(
-            "auto buf1 = alloc_from_pool(pool1, align((4L*s0) + (4L*s0*((-1L) + s0))),"
+            "auto buf1 = alloc_from_pool(pool1, align(4L*(static_cast<long>(s0*s0))),"
         ).run(
             code
         )

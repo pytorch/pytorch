@@ -86,12 +86,8 @@ struct FusedSgdMathFunctor {
         init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)};
     const auto n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size;
 
-#ifndef USE_ROCM
     const auto use_faster_load_store =
         (n % kILP == 0) && (chunk_size % kILP == 0) && all_aligned;
-#else
-    const auto use_faster_load_store{false};
-#endif
     if (use_faster_load_store) {
       for (auto i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
@@ -395,7 +391,7 @@ void _fused_sgd_kernel_cuda_(
   }
   TORCH_CHECK(
       lr.device() == params[0].device(),
-      "found_inf must be on the same GPU device as the params");
+      "lr must be on the same GPU device as the params");
   float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   float* found_inf_ptr =

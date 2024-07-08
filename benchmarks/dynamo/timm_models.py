@@ -7,11 +7,19 @@ import subprocess
 import sys
 import warnings
 
+try:
+    from .common import BenchmarkRunner, download_retry_decorator, main
+except ImportError:
+    from common import BenchmarkRunner, download_retry_decorator, main
+
 import torch
-from common import BenchmarkRunner, download_retry_decorator, main
 
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
+
+# Enable FX graph caching
+if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
+    torch._inductor.config.fx_graph_cache = True
 
 
 def pip_install(package):
@@ -66,8 +74,10 @@ REQUIRE_HIGHER_TOLERANCE = {
     "hrnet_w18",
     "inception_v3",
     "mixer_b16_224",
+    "mobilenetv3_large_100",
     "sebotnet33ts_256",
     "selecsls42b",
+    "cspdarknet53",
 }
 
 REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING = {
@@ -208,6 +218,12 @@ class TimmRunner(BenchmarkRunner):
             "convit_base",
         }
 
+    @property
+    def inline_inbuilt_nn_modules_models(self):
+        return {
+            "lcnet_050",
+        }
+
     @download_retry_decorator
     def _download_model(self, model_name):
         model = create_model(
@@ -302,8 +318,8 @@ class TimmRunner(BenchmarkRunner):
             if index < start or index >= end:
                 continue
             if (
-                not re.search("|".join(args.filter), model_name, re.I)
-                or re.search("|".join(args.exclude), model_name, re.I)
+                not re.search("|".join(args.filter), model_name, re.IGNORECASE)
+                or re.search("|".join(args.exclude), model_name, re.IGNORECASE)
                 or model_name in args.exclude_exact
                 or model_name in self.skip_models
             ):

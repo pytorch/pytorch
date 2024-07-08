@@ -369,7 +369,7 @@ struct ConvParams {
   }
 
   bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight, const std::optional<at::Tensor>& bias) const {
-#if defined(__ARM_NEON__)
+#if defined(__ARM_NEON__) || (defined(__riscv_v_intrinsic) && __riscv_v_intrinsic>=12000)
     // Currently only 3x3 depthwise convolutions on tensors of float are supported.
     return (input.ndimension() == 4) &&
            (at::symint::size<T>(input, 1) == groups) &&
@@ -1409,8 +1409,8 @@ static inline at::MemoryFormat determine_backend_memory_format(
     const Tensor& weight,
     const ConvBackend backend) {
   at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
-  auto k = weight.ndimension();
 #if !defined(C10_MOBILE)
+  auto k = weight.ndimension();
   // See Note [Mobile check segfaults]
   switch(backend) {
     case ConvBackend::Cudnn:
@@ -1730,7 +1730,7 @@ static Tensor subvariable(const Tensor& var, int dim, int groups, int g) {
   return result;
 }
 
-std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::optional<Tensor>& ggI_opt, const c10::optional<Tensor>& ggW_r_opt, const c10::optional<Tensor>& ggb_opt,
+std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::optional<Tensor>& ggI_opt, const std::optional<Tensor>& ggW_r_opt, const std::optional<Tensor>& ggb_opt,
     const Tensor& gO_r, const Tensor& weight_r, const Tensor& input,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,

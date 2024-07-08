@@ -168,10 +168,6 @@ struct RNNParams {
   }
 };
 
-static std::vector<int64_t> _hidden_size(const RNNParams& rnn) {
-  return {rnn.num_layers * rnn.num_directions, rnn.mini_batch, rnn.hidden_size};
-}
-
 template<bool is_single_direction>
 std::vector<int64_t> _output_size(const RNNParams& rnn) {
   auto output_channels = is_single_direction ? rnn.hidden_size

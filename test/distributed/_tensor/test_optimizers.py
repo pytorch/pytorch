@@ -93,8 +93,8 @@ class TestDTensorOptimizer(DTensorTestBase):
     def test_adam_1d_sharding(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
-        # TODO: add fused_adam support
-        adam_configs = [
+        # lr as a Tensor is not supported for capturable=False and foreach=True
+        adam_float_lr_configs = [
             {"lr": 0.1, "foreach": False},
             {"lr": 0.1, "weight_decay": 0.05, "foreach": False},
             {"lr": 0.1, "weight_decay": 0.05},
@@ -105,6 +105,8 @@ class TestDTensorOptimizer(DTensorTestBase):
                 "maximize": True,
                 "amsgrad": True,
             },
+        ]
+        fused_adam_float_lr_configs = [
             {"lr": 0.1, "fused": True},
             {"lr": 0.1, "weight_decay": 0.05, "amsgrad": True, "fused": True},
             {
@@ -114,6 +116,22 @@ class TestDTensorOptimizer(DTensorTestBase):
                 "amsgrad": True,
                 "fused": True,
             },
+        ]
+        # lr could be a Tensor or a float when fused=True for adam optimizer
+        fused_adam_tensor_lr_configs = [
+            {**config, "lr": torch.tensor(0.1)}
+            for config in fused_adam_float_lr_configs
+        ]
+        fused_adam_tensor_lr_configs.extend(
+            [
+                {**config, "lr": torch.tensor([0.1])}
+                for config in fused_adam_float_lr_configs
+            ]
+        )
+        adam_configs = [
+            *adam_float_lr_configs,
+            *fused_adam_float_lr_configs,
+            *fused_adam_tensor_lr_configs,
         ]
 
         for config in adam_configs:
@@ -134,7 +152,8 @@ class TestDTensorOptimizer(DTensorTestBase):
     def test_adamw_1d_sharding(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
-        adamw_configs = [
+        # lr as a Tensor is not supported for capturable=False and foreach=True
+        adamw_float_lr_configs = [
             {"lr": 0.1, "foreach": False},
             {"lr": 0.1, "weight_decay": 0.05, "foreach": False},
             {"lr": 0.1, "weight_decay": 0.05},
@@ -153,6 +172,8 @@ class TestDTensorOptimizer(DTensorTestBase):
                 "maximize": True,
                 "amsgrad": True,
             },
+        ]
+        fused_adamw_float_lr_configs = [
             {"lr": 0.1, "weight_decay": 0.05, "fused": True},
             {
                 "lr": 0.1,
@@ -171,6 +192,22 @@ class TestDTensorOptimizer(DTensorTestBase):
                 "amsgrad": True,
                 "fused": True,
             },
+        ]
+        # lr could be a Tensor or a float when fused=True for adamW optimizer
+        fused_adamw_tensor_lr_configs = [
+            {**config, "lr": torch.tensor(0.1)}
+            for config in fused_adamw_float_lr_configs
+        ]
+        fused_adamw_tensor_lr_configs.extend(
+            [
+                {**config, "lr": torch.tensor([0.1])}
+                for config in fused_adamw_float_lr_configs
+            ]
+        )
+        adamw_configs = [
+            *adamw_float_lr_configs,
+            *fused_adamw_float_lr_configs,
+            *fused_adamw_tensor_lr_configs,
         ]
 
         for config in adamw_configs:

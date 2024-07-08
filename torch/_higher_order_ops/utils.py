@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -6,7 +7,7 @@ from typing import Any, Callable
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
-from torch._ops import HigherOrderOperator
+from torch._ops import OperatorBase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -17,20 +18,20 @@ class UnsupportedAliasMutationException(RuntimeError):
 
 
 def autograd_not_implemented_inner(
-    operator: HigherOrderOperator, delayed_error: bool, *args: Any, **kwargs: Any
+    operator: OperatorBase, delayed_error: bool, *args: Any, **kwargs: Any
 ) -> Any:
     """If autograd is enabled and any of the arguments require grad this will either
     raise an error or return a DelayedError depending on the value of delayed.
 
     Args:
-        operator: The HigherOrderOperator to call with the *args and **kwargs with
-        op_name: The name of the HigherOrderOperator
+        operator: The Operator to call with the *args and **kwargs with
+        op_name: The name of the Operator
         delayed_error: If True, return a DelayedError instead of raising an error
-        args: The flattened operands to the HigherOrderOperator
-        kwargs: The keyword arguments to the HigherOrderOperator
+        args: The flattened operands to the Operator
+        kwargs: The keyword arguments to the Operator
 
     Raises:
-        RuntimeError: If autograd is enabled and any of the arguments to the HigherOrderOperator
+        RuntimeError: If autograd is enabled and any of the arguments to the Operator
     """
     with torch._C._AutoDispatchBelowAutograd():
         result = operator(*args, **kwargs)
@@ -58,7 +59,7 @@ def autograd_not_implemented_inner(
         return result
 
 
-def autograd_not_implemented(op: HigherOrderOperator, deferred_error: bool) -> Callable:
+def autograd_not_implemented(op: OperatorBase, deferred_error: bool) -> Callable:
     def inner(*args, **kwargs):
         return autograd_not_implemented_inner(op, deferred_error, *args, **kwargs)
 
@@ -95,13 +96,21 @@ def reenter_make_fx(fn):
 @contextmanager
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
+    _old_is_inlining = torch._dynamo.config.inline_inbuilt_nn_modules
     try:
         # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
+
+        # TODO(anijain2305, export-team) For non-strict export with module
+        # stack info, the codepatch forces the nn module __getattr__ to
+        # ProxyAttr __getattr__ downstream. To circumvent the issue for now,
+        # skip inlining inbuilt nn modules for cond.
+        torch._dynamo.config.inline_inbuilt_nn_modules = False
         yield
     finally:
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
+        torch._dynamo.config.inline_inbuilt_nn_modules = _old_is_inlining
 
 
 def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):

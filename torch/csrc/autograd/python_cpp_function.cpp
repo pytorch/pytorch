@@ -175,9 +175,8 @@ PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var) {
   }
   auto var = (THPVariable*)_var;
   auto& fn = *((THPCppFunction*)self)->cdata;
-  std::unique_ptr<FunctionPreHook> hook(new PyFunctionTensorPreHook(
+  fn.add_tensor_pre_hook(std::make_unique<PyFunctionTensorPreHook>(
       var->backward_hooks, THPVariable_Unpack(var).output_nr()));
-  fn.add_tensor_pre_hook(std::move(hook));
   Py_RETURN_NONE;
 }
 
@@ -346,8 +345,7 @@ PyObject* registerFunctionHook(Node& fn, PyObject* hook) {
   }
   if (dict == Py_None) {
     dict = PyTuple_GET_ITEM(res.get(), 0);
-    std::unique_ptr<FunctionPostHook> hook(new PyFunctionPostHook(dict));
-    fn.add_post_hook(std::move(hook));
+    fn.add_post_hook(std::make_unique<PyFunctionPostHook>(dict));
   }
 
   PyObject* handle = PyTuple_GET_ITEM(res.get(), 1);
@@ -370,8 +368,7 @@ PyObject* registerFunctionPreHook(Node& fn, PyObject* hook) {
   }
   if (dict == Py_None) {
     dict = PyTuple_GET_ITEM(res.get(), 0);
-    std::unique_ptr<FunctionPreHook> hook(new PyFunctionPreHook(dict));
-    fn.add_pre_hook(std::move(hook));
+    fn.add_pre_hook(std::make_unique<PyFunctionPreHook>(dict));
   }
 
   PyObject* handle = PyTuple_GET_ITEM(res.get(), 1);

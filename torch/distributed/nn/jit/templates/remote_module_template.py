@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+# mypy: allow-untyped-defs
 
 
 def get_remote_module_template(enable_moving_cpu_tensors_to_cuda: bool):

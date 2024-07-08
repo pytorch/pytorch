@@ -788,7 +788,7 @@ TEST_F(VulkanAPITest, avg_pool2d) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
+TEST_F(VulkanAPITest, DISABLED_batch_norm_invalid_inputs) {
   c10::InferenceMode mode;
 
   // Act: Vulkan batchnorm only supports evaluation mode

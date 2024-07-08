@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Provides optimal triton kernel parameters.
 
 Aim

@@ -24,9 +24,7 @@
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/utils/python_stub.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 enum class EventType : uint8_t {
   TorchOp = 0,
@@ -657,6 +655,4 @@ TORCH_API bool get_cuda_sync_enabled();
 TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()>);
 TORCH_API void set_cuda_sync_enabled_val(bool);
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

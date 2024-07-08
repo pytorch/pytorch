@@ -545,19 +545,20 @@ __global__ void upsample_gen2d_aa_out_frame(
 
   const scalar_t * buffer1;
 
-  for (int n = 0; n < batchsize; n++) {
-    for (int c = 0; c < channels; c++) {
-      // interpolate on y-axis for ymin to ymin + ysize
-      for (int y = 0; y < ysize; y++) {
-        buffer1 = &(idata[n][c][ymin + y][xmin]);
-        buffer2[y] = static_cast<scalar_t>(
-            upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
-                buffer1, wx, xsize));
-      }
-      odata[n][c][output_y][output_x] = static_cast<scalar_t>(
+  // Parallelized across batch/channels
+  for (int i = blockIdx.z; i < batchsize * channels; i += gridDim.z) {
+    int n = i / channels;
+    int c = i % channels;
+    // interpolate on y-axis for ymin to ymin + ysize
+    for (int y = 0; y < ysize; y++) {
+      buffer1 = &(idata[n][c][ymin + y][xmin]);
+      buffer2[y] = static_cast<scalar_t>(
           upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
-              buffer2, wy, ysize));
+              buffer1, wx, xsize));
     }
+    odata[n][c][output_y][output_x] = static_cast<scalar_t>(
+        upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
+            buffer2, wy, ysize));
   }
 }
 
@@ -587,11 +588,11 @@ __global__ void upsample_gen2d_aa_backward_out_frame(
 
   // special case: output just copy
   if (input_height == output_height && input_width == output_width) {
-    for (int n = 0; n < batchsize; n++) {
-      for (int c = 0; c < channels; c++) {
-        const scalar_t val = odata[n][c][output_y][output_x];
-        idata[n][c][output_y][output_x] = val;
-      }
+    for (int i = blockIdx.z; i < batchsize * channels; i += gridDim.z) {
+      int n = i / channels;
+      int c = i % channels;
+      const scalar_t val = odata[n][c][output_y][output_x];
+      idata[n][c][output_y][output_x] = val;
     }
     return;
   }
@@ -645,21 +646,22 @@ __global__ void upsample_gen2d_aa_backward_out_frame(
 
   __syncthreads();
 
-  for (int n = 0; n < batchsize; n++) {
-    for (int c = 0; c < channels; c++) {
-      scalar_t out_value = odata[n][c][output_y][output_x];
-      for (int y = 0; y < ysize; y++) {
-        for (int x = 0; x < xsize; x++) {
-          upsample_increment_value_bounded<scalar_t, accscalar_t>(
-              idata,
-              n,
-              c,
-              input_height,
-              input_width,
-              ymin + y,
-              xmin + x,
-              wx[x] * wy[y] * out_value);
-        }
+  // Parallelized across batch/channels
+  for (int i = blockIdx.z; i < batchsize * channels; i += gridDim.z) {
+    int n = i / channels;
+    int c = i % channels;
+    scalar_t out_value = odata[n][c][output_y][output_x];
+    for (int y = 0; y < ysize; y++) {
+      for (int x = 0; x < xsize; x++) {
+        upsample_increment_value_bounded<scalar_t, accscalar_t>(
+            idata,
+            n,
+            c,
+            input_height,
+            input_width,
+            ymin + y,
+            xmin + x,
+            wx[x] * wy[y] * out_value);
       }
     }
   }
@@ -732,7 +734,8 @@ static void upsample_gen2d_aa_out_cuda_template(
         const dim3 block(block_x, block_y);
 
         int grid_y = std::min<int>(maxGridSize[1], ceil_div(output_height, block_y));
-        const dim3 grid(grid_x, grid_y);
+        int grid_z = std::min<int>(maxGridSize[2], input.size(0) * input.size(1));
+        const dim3 grid(grid_x, grid_y, grid_z);
 
         // Compute actual size of required shared memory and verify if we can allocate it
         // - wx and wy size:
@@ -799,7 +802,8 @@ static void upsample_gen2d_aa_backward_out_cuda_template(
   int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
   int grid_x = std::min<int>(maxGridSize[0], ceil_div(output_width, block_x));
   int grid_y = std::min<int>(maxGridSize[1], ceil_div(output_height, block_y));
-  const dim3 grid(grid_x, grid_y);
+  int grid_z = std::min<int>(maxGridSize[2], input_size[0] * input_size[1]);
+  const dim3 grid(grid_x, grid_y, grid_z);
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,

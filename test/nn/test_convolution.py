@@ -528,6 +528,37 @@ class TestConvolutionNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
+    def test_cudnn_not_mutate_stride(self):
+        weight = torch.randn(64, 64, 1, 1)
+        x = torch.randn(2, 64, 10, 10).to(memory_format=torch.channels_last)
+        weight_stride = weight.stride()
+
+        def conv(x, weight):
+            return torch.convolution(
+                x,
+                weight,
+                stride=(1, 1),
+                padding=(0, 0),
+                dilation=(1, 1),
+                transposed=False,
+                output_padding=(0, 0),
+                groups=1,
+                bias=None,
+            )
+
+        # should have run in nhwc without mutating input strides
+        out_nhwc = conv(x, weight)
+        self.assertEqual(weight.stride(), weight_stride)
+        self.assertTrue(out_nhwc.is_contiguous(memory_format=torch.channels_last))
+
+        x = x.contiguous(memory_format=torch.contiguous_format)
+        out_c = conv(x, weight)
+        self.assertTrue(out_c.is_contiguous(memory_format=torch.contiguous_format))
+        self.assertEqual(out_c, out_nhwc)
+        self.assertEqual(weight.stride(), weight_stride)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
     def test_Conv2d_inconsistent_types_on_GPU_with_cudnn(self):
         inputs = torch.randn(4, 1, 7, 7, dtype=torch.float, device="cuda")
         weights = torch.randn(1, 1, 3, 3, dtype=torch.double, device="cuda")

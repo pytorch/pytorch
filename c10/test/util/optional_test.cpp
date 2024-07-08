@@ -142,7 +142,7 @@ TEST(OptionalTest, Nullopt) {
 // Ensure comparisons work...
 using CmpTestTypes = testing::Types<
     // between two optionals
-    std::pair<std::optional<int>, c10::optional<int>>,
+    std::pair<std::optional<int>, std::optional<int>>,
 
     // between an optional and a value
     std::pair<std::optional<int>, int>,

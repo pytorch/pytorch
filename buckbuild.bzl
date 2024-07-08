@@ -261,7 +261,6 @@ def get_aten_preprocessor_flags():
         "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
         "-DAT_PARALLEL_OPENMP_FBXPLAT=0",
         "-DAT_PARALLEL_NATIVE_FBXPLAT=1",
-        "-DAT_PARALLEL_NATIVE_TBB_FBXPLAT=0",
         "-DUSE_LAPACK_FBXPLAT=0",
         "-DAT_BLAS_F2C_FBXPLAT=0",
         "-DAT_BLAS_USE_CBLAS_DOT_FBXPLAT=0",
@@ -384,6 +383,7 @@ def get_aten_generated_files(enabled_backends):
         "core/TensorMethods.cpp",
         "core/aten_interned_strings.h",
         "core/enum_tag.h",
+        "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
     ] + get_aten_derived_type_srcs(enabled_backends)
 
     # This is tiresome.  A better strategy would be to unconditionally
@@ -468,6 +468,7 @@ def gen_aten_files(
         cmd = "$(exe {}torchgen:gen) ".format(ROOT_PATH) + " ".join([
             "--source-path $(location {}:aten_src_path)/aten/src/ATen".format(ROOT),
             "--install_dir $OUT",
+            "--aoti_install_dir $OUT/torch/csrc/inductor/aoti_torch/generated"
         ] + extra_params),
         visibility = visibility,
         compatible_with = compatible_with,
@@ -1111,9 +1112,6 @@ def define_buck_targets(
             "--replace",
             "@AT_PARALLEL_NATIVE@",
             "AT_PARALLEL_NATIVE_FBXPLAT",
-            "--replace",
-            "@AT_PARALLEL_NATIVE_TBB@",
-            "AT_PARALLEL_NATIVE_TBB_FBXPLAT",
             "--replace",
             "@AT_BUILD_WITH_LAPACK@",
             "USE_LAPACK_FBXPLAT",

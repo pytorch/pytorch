@@ -1823,7 +1823,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                 if not dist.is_mpi_available():
                     continue
             elif backend == dist.Backend.NCCL:
-                if not dist.is_nccl_available():
+                if not dist.is_nccl_available() or not torch.cuda.is_available():
                     continue
             elif backend == dist.Backend.GLOO:
                 if not dist.is_gloo_available():
@@ -2213,6 +2213,13 @@ class LocalRankTest(MultiProcessTestCase):
     def testWithoutEnv(self):
         with self.assertRaisesRegex(RuntimeError, "LOCAL_RANK"):
             dist.get_node_local_rank()
+
+    def testWithoutEnvWithFallback(self):
+        self.assertEqual(dist.get_node_local_rank(fallback_rank=2), 2)
+
+    def testNodeLocalRankOverridesFallback(self):
+        os.environ["LOCAL_RANK"] = str(self.rank)
+        self.assertEqual(dist.get_node_local_rank(fallback_rank=123), self.rank)
 
     def testNodeLocalRank(self):
         os.environ["LOCAL_RANK"] = str(self.rank)

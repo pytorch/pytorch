@@ -2522,8 +2522,8 @@ class TestFakeTensor(TestCase):
                         or name in sometimes_dynamic_output_op_test
                     )
                     self.assertTrue(
-                        mode.shape_env is None
-                        or not mode.shape_env.allow_dynamic_output_shape_ops
+                        fake_mode.shape_env is None
+                        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
                         or name not in supported_dynamic_output_op_tests
                     )
                 except torch._subclasses.fake_tensor.DataDependentOutputException:

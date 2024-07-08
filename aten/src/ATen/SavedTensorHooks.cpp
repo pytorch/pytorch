@@ -35,6 +35,12 @@ void SavedTensorDefaultHooks::enable() {
   tls.disabled_error_message = c10::nullopt;
 }
 
+/* static */ bool SavedTensorDefaultHooks::set_tracing(bool is_tracing) {
+  bool prior  = tls.is_tracing;
+  tls.is_tracing = is_tracing;
+  return prior;
+}
+
 const std::optional<std::string>& SavedTensorDefaultHooks::get_disabled_error_message() {
   return tls.disabled_error_message;
 }
@@ -59,25 +65,20 @@ void SavedTensorDefaultHooks::push_hooks(PyObject* pack_hook, PyObject* unpack_h
   tls.stack.emplace(pack_hook, unpack_hook);
 }
 
-void SavedTensorDefaultHooks::pop_hooks() {
+std::pair<PyObject*, PyObject*> SavedTensorDefaultHooks::pop_hooks() {
   // Reference counting is handled by the caller of `pop_hooks`
   TORCH_INTERNAL_ASSERT(is_initialized && !tls.stack.empty());
+  std::pair<PyObject*, PyObject*> hooks = tls.stack.top();
   tls.stack.pop();
+  return hooks;
 }
 
 std::pair<PyObject*, PyObject*> SavedTensorDefaultHooks::get_hooks() {
-  if (!is_initialized || tls.stack.empty()) {
+  // For tls.is_tracing, see NOTE: [Deferring tensor pack/unpack hooks until runtime]
+  if (!is_initialized || tls.stack.empty() || tls.is_tracing) {
     return std::make_pair(nullptr, nullptr);
   }
   return tls.stack.top();
-}
-
-std::stack<std::pair<PyObject*, PyObject*>> SavedTensorDefaultHooks::get_stack() {
-  return tls.stack;
-}
-
-void SavedTensorDefaultHooks::set_stack(std::stack<std::pair<PyObject*, PyObject*>> stack_) {
-  tls.stack = std::move(stack_);
 }
 
 }

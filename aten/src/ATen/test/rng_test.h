@@ -116,7 +116,7 @@ void test_random_from_to(const at::Device& device) {
   bool from_to_case_covered = false;
   bool from_case_covered = false;
   for (const int64_t from : froms) {
-    for (const ::std::optional<int64_t> to : tos) {
+    for (const ::std::optional<int64_t> & to : tos) {
       if (!to.has_value() || from < *to) {
         for (const uint64_t val : vals) {
           auto gen = at::make_generator<RNG>(val);

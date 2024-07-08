@@ -49,14 +49,32 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual SymNode mul(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   }
+  // NB: legacy, prefer float_truediv or int_truediv
   virtual SymNode truediv(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   }
+  virtual SymNode float_truediv(const SymNode& other) {
+    return truediv(other);
+  }
+  virtual SymNode int_truediv(const SymNode& other) {
+    return truediv(other);
+  }
+  // NB: legacy, prefer float_pow or pow_by_natural
   virtual SymNode pow(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   }
+  virtual SymNode float_pow(const SymNode& other) {
+    return pow(other);
+  }
+  virtual SymNode pow_by_natural(const SymNode& other) {
+    return pow(other);
+  }
+  // NB: legacy, prefer int_floordiv
   virtual SymNode floordiv(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
+  }
+  virtual SymNode int_floordiv(const SymNode& other) {
+    return floordiv(other);
   }
   virtual SymNode mod(const SymNode& other) {
     TORCH_CHECK(false, "NYI");

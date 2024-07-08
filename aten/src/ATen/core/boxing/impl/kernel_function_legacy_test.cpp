@@ -40,10 +40,6 @@ int64_t incrementKernel(const Tensor& tensor, int64_t input) {
   return input + 1;
 }
 
-int64_t decrementKernel(const Tensor& tensor, int64_t input) {
-  return input - 1;
-}
-
 void expectCallsIncrement(DispatchKey dispatch_key) {
   at::AutoDispatchBelowAutograd mode;
 
@@ -53,17 +49,6 @@ void expectCallsIncrement(DispatchKey dispatch_key) {
   auto result = callOp(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(6, result[0].toInt());
-}
-
-void expectCallsDecrement(DispatchKey dispatch_key) {
-  at::AutoDispatchBelowAutograd mode;
-
-  // assert that schema and cpu kernel are present
-  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
-  ASSERT_TRUE(op.has_value());
-  auto result = callOp(*op, dummyTensor(dispatch_key), 5);
-  EXPECT_EQ(1, result.size());
-  EXPECT_EQ(4, result[0].toInt());
 }
 
 TEST(OperatorRegistrationTestLegacyFunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
@@ -812,7 +797,7 @@ std::optional<Tensor> called_arg2 = c10::nullopt;
 std::optional<int64_t> called_arg3 = c10::nullopt;
 std::optional<std::string> called_arg4 = c10::nullopt;
 
-void kernelWithOptInputWithoutOutput(Tensor arg1, const std::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+void kernelWithOptInputWithoutOutput(Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
   called = true;
   called_arg2 = arg2;
   called_arg3 = arg3;
@@ -846,7 +831,7 @@ TEST(OperatorRegistrationTestLegacyFunctionBasedKernel, givenKernelWithOptionalI
   EXPECT_FALSE(called_arg4.has_value());
 }
 
-std::optional<Tensor> kernelWithOptInputWithOutput(Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+std::optional<Tensor> kernelWithOptInputWithOutput(Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
   called = true;
   called_arg2 = arg2;
   called_arg3 = arg3;
@@ -883,8 +868,8 @@ TEST(OperatorRegistrationTestLegacyFunctionBasedKernel, givenKernelWithOptionalI
   EXPECT_FALSE(called_arg4.has_value());
 }
 
-std::tuple<std::optional<Tensor>, c10::optional<int64_t>, c10::optional<std::string>>
-kernelWithOptInputWithMultipleOutputs(Tensor arg1, const std::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+std::tuple<std::optional<Tensor>, std::optional<int64_t>, std::optional<std::string>>
+kernelWithOptInputWithMultipleOutputs(Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
   return std::make_tuple(arg2, arg3, arg4);
 }
 

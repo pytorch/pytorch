@@ -60,7 +60,7 @@ inline Tensor to_meta(const Tensor& t) {
 /*device=*/c10::make_optional(c10::Device(kMeta)), /*pin_memory=*/c10::nullopt);
 }
 
-inline std::optional<Tensor> to_meta(const c10::optional<Tensor>& t) {
+inline std::optional<Tensor> to_meta(const std::optional<Tensor>& t) {
   if (t.has_value()) {
     return c10::make_optional<Tensor>(to_meta(*t));
   }

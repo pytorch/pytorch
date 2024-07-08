@@ -58,7 +58,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     with:!{{ upload.binary_env_as_input(config) }}
       {%- if "aarch64" in build_environment %}
-      runs_on: linux.arm64.2xlarge
+      runs_on: linux.arm64.m7g.4xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
       {%- elif "s390x" in build_environment %}
       runs_on: linux.s390x
@@ -71,12 +71,17 @@ jobs:
       {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
       {%- endif %}
+      {%- if config["gpu_arch_type"] == "cuda-aarch64" %}
+      timeout-minutes: 420
+      {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  {%- if config["gpu_arch_type"] != "cuda-aarch64" %}
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: !{{ config["build_name"] }}-build
-{%- if config["gpu_arch_type"] != "rocm" %}
+    {%- if config["gpu_arch_type"] != "rocm" %}
     uses: ./.github/workflows/_binary-test-linux.yml
     with:!{{ upload.binary_env_as_input(config) }}
       build_name: !{{ config["build_name"] }}
@@ -96,7 +101,7 @@ jobs:
       {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-{%- else %}
+    {%- else %}
     runs-on: linux.rocm.gpu
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
@@ -121,7 +126,8 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-{%- endif %}
+    {%- endif %}
+  {%- endif %}
 
 {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config) }}
