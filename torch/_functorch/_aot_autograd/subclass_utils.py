@@ -130,7 +130,7 @@ def unwrap_tensor_subclasses(
     is_runtime: bool,
     append_extra: bool,
 ):
-    def concat_inner_tensors_from_subclasses(xs, is_primals: bool):
+    def concat_inner_tensors_from_subclasses(xs):
         xs_inner = []
 
         for x in xs:
@@ -166,7 +166,6 @@ def unwrap_tensor_subclasses(
                 if (
                     isinstance(x, Tensor)
                     and is_traceable_wrapper_subclass(x)
-                    and (True if config.append_backward else is_primals)
                 ):
                     # x.size() can have both ints ans SymInts: `Size([3, sz1, 5])`
                     xs_inner += [sz for sz in x.size() if isinstance(sz, SymInt)]
@@ -179,16 +178,16 @@ def unwrap_tensor_subclasses(
             wrapped_args[1], (tuple, list)
         )
         unwrapped_args_fw = concat_inner_tensors_from_subclasses(
-            wrapped_args[0], is_primals=True
+            wrapped_args[0]
         )
         unwrapped_args_tangents = concat_inner_tensors_from_subclasses(
-            wrapped_args[1], is_primals=False
+            wrapped_args[1]
         )
         unwrapped_args = (unwrapped_args_fw, unwrapped_args_tangents)
     else:
         assert isinstance(wrapped_args, (list, tuple))
         unwrapped_args_fw = concat_inner_tensors_from_subclasses(
-            wrapped_args, is_primals=True
+            wrapped_args
         )
         unwrapped_args = unwrapped_args_fw
     return unwrapped_args

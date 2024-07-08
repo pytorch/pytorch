@@ -1914,9 +1914,11 @@ class GraphModule(torch.nn.Module):
         clone_1: "f32[s0, s1]" = torch.ops.aten.clone.default(primals_2);  primals_2 = None
 
         mul: "Sym(s0*s1)" = primals_3 * primals_4
-        view: "f32[s0*s1]" = torch.ops.aten.view.default(clone, [mul]);  clone = None
-        view_1: "f32[s0*s1]" = torch.ops.aten.view.default(clone_1, [mul]);  clone_1 = None
-        return [view, view_1, mul, primals_3, primals_4]
+        view: "f32[s0*s1]" = torch.ops.aten.view.default(clone, [mul])
+        view_1: "f32[s0*s1]" = torch.ops.aten.view.default(clone_1, [mul]);  clone_1 = mul = None
+
+        sym_numel_default: "Sym(s0*s1)" = torch.ops.aten.sym_numel.default(clone);  clone = None
+        return [view, view_1, sym_numel_default, primals_3, primals_4]
 """,  # noqa: B950
         )
 
@@ -1952,8 +1954,10 @@ class GraphModule(torch.nn.Module):
 
         mul: "Sym(s0*s1)" = primals_3 * primals_4
         view: "f32[s0*s1]" = torch.ops.aten.view.default(clone, [mul])
-        view_1: "f32[s0*s1]" = torch.ops.aten.view.default(clone_1, [mul]);  clone_1 = None
-        return [clone, view, view_1, mul, primals_3, primals_4]
+        view_1: "f32[s0*s1]" = torch.ops.aten.view.default(clone_1, [mul]);  clone_1 = mul = None
+
+        sym_numel_default: "Sym(s0*s1)" = torch.ops.aten.sym_numel.default(clone)
+        return [clone, view, view_1, sym_numel_default, primals_3, primals_4]
 """,  # noqa: B950
         )
 
@@ -2287,8 +2291,10 @@ class GraphModule(torch.nn.Module):
         clone: "f32[s0, 4]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
 
         mul: "Sym(4*s0)" = 4 * primals_2
-        view: "f32[4*s0]" = torch.ops.aten.view.default(clone, [mul])
-        return [view, clone, mul, primals_2]
+        view: "f32[4*s0]" = torch.ops.aten.view.default(clone, [mul]);  mul = None
+
+        sym_numel_default: "Sym(4*s0)" = torch.ops.aten.sym_numel.default(clone)
+        return [view, clone, sym_numel_default, primals_2]
 """,  # noqa: B950
         )
 

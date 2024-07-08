@@ -1805,15 +1805,14 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         for i, a in enumerate(all_args)
                     ]
 
-                    # there should be a better way to get the number of symints
-                    # added
+                    # there should be a better way to get the number of extra symints
                     len_extra_symints = len(
                         unwrap_tensor_subclasses(
                             all_args,
                             subclass_metas=tangent_metadata,
                             is_joint_structure=False,
                             is_runtime=True,
-                            append_extra=config.append_backward,
+                            append_extra=True,
                         )
                     ) - len(
                         unwrap_tensor_subclasses(
@@ -1830,7 +1829,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         subclass_metas=tangent_metadata,
                         is_joint_structure=False,
                         is_runtime=True,
-                        append_extra=config.append_backward,
+                        append_extra=True,
                     )
                     tangents_start_idx = (
                         len(all_args) - len_tangents - len(rng_args) - len_extra_symints
@@ -1966,14 +1965,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         CompiledFunction.maybe_subclass_metadata.grad_input_metas
                         is not None
                     )
-                    # map "None" values to input symints
-                    if not config.append_backward:
-                        n_symints = len(ctx.symints)
-                        assert (
-                            n_symints
-                            == CompiledFunction.metadata.num_symints_saved_for_bw
-                        )
-                        out += (*ctx.symints,)
                     outs_wrapped = wrap_tensor_subclasses(
                         out,
                         subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,

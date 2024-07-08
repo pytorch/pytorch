@@ -1,11 +1,10 @@
 # mypy: allow-untyped-defs
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass
 from typing import Union
 
 import torch
 import torch.utils._pytree as pytree
-from torch._functorch import config
 from torch.fx.experimental.proxy_tensor import py_sym_types, SymBool, SymFloat, SymInt
 
 
@@ -36,10 +35,7 @@ class _SymHashingDict:
     """
 
     def __init__(self):
-        if config.append_backward:
-            self.sym_hash_dict = defaultdict(list)
-        else:
-            self.sym_hash_dict = {}
+        self.sym_hash_dict = {}
 
     def __setitem__(self, key, value):
         self.sym_hash_dict.__setitem__(self._wrap_to_sym_expr_hash(key), value)
@@ -75,101 +71,28 @@ def dedupe_symints(graph: torch.fx.Graph):
     sym_dict = _SymHashingDict()
     resolvable_from_input_symints = set()
 
-    if config.append_backward:
-        # The graph can contain duplicated symbolic integers, for example:
-        # "return [mul, mul_1, sym_1, sym_2, mul_2, mul_3, None, None, sym_1, sym_2]".
-        # If we simply remove duplicates like "sym_1", it may cause the forward or
-        # backward graph to reference nonexistent arguments. To prevent such issues,
-        # we disambiguate these duplicates by assigning unique names to each instance.
+    # print()
+    # print(graph)
 
-        def compute_nodes_in_forward_graph(forward_inputs, forward_outputs):
-            queue = [*forward_inputs, *forward_outputs]
-            s = set()
-            while len(queue) > 0:
-                last = queue.pop()
-                if last in s:
-                    continue
-                s.add(last)
-                for node in last.all_input_nodes:
-                    if node not in s:
-                        queue.append(node)
-            return s
+    for node in graph.nodes:
+        val = node.meta.get("val", None)
+        if val is None or not isinstance(val, py_sym_types):
+            continue
 
-        [output] = graph.find_nodes(op="output")
-        new_args = list(output.args[0])
-        for node, cnt in Counter(output.args[0]).items():
-            if node and cnt > 1:
-                # copy and replace one occurrence on list
-                with graph.inserting_after(node):
-                    copy = graph.node_copy(node)
-                    new_args[new_args.index(node)] = copy
+        # print(f"[{node.op}] {node} - {val}")
 
-        output.args = (new_args,)
-        # print(graph)
-
-        if hasattr(graph._codegen, "pytree_info"):
-            # instance of _PyTreeCodegen
-            forward_inputs, _ = pytree.tree_unflatten(
-                graph.find_nodes(op="placeholder"), graph._codegen.pytree_info.in_spec
-            )
-            forward_outputs, _ = pytree.tree_unflatten(
-                new_args, graph._codegen.pytree_info.out_spec
-            )
-            forward_nodes = compute_nodes_in_forward_graph(
-                forward_inputs, forward_outputs
-            )
-        else:
-            forward_nodes = ()
-
-        for node in graph.nodes:
-            val = node.meta.get("val", None)
-            if val is None or not isinstance(val, py_sym_types):
+        if node.op == "placeholder" and val not in sym_dict:
+            resolvable_from_input_symints.add(node)
+            sym_dict[val] = node
+        elif existing_node := sym_dict.get(val):
+            if node.op == 'placeholder':
                 continue
 
-            # print(f"[{node.op}] {node} - {val}")
-            sym_dict_vals = sym_dict.get(val, [])
-            existing_nodes = (
-                [n for n in sym_dict_vals if n in forward_nodes]
-                if node in forward_nodes
-                else sym_dict_vals
-            )
+            existing_node = sym_dict.get(val)
+            node.replace_all_uses_with(existing_node)
+            graph.erase_node(node)
+        elif all(n in resolvable_from_input_symints for n in node.all_input_nodes):
+            sym_dict[val] = node
+            resolvable_from_input_symints.add(node)
 
-            if node.op == "placeholder":
-                resolvable_from_input_symints.add(node)
-                # sym_dict[val] = node
-                sym_dict[val].append(node)
-            elif len(sym_dict_vals) > 0 and len(existing_nodes) > 0:
-                # skip if node in forward_nodes but no replacement found in forward_nodes
-                node.replace_all_uses_with(existing_nodes[0])
-                graph.erase_node(node)
-            # elif existing_node := sym_dict.get(val):
-            #     node.replace_all_uses_with(existing_node)
-            #     graph.erase_node(node)
-            elif all(n in resolvable_from_input_symints for n in node.all_input_nodes):
-                # sym_dict[val] = node
-                sym_dict[val].append(node)
-                resolvable_from_input_symints.add(node)
-
-        # print(graph)
-
-    else:
-        # print(graph)
-
-        for node in graph.nodes:
-            val = node.meta.get("val", None)
-            if val is None or not isinstance(val, py_sym_types):
-                continue
-
-            # print(f"[{node.op}] {node} - {val}")
-
-            if node.op == "placeholder":
-                resolvable_from_input_symints.add(node)
-                sym_dict[val] = node
-            elif existing_node := sym_dict.get(val):
-                node.replace_all_uses_with(existing_node)
-                graph.erase_node(node)
-            elif all(n in resolvable_from_input_symints for n in node.all_input_nodes):
-                sym_dict[val] = node
-                resolvable_from_input_symints.add(node)
-
-        # print(graph)
+    # print(graph)

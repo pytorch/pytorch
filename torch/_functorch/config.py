@@ -15,8 +15,6 @@ from typing import TYPE_CHECKING
 # we functionalize only CUDA rng ops today.
 functionalize_rng_ops = False
 
-append_backward = os.environ.get("APPEND_BACKWARD", False)
-
 # can be useful for debugging if we are incorrectly creating meta fake tensors
 fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
 
