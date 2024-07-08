@@ -123,6 +123,14 @@ joint_custom_post_pass: Optional[Callable[[torch.fx.Graph], None]] = None
 # use post-grad passes.
 pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 
+# Registers a custom pass to be run right before fusion in Inductor scheduler.
+pre_fusion_custom_pass: Optional[
+    Callable[
+        [List["torch._inductor.scheduler.BaseSchedulerNode"]],
+        List["torch._inductor.scheduler.BaseSchedulerNode"],
+    ]
+] = None
+
 # Deprecated
 split_cat_fx_passes = True
 
