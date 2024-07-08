@@ -531,7 +531,7 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                   start:i - num_layers
                                                  length:1
                                                    name:nil];
-          if is_macos_14_4_or_newer {
+          if (is_macos_14_4_or_newer) {
             // Prevents shape optimization bug in kernel when num_layers > 2
             iterationInputTensor_ = [mpsGraph identityWithTensor:iterationInputTensor_ name:nil];
           }
