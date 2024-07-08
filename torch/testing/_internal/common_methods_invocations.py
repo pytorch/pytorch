@@ -18328,7 +18328,8 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs__unsafe_masked_index,
            skips=(
-                DecorateInfo(slowTest, 'TestDecomp', 'test_quick_core_backward', device_type='cpu', dtypes=(torch.float64,), active_if=IS_WINDOWS),
+                DecorateInfo(slowTest, 'TestDecomp', 'test_quick_core_backward', device_type='cpu',
+                             dtypes=(torch.float64,), active_if=IS_WINDOWS),
            ),),
     OpInfo('_unsafe_masked_index_put_accumulate',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
@@ -18345,7 +18346,8 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs__unsafe_masked_index_put_accumulate,
            skips=(
-                DecorateInfo(slowTest, 'TestDecomp', 'test_quick_core_backward', device_type='cpu', dtypes=(torch.float64,), active_if=IS_WINDOWS),
+                DecorateInfo(slowTest, 'TestDecomp', 'test_quick_core_backward', device_type='cpu',
+                             dtypes=(torch.float64,), active_if=IS_WINDOWS),
            ),),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -20649,7 +20651,8 @@ op_db: List[OpInfo] = [
         supports_gradgrad=False,
         gradcheck_nondet_tol=1e-15,
         skips=(
-            DecorateInfo(slowTest, 'TestDecomp', 'test_comprehensive', dtypes=(torch.float32, torch.float64), active_if=IS_WINDOWS),
+            DecorateInfo(slowTest, 'TestDecomp', 'test_comprehensive', dtypes=(torch.float32, torch.float64),
+                         active_if=IS_WINDOWS),
         ),),
     OpInfo(
         "argwhere",
