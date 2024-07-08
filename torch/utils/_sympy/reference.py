@@ -248,6 +248,7 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
 
     @staticmethod
     def ceil_to_int(x, dtype):
+        # This fails on fx.Proxy, not sure how to implement
         return math.ceil(x)
 
     @staticmethod
@@ -261,6 +262,11 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def truediv(a, b):
         return a / b
+
+    # @staticmethod
+    # def int_truediv(a, b):
+    #     # No idea about this
+    #     return torch.sym_float(torch.sym_int(a) / torch.sym_int(b))
 
     @staticmethod
     def pow(a, b):
@@ -280,3 +286,8 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def round_decimal(a, b):
         return round(a, ndigits=b)
+
+    # @staticmethod
+    # def trunc_to_int(x, dtype):
+    #     # This should be enough?
+    #     return torch.sym_int(x)
