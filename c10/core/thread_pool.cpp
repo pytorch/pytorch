@@ -1,5 +1,6 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/Logging.h>
+#include <c10/util/thread_name.h>
 #if !defined(__powerpc__) && !defined(__s390x__)
 #include <cpuinfo.h>
 #endif
@@ -44,6 +45,7 @@ ThreadPool::ThreadPool(
       if (init_thread) {
         init_thread();
       }
+      c10::setThreadName("pt_thread_pool");
       this->main_loop(i);
     });
   }
