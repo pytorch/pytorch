@@ -369,7 +369,7 @@ struct ConvParams {
   }
 
   bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight, const std::optional<at::Tensor>& bias) const {
-#if defined(__ARM_NEON__)
+#if defined(__ARM_NEON__) || (defined(__riscv_v_intrinsic) && __riscv_v_intrinsic>=12000)
     // Currently only 3x3 depthwise convolutions on tensors of float are supported.
     return (input.ndimension() == 4) &&
            (at::symint::size<T>(input, 1) == groups) &&
@@ -1409,8 +1409,8 @@ static inline at::MemoryFormat determine_backend_memory_format(
     const Tensor& weight,
     const ConvBackend backend) {
   at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
-  auto k = weight.ndimension();
 #if !defined(C10_MOBILE)
+  auto k = weight.ndimension();
   // See Note [Mobile check segfaults]
   switch(backend) {
     case ConvBackend::Cudnn:

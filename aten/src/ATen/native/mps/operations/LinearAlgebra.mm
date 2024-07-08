@@ -97,8 +97,8 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
       mtl_setBuffer(computeEncoder, self, 0);
       mtl_setBuffer(computeEncoder, other, 1);
       mtl_setBuffer(computeEncoder, output, 2);
-      [computeEncoder setBytes:strides.data() length:sizeof(uint64_t) * strides.size() atIndex:3];
-      [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
+      mtl_setBytes(computeEncoder, strides, 3);
+      mtl_setBytes(computeEncoder, sizes, 4);
       mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
       getMPSProfiler().endProfileKernel(matmulPSO);
     }

@@ -21,6 +21,7 @@ from torch._inductor.codecache import (
     CUDACodeCache,
     HalideCodeCache,
     LambdaFuture,
+    ROCmCodeCache,
     TritonCodeCache,
     TritonFuture,
 )
@@ -172,11 +173,16 @@ class AsyncCompile:
 
         kernel = TritonCodeCache.load(kernel_name, source_code)
         if config.compile_threads > 1:
+            # We want to support changing these env vars after (and while) the
+            # process pool is running, so pass them to the subprocess to reset.
+            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
+            extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
             return TritonFuture(
                 kernel,
                 self.process_pool().submit(
                     _worker_compile_triton,
                     kernel._reload_in_subproc,
+                    extra_env,
                 ),
             )
         else:
@@ -212,6 +218,14 @@ class AsyncCompile:
 
         def task():
             return CUDACodeCache.load(source_code, dst_file_ext)[0]
+
+        return self.submit(task)
+
+    def rocm(self, source_code, dst_file_ext):
+        kernel_code_log.info("ROCm Kernel:\n%s", source_code)
+
+        def task():
+            return ROCmCodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
 
