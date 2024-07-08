@@ -755,6 +755,9 @@ inline at::ScalarType toScalarType(PyObject* obj) {
   if (obj == (PyObject*)&PyLong_Type) {
     return at::ScalarType::Long;
   }
+  if (obj == (PyObject*)&PyComplex_Type) {
+    return at::ScalarType::ComplexDouble;
+  }
   return reinterpret_cast<THPDtype*>(obj)->scalar_type;
 }
 

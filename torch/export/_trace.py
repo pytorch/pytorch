@@ -1478,6 +1478,10 @@ def _export_to_aten_ir_make_fx(
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
+    _preserve_requires_grad_pass(
+        gm, export_graph_signature, fake_params_buffers, constants, flat_args
+    )
+
     # Prettify names for placeholder nodes.
     placeholder_naming_pass(
         gm,

@@ -12,6 +12,8 @@ import sympy
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from .. import ir
+
+from ..scheduler import SchedulerBuffer
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import V
 
@@ -308,9 +310,11 @@ def rewrite_index_for_function(
     index: sympy.Expr,
 ):
     # Local buffer at the inner dimensions
-    snode = V.graph.scheduler.name_to_node.get(
+    sbuffer = V.graph.scheduler.name_to_buf.get(
         localize_buffer_handler.global_buf.get_name()
     )
+    assert isinstance(sbuffer, SchedulerBuffer)
+    snode = sbuffer.defining_op
     assert snode is not None
     scheduler_nodes = snode.get_nodes()
     _, (group, reduction_group) = max(
@@ -448,6 +452,38 @@ class LocalBufferContext:
         if global_buffer:
             self.local_to_global[local_buffer.get_name()] = global_buffer
             V.graph.removed_buffers.add(global_buffer.get_name())
+            # Patch the attr of SchedulerNode's outputs and outputs_by_name.
+            # Since the name of local buffer has not been added into the outputs
+            # of schedulerNode, which fails method of CSEProxy._update_store_cache
+            # to get the SchedulerBuffer.
+            # We create a new SchedulerBuffer with Local Buffer to substitute the
+            # original SchedulerBuffer with global buffer.
+            scheduler_buffer = V.graph.scheduler.name_to_buf.get(
+                global_buffer.get_name()
+            )
+            assert isinstance(scheduler_buffer, SchedulerBuffer)
+            scheduler_node = scheduler_buffer.defining_op
+            new_outputs: List[SchedulerBuffer] = [
+                output
+                for output in scheduler_node.get_outputs()
+                if output.get_name() != global_buffer.get_name()
+            ]
+            new_outputs.append(
+                SchedulerBuffer(
+                    scheduler=scheduler_node.scheduler,
+                    node=local_buffer,
+                    defining_op=scheduler_node,
+                )
+            )
+            new_outputs_by_name: Dict[str, SchedulerBuffer] = {
+                buf.get_name(): buf for buf in new_outputs
+            }
+            self.exit_stack.enter_context(
+                patch.object(scheduler_node, "outputs", new_outputs)
+            )
+            self.exit_stack.enter_context(
+                patch.object(scheduler_node, "outputs_by_name", new_outputs_by_name)
+            )
 
     def localize_function(
         self,
@@ -534,3 +570,10 @@ def unify_mask_base_type(
         for var in vars
     )
     return new_vars
+
+
+def get_gemm_template_output_and_compute_dtype(input_dtype):
+    if input_dtype == torch.uint8:
+        return (torch.int32, torch.int32)
+    else:
+        return (torch.float32, torch.float32)
