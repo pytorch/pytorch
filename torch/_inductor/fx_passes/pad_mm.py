@@ -3,7 +3,7 @@ import functools
 import itertools
 import operator
 import typing
-from typing import List, Optional, Union
+from typing import Callable, List, Optional, Union
 
 import torch
 import torch._inductor.runtime.runtime_utils
@@ -323,7 +323,7 @@ def should_exclude_padding_time(match, arg_name):
     return node_def.op != "placeholder"
 
 
-def should_pad(key, ori_time, pad_time) -> bool:
+def should_pad(key: str, ori_time, pad_time) -> bool:
     multiplier = 1.1
     # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
     # tradeoff between performance improvement from shape padding and overhead from additional memory ops
@@ -544,13 +544,13 @@ def should_pad_bench(
 
 
 def get_context(
-    mat1,
-    mat2,
-    mat1_pre_padded,
-    mat2_pre_padded,
-    m_padded_length,
-    k_padded_length,
-    n_padded_length,
+    mat1: Tensor,
+    mat2: Tensor,
+    mat1_pre_padded: bool,
+    mat2_pre_padded: bool,
+    m_padded_length: int,
+    k_padded_length: int,
+    n_padded_length: int,
 ):
     context = AHContext()
 
@@ -590,28 +590,28 @@ def get_context(
 
 
 def run_autoheuristic(
-    mat1,
-    mat2,
-    orig_bench_fn,
-    pad_bench_fn,
-    m_padded_length,
-    k_padded_length,
-    n_padded_length,
+    mat1: Tensor,
+    mat2: Tensor,
+    orig_bench_fn: Callable[[], None],
+    pad_bench_fn: Callable[[], None],
+    m_padded_length: int,
+    k_padded_length: int,
+    n_padded_length: int,
     do_bench,
-    mat1_pre_padded,
-    mat2_pre_padded,
+    mat1_pre_padded: bool,
+    mat2_pre_padded: bool,
     ori_time,
-    ori_time_key,
-    key,
-):
-    def feedback_fn(choice):
+    ori_time_key: str,
+    key: str,
+) -> bool:
+    def feedback_fn(choice: str):
         if choice == orig_choice:
             return do_bench(orig_bench_fn)
         elif choice == pad_choice:
             return do_bench(pad_bench_fn)
         return None
 
-    def fallback():
+    def fallback() -> str:
         return "autotune"
 
     orig_choice = "orig"
