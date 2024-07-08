@@ -3981,6 +3981,45 @@ class TestCudaMallocAsync(TestCase):
                 matching = False
         self.assertEqual(True, matching)
 
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
+    def test_uuid_visible_devices(self):
+        test_script = """\
+import torch
+import os
+print(f"{torch.cuda.device_count()}")
+        """
+        cmd = "rocminfo | grep -o 'Uuid:.*GPU-.*' | sed 's/Uuid://'"
+        uuids = (
+            subprocess.check_output(cmd, shell=True, universal_newlines=True)
+            .strip()
+            .split("\n")
+        )
+        uuids = [s.strip() for s in uuids]
+
+        custom_envs = []
+        for uuid in uuids:
+            custom_envs.append(
+                {"CUDA_VISIBLE_DEVICES": f"{uuid}", "HIP_VISIBLE_DEVICES": None}
+            )
+            custom_envs.append(
+                {"HIP_VISIBLE_DEVICES": f"{uuid}", "CUDA_VISIBLE_DEVICES": None}
+            )
+
+        for env_config in custom_envs:
+            env = os.environ.copy()
+            for key, value in env_config.items():
+                if value is None:
+                    env.pop(key, None)
+                else:
+                    env[key] = value
+            r = (
+                subprocess.check_output([sys.executable, "-c", test_script], env=env)
+                .decode("ascii")
+                .strip()
+            )
+            self.assertEqual("1", r)
+
 
 MIN_BLOCK_SIZE = 512
 SMALL_SIZE = 1048576

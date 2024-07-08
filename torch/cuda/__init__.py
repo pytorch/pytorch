@@ -752,7 +752,7 @@ def _raw_device_uuid_amdsmi() -> Optional[List[str]]:
         try:
             uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
                 2:
-            ]  # Removes 0x prefix
+            ]  # Removes 0x prefix from serial
         except amdsmi.AmdSmiException:
             warnings.warn("Cannot get uuid for amd device")
             return None
@@ -797,7 +797,7 @@ def _raw_device_uuid_nvml() -> Optional[List[str]]:
 def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List[int]:
     r"""Given the set of partial uuids and list of known uuids builds a set of ordinals excluding ambiguous partials IDs."""
 
-    def uuid_to_orinal(candidate: str, uuids: List[str]) -> int:
+    def uuid_to_ordinal(candidate: str, uuids: List[str]) -> int:
         best_match = -1
         for idx, uuid in enumerate(uuids):
             if not uuid.startswith(candidate):
@@ -813,8 +813,8 @@ def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List
         if torch.version.hip:
             candidate = candidate.replace(
                 "GPU-", "", 1
-            )  # Remove GPU-prefix to match amdsmi asic seria
-        idx = uuid_to_orinal(candidate, uuids)
+            )  # Remove GPU-prefix to match amdsmi asic serial
+        idx = uuid_to_ordinal(candidate, uuids)
         # First invalid ordinal stops parsing
         if idx < 0:
             break
@@ -834,9 +834,9 @@ def _device_count_amdsmi() -> int:
             uuids = _raw_device_uuid_amdsmi()
             if uuids is None:
                 return -1
-            visible_devices = _transform_uuid_to_ordinals(
-                cast(List[str], visible_devices), uuids
-            )
+            # Create string version of visible devices to avoid mypy warnings
+            visible_device_str = cast(List[str], visible_devices)
+            visible_devices = _transform_uuid_to_ordinals(visible_device_str, uuids)
         else:
             raw_cnt = _raw_device_count_amdsmi()
             if raw_cnt <= 0:
