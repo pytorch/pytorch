@@ -50,10 +50,8 @@ def build_subgraph_buffer(
     The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
 
     Args:
-        args: The args that were passed into the flex_attention kernel
-        placeholder_inps: The list of scalar inputs, these were created on the fly through `create_placeholder`
+        args: The args that are passed into the subgraph. Contains both fixed and lifted inputs.
         subgraph: The Subgraph ir for which to produce the output node
-        graph_type: The type of subgraph for which we want to produce the output node, see enum above for details
     """
     cnt = 0
     env = {}
@@ -102,6 +100,8 @@ def build_subgraph_buffer(
                 )
                 return subgraph_buffer
 
+            # node.args[0] is either a single element or a list of elements
+            # representing all outputs of the function.
             return tree_map(convert_output_node_to_buffer, node.args[0])
 
     raise ValueError("FlexAttention was passed a subgraph with no output node!")

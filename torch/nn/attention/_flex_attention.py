@@ -424,7 +424,7 @@ def flex_attention(
     value: torch.Tensor,
     score_mod: _score_mod_signature = _identity,
     block_mask: Optional[BlockMask] = None,
-    scale=None,
+    scale: Optional[float] = None,
 ) -> torch.Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -457,7 +457,8 @@ def flex_attention(
         value (Tensor): Value tensor; shape :math:`(B, H, S, Ev)`.
         score_mod (Callable): Function to modify attention scores. By default no score_mod is applied.
         block_mask (BlockMask): BlockMask object that controls the blocksparsity pattern of the attention.
-        scale (float): Scaling factor applied prior to softmax. If none, the default value is set to :math`\frac{1}{\sqrt{E}}`
+        scale (Optional[float]): Scaling factor applied prior to softmax. If
+        none, the default value is set to :math`\frac{1}{\sqrt{E}}`
 
     Returns:
         output (Tensor): Attention output; shape :math:`(B, H, L, Ev)`.
