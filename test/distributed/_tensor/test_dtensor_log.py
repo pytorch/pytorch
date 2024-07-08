@@ -4,6 +4,7 @@ import functools
 import os
 import unittest
 
+import torch
 import torch.distributed as dist
 from torch._dynamo.test_case import run_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -14,10 +15,13 @@ requires_distributed = functools.partial(
 )
 
 
+@skip_if_lt_x_gpu(2)
 class DTensorLogTest(LoggingTestCase):
     @requires_distributed()
-    @skip_if_lt_x_gpu(2)
     def test_dtensor_log(self):
+        if not torch.cuda.is_available():
+            return
+
         env = dict(os.environ)
         env["TORCH_LOGS"] = "+dtensor"
         env["RANK"] = "0"
