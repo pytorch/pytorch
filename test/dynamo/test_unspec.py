@@ -617,6 +617,60 @@ def forward(self):
         self.assertTrue(f(torch.empty(8)).item())
         self.assertFalse(f(torch.empty(13)).item())
 
+    @torch._dynamo.config.patch(error_on_recompile=True)
+    def test_mark_unbacked(self):
+        class TestModel(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+
+            def forward(self, x: torch.Tensor, val: int) -> torch.Tensor:
+                return x * 2
+
+        main_model = TestModel()
+        opt_model = torch.compile(main_model, mode="max-autotune", dynamic=True)
+
+        x1 = torch.rand(3, 5, 4, 8)
+        x2 = torch.rand(1, 5, 4, 8)
+
+        torch._dynamo.decorators.mark_unbacked(x1, 0)
+
+        o1_ref = main_model(x1, 2)
+        o1 = opt_model(x1, 2)
+        self.assertEqual(o1_ref, o1)
+
+        o1_2_ref = main_model(x2, 2)
+        o1_2 = opt_model(x2, 2)
+        self.assertEqual(o1_2_ref, o1_2)
+
+    @torch._dynamo.config.patch(error_on_recompile=True)
+    def test_mark_unbacked_channels_last(self):
+        class TestModel(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+
+            def forward(self, x: torch.Tensor, val: int) -> torch.Tensor:
+                return x * 2
+
+        main_model = TestModel()
+        opt_model = torch.compile(main_model, mode="max-autotune", dynamic=True)
+
+        x1 = torch.rand(3, 5, 4, 8).to(memory_format=torch.channels_last)
+        x2 = torch.rand(1, 5, 4, 8).to(memory_format=torch.channels_last)
+
+        torch._dynamo.decorators.mark_unbacked(x1, 0)
+
+        o1_ref = main_model(x1, 2)
+        o1 = opt_model(x1, 2)
+        self.assertEqual(o1_ref, o1)
+
+        o1_2_ref = main_model(x2, 2)
+        o1_2 = opt_model(x2, 2)
+        self.assertEqual(o1_2_ref, o1_2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

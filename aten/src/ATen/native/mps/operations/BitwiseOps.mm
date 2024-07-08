@@ -146,7 +146,7 @@ static void handle_tensor_tensor_binary_op(const Tensor& self,
 
     [commandEncoder pushDebugGroup:[NSString stringWithFormat:@"Dispatch %s kernel", kernel_name.c_str()]];
     [commandEncoder setComputePipelineState:cplState];
-    [commandEncoder setBytes:&length length:sizeof(length) atIndex:0];
+    mtl_setBytes(commandEncoder, length, 0);
     mtl_setBuffer(commandEncoder, output, 1);
     mtl_setBuffer(commandEncoder, self, 2);
     mtl_setBuffer(commandEncoder, other, 3);
@@ -176,10 +176,10 @@ static void handle_tensor_scalar_binary_op(const Tensor& self,
 
     [commandEncoder pushDebugGroup:[NSString stringWithFormat:@"Dispatch %s kernel", kernel_name.c_str()]];
     [commandEncoder setComputePipelineState:cplState];
-    [commandEncoder setBytes:&length length:sizeof(length) atIndex:0];
+    mtl_setBytes(commandEncoder, length, 0);
     mtl_setBuffer(commandEncoder, output, 1);
     mtl_setBuffer(commandEncoder, self, 2);
-    [commandEncoder setBytes:&sval length:sizeof(sval) atIndex:3];
+    mtl_setBytes(commandEncoder, sval, 3);
     mtl_dispatch1DJob(commandEncoder, cplState, length);
 
     getMPSProfiler().endProfileKernel(cplState);
@@ -267,7 +267,7 @@ static void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
 
     [commandEncoder pushDebugGroup:@"Dispatch bitwise_not kernel"];
     [commandEncoder setComputePipelineState:cplState];
-    [commandEncoder setBytes:&length length:sizeof(length) atIndex:0];
+    mtl_setBytes(commandEncoder, length, 0);
     mtl_setBuffer(commandEncoder, output, 1);
     mtl_setBuffer(commandEncoder, self, 2);
     mtl_dispatch1DJob(commandEncoder, cplState, length);

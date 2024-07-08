@@ -396,6 +396,7 @@ class _StridedShard(Shard):
             start_value=1,
         )
     """
+
     # the shard stride for current mesh dimension: the shard on next local rank along the
     # mesh dim will be (_shard_stride - 1) shards away from the current shard.
     _total_split: int
@@ -436,16 +437,12 @@ class _StridedShard(Shard):
             self.dim <= tensor.ndim
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
 
-        assert (
-            self._total_split % num_chunks == 0
-        ), (
+        assert self._total_split % num_chunks == 0, (
             f"_StridedShard requires _total_split % num_chunks == 0 but "
             f"{self._total_split} % {num_chunks} == {self._total_split % num_chunks}"
         )
 
-        assert (
-            tensor.size(self.dim) % self._total_split == 0
-        ), (
+        assert tensor.size(self.dim) % self._total_split == 0, (
             "_StridedShard currently only allows even sharding but got tensor size"
             f" {tensor.size(self.dim)} on dim {self.dim} and _total_split"
             f" {self._total_split}"
@@ -465,14 +462,11 @@ class _StridedShard(Shard):
             )
             for i in range(num_chunks)
         ]
-        
+
         if contiguous:
             tensor_list = [t.contiguous() for t in tensor_list]
 
         return tensor_list, []
-
-    
-
 
 
 @dataclass(frozen=True)
