@@ -2,6 +2,7 @@
 """This module implements the user facing API for flex_attention in PyTorch."""
 import functools
 import itertools
+import math
 import operator
 from typing import Callable, Optional
 
@@ -423,6 +424,7 @@ def flex_attention(
     value: torch.Tensor,
     score_mod: _score_mod_signature = _identity,
     block_mask: Optional[BlockMask] = None,
+    scale=None,
 ) -> torch.Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -454,6 +456,8 @@ def flex_attention(
         key (Tensor): Key tensor; shape :math:`(B, H, S, E)`.
         value (Tensor): Value tensor; shape :math:`(B, H, S, Ev)`.
         score_mod (Callable): Function to modify attention scores. By default no score_mod is applied.
+        block_mask (BlockMask): BlockMask object that controls the blocksparsity pattern of the attention.
+        scale (float): Scaling factor applied prior to softmax. If none, the default value is set to :math`\frac{1}{\sqrt{E}}`
 
     Returns:
         output (Tensor): Attention output; shape :math:`(B, H, L, Ev)`.
@@ -466,7 +470,7 @@ def flex_attention(
         - :math:`Ev: \text{Embedding dimension of the value}`
 
     .. warning::
-        `torch.nn.attention.flex_attention` is a prototype feature in PyTorch. It doesn't support training currently.
+        `torch.nn.attention.flex_attention` is a prototype feature in PyTorch.
         Please look forward to a more stable implementation in a future version of PyTorch.
         Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
@@ -474,16 +478,14 @@ def flex_attention(
 
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key, value)
+    if scale is None:
+        scale = 1.0 / math.sqrt(query.size(-1))
     if torch.compiler.is_dynamo_compiling():
         # mark head_dim always to be static
         for x in [query, key, value]:
             torch._dynamo.mark_static(x, -1)
         out, _ = flex_attention_hop(
-            query,
-            key,
-            value,
-            score_mod,
-            block_mask.as_tuple(),
+            query, key, value, score_mod, block_mask.as_tuple(), scale=scale
         )
         return out
 
@@ -500,13 +502,7 @@ def flex_attention(
             with _temp_remove_pre_dispatch_torch_function_mode():
                 out, _ = torch.compile(
                     flex_attention_hop, backend="eager", fullgraph=True
-                )(
-                    query,
-                    key,
-                    value,
-                    score_mod,
-                    block_mask.as_tuple(),
-                )
+                )(query, key, value, score_mod, block_mask.as_tuple(), scale=scale)
                 return out
 
 

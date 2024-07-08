@@ -2,17 +2,16 @@
 """ Triton Implementation of the flex_attention Kernel"""
 
 import logging
-from enum import auto, Enum
 from typing import Any, List, Tuple
 
 import torch
+from torch.utils._pytree import tree_map
 from .. import config
 from ..ir import (
     ComputedBuffer,
     FixedLayout,
     FlexibleLayout,
     InputBuffer,
-    IRNode,
     StorageBox,
     Subgraph,
     TensorBox,
@@ -22,14 +21,6 @@ from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
-
-
-class SubgraphType(Enum):
-    """The type of subgraph for which we want to generate an output buffer."""
-
-    FWD = auto()  # Forward pass
-    JOINT_FWD = auto()  # The recompute step fo the of the bwds kernel
-    JOINT_BWD = auto()  # The bwd pass of the joint
 
 
 def flex_attention_grid(batch_size, num_heads, num_queries, d_model, meta):
@@ -51,56 +42,10 @@ def create_placeholder(
     return TensorBox.create(input_buffer)
 
 
-def index_to_other_buffers(cnt: int, graph_type: SubgraphType) -> int:
-    """This function needs to be aware of the signatures for flex_attention_forward
-    and flex_attention_backward. If new args are added, or the signature changes
-    be sure to update the indexing math
-
-    Args:
-        cnt (int): The current index of the placeholder node
-        is_joint_graph (bool): Whether or not this subgraph represents the joint graph
-    """
-    # Current fwd_args = [
-    #   query,
-    #   key,
-    #   value,
-    #   score_mod,
-    #   block_mask,
-    #   *other_buffers
-    # ]
-    # For fwd_graphs we have 5 dummy values this when the first lifted args
-    # is seen cnt = 5 and the start of the index_buffers is at args[5]
-    # thus we add 0 from the current cnt
-    if graph_type == SubgraphType.FWD:
-        return cnt + 0
-
-    # Current bwd_args = [
-    #   q,
-    #   k,
-    #   v,
-    #   out,
-    #   lse,
-    #   grad_out,
-    #   fw_graph,
-    #   joint_graph,
-    #   block_mask,
-    #   *other_buffers
-    # ]
-    # We have 5 dummy values but the start of other_buffers is at index 9
-    if graph_type == SubgraphType.JOINT_FWD:
-        return cnt + 4
-
-    # Same bwd args but now with 6 dummy values while other_buffers still start at 9
-    if graph_type == SubgraphType.JOINT_BWD:
-        return cnt + 3
-
-
 def build_subgraph_buffer(
-    args: Tuple[IRNode],
-    placeholder_inps: List[TensorBox],
+    args: List[TensorBox],
     subgraph: Subgraph,
-    graph_type: SubgraphType,
-) -> ComputedBuffer:
+):
     """This function's goal is to take in the required args and produce the subgraph buffer
     The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
 
@@ -121,51 +66,43 @@ def build_subgraph_buffer(
         # expect that these are lifted inputs that fill up the '*other_buffers'
         # tuple and already have corresponding TensorBoxes passed in as args.
         if node.op == "placeholder":
-            is_lifted_input = cnt >= len(placeholder_inps)
-            lifted_input_index = index_to_other_buffers(cnt, graph_type)
-            env[node] = (
-                args[lifted_input_index] if is_lifted_input else placeholder_inps[cnt]
-            )
+            env[node] = args[cnt]
             cnt += 1
         elif node.op == "call_function":
             # For call_function we use the default lowerings and pass in the
             # already created TensorBoxes as args
-            from torch.utils._pytree import tree_map
 
             args, kwargs = tree_map(
                 lambda x: env[x] if x in env else x, (node.args, node.kwargs)
             )
             env[node] = lowerings[node.target](*args, **kwargs)
         elif node.op == "output":
-            # For the output node we need to create a ComputedBuffer
-            # which represents the actual score modification
-            # The joint_graph's output should be of the form[grad_score, None, None, None, None]
-            # This is because only the 'score' requires grad and the other outputs are
-            # the non-differentiable index scalars
-            if graph_type == SubgraphType.FWD or graph_type == SubgraphType.JOINT_FWD:
-                output_node = node.args[0]
-            else:
-                output_node = node.args[0][0]
-            output_buffer = env[output_node]
-            assert isinstance(output_buffer, TensorBox), (
-                "The output node  for flex attention's subgraph must be a TensorBox, but got: ",
-                type(output_buffer),
-            )
-            assert isinstance(output_buffer.data, StorageBox), (
-                "The output node for the flex attention subgraph must be a StorageBox, but got: ",
-                type(output_buffer),
-            )
-            # Create the ComputedBuffer directly that will be inlined into the modification block
-            subgraph_buffer = ComputedBuffer(
-                name=None,
-                layout=FlexibleLayout(
-                    device=output_buffer.data.get_device(),
-                    dtype=output_buffer.data.get_dtype(),
-                    size=output_buffer.data.get_size(),
-                ),
-                data=output_buffer.data.data,  # type: ignore[arg-type]
-            )
-            return subgraph_buffer
+
+            def convert_output_node_to_buffer(output):
+                if output is None:
+                    return None
+                output_node = output
+                output_buffer = env[output_node]
+                assert isinstance(output_buffer, TensorBox), (
+                    "The output node  for flex attention's subgraph must be a TensorBox, but got: ",
+                    type(output_buffer),
+                )
+                assert isinstance(output_buffer.data, StorageBox), (
+                    "The output node for the flex attention subgraph must be a StorageBox, but got: ",
+                    type(output_buffer),
+                )
+                subgraph_buffer = ComputedBuffer(
+                    name=None,
+                    layout=FlexibleLayout(
+                        device=output_buffer.data.get_device(),
+                        dtype=output_buffer.data.get_dtype(),
+                        size=output_buffer.data.get_size(),
+                    ),
+                    data=output_buffer.data.data,  # type: ignore[arg-type]
+                )
+                return subgraph_buffer
+
+            return tree_map(convert_output_node_to_buffer, node.args[0])
 
     raise ValueError("FlexAttention was passed a subgraph with no output node!")
 
@@ -217,7 +154,7 @@ flex_attention_template = TritonTemplate(
     Q_LEN = {{size("Q", 2)}}
     KV_LEN = {{size("K", 2)}}
 
-    qk_scale = 1.0
+    qk_scale = SM_SCALE
     MATMUL_PRECISION = Q.dtype.element_ty
 
     start_m = tl.program_id(0)
@@ -485,6 +422,7 @@ def flex_attention(*args, **kwargs):
         value,
         subgraph,
         block_mask,
+        scale,
         *other_buffers,
     ) = args
     (
@@ -515,9 +453,7 @@ def flex_attention(*args, **kwargs):
             ("n", torch.int32),
         ]
     ]
-    subgraph_buffer = build_subgraph_buffer(
-        args, placeholder_inps, subgraph, graph_type=SubgraphType.FWD
-    )
+    subgraph_buffer = build_subgraph_buffer(placeholder_inps + other_buffers, subgraph)
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
@@ -582,6 +518,7 @@ def flex_attention(*args, **kwargs):
             SCORE_MOD_IS_LINEAR=False,
             ROWS_GUARANTEED_SAFE=False,
             OUTPUT_LOGSUMEXP=True,
+            SM_SCALE=scale,
             SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
         )
@@ -726,6 +663,10 @@ flex_attention_backward_template = TritonTemplate(
 
     offs_k = tl.arange(0, BLOCK_DMODEL)
 
+    qk_scale = SM_SCALE
+    if SCORE_MOD_IS_LINEAR:
+        qk_scale *= 1.44269504
+
     if pid >= NUM_KV_BLOCKS:
         # THIS BLOCK DOES DQ
         off_pid = pid - NUM_KV_BLOCKS
@@ -749,6 +690,7 @@ flex_attention_backward_template = TritonTemplate(
         offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
 
         q = tl.load(Q + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
+        q = (q * qk_scale).to(MATMUL_PRECISION)
         dq = tl.zeros([BLOCK_M2, BLOCK_DMODEL], dtype=tl.float32)
         do = tl.load(DO + offs_m2[:, None] * stride_dom + offs_k[None, :] * stride_dod)
 
@@ -823,6 +765,7 @@ flex_attention_backward_template = TritonTemplate(
 
         # Write back dQ.
         dq_ptrs = DQ + offs_m2[:, None] * stride_dqm + offs_k[None, :] * stride_dqd
+        dq *= qk_scale
         tl.store(dq_ptrs, dq)
     else:
         # THIS BLOCK DOES DK & DV
@@ -852,6 +795,7 @@ flex_attention_backward_template = TritonTemplate(
         # load K and V: they stay in SRAM throughout the inner loop.
         k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd)
         v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd)
+        k = (k * qk_scale).to(MATMUL_PRECISION)
 
         offs_m1 = start_m1 + tl.arange(0, BLOCK_M1)
         offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
@@ -930,6 +874,7 @@ flex_attention_backward_template = TritonTemplate(
         index_n = offs_n1[:, None]
         index_k = offs_k[None, :]
 
+        dk *= qk_scale
         mask = index_n <= KV_LEN
         {{store_output(("off_z", "off_h", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
  """,
@@ -951,6 +896,7 @@ def flex_attention_backward(*args, **kwargs):
         fw_graph,
         joint_graph,
         block_mask,
+        scale,
         *other_buffers,
     ) = args
     (
@@ -961,6 +907,7 @@ def flex_attention_backward(*args, **kwargs):
         SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
     ) = block_mask
+
     for buf in [
         query,
         key,
@@ -987,14 +934,14 @@ def flex_attention_backward(*args, **kwargs):
         ]
     ]
     fw_subgraph_buffer = build_subgraph_buffer(
-        args, fwd_placeholder_inps, fw_graph, graph_type=SubgraphType.JOINT_FWD
+        fwd_placeholder_inps + other_buffers, fw_graph
     )
 
     joint_placeholder_inps = fwd_placeholder_inps + [
         create_placeholder("grad_score_mod", dtype, device)
     ]
-    joint_subgraph_buffer = build_subgraph_buffer(
-        args, joint_placeholder_inps, joint_graph, graph_type=SubgraphType.JOINT_BWD
+    joint_subgraph_buffer, *_ = build_subgraph_buffer(
+        joint_placeholder_inps + other_buffers, joint_graph
     )
 
     layout_k = FixedLayout(
@@ -1064,6 +1011,7 @@ def flex_attention_backward(*args, **kwargs):
             BLOCK_M2=BLOCK2,
             BLOCK_N2=BLOCK1,
             BLOCK_DMODEL=query.get_size()[-1],
+            SM_SCALE=scale,
             # For now, we always assume the "sound" option
             SCORE_MOD_IS_LINEAR=False,
             SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,

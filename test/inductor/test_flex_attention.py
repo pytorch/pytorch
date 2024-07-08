@@ -1056,6 +1056,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
+                1.0,
             )
 
         @torch.compile(backend="aot_eager")
@@ -1064,13 +1065,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             Besides dropping LSE it also ensures that the hop is compiled with aot-eager
             backend. We need to replicate this.
             """
-            return flex_attention_hop(
-                q,
-                k,
-                v,
-                score_mod,
-                block_mask.as_tuple(),
-            )
+            return flex_attention_hop(q, k, v, score_mod, block_mask.as_tuple(), 1.0)
 
         ref_out, ref_lse = eager_sdpa_hop(
             q.to(torch.float64),
@@ -1127,6 +1122,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
+                scale=1.0,
             )
             lse_2 = lse * 2
             return lse_2
@@ -1155,6 +1151,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
+                1.0,
             )
             lse_2 = lse * 2
             return out, lse_2
@@ -1208,6 +1205,30 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 func, (query, key, value, score_mod), raise_exception=True
             )
         )
+
+    @supported_platform
+    def test_comparison_vs_sdpa(self):
+        inputs = [
+            torch.randn(2, 2, 2048, 128, device="cuda", dtype=torch.float16)
+            for _ in range(3)
+        ]
+        out_ref = torch.nn.functional.scaled_dot_product_attention(
+            *inputs, is_causal=True
+        )
+
+        def causal(score, b, h, q_idx, kv_idx):
+            return torch.where(q_idx >= kv_idx, score, -float("inf"))
+
+        inputs_flex = [i.clone() for i in inputs]
+        out_flex = torch.compile(flex_attention)(*inputs_flex, causal)
+        inputs_golden = [i.clone().to(dtype=torch.float64) for i in inputs]
+        out_golden = torch.nn.functional.scaled_dot_product_attention(
+            *inputs_golden, is_causal=True
+        )
+
+        ref_error = (out_ref - out_golden).abs().mean()
+        flex_error = (out_flex - out_golden).abs().mean()
+        self.assertTrue(ref_error < flex_error * 2)
 
     @supported_platform
     def test_block_mask_attributes(self):
@@ -1325,7 +1346,7 @@ class GraphModule(torch.nn.Module):
         new_empty_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         new_empty_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         flex_attention_0 = self.flex_attention_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, flex_attention_0, (ones, zeros, ones_1, zeros_1, 8, 8));  l_args_0_ = l_args_1_ = l_args_2_ = flex_attention_0 = ones = zeros = ones_1 = zeros_1 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, flex_attention_0, (ones, zeros, ones_1, zeros_1, 8, 8), 0.5);  l_args_0_ = l_args_1_ = l_args_2_ = flex_attention_0 = ones = zeros = ones_1 = zeros_1 = None
         out: "f64[2, 2, 8, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -1359,7 +1380,7 @@ class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", full_default: "i32[1, 1, 1]", full_default_1: "i32[1, 1, 1, 1]", getitem: "f64[2, 2, 8, 4]", getitem_1: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, (full_default, full_default_1, full_default, full_default_1, 8, 8));  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, (full_default, full_default_1, full_default, full_default_1, 8, 8), 0.5);  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = None
         getitem_2: "f64[2, 2, 8, 4]" = flex_attention_backward[0]
         getitem_3: "f64[2, 2, 8, 4]" = flex_attention_backward[1]
         getitem_4: "f64[2, 2, 8, 4]" = flex_attention_backward[2];  flex_attention_backward = None

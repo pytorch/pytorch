@@ -1564,6 +1564,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             value,
             score_mod,
             block_mask,
+            scale,
         ) = self.normalize_to_args(args, kwargs)
 
         p_args = self.create_wrapped_node(tx, query, score_mod)
@@ -1572,6 +1573,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             key,
             value,
             block_mask,
+            scale,
         ]
 
         # Store the invocation as a call
@@ -1589,7 +1591,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         example_value = (out_meta, lse_meta)
 
         # Compose the ordered HOO args from two parts:
-        # - inp_args: [query, key, value, block_mask]
+        # - inp_args: [query, key, value, block_mask, scale]
         # - p_args: [score_mod, *other_buffers]
         return wrap_fx_proxy(
             tx=tx,
