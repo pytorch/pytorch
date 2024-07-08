@@ -291,6 +291,7 @@ class BackwardStateGraphArg(GraphArg):
 class FrameStateSizeEntry:
     scalar: Optional[int]
     size: Optional[List[int]]
+    stride: Optional[List[int]]
 
 
 class VariableBuilder:
@@ -2167,12 +2168,17 @@ def _automatic_dynamic(
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
     from torch.fx.experimental.symbolic_shapes import is_nested_int
 
-    if any(isinstance(s, SymInt) and not is_nested_int(s) for s in e.size()):
+    if any(isinstance(s, SymInt) and not is_nested_int(s) for s in e.size()) or any(
+        isinstance(s, SymInt) and not is_nested_int(s) for s in e.stride()
+    ):
+        dynamic_sizes = []
+        for sz, st in zip(e.size(), e.stride()):
+            if isinstance(sz, SymInt) or isinstance(st, SymInt):
+                dynamic_sizes.append(DimDynamic.DYNAMIC)
+            else:
+                dynamic_sizes.append(DimDynamic.STATIC)
         return StatefulSymbolicContext(
-            dynamic_sizes=[
-                DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
-                for s in e.size()
-            ],
+            dynamic_sizes=dynamic_sizes,
             constraint_sizes=[None] * e.dim(),
             view_base_context=view_base_context,
             tensor_source=source,
@@ -2184,8 +2190,9 @@ def _automatic_dynamic(
     if name not in tx.output.frame_state:
         # If there is no entry for this source, add the tensor to frame state with its current static size.
         # E.g., {} -> {"x": [2, 4]}
-        frame_state_entry = FrameStateSizeEntry(None, None)
+        frame_state_entry = FrameStateSizeEntry(None, None, None)
         frame_state_entry.size = list(e.size())
+        frame_state_entry.stride = list(e.stride())
     else:
         frame_state_entry = tx.output.frame_state[name]
         if frame_state_entry.size is not None:
@@ -2212,6 +2219,16 @@ def _automatic_dynamic(
                             dim,
                         )
                         frame_state_entry.size[i] = None
+                for i, dim in enumerate(frame_state_entry.stride):
+                    if dim is not None and e.stride()[i] != dim:
+                        log.debug(
+                            "automatic dynamic %s stride(%s) %s != %s",
+                            name,
+                            i,
+                            e.stride(i),
+                            dim,
+                        )
+                        frame_state_entry.stride[i] = None
 
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
@@ -2264,7 +2281,10 @@ def _automatic_dynamic(
 
         # NB: both static and dynamic have precedence over
         automatic_dynamic = config.automatic_dynamic_shapes and (
-            frame_state_entry.size is None or frame_state_entry.size[i] is None
+            frame_state_entry.size is None
+            or frame_state_entry.size[i] is None
+            or frame_state_entry.stride is None
+            or frame_state_entry.stride[i] is None
         )
 
         # Reflect the user directive in the frame_state
@@ -2272,6 +2292,7 @@ def _automatic_dynamic(
         if frame_state_entry.size and marked_dynamic:
             log.debug("automatic dynamic %s marked dynamic", name)
             frame_state_entry.size[i] = None
+            frame_state_entry.stride[i] = None
 
         # We will process constraints first, as they will imply that we
         # have a dynamic dimension
