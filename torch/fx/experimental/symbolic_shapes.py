@@ -1230,6 +1230,7 @@ class StatelessSymbolicContext(SymbolicContext):
     This will cause fresh symbols to be allocated
     """
     dynamic_sizes: DimList[DimDynamic]
+    dynamic_strides: DimList[DimDynamic]
     constraint_sizes: DimList[DimConstraint] = None
     # If the tensor is a view, this should be populated for the base. It contains
     # information on how to allocate symbols when recursively fakeifying the base
@@ -3142,6 +3143,7 @@ class ShapeEnv:
         if symbolic_context is None:
             constraint_dims = [None] * dim
             dynamic_dims = []
+            dynamic_strides = []
             for i in range(dim):
                 # NB: This is encapsulation breaking!  Legacy behavior was
                 # bad.
@@ -3152,13 +3154,16 @@ class ShapeEnv:
                 else:
                     r = DimDynamic.DUCK
                 dynamic_dims.append(r)
+                dynamic_strides.append(r)
             dynamic_dims = [DimDynamic.DUCK] * dim
+            dynamic_strides = [DimDynamic.DUCK] * dim
             # symbolic_context is None - set one
-            symbolic_context = StatelessSymbolicContext(dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims)
+            symbolic_context = StatelessSymbolicContext(dynamic_sizes=dynamic_dims, dynamic_strides=dynamic_strides, constraint_sizes=constraint_dims)
         # We got a StatelessSymbolicContext
         _assert_symbol_context(symbolic_context)
         constraint_dims = symbolic_context.constraint_sizes
-        dynamic_dims = symbolic_context.dynamic_sizes
+        dynamic_sizes = symbolic_context.dynamic_sizes
+        dynamic_strides = symbolic_context.dynamic_strides
 
         # TODO: make this configurable from outside symbolic_context; we made a symbolic_context
         # decision here where if all sizes are static, we are going to
@@ -3166,9 +3171,9 @@ class ShapeEnv:
         # do this, and arguably we should ALWAYS allow for dynamic offset,
         # this is cheap.
         # TODO: This should be DYNAMIC, using DUCK for BC
-        dynamic_strides_offset = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
+        dynamic_offset = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_sizes) else DimDynamic.DUCK
 
-        assert len(dynamic_dims) == dim, f"{len(dynamic_dims)} != {dim}"
+        assert len(dynamic_sizes) == dim, f"{len(dynamic_sizes)} != {dim}"
         assert len(constraint_dims) == dim
 
         from torch._dynamo.source import TensorPropertySource, TensorProperty
@@ -3213,7 +3218,7 @@ class ShapeEnv:
                 stride[i] = self.create_symbol(
                     val,
                     TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    dynamic_dim=dynamic_strides_offset,
+                    dynamic_dim=dynamic_strides[i],
                     constraint_dim=None,
                     symbolic_context=symbolic_context,
                 )
@@ -3238,7 +3243,7 @@ class ShapeEnv:
             self.create_symbol(
                 ex_storage_offset,
                 TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-                dynamic_dim=dynamic_strides_offset,
+                dynamic_dim=dynamic_offset,
                 constraint_dim=None,
                 symbolic_context=symbolic_context
             ),

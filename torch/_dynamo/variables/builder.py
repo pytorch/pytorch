@@ -1538,7 +1538,9 @@ class VariableBuilder:
                 # it will start fully dynamic. That should always be a safe option, and not awfully inefficient.
                 # Alternatively, if we want to improve pef here, we can add a third state of unset, but I am not
                 # sure that is necessary for now.
-                frame_state_entry = FrameStateSizeEntry(scalar=value, size=None, stride=None)
+                frame_state_entry = FrameStateSizeEntry(
+                    scalar=value, size=None, stride=None
+                )
             else:
                 frame_state_entry = self.tx.output.frame_state[name]
                 if frame_state_entry.scalar != value:
@@ -2148,6 +2150,7 @@ def _automatic_dynamic(
 
         return SubclassSymbolicContext(
             dynamic_sizes=outer_context.dynamic_sizes,
+            dynamic_strides=outer_context.dynamic_strides,
             constraint_sizes=outer_context.constraint_sizes,
             view_base_context=view_base_context,
             tensor_source=outer_context.tensor_source,
@@ -2158,6 +2161,7 @@ def _automatic_dynamic(
     if static_shapes:
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
+            dynamic_strides=[DimDynamic.STATIC] * e.dim(),
             constraint_sizes=[None] * e.dim(),
             view_base_context=view_base_context,
             tensor_source=source,
@@ -2171,14 +2175,15 @@ def _automatic_dynamic(
     if any(isinstance(s, SymInt) and not is_nested_int(s) for s in e.size()) or any(
         isinstance(s, SymInt) and not is_nested_int(s) for s in e.stride()
     ):
-        dynamic_sizes = []
-        for sz, st in zip(e.size(), e.stride()):
-            if isinstance(sz, SymInt) or isinstance(st, SymInt):
-                dynamic_sizes.append(DimDynamic.DYNAMIC)
-            else:
-                dynamic_sizes.append(DimDynamic.STATIC)
         return StatefulSymbolicContext(
-            dynamic_sizes=dynamic_sizes,
+            dynamic_sizes=[
+                DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
+                for s in e.size()
+            ],
+            dynamic_strides=[
+                DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
+                for s in e.stride()
+            ],
             constraint_sizes=[None] * e.dim(),
             view_base_context=view_base_context,
             tensor_source=source,
@@ -2206,9 +2211,11 @@ def _automatic_dynamic(
                     frame_state_entry.size,
                 )
                 frame_state_entry.size = None
+                frame_state_entry.stride = None
             else:
-                # If there is already an entry, and the dim matches, for every size in the frame state which
-                # disagrees with the current static size, replace it with None. E.g., {"x": [2, 3]} -> {"x": [2, None]}
+                # If there is already an entry, and the dim matches, for every size/stride in the frame state which
+                # disagrees with the current static size/stride, replace it with None.
+                # E.g., {"x": [2, 3]} -> {"x": [2, # None]}
                 for i, dim in enumerate(frame_state_entry.size):
                     if dim is not None and e.size()[i] != dim:
                         log.debug(
@@ -2270,8 +2277,9 @@ def _automatic_dynamic(
                     constraint.debug_name,
                 )
 
-    dynamic_dims = []
-    constraint_dims = []
+    dynamic_sizes = []
+    dynamic_strides = []
+    constraint_sizes = []
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
         marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", set())
@@ -2280,11 +2288,12 @@ def _automatic_dynamic(
         marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
         # NB: both static and dynamic have precedence over
-        automatic_dynamic = config.automatic_dynamic_shapes and (
-            frame_state_entry.size is None
-            or frame_state_entry.size[i] is None
-            or frame_state_entry.stride is None
-            or frame_state_entry.stride[i] is None
+        automatic_dynamic_size = config.automatic_dynamic_shapes and (
+            frame_state_entry.size is None or frame_state_entry.size[i] is None
+        )
+
+        automatic_dynamic_stride = config.automatic_dynamic_shapes and (
+            frame_state_entry.stride is None or frame_state_entry.stride[i] is None
         )
 
         # Reflect the user directive in the frame_state
@@ -2299,41 +2308,52 @@ def _automatic_dynamic(
         # Precedence: export constraints > eager constraints
         constraint = dim2constraint.get(i)
         if constraint is None:
+            constraint_size = None
+            constraint_stride = None
             if marked_dynamic and not config.allow_ignore_mark_dynamic:
+                # constraint_stride is deliberaly kept None
+                constraint_stride = None
                 if hasattr(e, "_dynamo_dynamic_range"):
                     dim_range = [
                         dr for dr in e._dynamo_dynamic_range if dr.dim == i
                     ].pop()
                     if dim_range.min is None and dim_range.max is None:
-                        constraint_dim = RelaxedUnspecConstraint(warn_only=False)
+                        constraint_size = RelaxedUnspecConstraint(warn_only=False)
                     else:
                         from torch.fx.experimental.symbolic_shapes import (
                             StrictMinMaxConstraint,
                         )
 
-                        constraint_dim = StrictMinMaxConstraint(
+                        constraint_size = StrictMinMaxConstraint(
                             vr=ValueRanges(lower=dim_range.min, upper=dim_range.max),
                             warn_only=False,
                         )
                 else:
-                    constraint_dim = RelaxedUnspecConstraint(warn_only=False)
-
-            elif not marked_static and automatic_dynamic:
-                constraint_dim = RelaxedUnspecConstraint(warn_only=True)
+                    constraint_size = RelaxedUnspecConstraint(warn_only=False)
+            elif not marked_static and (
+                automatic_dynamic_size or automatic_dynamic_stride
+            ):
+                if automatic_dynamic_size:
+                    constraint_size = RelaxedUnspecConstraint(warn_only=True)
+                if automatic_dynamic_stride:
+                    constraint_stride = RelaxedUnspecConstraint(warn_only=True)
             else:
-                constraint_dim = None
+                constraint_size = None
+                constraint_stride = None
         else:
-            constraint_dim, debug_name = constraint
+            constraint_size, debug_name = constraint
+            constraint_stride = None
             if debug_name is not None:
                 dim_name = f"{name}.size()[{i}]"
                 tx.output.shape_env.source_name_to_debug_name[dim_name] = debug_name
-        constraint_dims.append(constraint_dim)
+        constraint_sizes.append(constraint_size)
 
         # Now, figure out if the dim is dynamic/duck/static
         if marked_unbacked:
-            dynamic = DimDynamic.SIZE_LIKE_UNBACKED
+            dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
+            dynamic_stride = DimDynamic.SIZE_LIKE_UNBACKED
         elif (
-            constraint_dim is not None
+            constraint_size is not None
             or marked_dynamic
             or marked_weak_dynamic
             or is_nested_int(e.shape[i])
@@ -2341,19 +2361,39 @@ def _automatic_dynamic(
             # NB: We could assert static_shapes is False here, but it
             # seems better to allow the user to override symbolic_context in this
             # case
-            dynamic = DimDynamic.DYNAMIC
+            dynamic_size = DimDynamic.DYNAMIC
         elif static_shapes or config.assume_static_by_default or marked_static:
-            dynamic = DimDynamic.STATIC
+            dynamic_size = DimDynamic.STATIC
         else:
-            dynamic = DimDynamic.DUCK
+            dynamic_size = DimDynamic.DUCK
 
-        dynamic_dims.append(dynamic)
+        if marked_unbacked:
+            dynamic_stride = DimDynamic.SIZE_LIKE_UNBACKED
+        elif (
+            constraint_stride is not None
+            or marked_dynamic
+            or marked_weak_dynamic
+            or is_nested_int(e.shape[i])
+        ):
+            # NB: We could assert static_shapes is False here, but it
+            # seems better to allow the user to override symbolic_context in this
+            # case
+            dynamic_stride = DimDynamic.DYNAMIC
+        elif static_shapes or config.assume_static_by_default or marked_static:
+            dynamic_stride = DimDynamic.STATIC
+        else:
+            dynamic_stride = DimDynamic.DUCK
+
+        dynamic_sizes.append(dynamic_size)
+        dynamic_strides.append(dynamic_stride)
 
     tx.output.frame_state[name] = frame_state_entry
 
+    # TODO(anijain2305) - DO WE NEED constraint_strides?
     return StatefulSymbolicContext(
-        dynamic_sizes=dynamic_dims,
-        constraint_sizes=constraint_dims,
+        dynamic_sizes=dynamic_sizes,
+        dynamic_strides=dynamic_strides,
+        constraint_sizes=constraint_sizes,
         view_base_context=view_base_context,
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
