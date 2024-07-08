@@ -5,6 +5,7 @@ import functools
 import itertools
 import logging
 import types
+import inspect
 
 from typing import Dict, List, Optional, TYPE_CHECKING
 
@@ -144,6 +145,7 @@ def validate_args_and_maybe_create_graph_inputs(
     tx,
     set_subgraph_inputs,
     description,
+    sub_args_names=None,
 ):
     from . import AutogradFunctionContextVariable
     from .builder import wrap_fx_proxy_cls
@@ -167,18 +169,31 @@ def validate_args_and_maybe_create_graph_inputs(
             ListVariable(flat_inputs), tree_spec
         ).unpack_var_sequence(tx)
     else:
+        if sub_args_names is not None:
+            # Can be greater if user passes some args as kwargs
+            assert len(sub_args_names) >= len(sub_args)
         args = []
-        for a in sub_args:
+        for idx, a in enumerate(sub_args):
             assert isinstance(a, VariableTracker)
             if set_subgraph_inputs == "automatic":
                 args.append(a)
                 continue
             elif set_subgraph_inputs == "semi_automatic":
                 if isinstance(a, AutogradFunctionContextVariable):
-                    tracer.create_graph_input(a.as_proxy().node.name)
+                    arg_name = (
+                        a.as_proxy().node.name
+                        if sub_args_names is None
+                        else sub_args_names[idx]
+                    )
+                    tracer.create_graph_input(arg_name)
                 elif a.maybe_fx_node() is not None:
                     node = a.maybe_fx_node()
-                    new_proxy = tracer.create_graph_input(node.name)
+                    arg_name = (
+                        a.as_proxy().node.name
+                        if sub_args_names is None
+                        else sub_args_names[idx]
+                    )
+                    new_proxy = tracer.create_graph_input(arg_name)
                     example_value = (
                         node.meta["example_value"]
                         if "example_value" in node.meta
@@ -198,17 +213,28 @@ def validate_args_and_maybe_create_graph_inputs(
                 # Currently, this new input is added to make the calls
                 # happy, which expect a fixed number of arguments. In
                 # future, we can clean this up.
-                tracer.create_graph_input("const")
+                arg_name = (
+                    "const_unused"
+                    if sub_args_names is None
+                    else f"const_unused_{sub_args_names[idx]}"
+                )
+                tracer.create_graph_input(arg_name)
                 new_arg = a
             # Weird special case, we probably want to delete it or fold it
             # into the next case (of `a` being placeable into a graph)
             elif isinstance(a, AutogradFunctionContextVariable):
-                tracer.create_graph_input(a.as_proxy().node.name)
+                arg_name = (
+                    a.as_proxy().node.name
+                    if sub_args_names is None
+                    else sub_args_names[idx]
+                )
+                tracer.create_graph_input(arg_name)
                 new_arg = a
             # If `a` can be put into a graph
             elif a.maybe_fx_node() is not None:
                 node = a.maybe_fx_node()
-                new_proxy = tracer.create_graph_input(node.name)
+                arg_name = node.name if sub_args_names is None else sub_args_names[idx]
+                new_proxy = tracer.create_graph_input(arg_name)
                 example_value = (
                     node.meta["example_value"] if "example_value" in node.meta else None
                 )
@@ -380,8 +406,14 @@ def speculate_subgraph(
         )
 
         with tx.output.subtracer(source_target, tracer) as subtracer:
+            sub_args_names = position_args_names(f)
             args = validate_args_and_maybe_create_graph_inputs(
-                sub_args, subtracer, tx, set_subgraph_inputs, description
+                sub_args,
+                subtracer,
+                tx,
+                set_subgraph_inputs,
+                description,
+                sub_args_names,
             )
 
             validate_args_and_maybe_create_graph_inputs(
@@ -1874,3 +1906,21 @@ class AutogradFunctionApplyVariable(VariableTracker):
             ),
             example_value=example_value,
         )
+
+
+def position_args_names(func):
+    result = []
+    if not hasattr(func, "get_function"):
+        return None
+    try:
+        fn = func.get_function()
+    except (Unsupported, NotImplementedError):
+        return None
+    for name, param in inspect.signature(func.get_function()).parameters.items():
+        if param.kind is inspect.Parameter.VAR_POSITIONAL:
+            return None
+        if param.kind is inspect.Parameter.POSITIONAL_ONLY:
+            result.append(name)
+        if param.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD:
+            result.append(name)
+    return result

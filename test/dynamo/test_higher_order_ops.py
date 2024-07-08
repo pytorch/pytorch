@@ -1252,7 +1252,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem, const):
+def forward(self, getitem, const_unused):
     add = getitem + 3;  getitem = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
@@ -1286,7 +1286,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem, const):
+def forward(self, getitem, const_unused):
     add = getitem + 3;  getitem = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
