@@ -5,16 +5,17 @@ from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import _deprecation_warning
 from torch.utils.data.datapipes.utils.decoder import (
-    Decoder,
     basichandlers as decoder_basichandlers,
+    Decoder,
+    extension_extract_fn,
     imagehandler as decoder_imagehandler,
-    extension_extract_fn
 )
 
-__all__ = ["RoutedDecoderIterDataPipe", ]
+
+__all__ = ["RoutedDecoderIterDataPipe"]
 
 
-@functional_datapipe('routed_decode')
+@functional_datapipe("routed_decode")
 class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
     r"""
     Decodes binary streams from input DataPipe, yields pathname and decoded data in a tuple.
@@ -35,14 +36,16 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
         could use regex to determine the eligibility to handle data.
     """
 
-    def __init__(self,
-                 datapipe: Iterable[Tuple[str, BufferedIOBase]],
-                 *handlers: Callable,
-                 key_fn: Callable = extension_extract_fn) -> None:
+    def __init__(
+        self,
+        datapipe: Iterable[Tuple[str, BufferedIOBase]],
+        *handlers: Callable,
+        key_fn: Callable = extension_extract_fn,
+    ) -> None:
         super().__init__()
         self.datapipe: Iterable[Tuple[str, BufferedIOBase]] = datapipe
         if not handlers:
-            handlers = (decoder_basichandlers, decoder_imagehandler('torch'))
+            handlers = (decoder_basichandlers, decoder_imagehandler("torch"))
         self.decoder = Decoder(*handlers, key_fn=key_fn)
         _deprecation_warning(
             type(self).__name__,

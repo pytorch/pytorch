@@ -5018,5 +5018,5 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         s = re.sub(r"\n*You can suppress this exception.+", "", s, flags=re.DOTALL)
     if suppress_prefix:
         s = re.sub(r"Cannot export model.+\n\n", "", s)
-    s = re.sub(r" +$", "", s, flags=re.M)
+    s = re.sub(r" +$", "", s, flags=re.MULTILINE)
     return s

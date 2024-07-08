@@ -771,9 +771,7 @@ def _get_min_chunk_len(config):
         return config.lsh_attn_chunk_length
     elif len(attn_types_set) == 1 and attn_types[0] == "local":
         return config.local_attn_chunk_length
-    elif len(attn_types_set) == 2 and attn_types_set == set(  # noqa: C405
-        ["lsh", "local"]
-    ):
+    elif len(attn_types_set) == 2 and attn_types_set == {"lsh", "local"}:
         return min(config.lsh_attn_chunk_length, config.local_attn_chunk_length)
     else:
         raise NotImplementedError(
@@ -1305,6 +1303,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("aot_eager")(fn)
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
+
+    @torch._dynamo.config.patch(error_on_recompile=True)
+    @torch.fx.experimental._config.patch(use_duck_shape=False)
+    def test_dynamic_shape_disable_duck_size(self):
+        class TestModel(nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+
+            def forward(self, x: torch.Tensor, val: int) -> torch.Tensor:
+                return x + val
+
+        main_model = TestModel().to(memory_format=torch.channels_last)
+        opt_model = torch.compile(main_model, backend="eager", dynamic=True)
+
+        x1 = torch.rand(2, 5, 10, 10).to(memory_format=torch.channels_last)
+        x2 = torch.rand(2, 5, 4, 8).to(memory_format=torch.channels_last)
+
+        o1_ref = main_model(x1, 4)
+        o1 = opt_model(x1, 4)
+
+        o2_ref = main_model(x2, 20)
+        o2 = opt_model(x2, 20)
 
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])
@@ -4350,7 +4372,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
         x = torch.rand([2, 2])
         opt_fn(x, x)
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertExpectedInline(cnt.frame_count, """1""")
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_arange_in_bounds(self):
@@ -4419,7 +4441,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
         x = torch.rand([2, 2])
         self.assertEqual(opt_fn(x, [5]), fn(x, [5]))
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertExpectedInline(cnt.frame_count, """1""")
 
     def test_user_ctor_ctx_manager_custom_init_graph_break(self):
         counter = [0]
@@ -4447,7 +4469,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for i in range(0, 10):
             opt_fn(x, counter)
         self.assertEqual(counter[0], 12)
-        self.assertEqual(cnt.frame_count, torch._dynamo.utils.ifdynstaticdefault(3, 2))
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(cnt.frame_count, """2""")
+        else:
+            self.assertExpectedInline(cnt.frame_count, """1""")
 
     @unittest.expectedFailure
     def test_many_overlapping_inputs_does_not_explode_guards(self):
@@ -5251,6 +5276,26 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return torch.sin(x)
 
         fn(torch.rand(4))
+
+    def test_negative_floor_div_solve(self):
+        class CompiledClass(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nums = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+                self.t = 5
+
+            def forward(self):
+                self.num = self.nums[self.t // 12]
+                self.t += 1
+                return self.num
+
+        m = CompiledClass()
+        m = torch.compile(m, backend="eager")
+
+        # the first call works
+        m()
+        # the second call causes a failure
+        m()
 
 
 instantiate_parametrized_tests(ReproTests)
