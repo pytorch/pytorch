@@ -1668,9 +1668,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
                 loss.backward()
                 yield x.grad
 
-        # can bring this down to 2 if we support dynamic shapes
-        # instead of collecting the saved_data's tensor hash
-        self.check_output_and_recompiles(fn, 5)
+        # compiles for 10 (static) and 100 (dynamic)
+        self.check_output_and_recompiles(fn, 2)
 
     def test_autograd_cpp_node_data_dependent(self):
         cpp_source = """
@@ -2346,6 +2345,7 @@ known_failing_tests = {
     "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
     "test_unpack_hooks_exec_count",  # pack/unpack saved tensor hooks firing more than once
     "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
+    "test_backward_twice_without_saved_values",  # https://github.com/pytorch/pytorch/issues/129938
 }
 
 if not HAS_CUDA:
