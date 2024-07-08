@@ -583,16 +583,16 @@ class TestFlexAttention(InductorTestCase):
                 k,
                 v,
                 _causal,
-                block_mask,
                 _causal_mask,
+                block_mask,
             )
             out = _flex_attention(
                 q,
                 k2,
                 v2,
                 _causal,
-                block_mask,
                 _causal_mask,
+                block_mask,
             )
             return out
 
@@ -1092,8 +1092,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask.as_tuple(),
                 mask_fn,
+                block_mask.as_tuple(),
             )
 
         @torch.compile(backend="aot_eager")
@@ -1107,8 +1107,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask.as_tuple(),
                 mask_fn,
+                block_mask.as_tuple(),
             )
 
         ref_out, ref_lse = eager_sdpa_hop(
@@ -1169,8 +1169,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask.as_tuple(),
                 mask_fn,
+                block_mask.as_tuple(),
             )
             lse_2 = lse * 2
             return lse_2
@@ -1202,8 +1202,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                block_mask.as_tuple(),
                 mask_fn,
+                block_mask.as_tuple(),
             )
             lse_2 = lse * 2
             return out, lse_2

@@ -478,8 +478,6 @@ def _flex_attention(
             score_mod,
             mask_fn,
             block_mask.as_tuple(),
-            (),
-            (),
         )
         return out
 
@@ -503,8 +501,6 @@ def _flex_attention(
                     score_mod,
                     mask_fn,
                     block_mask.as_tuple(),
-                    (),
-                    (),
                 )
                 return out
 
