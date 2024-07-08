@@ -23,7 +23,7 @@ from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from ..._dynamo.utils import counters
 
-from .. import codecache, config, ir, metrics
+from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import (
@@ -1207,6 +1207,30 @@ class CppVecOverrides(CppOverrides):
         return f"{a} ^ {b}"
 
     @staticmethod
+    def bitwise_and(a, b):
+        return f"{a} & {b}"
+
+    @staticmethod
+    def bitwise_not(a):
+        return f"~{a}"
+
+    @staticmethod
+    def bitwise_or(a, b):
+        return f"{a} | {b}"
+
+    @staticmethod
+    def bitwise_xor(a, b):
+        return f"{a} ^ {b}"
+
+    @staticmethod
+    def bitwise_left_shift(a, b):
+        return f"{a} << {b}"
+
+    @staticmethod
+    def bitwise_right_shift(a, b):
+        return f"{a} >> {b}"
+
+    @staticmethod
     def tan(a):
         return f"{a}.tan()"
 
@@ -2116,7 +2140,7 @@ class CppVecKernel(CppKernel):
         tiling_dtype=torch.float,
     ):
         super().__init__(args, num_threads)
-        self.vec_isa = codecache.pick_vec_isa()
+        self.vec_isa = cpu_vec_isa.pick_vec_isa()
         assert self.vec_isa
         if tiling_factor == 0:
             tiling_factor = self.vec_isa.nelements(dtype=tiling_dtype)
@@ -2295,7 +2319,7 @@ class CppVecKernel(CppKernel):
                     load_mask = f"{self._load_mask}.is_masked({itervar_inner})"
                 else:
                     load_mask = f"{self._load_mask} != 0"
-            if codecache.is_gcc():
+            if cpp_builder.is_gcc():
                 code.writeline(f"#pragma GCC unroll {self.tiling_factor}")
             else:
                 code.writeline(f"#pragma unroll {self.tiling_factor}")
@@ -3070,7 +3094,7 @@ class CppKernelProxy(CppKernel):
         self.kernel_group = kernel_group
         self.loop_nest = None
         self.call_ranges = None
-        self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+        self.picked_vec_isa: cpu_vec_isa.VecISA = cpu_vec_isa.pick_vec_isa()
 
     def data_type_propagation(self, nodes):
         for _node in nodes:
@@ -3560,6 +3584,7 @@ class CppScheduling(BaseScheduling):
     backend_features = dict.fromkeys(
         [
             BackendFeature.INPLACE_BUFFERS,
+            BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
         ]
     )
 
@@ -3795,7 +3820,7 @@ class CppScheduling(BaseScheduling):
         return (
             not node1.is_template()
             and not node2.is_template()
-            and node1.get_names() & node2.ancestors
+            and node1.get_operation_names() & node2.ancestors
             and not (
                 self._can_fuse_horizontal_impl(node1, node2)
                 and not node1.is_reduction()
@@ -3868,18 +3893,26 @@ class CppScheduling(BaseScheduling):
                 visited_scheduler_nodes: Set[str] = set()
                 for scheduler_node in node.get_nodes():
                     # all users inside same OuterLoopFusedSchedulerNode
+                    if len(scheduler_node.get_outputs()) > 1:
+                        # <TODO> Leslie supports single operator with Multi Outputs after
+                        # https://github.com/pytorch/pytorch/pull/128893
+                        continue
+                    scheduler_buffer = scheduler_node.get_outputs()[0]
                     visited_scheduler_nodes.add(scheduler_node.get_name())
                     if not scheduler_node.is_reduction() and all(
-                        user.node in node.get_nodes() for user in scheduler_node.users
+                        user.node in node.get_nodes() for user in scheduler_buffer.users
                     ):
-                        global_buffer = scheduler_node.node
+                        global_buffer = scheduler_buffer.node
                         assert isinstance(global_buffer, ir.ComputedBuffer)
                         global_buffer_layout = global_buffer.get_layout()
                         size_offset = node.outer_loop_fusion_depth - len(
                             get_call_ranges(scheduler_node)
                         )
 
-                        def is_all_write_read_contiguous(scheduler_node):
+                        def is_all_write_read_contiguous(
+                            scheduler_node,
+                            scheduler_buffer,
+                        ):
                             contiguous_index_expr = 0
                             stride = 1
                             for var, range in reversed(
@@ -3888,7 +3921,7 @@ class CppScheduling(BaseScheduling):
                                 contiguous_index_expr += stride * var
                                 stride *= range
                             write_index_expr = scheduler_node._body.writes_name2expr[
-                                scheduler_node.get_name()
+                                scheduler_buffer.get_name()
                             ]
 
                             def is_contiguous_index(x):
@@ -3897,16 +3930,19 @@ class CppScheduling(BaseScheduling):
                             return is_contiguous_index(write_index_expr) and all(
                                 is_contiguous_index(
                                     user.node._body.reads_name2expr[
-                                        scheduler_node.get_name()
+                                        scheduler_buffer.get_name()
                                     ],
                                 )
-                                for user in scheduler_node.users
+                                for user in scheduler_buffer.users
                             )
 
                         if not (
                             global_buffer_layout.is_contiguous()
                             and not scheduler_node.is_reduction()
-                            and is_all_write_read_contiguous(scheduler_node)
+                            and is_all_write_read_contiguous(
+                                scheduler_node,
+                                scheduler_buffer,
+                            )
                         ):
                             continue
                         # Local Buffer is a view of global buffer
@@ -3922,7 +3958,7 @@ class CppScheduling(BaseScheduling):
                                 if local_buffer_layout == local_buf.layout and all(
                                     all(
                                         user.node.get_name() in visited_scheduler_nodes
-                                        for user in V.graph.scheduler.name_to_node[
+                                        for user in V.graph.scheduler.name_to_buf[
                                             global_buffer.name
                                         ].users
                                     )
@@ -4043,7 +4079,9 @@ class CppScheduling(BaseScheduling):
         _, (_, rnumel) = template_node.group
         assert rnumel == ()
         ctb: ir.CppTemplateBuffer = cast(ir.CppTemplateBuffer, template_node.node)
-        epilogue_ir_nodes: List[Optional[ir.Buffer]] = [n.node for n in epilogue_nodes]
+        epilogue_ir_nodes: List[Optional[ir.Operation]] = [
+            n.node for n in epilogue_nodes
+        ]
         assert all(
             isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
         ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
@@ -4244,15 +4282,15 @@ class LoopLevel:
     kernel: Optional[CppKernel] = None
 
     def __post_init__(self):
-        # Regarding the C++/OpenMP backend, `codecache.pick_vec_isa()` to check
+        # Regarding the C++/OpenMP backend, `cpu_vec_isa.pick_vec_isa()` to check
         # vectorization ISA is a time-consuming and one-shot operation. It leads
         # to taking a longer time to import `codegen.cpp` package because the
         # `LoopLevel` of the package is decorated by `@dataclasses.dataclass` while
-        # the decorator will invoke `codecache.pick_vec_isa()` to initialize the
+        # the decorator will invoke `cpu_vec_isa.pick_vec_isa()` to initialize the
         # `simd_nelements` of the `LoopLevel`. It might introduce additional compilation
         # overhead to the Triton backend. Therefore, we moved the `simd_nelements` to
         # `__post_init__`
-        picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+        picked_vec_isa: cpu_vec_isa.VecISA = cpu_vec_isa.pick_vec_isa()
         self.simd_nelements: int = picked_vec_isa.nelements() if picked_vec_isa else 0
 
     def get_kernels(self) -> List[CppKernel]:
@@ -4371,7 +4409,7 @@ class LoopLevel:
             line1 = ""
         elif self.simd_omp:
             line1 = f"#pragma omp {simd}"
-        elif not self.is_reduction and codecache.is_gcc():
+        elif not self.is_reduction and cpp_builder.is_gcc():
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
