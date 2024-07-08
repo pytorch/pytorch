@@ -117,9 +117,7 @@ class ContextWrappingVariable(VariableTracker):
             return WrappedUserFunctionVariable(args[0], self)
 
 
-class GenericContextWrappingVariable(
-    UserDefinedObjectVariable
-):
+class GenericContextWrappingVariable(UserDefinedObjectVariable):
     # Some methods in ContextWrappingVariable assumes the arguments are
     # python contants. Which might not always be the case here.
     def __init__(self, cm_obj, **kwargs):
