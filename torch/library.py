@@ -17,7 +17,6 @@ from torch._library.custom_ops import (
     CustomOpDef,
     device_types_t,
 )
-from torch._library.infer_schema import infer_schema  # noqa: F401
 from torch._ops import OpOverload
 
 
@@ -30,7 +29,6 @@ __all__ = [
     "register_fake",
     "get_ctx",
     "custom_op",
-    "infer_schema",
 ]
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
@@ -180,6 +178,27 @@ class Library:
             func_to_register = fn
 
         handle = entry.fake_impl.register(func_to_register, source)
+        self._registration_handles.append(handle)
+
+    def _register_torch_dispatch_rule(self, op_name, torch_dispatch_class, fn):
+        r"""Registers a torch_dispatch rule for the given operator and torch_dispatch_class.
+
+        This allows for open registration to specify the behavior between the operator
+        and the torch_dispatch_class without needing to modify the torch_dispatch_class
+        or the operator directly.
+
+        The torch_dispatch_class is either a Tensor subclass with `__torch_dispatch__` or a
+        TorchDispatchMode.
+
+        If it is a Tensor subclass, we expect fn to have the following signature:
+        (cls, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any
+
+        If it is a TorchDispatchMode, we expect fn to have the following signature:
+        (mode, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any
+        """
+        qualname = f"{self.ns}::{op_name}"
+        entry = torch._library.simple_registry.singleton.find(qualname)
+        handle = entry.torch_dispatch_rules.register(torch_dispatch_class, fn)
         self._registration_handles.append(handle)
 
     def _impl_with_aoti_compile(self, op_name, dispatch_key=""):
