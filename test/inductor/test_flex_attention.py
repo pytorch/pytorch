@@ -1211,6 +1211,29 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    def test_block_mask_attributes(self):
+        offset = torch.zeros(8, device="cuda")
+
+        def causal(score, b, h, q, kv):
+            return torch.where(q + offset[b] * 128 >= kv, score, -float("inf"))
+
+        block_mask = create_block_mask(causal, 4, 2, 2048, 2048)
+        self.assertEqual(block_mask.shape, (4, 2, 2048, 2048))
+        self.assertEqual(block_mask[0].shape, (2, 2048, 2048))
+        self.assertEqual(block_mask[0, 0].shape, (2048, 2048))
+        self.assertEqual(block_mask.numel(), 4 * 2 * 2048 * 2048)
+        self.assertEqual(block_mask.sparsity(), 46.875)
+        self.assertEqual(block_mask[0].sparsity(), 46.875)
+        self.assertEqual(block_mask[1, 0].sparsity(), 46.875)
+        self.assertEqual(block_mask.sparsity(), block_mask[1].sparsity())
+
+        offset = torch.arange(8, device="cuda")
+        block_mask = create_block_mask(causal, 8, 1, 2048, 2048)
+        self.assertEqual(block_mask.sparsity(), 29.1015625)
+        self.assertTrue(block_mask.sparsity() < block_mask[0].sparsity())
+        self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
+
+    @supported_platform
     def test_block_mask_viz(self):
         def causal(score, b, h, q, kv):
             return torch.where(q >= kv, score, -float("inf"))
@@ -1231,7 +1254,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             replace_non_printable(str(block_mask)),
             """\
 BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
-batch=0,shead=0
+(0,s0)
 @@ssssssssssssssssssssssssssssss
 @@@@ssssssssssssssssssssssssssss
 @@@@@@ssssssssssssssssssssssssss

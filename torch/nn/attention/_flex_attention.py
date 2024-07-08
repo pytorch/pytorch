@@ -84,7 +84,7 @@ class BlockMask:
         )
 
     def __str__(self):
-        s = f"BlockMask(shape={self.shape()}, sparsity={self.sparsity():.2f}%, \n"
+        s = f"BlockMask(shape={self.shape}, sparsity={self.sparsity():.2f}%, \n"
         mask_str = self.to_string().strip()
         s += mask_str
         s += "\n)"
@@ -102,6 +102,7 @@ class BlockMask:
             Q_BLOCK_SIZE=self.Q_BLOCK_SIZE,
         )
 
+    @property
     def shape(self):
         """
         Returns the shape of the mask.
@@ -115,7 +116,7 @@ class BlockMask:
         """
         Returns the number of elements (not accounting for sparsity) in the mask.
         """
-        shape = self.shape()
+        shape = self.shape
 
         def _prod(xs):
             return functools.reduce(operator.mul, xs, 1)
@@ -187,10 +188,7 @@ class BlockMask:
         def create_block_vis(*batch_idx):
             descriptors = []
 
-            naming = ["batch", "head"]
-            for idx, dim_size in enumerate(reversed(batch_idx)):
-                name = naming[len(naming) - idx - 1]
-                descriptors.append(f"{name}={dim_size}")
+            descriptors.append(f"{batch_idx}")
 
             vis = ", ".join(reversed(descriptors)) + "\n"
 
@@ -219,11 +217,15 @@ class BlockMask:
             return vis
 
         total_vis = []
-        for idx, batch_idx in enumerate(itertools.product(*[range(i) for i in batch_dims])):
+        for idx, batch_idx in enumerate(
+            itertools.product(*[range(i) for i in batch_dims])
+        ):
             if idx == limit:
                 total_vis.append("...")
                 total_vis.append("To print out more, set BlockMask.to_string(limit=N)")
-                total_vis.append("You can also index (BlockMask[batch, head]) to choose a specific batch or head")
+                total_vis.append(
+                    "You can also index (BlockMask[batch, head]) to choose a specific batch or head"
+                )
                 break
             block_vis = create_block_vis(*batch_idx)
             total_vis.append(block_vis)
