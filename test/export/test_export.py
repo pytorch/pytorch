@@ -4836,6 +4836,8 @@ graph():
         ep_strict = torch.export.export(mod, inp).run_decompositions()
         ep_non_strict = torch.export.export(mod, inp, strict=False).run_decompositions()
 
+        breakpoint()
+
         gm_unflat_non_strict = unflatten(ep_non_strict)
         self.assertTrue(hasattr(gm_unflat_non_strict, "bar"))
         self.assertTrue(hasattr(gm_unflat_non_strict.bar, "buffer"))
@@ -4973,9 +4975,35 @@ graph():
             )
         )
 
-    # Guard validation upsets the guard
-    # https://github.com/pytorch/pytorch/issues/129939
-    @unittest.expectedFailure
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193702033
+    def test_sym_stack_trace(self):
+        # TODO(avik): update this test with torch._check*
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                y = torch.sym_constrain_range_for_size(y.item(), min=2)
+                z = x.shape[0] == 4
+                z = torch.sym_ite(z, x.shape[0], x.shape[1])
+                return z
+
+        ep = export(
+            Foo(),
+            (torch.randn(4, 4), torch.tensor(5)),
+            dynamic_shapes={"x": (Dim("dx0"), Dim("dx1")), "y": None},
+        )
+        # stack trace for sym call constrain_range
+        trace_constrain_range = [  # different names for serdes/pre-dispatch
+            node
+            for node in ep.graph.nodes
+            if node.name
+            in ["sym_constrain_range_for_size", "sym_constrain_range_for_size_default"]
+        ][0].meta.get("stack_trace", None)
+        self.assertTrue(
+            re.search(
+                r"in forward\n.*torch.sym_constrain_range_for_size",
+                trace_constrain_range,
+            )
+        )
+
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
             def __init__(self):

@@ -106,6 +106,7 @@ from .utils import (
     tensor_always_has_static_shape,
     tuple_iterator_getitem,
     tuple_iterator_len,
+    unpatched_nn_module_getattr,
 )
 
 if TYPE_CHECKING:
@@ -845,7 +846,10 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, AttrSource):
             assert base_guard_manager  # to make mypy happy
 
-            if isinstance(base_example_value, torch.nn.Module):
+            if (
+                isinstance(base_example_value, torch.nn.Module)
+                and base_example_value.__getattr__ is unpatched_nn_module_getattr
+            ):
                 out = self.getattr_on_nn_module(
                     source,
                     base_guard_manager,
@@ -1130,7 +1134,10 @@ class GuardBuilder(GuardBuilderBase):
 
                 # if the base value is nn.Module, check if we can speedup the
                 # guard by going through __dict__ attrs.
-                if isinstance(base_example_value, torch.nn.Module):
+                if (
+                    isinstance(base_example_value, torch.nn.Module)
+                    and base_example_value.__getattr__ is unpatched_nn_module_getattr
+                ):
                     return self.getattr_on_nn_module(
                         source,
                         base_manager,
