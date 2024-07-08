@@ -141,7 +141,7 @@ class AutoHeuristic:
 
         # TODO(AlnisM): Allow something like AUTOHEURISTIC_MODE="collect:pad_mm,foo,bar"
         # to be able to collect data only for specific heuristics
-        if torch._inductor.config.autoheuristic_mode == "COLLECT_DATA" and isinstance(
+        if torch._inductor.config.collect_autoheuristic(self.name) and isinstance(
             self.feedback, LocalFeedback
         ):
             for choice in self.choices:
@@ -155,19 +155,15 @@ class AutoHeuristic:
 
     def get_choice(self) -> Choice:
         """
-        Returns the chosen option based on the autoheuristic mode.
-
-        If the mode is "USE_HEURISTIC", it queries a learned heuristic to make a decision.
-        If the mode is not "USE_HEURISTIC", it falls back to the self.fallback() method.
-
-        Returns:
-            Choice: The chosen option.
+        Returns the chosen option based on the value of autoheuristic_use.
+        If self.name is one of the comma separated strings in autoheuristic_use,
+        it queries a learned heuristic to make a decision. Otherwise, it returns the fallback option.
         """
 
         if not self.satisfies_precondition():
             return self.fallback()
 
-        if torch._inductor.config.autoheuristic_mode == "USE_HEURISTIC":
+        if torch._inductor.config.use_autoheuristic(self.name):
             if self.augment_context is not None:
                 self.context.apply_operations(self.augment_context)
             controller = LearnedHeuristicController(

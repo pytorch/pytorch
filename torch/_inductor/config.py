@@ -324,11 +324,24 @@ coordinate_descent_search_radius = int(
 )
 
 # AutoHeuristic is a framework that allows one to collect data from autotuning, use the data to learn a heuristic, and
-# generate the learned heursitic to code which is shipped with the compiler. For now, this is only enabled for pad_mm.
-# If set to "OFF", this will not run AutoHeuristic.
-# If set to "COLLECT_DATA", this will store data about the inputs and autotuning results.
-# If set to "USE_HEURISTIC", this will use the learned heuristic to make a choice in pad_mm.
-autoheuristic_mode = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_MODE", "OFF")
+# generate the learned heursitic to code which is shipped with the compiler
+# Specify a list of comma separated optimizations to collect data for
+autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
+# Specify a list of comma separated optimizations to use learned heuristics for
+autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "")
+
+
+def run_autoheuristic(name):
+    return collect_autoheuristic(name) or use_autoheuristic(name)
+
+
+def collect_autoheuristic(name):
+    return name in torch._inductor.config.autoheuristic_collect.split(",")
+
+
+def use_autoheuristic(name):
+    return name in torch._inductor.config.autoheuristic_use.split(",")
+
 
 # If set to "DEFAULT", this will use the default log path specified in autoheuristic.py.
 # If set to another path, autoheuristic will instead log results to the given path.
