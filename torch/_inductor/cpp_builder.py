@@ -839,7 +839,7 @@ class CppTorchOptions(CppOptions):
 
     def __init__(
         self,
-        vec_isa: VecISA,
+        vec_isa: VecISA = invalid_vec_isa,
         include_pytorch: bool = False,
         warning_all: bool = True,
         aot_mode: bool = False,
@@ -933,7 +933,7 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     ):
         os.environ["CUDA_HOME"] = build_paths.cuda()
     """
-    from torch._inductor.codecache import _set_gpu_runtime_env, cpp_prefix_path
+    from torch._inductor.codecache import cpp_prefix_path
 
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
@@ -998,7 +998,7 @@ class CppTorchCudaOptions(CppTorchOptions):
 
     def __init__(
         self,
-        vec_isa: VecISA,
+        vec_isa: VecISA = invalid_vec_isa,
         include_pytorch: bool = False,
         cuda: bool = True,
         aot_mode: bool = False,
