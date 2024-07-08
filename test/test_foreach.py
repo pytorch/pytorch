@@ -510,7 +510,9 @@ class TestForeach(TestCase):
                 # Match with error messages from regular non-foreach reference if no
                 # custom error message was provided.
                 if custom_values_err is None:
-                    with self.assertRaisesRegex(type(e), re.escape(str(e).splitlines()[0])):
+                    with self.assertRaisesRegex(
+                        type(e), re.escape(str(e).splitlines()[0])
+                    ):
                         ref(ref_inputs, **kwargs)
                 else:
                     self.assertEqual(re.escape(str(e)), re.escape(custom_values_err))
