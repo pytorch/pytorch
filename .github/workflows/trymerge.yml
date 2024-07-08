@@ -9,6 +9,8 @@ jobs:
     name: try_merge_pr_${{ github.event.client_payload.pr_num }}
     runs-on: linux.20_04.4x
     environment: mergebot
+    permissions:
+      id-token: write
     env:
         GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
@@ -99,7 +101,7 @@ jobs:
         with:
           s3-bucket: ossci-raw-job-status
           s3-prefix: merges/${{ github.repository }}/${{ github.event.client_payload.pr_num }}/${{ github.event.client_payload.comment_id }}/${{ github.run_id }}
-          path: merge-record.json
+          path: merge_record.json
 
 # We want newer merge commands to supercede old ones
 concurrency:
