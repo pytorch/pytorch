@@ -990,9 +990,6 @@ class TestSchemaVersioning(TestCase):
 # We didn't set up kwargs input yet
 unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_fn_with_kwargs)
 
-# Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph.
-unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_scalar_output)
-
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSaveLoad(TestCase):

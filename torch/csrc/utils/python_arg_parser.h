@@ -399,7 +399,7 @@ inline std::optional<at::Tensor> PythonArgs::optionalTensor(int i) {
   if (t.defined()) {
     return t;
   } else {
-    return c10::nullopt;
+    return std::nullopt;
   }
 }
 
@@ -435,7 +435,7 @@ inline at::Scalar PythonArgs::scalarWithDefault(
 
 inline std::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return scalar_slow(i);
 }
 
@@ -774,7 +774,7 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
 
 inline std::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return scalartype(i);
 }
 
@@ -799,7 +799,7 @@ inline at::Layout PythonArgs::layoutWithDefault(
 
 inline std::optional<at::Layout> PythonArgs::layoutOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return layout(i);
 }
 
@@ -840,7 +840,7 @@ inline at::Device PythonArgs::deviceWithDefault(
 
 inline std::optional<at::Device> PythonArgs::deviceOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return device(i);
 }
 
@@ -866,7 +866,7 @@ inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
 inline std::optional<std::vector<at::Dimname>> PythonArgs::
     toDimnameListOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return parseDimnameList(args[i]);
 }
 
@@ -893,7 +893,7 @@ inline at::MemoryFormat PythonArgs::memoryformat(int i) {
 
 inline std::optional<at::MemoryFormat> PythonArgs::memoryformatOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return memoryformat(i);
 }
 
@@ -921,7 +921,7 @@ inline std::string PythonArgs::stringWithDefault(
 
 inline std::optional<std::string> PythonArgs::stringOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return THPUtils_unpackString(args[i]);
 }
 
@@ -939,7 +939,7 @@ inline c10::string_view PythonArgs::stringViewWithDefault(
 
 inline std::optional<c10::string_view> PythonArgs::stringViewOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return THPUtils_unpackStringView(args[i]);
 }
 
@@ -993,26 +993,26 @@ inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {
 
 inline std::optional<int64_t> PythonArgs::toInt64Optional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return toInt64(i);
 }
 
 inline std::optional<c10::SymInt> PythonArgs::toSymIntOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return toSymInt(i);
 }
 
 inline std::optional<bool> PythonArgs::toBoolOptional(int i) {
   if (!args[i]) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return toBool(i);
 }
 
 inline std::optional<double> PythonArgs::toDoubleOptional(int i) {
   if (!args[i]) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return toDouble(i);
 }
@@ -1074,7 +1074,7 @@ inline bool PythonArgs::isNone(int i) {
 
 inline std::optional<at::Generator> PythonArgs::generator(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 
