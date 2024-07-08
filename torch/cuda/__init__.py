@@ -1098,7 +1098,10 @@ def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
         uuids = _raw_device_uuid_amdsmi()
         if uuids is None:
             raise RuntimeError("Can't get device UUIDs")
-        visible_devices = _transform_uuid_to_ordinals(visible_devices, uuids)
+        visible_device_str = cast(
+            List[str], visible_devices
+        )  # Create str variable for mypy
+        visible_devices = _transform_uuid_to_ordinals(visible_devices_str, uuids)
     idx_map = dict(enumerate(cast(List[int], visible_devices)))
     if idx not in idx_map:
         raise RuntimeError(
