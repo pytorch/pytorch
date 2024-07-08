@@ -121,7 +121,7 @@ struct BroadcastOptions {
 struct AllreduceOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
-  std::optional<at::Tensor> sparseIndices = std::nullopt;
+  std::optional<at::Tensor> sparseIndices = c10::nullopt;
 };
 
 struct AllreduceCoalescedOptions : AllreduceOptions {};

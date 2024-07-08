@@ -3,7 +3,6 @@
 import os
 import shutil
 import subprocess
-from unittest import skipIf
 
 import torch
 import torch.utils.cpp_extension
@@ -172,10 +171,6 @@ class CppThreadTest(TestCase):
                         "not enough event recorded",
                     )
 
-    @skipIf(
-        IS_WINDOWS,
-        "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
-    )
     def test_with_enable_profiler_in_child_thread(self) -> None:
         self.start_profiler(False)
         cpp.start_threads(self.ThreadCount, IterationCount, True)
@@ -186,10 +181,6 @@ class CppThreadTest(TestCase):
             }
         )
 
-    @skipIf(
-        IS_WINDOWS,
-        "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
-    )
     def test_without_enable_profiler_in_child_thread(self) -> None:
         self.start_profiler(False)
         cpp.start_threads(self.ThreadCount, IterationCount, False)
@@ -200,10 +191,6 @@ class CppThreadTest(TestCase):
             }
         )
 
-    @skipIf(
-        IS_WINDOWS,
-        "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
-    )
     def test_profile_memory(self) -> None:
         self.start_profiler(True)
         cpp.start_threads(self.ThreadCount, IterationCount, True)

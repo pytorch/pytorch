@@ -3,6 +3,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
@@ -12,7 +13,6 @@
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <optional>
 
 namespace torch::jit {
 
@@ -261,7 +261,7 @@ std::optional<size_t> findInputWithName(
       return i;
     }
   }
-  return std::nullopt;
+  return c10::nullopt;
 }
 
 /// Creates a list with the provided values if each value's type can be matched
@@ -364,7 +364,7 @@ static std::optional<MatchedSchema> tryMatchSchema(
     std::ostream* failure_messages,
     bool allow_conversions) {
   if (isBlockListedSchema(schema)) {
-    return std::nullopt;
+    return c10::nullopt;
   }
 
   auto err = [&]() -> std::ostream& {
@@ -392,7 +392,7 @@ static std::optional<MatchedSchema> tryMatchSchema(
     std::optional<NamedValue> actual_named_value;
     if (arg.name() == "self" && self) {
       actual_named_value = self;
-      self = std::nullopt;
+      self = c10::nullopt;
     } else if (!arg.kwarg_only() && used_args < args.size()) {
       // Try to convert all the remaining non-kwarg arguments (used_args) to a
       // list. Allow zeros(IntArrayRef sizes) to work with zeros(1, 2) or
@@ -417,7 +417,7 @@ static std::optional<MatchedSchema> tryMatchSchema(
               allow_conversions,
               type_env);
           if (!list) {
-            return std::nullopt;
+            return c10::nullopt;
           }
           used_args = args.size();
           positional_inputs.push_back(list);
@@ -437,7 +437,7 @@ static std::optional<MatchedSchema> tryMatchSchema(
           err() << "Argument " << nv.name()
                 << " specified twice in schema, submit a bug report!\n";
         }
-        return std::nullopt;
+        return c10::nullopt;
       }
       used_kwarg[*kwarg_idx] = true;
       actual_named_value = nv;
@@ -450,7 +450,7 @@ static std::optional<MatchedSchema> tryMatchSchema(
         err() << "Argument " << schema.arguments()[schema_i].name()
               << " not provided.\n";
       }
-      return std::nullopt;
+      return c10::nullopt;
     }
 
     // Make sure the actual_named_value found matches the type of arg
@@ -464,16 +464,16 @@ static std::optional<MatchedSchema> tryMatchSchema(
         allow_conversions,
         type_env);
     if (!positional) {
-      return std::nullopt;
+      return c10::nullopt;
     }
     positional_inputs.push_back(positional);
   }
   // check for unused self argument
-  if (self != std::nullopt) {
+  if (self != c10::nullopt) {
     if (failure_messages) {
       err() << "Provided self argument not used in schema.\n";
     }
-    return std::nullopt;
+    return c10::nullopt;
   }
 
   if (schema.is_vararg()) {
@@ -488,7 +488,7 @@ static std::optional<MatchedSchema> tryMatchSchema(
       err() << "Expected at most " << used_args << " arguments "
             << "but found " << args.size() << " positional arguments.\n";
     }
-    return std::nullopt;
+    return c10::nullopt;
   }
   // check for unused kwargs
   for (const auto i : c10::irange(kwargs.size())) {
@@ -501,7 +501,7 @@ static std::optional<MatchedSchema> tryMatchSchema(
           err() << "Keyword argument " << nv.name() << " specified twice.\n";
         }
       }
-      return std::nullopt;
+      return c10::nullopt;
     }
   }
 
@@ -518,7 +518,7 @@ static std::optional<MatchedSchema> tryMatchSchema(
       std::all_of(returns.begin(), returns.end(), [&](const Argument& r) {
         return r.name().length() > 0;
       });
-  c10::OptNameList return_field_names = std::nullopt;
+  c10::OptNameList return_field_names = c10::nullopt;
   if (return_has_field_names) {
     return_field_names =
         fmap(returns, [&](const Argument& r) { return r.name(); });
@@ -633,7 +633,7 @@ static Value* packOutputs(
   if (field_names) {
     auto types = fmap(values, [](Value* v) { return v->type(); });
     named_tuple =
-        TupleType::createNamed(std::nullopt, field_names.value(), types);
+        TupleType::createNamed(c10::nullopt, field_names.value(), types);
   }
   return g.insertNode(g.createTuple(values, named_tuple))->output();
 }
