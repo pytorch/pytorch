@@ -232,9 +232,9 @@ def do_auto_functionalize(
             normalized_kwargs[arg.name] = arg.default_value
 
     unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
-    if "self" in unwrapped_kwargs:
+    if "self" in unwrapped_kwargs or "self_" in unwrapped_kwargs:
         warnings.warn(
-            "Using `self` as an argument in the definition of custom ops may lead to ambiguous parsing. "
+            "Using `self` or `self_` as an argument in the definition of custom ops may lead to ambiguous parsing. "
             "Please consider using a different name for this argument to avoid potential issues."
         )
     with ctx.redispatch_to_next():
