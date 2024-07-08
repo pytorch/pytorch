@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Tuple, Union
+from typing import Callable, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -21,14 +21,6 @@ from torch.fx.graph_module import GraphModule
 from torch.overrides import TorchFunctionMode
 
 
-def transform_getitem_args(x: torch.Tensor, index_args) -> Tuple[Any, ...]:
-    if isinstance(index_args, tuple):
-        return (x, list(index_args))
-    elif not isinstance(index_args, (list, tuple)):
-        return (x, [index_args])
-    return (x, index_args)
-
-
 class TransformGetItemToIndex(TorchFunctionMode):
     # This is needed since we want to support calling
     # A[q_idx], where q_idx is a scalar tensor in score_mod.
@@ -38,7 +30,9 @@ class TransformGetItemToIndex(TorchFunctionMode):
     # wherever we're running it.
     def __torch_function__(self, func, types, args, kwargs=None):
         if func == torch.Tensor.__getitem__:
-            return torch.ops.aten.index(*transform_getitem_args(*args))
+            index_args = pytree.tree_leaves(args[1])
+            if all(isinstance(x, torch.Tensor) for x in index_args):
+                return torch.ops.aten.index(args[0], index_args)
         return func(*args, **(kwargs or {}))
 
 

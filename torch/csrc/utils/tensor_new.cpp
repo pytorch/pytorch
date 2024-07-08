@@ -28,8 +28,8 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/Layout.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <optional>
 
 #include <stdexcept>
 #include <vector>
@@ -53,7 +53,7 @@ thread_local bool kOnlyLiftCPUTensors = false;
 TensorOptions build_options(
     c10::TensorOptions options,
     at::ScalarType scalar_type,
-    const std::optional<Device>& device = c10::nullopt) {
+    const std::optional<Device>& device = std::nullopt) {
   options = options.dtype(scalar_type);
   if (device.has_value()) {
     return options.device(device);
@@ -1257,7 +1257,7 @@ void _validate_sparse_coo_tensor_args(
   Tensor values = internal_new_from_data(
       options,
       scalar_type,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(1),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,
@@ -1266,7 +1266,7 @@ void _validate_sparse_coo_tensor_args(
   Tensor indices = internal_new_from_data(
       values.options(),
       kLong,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(0),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,
@@ -1298,7 +1298,7 @@ void _validate_sparse_compressed_tensor_args(
   Tensor values = internal_new_from_data(
       options,
       scalar_type,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(ARG_VALUES),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,
@@ -1307,7 +1307,7 @@ void _validate_sparse_compressed_tensor_args(
   Tensor compressed_indices = internal_new_from_data(
       values.options(),
       kInt,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(ARG_COMPRESSED_INDICES),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,
@@ -1315,7 +1315,7 @@ void _validate_sparse_compressed_tensor_args(
   Tensor plain_indices = internal_new_from_data(
       values.options(),
       kInt,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(ARG_PLAIN_INDICES),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,
@@ -1369,7 +1369,7 @@ void _validate_sparse_compressed_tensor_args_template(
   Tensor values = internal_new_from_data(
       options,
       scalar_type,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(ARG_VALUES),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,
@@ -1378,7 +1378,7 @@ void _validate_sparse_compressed_tensor_args_template(
   Tensor compressed_indices = internal_new_from_data(
       values.options(),
       kInt,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(ARG_COMPRESSED_INDICES),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,
@@ -1386,7 +1386,7 @@ void _validate_sparse_compressed_tensor_args_template(
   Tensor plain_indices = internal_new_from_data(
       values.options(),
       kInt,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(ARG_PLAIN_INDICES),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,
