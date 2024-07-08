@@ -687,6 +687,7 @@ exclusions = {
     "recompiles_verbose",
     "graph_breaks",
     "graph",
+    "graph_code",
     "graph_sizes",
     "ddp_graphs",
     "perf_hints",

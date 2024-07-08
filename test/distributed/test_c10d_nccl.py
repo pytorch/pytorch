@@ -624,6 +624,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # no additional comm split happens after a collective.
         self.assertEqual(backend.comm_split_count(), 1)
         self.assertEqual(tensor, original_tensor)
+        dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -645,6 +646,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         broadcast_tensor = torch.tensor([self.rank]).cuda(device)
         new_pg.broadcast(broadcast_tensor, 0).wait()
         self.assertEqual(backend.comm_split_count(), 1)
+        dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -664,11 +666,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # but allreduce is issued to CUDA STREAM only after the initialization is a success
         pg.allreduce(reduce_tensor).wait()
         new_pg = c10d.new_group()
-        # even after pg's collective call, new pg's comm is not initialized until its own collectcive calls
-        self.assertEqual(backend.comm_split_count(), 0)
+        # new pg's comm is initialized eagerly
+        self.assertEqual(backend.comm_split_count(), 1)
         broadcast_tensor = torch.tensor([self.rank]).cuda(device)
         new_pg.broadcast(broadcast_tensor, 0).wait()
         self.assertEqual(backend.comm_split_count(), 1)
+        dist.destroy_process_group()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -4062,7 +4065,7 @@ def check_if_test_is_skipped(fn):
     def wrapper(self, *args, **kwargs):
         for skip in TEST_SKIPS.values():
             if self.processes[0].exitcode == skip.exit_code:
-                return MultiProcessTestCase()._check_return_codes(self)
+                return MultiProcessTestCase._check_return_codes(self, *args, **kwargs)
         return fn(self, *args, **kwargs)
 
     return wrapper
@@ -4100,7 +4103,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
 
 class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
     @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_if_lt_x_gpu(2)
     @parametrize("timing_enabled", [True, False])
     def test_timeout_dumps(self, timing_enabled):
         # dump on heartbeatmonitor thread
@@ -4158,7 +4161,7 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
         self.assertEqual(self.processes[1].exitcode, -6)
 
     @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_if_lt_x_gpu(2)
     def test_timeout_dumps_on_stuck_ranks(self):
         # need rank0 to crash quicker after detecting timeout
         os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "1"
