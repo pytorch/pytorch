@@ -370,6 +370,7 @@ class TestPublicBindings(TestCase):
             "torch._inductor.codegen.cuda.cuda_template",
             "torch._inductor.codegen.cuda.gemm_template",
             "torch._inductor.runtime.triton_helpers",
+            "torch._inductor.runtime.halide_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",
             "torch.contrib._tensorboard_vis",
