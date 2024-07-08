@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import time
 import gzip
 import io
 import json
 import os
+
+import time
 import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
