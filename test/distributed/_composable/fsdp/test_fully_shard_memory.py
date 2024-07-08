@@ -143,13 +143,13 @@ class TestFullyShardMemory(FSDPTest):
         loss.sum().backward()
         mem_mb = self._get_peak_active_memory_mb()
         if reshard_after_forward:
-            # 1x max unsharded block parameters (all-gather), 2x max
+            # 2x max unsharded block parameters (all-gather + copy-out), 2x max
             # unsharded block gradients (gradients, reduce-scatter input),
             # non-block parameters, and other
             # NOTE: Reduce-scatter output is counted as part of the 1x sharded
             # gradients below since the gradients view into the output
             expected_mem_mb = (
-                3 * max_unsharded_numel + non_block_numel
+                4 * max_unsharded_numel + non_block_numel
             ) * 4 / 1e6 + buffer_mb
             if not use_cpu_offload:
                 if run_optim_in_backward:

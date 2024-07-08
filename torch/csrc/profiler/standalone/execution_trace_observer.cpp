@@ -61,13 +61,13 @@ inline std::string vectorToString(const std::vector<T>& v) {
 
 std::string json_str_escape(const std::string& str);
 
-constexpr size_t maxNumElements = 4096;
-constexpr size_t maxStrLength = 8192;
+constexpr size_t kMaxNumElements = 4096;
+constexpr size_t kMaxStrLength = 8192;
 
 inline std::string getValueType(
     const c10::IValue& val,
     const bool baseType = true,
-    const size_t maxArrayLen = maxNumElements) {
+    const size_t maxArrayLen = kMaxNumElements) {
   std::string type = val.tagKind();
 
   if (val.isTensor()) {
@@ -99,7 +99,7 @@ inline std::string getValueType(
 
 inline std::string getValueShape(
     const c10::IValue& val,
-    const size_t maxArrayLen = maxNumElements) {
+    const size_t maxArrayLen = kMaxNumElements) {
   if (val.isTensor()) {
     auto& tensor = val.toTensor();
     if (tensor.defined() &&
@@ -144,11 +144,11 @@ inline std::string getScalarValue(const c10::IValue& val) {
     return val.toBool() ? "true" : "false";
   } else if (val.isString()) {
     const std::string& str_val = val.toStringRef();
-    if (str_val.size() > maxStrLength) {
+    if (str_val.size() > kMaxStrLength) {
       LOG(WARNING) << "string size=" << str_val.size()
-                   << " exceeded maxStrLength=" << maxStrLength;
+                   << " exceeded kMaxStrLength=" << kMaxStrLength;
       return fmt::format(
-          "\"{}\"", json_str_escape(str_val.substr(0, maxStrLength)));
+          "\"{}\"", json_str_escape(str_val.substr(0, kMaxStrLength)));
     }
 
     return fmt::format("\"{}\"", json_str_escape(str_val));
@@ -172,36 +172,36 @@ inline int32_t processId() {
 
 // ExecutionTraceObserver contains all the states of the observer. Some of them
 // are shared between the enter and exit RecordFunction call backs, some data
-// like the `op_stack` may be accessed across different threads. So we should be
-// careful about data races. A global mutex `g_mutex` is used avoid these races
+// like the `opStack` may be accessed across different threads. So we should be
+// careful about data races. A global mutex `gMutex` is used avoid these races
 // at the cost of performance in large number of threads situations. We may
 // optimize this further to thread local, fine-grained locking, or use thread
 // safe containers.
-struct TORCH_API ExecutionTraceObserver {
+struct TORCH_API ExecutionTraceObserver { // NOLINT
   using ID = size_t;
 
   // Mapping of each thread to its own operator stack
-  std::map<size_t, std::stack<ID>> op_stack{};
+  std::map<size_t, std::stack<ID>> opStack{};
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
-  std::map<const void*, ID> object_id{};
+  std::map<const void*, ID> objectId{};
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 
   // Mutex for multithreaded access to the shared containers.
-  std::recursive_mutex g_mutex{};
+  std::recursive_mutex gMutex{};
   // Stream to write output JSON.
   std::ofstream out{};
 
   // Full path to the output file.
-  std::string file_name{};
+  std::string fileName{};
 
   // RecordFunction callback handle for this observer.
-  CallbackHandle cb_handle{INVALID_CALLBACK_HANDLE};
+  CallbackHandle cbHandle{INVALID_CALLBACK_HANDLE};
 
   // Process ID.
   int32_t pid{-1};
-  std::string record_time{};
+  std::string recordTime{};
 
   ExecutionTraceObserver() = default;
 
@@ -218,9 +218,9 @@ struct TORCH_API ExecutionTraceObserver {
     if (state_ == RunState::uninitialized ||
         callbackShouldBeEnabled(state_) != callbackShouldBeEnabled(newState)) {
       if (callbackShouldBeEnabled(newState)) {
-        reenableCallback(cb_handle);
+        reenableCallback(cbHandle);
       } else {
-        disableCallback(cb_handle);
+        disableCallback(cbHandle);
       }
     }
     state_ = newState;
@@ -247,20 +247,20 @@ struct TORCH_API ExecutionTraceObserver {
 using ObserverManager = GlobalStateManager<ExecutionTraceObserver>;
 
 // Uninitialized node has id = 0
-const ExecutionTraceObserver::ID uninitialized_id{0};
+const ExecutionTraceObserver::ID kUninitializedId{0};
 // Root node has id = 1
-const ExecutionTraceObserver::ID root_id{1};
+const ExecutionTraceObserver::ID kRootId{1};
 
-struct FunctionCallContext : public ObserverContext {
+struct FunctionCallContext : public ObserverContext { // NOLINT
   std::string name;
-  std::string kernel_backend;
-  std::string kernel_file;
-  ExecutionTraceObserver::ID op_id{uninitialized_id};
-  ExecutionTraceObserver::ID parent_id{uninitialized_id};
-  ExecutionTraceObserver::ID fw_parent_id{uninitialized_id};
-  std::vector<std::string> input_types;
-  std::vector<std::string> input_shapes;
-  std::vector<std::string> input_values;
+  std::string kernelBackend;
+  std::string kernelFile;
+  ExecutionTraceObserver::ID opId{kUninitializedId};
+  ExecutionTraceObserver::ID parentId{kUninitializedId};
+  ExecutionTraceObserver::ID fwParentId{kUninitializedId};
+  std::vector<std::string> inputTypes;
+  std::vector<std::string> inputShapes;
+  std::vector<std::string> inputValues;
 };
 
 // Opens the json file to write the execution trace.
@@ -302,14 +302,14 @@ static void writeJsonNode(
     const uint64_t tid,
     const uint64_t fw_tid,
     const std::string& inputs = "[]",
-    const std::string& input_shapes = "[]",
-    const std::string& input_types = "[]",
+    const std::string& inputShapes = "[]",
+    const std::string& inputTypes = "[]",
     const std::string& outputs = "[]",
     const std::string& output_shapes = "[]",
     const std::string& output_types = "[]",
     const std::string& operator_schema = "",
-    const std::string& kernel_backend = "",
-    const std::string& kernel_file = "",
+    const std::string& kernelBackend = "",
+    const std::string& kernelFile = "",
     const std::string& additiona_attrs = "") {
   out << fmt::format(
       R"JSON(
@@ -323,8 +323,8 @@ static void writeJsonNode(
       name,
       parent,
       inputs,
-      input_shapes,
-      input_types,
+      inputShapes,
+      inputTypes,
       outputs,
       output_shapes,
       output_types,
@@ -335,28 +335,28 @@ static void writeJsonNode(
       tid,
       fw_tid,
       operator_schema,
-      kernel_backend,
-      kernel_file,
+      kernelBackend,
+      kernelFile,
       additiona_attrs);
 }
 
 inline std::string timeString(const std::time_t timepoint) {
   std::ostringstream oss;
-  oss << std::put_time(std::localtime(&timepoint), "%Y-%m-%d %X");
+  oss << std::put_time(std::localtime(&timepoint), "%Y-%m-%d %X"); // NOLINT
   return oss.str();
 }
 
 static bool initExecutionTraceStart(ExecutionTraceObserver& ob) {
-  ob.out = openOutputFile(ob.file_name);
+  ob.out = openOutputFile(ob.fileName);
   // If somehow the output stream failed to open, finish observer here.
   if (!ob.out) {
-    LOG(WARNING) << "Failed to open output file: " << ob.file_name;
+    LOG(WARNING) << "Failed to open output file: " << ob.fileName;
     return false;
   }
 
   // Wall clock time for the first op collection time.
   const auto current_time = std::chrono::system_clock::now();
-  ob.record_time =
+  ob.recordTime =
       timeString(std::chrono::system_clock::to_time_t(current_time));
   // Start timestamp using steady_clock for measurement.
   const auto timestamp =
@@ -369,7 +369,7 @@ static bool initExecutionTraceStart(ExecutionTraceObserver& ob) {
   "schema": "1.1.0-chakra.0.0.4", "pid": {}, "time": "{}", "start_ts": {},
   "nodes": [)JSON",
       ob.pid,
-      ob.record_time,
+      ob.recordTime,
       timestamp);
   return true;
 }
@@ -379,9 +379,9 @@ static void finalizeExecutionTraceOutput(ExecutionTraceObserver& ob) {
   writeJsonNode(
       ob.out,
       "[pytorch|profiler|execution_trace|process]",
-      root_id,
+      kRootId,
       0, // rf_id
-      root_id, // parent is self
+      kRootId, // parent is self
       0, // fw_parent
       -1, // seq_id
       static_cast<std::underlying_type_t<RecordScope>>(RecordScope::USER_SCOPE),
@@ -401,17 +401,17 @@ static void finalizeExecutionTraceOutput(ExecutionTraceObserver& ob) {
       timestamp);
 
   ob.out.close();
-  VLOG(1) << "PyTorch Execution Trace: written to file " << ob.file_name;
+  VLOG(1) << "PyTorch Execution Trace: written to file " << ob.fileName;
 }
 
 inline ExecutionTraceObserver::ID getObjectID(
     ExecutionTraceObserver& ob,
     const void* t) {
-  auto iter = ob.object_id.find(t);
-  if (iter == ob.object_id.end()) {
-    ExecutionTraceObserver::ID object_id = ob.getNewID();
-    ob.object_id[t] = object_id;
-    return object_id;
+  auto iter = ob.objectId.find(t);
+  if (iter == ob.objectId.end()) {
+    ExecutionTraceObserver::ID objectId = ob.getNewID();
+    ob.objectId[t] = objectId;
+    return objectId;
   }
 
   return iter->second;
@@ -420,7 +420,7 @@ inline ExecutionTraceObserver::ID getObjectID(
 inline std::string convertIValue(
     ExecutionTraceObserver& ob,
     const c10::IValue& val,
-    const size_t maxArrayLen = maxNumElements) {
+    const size_t maxArrayLen = kMaxNumElements) {
   if (val.isTensor()) {
     const auto t = val.toTensor().unsafeGetTensorImpl();
     ExecutionTraceObserver::ID tensor_id = getObjectID(ob, t);
@@ -488,40 +488,41 @@ inline void handleKernelBackendInfo(
   // triton kernel related information are in kwinputs
   const auto& kwinputs = fn.kwinputs();
   if (kwinputs.find("kernel_backend") != kwinputs.end()) {
-    fc.kernel_backend = kwinputs.at("kernel_backend").toStringRef();
-    if (fc.kernel_backend == "triton") {
-      fc.kernel_file = kwinputs.at("kernel_file").toStringRef();
+    fc.kernelBackend = kwinputs.at("kernel_backend").toStringRef();
+    if (fc.kernelBackend == "triton") {
+      fc.kernelFile = kwinputs.at("kernel_file").toStringRef();
       TORCH_INTERNAL_ASSERT(
           kwinputs.find("kernel_file") != kwinputs.end(),
           "kernel file is missing in triton kernel");
       // Remove the path of the file name
-      if (fc.kernel_file.find_last_of('/') != std::string::npos)
-        fc.kernel_file =
-            fc.kernel_file.substr(fc.kernel_file.find_last_of('/') + 1);
+      if (fc.kernelFile.find_last_of('/') != std::string::npos) {
+        fc.kernelFile =
+            fc.kernelFile.substr(fc.kernelFile.find_last_of('/') + 1);
+      }
 
       // get grid information
       TORCH_INTERNAL_ASSERT(
           kwinputs.find("grid") != kwinputs.end(),
           "grid is missing in triton kernel");
-      fc.input_values.emplace_back(
+      fc.inputValues.emplace_back(
           "\"" + kwinputs.at("grid").toStringRef() + "\"");
-      fc.input_types.emplace_back("\"String\"");
-      fc.input_shapes.emplace_back("[]");
+      fc.inputTypes.emplace_back("\"String\"");
+      fc.inputShapes.emplace_back("[]");
 
       // get stream information
       TORCH_INTERNAL_ASSERT(
           kwinputs.find("stream") != kwinputs.end(),
           "stream is missing in triton kernel");
-      fc.input_values.emplace_back(
+      fc.inputValues.emplace_back(
           std::to_string(kwinputs.at("stream").toInt()));
-      fc.input_types.emplace_back("\"Int\"");
-      fc.input_shapes.emplace_back("[]");
+      fc.inputTypes.emplace_back("\"Int\"");
+      fc.inputShapes.emplace_back("[]");
     }
   }
 }
 
 // Additional attributes for commounication collectives
-inline std::string getCommsNodeAttrs(const RecordFunction& fn) {
+inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   std::vector<std::string> attrs;
 
 #ifdef USE_DISTRIBUTED
@@ -577,18 +578,18 @@ static void recordOperatorStart(
   auto tid = fn.threadId();
 
   try {
-    const std::lock_guard<std::recursive_mutex> lock(ob.g_mutex);
+    const std::lock_guard<std::recursive_mutex> lock(ob.gMutex);
 
     // if current thread stack is empty, push the root node to the stack first
-    if (ob.op_stack[tid].empty()) {
+    if (ob.opStack[tid].empty()) {
       auto thread_node_id = ob.getNewID();
-      ob.op_stack[tid].push(thread_node_id);
+      ob.opStack[tid].push(thread_node_id);
       writeJsonNode(
           ob.out,
           "[pytorch|profiler|execution_trace|thread]",
           thread_node_id,
           0, // rf_id
-          root_id,
+          kRootId,
           0, // fw_parent
           -1, // seq_id
           static_cast<std::underlying_type_t<RecordScope>>(
@@ -617,22 +618,22 @@ static void recordOperatorStart(
 
     for (const auto i : c10::irange(input_start, inputs.size())) {
       appendValueInfo(
-          ob, inputs[i], fc.input_values, fc.input_types, fc.input_shapes);
+          ob, inputs[i], fc.inputValues, fc.inputTypes, fc.inputShapes);
     }
 
     handleKernelBackendInfo(fc, fn);
 
-    fc.parent_id = ob.op_stack[tid].top();
+    fc.parentId = ob.opStack[tid].top();
     // get parent id from the forward stack, this can be different for
     // autograd ops, which may execute on a different thread than the original
     // thread (which should have the parent op on the stack).
     auto fw_tid = fn.forwardThreadId();
     if (fw_tid != 0) {
-      fc.fw_parent_id = ob.op_stack[fw_tid].top();
+      fc.fwParentId = ob.opStack[fw_tid].top();
     }
-    // all input nodes should have id > op_id
-    fc.op_id = ob.getNewID();
-    ob.op_stack[tid].push(fc.op_id);
+    // all input nodes should have id > opId
+    fc.opId = ob.getNewID();
+    ob.opStack[tid].push(fc.opId);
 
   } catch (const std::exception& e) {
     LOG(WARNING) << "Exception in execution trace observer: " << e.what();
@@ -714,10 +715,10 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
     std::vector<std::string> output_shapes;
     std::vector<std::string> output_values;
     try {
-      const std::lock_guard<std::recursive_mutex> lock(ob->g_mutex);
+      const std::lock_guard<std::recursive_mutex> lock(ob->gMutex);
       // remove current op id from stack
 
-      ob->op_stack[fn.threadId()].pop();
+      ob->opStack[fn.threadId()].pop();
       for (const auto i : c10::irange(output_start, outputs.size())) {
         appendValueInfo(
             *ob, outputs[i], output_values, output_types, output_shapes);
@@ -735,28 +736,28 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
       writeJsonNode(
           ob->out,
           fc.name,
-          fc.op_id,
+          fc.opId,
           fn.handle(),
-          fc.parent_id,
-          fc.fw_parent_id,
+          fc.parentId,
+          fc.fwParentId,
           fn.seqNr(),
           static_cast<std::underlying_type_t<RecordScope>>(fn.scope()),
           fn.threadId(),
           fn.forwardThreadId(),
-          vectorToString(fc.input_values),
-          vectorToString(fc.input_shapes),
-          vectorToString(fc.input_types),
+          vectorToString(fc.inputValues),
+          vectorToString(fc.inputShapes),
+          vectorToString(fc.inputTypes),
           vectorToString(output_values),
           vectorToString(output_shapes),
           vectorToString(output_types),
           op_schema_str,
-          fc.kernel_backend,
-          fc.kernel_file,
+          fc.kernelBackend,
+          fc.kernelFile,
           additiona_attrs);
       ob->out << ",";
     } catch (const std::exception& e) {
       LOG(WARNING) << "Exception in execution trace observer: [" << fc.name
-                   << " (" << fc.op_id << ")] " << e.what();
+                   << " (" << fc.opId << ")] " << e.what();
     }
   }
 }
@@ -770,12 +771,12 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
     auto& ob = *ObserverManager::get();
     ob.pid = processId();
     // Set output
-    ob.file_name = output_file_path;
+    ob.fileName = output_file_path;
     if (!initExecutionTraceStart(ob)) {
       return false;
     }
 
-    ob.cb_handle = addGlobalCallback(
+    ob.cbHandle = addGlobalCallback(
         RecordFunctionCallback(&onFunctionEnter, &onFunctionExit)
             .needsInputs(true)
             .needsOutputs(true)
@@ -785,7 +786,7 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
 
     VLOG(1) << "PyTorch Execution Trace: added observer, output="
             << output_file_path;
-  } else if (ObserverManager::get()->cb_handle != INVALID_CALLBACK_HANDLE) {
+  } else if (ObserverManager::get()->cbHandle != INVALID_CALLBACK_HANDLE) {
     LOG(WARNING) << "Execution trace observer is already registered.";
   }
   return true;
@@ -798,10 +799,10 @@ void removeExecutionTraceObserver() {
       disableExecutionTraceObserver();
     }
 
-    if (ob->cb_handle != INVALID_CALLBACK_HANDLE) {
+    if (ob->cbHandle != INVALID_CALLBACK_HANDLE) {
       finalizeExecutionTraceOutput(*ob);
-      removeCallback(ob->cb_handle);
-      ob->cb_handle = INVALID_CALLBACK_HANDLE;
+      removeCallback(ob->cbHandle);
+      ob->cbHandle = INVALID_CALLBACK_HANDLE;
       // Release the current ET observer object and reset.
       TORCH_INTERNAL_ASSERT(
           ObserverManager::pop() != nullptr,
