@@ -57,11 +57,9 @@ def raise_comms_and_sink_waits(
     # When only raise_comms is True, only score_0 and score_2 are considered.
     # When only sink_waits is True, only score_1 and score_2 are considered.
     # When neither is True, the original order is yielded.
-    name_to_snode = {}
     scores_0, scores_1, scores_2 = {}, {}, {}
     for idx, snode in enumerate(snodes):
-        for name in snode.get_buffer_names():
-            name_to_snode[name] = snode
+        for name in snode.get_operation_names():
             scores_0[name] = sys.maxsize
             scores_1[name] = 0
             scores_2[name] = idx
@@ -79,7 +77,7 @@ def raise_comms_and_sink_waits(
     class Runnable:
         def __init__(self, snode):
             self.snode = snode
-            name = next(iter(snode.get_buffer_names()))
+            name = next(iter(snode.get_operation_names()))
             self.score = (
                 scores_0[name],
                 scores_1[name],
@@ -89,40 +87,24 @@ def raise_comms_and_sink_waits(
         def __lt__(self, other):
             return self.score < other.score
 
-    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {}
-    for snode in snodes:
-        # A mutating node's unmet_dependencies doesn't cover the dependencies
-        # caused by the mutation. Instead, they are described by associated
-        # MutationOutput node. Thus, to safely schedule a mutating node, we
-        # have to add the unmet_dependencies of the associated MutationOutput
-        # nodes to the mutating node.
-        if isinstance(snode.node, ir.MutationOutput):
-            src_name = snode.node.node_doing_mutating.get_name()
-            src_snode = name_to_snode[src_name]
-            assert src_snode in unmet_deps
-            unmet_deps[src_snode] |= {
-                dep.name for dep in snode.unmet_dependencies if dep.name != src_name
-            }
-        assert snode not in unmet_deps
-        unmet_deps[snode] = {dep.name for dep in snode.unmet_dependencies}
-
     ready: List[Runnable] = []
     snode_num_deps: Dict[BaseSchedulerNode, int] = {}
-    buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(set)
 
-    for snode, deps in unmet_deps.items():
+    buf_name_to_downstream_ops = defaultdict(set)
+    for snode in snodes:
+        deps = snode.unmet_dependencies
+        for dep in deps:
+            buf_name_to_downstream_ops[dep.name].add(snode)
         snode_num_deps[snode] = len(deps)
         if len(deps) == 0:
             heapq.heappush(ready, Runnable(snode))
-        for dep in deps:
-            buffer_users[dep].add(snode)
 
     scheduled = []
     while len(ready):
         curr = heapq.heappop(ready).snode
         scheduled.append(curr)
-        for curr_name in curr.get_buffer_names():
-            for snode in buffer_users[curr_name]:
+        for scheduler_buf in curr.get_outputs():
+            for snode in buf_name_to_downstream_ops[scheduler_buf.get_name()]:
                 snode_num_deps[snode] -= 1
                 if snode_num_deps[snode] == 0:
                     heapq.heappush(ready, Runnable(snode))

@@ -2456,7 +2456,9 @@ class Scheduler:
             why("template epilogue not satisfied")
             return False
 
-        if (node1.get_buffer_names() | node2.get_buffer_names()) & V.graph.no_fuse_buffer_names:
+        if (
+            node1.get_buffer_names() | node2.get_buffer_names()
+        ) & V.graph.no_fuse_buffer_names:
             why("fusion for buffer explicit disabled")
             return False
 
