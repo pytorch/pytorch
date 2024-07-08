@@ -1538,7 +1538,7 @@ class VariableBuilder:
                 # it will start fully dynamic. That should always be a safe option, and not awfully inefficient.
                 # Alternatively, if we want to improve pef here, we can add a third state of unset, but I am not
                 # sure that is necessary for now.
-                frame_state_entry = FrameStateSizeEntry(scalar=value, size=None)
+                frame_state_entry = FrameStateSizeEntry(scalar=value, size=None, stride=None)
             else:
                 frame_state_entry = self.tx.output.frame_state[name]
                 if frame_state_entry.scalar != value:
