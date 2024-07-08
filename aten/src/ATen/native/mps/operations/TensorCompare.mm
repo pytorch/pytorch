@@ -32,7 +32,7 @@ static at::ScalarType clamp_type_promotion(const Tensor& input_tensor,
                                            const OptionalScalarRef min_opt,
                                            const OptionalScalarRef max_opt,
                                            const Tensor& output_tensor) {
-  // Manual type promotion, adapted from clamp META_FUNC
+  // Manual type promotion, adapted from clamp meta function in `aten/src/ATen/native/TensorCompare.cpp`
   ScalarType result_type = input_tensor.scalar_type();
   TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
   // Floating is the highest supported
@@ -63,7 +63,7 @@ static at::ScalarType clamp_type_promotion(const Tensor& input_tensor,
                                            const OptionalTensorRef min_opt,
                                            const OptionalTensorRef max_opt,
                                            const Tensor& output_tensor) {
-  // Manual type promotion, adapted from clamp META_FUNC
+  // Manual type promotion, adapted from clamp meta function in `aten/src/ATen/native/TensorCompare.cpp`
   ScalarType result_type = input_tensor.scalar_type();
   TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
   // Floating is the highest supported
