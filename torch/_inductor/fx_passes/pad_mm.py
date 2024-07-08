@@ -569,9 +569,6 @@ def get_context(
     context.add_feature("k_padded_length", k_padded_length)
     context.add_feature("n_padded_length", n_padded_length)
 
-    context.add_feature("mat1_iscontig", mat1.is_contiguous(), is_categorical=True)
-    context.add_feature("mat2_iscontig", mat2.is_contiguous(), is_categorical=True)
-
     context.add_feature("mat1_align_size", get_alignment_size(mat1))
     context.add_feature("mat2_align_size", get_alignment_size(mat2))
 
@@ -603,7 +600,7 @@ def run_autoheuristic(
     ori_time,
     ori_time_key: str,
     key: str,
-) -> bool:
+) -> Optional[bool]:
     def feedback_fn(choice: str):
         if choice == orig_choice:
             return do_bench(orig_bench_fn)

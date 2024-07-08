@@ -157,6 +157,7 @@ def pad_mm_operations() -> List[AHOperation]:
     arith_intensity_op = AHOperation("arith_intensity", get_arith_intensity)
     dims_need_padding_ops = get_dims_need_padding_ops()
     dims_multiple_ops = get_dims_multiple_ops()
+    is_contig_ops = get_is_contig_ops()
 
     ah_operations = [
         m_times_k_op,
@@ -168,6 +169,7 @@ def pad_mm_operations() -> List[AHOperation]:
     ]
     ah_operations.extend(dims_need_padding_ops)
     ah_operations.extend(dims_multiple_ops)
+    ah_operations.extend(is_contig_ops)
     return ah_operations
 
 
@@ -241,3 +243,27 @@ def get_dims_need_padding_ops() -> List[AHOperation]:
 
     num_dims_op = AHOperation("num_dims_needs_padding", num_dims_needs_padding_fn)
     return [mat1_innermost_op, mat2_innermost_op, num_dims_op]
+
+
+def get_is_contig_ops() -> List[AHOperation]:
+    def mat1_is_contig_fn(data: Any) -> bool:
+        stride_0 = data["mat1_stride_0"]
+        stride_1 = data["mat1_stride_1"]
+        k = data["k"]
+        return stride_0 == k and stride_1 == 1
+
+    mat1_is_contig_op = AHOperation(
+        "mat1_iscontig", mat1_is_contig_fn, is_categorical=True
+    )
+
+    def mat2_is_contig_fn(data: Any) -> bool:
+        stride_0 = data["mat2_stride_0"]
+        stride_1 = data["mat2_stride_1"]
+        n = data["n"]
+        return stride_0 == n and stride_1 == 1
+
+    mat2_is_contig_op = AHOperation(
+        "mat2_iscontig", mat2_is_contig_fn, is_categorical=True
+    )
+
+    return [mat1_is_contig_op, mat2_is_contig_op]
