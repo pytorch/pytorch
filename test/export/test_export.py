@@ -4836,8 +4836,6 @@ graph():
         ep_strict = torch.export.export(mod, inp).run_decompositions()
         ep_non_strict = torch.export.export(mod, inp, strict=False).run_decompositions()
 
-        breakpoint()
-
         gm_unflat_non_strict = unflatten(ep_non_strict)
         self.assertTrue(hasattr(gm_unflat_non_strict, "bar"))
         self.assertTrue(hasattr(gm_unflat_non_strict.bar, "buffer"))
