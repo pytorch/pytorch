@@ -2109,6 +2109,35 @@ class TrackedFake:
         return False
 
 
+def get_dynamic_dim(
+    size_or_stride_at_i,
+    constraint_size_or_stride,
+    marked_unbacked,
+    marked_dynamic,
+    marked_weak_dynamic,
+    static_shapes,
+    marked_static,
+):
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
+
+    if marked_unbacked:
+        return DimDynamic.SIZE_LIKE_UNBACKED
+    elif (
+        constraint_size_or_stride is not None
+        or marked_dynamic
+        or marked_weak_dynamic
+        or is_nested_int(size_or_stride_at_i)
+    ):
+        # NB: We could assert static_shapes is False here, but it
+        # seems better to allow the user to override symbolic_context in this
+        # case
+        return DimDynamic.DYNAMIC
+    elif static_shapes or config.assume_static_by_default or marked_static:
+        return DimDynamic.STATIC
+    else:
+        return DimDynamic.DUCK
+
+
 # Performs automatic dynamic dim determination.
 # Returns a SymbolicContext
 def _automatic_dynamic(
@@ -2152,6 +2181,7 @@ def _automatic_dynamic(
             dynamic_sizes=outer_context.dynamic_sizes,
             dynamic_strides=outer_context.dynamic_strides,
             constraint_sizes=outer_context.constraint_sizes,
+            constraint_strides=outer_context.constraint_strides,
             view_base_context=view_base_context,
             tensor_source=outer_context.tensor_source,
             shape_env_to_source_to_symbol_cache=outer_context.shape_env_to_source_to_symbol_cache,
@@ -2163,6 +2193,7 @@ def _automatic_dynamic(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.STATIC] * e.dim(),
             constraint_sizes=[None] * e.dim(),
+            constraint_strides=[None] * e.dim(),
             view_base_context=view_base_context,
             tensor_source=source,
             shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
@@ -2185,6 +2216,7 @@ def _automatic_dynamic(
                 for s in e.stride()
             ],
             constraint_sizes=[None] * e.dim(),
+            constraint_strides=[None] * e.dim(),
             view_base_context=view_base_context,
             tensor_source=source,
             shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
@@ -2226,6 +2258,7 @@ def _automatic_dynamic(
                             dim,
                         )
                         frame_state_entry.size[i] = None
+                # Update stride to None if required
                 for i, dim in enumerate(frame_state_entry.stride):
                     if dim is not None and e.stride()[i] != dim:
                         log.debug(
@@ -2280,6 +2313,7 @@ def _automatic_dynamic(
     dynamic_sizes = []
     dynamic_strides = []
     constraint_sizes = []
+    constraint_strides = []
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
         marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", set())
@@ -2311,7 +2345,7 @@ def _automatic_dynamic(
             constraint_size = None
             constraint_stride = None
             if marked_dynamic and not config.allow_ignore_mark_dynamic:
-                # constraint_stride is deliberaly kept None
+                # constraint_stride is deliberaly kept None because no easy way to provide value ranges for mark dynamic
                 constraint_stride = None
                 if hasattr(e, "_dynamo_dynamic_range"):
                     dim_range = [
@@ -2347,53 +2381,36 @@ def _automatic_dynamic(
                 dim_name = f"{name}.size()[{i}]"
                 tx.output.shape_env.source_name_to_debug_name[dim_name] = debug_name
         constraint_sizes.append(constraint_size)
+        constraint_strides.append(constraint_stride)
 
-        # Now, figure out if the dim is dynamic/duck/static
-        if marked_unbacked:
-            dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
-            dynamic_stride = DimDynamic.SIZE_LIKE_UNBACKED
-        elif (
-            constraint_size is not None
-            or marked_dynamic
-            or marked_weak_dynamic
-            or is_nested_int(e.shape[i])
-        ):
-            # NB: We could assert static_shapes is False here, but it
-            # seems better to allow the user to override symbolic_context in this
-            # case
-            dynamic_size = DimDynamic.DYNAMIC
-        elif static_shapes or config.assume_static_by_default or marked_static:
-            dynamic_size = DimDynamic.STATIC
-        else:
-            dynamic_size = DimDynamic.DUCK
-
-        if marked_unbacked:
-            dynamic_stride = DimDynamic.SIZE_LIKE_UNBACKED
-        elif (
-            constraint_stride is not None
-            or marked_dynamic
-            or marked_weak_dynamic
-            or is_nested_int(e.shape[i])
-        ):
-            # NB: We could assert static_shapes is False here, but it
-            # seems better to allow the user to override symbolic_context in this
-            # case
-            dynamic_stride = DimDynamic.DYNAMIC
-        elif static_shapes or config.assume_static_by_default or marked_static:
-            dynamic_stride = DimDynamic.STATIC
-        else:
-            dynamic_stride = DimDynamic.DUCK
-
+        dynamic_size = get_dynamic_dim(
+            e.shape[i],
+            constraint_size,
+            marked_unbacked,
+            marked_dynamic,
+            marked_weak_dynamic,
+            static_shapes,
+            marked_static,
+        )
+        dynamic_stride = get_dynamic_dim(
+            e.stride()[i],
+            constraint_stride,
+            marked_unbacked,
+            marked_dynamic,
+            marked_weak_dynamic,
+            static_shapes,
+            marked_static,
+        )
         dynamic_sizes.append(dynamic_size)
         dynamic_strides.append(dynamic_stride)
 
     tx.output.frame_state[name] = frame_state_entry
 
-    # TODO(anijain2305) - DO WE NEED constraint_strides?
     return StatefulSymbolicContext(
         dynamic_sizes=dynamic_sizes,
         dynamic_strides=dynamic_strides,
         constraint_sizes=constraint_sizes,
+        constraint_strides=constraint_strides,
         view_base_context=view_base_context,
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,

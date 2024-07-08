@@ -887,6 +887,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                                 for d in range(len(flat_args[i].stride()))
                             ],
                             constraint_sizes=[None] * len(flat_args[i].shape),
+                            constraint_strides=[None] * len(flat_args[i].stride()),
                         ),
                     )
             self.new_args.append(arg)
