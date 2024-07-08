@@ -132,6 +132,8 @@ ignores = [
     "third_party/nvfuser/runtime/grid_reduction.cu",
     "third_party/nvfuser/runtime/helpers.cu",
     "torch/csrc/jit/codegen/fuser/cuda/resource_strings.h",
+    "torch/csrc/jit/codegen/fuser/codegen.cpp",
+    "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
     "torch/csrc/jit/tensorexpr/ir_printer.cpp",
     # generated files we shouldn't frob
     "torch/lib/tmp_install/*",
