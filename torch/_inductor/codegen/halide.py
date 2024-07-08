@@ -5,6 +5,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import math
 import re
 from collections import defaultdict
 from math import inf
@@ -31,6 +32,7 @@ from ...utils._sympy.symbol import symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import HalideCodeCache
+from ..ir import get_reduction_combine_fn
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
 from ..ops_handler import AddParenHandler, MockHandler
 
@@ -403,19 +405,52 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def rand(seed, offset):
-        raise Unsupported("rand")
+        return f"hl.random_float({seed} ^ {offset})"
 
     @staticmethod
     def randn(seed, offset):
-        raise Unsupported("rand")
+        # Box-Muller transform
+        return ops.mul(
+            ops.sqrt(
+                ops.mul(
+                    ops.constant(-2, torch.float32), ops.log(ops.rand(seed, offset))
+                )
+            ),
+            ops.cos(
+                ops.mul(
+                    ops.constant(2 * math.pi, torch.float32),
+                    ops.rand(
+                        ops.bitwise_xor(seed, ops.constant(0x7777, torch.int32)), offset
+                    ),
+                )
+            ),
+        )
+
+    @staticmethod
+    def halide_random_uint(seed, offset):
+        return f"hl.random_uint({seed} ^ {offset})"
 
     @staticmethod
     def randint64(seed, offset, low, high):
-        raise Unsupported("rand")
+        uint64 = "hl.cast(hl.UInt(64), {})".format
+        int64 = "hl.cast(hl.Int(64), {})".format
+        lo = uint64(ops.halide_random_uint(seed, offset))
+        hi = uint64(
+            ops.halide_random_uint(
+                ops.bitwise_xor(seed, ops.constant(0x7777, torch.int32)), offset
+            )
+        )
+        result = f"({lo} | ({hi} << 32))"
+        size = uint64(f"{int64(high)} - {int64(low)}")
+        result = f"{result} % {size}"
+        result = f"{int64(result)} + {int64(low)}"
+        return result
 
     @staticmethod
     def load_seed(name, offset):
-        raise Unsupported("rand")
+        seed = ops.load(name, offset)
+        # Halide requires 32-bit seeds
+        return f"hl.cast(hl.Int(32), {seed} ^ ({seed} >> 32))"
 
     @staticmethod
     def rsqrt(x):
@@ -1170,7 +1205,6 @@ class HalideKernel(SIMDKernel):
         """Codegen a reduction operation"""
         assert self.inside_reduction
         assert not self._load_mask
-
         cache_key = (src_dtype, reduction_type, value)
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
@@ -1207,29 +1241,16 @@ class HalideKernel(SIMDKernel):
                     parts[-1] += f"*{stride}"
                 stride *= self.halide_vars[sym]
             self.body.writeline(f"{result_var} = {' + '.join(parts)}")
-        elif reduction_type in ("sum", "prod", "min", "max", "any"):
-            fn = {
-                "sum": "sum",
-                "prod": "product",
-                "min": "minimum",
-                "max": "maximum",
-                "any": "maximum",
-            }[reduction_type]
-            self.body.writeline(f"{result_var} = hl.{fn}(rdom, {value_str})")
-        elif reduction_type == "xor_sum":
-            result_var_init = result_var
-            if not result_var.used_dims:  # need a fake dim
-                result_var_init = result_var.index_str([sympy.Symbol("hl.Var()")])
-                result_var.used_dims = [sympy.Integer(0)]
-            self.body.writeline(
-                f"{result_var_init} = hl.cast({acc_type}, {halide_constant(default)})"
-            )
-            self.body.writeline(f"{result_var} = {result_var} ^ {value_str}")
         elif reduction_type == "welford_reduce":
             # TODO(jansel): implement welford_reduce without fallback
             result_var = self.welford_reduce_fallback(dtype, value)
         else:
-            raise Unsupported(reduction_type)
+            combine_fn = get_reduction_combine_fn(reduction_type, acc_type)
+            with V.set_ops_handler(AddParenHandler(HalideOverrides(MockHandler()))):
+                combine_str = combine_fn(result_var, value_str)  # type: ignore[arg-type]
+            default_str = f"hl.cast({acc_type}, {halide_constant(default)})"
+            self.body.writeline(f"{result_var} = {default_str}")
+            self.body.writeline(f"{result_var} = {combine_str}")
 
         self.cse.reduction_cache[cache_key] = result_var
         return result_var
