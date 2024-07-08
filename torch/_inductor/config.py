@@ -98,6 +98,9 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# set to True to enable the back-to-back GEMM pass
+b2b_gemm_pass = False
+
 # register custom graph optimization pass hook. so far, pre/post passes are
 # only applied before/after pattern_matcher in post_grad_passes.
 #
@@ -945,6 +948,10 @@ class halide:
 
     # Controls `debug` flag passed to Halide target
     debug = False
+
+    # Enable (or fallback on) scan kernels such as cumsum
+    # Halide autoschedulers struggle with these kernels
+    scan_kernels = False
 
 
 # create a directory containing lots of debug information

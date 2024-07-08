@@ -2162,7 +2162,7 @@ make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 # Haven't checked but sound difficult / impossible
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
-make_fallback(aten._embedding_bag_dense_backward)
+make_fallback(aten._embedding_bag_backward)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)

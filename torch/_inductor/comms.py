@@ -10,6 +10,7 @@ from typing import Dict, List, Set, Tuple, TYPE_CHECKING
 
 import torch
 
+from torch import _inductor
 from . import config, ir
 from .dependencies import WeakDep
 from .utils import contains_collective, contains_wait, tuple_sorted
@@ -18,6 +19,11 @@ overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
 if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode
+
+
+def item(x: Set[str]) -> str:
+    assert len(x) == 1
+    return next(iter(x))
 
 
 def sink_waits(snodes: List[BaseSchedulerNode], *args) -> List[BaseSchedulerNode]:
@@ -68,7 +74,7 @@ def raise_comms_and_sink_waits(
 
     comm_idx = 0
     for snode in snodes:
-        if raise_comms and contains_collective(snode.node):
+        if raise_comms and contains_collective(snode):
             scores_0[snode.get_name()] = comm_idx
             for anc in snode.ancestors:
                 scores_0[anc] = min(scores_0[anc], comm_idx)
@@ -160,25 +166,21 @@ def get_descendants(node, node_users):
     return descendants
 
 
-def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
+def decide_global_ordering_of_comms(snodes: List[BaseSchedulerNode]):
     """
     Decide global ordering of comms, by just enforcing the ordering that's in the input graph
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
-    comm_nodes = [n for n in nodes if contains_collective(n.node)]
+    comm_snodes = [snode for snode in snodes if contains_collective(snode)]
 
-    def item(x: Set[str]) -> str:
-        assert len(x) == 1
-        return next(iter(x))
-
-    for i in range(1, len(comm_nodes)):
+    for i in range(1, len(comm_snodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
-        comm_nodes[i].add_fake_dep(WeakDep(item(comm_nodes[i - 1].get_buffer_names())))
+        comm_snodes[i].add_fake_dep(WeakDep(item(comm_snodes[i - 1].get_buffer_names())))
 
 
 def assert_no_comm_nodes(snodes: List[BaseSchedulerNode]) -> None:
-    assert not any(contains_collective(snode.node) for snode in snodes)
+    assert not any(contains_collective(snode) for snode in snodes)
 
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
@@ -253,7 +255,7 @@ def reorder_compute_for_overlap(
 
     comm_nodes = []
     for snode in snodes:
-        if contains_collective(snode.node):
+        if contains_collective(snode):
             comm_nodes.append(snode)
     if len(comm_nodes) == 0:
         # if there is no comm nodes, return the current order
@@ -420,7 +422,7 @@ def visualize_overlap(order):
     cur_comm_node = None
     for snode in order:
         if cur_comm_node is None:
-            if contains_collective(snode.node):
+            if contains_collective(snode):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
             elif contains_wait(snode.node):
@@ -431,7 +433,7 @@ def visualize_overlap(order):
                 total_est_runtime += estimate_op_runtime(snode)
             overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
         else:  # cur_comm_node is not None
-            if contains_collective(snode.node):
+            if contains_collective(snode):
                 raise AssertionError(
                     "Found two collectives running at the same time. "
                     "`visualize_overlap` needs to be updated to handle this case"
@@ -476,6 +478,8 @@ def reorder_compute_and_comm_for_overlap(
 
 
 def get_all_reads(snode):
+    from . import scheduler
+
     reads = set()
     reads.update(snode.read_writes.reads)
     if isinstance(
@@ -487,19 +491,23 @@ def get_all_reads(snode):
 
 
 def is_collective_op(snode, op):
+    if isinstance(snode, str):
+        print(f"snode: {snode}")
     return isinstance(snode.node, ir.CollectiveKernel) and snode.node.op_overload is op
 
 
-def is_fallback_op(snode):
+def is_fallback_op(snode, op):
     return isinstance(snode.node, ir._FallbackKernel) and snode.node.op_overload is op
 
 
 # TODO: can we simplify the input args to just be `snodes`?
 def enforce_comm_ordering_for_fsdp(
-    name_to_fused_node: Dict[str, scheduler.BaseSchedulerNode],
-    graph_inputs: Dict[str, Buffer],
-    snodes: List[scheduler.BaseSchedulerNode],
-) -> List[scheduler.BaseSchedulerNode]:
+    name_to_fused_node: Dict[str, _inductor.scheduler.BaseSchedulerNode],
+    graph_inputs: Dict[str, ir.Buffer],
+    snodes: List[_inductor.scheduler.BaseSchedulerNode],
+) -> List[_inductor.scheduler.BaseSchedulerNode]:
+    from . import scheduler
+
     def _find_all_recursive_deps_of_node_up_to_criteria(
         snode, collected_node_set, criteria_cb
     ):
@@ -595,7 +603,7 @@ def enforce_comm_ordering_for_fsdp(
             )
             # sort nodes by original buffer order
             collected_nodes = sorted(
-                list(collected_node_set), key=lambda x: int(x.get_name()[3:])
+                collected_node_set, key=lambda x: int(x.get_name()[3:])
             )
 
             # Group "reduce_scatter copy-in + reduce_scatter comm" into one GroupedSchedulerNode
@@ -623,14 +631,16 @@ def enforce_comm_ordering_for_fsdp(
             scheduled.add(snode)
             new_order.append(snode)
 
-    # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run before next AllGather's "copy_in then AG" group node
+    # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
+    # before next AllGather's "copy_in then AG" group node
     prev_ag_wait = None
     for ag_group_node, wait_group_node in ag_nodes:
         if prev_ag_wait is not None:
             ag_group_node.add_fake_dep(WeakDep(item(prev_ag_wait.get_buffer_names())))
         prev_ag_wait = wait_group_node
 
-    # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run before next ReduceScatter's "copy_in then RS" group node
+    # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
+    # before next ReduceScatter's "copy_in then RS" group node
     prev_rs_wait = None
     for rs_group_node, wait_group_node in rs_nodes:
         if prev_rs_wait is not None:
