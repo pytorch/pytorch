@@ -845,9 +845,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               }
               stack.pop_back();
             } else {
-              const auto& msg = stack.back().toStringRef();
               if (need_warn) {
-                TORCH_WARN(msg);
+                TORCH_WARN(stack.back().toStringRef());
               }
               stack.pop_back();
             }
