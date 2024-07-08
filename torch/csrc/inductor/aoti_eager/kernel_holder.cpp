@@ -189,6 +189,9 @@ std::vector<ParameterMetadata> unpack_input_parameters(
     } else if (stack[idx].isDevice()) {
       inputs_metadata.push_back(
           ParameterMetadata(stack[idx].toDevice(), arg_order));
+    } else if (stack[idx].isIntList()) {
+      inputs_metadata.push_back(
+          ParameterMetadata(stack[idx].toIntVector(), arg_order));
     } else {
       TORCH_CHECK_NOT_IMPLEMENTED(
           false,
@@ -409,6 +412,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       bool is_device = metadata.contains("device_type_value");
       bool is_dtype = metadata.contains("dtype_value");
       bool is_layout = metadata.contains("layout_value");
+      bool is_int_list = metadata.contains("int_list");
 
       if (is_tensor_list) {
         // Tensor List
@@ -484,6 +488,15 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
             reinterpret_cast<THPLayout*>(layout_value_obj.ptr())->layout;
         parameter_metadata_list.push_back(ParameterMetadata(
             c10::Scalar(static_cast<int>(layout_value)), arg_idx));
+      } else if (is_int_list) {
+        auto metadata = item_metadata.cast<py::list>();
+        std::vector<int64_t> int_list(metadata.size());
+
+        for (const auto& int_item : metadata) {
+          int_list.push_back(int_item.cast<py::int_>());
+        }
+
+        parameter_metadata_list.push_back(ParameterMetadata(int_list, arg_idx));
       } else {
         // Tensor
         auto metadata = item_metadata.cast<py::dict>();

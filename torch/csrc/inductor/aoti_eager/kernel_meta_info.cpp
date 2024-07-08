@@ -221,6 +221,13 @@ ParameterMetadata::ParameterMetadata(
   value_ = device;
 }
 
+ParameterMetadata::ParameterMetadata(
+    const std::vector<int64_t>& int_list,
+    uint64_t input_order)
+    : tag_(INT_LIST), order_(input_order) {
+  value_ = int_list;
+}
+
 bool ParameterMetadata::operator==(const ParameterMetadata& other) const {
   // Same type
   if (tag_ != other.tag_) {
@@ -250,6 +257,9 @@ bool ParameterMetadata::operator==(const ParameterMetadata& other) const {
     case DEVICE:
       return std::get<c10::Device>(value_) ==
           std::get<c10::Device>(other.value_);
+    case INT_LIST:
+      return std::get<std::vector<int64_t>>(value_) ==
+          std::get<std::vector<int64_t>>(other.value_);
     default:
       return false;
   }

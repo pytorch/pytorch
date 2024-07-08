@@ -252,6 +252,13 @@ def extract_layout_metadata(input: torch.layout) -> Dict[str, Any]:
     return metadata
 
 
+def extract_int_list_metadata(input: List[int]) -> Dict[str, Any]:
+    assert isinstance(input, list)
+    metadata: Dict[str, Any] = {}
+    metadata["int_list"] = input
+    return metadata
+
+
 def mark_tensor_dim_as_dynamic(inputs: Any) -> None:
     def _mark_tensor_dim_as_dynamic(input_item: Any) -> None:
         torch._dynamo.mark_dynamic(input_item, list(range(input_item.ndim)))
@@ -263,6 +270,10 @@ def mark_tensor_dim_as_dynamic(inputs: Any) -> None:
             for item in input_item:
                 if isinstance(item, torch.Tensor):
                     _mark_tensor_dim_as_dynamic(input_item)
+
+
+def _expected_type_list(inputs: List[Any], expected_type: Any) -> bool:
+    return all(isinstance(input, expected_type) for input in inputs)
 
 
 def aoti_compile_with_persistent_cache(
@@ -302,8 +313,10 @@ def aoti_compile_with_persistent_cache(
         raise NotImplementedError(err_msg)
 
     for input in flattened_inputs:
-        if isinstance(input, list) and not all(
-            isinstance(item, torch.Tensor) for item in input
+        if (
+            isinstance(input, list)
+            and not _expected_type_list(input, torch.Tensor)
+            and not _expected_type_list(input, int)
         ):
             err_msg = f"_impl_with_aoti_compile encounters unsupported input types: {flattened_inputs}"
             log.exception(err_msg)
@@ -374,11 +387,13 @@ def aoti_compile_with_persistent_cache(
                     )
                     tensor_arg_offset = tensor_arg_offset + 1
                 elif isinstance(input, list):
-                    assert all(isinstance(item, torch.Tensor) for item in input)
-                    metadata = extract_tensor_list_metadata(
-                        dynamic, input, fake_inputs[tensor_arg_offset:]
-                    )
-                    tensor_arg_offset = tensor_arg_offset + len(input)
+                    if all(isinstance(item, torch.Tensor) for item in input):
+                        metadata = extract_tensor_list_metadata(
+                            dynamic, input, fake_inputs[tensor_arg_offset:]
+                        )
+                        tensor_arg_offset = tensor_arg_offset + len(input)
+                    else:
+                        metadata = extract_int_list_metadata(input)
                 elif isinstance(input, supported_scalar_types()):
                     metadata = extract_scalar_metadata(device_type, input)
                 elif isinstance(input, str):
