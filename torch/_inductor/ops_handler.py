@@ -935,6 +935,20 @@ def _typecheck_WrapperHandler(h: WrapperHandler[T]) -> OpsHandler[T]:
     return h
 
 
+class AddParenHandler(WrapperHandler[T]):
+    def __getattr__(self, name):
+        def inner(*args, **kwargs):
+            val = getattr(self._inner, name)(*args, **kwargs)
+            return f"({val})"
+
+        return inner
+
+
+# Use mypy to check protocol implemented correctly
+def _typecheck_AddParenHandler(h: AddParenHandler[T]) -> OpsHandler[T]:
+    return h
+
+
 class OpCounterCSE:
     """Shim to count how many ops are used"""
 
