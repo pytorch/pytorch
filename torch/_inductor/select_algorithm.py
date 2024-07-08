@@ -1125,6 +1125,8 @@ class AlgorithmSelectorCache(PersistentCache):
         precompilation_timeout_seconds: int = 60 * 60,
         return_multi_template=False,
     ):
+        assert config.search_autotune_cache or config.max_autotune_gemm or config.max_autotune
+
         if len(choices) == 0:
             raise NoValidChoicesError(
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
