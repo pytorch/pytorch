@@ -46,7 +46,7 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(
 
   // TODO: contiguous is called for further jit optimizations.
   auto input_contig = input.contiguous();
-  const auto* input_ptr = input_contig.data_ptr<float>();
+  const auto* input_ptr = input_contig.const_data_ptr<float>();
 
   TORCH_CHECK(
       input.dim() >= 2,
@@ -269,7 +269,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
   TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
 
   auto bias_contig = bias_vec.contiguous();
-  const float* bias_ptr = bias_contig.data_ptr<float>();
+  const float* bias_ptr = bias_contig.const_data_ptr<float>();
 
   // Calculate statistics for quantization of input Tensor
   // TODO: optimized kernel
@@ -410,7 +410,7 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
     const at::Tensor& input,
     at::Tensor& output) {
   const at::Tensor input_contig = input.contiguous();
-  const float* input_ptr = input_contig.data_ptr<float>();
+  const float* input_ptr = input_contig.const_data_ptr<float>();
 
   auto& packed_weight_fp16 = *w;
 
@@ -483,7 +483,7 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_relu_out(
   return apply_dynamic_impl<true>(input, output);
 }
 
-void PackedLinearWeightFp16::set_bias(c10::optional<at::Tensor> bias) {
+void PackedLinearWeightFp16::set_bias(std::optional<at::Tensor> bias) {
   bias_ = std::move(bias);
 }
 
@@ -728,7 +728,7 @@ class QLinearUnpackedDynamicFp16 final {
 #endif // USE_FBGEMM
 };
 
-at::Tensor wrapped_fbgemm_pack_gemm_matrix_fp16(const at::Tensor weight) {
+at::Tensor wrapped_fbgemm_pack_gemm_matrix_fp16(const at::Tensor& weight) {
 #ifdef USE_FBGEMM
   TORCH_CHECK(
       weight.dim() == 2,
@@ -740,7 +740,7 @@ at::Tensor wrapped_fbgemm_pack_gemm_matrix_fp16(const at::Tensor weight) {
 #endif // USE_FBGEMM
 }
 
-at::Tensor wrapped_fbgemm_pack_gemm_matrix_fp16_meta(const at::Tensor weight) {
+at::Tensor wrapped_fbgemm_pack_gemm_matrix_fp16_meta(const at::Tensor& weight) {
 #ifdef USE_FBGEMM
   // Strictly speaking this is not correct. However we do not know the exact
   // size of the packed matrix as it's being maintained by the object itself,
@@ -752,7 +752,7 @@ at::Tensor wrapped_fbgemm_pack_gemm_matrix_fp16_meta(const at::Tensor weight) {
 #endif // USE_FBGEMM
 }
 
-at::Tensor wrapped_fbgemm_linear_fp16_weight(at::Tensor input, const at::Tensor weight, const at::Tensor bias, int64_t out_channel) {
+at::Tensor wrapped_fbgemm_linear_fp16_weight(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias, int64_t out_channel) {
 #ifdef USE_FBGEMM
   return at::native::fbgemm_linear_fp16_weight(input, weight, bias);
 #else // USE_FBGEMM
@@ -761,7 +761,7 @@ at::Tensor wrapped_fbgemm_linear_fp16_weight(at::Tensor input, const at::Tensor 
 #endif // USE_FBGEMM
 }
 
-at::Tensor wrapped_fbgemm_linear_fp16_weight_meta(at::Tensor input, const at::Tensor weight, const at::Tensor bias, int64_t out_channel) {
+at::Tensor wrapped_fbgemm_linear_fp16_weight_meta(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias, int64_t out_channel) {
 #ifdef USE_FBGEMM
   // For the meta function, we need users to provide the dimension explicitly
   // as we don't have access to the weight.

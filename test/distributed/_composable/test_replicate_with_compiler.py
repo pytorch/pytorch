@@ -24,9 +24,9 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    run_with_native_funcol,
     skip_if_lt_x_gpu,
     skip_if_rocm,
 )
@@ -36,8 +36,6 @@ from torch.utils.checkpoint import checkpoint
 
 
 DIM = 2000
-# TODO: figure out why buffer reuse conflicts with bucketing
-torch._inductor.config.allow_buffer_reuse = False
 
 
 class Net(nn.Module):
@@ -118,13 +116,31 @@ class ReplicateTest(MultiProcessTestCase):
         model = Net().to(device)
         input = torch.randn([1, DIM], device=device)
 
-        compiled_model = torch.compile(replicate(deepcopy(model)), fullgraph=True)
-        compiled_optim = torch.optim.Adam(compiled_model.parameters())
+        compiled_replicate_model = replicate(deepcopy(model))
+        if not no_compile_forward:
+            compiled_replicate_model = torch.compile(
+                compiled_replicate_model, fullgraph=False
+            )
+        compiled_replicate_optim = torch.optim.Adam(
+            compiled_replicate_model.parameters()
+        )
+        compiled_ddp_model = DDP(deepcopy(model))
+        if not no_compile_forward:
+            compiled_ddp_model = torch.compile(compiled_ddp_model, fullgraph=True)
+        compiled_ddp_optim = torch.optim.Adam(compiled_ddp_model.parameters())
         model = replicate(model)
         optim = torch.optim.Adam(model.parameters())
 
         if setup_func:
-            setup_func(model, compiled_model)
+            setup_func(model, compiled_replicate_model, compiled_ddp_model)
+
+        models = [model, compiled_replicate_model, compiled_ddp_model]
+        optims = [optim, compiled_replicate_optim, compiled_ddp_optim]
+        sync_contexts = [
+            contextlib.nullcontext(),
+            contextlib.nullcontext(),
+            compiled_ddp_model.no_sync(),
+        ]
 
         # Run multiple iterations so that we could test no_sync
         for i in range(2):
@@ -134,37 +150,45 @@ class ReplicateTest(MultiProcessTestCase):
             torch.manual_seed(123 + self.rank + i)
             input = torch.randn([1, DIM], device=device)
 
-            if no_sync and i % 2 == 0:
-                context = replicate.state(model)._ddp.no_sync()
-            else:
+            for model_idx in range(3):
+                if no_sync and i % 2 == 0:
+                    context = sync_contexts[model_idx]
+                    if model_idx <= 1:
+                        models[model_idx].set_requires_gradient_sync(False)
+                else:
+                    context = contextlib.nullcontext()
+                    if model_idx <= 1:
+                        models[model_idx].set_requires_gradient_sync(True)
                 context = contextlib.nullcontext()
-            with context:
-                loss = model(input).sum()
-                loss.backward()
 
-            compiled_m = getattr(compiled_model, "_orig_mod", compiled_model)
-            if no_sync and i % 2 == 0:
-                context = replicate.state(compiled_m)._ddp.no_sync()
-            else:
-                context = contextlib.nullcontext()
-            with context:
-                with compiled_autograd.enable(compiler_fn(no_inductor)):
-                    compiled_loss = compiled_model(input).sum()
-                    compiled_loss.backward()
+                with context:
+                    bwd_context = (
+                        contextlib.nullcontext()
+                        if model_idx == 0
+                        else compiled_autograd.enable(compiler_fn(no_inductor))
+                    )
+                    with bwd_context:
+                        loss = models[model_idx](input).sum()
+                        loss.backward()
 
             if not no_sync or i % 2 == 1:
-                for p1, p2 in zip(model.parameters(), compiled_model.parameters()):
+                for p1, p2, p3 in zip(
+                    model.parameters(),
+                    compiled_replicate_model.parameters(),
+                    compiled_ddp_model.parameters(),
+                ):
                     self.assertEqual(p1.grad, p2.grad)
-                compiled_optim.step()
-                # Right now we have to use `set_to_none=False`, otherwise
-                # the backward will be recompiled every iteration.
-                # With `set_to_none=False`, it will only be recompiled once.
-                # https://github.com/pytorch/pytorch/issues/118435
-                compiled_optim.zero_grad(set_to_none=False)
-                optim.step()
-                optim.zero_grad()
+                    self.assertEqual(p1.grad, p3.grad)
+                for optim in optims:
+                    optim.step()
+                    optim.zero_grad()
 
-        self.assertEqual(tuple(model.parameters()), tuple(compiled_model.parameters()))
+        self.assertEqual(
+            tuple(model.parameters()), tuple(compiled_replicate_model.parameters())
+        )
+        self.assertEqual(
+            tuple(model.parameters()), tuple(compiled_ddp_model.parameters())
+        )
 
     def test_compile_cpu(self):
         # Test the coalesced_op with CPU.
@@ -192,29 +216,25 @@ class ReplicateTest(MultiProcessTestCase):
     @skip_if_rocm
     @skip_if_lt_x_gpu(2)
     def test_compile_bf16(self):
-        def setup(model, compiled_model) -> None:
-            replicate.state(model)._ddp.register_comm_hook(
-                None, ddp_default_hooks.bf16_compress_hook
-            )
-            compiled_m = compiled_model._orig_mod
-            replicate.state(compiled_m)._ddp.register_comm_hook(
+        def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
+            model.register_comm_hook(None, ddp_default_hooks.bf16_compress_hook)
+            compiled_m = compiled_replicate_model._orig_mod
+            compiled_m.register_comm_hook(None, ddp_default_hooks.bf16_compress_hook)
+            compiled_ddp_model.register_comm_hook(
                 None, ddp_default_hooks.bf16_compress_hook
             )
 
-        self._test_compile(
-            use_gpu=True, no_sync=False, setup_func=setup, no_inductor=True
-        )
+        self._test_compile(use_gpu=True, no_sync=False, setup_func=setup)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm
     @skip_if_lt_x_gpu(2)
     def test_compile_fp16(self):
-        def setup(model, compiled_model) -> None:
-            replicate.state(model)._ddp.register_comm_hook(
-                None, ddp_default_hooks.fp16_compress_hook
-            )
-            compiled_m = compiled_model._orig_mod
-            replicate.state(compiled_m)._ddp.register_comm_hook(
+        def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
+            model.register_comm_hook(None, ddp_default_hooks.fp16_compress_hook)
+            compiled_m = compiled_replicate_model._orig_mod
+            compiled_m.register_comm_hook(None, ddp_default_hooks.fp16_compress_hook)
+            compiled_ddp_model.register_comm_hook(
                 None, ddp_default_hooks.fp16_compress_hook
             )
 
@@ -240,14 +260,16 @@ class ReplicateTest(MultiProcessTestCase):
         model = Net()
         input = torch.randn([1, DIM])
         torch._dynamo.config.optimize_ddp = "python_reducer"
-        compiled_model = torch.compile(replicate(deepcopy(model)), fullgraph=True)
+        compiled_replicate_model = torch.compile(
+            replicate(deepcopy(model)), fullgraph=False
+        )
 
         def bwd(loss):
             with compiled_autograd.enable(compiler_fn()):
                 loss.backward()
 
         for i in range(loop):
-            loss = compiled_model(input).sum()
+            loss = compiled_replicate_model(input).sum()
             if i != loop - 1:
                 # Leave the last bwd for the run_and_get_triton_code.
                 bwd(loss)
@@ -257,13 +279,16 @@ class ReplicateTest(MultiProcessTestCase):
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         return code
 
-    @run_with_native_funcol
-    def test_bucketing_coalesced_op(self):
-        torch._inductor.config._fuse_ddp_communication_passes = [
+    @torch._inductor.config.patch(
+        _fuse_ddp_communication_passes=[
             "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
-
+    )
+    # todo: This pass mucks things up since Inductor thinks its inference
+    # and can apply this. Should turn off these passes in compiled autograd
+    @torch._inductor.config.patch(reorder_for_locality=False)
+    def test_bucketing_coalesced_op(self):
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
@@ -290,13 +315,16 @@ class ReplicateTest(MultiProcessTestCase):
 
         fc.run(code)
 
-    @run_with_native_funcol
-    def test_bucketing_concat_op(self):
-        torch._inductor.config._fuse_ddp_communication_passes = [
+    @torch._inductor.config.patch(
+        _fuse_ddp_communication_passes=[
             "fuse_ddp_with_concat_op",
             "schedule_comm_wait",
         ]
-
+    )
+    # todo: This pass mucks things up since Inductor thinks its inference
+    # and can apply this. Should turn off these passes in compiled autograd
+    @torch._inductor.config.patch(reorder_for_locality=False)
+    def test_bucketing_concat_op(self):
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
@@ -350,7 +378,7 @@ class DDP_TP_Test(MultiProcessTestCase):
             store=dist.FileStore(self.file_name, self.world_size),
         )
         model = Net().cuda()
-        compiled_model = deepcopy(model)
+        compiled_replicate_model = deepcopy(model)
         mesh_2d = init_device_mesh(
             "cuda", (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
@@ -364,17 +392,21 @@ class DDP_TP_Test(MultiProcessTestCase):
         }
         model = parallelize_module(model, tp_mesh, parallelize_plan)
         model = replicate(model, device_mesh=dp_mesh)
-        compiled_model = parallelize_module(compiled_model, tp_mesh, parallelize_plan)
-        compiled_model = replicate(compiled_model, device_mesh=dp_mesh)
-        compiled_model = torch.compile(compiled_model)
+        compiled_replicate_model = parallelize_module(
+            compiled_replicate_model, tp_mesh, parallelize_plan
+        )
+        compiled_replicate_model = replicate(
+            compiled_replicate_model, device_mesh=dp_mesh
+        )
+        compiled_replicate_model = torch.compile(compiled_replicate_model)
         data = torch.randn([1, DIM]).cuda()
         with compiled_autograd.enable(compiler_fn()):
-            loss = compiled_model(data).sum()
+            loss = compiled_replicate_model(data).sum()
             loss.backward()
 
         loss = model(data).sum()
         loss.backward()
-        for p1, p2 in zip(model.parameters(), compiled_model.parameters()):
+        for p1, p2 in zip(model.parameters(), compiled_replicate_model.parameters()):
             self.assertEqual(p1.grad, p2.grad)
 
 

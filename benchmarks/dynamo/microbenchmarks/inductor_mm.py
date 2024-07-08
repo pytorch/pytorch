@@ -1,10 +1,11 @@
+import triton
+from benchmark_helper import time_with_torch_timer
+
 import torch
 
 import torch._dynamo
 import torch._dynamo.config
 import torch._inductor.config as config
-import triton
-from benchmark_helper import time_with_torch_timer
 
 # The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
 torch.backends.cuda.matmul.allow_tf32 = True

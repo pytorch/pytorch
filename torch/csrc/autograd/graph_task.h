@@ -125,7 +125,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
 
   // Per-device current streams of the execute() that called this GraphTask.
   // These will be synced with leaf_streams in exec_post_processing.
-  std::vector<c10::optional<c10::Stream>> caller_current_streams_;
+  std::vector<std::optional<c10::Stream>> caller_current_streams_;
 
   // Collects caller_current_streams_ for the accelerator device.
   void stash_current_streams();

@@ -6,6 +6,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
@@ -16,10 +17,12 @@
 #include <c10/util/irange.h>
 #include <c10/util/CallOnce.h>
 
+#if AT_CUDNN_ENABLED()
+#include <ATen/cudnn/cudnn-wrapper.h>
+#endif
+
 #include <c10/core/SymInt.h>
 #include <c10/util/string_view.h>
-#include <cmath>
-#include <functional>
 
 #if USE_ROCM
 #include <aotriton/flash.h>
@@ -46,14 +49,32 @@
 
 namespace sdp {
 namespace {
+
+// TODO(eqy): more benchmarking to determine whether this should include sm86/89
+// Needs to be kept in-sync with test_fused_chocie in test_transformers.py
+bool check_prefer_cudnn_attention() {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 90000
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  return dprops->major >= 9;
+#else
+  return false;
+#endif
+}
+
 // flash_attention V2 is universally faster than efficient_attention and Math
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
+      SDPBackend::flash_attention,
+      SDPBackend::cudnn_attention,
+      SDPBackend::efficient_attention,
+      SDPBackend::math};
+  constexpr std::array<SDPBackend, num_backends> cudnn_order{
       SDPBackend::cudnn_attention,
       SDPBackend::flash_attention,
       SDPBackend::efficient_attention,
       SDPBackend::math};
-  return default_order;
+  static const bool prefer_cudnn = check_prefer_cudnn_attention();
+  return prefer_cudnn ? cudnn_order : default_order;
 }
 
 bool use_tensor_cores(sdp_params const& params, cudaDeviceProp* dprops, bool is_half) {
@@ -217,6 +238,17 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   // Mem Efficient attention supports hardware in the range [sm_50, sm_90]
   using sm50 = SMVersion<5, 0>;
   using sm90 = SMVersion<9, 0>;
+#if USE_ROCM
+  auto stream = at::cuda::getCurrentCUDAStream().stream();
+  if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
+      auto dprops = at::cuda::getCurrentDeviceProperties();
+      if (debug) {
+          TORCH_WARN(
+                  "Mem Efficient attention was not compiled for current AMD GPU architecture. Attempting to run on architecture ", dprops->gcnArchName);
+      }
+      return false;
+  }
+#else
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm50, sm90>(dprops)) {
     if (debug) {
@@ -229,6 +261,7 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
     }
     return false;
   }
+#endif
   return true;
 }
 
@@ -301,18 +334,57 @@ bool check_all_tensors_on_device(sdp_params const& params, bool debug) {
 }
 
 bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
-  const auto num_heads{params.query.sym_size(1)},
-      query_lengths{params.query.sym_size(2)},
-      head_dim{params.query.sym_size(3)};
-  const bool ok = query_lengths % 64 == 0 && head_dim % 64 == 0;
-  if (!ok) {
+  const auto s_q = params.query.sym_size(2);
+  const auto s_k = params.key.sym_size(2);
+  const auto d_qk = params.query.sym_size(3);
+  const auto d_v = params.value.sym_size(3);
+  long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
+  if (d_qk % 8 != 0 || d_v % 8 != 0) {
     if (debug) {
-      TORCH_WARN(
-          "CuDNN requires sequence length and head dim to be divisible by 64. Got sequence length: ",
-          query_lengths,
-          ", head dim: ",
-          head_dim,
-          ".");
+      TORCH_WARN("head_dim should be a multiple of 8");
+    }
+    return false;
+  }
+  auto head_dim_limit = 128;
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  auto sm90orabove = dprops->major >= 9;
+  head_dim_limit = cudnn_version >= 90000 && sm90orabove ? 256 : head_dim_limit;
+  if (d_qk > head_dim_limit || d_v > head_dim_limit) {
+    if (debug) {
+      TORCH_WARN("head_dim should be no more than ", head_dim_limit);
+    }
+    return false;
+  }
+  if (cudnn_version < 8903) {
+    if (debug) {
+      TORCH_WARN("SDPA fprop requires cudnn 8.9.3 or higher");
+    }
+    return false;
+  }
+  if (params.dropout != 0.0 && cudnn_version < 8906) {
+    if (debug) {
+      TORCH_WARN("Dropout reference is only supported on 8.9.6 onwards.");
+    }
+    return false;
+  }
+  if (cudnn_version < 90000) {
+    if (s_q < 64) {
+      if (debug) {
+        TORCH_WARN("s_q less than 64 is not supported before cudnn 9.0.0");
+      }
+      return false;
+    }
+    if ((s_q % 64 != 0 || s_k % 64 != 0) && params.dropout != 0.0) {
+      if (debug) {
+        TORCH_WARN(
+            "s_q not a multiple of 64 with padding/dropout is not supported with cudnn version 9.0.0");
+      }
+      return false;
+    }
+  }
+  if (s_k % 64 != 0 && cudnn_version < 8906) {
+    if (debug) {
+      TORCH_WARN("not-multiple-of-64 seq_kv is not supported below 8.9.6");
     }
     return false;
   }
@@ -326,24 +398,64 @@ bool check_cudnn_layout(sdp_params const& params, bool debug) {
   const int64_t s_k = params.key.size(2);
   const int64_t s_v = params.value.size(2);
   // corresponds to cuDNN's "packed QKV" layout
-  const bool query_layout_ok = (params.query.stride(0) == s_q * 3 * h * d) &&
+  const bool packed_query_layout_ok = (params.query.stride(0) == s_q * 3 * h * d) &&
                                  (params.query.stride(1) == d) &&
                                  (params.query.stride(2) == 3 * h * d) &&
                                  (params.query.stride(3) == 1);
-  const bool key_layout_ok = (params.key.stride(0) == s_k * 3 * h * d) &&
+  const bool packed_key_layout_ok = (params.key.stride(0) == s_k * 3 * h * d) &&
                                (params.key.stride(1) == d) &&
                                (params.key.stride(2) == 3 * h * d) &&
                                (params.key.stride(3) == 1);
-  const bool value_layout_ok = (params.value.stride(0) == s_v * 3 * h * d) &&
+  const bool packed_value_layout_ok = (params.value.stride(0) == s_v * 3 * h * d) &&
                                  (params.value.stride(1) == d) &&
                                  (params.value.stride(2) == 3 * h * d) &&
                                  (params.value.stride(3) == 1);
-  if (debug) {
-    if (!query_layout_ok) { TORCH_WARN("Query tensor was not in cuDNN-supported packed QKV layout", params.query.strides()); }
-    if (!key_layout_ok) { TORCH_WARN("Key tensor was not in cuDNN-supported packed QKV layout"); }
-    if (!value_layout_ok) { TORCH_WARN("Value tensor was not in cuDNN-supported packed QKV layout"); }
+
+  const bool packed_layout_ok = packed_query_layout_ok && packed_key_layout_ok && packed_value_layout_ok;
+
+  const bool query_layout_ok = (params.query.stride(0) == s_q * h * d) &&
+                               (params.query.stride(1) == d) &&
+                               (params.query.stride(2) == h * d) &&
+                               (params.query.stride(3) == 1);
+  const bool key_layout_ok = (params.key.stride(0) == s_k * h * d) &&
+                              (params.key.stride(1) == d) &&
+                              (params.key.stride(2) == h * d) &&
+                              (params.key.stride(3) == 1);
+  const bool value_layout_ok = (params.value.stride(0) == s_v * h * d) &&
+                               (params.value.stride(1) == d) &&
+                               (params.value.stride(2) == h * d) &&
+                               (params.value.stride(3) == 1);
+
+  const bool layout_ok = query_layout_ok && key_layout_ok && value_layout_ok;
+
+  if (!packed_value_layout_ok && !layout_ok) {
+    if (debug) {
+      if (!packed_layout_ok) {
+        if (!packed_query_layout_ok) {
+          TORCH_WARN("Query tensor was not in cuDNN-supported packed QKV layout", params.query.strides());
+        }
+        if (!packed_key_layout_ok) {
+          TORCH_WARN("Key tensor was not in cuDNN-supported packed QKV layout", params.key.strides());
+        }
+        if (!packed_value_layout_ok) {
+          TORCH_WARN("Value tensor was not in cuDNN-supported packed QKV layout", params.value.strides());
+        }
+      }
+      if (!layout_ok) {
+        if (!query_layout_ok) {
+          TORCH_WARN("Query tensor was not in cuDNN-supported unpacked QKV layout", params.query.strides());
+        }
+        if (!key_layout_ok) {
+          TORCH_WARN("Key tensor was not in cuDNN-supported unpacked QKV layout", params.key.strides());
+        }
+        if (!value_layout_ok) {
+          TORCH_WARN("Value tensor was not in cuDNN-supported unpacked QKV layout", params.value.strides());
+        }
+      }
+    }
+    return false;
   }
-  return query_layout_ok && key_layout_ok && value_layout_ok;
+  return true;
 }
 
 bool check_cudnn_hardware_support(sdp_params const& params, bool debug) {
@@ -358,17 +470,6 @@ bool check_cudnn_hardware_support(sdp_params const& params, bool debug) {
           ".",
           dprops->minor,
           " gpu.");
-    }
-    return false;
-  }
-  return true;
-}
-
-bool check_is_causal(sdp_params const& params, bool debug) {
-  // Check that the input is causal
-  if (!params.is_causal) {
-    if (debug) {
-      TORCH_WARN("CuDNN requires is_causal=True.");
     }
     return false;
   }
@@ -398,29 +499,27 @@ bool check_dtypes_low_precision(sdp_params const& params, bool debug) {
   }
 }
 
-bool check_runtime_enabled_cudnn(sdp_params const& params, bool debug) {
-  static c10::once_flag supported_flag;
-  static bool supported = false;
-  c10::call_once(supported_flag, []() {
-    supported = (c10::utils::check_env("TORCH_CUDNN_SDPA_ENABLED") == true);
-  });
-  if (!supported) {
+bool check_runtime_disabled_cudnn(sdp_params const& params, bool debug) {
+  // We check the global context to see if user has explicitly turned of cudnn
+  // sdp kernels
+  if (!at::globalContext().userEnabledCuDNNSDP()) {
     if (debug) {
-      TORCH_WARN(
-          "The CuDNN backend needs to be enabled by setting the enviornment variable`TORCH_CUDNN_SDPA_ENABLED=1`");
+      TORCH_WARN("CuDNN attention has been runtime disabled.");
     }
     return false;
   }
   return true;
 }
 
-bool check_cudnn_requires_grad(sdp_params const& params, bool debug) {
-  // Check that the input is causal
-  if (input_requires_grad(params)) {
-    if (debug) {
-      TORCH_WARN("CuDNN does not currently support inputs with requires_grad=True.");
+bool check_cudnn_deterministic(const sdp_params& params, bool debug) {
+  auto& ctx = at::globalContext();
+  if (ctx.deterministicAlgorithms()) {
+    if (!ctx.deterministicAlgorithmsWarnOnly()) {
+      if (debug) {
+        TORCH_WARN("cuDNN SDPA is not deterministic.");
+      }
+      return false;
     }
-    return false;
   }
   return true;
 }
@@ -428,20 +527,35 @@ bool check_cudnn_requires_grad(sdp_params const& params, bool debug) {
 } // namespace
 
 bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
-
+#if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || !defined(CUDNN_VERSION)
+  if (debug) {
+    TORCH_WARN("Torch was not compiled with cuDNN attention.");
+  }
+  return false;
+#endif
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < 90000
+  if (debug) {
+    TORCH_WARN(CUDNN_VERSION, "cuDNN version too old to use Flash Attention! (< v9.0.0)");
+  }
+  return false;
+#endif
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20
   constexpr auto general_constraints =
       array_of<bool (*)(sdp_params const&, bool)>(
-          check_runtime_enabled_cudnn,
-          check_cudnn_hardware_support);
-          // check_all_tensors_on_device,
-          // check_cudnn_tensor_shapes,
-          // check_cudnn_layout,
+          check_runtime_disabled_cudnn,
+          check_for_nested_inputs,
+          check_nonzero_sequence_lengths_dense,
+          check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim>*/>,
+          check_all_tensors_on_device,
+          check_tensor_shapes,
+          check_cudnn_tensor_shapes,
+          check_cudnn_deterministic,
           // check_is_causal,
-          // check_for_nested_inputs,
-          // check_cudnn_requires_grad,
-          // check_dtypes_low_precision
+          check_dtypes_low_precision,
+          check_for_attn_mask_cudnn,
+          check_cudnn_hardware_support
+          );
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -509,6 +623,10 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
   constexpr auto less_than_sm80_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat);
+#ifdef USE_ROCM
+  constexpr auto aotriton_mem_efficient_dtypes =
+      array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+#endif
 
   //  Define gate functions that determine if a mem efficient kernel can be ran
   constexpr auto general_constraints = array_of<bool (*)(sdp_params const&, bool)>(
@@ -524,6 +642,10 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   }
 
   if (has_for_nested_inputs(params)) {
+#ifdef USE_ROCM
+    TORCH_WARN_ONCE(false, "[ROCM] no support for nested tensors in memory efficient attention.");
+    return false;
+#endif
     constexpr auto nested_constraints = array_of<bool (*)(sdp_params const&, bool)>(
         check_requires_grad_and_nested,
         check_batch_size_nested,
@@ -546,10 +668,14 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
     }
   }
 
+#ifdef USE_ROCM
+  return check_tensor_dtype(params, aotriton_mem_efficient_dtypes, debug);
+#else
   auto dprop = at::cuda::getCurrentDeviceProperties();
   if (dprop->major >= 8) {
     return check_tensor_dtype(params, greater_than_or_equal_sm80_mem_efficient_dtypes, debug);
   }
+#endif
   return check_tensor_dtype(params, less_than_sm80_mem_efficient_dtypes, debug);
 }
 
@@ -573,7 +699,6 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
     switch (backend) {
       case SDPBackend::cudnn_attention:
         if (sdp::can_use_cudnn_attention(kernel_params, print_debug)) {
-              TORCH_WARN("USING CUDNN SDPA");
               return SDPBackend::cudnn_attention;
         }
         break;

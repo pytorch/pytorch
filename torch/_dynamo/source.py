@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import dataclasses
 import enum
@@ -113,9 +114,7 @@ class GlobalSource(Source):
     global_name: str
 
     def reconstruct(self, codegen):
-        codegen.append_output(
-            codegen.create_load_global(self.global_name, False, add=True)
-        )
+        codegen.append_output(codegen.create_load_global(self.global_name, add=True))
 
     def guard_source(self):
         return GuardSource.GLOBAL
@@ -129,8 +128,10 @@ class GlobalWeakRefSource(Source):
     global_name: str
 
     def reconstruct(self, codegen):
-        codegen.append_output(
-            codegen.create_load_global(self.global_name, True, add=True)
+        codegen.add_push_null(
+            lambda: codegen.append_output(
+                codegen.create_load_global(self.global_name, add=True)
+            )
         )
         codegen.extend_output(create_call_function(0, False))
 
@@ -142,9 +143,21 @@ class GlobalWeakRefSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
+class WeakRefCallSource(ChainedSource):
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: self.base.reconstruct(codegen))
+        codegen.extend_output(create_call_function(0, False))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}()"
+
+
+@dataclasses.dataclass(frozen=True)
 class AttrSource(ChainedSource):
     member: str
-    get_static: bool = False
 
     def __post_init__(self):
         assert self.base, "Can't construct an AttrSource without a valid base source"
@@ -163,10 +176,27 @@ class AttrSource(ChainedSource):
         return self.base.guard_source()
 
     def name(self):
-        if self.get_static:
-            return f"inspect.getattr_static({self.base.name()}, {self.member!r})"
-        elif not self.member.isidentifier():
+        if not self.member.isidentifier():
             return f"getattr({self.base.name()}, {self.member!r})"
+        return f"{self.base.name()}.{self.member}"
+
+
+# Represents tensor.grad source. It could be represented by AttrSource as well.
+# But, we could access grad field on tensor directly in C++ without going
+# through the Python bytecodes. Therefore, we use a separate source for grad
+# field.
+@dataclasses.dataclass(frozen=True)
+class GradSource(ChainedSource):
+    member: str = "grad"
+
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+        codegen.extend_output(codegen.create_load_attrs(self.member))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
         return f"{self.base.name()}.{self.member}"
 
 
@@ -196,7 +226,7 @@ class EphemeralSource(Source):
         return f"<ephemeral{': ' + self.desc if self.desc is not None else ''}>"
 
     def make_guard(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def is_ephemeral(self):
         return True
@@ -229,12 +259,15 @@ class TensorPropertySource(ChainedSource):
             assert self.idx is not None
 
     def reconstruct(self, codegen):
-        self.base.reconstruct(codegen)
-        codegen.append_output(codegen.create_load_attr(self.prop.method_name()))
+        def gen_fn():
+            self.base.reconstruct(codegen)
+            codegen.append_output(codegen.create_load_attr(self.prop.method_name()))
+
+        codegen.add_push_null(gen_fn)
         if self.idx is not None:
             codegen.append_output(codegen.create_load_const(self.idx))
         codegen.extend_output(
-            create_call_function(1 if self.idx is not None else 0, True)
+            create_call_function(1 if self.idx is not None else 0, False)
         )
 
     def guard_source(self):
@@ -258,7 +291,7 @@ class NegateSource(ChainedSource):
         assert self.base is not None
 
     def reconstruct(self, codegen):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def guard_source(self):
         return self.base.guard_source()
@@ -281,6 +314,36 @@ class ConvertIntSource(ChainedSource):
 
     def name(self):
         return f"cast_symbool_to_symint_guardless({self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
+class FlattenScriptObjectSource(ChainedSource):
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}.__obj_flatten__()"
+
+
+@dataclasses.dataclass(frozen=True)
+class ScriptObjectQualifiedNameSource(ChainedSource):
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}._type().qualified_name()"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -370,10 +433,12 @@ class ConstDictKeySource(GetItemSource):
         return True
 
     def reconstruct(self, codegen):
-        codegen.load_import_from(utils.__name__, "dict_keys_getitem")
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "dict_keys_getitem")
+        )
         self.base.reconstruct(codegen)
         codegen.append_output(codegen.create_load_const(self.index))
-        codegen.extend_output(create_call_function(2, True))
+        codegen.extend_output(create_call_function(2, False))
 
     def name(self):
         # The list creation will be CSE'd by PyExprCSEPass
@@ -383,10 +448,12 @@ class ConstDictKeySource(GetItemSource):
 @dataclasses.dataclass(frozen=True)
 class TupleIteratorGetItemSource(GetItemSource):
     def reconstruct(self, codegen):
-        codegen.load_import_from(utils.__name__, "tuple_iterator_getitem")
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "tuple_iterator_getitem")
+        )
         self.base.reconstruct(codegen)
         codegen.append_output(codegen.create_load_const(self.index))
-        codegen.extend_output(create_call_function(2, True))
+        codegen.extend_output(create_call_function(2, False))
 
     def name(self):
         return f"___tuple_iterator_getitem({self.base.name()}, {self.index!r})"
@@ -398,9 +465,9 @@ class TypeSource(ChainedSource):
         assert self.base is not None
 
     def reconstruct(self, codegen):
-        codegen.load_import_from("builtins", "type")
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "type"))
         self.base.reconstruct(codegen)
-        codegen.extend_output(create_call_function(1, True))
+        codegen.extend_output(create_call_function(1, False))
 
     def guard_source(self):
         return self.base.guard_source()
@@ -417,11 +484,13 @@ class ODictGetItemSource(ChainedSource):
         assert self.base is not None
 
     def reconstruct(self, codegen):
-        codegen.append_output(
-            codegen._create_load_const(collections.OrderedDict.__getitem__)
+        codegen.add_push_null(
+            lambda: codegen.append_output(
+                codegen._create_load_const(collections.OrderedDict.__getitem__)
+            )
         )
         reconstruct_getitem(self, codegen, index_is_slice=False)
-        codegen.extend_output(create_call_function(2, True))
+        codegen.extend_output(create_call_function(2, False))
 
     def guard_source(self):
         return self.base.guard_source()
@@ -434,6 +503,18 @@ class ODictGetItemSource(ChainedSource):
             return f"___odict_getitem({self.base.name()}, {self.index.name()})"
         else:
             return f"___odict_getitem({self.base.name()}, {self.index!r})"
+
+
+@dataclasses.dataclass(frozen=True)
+class OptimizerSource(ChainedSource):
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return self.base.name()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -474,9 +555,7 @@ class ConstantSource(Source):
     source_name: str
 
     def reconstruct(self, codegen):
-        codegen.append_output(
-            codegen.create_load_global(self.source_name, False, add=False)
-        )
+        codegen.append_output(codegen.create_load_global(self.source_name, add=False))
 
     def guard_source(self):
         return GuardSource.CONSTANT
@@ -485,7 +564,7 @@ class ConstantSource(Source):
         return self.source_name
 
     def make_guard(self, fn):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 @dataclasses.dataclass(frozen=True)
@@ -497,9 +576,38 @@ class NumpyTensorSource(ChainedSource):
         return self.base.guard_source()
 
     def reconstruct(self, codegen):
-        codegen.load_import_from("torch", "as_tensor")
+        codegen.add_push_null(lambda: codegen.load_import_from("torch", "as_tensor"))
         self.base.reconstruct(codegen)
-        codegen.extend_output(create_call_function(1, True))
+        codegen.extend_output(create_call_function(1, False))
+
+
+@dataclasses.dataclass(frozen=True)
+class SubclassAttrListSource(ChainedSource):
+    def name(self) -> str:
+        return f"{self.base.name()}.__tensor_flatten__()[0]"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+
+# NB: We don't expect you to actually ever generate guards against this
+# source, it is ephemeral
+@dataclasses.dataclass(frozen=True)
+class FloatTensorSource(ChainedSource):
+    def name(self) -> str:
+        return f"___as_tensor({self.base.name()})"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+
+@dataclasses.dataclass(frozen=True)
+class CallMethodItemSource(ChainedSource):
+    def name(self) -> str:
+        return f"{self.base.name()}.item()"
+
+    def guard_source(self):
+        return self.base.guard_source()
 
 
 # This is a synthetic source that is associated with the singleton
@@ -535,6 +643,22 @@ def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
     return True
 
 
+def is_from_flatten_script_object_source(source: Source):
+    if isinstance(source, FlattenScriptObjectSource):
+        return True
+    elif isinstance(source, ChainedSource):
+        return is_from_flatten_script_object_source(source.base)
+    return False
+
+
+def is_from_optimizer_source(source: Source):
+    if isinstance(source, OptimizerSource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_optimizer_source(source.base)
+    return False
+
+
 # TODO: can probably write a generic "test this on everything in the chain"
 # helper
 def is_from_defaults(source: Source):
@@ -543,3 +667,7 @@ def is_from_defaults(source: Source):
     if isinstance(source, ChainedSource):
         return is_from_defaults(source.base)
     return False
+
+
+def is_cell_contents(source: Source):
+    return isinstance(source, AttrSource) and source.member == "cell_contents"

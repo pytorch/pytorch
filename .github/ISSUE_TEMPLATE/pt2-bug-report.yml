@@ -9,6 +9,17 @@ body:
         #### Before submitting a bug, please make sure the issue hasn't been already addressed by searching through [the
         existing and past issues](https://github.com/pytorch/pytorch/issues)
         It's likely that your bug will be resolved by checking our FAQ or troubleshooting guide [documentation](https://pytorch.org/docs/main/dynamo/index.html)
+
+        Note: if you're submitting an issue that you generated from a fuzzer. Please do the following:
+
+        - Ensure rtol/atol are at default tolerances
+
+        - Dont compare indices of max/min etc, because that avoids the above requirement
+
+        - If comparing eager and torch.compile at fp16/bf16, you should use fp32 as baseline
+
+        If the above requirements are met, add the label "topic: fuzzer" to your issue.
+
   - type: textarea
     attributes:
       label: 🐛 Describe the bug

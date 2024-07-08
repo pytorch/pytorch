@@ -22,7 +22,7 @@ namespace at::native {
 
 at::Tensor _nnpack_spatial_convolution(
     const Tensor& input,
-    const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& weight, const std::optional<Tensor>& bias_opt,
     const IntArrayRef padding,
     const IntArrayRef stride) {
   throw std::runtime_error(
@@ -137,7 +137,7 @@ static thread_local Workspace workspace;
 
 Tensor _nnpack_spatial_convolution(
     const Tensor& input,
-    const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& weight, const std::optional<Tensor>& bias_opt,
     const IntArrayRef padding,
     const IntArrayRef stride) {
   // See [Note: hacky wrapper removal for optional tensor]

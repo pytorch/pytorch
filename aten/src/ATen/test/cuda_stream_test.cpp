@@ -408,7 +408,7 @@ TEST(TestStream, ExternalMultiThreadTest) {
 
   std::promise<void> aToBProm;
   std::promise<void> bToAProm;
-  c10::optional<at::cuda::CUDAStream> foundStream;
+  std::optional<at::cuda::CUDAStream> foundStream;
 
   std::thread threadA([&]() {
     at::cuda::CUDAGuard device_guard(0);

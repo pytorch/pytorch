@@ -107,7 +107,7 @@ class VectorizedN {
       const VectorizedN<T, N>& b) {
     VectorizedN<T, N> result;
     for (int i = 0; i < N; ++i) {
-      result.values[i] = Vectorized<T>::blend<mask>(a.values[i], b.values[i]);
+      result.values[i] = Vectorized<T>::template blend<mask>(a.values[i], b.values[i]);
     }
     return result;
   }

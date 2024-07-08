@@ -86,7 +86,16 @@ class ScopeContextManager:
         return
 
 
-_COPY_META_FIELDS = ["nn_module_stack", "source_fn_stack", "original_aten", "recompute", "from_node", "quantization_tag"]
+_COPY_META_FIELDS = [
+    "nn_module_stack",
+    "torch_fn",
+    "source_fn_stack",
+    "original_aten",
+    "recompute",
+    "ac_graph_id",
+    "from_node",
+    "quantization_tag",
+]
 
 
 @compatibility(is_backward_compatible=True)
@@ -279,7 +288,7 @@ class TracerBase:
         elif isinstance(a, range):
             return range(self.create_arg(a.start), self.create_arg(a.stop), self.create_arg(a.step))
 
-        elif isinstance(a, torch._ops.OpOverload):
+        elif isinstance(a, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
             return a
 
         if isinstance(a, Proxy):

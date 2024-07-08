@@ -40,7 +40,7 @@ std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, option
   return res;
 }
 
-std::tuple<Tensor, c10::optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level) {
+std::tuple<Tensor, std::optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level) {
   auto* batched = maybeGetBatchedImpl(tensor);
   if (!batched) {
     return std::make_tuple(tensor, nullopt);
@@ -56,7 +56,7 @@ bool isBatchedAtLevel(const Tensor& tensor, int64_t level) {
   return std::get<1>(result).has_value();
 }
 
-bool isBatchedAtLevel(const c10::optional<Tensor>& maybe_tensor, int64_t level) {
+bool isBatchedAtLevel(const std::optional<Tensor>& maybe_tensor, int64_t level) {
   if (!maybe_tensor.has_value()) {
     return false;
   }
@@ -72,7 +72,7 @@ bool isBatchedAtLevel(ITensorListRef tensors, int64_t level) {
   return false;
 }
 
-bool isBatchedAtLevel(const c10::List<c10::optional<Tensor>>& maybe_tensors, int64_t level) {
+bool isBatchedAtLevel(const c10::List<std::optional<Tensor>>& maybe_tensors, int64_t level) {
   for (const auto idx : c10::irange(0, maybe_tensors.size())) {
     const auto& maybe_tensor = maybe_tensors.get(idx);
     if (isBatchedAtLevel(maybe_tensor, level)) {

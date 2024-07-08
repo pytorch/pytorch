@@ -53,7 +53,7 @@ std::unordered_map<std::string, OperatorInfo> _get_runtime_ops_and_info() {
   for (auto& op : dispatcherOperators) {
     // grab schema
     const auto op_handle = c10::Dispatcher::singleton().findOp(op);
-    c10::optional<int> num_schema_args;
+    std::optional<int> num_schema_args;
     if (op_handle->hasSchema()) {
       num_schema_args = op_handle->schema().arguments().size();
     }

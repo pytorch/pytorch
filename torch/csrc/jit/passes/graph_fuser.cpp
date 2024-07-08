@@ -490,11 +490,11 @@ struct GraphFuser {
     return true;
   }
 
-  c10::optional<Node*> findFusedChunk(Node* group, Value* input) {
+  std::optional<Node*> findFusedChunk(Node* group, Value* input) {
     AT_ASSERT(group->kind() == prim::FusionGroup);
     auto it = std::find(group->inputs().begin(), group->inputs().end(), input);
     if (it == group->inputs().end()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     size_t input_index = it - group->inputs().begin();
     auto& subgraph = getSubgraph(group);
@@ -505,7 +505,7 @@ struct GraphFuser {
       AT_ASSERT(subgraph_input->uses().size() == 1);
       return node;
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   void fuseChunkByReusingExistingFusedChunk(

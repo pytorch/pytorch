@@ -5,6 +5,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
 #include <bitset>
+#include <utility>
 #include <variant>
 
 namespace at::functorch {
@@ -144,7 +145,7 @@ struct Interpreter {
 
   void saveLocalDispatchKeySet(c10::impl::LocalDispatchKeySet keyset) {
     TORCH_INTERNAL_ASSERT(!savedLocalDispatchKeySet_.has_value());
-    savedLocalDispatchKeySet_ = std::move(keyset);
+    savedLocalDispatchKeySet_ = keyset;
   }
   void clearSavedLocalDispatchKeySet() {
     TORCH_INTERNAL_ASSERT(savedLocalDispatchKeySet_.has_value());
@@ -173,11 +174,11 @@ struct Interpreter {
 
  private:
   explicit Interpreter(TransformType type, int64_t level, InterpreterMeta meta):
-    type_(type), level_(level), is_alive_(std::make_shared<bool>(false)), meta_(meta) {}
+    type_(type), level_(level), is_alive_(std::make_shared<bool>(false)), meta_(std::move(meta)) {}
 
   // fields
-  TransformType type_;
-  int64_t level_;
+  TransformType type_{};
+  int64_t level_{};
   optional<c10::impl::LocalDispatchKeySet> savedLocalDispatchKeySet_;
   std::shared_ptr<bool> is_alive_;
   InterpreterMeta meta_;

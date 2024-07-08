@@ -51,8 +51,7 @@
 #define ROCM_HIPCUB(x) x
 #endif
 
-#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || \
-     (defined(USE_ROCM) && ROCM_VERSION >= 40500)
+#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || defined(USE_ROCM)
 
 #if !defined(USE_ROCM)
 namespace at_cuda_detail {
@@ -110,7 +109,7 @@ struct cuda_type<c10::BFloat16> {
   using type = __nv_bfloat16;
 };
 
-#elif (defined(USE_ROCM) && ROCM_VERSION >= 40500)
+#elif defined(USE_ROCM)
 
 template<>
 struct cuda_type<c10::BFloat16> {
@@ -234,7 +233,7 @@ constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
 // so split at int_max/2
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, int max_cub_size=impl::max_cub_size>
 inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
-#if defined(USE_ROCM) && (ROCM_VERSION >= 50000)
+#if defined(USE_ROCM)
   //For ROCm, use hipCUB chained iterators
   CUB_WRAPPER(NO_ROCM(detail)::hipcub::DeviceScan::InclusiveScan,
       input,
@@ -301,7 +300,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
 
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, typename InitValueT, int max_cub_size=impl::max_cub_size>
 inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, InitValueT init_value, int64_t num_items) {
-#if defined(USE_ROCM) && (ROCM_VERSION >= 50000)
+#if defined(USE_ROCM)
   //For ROCm, use hipCUB chained iterators
   CUB_WRAPPER(NO_ROCM(detail)::hipcub::DeviceScan::ExclusiveScan,
       input,

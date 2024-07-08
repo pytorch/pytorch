@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+import contextlib
 import copy
 
 import torch
@@ -56,9 +58,15 @@ def _replace_with_hop(node: torch.fx.Node):
         with graph.inserting_before(node):
             get_attr_node = graph.get_attr(node.target)
             get_attr_node.meta["nn_module_stack"] = copy.copy(
-                set_grad_node.meta["nn_module_stack"]
+                set_grad_node.meta.get("nn_module_stack", {})
             )
             output_node = next(iter(reversed(sub_gm.graph.nodes)), None)
+            # Split_module pass intentially doesn't add output node
+            # if the graph doesn't return anything.
+            # TODO (tmanlaibaatar) Figure out if this is right behaviour
+            # for split_module
+            if isinstance(output_node, torch.fx.Node) and output_node.op != "output":
+                output_node = None
             if output_node is not None:
                 assert len(output_node.args) == 1
                 output_args = output_node.args[0]
@@ -73,7 +81,11 @@ def _replace_with_hop(node: torch.fx.Node):
                         arg.meta["val"] for arg in output_args
                     )
                     call_func_node.meta["nn_module_stack"] = copy.copy(
-                        set_grad_node.meta["nn_module_stack"]
+                        set_grad_node.meta.get("nn_module_stack", {})
+                    )
+                    call_func_node.meta["torch_fn"] = (
+                        f"{wrap_with_set_grad_enabled.__name__}",
+                        f"{wrap_with_set_grad_enabled.__class__.__name__}.{wrap_with_set_grad_enabled.__name__}",
                     )
                     node_replace_(node, call_func_node, delete_old=True)
 
@@ -101,9 +113,7 @@ def _replace_with_hop(node: torch.fx.Node):
                         f"repalce_set_grad_with_hop_pass doesnt' support output type {type(output_args)}"
                     )
             else:
-                raise NotImplementedError(
-                    "Cannot replace a call_module with a hop if it has no output. This module will gets DCEed."
-                )
+                node.graph.erase_node(node)
         sub_graph.erase_node(set_grad_node)
 
 
@@ -121,29 +131,77 @@ def _remove_set_grad_and_inline(node: torch.fx.Node):
     node_inline_(node)
 
 
-def replace_set_grad_with_hop_pass(gm: torch.fx.GraphModule):
+def _sequential_split_and_maybe_inline_subgraphs(
+    gm: torch.fx.GraphModule, graph_signature
+):
+    """
+    Helper function for replace_set_grad_with_hop_pass().
+    Split the graph module into multiple subgraphs based on the set_grad_enabled nodes.
+    For each subgraph, decides whether to construct a HOO subgraph, or inline the calls
+    back into the parent graph module.
+    """
     # If there is no set_grad_enabled node, return the original graph module
     need_replacing = False
     for node in gm.graph.nodes:
         if _is_set_grad_enabled_node(node):
             need_replacing = True
 
-    if not need_replacing:
-        return gm
+    if need_replacing:
+        # sequential_split returns a new graph module that could have different output
+        # args names. We need to fix the graph signature.
+        new_gm = sequential_split(gm, _is_set_grad_enabled_node)
 
-    new_gm = sequential_split(gm, _is_set_grad_enabled_node)
+        replace_ctx = contextlib.nullcontext()
+        new_signature = None
+        if graph_signature is not None:
+            new_signature = copy.deepcopy(graph_signature)
+            new_gm_out_node = next(reversed(new_gm.graph.find_nodes(op="output")))
+            assert new_gm_out_node.op == "output" and len(
+                new_gm_out_node.args[0]
+            ) == len(new_signature.output_specs)
+            for arg_node, out_spec in zip(
+                new_gm_out_node.args[0], new_signature.output_specs
+            ):
+                if out_spec.arg.name != arg_node.name:
+                    out_spec.arg.name = arg_node.name
 
-    def _maybe_inline_or_replace_with_hop(node: torch.fx.Node):
-        if _is_set_grad_enabled_sub_mod(node, omit_if_same_with_ambient=True):
-            _replace_with_hop(node)
-        else:
-            _remove_set_grad_and_inline(node)
+            replace_ctx = new_gm._set_replace_hook(new_signature.get_replace_hook())  # type: ignore[assignment]
 
-    nodes_map(
-        list(new_gm.graph.nodes),
-        lambda node: _maybe_inline_or_replace_with_hop(node)
-        if node.op == "call_module"
-        else node,
+        with replace_ctx:
+
+            def _maybe_inline_or_replace_with_hop(node: torch.fx.Node):
+                if _is_set_grad_enabled_sub_mod(node, omit_if_same_with_ambient=True):
+                    _replace_with_hop(node)
+                else:
+                    _remove_set_grad_and_inline(node)
+
+            nodes_map(
+                list(new_gm.graph.nodes),
+                lambda node: (
+                    _maybe_inline_or_replace_with_hop(node)
+                    if node.op == "call_module"
+                    else node
+                ),
+            )
+        new_gm.recompile()
+        return new_gm, new_signature
+
+    return gm, graph_signature
+
+
+def replace_set_grad_with_hop_pass(gm: torch.fx.GraphModule, graph_signature):
+    new_gm, new_signature = _sequential_split_and_maybe_inline_subgraphs(
+        gm, graph_signature
     )
+    # recursively call
+    for node in new_gm.graph.nodes:
+        if node.op == "get_attr":
+            subgm = getattr(new_gm, node.target)
+            if not isinstance(subgm, torch.fx.GraphModule):
+                continue
+            new_subgm, _ = replace_set_grad_with_hop_pass(subgm, None)
+            setattr(new_gm, node.target, new_subgm)
+
+    new_gm.recompile()
     new_gm.graph.lint()
-    return new_gm
+    return new_gm, new_signature

@@ -342,7 +342,10 @@ Tensor qembeddingbag_byte_prepack_meta(const Tensor& weight) {
   output_shape[cols_dim] = output_columns;
   at::SymDimVector output_shape_vec(output_shape);
 
-  return at::empty_symint(output_shape_vec, weight.options().dtype(weight.scalar_type()), weight.suggest_memory_format());
+  return at::empty_symint(
+      output_shape_vec,
+      weight.options().dtype(weight.scalar_type()),
+      weight.suggest_memory_format());
 }
 
 namespace {
@@ -373,9 +376,10 @@ Tensor _qembeddingbag_nbit_prepack_helper(
   int NUM_ELEM_PER_BYTE = 8 / bit_width;
   TORCH_CHECK(
       weight_contig.size(weight.dim() - 1) % NUM_ELEM_PER_BYTE == 0,
-      "qembeddingbag_" + c10::to_string(bit_width) +
-          "bit_prepack only works for the number of columns a multiple of " +
-          c10::to_string(NUM_ELEM_PER_BYTE));
+      "qembeddingbag_",
+      std::to_string(bit_width),
+      "bit_prepack only works for the number of columns a multiple of ",
+      std::to_string(NUM_ELEM_PER_BYTE));
 
   // The "fused" representation stores the scale and bias with the
   // row-wise quantized data in one tensor.
@@ -551,11 +555,9 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
       TORCH_FN(QEmbeddingPackWeights::run));
 }
 
-
 TORCH_LIBRARY_IMPL(quantized, Meta, m) {
   m.impl(
-      "quantized::embedding_bag_byte_prepack",
-      qembeddingbag_byte_prepack_meta);
+      "quantized::embedding_bag_byte_prepack", qembeddingbag_byte_prepack_meta);
 }
 
 } // namespace

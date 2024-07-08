@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import abc
 import faulthandler
 import itertools
 import logging
@@ -38,10 +39,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
-)
-from torch.testing._internal.common_utils import (
-    parametrize,
-    subtest,
+    run_tests,
 )
 from torch.testing._internal.distributed.multi_threaded_pg import (
     _install_threaded_pg,
@@ -308,9 +306,7 @@ def requires_nccl_version(version, msg):
     else:
         return skip_but_pass_in_sandcastle_if(
             torch.cuda.nccl.version() < version,
-            "Requires NCCL version greater than or equal to: {}, found: {}, reason: {}".format(
-                version, torch.cuda.nccl.version(), msg
-            ),
+            f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
         )
 
 
@@ -361,7 +357,7 @@ def create_tcp_store(
     timeout=timedelta(minutes=5),
     wait_for_workers=True,
     jit_class=False,
-    use_libuv=False
+    use_libuv=True,
 ):
     """
     Creates a TCP store. Retries if the chosen port is already in use.
@@ -548,7 +544,11 @@ class MultiProcessTestCase(TestCase):
     # Constructor patches current instance test method to
     # assume the role of the main process and join its subprocesses,
     # or run the underlying test function.
-    def __init__(self, method_name: str = "runTest") -> None:
+    def __init__(self, method_name: str = "runTest", methodName: str = "runTest") -> None:
+        # methodName is the correct naming in unittest and testslide uses keyword arguments.
+        # So we need to use both to 1) not break BC and, 2) support testslide.
+        if methodName != "runTest":
+            method_name = methodName
         super().__init__(method_name)
         fn = getattr(self, method_name)
         setattr(self, method_name, self.join_or_run(fn))
@@ -802,9 +802,8 @@ class MultiProcessTestCase(TestCase):
                 # Get error from pipe.
                 error_message = self.pid_to_pipe[process.pid].recv()
                 error += (
-                    "Process {} exited with error code {} and exception:\n{}\n".format(
-                        i, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, error_message
-                    )
+                    f"Process {i} exited with error code {MultiProcessTestCase.TEST_ERROR_EXIT_CODE} "
+                    f"and exception:\n{error_message}\n"
                 )
 
             raise RuntimeError(error)
@@ -818,9 +817,7 @@ class MultiProcessTestCase(TestCase):
             self.assertEqual(
                 p.exitcode,
                 first_process.exitcode,
-                msg="Expect process {} exit code to match Process 0 exit code of {}, but got {}".format(
-                    i, first_process.exitcode, p.exitcode
-                ),
+                msg=f"Expect process {i} exit code to match Process 0 exit code of {first_process.exitcode}, but got {p.exitcode}",
             )
         for skip in TEST_SKIPS.values():
             if first_process.exitcode == skip.exit_code:
@@ -874,7 +871,9 @@ def run_subtests(
         # Map keyword to chosen value
         subtest_kwargs = dict(zip(subtest_config_keys, values))
         with cls_inst.subTest(**subtest_kwargs):
+            torch._dynamo.reset()
             test_fn(*test_args, **test_kwargs, **subtest_kwargs)
+            torch._dynamo.reset()
         c10d.barrier()
 
 
@@ -995,10 +994,14 @@ class MultiThreadedTestCase(TestCase):
 
         return types.MethodType(wrapper, self)
 
-    def __init__(self, method_name: str = "runTest") -> None:
+    def __init__(self, method_name: str = "runTest", methodName: str = "runTest") -> None:
+        # methodName is the correct naming in unittest and testslide uses keyword arguments.
+        # So we need to use both to 1) not break BC and, 2) support testslide.
+        if methodName != "runTest":
+            method_name = methodName
         super().__init__(method_name)
-        test_fn = getattr(self, method_name, None)
-        setattr(self, method_name, self.join_or_run(test_fn))
+        fn = getattr(self, method_name)
+        setattr(self, method_name, self.join_or_run(fn))
 
     def perThreadSetUp(self):
         # super().setUp()  # TestCase.setUp() calls torch.manual_seed()
@@ -1301,55 +1304,102 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
         self.run_test(test_name, parent_pipe)
 
 
-# NOTE [test parametrization utils for native funcol migration]
-#
-# Between the time we switch to the native funcol by default and the time when
-# we are confident that we can remove the legacy implementation, we want to
-# ensure that the legacy funcol remains covered by unit tests. This is to
-# prepare for any potential (but unlikely) reverts. The following utilities
-# help achieve this goal.
-#
-# run_with_{native,legacy}_funcol - mark a test to run with only
-# {native,legacy} funcol. These decorators are for impl specific tests (e.g.
-# verifying generated code with FileCheck).
-#
-# run_with_both_funcol_impls - parametrize a test to run with both legacy and
-# native funcol.
-#
-# run_with_both_funcol_impls_with_arg - same as run_with_both_funcol_impls, but
-# passes `enable_native_funcol` to the test so impl specific checks can be
-# carried out.
-def with_native_funcol(use_native_funcol: bool, remove_arg: bool):
-    import torch.distributed._functional_collectives_impl as funcol_impl
+class MultiProcContinousTest(TestCase):
+    # Class variables:
+    # number of test processes
+    world_size: int = 2
+    # rank of the current process
+    rank: int = -1  # unset state
+    # Rendezvous file
+    rdvz_file: Optional[str] = None
 
-    def decorator(fn):
-        def inner(*args, **kwargs):
-            if remove_arg:
-                del kwargs["use_native_funcol"]
-            with patch.object(funcol_impl, '_use_native_funcol', new=use_native_funcol):
-                return fn(*args, **kwargs)
+    @classmethod
+    @abc.abstractmethod
+    def backend_str(cls) -> str:
+        """
+        ProcessGroup backend str.
+        To be customized by sub test classes, e.g. "nccl".
+        Here we raise error.
+        """
+        raise NotImplementedError("Please implement backend_str in your test class")
 
-        return inner
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        """
+        ProcessGroup init options.
+        To be customized by sub test classes, e.g. ProcessGroupNCCLOpTest
+        Here we return None.
+        """
+        return None
 
-    return decorator
+    @classmethod
+    def setUpClass(cls):
+        """
+        Class-scope test fixture. Run once for entire test class, before any test starts.
+        Set up the process group.
+        """
+        super().setUpClass()
+        if not 0 <= cls.rank < cls.world_size:
+            raise RuntimeError(
+                "Rank must be set and in the range of 0 to world_size. "
+                f"World size: {cls.world_size} Rank: {cls.rank}"
+            )
+        if cls.rdvz_file:
+            store = c10d.FileStore(cls.rdvz_file, cls.world_size)
+        else:
+            # torchrun takes care of rendezvous
+            store = None
+        opts = cls.opts()
+        backend = cls.backend_str()
+        print(f"Testing {backend=}")
+        # create nccl processgroup with opts
+        c10d.init_process_group(
+            backend=backend,
+            world_size=cls.world_size,
+            rank=cls.rank,
+            store=store,
+            pg_options=opts,
+        )
+        cls.pg = c10d.distributed_c10d._get_default_group()
+        print(f"Rank {cls.rank} setup complete")
 
+    @classmethod
+    def tearDownClass(cls):
+        """
+        Class-scope test fixture. Run once for entire test class, after all tests finish.
+        Tear down the process group.
+        """
+        c10d.destroy_process_group()
+        super().tearDownClass()
+        # Clear up the rendezvous file
+        if cls.rdvz_file:
+            try:
+                os.remove(cls.rdvz_file)
+            except OSError:
+                pass
+        print(f"Rank {cls.rank} teardown complete")
 
-run_with_native_funcol = with_native_funcol(True, remove_arg=False)
-run_with_legacy_funcol = with_native_funcol(False, remove_arg=False)
+    @classmethod
+    def run_rank(
+        cls,
+        rank: int,
+        world_size: int,
+        rdvz_file: Optional[str] = None,
+    ):
+        """
+        This is an entry point for each rank to run the tests in `MultiProcContinousTest`.
+        In this entry point, we set the class variables for the test class.
+        Then we run all tests.
 
+        Note:
+        - This helper only works for a subclass of `MultiProcContinousTest`.
 
-run_with_both_funcol_impls = parametrize(
-    "use_native_funcol",
-    [
-        subtest(True, decorators=[with_native_funcol(True, remove_arg=True)]),
-        subtest(False, decorators=[with_native_funcol(False, remove_arg=True)]),
-    ]
-)
-
-run_with_both_funcol_impls_with_arg = parametrize(
-    "use_native_funcol",
-    [
-        subtest(True, decorators=[with_native_funcol(True, remove_arg=False)]),
-        subtest(False, decorators=[with_native_funcol(False, remove_arg=False)]),
-    ]
-)
+        Example:
+        - See `test_c10d_ops_nccl.py`.
+        """
+        # set class variables for the test class
+        cls.rank = rank
+        cls.world_size = world_size
+        cls.rdvz_file = rdvz_file
+        # Launch tests via `common_utils` infra
+        run_tests()

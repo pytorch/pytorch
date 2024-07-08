@@ -79,7 +79,6 @@ if(@USE_CUDA@)
   # If Caffe2 was compiled with the libraries below, they must
   # be found again when including the Caffe2 target.
   set(CAFFE2_USE_CUDA @USE_CUDA@)
-  set(CAFFE2_USE_TENSORRT @USE_TENSORRT@)
 
   # Add current directory to module path so we pick up FindCUDAToolkit.cmake
   set(old_CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}")
@@ -92,12 +91,6 @@ if(@USE_CUDA@)
       "Your installed Caffe2 version uses CUDA but I cannot find the CUDA "
       "libraries. Please set the proper CUDA prefixes and / or install "
       "CUDA.")
-  endif()
-  if(@CAFFE2_USE_TENSORRT@ AND NOT CAFFE2_USE_TENSORRT)
-    message(FATAL_ERROR
-      "Your installed Caffe2 version uses TensorRT but I cannot find the TensorRT "
-      "libraries. Please set the proper TensorRT prefixes and / or install "
-      "TensorRT.")
   endif()
 endif()
 

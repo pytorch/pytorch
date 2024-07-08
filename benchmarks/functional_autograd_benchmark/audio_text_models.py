@@ -1,9 +1,9 @@
-import torch
-
 import torchaudio_models as models
-from torch import nn, Tensor
 
 from utils import check_for_functorch, extract_weights, GetterReturnType, load_weights
+
+import torch
+from torch import nn, Tensor
 
 
 has_functorch = check_for_functorch()

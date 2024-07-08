@@ -7,11 +7,19 @@ import subprocess
 import sys
 import warnings
 
+try:
+    from .common import BenchmarkRunner, download_retry_decorator, main
+except ImportError:
+    from common import BenchmarkRunner, download_retry_decorator, main
+
 import torch
-from common import BenchmarkRunner, download_retry_decorator, main
 
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
+
+# Enable FX graph caching
+if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
+    torch._inductor.config.fx_graph_cache = True
 
 
 def pip_install(package):
@@ -65,8 +73,22 @@ REQUIRE_HIGHER_TOLERANCE = {
     "gmixer_24_224",
     "hrnet_w18",
     "inception_v3",
+    "mixer_b16_224",
+    "mobilenetv3_large_100",
     "sebotnet33ts_256",
     "selecsls42b",
+    "cspdarknet53",
+}
+
+REQUIRE_EVEN_HIGHER_TOLERANCE = {
+    "levit_128",
+    "sebotnet33ts_256",
+    "beit_base_patch16_224",
+}
+
+# These models need higher tolerance in MaxAutotune mode
+REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE = {
+    "gluon_inception_v3",
 }
 
 REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING = {
@@ -92,6 +114,10 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
 
 SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
     "xcit_large_24_p8_224",
+}
+
+REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR = {
+    "mobilenetv3_large_100",
 }
 
 
@@ -166,11 +192,9 @@ def refresh_model_names():
         del all_models_family[key]
 
     chosen_models = set()
-    for value in docs_models_family.values():
-        chosen_models.add(value[0])
+    chosen_models.update(value[0] for value in docs_models_family.values())
 
-    for key, value in all_models_family.items():
-        chosen_models.add(value[0])
+    chosen_models.update(value[0] for key, value in all_models_family.items())
 
     filename = "timm_models_list.txt"
     if os.path.exists("benchmarks"):
@@ -194,10 +218,26 @@ class TimmRunner(BenchmarkRunner):
         return set()
 
     @property
+    def get_output_amp_train_process_func(self):
+        return {}
+
+    @property
     def skip_accuracy_check_as_eager_non_deterministic(self):
         if self.args.accuracy and self.args.training:
             return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
         return set()
+
+    @property
+    def guard_on_nn_module_models(self):
+        return {
+            "convit_base",
+        }
+
+    @property
+    def inline_inbuilt_nn_modules_models(self):
+        return {
+            "lcnet_050",
+        }
 
     @download_retry_decorator
     def _download_model(self, model_name):
@@ -293,8 +333,8 @@ class TimmRunner(BenchmarkRunner):
             if index < start or index >= end:
                 continue
             if (
-                not re.search("|".join(args.filter), model_name, re.I)
-                or re.search("|".join(args.exclude), model_name, re.I)
+                not re.search("|".join(args.filter), model_name, re.IGNORECASE)
+                or re.search("|".join(args.exclude), model_name, re.IGNORECASE)
                 or model_name in args.exclude_exact
                 or model_name in self.skip_models
             ):
@@ -308,6 +348,9 @@ class TimmRunner(BenchmarkRunner):
         else:
             return torch.no_grad()
 
+    def use_larger_multiplier_for_smaller_tensor(self, name):
+        return name in REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR
+
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         tolerance = 1e-3
@@ -319,7 +362,14 @@ class TimmRunner(BenchmarkRunner):
             tolerance = 8 * 1e-2
 
         if is_training:
-            if name in REQUIRE_HIGHER_TOLERANCE:
+            from torch._inductor import config as inductor_config
+
+            if name in REQUIRE_EVEN_HIGHER_TOLERANCE or (
+                inductor_config.max_autotune
+                and name in REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE
+            ):
+                tolerance = 8 * 1e-2
+            elif name in REQUIRE_HIGHER_TOLERANCE:
                 tolerance = 4 * 1e-2
             else:
                 tolerance = 1e-2

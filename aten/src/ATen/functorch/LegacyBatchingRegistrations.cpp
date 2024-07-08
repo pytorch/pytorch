@@ -536,7 +536,7 @@ Tensor cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
   // we'll just slice the tensor to get a Tensor of shape [0] to pass to at::cat.
   std::vector<Tensor> tensors_to_cat;
   tensors_to_cat.reserve(tensors.size());
-  c10::optional<int64_t> bdim_size = c10::nullopt;
+  std::optional<int64_t> bdim_size = c10::nullopt;
 
   // find the bdim size. Might not exist if all BatchedTensors should be skipped
   // by cat's special case.
@@ -573,7 +573,7 @@ Tensor cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
   }
 
   auto new_dim = bdim_size.has_value() ? dim + 1 : dim;
-  c10::optional<int64_t> new_bdim = bdim_size.has_value() ? c10::make_optional((int64_t)0) : nullopt;
+  std::optional<int64_t> new_bdim = bdim_size.has_value() ? c10::make_optional((int64_t)0) : nullopt;
   auto result = at::cat(tensors_to_cat, new_dim);
   return makeBatched(result, new_bdim, get_current_level());
 }
@@ -693,7 +693,7 @@ Tensor new_empty_strided_batching_rule(
 }
 
 Tensor nested_cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
-  TORCH_CHECK(tensors.size() > 0, "cat() not supported on empty tensor list");
+  TORCH_CHECK(!tensors.empty(), "cat() not supported on empty tensor list");
 
   std::vector<std::vector<Tensor>> unbound;
   for (const auto & tensor : tensors) {
@@ -703,7 +703,7 @@ Tensor nested_cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
     TORCH_CHECK(nt.is_nested(), "Tried to run batching rule for cat() on a non-nested tensor");
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::BatchedNestedTensor);
     auto this_unbound = nt.unbind();
-    if (unbound.size() > 0) {
+    if (!unbound.empty()) {
       TORCH_INTERNAL_ASSERT(unbound.front().size() == this_unbound.size(),
           "cat() not supported for differently-sized nested arguments");
     }

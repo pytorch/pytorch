@@ -21,6 +21,8 @@
 #include <ATen/core/GeneratorForPrivateuseone.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <ATen/ops/view.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <ATen/native/transformers/attention.h>
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;
@@ -125,12 +127,18 @@ void quantize_tensor_per_tensor_affine_privateuse1(
     // do nothing
 }
 
+int64_t _fused_sdp_choice_privateuse1(const at::Tensor & query, const at::Tensor & key, const at::Tensor & value,
+    const c10::optional<at::Tensor> & attn_mask, double dropout_p, bool is_causal, c10::optional<double> scale){
+  auto backend = sdp::SDPBackend::overrideable;
+  return static_cast<int64_t>(backend);
+}
 } // namespace
 
 namespace at::native {
 
 REGISTER_PRIVATEUSE1_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_PRIVATEUSE1_DISPATCH(quantize_tensor_per_tensor_affine_stub, &quantize_tensor_per_tensor_affine_privateuse1);
+REGISTER_PRIVATEUSE1_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_privateuse1);
 
 } // namespace at::native
 struct CustomBackendMetadata : public c10::BackendMeta {
@@ -277,11 +285,11 @@ REGISTER_ALLOCATOR(c10::DeviceType::PrivateUse1, &global_custom_alloc);
 // basic dummy empty function, so we can directly construct tensors on the custom device
 // This dummy test device will just use the CPU allocator, and ignores pinned memory.
 at::Tensor custom_empty_memory_format(at::IntArrayRef size,
-                                      c10::optional<at::ScalarType> dtype,
-                                      c10::optional<at::Layout> layout,
-                                      c10::optional<at::Device> device,
-                                      c10::optional<bool> pin_memory,
-                                      c10::optional<at::MemoryFormat> memory_format) {
+                                      std::optional<at::ScalarType> dtype,
+                                      std::optional<at::Layout> layout,
+                                      std::optional<at::Device> device,
+                                      std::optional<bool> pin_memory,
+                                      std::optional<at::MemoryFormat> memory_format) {
   constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
   return at::detail::empty_generic(size,
                                    &global_custom_alloc,
@@ -290,11 +298,11 @@ at::Tensor custom_empty_memory_format(at::IntArrayRef size,
                                    memory_format);
 }
 at::Tensor custom_empty_symint(c10::IntArrayRef size,
-                               c10::optional<at::ScalarType> dtype,
-                               c10::optional<at::Layout> layout,
-                               c10::optional<at::Device> device,
-                               c10::optional<bool> pin_memory,
-                               c10::optional<at::MemoryFormat> memory_format) {
+                               std::optional<at::ScalarType> dtype,
+                               std::optional<at::Layout> layout,
+                               std::optional<at::Device> device,
+                               std::optional<bool> pin_memory,
+                               std::optional<at::MemoryFormat> memory_format) {
   constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
   return at::detail::empty_generic(size,
     &global_custom_alloc, private_use_ks, c10::dtype_or_default(dtype), memory_format);
@@ -368,10 +376,10 @@ at::Tensor custom__copy_from_and_resize(const at::Tensor& self, const at::Tensor
 
 at::Tensor custom_empty_strided(c10::IntArrayRef size,
                                 c10::IntArrayRef stride,
-                                c10::optional<at::ScalarType> dtype_opt,
-                                c10::optional<at::Layout> layout_opt,
-                                c10::optional<at::Device> device_opt,
-                                c10::optional<bool> pin_memory_opt) {
+                                std::optional<at::ScalarType> dtype_opt,
+                                std::optional<at::Layout> layout_opt,
+                                std::optional<at::Device> device_opt,
+                                std::optional<bool> pin_memory_opt) {
   constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
   auto dtype = c10::dtype_or_default(dtype_opt);
   return  at::detail::empty_strided_generic(size, stride, &global_custom_alloc, private_use_ks, dtype);
@@ -406,7 +414,7 @@ at::Tensor& custom_set_source_Storage_storage_offset(at::Tensor& result,
 // basic dummy functions related to pin_memory.
 std::vector<void*> custom_pinned_data_ptr;
 
-at::Tensor custom__pin_memory(const at::Tensor& self, c10::optional<at::Device> device) {
+at::Tensor custom__pin_memory(const at::Tensor& self, std::optional<at::Device> device) {
   TORCH_CHECK(
       self.device().is_cpu(),
       "cannot pin '",
@@ -420,7 +428,7 @@ at::Tensor custom__pin_memory(const at::Tensor& self, c10::optional<at::Device> 
   return dump_pinned_tensor;
 }
 
-bool custom_is_pinned(const at::Tensor& self, c10::optional<at::Device> device) {
+bool custom_is_pinned(const at::Tensor& self, std::optional<at::Device> device) {
   // Only CPU tensors can be pinned
   if (!self.is_cpu()) {
     return false;
@@ -436,7 +444,7 @@ bool custom_is_pinned(const at::Tensor& self, c10::optional<at::Device> device) 
 }
 
 const at::Tensor& custom_resize_(const at::Tensor& self, at::IntArrayRef size,
-                          c10::optional<at::MemoryFormat> optional_memory_format) {
+                          std::optional<at::MemoryFormat> optional_memory_format) {
   at::TensorImpl* tensor_impl = self.unsafeGetTensorImpl();
   tensor_impl->set_sizes_contiguous(size);
   const auto itemsize = tensor_impl->dtype().itemsize();
@@ -456,6 +464,59 @@ const at::Tensor& custom_resize_(const at::Tensor& self, at::IntArrayRef size,
     tensor_impl->empty_tensor_restride(memory_format);
   }
   return self;
+}
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, c10::SymInt, c10::SymInt, at::Tensor, at::Tensor, at::Tensor>
+custom_scaled_dot_product_fused_attention_overrideable(
+    const at::Tensor & query,
+    const at::Tensor & key,
+    const at::Tensor & value,
+    const c10::optional<at::Tensor> & attn_bias,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    std::optional<double> scale) {
+  const int64_t batch_size = query.size(0);
+  const int64_t num_heads = query.size(1);
+  const int64_t head_dim_qk = query.size(3);
+  const int64_t head_dim_v = value.size(3);
+  const int64_t max_seqlen_q = query.size(2);
+  const int64_t max_seqlen_kv = key.size(2);
+
+  auto opts = query.options();
+  auto output = at::empty({batch_size, num_heads, max_seqlen_q, head_dim_v}, opts);
+  auto logsumexp = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
+  auto debug_attn_mask = at::empty({batch_size, num_heads, max_seqlen_q, max_seqlen_kv},
+                                   opts.dtype(at::kFloat));
+  auto philox_seed = at::empty({}, at::dtype(at::kLong));
+  auto philox_offset = at::empty({}, at::dtype(at::kLong));
+
+  return std::make_tuple(output, logsumexp, at::Tensor(), at::Tensor(), max_seqlen_q, max_seqlen_kv, philox_seed, philox_offset, debug_attn_mask);
+}
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
+custom_scaled_dot_product_fused_attention_overrideable_backward(
+    const at::Tensor & grad_out,
+    const at::Tensor & query,
+    const at::Tensor & key,
+    const at::Tensor & value,
+    const at::Tensor & attn_bias,
+    std::array<bool,4> grad_input_mask,
+    const at::Tensor & out,
+    const at::Tensor & logsumexp,
+    const at::Tensor & cum_seq_q,
+    const at::Tensor & cum_seq_k,
+    int64_t max_q,
+    int64_t max_k,
+    double dropout_p,
+    bool is_causal,
+    const at::Tensor & philox_seed,
+    const at::Tensor & philox_offset,
+    std::optional<double> scale) {
+  return std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>(
+          at::empty_like(query),
+          at::empty_like(key),
+          at::empty_like(value),
+          at::empty_like(attn_bias));
 }
 
 // This macro does the heavy lifting.
@@ -482,6 +543,9 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("resize_", &custom_resize_);
   m.impl("as_strided", at::native::as_strided_tensorimpl);
   m.impl("quantize_per_tensor", at::native::quantize_per_tensor);
+  m.impl("_fused_sdp_choice", &_fused_sdp_choice_privateuse1);
+  m.impl("_scaled_dot_product_fused_attention_overrideable", &custom_scaled_dot_product_fused_attention_overrideable);
+  m.impl("_scaled_dot_product_fused_attention_overrideable_backward", &custom_scaled_dot_product_fused_attention_overrideable_backward);
 }
 
 void custom_cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
@@ -492,7 +556,7 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("sub.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
   m.impl("_foreach_add.List", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
   m.impl("index.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
-  m.impl("triu.indices", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
+  m.impl("triu_indices", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
 }
 
 // This basic implementation doesn't bother dealing with different device indices

@@ -22,13 +22,13 @@ namespace at { namespace native {
 // See Note [ATen preprocessor philosophy]
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
+    const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     bool training, double exponential_average_factor, double epsilon) {
   AT_ERROR("miopen_batch_norm: ATen not compiled with MIOpen support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
-    const Tensor& input, const Tensor& grad_output, const Tensor& weight, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
+    const Tensor& input, const Tensor& grad_output, const Tensor& weight, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt, const std::optional<Tensor>& save_mean_opt, const std::optional<Tensor>& save_var_opt,
     double epsilon) {
   AT_ERROR("miopen_batch_norm_backward: ATen not compiled with MIOpen support");
 }
@@ -58,7 +58,7 @@ Tensor expandScale(const Tensor& t, int64_t dim) {
 }  // namespace
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
-    const Tensor& input_t, const Tensor& weight_t, const c10::optional<Tensor>& bias_t_opt, const c10::optional<Tensor>& running_mean_t_opt, const c10::optional<Tensor>& running_var_t_opt,
+    const Tensor& input_t, const Tensor& weight_t, const std::optional<Tensor>& bias_t_opt, const std::optional<Tensor>& running_mean_t_opt, const std::optional<Tensor>& running_var_t_opt,
     bool training, double exponential_average_factor, double epsilon)
 {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -83,7 +83,8 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     checkAllSameType(c, {input, weight});
   }
   checkAllSameType(c, {weight, bias, running_mean, running_var});
-  checkAllContiguous(c, {input, weight, bias, running_mean, running_var});
+  checkAllContiguous(c, {weight, bias, running_mean, running_var});
+  TORCH_CHECK(input->is_contiguous(input->suggest_memory_format()));
   checkDimRange(c, input, 2, 6 /* exclusive */);
   auto num_features = input->size(1);
   for (auto t : {weight, bias, running_mean, running_var}) {
@@ -222,15 +223,15 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
 
   MIOPEN_CHECK(miopenBatchNormalizationBackward(
     handle, mode, &one, &zero, &one, &zero,
-    idesc.desc(), input->data_ptr(),
-    idesc.desc(), grad_output->data_ptr(),
+    idesc.desc(), input->const_data_ptr(),
+    idesc.desc(), grad_output->const_data_ptr(),
     idesc.desc(), grad_input_t.data_ptr(),
-    wdesc.desc(), weight->data_ptr(),
+    wdesc.desc(), weight->const_data_ptr(),
     grad_weight_t.data_ptr(),
     grad_bias_t.data_ptr(),
     epsilon,
-    save_mean->data_ptr(),
-    save_var->data_ptr()));
+    save_mean->const_data_ptr(),
+    save_var->const_data_ptr()));
 
   return std::tuple<Tensor,Tensor,Tensor>{grad_input_t, grad_weight_t, grad_bias_t};
 }

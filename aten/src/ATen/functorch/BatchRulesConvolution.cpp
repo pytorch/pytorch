@@ -124,7 +124,7 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
 }
 
 static Tensor _convolution_decomp(
-    const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_r_opt,
+    const Tensor& input_r, const Tensor& weight_r, const std::optional<Tensor>& bias_r_opt,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) {

@@ -2,7 +2,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <ATen/core/Tensor.h>
-#include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/irange.h>
@@ -446,13 +446,13 @@ _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
         self, return_inverse, /* return_counts */false);
     return std::make_tuple(output, inverse);
   }
-  return AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "unique", [&] {
+  return AT_DISPATCH_V2(self.scalar_type(), "unique", [&] AT_WRAP({
     // The current CPU implementation of unique always sort due to
     // this is faster than hash table
     auto [output, inverse, _] = unique_cpu_sorted_template<scalar_t>(
         self, return_inverse, /* return_counts */false, IsUnique<scalar_t, /* equal_nan */false>());
     return std::make_tuple(output, inverse);
-  });
+  }), AT_EXPAND(AT_ALL_TYPES), kBFloat16, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
 }
 
 std::tuple<Tensor, Tensor, Tensor>
@@ -460,35 +460,35 @@ _unique2_cpu(const Tensor& self, const bool sorted, const bool return_inverse, c
   if (self.scalar_type() == kBool) {
     return unique_cpu_bool_template(self, return_inverse, return_counts);
   }
-  return AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "unique", [&] {
+  return AT_DISPATCH_V2(self.scalar_type(), "unique", AT_WRAP([&] {
     // The current CPU implementation of unique always sort due to
     // this is faster than hash table
     return unique_cpu_sorted_template<scalar_t>(
         self, return_inverse, return_counts, IsUnique<scalar_t, /* equal_nan */ false>());
-  });
+  }), AT_EXPAND(AT_ALL_TYPES), kBFloat16, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
 }
 
 std::tuple<Tensor, Tensor, Tensor>
 unique_dim_cpu(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse, const bool return_counts) {
-  return AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kBool, kHalf, self.scalar_type(), "unique_dim", [&] {
+  return AT_DISPATCH_V2(self.scalar_type(), "unique_dim", AT_WRAP([&] {
     // The current implementation using `dim` always sorts due to unhashable tensors
     return _unique_dim_cpu_template<scalar_t>(self, dim, false, return_inverse, return_counts);
-  });
+  }), AT_EXPAND(AT_ALL_TYPES), kBFloat16, kBool, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
 }
 
 std::tuple<Tensor, Tensor, Tensor>
 unique_dim_consecutive_cpu(const Tensor& self, const int64_t dim, const bool return_inverse, const bool return_counts) {
-  return AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kBool, kHalf, self.scalar_type(), "unique_dim", [&] {
+  return AT_DISPATCH_V2(self.scalar_type(), "unique_dim", AT_WRAP([&] {
     return _unique_dim_cpu_template<scalar_t>(self, dim, true, return_inverse, return_counts);
-  });
+  }), AT_EXPAND(AT_ALL_TYPES), kBFloat16, kBool, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
 }
 
 std::tuple<Tensor, Tensor, Tensor>
-unique_consecutive_cpu(const Tensor& self, const bool return_inverse, const bool return_counts, c10::optional<int64_t> dim) {
+unique_consecutive_cpu(const Tensor& self, const bool return_inverse, const bool return_counts, std::optional<int64_t> dim) {
   if (!dim.has_value() || (dim.value() == 0 && self.dim() == 1)) {
-    return AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kBool, kHalf, self.scalar_type(), "unique", [&] {
+    return AT_DISPATCH_V2(self.scalar_type(), "unique", AT_WRAP([&] {
       return unique_consecutive_cpu_template<scalar_t>(self, return_inverse, return_counts);
-    });
+    }), AT_EXPAND(AT_ALL_TYPES), kBFloat16, kBool, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   }
   return unique_dim_consecutive_cpu(self, dim.value(), return_inverse, return_counts);
 }

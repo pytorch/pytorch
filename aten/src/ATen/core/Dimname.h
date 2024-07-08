@@ -21,7 +21,7 @@ struct TORCH_API Dimname {
   bool isWildcard() const { return type_ == NameType::WILDCARD; }
 
   bool matches(Dimname other) const;
-  c10::optional<Dimname> unify(Dimname other) const;
+  std::optional<Dimname> unify(Dimname other) const;
 
  private:
   Dimname(Symbol name)

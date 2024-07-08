@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import os
 import textwrap
 from enum import auto, Enum
@@ -158,11 +159,32 @@ class UserError(Unsupported):
         self.message = msg
 
 
+class UserStopIteration(TorchDynamoException):
+    value: Optional[Any]
+
+    # Reference `StopIteration_init` in CPython
+    # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
+    def __init__(self, *args, **kwargs):
+        super().__init__("unhandled `raise StopIteration`")
+        if len(args) > 0:
+            self.value = args[0]
+        else:
+            self.value = None
+
+
+class UnsafeScriptObjectError(TorchDynamoException):
+    pass
+
+
 class UncapturedHigherOrderOpError(TorchDynamoException):
     pass
 
 
 class IncorrectUsage(Exception):
+    pass
+
+
+class ObservedException(TorchDynamoException):
     pass
 
 

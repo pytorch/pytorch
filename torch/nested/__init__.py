@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -105,6 +106,9 @@ def as_nested_tensor(
             return torch._nested_tensor_from_tensor_list(ts, dtype, None, device, None)
     elif layout == torch.jagged:
         if isinstance(ts, Tensor):
+            if device is None:
+                device = ts.device
+
             # contiguous() might be necessary to get flattened view.
             # we could probably be more precise about when to do this as an optimization
             values = ts.contiguous().flatten(0, 1).to(device=device, dtype=dtype)
@@ -186,7 +190,7 @@ Example::
 
 def nested_tensor(tensor_list, *, dtype=None, layout=None, device=None, requires_grad=False, pin_memory=False) -> Tensor:
     r"""
-Constructs a nested tensor with no autograd history (also known as a “leaf tensor”, see
+Constructs a nested tensor with no autograd history (also known as a "leaf tensor", see
 :ref:`Autograd mechanics <autograd-mechanics>`) from :attr:`tensor_list` a list of tensors.
 
 Args:

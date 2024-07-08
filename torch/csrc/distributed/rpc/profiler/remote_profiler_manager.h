@@ -1,8 +1,8 @@
 #pragma once
-#include <c10/util/Optional.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 
 namespace torch {
@@ -50,7 +50,7 @@ class TORCH_API RemoteProfilerManager {
   local_id_t getNextLocalId();
   std::unordered_map<ProfilingId, std::string, ProfilingId::Hash>
       profiledRpcKeys_;
-  static thread_local c10::optional<std::string> currentThreadLocalKey_;
+  static thread_local std::optional<std::string> currentThreadLocalKey_;
   std::mutex mutex_;
   local_id_t currentLocalId_;
 };

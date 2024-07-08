@@ -41,6 +41,9 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+    defaults:
+      run:
+        shell: bash
     steps:
       # Duplicated in win-build because this MUST go before a checkout
       - name: Enable git symlinks on Windows and disable fsmonitor daemon
@@ -92,7 +95,7 @@ jobs:
           retry_wait_seconds: 30
           command: |
             set -eu
-            python3 -m pip install rockset==1.0.3
+            python3 -m pip install rockset==1.0.3 'xdoctest>=1.1.0'
 
       - name: Start monitoring script
         id: monitor-script
@@ -224,6 +227,7 @@ jobs:
 
       - name: Parse ref
         id: parse-ref
+        shell: bash
         run: python3 .github/scripts/parse_ref.py
 
       - name: Uninstall PyTorch

@@ -192,34 +192,34 @@ constexpr size_t size(T(&)[N]) {
 }
 
 template <typename Filter, typename T>
-typename std::enable_if_t<std::is_same<Filter, std::nullptr_t>::value, void>
+typename std::enable_if_t<std::is_same_v<Filter, std::nullptr_t>, void>
 call_filter(Filter filter, T& val) {}
 
 template <typename Filter, typename T>
-typename std::enable_if_t< std::is_same<Filter, std::nullptr_t>::value, void>
+typename std::enable_if_t< std::is_same_v<Filter, std::nullptr_t>, void>
 call_filter(Filter filter, T& first, T& second) { }
 
 template <typename Filter, typename T>
-typename std::enable_if_t< std::is_same<Filter, std::nullptr_t>::value, void>
+typename std::enable_if_t< std::is_same_v<Filter, std::nullptr_t>, void>
 call_filter(Filter filter, T& first, T& second, T& third) {  }
 
 template <typename Filter, typename T>
 typename std::enable_if_t<
-    !std::is_same<Filter, std::nullptr_t>::value, void>
+    !std::is_same_v<Filter, std::nullptr_t>, void>
     call_filter(Filter filter, T& val) {
     return filter(val);
 }
 
 template <typename Filter, typename T>
 typename std::enable_if_t<
-    !std::is_same<Filter, std::nullptr_t>::value, void>
+    !std::is_same_v<Filter, std::nullptr_t>, void>
     call_filter(Filter filter, T& first, T& second) {
     return filter(first, second);
 }
 
 template <typename Filter, typename T>
 typename std::enable_if_t<
-    !std::is_same<Filter, std::nullptr_t>::value, void>
+    !std::is_same_v<Filter, std::nullptr_t>, void>
     call_filter(Filter filter, T& first, T& second, T& third) {
     return filter(first, second, third);
 }
@@ -268,38 +268,30 @@ std::ostream& operator<<(std::ostream& stream, const CheckWithinDomains<T>& dmn)
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point<T>::value, bool> check_both_nan(T x,
-    T y) {
-    return std::isnan(x) && std::isnan(y);
-}
-
-template <typename T>
-std::enable_if_t<!std::is_floating_point<T>::value, bool> check_both_nan(T x,
-    T y) {
+bool check_both_nan(T x, T y) {
+    if constexpr (std::is_floating_point_v<T>) {
+        return std::isnan(x) && std::isnan(y);
+    }
     return false;
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point<T>::value, bool> check_both_inf(T x,
-    T y) {
-    return std::isinf(x) && std::isinf(y);
-}
-
-template <typename T>
-std::enable_if_t<!std::is_floating_point<T>::value, bool> check_both_inf(T x,
-    T y) {
+bool check_both_inf(T x, T y) {
+    if constexpr (std::is_floating_point_v<T>) {
+        return std::isinf(x) && std::isinf(y);
+    }
     return false;
 }
 
 template<typename T>
-std::enable_if_t<!std::is_floating_point<T>::value, bool> check_both_big(T x, T y) {
+std::enable_if_t<!std::is_floating_point_v<T>, bool> check_both_big(T x, T y) {
     return false;
 }
 
 template<typename T>
-std::enable_if_t<std::is_floating_point<T>::value, bool> check_both_big(T x, T y) {
-    T cmax = std::is_same<T, float>::value ? static_cast<T>(1e+30) : static_cast<T>(1e+300);
-    T cmin = std::is_same<T, float>::value ? static_cast<T>(-1e+30) : static_cast<T>(-1e+300);
+std::enable_if_t<std::is_floating_point_v<T>, bool> check_both_big(T x, T y) {
+    T cmax = std::is_same_v<T, float> ? static_cast<T>(1e+30) : static_cast<T>(1e+300);
+    T cmin = std::is_same_v<T, float> ? static_cast<T>(-1e+30) : static_cast<T>(-1e+300);
     //only allow when one is inf
     bool x_inf = std::isinf(x);
     bool y_inf = std::isinf(y);
@@ -330,7 +322,7 @@ T safe_fpt_division(T f1, T f2)
 }
 
 template<class T>
-std::enable_if_t<std::is_floating_point<T>::value, bool>
+std::enable_if_t<std::is_floating_point_v<T>, bool>
 nearlyEqual(T a, T b, T tolerance) {
     if (check_both_nan<T>(a, b)) return true;
     if (check_both_big(a, b)) return true;
@@ -346,7 +338,7 @@ nearlyEqual(T a, T b, T tolerance) {
 }
 
 template<class T>
-std::enable_if_t<!std::is_floating_point<T>::value, bool>
+std::enable_if_t<!std::is_floating_point_v<T>, bool>
 nearlyEqual(T a, T b, T tolerance) {
     return a == b;
 }
@@ -403,13 +395,12 @@ void copy_interleave(VT(&vals)[N], VT(&interleaved)[N]) {
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point<T>::value, bool> is_zero(T val) {
-    return std::fpclassify(val) == FP_ZERO;
-}
-
-template <typename T>
-std::enable_if_t<!std::is_floating_point<T>::value, bool> is_zero(T val) {
-    return val == 0;
+bool is_zero(T val) {
+    if constexpr (std::is_floating_point_v<T>) {
+        return std::fpclassify(val) == FP_ZERO;
+    } else {
+        return val == 0;
+    }
 }
 
 template <typename T>
@@ -420,7 +411,7 @@ void filter_clamp(T& f, T& s, T& t) {
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point<T>::value, void> filter_fmod(T& a, T& b) {
+std::enable_if_t<std::is_floating_point_v<T>, void> filter_fmod(T& a, T& b) {
     // This is to make sure fmod won't cause overflow when doing the div
     if (std::abs(b) < (T)1) {
       b = b < (T)0 ? (T)-1 : T(1);
@@ -428,7 +419,7 @@ std::enable_if_t<std::is_floating_point<T>::value, void> filter_fmod(T& a, T& b)
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point<T>::value, void> filter_fmadd(T& a, T& b, T& c) {
+std::enable_if_t<std::is_floating_point_v<T>, void> filter_fmadd(T& a, T& b, T& c) {
     // This is to setup a limit to make sure fmadd (a * b + c) won't overflow
     T max = std::sqrt(std::numeric_limits<T>::max()) / T(2.0);
     T min = ((T)0 - max);
@@ -550,7 +541,7 @@ filter_div_ub(T& val1, T& val2) {
     if (is_zero(val2)) {
         val2 = 1;
     }
-    else if (std::is_integral<T>::value && val1 == std::numeric_limits<T>::min() && val2 == -1) {
+    else if (std::is_integral_v<T> && val1 == std::numeric_limits<T>::min() && val2 == -1) {
         val2 = 1;
     }
 }
@@ -574,7 +565,7 @@ private:
     uint64_t seed;
 };
 
-template <typename T, bool is_floating_point = std::is_floating_point<T>::value, bool is_complex = is_complex<T>::value>
+template <typename T, bool is_floating_point = std::is_floating_point_v<T>, bool is_complex = is_complex<T>::value>
 struct ValueGen
 {
     std::uniform_int_distribution<int64_t> dis;
@@ -936,7 +927,7 @@ void test_unary(
     CACHE_ALIGN VT vals[el_count];
     CACHE_ALIGN VT expected[el_count];
     bool bitwise = testCase.isBitwise();
-    UVT default_start = std::is_floating_point<UVT>::value ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
+    UVT default_start = std::is_floating_point_v<UVT> ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
     UVT default_end = std::numeric_limits<UVT>::max();
     auto domains = testCase.getDomains();
     auto domains_size = domains.size();
@@ -992,7 +983,7 @@ void test_binary(
     CACHE_ALIGN VT vals1[el_count];
     CACHE_ALIGN VT expected[el_count];
     bool bitwise = testCase.isBitwise();
-    UVT default_start = std::is_floating_point<UVT>::value ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
+    UVT default_start = std::is_floating_point_v<UVT> ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
     UVT default_end = std::numeric_limits<UVT>::max();
     auto domains = testCase.getDomains();
     auto domains_size = domains.size();
@@ -1053,7 +1044,7 @@ void test_ternary(
     CACHE_ALIGN VT vals2[el_count];
     CACHE_ALIGN VT expected[el_count];
     bool bitwise = testCase.isBitwise();
-    UVT default_start = std::is_floating_point<UVT>::value ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
+    UVT default_start = std::is_floating_point_v<UVT> ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
     UVT default_end = std::numeric_limits<UVT>::max();
     auto domains = testCase.getDomains();
     auto domains_size = domains.size();
@@ -1444,10 +1435,28 @@ double getDefaultTolerance() {
 }
 
 template<typename T>
+at::vec::VecMask<T, 1> create_vec_mask(uint64_t bitmask) {
+  constexpr auto N = at::vec::Vectorized<T>::size();
+  std::array<int, N> mask;
+  for (int i = 0; i < N; i++) {
+    mask[i] = (bitmask >> i) & 1;
+  }
+  return at::vec::VecMask<T, 1>::from(mask.data());
+}
+
+template<typename T>
+at::vec::VecMask<T, 1> generate_vec_mask(int seed) {
+  constexpr auto N = at::vec::Vectorized<T>::size();
+  ValueGen<uint64_t> generator(0, (1ULL << N) - 1, seed);
+  auto bitmask = generator.get();
+  return create_vec_mask<T>(bitmask);
+}
+
+template<typename T>
 TestingCase<T> createDefaultUnaryTestCase(TestSeed seed = TestSeed(), bool bitwise = false, bool checkWithTolerance = false, size_t trials = 0) {
     using UVT = UvalueType<T>;
     TestingCase<T> testCase;
-    if (!bitwise && std::is_floating_point<UVT>::value) {
+    if (!bitwise && std::is_floating_point_v<UVT>) {
         //for float types lets add manual ranges
         UVT tolerance = getDefaultTolerance<UVT>();
         testCase = TestingCase<T>::getBuilder()
@@ -1475,7 +1484,7 @@ template<typename T>
 TestingCase<T> createDefaultBinaryTestCase(TestSeed seed = TestSeed(), bool bitwise = false, bool checkWithTolerance = false, size_t trials = 0) {
     using UVT = UvalueType<T>;
     TestingCase<T> testCase;
-    if (!bitwise && std::is_floating_point<UVT>::value) {
+    if (!bitwise && std::is_floating_point_v<UVT>) {
         //for float types lets add manual ranges
         UVT tolerance = getDefaultTolerance<UVT>();
         testCase = TestingCase<T>::getBuilder()

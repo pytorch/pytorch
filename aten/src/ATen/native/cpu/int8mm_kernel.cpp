@@ -180,15 +180,138 @@ inline void tinygemm_kernel(
   c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
 
-#else
+#endif
 
-// non-vectorized version
+#if !defined(C10_MOBILE) && defined(__aarch64__)
+#include <arm_neon.h>
+
+inline float reduce(float32x4_t x) {
+        auto sum = vpaddq_f32(x, x);
+        return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
+}
+
+inline float32x4x2_t load_as_float32x4x2(const Half* ptr) {
+  float16x8_t f16_val = vld1q_f16(reinterpret_cast<const float16_t *>(ptr));
+  auto val_low = vcvt_f32_f16(vget_low_f16(f16_val));
+  auto val_high = vcvt_f32_f16(vget_high_f16(f16_val));
+  return {val_low, val_high};
+}
+
+inline float32x4_t load_as_float32x4(const Half* ptr) {
+    return vcvt_f32_f16(vld1_f16(reinterpret_cast<const float16_t *>(ptr)));
+}
+
+inline float32x4x2_t load_as_float32x4x2(const BFloat16* ptr) {
+  int32x4_t shift = vdupq_n_s32(16);
+  uint16x8_t u16_val = vld1q_u16(reinterpret_cast<const uint16_t *>(ptr));
+  uint32x4_t int_low = vmovl_u16(vget_low_u16(u16_val));
+  uint32x4_t int_high = vmovl_u16(vget_high_u16(u16_val));
+  return {vreinterpretq_f32_u32(vshlq_u32(int_low, shift)), vreinterpretq_f32_u32(vshlq_u32(int_high, shift))};
+}
+
+inline float32x4_t load_as_float32x4(const BFloat16* ptr) {
+  int32x4_t shift = vdupq_n_s32(16);
+  uint32x4_t as_int = vmovl_u16(vld1_u16(reinterpret_cast<const uint16_t *>(ptr)));
+  return vreinterpretq_f32_u32(vshlq_u32(as_int, shift));
+}
+
+inline float32x4_t load_as_float32x4(const float* ptr) {
+  return vld1q_f32(ptr);
+}
+
+inline float32x4x2_t load_as_float32x4x2(const float* ptr) {
+  return {vld1q_f32(ptr), vld1q_f32(ptr + 4)};
+}
+
+template <int BLOCK_M, int BLOCK_N, typename T>
+inline void tinygemm_kernel_(
+    const T* RESTRICT A,
+    const int8_t* RESTRICT B,
+    const T* RESTRICT scales,
+    T* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K) {
+
+  for (const auto m : c10::irange(BLOCK_M)) {
+    float32x4_t c_val[BLOCK_N];
+    c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
+        c_val[i] = vdupq_n_f32(0.0);
+    });
+    for (int k = 0; k < K; k += 8) {
+      auto a_val = load_as_float32x4x2(A + m * lda + k);
+      c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
+        int16x8_t b_val = vmovl_s8(vld1_s8(B + i * ldb + k));
+        auto b_val_low = vcvtq_f32_s32(vmovl_s16(vget_low_s16(b_val)));
+        auto b_val_high = vcvtq_f32_s32(vmovl_s16(vget_high_s16(b_val)));
+        c_val[i] = vfmaq_f32(c_val[i], a_val.val[1], b_val_high);
+        c_val[i] = vfmaq_f32(c_val[i], a_val.val[0], b_val_low);
+      });
+    }
+
+#if __OPTIMIZE__
+    float32x4_t scale_val = load_as_float32x4(scales);
+    c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
+      C[m * ldc + i] = reduce(c_val[i]) * vgetq_lane_f32(scale_val, i);
+    });
+#else
+    // Workaround GCCs inability to infer lane index at compile time
+    // See https://github.com/pytorch/pytorch/issues/126283
+    c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
+      C[m * ldc + i] = reduce(c_val[i]) * float(scales[i]);
+    });
+#endif
+  }
+}
+
+template <int BLOCK_M, int BLOCK_N>
+inline void tinygemm_kernel(
+    const Half* RESTRICT A,
+    const int8_t* RESTRICT B,
+    const Half* RESTRICT scales,
+    Half* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K) {
+  tinygemm_kernel_<BLOCK_M, BLOCK_N>(A, B, scales, C, lda, ldb, ldc, K);
+}
+
 template <int BLOCK_M, int BLOCK_N>
 inline void tinygemm_kernel(
     const BFloat16* RESTRICT A,
     const int8_t* RESTRICT B,
     const BFloat16* RESTRICT scales,
     BFloat16* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K) {
+  tinygemm_kernel_<BLOCK_M, BLOCK_N>(A, B, scales, C, lda, ldb, ldc, K);
+}
+
+template <int BLOCK_M, int BLOCK_N>
+inline void tinygemm_kernel(
+    const float* RESTRICT A,
+    const int8_t* RESTRICT B,
+    const float* RESTRICT scales,
+    float* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K) {
+  tinygemm_kernel_<BLOCK_M, BLOCK_N>(A, B, scales, C, lda, ldb, ldc, K);
+}
+#endif
+
+// non-vectorized version
+template <int BLOCK_M, int BLOCK_N, typename T>
+inline void tinygemm_kernel(
+    const T* RESTRICT A,
+    const int8_t* RESTRICT B,
+    const T* RESTRICT scales,
+    T* RESTRICT C,
     int lda,
     int ldb,
     int ldc,
@@ -207,8 +330,6 @@ inline void tinygemm_kernel(
     }
   }
 }
-
-#endif
 
 #define LAUNCH_TINYGEMM_KERNEL(MB_SIZE, NB_SIZE)                 \
   tinygemm_kernel<MB_SIZE, NB_SIZE>(                             \
@@ -234,16 +355,17 @@ inline void tinygemm_kernel(
       break;                                                     \
   }
 
-void int8pack_mm_kernel(
+template<typename T>
+void int8pack_mm_kernel_(
     const Tensor& C,
     const Tensor& A,
     const Tensor& B,
     const Tensor& scales) {
 
-  const auto* A_data = A.data_ptr<BFloat16>();
-  const auto* B_data = B.data_ptr<int8_t>();
-  auto* C_data = C.data_ptr<BFloat16>();
-  const auto* S_data = scales.data_ptr<BFloat16>();
+  const auto* A_data = A.const_data_ptr<T>();
+  const auto* B_data = B.const_data_ptr<int8_t>();
+  auto* C_data = C.data_ptr<T>();
+  const auto* S_data = scales.const_data_ptr<T>();
 
   int M = A.size(0);
   int N = B.size(0);
@@ -293,6 +415,20 @@ void int8pack_mm_kernel(
       data_index_step(mb, MB, nb, NB);
     }
   });
+}
+
+void int8pack_mm_kernel(
+    const Tensor& C,
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& scales) {
+  if (C.dtype() == kHalf) {
+    int8pack_mm_kernel_<Half>(C, A, B, scales);
+  } else if (C.dtype() == kBFloat16) {
+    int8pack_mm_kernel_<BFloat16>(C, A, B, scales);
+  } else {
+    int8pack_mm_kernel_<float>(C, A, B, scales);
+  }
 }
 
 } // anonymous namespace

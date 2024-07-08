@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <initializer_list>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
@@ -12,6 +13,7 @@
 #include <torch/library.h>
 #include <exception>
 #include <unordered_map>
+#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -71,10 +73,13 @@ static inline std::string getMPSTypeString(const Tensor& t, bool short_name = fa
   return getMPSTypeString(t.scalar_type(), short_name);
 }
 std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type);
+static inline std::string scalarToMetalTypeString(const Tensor& t) {
+  return scalarToMetalTypeString(t.scalar_type());
+}
 NSArray<NSNumber*>* getTensorAxes(const Tensor& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
 std::string getMPSShapeString(MPSShape* shape);
-std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype = true);
+std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype = true, bool exclude_shape = false);
 std::string getArrayRefString(const IntArrayRef s);
 // use has_storage() on the returned tensor to determine if src actually is a view
 Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst);
@@ -329,10 +334,55 @@ inline bool is_dense_in_storage(const at::Tensor& t) {
   return compute_storage_numel_distance(t) == static_cast<size_t>(t.numel());
 }
 
+
+class MetalShaderLibrary {
+public:
+  MetalShaderLibrary(const std::string& src): shaderSource(src), nparams(0), compile_options(nullptr){}
+  MetalShaderLibrary(const std::string& src, unsigned nparams_): shaderSource(src), nparams(nparams_), compile_options(nullptr){}
+  MetalShaderLibrary(const std::string& src, unsigned nparams_, MTLCompileOptions* compile_options_): shaderSource(src), nparams(nparams_), compile_options(compile_options_) {}
+  MetalShaderLibrary(const MetalShaderLibrary&) = delete;
+  inline id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname) {
+    return getLibraryPipelineState(getLibrary(), fname).first;
+  }
+  id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname, const std::initializer_list<std::string>& params) {
+    return getLibraryPipelineState(getLibrary(params), fname).first;
+  }
+  inline id<MTLFunction> getMTLFunction(const std::string& fname) {
+    return getLibraryPipelineState(getLibrary(), fname).second;
+  }
+  id<MTLFunction> getMTLFunction(const std::string& fname, const std::initializer_list<std::string>& params) {
+    return getLibraryPipelineState(getLibrary(params), fname).second;
+  }
+private:
+  std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getLibraryPipelineState(id<MTLLibrary> lib, const std::string& fname);
+  id<MTLLibrary> getLibrary();
+  id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params);
+
+  id<MTLLibrary> compileLibrary(const std::string& src);
+  std::string shaderSource;
+  unsigned nparams;
+  MTLCompileOptions* compile_options;
+  id<MTLLibrary> library = nil;
+  std::unordered_map<std::string, id<MTLLibrary>> libMap;
+  std::unordered_map<std::string, std::pair<id<MTLComputePipelineState>, id<MTLFunction>>> cplMap;
+};
+
 static inline void mtl_setBuffer(id<MTLComputeCommandEncoder> encoder, const Tensor& t, unsigned idx) {
   [encoder setBuffer:getMTLBufferStorage(t)
               offset:t.storage_offset() * t.element_size()
              atIndex:idx];
+}
+
+template<typename T,
+         typename = std::enable_if_t<std::is_integral_v<T> || std::is_same_v<T, float>>>
+static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const T val, unsigned idx) {
+  [encoder setBytes:&val length:sizeof(T) atIndex: idx];
+}
+
+template<typename Container,
+         typename = std::enable_if_t<std::is_integral_v<typename Container::size_type>>>
+static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Container& values, unsigned idx) {
+  [encoder setBytes:values.data() length:sizeof(typename Container::value_type) * values.size() atIndex: idx];
 }
 
 static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
@@ -389,6 +439,21 @@ inline bool supportedFloatingType(ScalarType dtype) {
 
 inline bool supportedFloatingType(const Tensor& t) {
   return supportedFloatingType(t.scalar_type());
+}
+
+inline bool supportedFloatingOrComplexType(ScalarType dtype) {
+  if (dtype == kComplexFloat || dtype == kComplexHalf) {
+    return supportsComplex();
+  }
+  return supportedFloatingType(dtype);
+}
+inline bool supportedFloatingOrComplexType(const Tensor& t) {
+  return supportedFloatingOrComplexType(t.scalar_type());
+}
+
+
+inline bool needsGather(const Tensor& t) {
+  return !t.is_contiguous() || t.storage_offset();
 }
 
 } // namespace at::native::mps

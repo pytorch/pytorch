@@ -143,10 +143,10 @@ std::unordered_map<std::string, std::string> RRefContext::getDebugInfo() {
     numForks += owner.second.size();
   }
   lock.unlock();
-  info[kNumOwnerRRefs] = c10::to_string(ownerSize);
-  info[kNumPendingFutures] = c10::to_string(numPendingFutures_.load());
-  info[kNumPendingUsers] = c10::to_string(numPendingUsers);
-  info[kNumForks] = c10::to_string(numForks);
+  info[kNumOwnerRRefs] = std::to_string(ownerSize);
+  info[kNumPendingFutures] = std::to_string(numPendingFutures_.load());
+  info[kNumPendingUsers] = std::to_string(numPendingUsers);
+  info[kNumForks] = std::to_string(numForks);
   return info;
 }
 

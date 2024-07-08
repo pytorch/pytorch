@@ -132,6 +132,8 @@ struct P2pState {
   uint32_t signals1[kMaxAllReduceBlocks][kMaxDevices];
 };
 
+static_assert(sizeof(P2pState) <= kP2pStateSize);
+
 template <uint32_t kWorldSize, bool kAligned>
 static __global__ void oneShotAllReduceKernel(
     at::BFloat16* input,
@@ -174,7 +176,10 @@ static __global__ void oneShotAllReduceKernel(
     bf16x8 vals[kWorldSize];
 #pragma unroll kWorldSize
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      streamLoad128(vals[ii], &srcs[ii][i]);
+      // Make sure the values in `vals` are order by rank so that the reduction
+      // results are consistent across ranks.
+      int srcRank = (ii + kWorldSize - rank) % kWorldSize;
+      streamLoad128(vals[srcRank], &srcs[ii][i]);
     }
 
     bf16x8 sums;
@@ -504,7 +509,8 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
     at::cuda::CUDAStream& stream) {
   checkInput(input, rank_);
 
-  const size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
+  const size_t numelPerWarp =
+      kBytesPerThread / input.element_size() * kWarpSize;
   const size_t N_aligned = alignUp(input.numel(), numelPerWarp);
   const bool isAligned = (N_aligned == static_cast<size_t>(input.numel()));
   TORCH_CHECK(N_aligned <= bufferSize_ / input.element_size());
@@ -521,7 +527,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
   const bool fuseInputCopy = isAligned && blocks.x < kMaxAllReduceBlocks;
   if (!fuseInputCopy) {
     AT_CUDA_CHECK(cudaMemcpyAsync(
-        buffers_[rank_],
+        symmetricMemory_->get_buffer_ptrs_dev()[rank_],
         input.data_ptr(),
         input.numel() * input.element_size(),
         cudaMemcpyDeviceToDevice,
@@ -581,7 +587,7 @@ at::Tensor IntraNodeComm::twoShotAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      buffers_[rank_],
+      symmetricMemory_->get_buffer_ptrs_dev()[rank_],
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
@@ -631,7 +637,7 @@ at::Tensor IntraNodeComm::hybridCubeMeshAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      buffers_[rank_],
+      symmetricMemory_->get_buffer_ptrs_dev()[rank_],
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
@@ -718,6 +724,43 @@ at::Tensor IntraNodeComm::allReduce(
 
 int64_t getIntraNodeCommUsageCounter() {
   return usageCounter;
+}
+
+static __global__ void barrierKernel(
+    P2pState** p2pStates,
+    uint64_t mask,
+    size_t rank,
+    size_t worldSize) {
+  if (threadIdx.x < worldSize && (mask & (1ULL << threadIdx.x))) {
+    auto targetRank = threadIdx.x;
+    releaseSignal(&p2pStates[targetRank]->signals0[0][rank]);
+    acquireSignal(&p2pStates[rank]->signals0[0][targetRank]);
+  }
+}
+
+void IntraNodeComm::barrier(std::optional<std::vector<int64_t>> ranks) {
+  barrierReady_.block(at::cuda::getCurrentCUDAStream());
+  if (!ranks.has_value()) {
+    ranks = std::vector<int64_t>(worldSize_);
+    std::iota(ranks->begin(), ranks->end(), 0);
+  }
+  uint64_t mask = 0;
+  for (const auto& r : ranks.value()) {
+    TORCH_CHECK(r >= 0 && r < static_cast<int64_t>(worldSize_));
+    mask |= (1ULL << r);
+  }
+  barrierKernel<<<1, kWarpSize, 0, at::cuda::getCurrentCUDAStream()>>>(
+      reinterpret_cast<P2pState**>(p2pStatesDev_), mask, rank_, worldSize_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  barrierReady_.record();
+}
+
+at::Tensor IntraNodeComm::getBuffer(
+    size_t rank,
+    const std::vector<int64_t>& sizes,
+    c10::ScalarType dtype,
+    int64_t storageOffset) {
+  return symmetricMemory_->get_buffer(rank, sizes, dtype, storageOffset);
 }
 
 } // namespace intra_node_comm
