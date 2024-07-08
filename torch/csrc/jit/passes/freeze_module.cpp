@@ -170,7 +170,7 @@ class AttributePropagator {
   std::optional<ResolvedName> resolveName(const std::string& name) {
     auto sub_names = splitName(name);
     if (sub_names.empty()) {
-      return std::nullopt;
+      return c10::nullopt;
     }
     auto& attr_name = sub_names.back();
     auto cur_module = module_;
@@ -189,7 +189,7 @@ class AttributePropagator {
         }
       }
       if (!found) {
-        return std::nullopt;
+        return c10::nullopt;
       }
     }
 
@@ -207,7 +207,7 @@ class AttributePropagator {
       return std::make_pair(std::move(cur_module), std::move(attr_name));
     }
 
-    return std::nullopt;
+    return c10::nullopt;
   }
 
   bool _loadModulePath(Value* input, std::shared_ptr<Graph>& graph) {
@@ -230,7 +230,7 @@ class AttributePropagator {
       std::shared_ptr<Graph>& graph) {
     bool success = _loadModulePath(input, graph);
     if (!success) {
-      return std::nullopt;
+      return c10::nullopt;
     }
     return names_;
   }

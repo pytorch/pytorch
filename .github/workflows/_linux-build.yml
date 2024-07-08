@@ -39,7 +39,7 @@ on:
         type: string
         default: "linux.2xlarge"
         description: |
-          Label of the runner this job should run on.
+          List of CUDA architectures CI build should target.
       test-matrix:
         required: false
         type: string

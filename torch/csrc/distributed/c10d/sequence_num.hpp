@@ -1,9 +1,9 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
+#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <mutex>
-#include <optional>
 #include <vector>
 
 namespace c10d {

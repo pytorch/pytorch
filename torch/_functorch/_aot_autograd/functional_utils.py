@@ -22,6 +22,7 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
+from .. import config
 
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 
@@ -222,8 +223,6 @@ def gen_alias_from_base(
     target_meta_tensor,
     target_requires_grad,
     target_functional_tensor: Optional[FunctionalTensorMetadataEq] = None,
-    *,
-    replay_views,
 ):
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
@@ -241,7 +240,7 @@ def gen_alias_from_base(
     # functions applied to itself (collected during functionalization) so as
     # to replay them (view functions) on the aliased_base_tensor.
     if (
-        replay_views
+        config.view_replay_for_aliased_outputs
         and target_functional_tensor is not None
         and not torch._functionalize_is_symbolic(target_functional_tensor.tensor)
     ):

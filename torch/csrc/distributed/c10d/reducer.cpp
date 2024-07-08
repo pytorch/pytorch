@@ -61,7 +61,7 @@ class CpuTimer : public Timer {
     // calculate the valid avg_time.
     // In this case, skip calculating the avg_time and return.
     if (end_time < start_time) {
-      return std::nullopt;
+      return c10::nullopt;
     }
     return end_time - start_time;
   }
@@ -499,7 +499,7 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
         bucket.lengths,
         bucket.sizes_vec,
         variables_for_bucket,
-        std::nullopt);
+        c10::nullopt);
   }
   return gradBuckets;
 }
@@ -1655,9 +1655,9 @@ void Reducer::finalize_backward() {
     }
   }
 
-  if (installed_futures_ != std::nullopt) {
+  if (installed_futures_ != c10::nullopt) {
     c10::collectAll(*installed_futures_)->wait();
-    installed_futures_ = std::nullopt;
+    installed_futures_ = c10::nullopt;
   }
 
   // See Note [Skip allreducing local_used_maps_dev]

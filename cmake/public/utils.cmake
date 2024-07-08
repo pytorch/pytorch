@@ -405,6 +405,12 @@ endmacro()
 #   torch_compile_options(lib_name)
 function(torch_compile_options libname)
   set_property(TARGET ${libname} PROPERTY CXX_STANDARD 17)
+  set(private_compile_options "")
+
+  # ---[ Check if warnings should be errors.
+  if(WERROR)
+    list(APPEND private_compile_options -Werror)
+  endif()
 
   # until they can be unified, keep these lists synced with setup.py
   if(MSVC)
@@ -423,7 +429,7 @@ function(torch_compile_options libname)
         /bigobj>
       )
   else()
-    set(private_compile_options
+    list(APPEND private_compile_options
       -Wall
       -Wextra
       -Wdeprecated
@@ -435,13 +441,17 @@ function(torch_compile_options libname)
       -Wno-strict-overflow
       -Wno-strict-aliasing
       )
-    list(APPEND private_compile_options -Wunused-function)
-    list(APPEND private_compile_options -Wunused-variable)
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      list(APPEND private_compile_options -Wunused-but-set-variable)
-    endif()
-    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-      list(APPEND private_compile_options -Wunused-private-field)
+    if("${libname}" STREQUAL "torch_cpu")
+      list(APPEND private_compile_options -Wunused-function)
+      list(APPEND private_compile_options -Wunused-variable)
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        list(APPEND private_compile_options -Wunused-but-set-variable)
+      endif()
+      if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+        list(APPEND private_compile_options -Wunused-private-field)
+      endif()
+    else()
+      list(APPEND private_compile_options -Wno-unused-function)
     endif()
     if(NOT "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
       list(APPEND private_compile_options
@@ -451,16 +461,7 @@ function(torch_compile_options libname)
     endif()
 
     if(WERROR)
-      list(APPEND private_compile_options
-        -Werror
-        -Wno-strict-overflow
-        -Werror=inconsistent-missing-override
-        -Werror=inconsistent-missing-destructor-override
-        -Werror=unused-function
-        -Werror=unused-variable)
-      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        list(APPEND private_compile_options -Werror=unused-but-set-variable)
-      endif()
+      list(APPEND private_compile_options -Wno-strict-overflow)
     endif()
   endif()
 

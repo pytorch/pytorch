@@ -74,7 +74,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
         uint64_t seq,
         const char* profilingTitle = nullptr,
         const std::optional<std::vector<at::Tensor>>& inputTensors =
-            std::nullopt);
+            c10::nullopt);
 
     ~AsyncWork() override = default;
 

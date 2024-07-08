@@ -47,7 +47,7 @@ class TORCH_API Timer {
   std::optional<int64_t> getTimestamp(Event event) {
     auto time = getTimeRef(event);
     if (time == kUnsetTime) {
-      return std::nullopt;
+      return c10::nullopt;
     } else {
       return time;
     }
