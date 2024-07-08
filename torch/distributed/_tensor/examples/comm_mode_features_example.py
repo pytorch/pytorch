@@ -93,7 +93,7 @@ class CommDebugModeExample:
 
         return model, inp
 
-    def test_MLP_distributed_sharding_display(self) -> None:
+    def example_MLP_distributed_sharding_display(self) -> None:
         """
         Example of obtaining all module's FQN and parameters for a given distributed model and printing the sharding info
 
@@ -115,7 +115,7 @@ class CommDebugModeExample:
 
         comm_mode.print_sharding_info()
 
-    def test_MLPStacked_distributed_sharding_display(self) -> None:
+    def example_MLPStacked_distributed_sharding_display(self) -> None:
         """
         Example of obtaining all module's FQN and parameters for a given
         distributed model with nested modules and printing the sharding info
@@ -152,7 +152,7 @@ class CommDebugModeExample:
 
         comm_mode.print_sharding_info()
 
-    def test_MLP_module_tracing(self) -> None:
+    def example_MLP_module_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module level tracing using a MLP model.
         Prints a table of module level collective tracing information and logs table to output.txt
@@ -185,7 +185,7 @@ class CommDebugModeExample:
         print(comm_mode.generate_module_tracing_table())
         comm_mode.log_module_tracing_table_to_file()
 
-    def test_transformer_module_tracing(self) -> None:
+    def example_transformer_module_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module level tracing using a distributed Transformer model.
         Prints a table of module level collective tracing information and logs table to output.txt
@@ -273,7 +273,7 @@ class CommDebugModeExample:
         print(comm_mode.generate_module_tracing_table())
         comm_mode.log_module_tracing_table_to_file()
 
-    def test_MLP_operation_tracing(self) -> None:
+    def example_MLP_operation_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module operation level tracing using a distributed MLP model.
         Prints a table of module opoeration level collective tracing information and logs table to output.txt
@@ -489,7 +489,9 @@ class CommDebugModeExample:
         print(comm_mode.generate_operation_tracing_table())
         comm_mode.log_operation_tracing_table_to_file()
 
-    def test_transformer_operation_tracing(self, is_seq_parallel: bool = False) -> None:
+    def example_transformer_operation_tracing(
+        self, is_seq_parallel: bool = False
+    ) -> None:
         """
         Example code to demonstrate CommModeDebug's module operation level tracing using a distributed transformer model.
         Prints a table of module opoeration level collective tracing information and logs table to output.txt
@@ -507,19 +509,53 @@ class CommDebugModeExample:
         print(comm_mode.generate_operation_tracing_table())
         comm_mode.log_operation_tracing_table_to_file()
 
+    def example_MLP_json_dump(self) -> None:
+        """
+        Example code to demonstrate CommModeDebug's json dump using a MLP model. Sends the information to default
+        comm_mode_log.json file
+        """
+        torch.manual_seed(0)
+
+        model, inp = self._MLP_model_setup(model_type=MLPModule)
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            output_tp = model(inp)
+            output_tp.sum().backward()
+
+        comm_mode.generate_json_dump()
+
+    def example_transformer_json_dump(self, is_seq_parallel: bool = False) -> None:
+        """
+        Example code to demonstrate CommModeDebug's json dump using a transformer model. Sends the information to
+        user-passed transformer_log.json file
+        """
+
+        torch.manual_seed(0)
+
+        model, inp = self._transformer_model_setup()
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            output = model(inp)
+
+        comm_mode.generate_json_dump(file_name="transformer_log.json")
+
 
 def run_example(world_size: int, rank: int, example_name: str) -> None:
     # set manual seed
     # intializing class with all of the functions
-    instantiated_test = CommDebugModeExample(world_size, rank)
+    instantiated_example = CommDebugModeExample(world_size, rank)
     # dict that stores example code function names
     name_to_example_code: Dict[str, Callable[[], None]] = {
-        "MLP_distributed_sharding_display": instantiated_test.test_MLP_distributed_sharding_display,
-        "MLPStacked_distributed_sharding_display": instantiated_test.test_MLPStacked_distributed_sharding_display,
-        "MLP_module_tracing": instantiated_test.test_MLP_module_tracing,
-        "transformer_module_tracing": instantiated_test.test_transformer_module_tracing,
-        "MLP_operation_tracing": instantiated_test.test_MLP_operation_tracing,
-        "transformer_operation_tracing": instantiated_test.test_transformer_operation_tracing,
+        "MLP_distributed_sharding_display": instantiated_example.example_MLP_distributed_sharding_display,
+        "MLPStacked_distributed_sharding_display": instantiated_example.example_MLPStacked_distributed_sharding_display,
+        "MLP_module_tracing": instantiated_example.example_MLP_module_tracing,
+        "transformer_module_tracing": instantiated_example.example_transformer_module_tracing,
+        "MLP_operation_tracing": instantiated_example.example_MLP_operation_tracing,
+        "transformer_operation_tracing": instantiated_example.example_transformer_operation_tracing,
+        "MLP_json_dump": instantiated_example.example_MLP_json_dump,
+        "transformer_json_dump": instantiated_example.example_transformer_json_dump,
     }
 
     name_to_example_code[example_name]()
