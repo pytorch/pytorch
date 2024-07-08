@@ -23,7 +23,7 @@ from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from ..._dynamo.utils import counters
 
-from .. import codecache, config, ir, metrics
+from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import (
@@ -1233,11 +1233,6 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def remainder(a, b):
-        # Since we register remainder as ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT in
-        # the lowering phase: https://github.com/pytorch/pytorch/blob/
-        # eb1583dbc1a8c4a8f0d1525438f16350f11f1208/torch/_inductor/lowering.py#L5853
-        # Should expect same dtype for a and b. Otherwise, we need to handle
-        # the case when a and b with mixed integer and float.
         assert (
             a.dtype == b.dtype
         ), "remainder vec implementation expect the same inputs' dtype."
@@ -1245,14 +1240,6 @@ class CppVecOverrides(CppOverrides):
             return f"{a} - ({a} / {b}).floor() * {b}"
         else:
             assert is_integer_dtype(a.dtype)
-            if a.dtype in [torch.uint8, torch.int8]:
-                # Since we load 16 int8 elements into vec512, the remaining bits of vec512 could be zero
-                # and causes div with float exception. Convert to int for div to avoid this issue.
-                a_cast = f"at::vec::convert<int32_t>({a})"
-                b_cast = f"at::vec::convert<int32_t>({b})"
-                floor_div = f"({CppVecOverrides.floordiv(a_cast, b_cast)})"
-                cast_down = f"at::vec::convert<{DTYPE_TO_CPP[a.dtype]}>({floor_div})"
-                return f"{a} - {cast_down} * {b}"
             return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
 
     @staticmethod
@@ -1358,12 +1345,23 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def floordiv(a, b):
+        def _floordiv(a, b):
+            _t = f"decltype({a})"
+            quot = f"{a} / {b}"
+            has_rem = f"({a} % {b} != {_t}(0))"
+            is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
+            return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
+
         # a and b are integer type
-        _t = f"decltype({a})"
-        quot = f"{a} / {b}"
-        has_rem = f"({a} % {b} != {_t}(0))"
-        is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
-        return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
+        if a.dtype in [torch.uint8, torch.int8]:
+            # Since we load 16 int8 elements into vec512, the remaining bits of vec512 could be zero
+            # and causes div with float exception. Convert to int for div to avoid this issue.
+            a_cast = f"at::vec::convert<int32_t>({a})"
+            b_cast = f"at::vec::convert<int32_t>({b})"
+            floor_div = f"({_floordiv(a_cast, b_cast)})"
+            return f"at::vec::convert<{DTYPE_TO_CPP[a.dtype]}>({floor_div})"
+        else:
+            return _floordiv(a, b)
 
     @staticmethod
     def truncdiv(a, b):
@@ -2138,7 +2136,7 @@ class CppVecKernel(CppKernel):
         tiling_dtype=torch.float,
     ):
         super().__init__(args, num_threads)
-        self.vec_isa = codecache.pick_vec_isa()
+        self.vec_isa = cpu_vec_isa.pick_vec_isa()
         assert self.vec_isa
         if tiling_factor == 0:
             tiling_factor = self.vec_isa.nelements(dtype=tiling_dtype)
@@ -2317,7 +2315,7 @@ class CppVecKernel(CppKernel):
                     load_mask = f"{self._load_mask}.is_masked({itervar_inner})"
                 else:
                     load_mask = f"{self._load_mask} != 0"
-            if codecache.is_gcc():
+            if cpp_builder.is_gcc():
                 code.writeline(f"#pragma GCC unroll {self.tiling_factor}")
             else:
                 code.writeline(f"#pragma unroll {self.tiling_factor}")
@@ -3092,7 +3090,7 @@ class CppKernelProxy(CppKernel):
         self.kernel_group = kernel_group
         self.loop_nest = None
         self.call_ranges = None
-        self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+        self.picked_vec_isa: cpu_vec_isa.VecISA = cpu_vec_isa.pick_vec_isa()
 
     def data_type_propagation(self, nodes):
         for _node in nodes:
@@ -3570,6 +3568,7 @@ class CppScheduling(BaseScheduling):
     backend_features = dict.fromkeys(
         [
             BackendFeature.INPLACE_BUFFERS,
+            BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
         ]
     )
 
@@ -3805,7 +3804,7 @@ class CppScheduling(BaseScheduling):
         return (
             not node1.is_template()
             and not node2.is_template()
-            and node1.get_names() & node2.ancestors
+            and node1.get_operation_names() & node2.ancestors
             and not (
                 self._can_fuse_horizontal_impl(node1, node2)
                 and not node1.is_reduction()
@@ -3903,7 +3902,9 @@ class CppScheduling(BaseScheduling):
         _, (_, rnumel) = template_node.group
         assert rnumel == ()
         ctb: ir.CppTemplateBuffer = cast(ir.CppTemplateBuffer, template_node.node)
-        epilogue_ir_nodes: List[Optional[ir.Buffer]] = [n.node for n in epilogue_nodes]
+        epilogue_ir_nodes: List[Optional[ir.Operation]] = [
+            n.node for n in epilogue_nodes
+        ]
         assert all(
             isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
         ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
@@ -4104,15 +4105,15 @@ class LoopLevel:
     kernel: Optional[CppKernel] = None
 
     def __post_init__(self):
-        # Regarding the C++/OpenMP backend, `codecache.pick_vec_isa()` to check
+        # Regarding the C++/OpenMP backend, `cpu_vec_isa.pick_vec_isa()` to check
         # vectorization ISA is a time-consuming and one-shot operation. It leads
         # to taking a longer time to import `codegen.cpp` package because the
         # `LoopLevel` of the package is decorated by `@dataclasses.dataclass` while
-        # the decorator will invoke `codecache.pick_vec_isa()` to initialize the
+        # the decorator will invoke `cpu_vec_isa.pick_vec_isa()` to initialize the
         # `simd_nelements` of the `LoopLevel`. It might introduce additional compilation
         # overhead to the Triton backend. Therefore, we moved the `simd_nelements` to
         # `__post_init__`
-        picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+        picked_vec_isa: cpu_vec_isa.VecISA = cpu_vec_isa.pick_vec_isa()
         self.simd_nelements: int = picked_vec_isa.nelements() if picked_vec_isa else 0
 
     def get_kernels(self) -> List[CppKernel]:
@@ -4231,7 +4232,7 @@ class LoopLevel:
             line1 = ""
         elif self.simd_omp:
             line1 = f"#pragma omp {simd}"
-        elif not self.is_reduction and codecache.is_gcc():
+        elif not self.is_reduction and cpp_builder.is_gcc():
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""

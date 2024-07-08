@@ -142,15 +142,8 @@ void computeRepeatIndices(const index_t* repeat_ptr,
       [computeEncoder setBuffer:repeatBuffer offset:0 atIndex:0];
       [computeEncoder setBuffer:cumsumBuffer offset:0 atIndex:1];
       [computeEncoder setBuffer:resultBuffer offset:0 atIndex:2];
-      [computeEncoder setBytes:&size length:sizeof(size) atIndex:3];
-      MTLSize gridSize = MTLSizeMake(size, 1, 1);
-      NSUInteger threadsPerThreadgroup_ = pipelineState.maxTotalThreadsPerThreadgroup;
-      if (threadsPerThreadgroup_ > static_cast<NSUInteger>(size)) {
-        threadsPerThreadgroup_ = size;
-      }
-      MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);
-
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadsPerThreadgroup];
+      mps::mtl_setBytes(computeEncoder, size, 3);
+      mps::mtl_dispatch1DJob(computeEncoder, pipelineState, size);
 
       getMPSProfiler().endProfileKernel(pipelineState);
     }
