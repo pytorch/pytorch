@@ -139,8 +139,6 @@ class AutoHeuristic:
         else:
             self.log_path = torch._inductor.config.autoheuristic_log_path
 
-        # TODO(AlnisM): Allow something like AUTOHEURISTIC_MODE="collect:pad_mm,foo,bar"
-        # to be able to collect data only for specific heuristics
         if torch._inductor.config.collect_autoheuristic(self.name) and isinstance(
             self.feedback, LocalFeedback
         ):
