@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import gzip
 import io
 import json
@@ -151,6 +152,9 @@ def upload_to_dynamodb(
     # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/dynamodb.html#batch-writing
     with boto3.resource("dynamodb").Table(dynamodb_table).batch_writer() as batch:
         for doc in docs:
+            # This is to move away the _event_time field from Rockset, which we cannot use when
+            # reimport the data
+            doc["timestamp"] = int(round(time.time() * 1000))
             if generate_partition_key:
                 doc["dynamoKey"] = generate_partition_key(repo, doc)
             batch.put_item(Item=doc)
