@@ -1138,6 +1138,31 @@ class AlgorithmSelectorCache(PersistentCache):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size
                 return choices[0].output_node()
 
+        inputs_key = repr([self.key_of(x) for x in input_nodes])
+        
+        if config.search_autotune_cache and not (config.max_autotune_gemm or config.max_autotune):
+            log.debug("Selecting best of %s choices from cached autotunings.", str(len(choices)))
+
+            cached_timings = self.lookup(
+                choices,
+                name,
+                inputs_key,
+                None,
+            )
+
+            selected_choice = None
+            if cached_timings == {}:
+                selected_choice = choices[0]
+                log.debug("One or more missing cached autotunings, selecting default %s.", selected_choice)
+            else:
+                selected_choice = min(cached_timings, key=cached_timings.__getitem__)
+                log.debug("Selecting choice %s from cached autotunings.", selected_choice)
+            
+            wait_on_precompilation = self.precompile([selected_choice])
+            wait_on_precompilation()
+
+            return selected_choice.output_node()
+
         log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
         # Templates selected with input_gen_fns require specific input data to avoid IMA
@@ -1157,7 +1182,7 @@ class AlgorithmSelectorCache(PersistentCache):
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
-        inputs_key = repr([self.key_of(x) for x in input_nodes])
+        
 
         def precompile(choices) -> Callable[[], None]:
             def no_op(*args, **kwargs):
