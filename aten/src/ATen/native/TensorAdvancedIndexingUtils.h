@@ -57,7 +57,7 @@ const Tensor& value){
 }
 
 inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
-  checkIndexTensorTypes(orig, /*allow_int*/ true);
+  checkIndexTensorTypes(orig);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
   // next broadcast all index tensors together
