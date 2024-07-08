@@ -1125,7 +1125,18 @@ class AlgorithmSelectorCache(PersistentCache):
         precompilation_timeout_seconds: int = 60 * 60,
         return_multi_template=False,
     ):
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        if len(choices) == 0:
+            raise NoValidChoicesError(
+                "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
+                "config (defined in torch/_inductor/config.py) to allow at least one choice. "
+            )
+        elif len(choices) == 1:
+            from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+            if not isinstance(choices[0], CUDATemplateCaller):
+                # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size
+                return choices[0].output_node()
+
+        log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
         # Templates selected with input_gen_fns require specific input data to avoid IMA
         # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
@@ -1139,18 +1150,6 @@ class AlgorithmSelectorCache(PersistentCache):
             M, K = input_nodes[-2].get_size()[:2]
             N = input_nodes[-1].get_size()[-1]
             append_to_log(mm_file_name, {"invoke": str((M, K, N))})
-
-        if len(choices) == 0:
-            raise NoValidChoicesError(
-                "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
-                "config (defined in torch/_inductor/config.py) to allow at least one choice. "
-            )
-        log.debug("Max autotune selects from %s choices.", str(len(choices)))
-
-        if len(choices) == 1:
-            if not isinstance(choices[0], CUDATemplateCaller):
-                # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
-                return choices[0].output_node()
 
         @functools.lru_cache(None)
         def make_benchmark_fn():
