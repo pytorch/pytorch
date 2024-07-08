@@ -158,6 +158,9 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_tensor_lr_cuda": 2,
     "test_sgd_tensor_lr_foreach_cuda": 2,
     "test_rprop_tensor_lr_capturable_foreach_cuda": 6,
+    "test_rprop_capturable_foreach_cuda": 6,
+    "test_rprop_etas_foreach_cuda": 6,
+    "test_rprop_foreach_cuda": 6,
     "test_rprop_maximize_foreach_cuda": 6,
     "test_rprop_step_sizes_foreach_cuda": 6,
 }
