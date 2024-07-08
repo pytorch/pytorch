@@ -304,6 +304,10 @@ def _get_optimize_ddp_mode():
     return mode
 
 
+# Skip tracing the torchrec files added to trace_rules.FBCODE_SKIP_DIRS
+skip_torchrec = True
+
+
 # No longer used
 optimize_ddp_lazy_compile = False
 

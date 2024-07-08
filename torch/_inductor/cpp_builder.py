@@ -5,6 +5,7 @@
 import copy
 import errno
 import functools
+import json
 import logging
 import os
 import platform
@@ -20,15 +21,7 @@ from typing import List, Sequence, Tuple, Union
 
 import torch
 from torch._inductor import config, exc
-from torch._inductor.codecache import (
-    _get_python_include_dirs,
-    _LINKER_SCRIPT,
-    _transform_cuda_paths,
-    get_lock_dir,
-    invalid_vec_isa,
-    LOCK_TIMEOUT,
-    VecISA,
-)
+from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
 
 if config.is_fbcode():
@@ -67,8 +60,11 @@ _IS_WINDOWS = sys.platform == "win32"
 log = logging.getLogger(__name__)
 
 
+# =============================== toolchain ===============================
 @functools.lru_cache(1)
 def cpp_compiler_search(search: str) -> str:
+    from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT
+
     for cxx in search:
         try:
             if cxx is None:
@@ -91,7 +87,7 @@ def cpp_compiler_search(search: str) -> str:
             return cxx
         except (subprocess.SubprocessError, FileNotFoundError, ImportError):
             continue
-    raise exc.InvalidCxxCompiler()  # noqa: RSE102
+    raise exc.InvalidCxxCompiler
 
 
 def install_gcc_via_conda() -> str:
@@ -120,7 +116,7 @@ def install_gcc_via_conda() -> str:
     return cxx_path
 
 
-def _get_cpp_compiler() -> str:
+def get_cpp_compiler() -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
     else:
@@ -134,32 +130,62 @@ def _get_cpp_compiler() -> str:
     return compiler
 
 
-def _is_gcc(cpp_compiler) -> bool:
-    return bool(re.search(r"(gcc|g\+\+)", cpp_compiler))
-
-
-def is_gcc() -> bool:
-    return _is_gcc(_get_cpp_compiler())
+@functools.lru_cache(None)
+def _is_apple_clang(cpp_compiler) -> bool:
+    version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
+    return "Apple" in version_string.splitlines()[0]
 
 
 def _is_clang(cpp_compiler) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
-        return is_apple_clang(cpp_compiler)
+        return _is_apple_clang(cpp_compiler)
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
-def is_clang() -> bool:
-    compiler = _get_cpp_compiler()
-    return _is_clang(compiler)
+def _is_gcc(cpp_compiler) -> bool:
+    if sys.platform == "darwin" and _is_apple_clang(cpp_compiler):
+        return False
+    return bool(re.search(r"(gcc|g\+\+)", cpp_compiler))
 
 
 @functools.lru_cache(None)
-def is_apple_clang(cpp_compiler) -> bool:
-    version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
-    return "Apple" in version_string.splitlines()[0]
+def is_gcc() -> bool:
+    return _is_gcc(get_cpp_compiler())
 
 
+@functools.lru_cache(None)
+def is_clang() -> bool:
+    return _is_clang(get_cpp_compiler())
+
+
+@functools.lru_cache(None)
+def is_apple_clang() -> bool:
+    return _is_apple_clang(get_cpp_compiler())
+
+
+def get_compiler_version_info(compiler: str) -> str:
+    SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
+    env = os.environ.copy()
+    env["LC_ALL"] = "C"  # Don't localize output
+    try:
+        version_string = subprocess.check_output(
+            [compiler, "-v"], stderr=subprocess.STDOUT, env=env
+        ).decode(*SUBPROCESS_DECODE_ARGS)
+    except Exception as e:
+        try:
+            version_string = subprocess.check_output(
+                [compiler, "--version"], stderr=subprocess.STDOUT, env=env
+            ).decode(*SUBPROCESS_DECODE_ARGS)
+        except Exception as e:
+            return ""
+    # Mutiple lines to one line string.
+    version_string = version_string.replace("\r", "_")
+    version_string = version_string.replace("\n", "_")
+    return version_string
+
+
+# =============================== cpp builder ===============================
 def _append_list(dest_list: List[str], src_list: List[str]):
     for item in src_list:
         dest_list.append(copy.deepcopy(item))
@@ -320,25 +346,14 @@ def _get_optimization_cflags() -> List[str]:
         if not config.cpp.enable_floating_point_contract_flag:
             cflags.append("ffp-contract=off")
 
-        if config.is_fbcode():
-            # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
-            # This causes `ldopen` to fail in fbcode, because libgomp does not exist in the default paths.
-            # We will fix it later by exposing the lib path.
-            return cflags
-
-        if sys.platform == "darwin":
-            # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
-            # Also, `-march=native` is unrecognized option on M1
-            cflags.append("Xclang")
-        else:
-            if platform.machine() == "ppc64le":
-                cflags.append("mcpu=native")
-            else:
-                cflags.append("march=native")
-
-        # Internal cannot find libgomp.so
-        if not config.is_fbcode():
-            cflags.append("fopenmp")
+        if sys.platform != "darwin":
+            # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
+            # `-march=native` is unrecognized option on M1
+            if not config.is_fbcode():
+                if platform.machine() == "ppc64le":
+                    cflags.append("mcpu=native")
+                else:
+                    cflags.append("march=native")
 
         return cflags
 
@@ -353,7 +368,7 @@ def _get_shared_cflag(compile_only: bool) -> List[str]:
     else:
         if compile_only:
             return ["fPIC"]
-        if platform.system() == "Darwin" and "clang" in _get_cpp_compiler():
+        if platform.system() == "Darwin" and "clang" in get_cpp_compiler():
             # This causes undefined symbols to behave the same as linux
             return ["shared", "fPIC", "undefined dynamic_lookup"]
         else:
@@ -410,13 +425,13 @@ class CppOptions(BuildOptionsBase):
 
     def __init__(
         self,
-        compile_only: bool,
+        compile_only: bool = False,
         warning_all: bool = True,
         extra_flags: Sequence[str] = (),
         use_absolute_path: bool = False,
     ) -> None:
         super().__init__()
-        self._compiler = _get_cpp_compiler()
+        self._compiler = get_cpp_compiler()
         self._use_absolute_path = use_absolute_path
         self._compile_only = compile_only
 
@@ -491,6 +506,8 @@ def _setup_standard_sys_libs(
     aot_mode: bool,
     use_absolute_path: bool,
 ):
+    from torch._inductor.codecache import _LINKER_SCRIPT
+
     cflags: List[str] = []
     include_dirs: List[str] = []
     passthough_args: List[str] = []
@@ -547,13 +564,13 @@ def _get_build_args_of_chosen_isa(vec_isa: VecISA):
 
         build_flags = [vec_isa.build_arch_flags()]
 
-    if config.is_fbcode() and vec_isa != invalid_vec_isa:
-        cap = str(vec_isa).upper()
-        macros = [
-            f"CPU_CAPABILITY={cap}",
-            f"CPU_CAPABILITY_{cap}",
-            f"HAVE_{cap}_CPU_DEFINITION",
-        ]
+        if config.is_fbcode():
+            cap = str(vec_isa).upper()
+            macros = [
+                f"CPU_CAPABILITY={cap}",
+                f"CPU_CAPABILITY_{cap}",
+                f"HAVE_{cap}_CPU_DEFINITION",
+            ]
 
     return macros, build_flags
 
@@ -587,6 +604,19 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
     return include_dirs, libraries_dirs, libraries
 
 
+def _get_python_include_dirs():
+    include_dir = Path(sysconfig.get_path("include"))
+    # On Darwin Python executable from a framework can return
+    # non-existing /Library/Python/... include path, in which case
+    # one should use Headers folder from the framework
+    if not include_dir.exists() and platform.system() == "Darwin":
+        std_lib = Path(sysconfig.get_path("stdlib"))
+        include_dir = (std_lib.parent.parent / "Headers").absolute()
+    if not (include_dir / "Python.h").exists():
+        warnings.warn(f"Can't find Python.h in {str(include_dir)}")
+    return [str(include_dir)]
+
+
 def _get_python_related_args():
     python_include_dirs = _get_python_include_dirs()
     python_include_path = sysconfig.get_path(
@@ -607,6 +637,36 @@ def _get_python_related_args():
     return python_include_dirs, python_lib_path
 
 
+@functools.lru_cache(None)
+def is_conda_llvm_openmp_installed() -> bool:
+    try:
+        command = "conda list llvm-openmp --json"
+        output = subprocess.check_output(command.split()).decode("utf8")
+        return len(json.loads(output)) > 0
+    except subprocess.SubprocessError:
+        return False
+
+
+@functools.lru_cache(None)
+def homebrew_libomp() -> Tuple[bool, str]:
+    try:
+        # check if `brew` is installed
+        subprocess.check_output(["which", "brew"])
+        # get the location of `libomp` if it is installed
+        # this is the location that `libomp` **would** be installed
+        # see https://github.com/Homebrew/brew/issues/10261#issuecomment-756563567 for details
+        libomp_path = (
+            subprocess.check_output(["brew", "--prefix", "libomp"])
+            .decode("utf8")
+            .strip()
+        )
+        # check if `libomp` is installed
+        omp_available = os.path.exists(libomp_path)
+        return omp_available, libomp_path
+    except subprocess.SubprocessError:
+        return False, ""
+
+
 def _get_openmp_args(cpp_compiler):
     cflags: List[str] = []
     ldflags: List[str] = []
@@ -615,13 +675,12 @@ def _get_openmp_args(cpp_compiler):
     libs: List[str] = []
     passthough_args: List[str] = []
     if _IS_MACOS:
-        from torch._inductor.codecache import (
-            homebrew_libomp,
-            is_conda_llvm_openmp_installed,
-        )
+        # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
+        cflags.append("Xclang")
+        cflags.append("fopenmp")
 
         # only Apple builtin compilers (Apple Clang++) require openmp
-        omp_available = not is_apple_clang(cpp_compiler)
+        omp_available = not _is_apple_clang(cpp_compiler)
 
         # check the `OMP_PREFIX` environment first
         omp_prefix = os.getenv("OMP_PREFIX")
@@ -665,10 +724,8 @@ def _get_openmp_args(cpp_compiler):
         # /openmp, /openmp:llvm
         # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
         # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
-
         cflags.append("openmp")
         cflags.append("openmp:experimental")  # MSVC CL
-        libs = []
     else:
         if config.is_fbcode():
             include_dir_paths.append(build_paths.openmp())
@@ -845,6 +902,33 @@ class CppTorchOptions(CppOptions):
         _append_list(self._libraries, torch_libraries)
         _append_list(self._passthough_args, torch_passthough_args)
         self._remove_duplicate_options()
+
+
+def _set_gpu_runtime_env() -> None:
+    if (
+        config.is_fbcode()
+        and torch.version.hip is None
+        and "CUDA_HOME" not in os.environ
+        and "CUDA_PATH" not in os.environ
+    ):
+        os.environ["CUDA_HOME"] = build_paths.cuda()
+
+
+def _transform_cuda_paths(lpaths):
+    # This handles two cases:
+    # 1. Meta internal cuda-12 where libs are in lib/cuda-12 and lib/cuda-12/stubs
+    # 2. Linux machines may have CUDA installed under either lib64/ or lib/
+    for i, path in enumerate(lpaths):
+        if (
+            "CUDA_HOME" in os.environ
+            and path.startswith(os.environ["CUDA_HOME"])
+            and not os.path.exists(f"{path}/libcudart_static.a")
+        ):
+            for root, dirs, files in os.walk(path):
+                if "libcudart_static.a" in files:
+                    lpaths[i] = os.path.join(path, root)
+                    lpaths.append(os.path.join(lpaths[i], "stubs"))
+                    break
 
 
 def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
