@@ -294,7 +294,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             f,
             default_args_generator((x,)),
             ifdynstaticdefault(2, 3),
-            expected_opcount=ifdynstaticdefault(2, 3),
+            expected_opcount=2,
         )
 
     def test_wrap_pytree_args_nested(self):
@@ -356,7 +356,7 @@ class GraphModule(torch.nn.Module):
             f,
             default_args_generator((x, y)),
             ifdynstaticdefault(2, 3),
-            expected_opcount=ifdynstaticdefault(2, 3),
+            expected_opcount=2,
             return_graph=True,
         )
         if torch._dynamo.config.assume_static_by_default:
@@ -387,10 +387,8 @@ class GraphModule(torch.nn.Module):
     def forward(self, s0: "Sym(s0)", L_x_: "f32[s0, 1]"):
         l_x_ = L_x_
 
-        size: "Sym(s0)" = l_x_.size(0)
-
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, size);  wrap_body_0 = l_x_ = size = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, s0);  wrap_body_0 = l_x_ = s0 = None
         getitem: "f32[s0]" = wrap[0];  wrap = None
         return (getitem,)
 
@@ -3572,11 +3570,13 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_inputs_: "f32[64, 3]", L_targets_: "f32[64, 3]"):
+    def forward(self, L_model_parameters_weight_: "f32[3, 3]", L_model_parameters_bias_: "f32[3]", L_inputs_: "f32[64, 3]", L_targets_: "f32[64, 3]"):
+        l_model_parameters_weight_ = L_model_parameters_weight_
+        l_model_parameters_bias_ = L_model_parameters_bias_
         l_inputs_ = L_inputs_
         l_targets_ = L_targets_
 
-        prediction: "f32[64, 3]" = self.model(l_inputs_);  l_inputs_ = None
+        prediction: "f32[64, 3]" = torch._C._nn.linear(l_inputs_, l_model_parameters_weight_, l_model_parameters_bias_);  l_inputs_ = l_model_parameters_weight_ = l_model_parameters_bias_ = None
 
         mse_loss: "f32[]" = torch.nn.functional.mse_loss(prediction, l_targets_);  prediction = l_targets_ = None
         return (mse_loss,)
@@ -3616,12 +3616,15 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
+    def forward(self, L_params_l1_weight_: "f32[1, 1]", L_params_l1_bias_: "f32[1]", L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
+        l_params_l1_weight_ = L_params_l1_weight_
+        l_params_l1_bias_ = L_params_l1_bias_
         l_buffers_buffer_ = L_buffers_buffer_
         l_inputs_ = L_inputs_
 
-        l__model___l1: "f32[1, 1]" = self.L__model___l1(l_inputs_);  l_inputs_ = None
-        add: "f32[1, 1]" = l__model___l1 + l_buffers_buffer_;  l__model___l1 = l_buffers_buffer_ = None
+        linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_params_l1_weight_, l_params_l1_bias_);  l_inputs_ = l_params_l1_weight_ = l_params_l1_bias_ = None
+
+        add: "f32[1, 1]" = linear + l_buffers_buffer_;  linear = l_buffers_buffer_ = None
         return (add,)
 """,
         )

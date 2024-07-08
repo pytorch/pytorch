@@ -765,7 +765,7 @@ class TestStatelessFunctionalAPI(TestCase):
         repeated_parameters = {'l1.weight': torch.ones((1, 1))}
         with self.assertRaisesRegex(
             ValueError,
-            re.escape("['l1.weight'] appeared in multiple dictionaries"),
+            re.escape("{'l1.weight'} appeared in multiple dictionaries"),
         ):
             torch.func.functional_call(mod, (parameters, repeated_parameters), x)
 
