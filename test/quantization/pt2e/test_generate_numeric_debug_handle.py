@@ -46,7 +46,10 @@ class TestGenerateNumericDebugHandle(TestCase):
                 count += 1
         self.assertEqual(len(unique_ids), count)
 
-    @unittest.skipIf(is_fbcode(), "fbcode changes the code path for `capture_pre_autograd_graph` we can enable the test in fbcode after we remove `capture_pre_autograd_graph`")
+    @unittest.skipIf(
+        is_fbcode(), "fbcode changes the code path for `capture_pre_autograd_graph` "
+        "we can enable the test in fbcode after we remove `capture_pre_autograd_graph`"
+    )
     def test_quantize_pt2e_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
