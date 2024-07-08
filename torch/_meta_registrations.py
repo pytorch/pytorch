@@ -5232,6 +5232,35 @@ def meta__scaled_dot_product_efficient_backward(
 
 @register_meta(
     [
+        aten._scaled_dot_product_cudnn_attention_backward,
+    ]
+)
+def meta__scaled_dot_product_cudnn_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    philox_seed: Tensor,
+    philox_offset: Tensor,
+    attn_bias: Tensor,
+    cum_seq_q: Tensor,
+    cum_seq_k: Tensor,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    scale: Optional[float] = None,
+):
+    grad_q = torch.empty_like(query)
+    grad_k = torch.empty_like(key)
+    grad_v = torch.empty_like(value)
+    return grad_q, grad_k, grad_v
+
+
+@register_meta(
+    [
         aten._flash_attention_backward,
     ]
 )
@@ -6018,6 +6047,49 @@ def _check_for_unsupported_isin_dtype(dtype):
         dtype not in [torch.bool, torch.bfloat16, torch.complex128, torch.complex64],
         lambda: f"Unsupported input type encountered for isin(): {dtype}",
     )
+
+
+@register_meta(aten._embedding_bag_backward)
+def meta_embedding_bag_backward(
+    grad,
+    indices,
+    offsets,
+    offset2bag,
+    bag_size,
+    maximum_indices,
+    num_weights,
+    scale_grad_by_freq,
+    mode,
+    sparse,
+    per_sample_weights,
+    padding_idx=-1,
+):
+    if sparse:
+        return aten._embedding_bag_sparse_backward(
+            grad,
+            indices,
+            offsets,
+            offset2bag,
+            bag_size,
+            num_weights,
+            scale_grad_by_freq,
+            mode,
+            per_sample_weights,
+            padding_idx,
+        )
+    else:
+        return meta_embedding_bag_dense_backward(
+            grad,
+            indices,
+            offset2bag,
+            bag_size,
+            maximum_indices,
+            num_weights,
+            scale_grad_by_freq,
+            mode,
+            per_sample_weights,
+            padding_idx,
+        )
 
 
 @register_meta(aten._embedding_bag_dense_backward)

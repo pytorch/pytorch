@@ -4579,7 +4579,7 @@ def find_library_location(lib_name: str) -> Path:
     path = torch_root / 'lib' / lib_name
     if os.path.exists(path):
         return path
-    torch_root = Path(__file__).resolve().parents[2]
+    torch_root = Path(__file__).resolve().parent.parent.parent
     return torch_root / 'build' / 'lib' / lib_name
 
 def skip_but_pass_in_sandcastle(reason):
@@ -5018,5 +5018,5 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         s = re.sub(r"\n*You can suppress this exception.+", "", s, flags=re.DOTALL)
     if suppress_prefix:
         s = re.sub(r"Cannot export model.+\n\n", "", s)
-    s = re.sub(r" +$", "", s, flags=re.M)
+    s = re.sub(r" +$", "", s, flags=re.MULTILINE)
     return s

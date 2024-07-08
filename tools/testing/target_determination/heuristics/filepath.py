@@ -10,14 +10,14 @@ from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
     TestPrioritizations,
 )
+
 from tools.testing.target_determination.heuristics.utils import (
     normalize_ratings,
     query_changed_files,
 )
 from tools.testing.test_run import TestRun
 
-
-REPO_ROOT = Path(__file__).parents[3]
+REPO_ROOT = Path(__file__).parent.parent.parent.parent
 
 keyword_synonyms: dict[str, list[str]] = {
     "amp": ["mixed_precision"],

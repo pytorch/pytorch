@@ -17,6 +17,8 @@ import types
 import weakref
 from typing import Any, List, NamedTuple, Optional, Union
 
+from torch._utils_internal import justknobs_check
+
 from torch.utils._sympy.value_ranges import ValueRanges
 
 try:
@@ -90,6 +92,7 @@ from ..utils import (
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
+    is_wrapper_or_member_descriptor,
     istype,
     odict_values,
     proxy_args_kwargs,
@@ -325,6 +328,7 @@ class VariableBuilder:
         if (
             self._can_lift_attrs_to_inputs(vt)
             and value not in self.tx.output.side_effects
+            and not is_wrapper_or_member_descriptor(value)
         ):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
 
@@ -954,10 +958,18 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, types.GetSetDescriptorType):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            # GetSet descriptors are C functions attached to an attribute lookup
+            # using PyGetSetDef. Python, on attribute lookup, can decide to
+            # create a new object on the fly, and therefore the `id` of the
+            # descriptors is not guaranteed to be same for different attribute
+            # accesses. Since these are unlikely to change during the program
+            # execution, we can skip guarding on them.
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MethodWrapperType):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            # Method-wrappers are written in C, and they are not guaranteed to
+            # return the same object on attribute lookup. Therefore, we cannot
+            # insert a FUNCTION_MATCH guard here. method-wrappers are very
+            # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
             if value in (torch.utils.hooks.BackwardHook, torch.nn.Parameter):
@@ -1245,15 +1257,22 @@ class VariableBuilder:
             # unspecializing int by default, but still
             # specialize for the following conditions
             if not TracingContext.get().force_unspec_int_unbacked_size_like and (
-                value in self._common_constants()
                 # Assume integers from global variables want to be specialized
-                or not self.source.guard_source().is_local()
+                not self.source.guard_source().is_local()
                 # Assume that integers that came from NN modules want to be
                 # specialized (as we don't expect users to be changing the
                 # NN modules on the fly)
                 or self.source.guard_source().is_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
+                # TODO: Delete this condition when rollout is done.  NB: this
+                # condition never evaluates True in open source
+                or (
+                    not justknobs_check(
+                        "pytorch/dynamo:enable_unspecialize_zero_one_plain_int"
+                    )
+                    and value in self._common_constants()
+                )
             ):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
@@ -1369,6 +1388,13 @@ class VariableBuilder:
             unimplemented(
                 f"torch.compile does not support sparse Tensor with {value.layout} layout"
             )
+
+        # TODO(pearu,sparse-team) - Add the corresponding SPARSE_TENSOR_MATCH guards
+        if is_sparse_any(value) and value.is_sparse and not self.tx.export:
+            # A hot fix for sparse tensors + torch.compile. There is some
+            # support for export + coo tensor. We need to create
+            # SPARSE_TENSOR_GUARDS for guards to work propertly.
+            unimplemented("torch.compile does not support sparse Tensors")
 
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
@@ -1899,8 +1925,10 @@ def wrap_fx_proxy_cls(
             example_value = wrap_to_fake_tensor_and_record(
                 example_value, tx=tx, **kwargs
             )
-        if isinstance(example_value, torch.Tensor) and (
-            maybe_get_fake_mode(example_value) is not tx.fake_mode
+        if (
+            isinstance(example_value, torch.Tensor)
+            and example_value.device.type != "meta"
+            and (maybe_get_fake_mode(example_value) is not tx.fake_mode)
         ):
             raise InternalTorchDynamoError(
                 "`example_value` needs to be a `FakeTensor`"
