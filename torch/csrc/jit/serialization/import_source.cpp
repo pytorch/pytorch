@@ -67,19 +67,18 @@ struct ConstantTableValue : public SugaredValue {
       GraphFunction& m,
       const std::string& field) override {
     const char* field_s = field.c_str();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    char* end;
+    char* end = nullptr;
     int64_t offset = strtoll(field_s + 1, &end, 10);
     if (field.size() < 2 || *end != 0)
-      throw ErrorReport(loc) << "invalid constant specifier: " << field;
+      throw(ErrorReport(loc) << "invalid constant specifier: " << field);
     if (offset < 0 || size_t(offset) >= constants_->size()) {
-      throw ErrorReport(loc) << "constant index " << offset
-                             << " is out of bounds (constant table has "
-                             << constants_->size() << " entries)";
+      throw(
+          ErrorReport(loc) << "constant index " << offset
+                           << " is out of bounds (constant table has "
+                           << constants_->size() << " entries)");
     }
     auto ivalue = constants_->at(offset);
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Value* value;
+    Value* value = nullptr;
 
     // see [Constant Object Weak CompilationUnit Reference]
     if (ivalue.isObject() && !ivalue.toObject()->is_weak_compilation_ref()) {
@@ -189,8 +188,9 @@ void SourceImporterImpl::parseSourceIfNeeded(const std::string& qualifier) {
             parsed_treeref;
       } break;
       default:
-        throw ErrorReport(L.cur().range)
-            << "Unexpected token in code import: " << kindToString(kind);
+        throw(
+            ErrorReport(L.cur().range)
+            << "Unexpected token in code import: " << kindToString(kind));
     }
   }
 }
@@ -299,8 +299,9 @@ void SourceImporterImpl::importNamedType(
   } else if (superclass_name == "Enum") {
     importEnum(qualified_name, class_def);
   } else {
-    throw ErrorReport(class_def.range())
-        << "Torchscript does not support class inheritance.";
+    throw(
+        ErrorReport(class_def.range())
+        << "Torchscript does not support class inheritance.");
   }
 }
 
@@ -555,6 +556,7 @@ void SourceImporterImpl::importClass(
   // Populate class attributes
   ScriptTypeParser type_parser(shared_from_this());
   for (const auto& assign : attributes) {
+    // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
     switch (assign.lhs().kind()) {
       case TK_VAR: {
         const auto name = Var(assign.lhs()).name().name();
@@ -630,21 +632,23 @@ void SourceImporterImpl::importEnum(
   std::vector<at::EnumNameValue> names_values;
 
   TypePtr value_type = nullptr;
-  auto set_or_check_type = [&value_type](
-                               const TypePtr& t, const SourceRange& loc) {
-    if (!value_type) {
-      value_type = t;
-    } else if (value_type != t) {
-      throw ErrorReport(loc)
-          << "Enum class with varying value types are not supported.";
-    }
-  };
+  auto set_or_check_type =
+      [&value_type](const TypePtr& t, const SourceRange& loc) {
+        if (!value_type) {
+          value_type = t;
+        } else if (value_type != t) {
+          throw(
+              ErrorReport(loc)
+              << "Enum class with varying value types are not supported.");
+        }
+      };
 
   for (const auto& statement : enum_def.body()) {
     if (statement.kind() != TK_ASSIGN) {
-      throw ErrorReport(statement.range())
+      throw(
+          ErrorReport(statement.range())
           << "Unexpected statement in Enum class body: "
-             "only enum attribute definitions are currently supported.";
+             "only enum attribute definitions are currently supported.");
     }
 
     const auto assign = Assign(statement);
@@ -669,17 +673,19 @@ void SourceImporterImpl::importEnum(
         break;
       }
       default:
-        throw ErrorReport(rhs.range())
+        throw(
+            ErrorReport(rhs.range())
             << "Unsupported enum value type: " << rhs.kind()
-            << ". Only Integers, Floats and Strings are supported.";
+            << ". Only Integers, Floats and Strings are supported.");
     }
 
     names_values.emplace_back(name, ivalue);
   }
 
   if (!value_type) {
-    throw ErrorReport(enum_def.range())
-        << "No enum values defined for " << qualified_name.qualifiedName();
+    throw(
+        ErrorReport(enum_def.range())
+        << "No enum values defined for " << qualified_name.qualifiedName());
   }
 
   auto enum_type = EnumType::create(
@@ -696,9 +702,10 @@ void SourceImporterImpl::importNamedTuple(
   std::vector<IValue> field_defaults;
   for (const auto& statement : named_tuple_def.body()) {
     if (statement.kind() != TK_ASSIGN) {
-      throw ErrorReport(statement.range())
+      throw(
+          ErrorReport(statement.range())
           << "Unexpected statement in NamedTuple body: "
-             "only attribute annotations are currently supported.";
+             "only attribute annotations are currently supported.");
     }
     const auto assign = Assign(statement);
 
@@ -735,7 +742,7 @@ void SourceImporterImpl::parsePossibleVersionNumber(Lexer& L) {
     auto range = L.cur().range;
     L.next();
     L.expect('=');
-    std::string version_text = L.expect(TK_NUMBER).text();
+    L.expect(TK_NUMBER);
     L.expect(TK_NEWLINE);
   }
 }
