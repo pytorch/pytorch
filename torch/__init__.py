@@ -515,7 +515,7 @@ class SymInt:
 
     def as_integer_ratio(self) -> _Tuple[int, int]:
         """Represent this int as an exact integer ratio"""
-        return self, 1
+        return self._get_int(), 1
 
 
 class SymFloat:
