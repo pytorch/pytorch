@@ -2725,6 +2725,104 @@ class TestCustomOpAPI(TestCase):
                 self.assertTrue(called)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_torch_dispatch(self):
+        for mode in ["function", "qualname", "opoverload"]:
+
+            class MyMode(torch.utils._python_dispatch.TorchDispatchMode):
+                def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                    return func(*args, **kwargs)
+
+            @torch.library.custom_op("_torch_testing::add", mutates_args=())
+            def add(x: Tensor, y: float) -> Tensor:
+                x_np = x.cpu().numpy()
+                out_np = x_np + y
+                return torch.from_numpy(out_np).to(x.device)
+
+            called = False
+
+            if mode == "function":
+                dec = torch.library.register_torch_dispatch(add, MyMode)
+                self.assertIsNotNone(dec)
+            elif mode == "qualname":
+                dec = torch.library.register_torch_dispatch(
+                    "_torch_testing::add", MyMode
+                )
+                self.assertIsNotNone(dec)
+            elif mode == "opoverload":
+                dec = torch.library.register_torch_dispatch(
+                    torch.ops._torch_testing.add.default, MyMode
+                )
+                self.assertIsNotNone(dec)
+            else:
+                raise AssertionError("should not get here")
+
+            @dec
+            def _(mode, func, types, args, kwargs):
+                nonlocal called
+                called = True
+                return func(*args, **kwargs)
+
+            with MyMode():
+                x = torch.randn(3)
+                y = 3.14
+                z = add(x, y)
+                self.assertEqual(z.shape, x.shape)
+                self.assertTrue(called)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_torch_dispatch_low_level(self):
+        modes = ["qualname", "opoverload"]
+        calls = ["decorator", "function"]
+        device_types_options = [("cpu", "cuda"), "cpu", None]
+
+        for mode, call, device_types in itertools.product(
+            modes, calls, device_types_options
+        ):
+            with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+                lib.define("add10(Tensor x, float y) -> Tensor")
+
+                if mode == "qualname":
+                    op = "_torch_testing::add10"
+                else:
+                    assert mode == "opoverload"
+                    op = torch.ops._torch_testing.add10.default
+
+                called = False
+
+                class MyMode(torch.utils._python_dispatch.TorchDispatchMode):
+                    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                        return func(*args, **kwargs)
+
+                if call == "decorator":
+
+                    @torch.library.register_torch_dispatch(op, MyMode, lib=lib)
+                    def _(mode, func, types, args, kwargs):
+                        x, y = args
+                        nonlocal called
+                        called = True
+                        return x + y
+
+                else:
+                    assert call == "function"
+
+                    def add_stuff(mode, func, types, args, kwargs):
+                        x, y = args
+                        nonlocal called
+                        called = True
+                        return x + y
+
+                    torch.library.register_torch_dispatch(
+                        op, MyMode, add_stuff, lib=lib
+                    )
+
+                x = torch.randn(3)
+                y = 3.14
+                with MyMode():
+                    z = torch.ops._torch_testing.add10.default(x, y)
+                self.assertEqual(z, x + y)
+                self.assertTrue(called)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_kernel(self):
         modes = ["function", "qualname", "opoverload"]
         calls = ["decorator", "function"]

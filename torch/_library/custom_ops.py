@@ -175,6 +175,7 @@ class CustomOpDef:
         self._abstract_fn: Optional[Callable] = None
         self._setup_context_fn: Optional[Callable] = None
         self._backward_fn: Optional[Callable] = None
+        self._torch_dispatch_fns: Dict[type, Callable] = {}
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher()
@@ -366,6 +367,37 @@ class CustomOpDef:
         """
         self._abstract_fn = fn
         return fn
+
+    def register_torch_dispatch(
+        self, torch_dispatch_class: Any, fn: Optional[Callable] = None, /
+    ) -> Callable:
+        r"""Registers a torch_dispatch rule for the given operator and ``torch_dispatch_class``.
+
+        This allows for open registration to specify the behavior between the operator
+        and the ``torch_dispatch_class`` without needing to modify the ``torch_dispatch_class``
+        or the operator directly.
+
+        Please see :func:`torch.library.register_torch_dispatch` for examples and more details.
+        """
+
+        def register(fn):
+            if torch_dispatch_class not in self._torch_dispatch_fns:
+
+                def inner(*args, **kwargs):
+                    return self._torch_dispatch_fns[torch_dispatch_class](
+                        *args, **kwargs
+                    )
+
+                self._lib._register_torch_dispatch_rule(
+                    self._name, torch_dispatch_class, inner
+                )
+            self._torch_dispatch_fns[torch_dispatch_class] = fn
+            return fn
+
+        if fn is None:
+            return register
+        else:
+            return register(fn)
 
     def register_autograd(
         self,
