@@ -1491,7 +1491,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         all_args = args + flat_kwargs
         return all_args
 
-    def create_wrapped_node(
+    def create_score_mod_wrapped_node(
         self, tx, query: "VariableTracker", score_function: "VariableTracker"
     ):
         from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
@@ -1553,7 +1553,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         return proxy_args
 
-    def create_mask_wrapped_node(
+    def create_mask_fn_wrapped_node(
         self, tx, query: "VariableTracker", mask_function: "VariableTracker"
     ):
         from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
@@ -1617,14 +1617,14 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             key,
             value,
             score_mod,
-            block_mask,
             mask_fn,
+            block_mask,
         ) = self.normalize_to_args(args, kwargs)
 
-        score_mod_node, score_mod_lifted_args = self.create_wrapped_node(
+        score_mod_node, score_mod_lifted_args = self.create_score_mod_wrapped_node(
             tx, query, score_mod
         )
-        mask_fn_node, mask_fn_lifted_args = self.create_mask_wrapped_node(
+        mask_fn_node, mask_fn_lifted_args = self.create_mask_fn_wrapped_node(
             tx, query, mask_fn
         )
         proxied_args = [
@@ -1658,10 +1658,12 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "call_function",
                 self.value,
                 args=inp_args[:3]
-                + (score_mod_node,)
+                + (
+                    score_mod_node,
+                    mask_fn_node,
+                )
                 + inp_args[3:]
                 + (
-                    mask_fn_node,
                     score_mod_lifted_args,
                     mask_fn_lifted_args,
                 ),

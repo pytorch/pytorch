@@ -405,8 +405,8 @@ def _flex_attention(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: _score_mod_signature = _identity,
-    block_mask: Optional[_BlockMask] = None,
     mask_fn: _mask_signature = _no_mask,
+    block_mask: Optional[_BlockMask] = None,
 ) -> torch.Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -467,8 +467,8 @@ def _flex_attention(
             key,
             value,
             score_mod,
-            block_mask.as_tuple(),
             mask_fn,
+            block_mask.as_tuple(),
         )
         return out
 
@@ -490,8 +490,8 @@ def _flex_attention(
                     key,
                     value,
                     score_mod,
-                    block_mask.as_tuple(),
                     mask_fn,
+                    block_mask.as_tuple(),
                 )
                 return out
 

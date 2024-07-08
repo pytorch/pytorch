@@ -51,50 +51,6 @@ def create_placeholder(
     return TensorBox.create(input_buffer)
 
 
-def index_to_other_buffers(cnt: int, graph_type: SubgraphType) -> int:
-    """This function needs to be aware of the signatures for flex_attention_forward
-    and flex_attention_backward. If new args are added, or the signature changes
-    be sure to update the indexing math
-
-    Args:
-        cnt (int): The current index of the placeholder node
-        is_joint_graph (bool): Whether or not this subgraph represents the joint graph
-    """
-    # Current fwd_args = [
-    #   query,
-    #   key,
-    #   value,
-    #   score_mod,
-    #   block_mask,
-    #   *other_buffers
-    # ]
-    # For fwd_graphs we have 5 dummy values this when the first lifted args
-    # is seen cnt = 5 and the start of the index_buffers is at args[5]
-    # thus we add 0 from the current cnt
-    if graph_type == SubgraphType.FWD:
-        return cnt + 0
-
-    # Current bwd_args = [
-    #   q,
-    #   k,
-    #   v,
-    #   out,
-    #   lse,
-    #   grad_out,
-    #   fw_graph,
-    #   joint_graph,
-    #   block_mask,
-    #   *other_buffers
-    # ]
-    # We have 5 dummy values but the start of other_buffers is at index 9
-    if graph_type == SubgraphType.JOINT_FWD:
-        return cnt + 4
-
-    # Same bwd args but now with 6 dummy values while other_buffers still start at 9
-    if graph_type == SubgraphType.JOINT_BWD:
-        return cnt + 3
-
-
 def build_subgraph_buffer(
     other_buffers: Tuple[IRNode],
     placeholder_inps: List[TensorBox],
@@ -597,8 +553,8 @@ def flex_attention(*args, **kwargs):
         key,
         value,
         subgraph,
+        mask_graph,
         block_mask,
-        mask_fn_graph,
         score_mod_other_buffers,
         mask_fn_other_buffers,
     ) = args
@@ -641,7 +597,7 @@ def flex_attention(*args, **kwargs):
     subgraph_buffer = build_subgraph_buffer(
         score_mod_other_buffers, placeholder_inps, subgraph, graph_type=SubgraphType.FWD
     )
-    mask_fn_graph_placeholder_inps = [
+    mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
             ("b", torch.int32),
@@ -650,10 +606,10 @@ def flex_attention(*args, **kwargs):
             ("n", torch.int32),
         ]
     ]
-    mask_fn_graph_buffer = build_subgraph_buffer(
+    mask_graph_buffer = build_subgraph_buffer(
         mask_fn_other_buffers,
-        mask_fn_graph_placeholder_inps,
-        mask_fn_graph,
+        mask_graph_placeholder_inps,
+        mask_graph,
         graph_type=SubgraphType.FWD,
     )
     layout = FixedLayout(
@@ -708,7 +664,7 @@ def flex_attention(*args, **kwargs):
             layout=layout,
             subgraphs=[
                 subgraph_buffer,
-                mask_fn_graph_buffer,
+                mask_graph_buffer,
             ],
             mutated_inputs=[
                 logsumexp,
@@ -1291,8 +1247,8 @@ def flex_attention_backward(*args, **kwargs):
         grad_out,
         fw_graph,
         joint_graph,
+        mask_graph,
         block_mask,
-        mask_fn_graph,
         score_mod_other_buffers,
         mask_fn_other_buffers,
     ) = args
@@ -1353,7 +1309,7 @@ def flex_attention_backward(*args, **kwargs):
         joint_graph,
         graph_type=SubgraphType.JOINT_BWD,
     )
-    mask_fn_graph_placeholder_inps = [
+    mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
             ("b", torch.int32),
@@ -1362,10 +1318,10 @@ def flex_attention_backward(*args, **kwargs):
             ("n", torch.int32),
         ]
     ]
-    mask_fn_graph_buffer = build_subgraph_buffer(
+    mask_graph_buffer = build_subgraph_buffer(
         mask_fn_other_buffers,
-        mask_fn_graph_placeholder_inps,
-        mask_fn_graph,
+        mask_graph_placeholder_inps,
+        mask_graph,
         graph_type=SubgraphType.FWD,
     )
 
@@ -1431,7 +1387,7 @@ def flex_attention_backward(*args, **kwargs):
                 partial_sparse_q_indices,
             ],
             layout=layout_k,  # We use store_output only for grad_key
-            subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer, mask_fn_graph_buffer],
+            subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer, mask_graph_buffer],
             mutated_inputs=[grad_query, grad_value],
             call_sizes=query.get_size() + [key.get_size()[2]],
             num_stages=num_stages,
