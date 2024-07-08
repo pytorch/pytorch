@@ -19,6 +19,7 @@ from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.proxy_tensor import py_sym_types
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.graph_module import GraphModule
+from torch._subclasses.meta_utils import is_sparse_any
 
 log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
@@ -266,19 +267,20 @@ def insert_deferred_runtime_asserts(
                                 torch.ops.aten.sym_size.int, (node, i)
                             ),
                         )
-                    for i, s in enumerate(t.stride()):
+                    if not is_sparse_any(t):
+                        for i, s in enumerate(t.stride()):
+                            match_symbol(
+                                s,
+                                lambda: graph.call_function(
+                                    torch.ops.aten.sym_stride.int, (node, i)
+                                ),
+                            )
                         match_symbol(
-                            s,
+                            t.storage_offset(),
                             lambda: graph.call_function(
-                                torch.ops.aten.sym_stride.int, (node, i)
+                                torch.ops.aten.sym_storage_offset.default, (node,)
                             ),
                         )
-                    match_symbol(
-                        t.storage_offset(),
-                        lambda: graph.call_function(
-                            torch.ops.aten.sym_storage_offset.default, (node,)
-                        ),
-                    )
 
             # Handle asserts that aren't associated with any symbol.  This
             # doesn't really have to be in the loop as it will only run once,
