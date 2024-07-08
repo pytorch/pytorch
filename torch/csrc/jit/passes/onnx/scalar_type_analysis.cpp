@@ -100,7 +100,7 @@ static bool IsImplicitCastSupported(const NodeKind& nodeKind) {
 static std::optional<c10::ScalarType> PromoteScalarTypes(
     const std::vector<c10::ScalarType>& types) {
   if (types.empty()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   auto st = types[0];
   for (const auto i : c10::irange(1, types.size())) {
@@ -131,9 +131,9 @@ static std::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
     return 0;
   };
 
-  if (c10::nullopt == typeFromScalar) {
+  if (std::nullopt == typeFromScalar) {
     return typeFromTensor;
-  } else if (c10::nullopt == typeFromTensor) {
+  } else if (std::nullopt == typeFromTensor) {
     return typeFromScalar;
   }
 
@@ -155,7 +155,7 @@ static std::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
     if (auto* tensor_type = input->type()->castRaw<TensorType>()) {
       return tensor_type->scalarType();
     }
-    return c10::nullopt;
+    return std::nullopt;
   };
   auto emplace_type_from_scalar =
       [&typesFromTensors, &typesFromScalars](at::ScalarType scalar_type) {
@@ -252,7 +252,7 @@ static std::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
         }
       });
 
-  std::optional<c10::ScalarType> st = c10::nullopt;
+  std::optional<c10::ScalarType> st = std::nullopt;
   const auto output_st = get_scalar_type(n->output());
 
   if (IsComparisonOp(n->kind())) {
@@ -313,7 +313,7 @@ static void UpdateScalarTypeForInputs(
   for (auto input : n->inputs()) {
     auto input_tensor_type = input->type()->cast<TensorType>();
     auto input_scalar_type =
-        input_tensor_type ? input_tensor_type->scalarType() : c10::nullopt;
+        input_tensor_type ? input_tensor_type->scalarType() : std::nullopt;
 
     // We skip the 'condition' input (i.e., the first input) in case of
     // onnx:Where operator.
@@ -393,7 +393,7 @@ static void RecoverScalarTypeForOutput(
 static void LowPrecisionCastNodeForStandardOps(Node* n, int opset_version) {
   TORCH_INTERNAL_ASSERT(n->outputs().size() == 1);
   if (n->output()->type()->cast<TensorType>() == nullptr ||
-      n->output()->type()->cast<TensorType>()->scalarType() == c10::nullopt) {
+      n->output()->type()->cast<TensorType>()->scalarType() == std::nullopt) {
     // skip LowPrecisionCast if op output type is null.
     return;
   }
@@ -401,7 +401,7 @@ static void LowPrecisionCastNodeForStandardOps(Node* n, int opset_version) {
       n->output()->type()->cast<TensorType>()->scalarType().value();
   for (size_t i = 0; i < n->inputs().size(); ++i) {
     if (n->input(i)->type()->cast<TensorType>() == nullptr ||
-        n->input(i)->type()->cast<TensorType>()->scalarType() == c10::nullopt) {
+        n->input(i)->type()->cast<TensorType>()->scalarType() == std::nullopt) {
       // skip LowPrecisionCast if any op input type node is null.
       return;
     }

@@ -414,7 +414,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
   // Fuse transform_0213 inside
   auto proj = transform0213_gemm_nt_bias(
       attn_ctx, proj_weight, proj_bias, query);
-#ifndef NDEBUG
+// TODO: Remove me when https://github.com/pytorch/pytorch/issues/130073 is fixed
+#if !defined(NDEBUG) && 0
   debug_assert_shape(__LINE__, proj, {B, T, D});
 #endif
   if (need_weights && average_attn_weights) {
