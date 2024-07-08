@@ -28,8 +28,10 @@ def _extract_debug_handles(model) -> Dict[torch.fx.Node, int]:
 
     return debug_handle_map
 
+
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
 class TestGenerateNumericDebugHandle(TestCase):
@@ -47,8 +49,9 @@ class TestGenerateNumericDebugHandle(TestCase):
         self.assertEqual(len(unique_ids), count)
 
     @unittest.skipIf(
-        is_fbcode(), "fbcode changes the code path for `capture_pre_autograd_graph` "
-        "we can enable the test in fbcode after we remove `capture_pre_autograd_graph`"
+        is_fbcode(),
+        "fbcode changes the code path for `capture_pre_autograd_graph` "
+        "we can enable the test in fbcode after we remove `capture_pre_autograd_graph`",
     )
     def test_quantize_pt2e_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
