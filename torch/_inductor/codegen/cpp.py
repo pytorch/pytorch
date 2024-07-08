@@ -1366,7 +1366,15 @@ class CppVecOverrides(CppOverrides):
     @staticmethod
     def truncdiv(a, b):
         # a and b are integer type
-        return f"{a} / {b}"
+        if a.dtype in [torch.uint8, torch.int8]:
+            # Since we load 16 int8 elements into vec512, the remaining bits of vec512 could be zero
+            # and causes div with float exception. Convert to int for div to avoid this issue.
+            a_cast = f"at::vec::convert<int32_t>({a})"
+            b_cast = f"at::vec::convert<int32_t>({b})"
+            trunc_div = f"{a_cast} / {b_cast}"
+            return f"at::vec::convert<{DTYPE_TO_CPP[a.dtype]}>({trunc_div})"
+        else:
+            return f"{a} / {b}"
 
     @staticmethod
     def minimum(a, b):

@@ -3408,13 +3408,19 @@ class CPUReproTests(TestCase):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
 
-        x = torch.randint(1, 100, (32, 32))
-        y = torch.randint(1, 100, (32, 32))
-        for mode in [None, "trunc", "floor"]:
-            with torch.no_grad():
-                metrics.reset()
-                self.common(fn, (x, y, mode))
-                check_metrics_vec_kernel_count(1)
+        for dtype in [
+            torch.int8,
+            torch.uint8,
+            torch.int32,
+            torch.int64,
+        ]:
+            x = torch.randint(1, 100, (32, 32), dtype=dtype)
+            y = torch.randint(1, 100, (32, 32), dtype=dtype)
+            for mode in [None, "trunc", "floor"]:
+                with torch.no_grad():
+                    metrics.reset()
+                    self.common(fn, (x, y, mode))
+                    check_metrics_vec_kernel_count(1)
 
     def test_uint8_add(self):
         # https://github.com/pytorch/pytorch/issues/113016
