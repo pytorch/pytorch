@@ -1491,70 +1491,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         all_args = args + flat_kwargs
         return all_args
 
-    def create_score_mod_wrapped_node(
-        self, tx, query: "VariableTracker", score_function: "VariableTracker"
-    ):
-        from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
-        from .builder import SourcelessBuilder
-
-        tx: InstructionTranslator = tx
-
-        scores_require_grad: bool = query.requires_grad
-        score = query.call_method(
-            tx,
-            "new_empty",
-            (SourcelessBuilder.create(tx, []),),
-            {"requires_grad": SourcelessBuilder.create(tx, scores_require_grad)},
-        )
-
-        def create_scalar():
-            return query.call_method(
-                tx,
-                "new_empty",
-                (SourcelessBuilder.create(tx, []),),
-                {
-                    "dtype": SourcelessBuilder.create(tx, torch.int32),
-                },
-            )
-
-        bhmn = [create_scalar() for _ in range(4)]
-        new_args = [score, *bhmn]
-
-        with TransformGetItemToIndex():
-            (
-                (body_output, body_treespec),
-                body_graph,
-                body_lifted_freevars,
-            ) = speculate_subgraph(
-                tx,
-                score_function,
-                new_args,
-                {},  # expect only args no kwargs for now
-                description="flex_attention",
-                source_target=self.value,
-                set_subgraph_inputs="flatten_manual",
-            )
-
-        body_name = add_subgraph(
-            tx,
-            "flex_attention",
-            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
-        )
-
-        body_node = make_attr(tx, body_name)
-
-        # It is possible that the score-mod function captures some free variables that are not
-        # passed in as arguments. In this case, we need to lift them, which is handled by speculate_subgraph.
-        # We then need to create proxies for this + the inputs.
-
-        lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
-
-        proxy_args = (body_node, lifted_args)
-
-        return proxy_args
-
-    def create_mask_fn_wrapped_node(
-        self, tx, query: "VariableTracker", mask_function: "VariableTracker"
+    def create_wrapped_node(
+        self, tx, query: "VariableTracker", fn: "VariableTracker", fn_name: str
     ):
         from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
         from .builder import SourcelessBuilder
@@ -1572,7 +1510,19 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         bhmn = [create_scalar() for _ in range(4)]
-        new_args = [*bhmn]
+
+        if fn_name == "score_mod":
+            scores_require_grad: bool = query.requires_grad
+            score = query.call_method(
+                tx,
+                "new_empty",
+                (SourcelessBuilder.create(tx, []),),
+                {"requires_grad": SourcelessBuilder.create(tx, scores_require_grad)},
+            )
+            new_args = [score, *bhmn]
+        else:
+            assert fn_name == "mask_fn", "Illegal function name: " + fn_name
+            new_args = [*bhmn]
 
         with TransformGetItemToIndex():
             (
@@ -1581,23 +1531,23 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 body_lifted_freevars,
             ) = speculate_subgraph(
                 tx,
-                mask_function,
+                fn,
                 new_args,
                 {},  # expect only args no kwargs for now
-                description="mask_fn",
+                description=fn_name,
                 source_target=self.value,
                 set_subgraph_inputs="flatten_manual",
             )
 
         body_name = add_subgraph(
             tx,
-            "mask_fn",
+            fn_name,
             torch.fx.GraphModule(tx.output.nn_modules, body_graph),
         )
 
         body_node = make_attr(tx, body_name)
 
-        # It is possible that the mask function captures some free variables that are not
+        # It is possible that the score-mod or mask function captures some free variables that are not
         # passed in as arguments. In this case, we need to lift them, which is handled by speculate_subgraph.
         # We then need to create proxies for this + the inputs.
 
@@ -1621,11 +1571,11 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             block_mask,
         ) = self.normalize_to_args(args, kwargs)
 
-        score_mod_node, score_mod_lifted_args = self.create_score_mod_wrapped_node(
-            tx, query, score_mod
+        score_mod_node, score_mod_lifted_args = self.create_wrapped_node(
+            tx, query, score_mod, "score_mod"
         )
-        mask_fn_node, mask_fn_lifted_args = self.create_mask_fn_wrapped_node(
-            tx, query, mask_fn
+        mask_fn_node, mask_fn_lifted_args = self.create_wrapped_node(
+            tx, query, mask_fn, "mask_fn"
         )
         proxied_args = [
             query,
