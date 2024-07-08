@@ -119,6 +119,8 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
 fi
 
 if [[ "$GPU_ARCH_TYPE" == xpu ]]; then
+  # Workaround for __mkl_tmp_MOD unbound variable issue
+  set +u
   source /opt/intel/oneapi/pytorch-gpu-dev-0.5/oneapi-vars.sh
 fi
 
