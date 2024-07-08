@@ -952,16 +952,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         _, code = run_and_get_code(f, q, k, v)
         # Check the attention output is not allocated
         fc = FileCheck()
-        fc.check("buf0 = empty_strided_cuda((1, 1, 1)")  # SPARSE_KV_NUM_BLKS
-        fc.check("buf1 = empty_strided_cuda((1, 1, 1, 1)")  # SPARSE_KV_IDX
-        fc.check("buf4 = empty_strided_cuda")  # logsumexp
-        fc.check("buf7 = empty_strided_cuda")  # cos(attention)
+        fc.check("buf0 = empty_strided_cuda((1, 1, 1)")  # FULL_KV_NUM_BLKS
+        fc.check("buf1 = empty_strided_cuda((1, 1, 1, 1)")  # FULL_KV_IDX
+        fc.check("buf8 = empty_strided_cuda")  # logsumexp
+        fc.check("buf11 = empty_strided_cuda")  # cos(attention)
         fc.run(code[0])
         fc = FileCheck()
         fc.check_not("buf2 =")  # Dead buffer
         fc.check_not("buf3 =")  # Dead buffer
-        fc.check_not("buf5 =")  # Dead buffer, attention output
-        fc.check_not("buf6 =")  # Mutation-buffer, not allocated
+        fc.check_not("buf6 =")  # Dead buffer, attention output
+        fc.check_not("buf7 =")  # Mutation-buffer, not allocated
         fc.run(code[0])
         accessed_bytes = 1 * 8 * 1024 * 64 * torch.float32.itemsize
         num_accesses = 4  # q, k, v reads, one output.
@@ -1335,20 +1335,38 @@ class GraphModule(torch.nn.Module):
 
         zeros_1: "i32[1, 1, 1, 1]" = torch.zeros([1, 1, 1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
 
-        new_empty: "f64[]" = l_args_0_.new_empty([], requires_grad = True)
+        zeros_2: "i32[1, 1, 1]" = torch.zeros([1, 1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
+
+        zeros_3: "i32[1, 1, 1, 1]" = torch.zeros([1, 1, 1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
+
+        zeros_4: "i32[1, 1, 1]" = torch.zeros([1, 1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
+
+        zeros_5: "i32[1, 1, 1, 1]" = torch.zeros([1, 1, 1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
+
+        new_empty: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         new_empty_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         new_empty_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         new_empty_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        new_empty_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        flex_attention_0 = self.flex_attention_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, flex_attention_0, (ones, zeros, ones_1, zeros_1, 8, 8));  l_args_0_ = l_args_1_ = l_args_2_ = flex_attention_0 = ones = zeros = ones_1 = zeros_1 = None
+        new_empty_4: "f64[]" = l_args_0_.new_empty([], requires_grad = True)
+        score_mod_0 = self.score_mod_0
+        new_empty_5: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        new_empty_6: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        new_empty_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        new_empty_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        mask_fn_0 = self.mask_fn_0
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, mask_fn_0, (ones, zeros, ones_1, zeros_1, zeros_2, zeros_3, zeros_4, zeros_5, 8, 8), (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = mask_fn_0 = ones = zeros = ones_1 = zeros_1 = zeros_2 = zeros_3 = zeros_4 = zeros_5 = None
         out: "f64[2, 2, 8, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, new_empty: "f64[]", new_empty_1: "i32[]", new_empty_2: "i32[]", new_empty_3: "i32[]", new_empty_4: "i32[]"):
-            mul: "f64[]" = new_empty * new_empty;  new_empty = None
+        def forward(self, new_empty_4: "f64[]", new_empty: "i32[]", new_empty_1: "i32[]", new_empty_2: "i32[]", new_empty_3: "i32[]"):
+            mul: "f64[]" = new_empty_4 * new_empty_4;  new_empty_4 = None
             return mul
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, new_empty_5: "i32[]", new_empty_6: "i32[]", new_empty_7: "i32[]", new_empty_8: "i32[]"):
+            ge: "b8[]" = new_empty_7 >= 0;  new_empty_7 = None
+            return ge
 """,  # noqa: B950
         )
         # Save the AOT graphs
@@ -1372,10 +1390,11 @@ class GraphModule(torch.nn.Module):
             joint_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", full_default: "i32[1, 1, 1]", full_default_1: "i32[1, 1, 1, 1]", getitem: "f64[2, 2, 8, 4]", getitem_1: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
+    def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", full_default: "i32[1, 1, 1]", full_default_1: "i32[1, 1, 1, 1]", full_default_4: "i32[1, 1, 1]", getitem: "f64[2, 2, 8, 4]", getitem_1: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, (full_default, full_default_1, full_default, full_default_1, 8, 8));  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = None
+        mask_graph = self.mask_graph
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, mask_graph, (full_default, full_default_1, full_default, full_default_1, full_default_4, full_default_1, full_default_4, full_default_1, 8, 8), (), ());  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = mask_graph = full_default = full_default_1 = full_default_4 = None
         getitem_2: "f64[2, 2, 8, 4]" = flex_attention_backward[0]
         getitem_3: "f64[2, 2, 8, 4]" = flex_attention_backward[1]
         getitem_4: "f64[2, 2, 8, 4]" = flex_attention_backward[2];  flex_attention_backward = None
@@ -1393,6 +1412,11 @@ class GraphModule(torch.nn.Module):
             mul_2: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1);  arg5_1 = arg0_1 = None
             add: "f64[]" = torch.ops.aten.add.Tensor(mul_2, mul_1);  mul_2 = mul_1 = None
             return [add, None, None, None, None]
+
+    class <lambda>(torch.nn.Module):
+        def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
+            ge: "b8[]" = torch.ops.aten.ge.Scalar(arg2_1, 0);  arg2_1 = None
+            return ge
 """,  # noqa: B950
         )
 
