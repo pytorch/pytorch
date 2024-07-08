@@ -563,7 +563,7 @@ def _load_model_state_dict(
         )
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
-    elif info.fsdp_context() and info.full_state_dict:
+    elif info.full_state_dict:
         device = None
         for key, value in local_state_dict.items():
             if torch.is_tensor(value):
