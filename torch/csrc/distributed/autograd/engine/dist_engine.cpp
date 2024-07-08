@@ -77,7 +77,7 @@ class DistAccumulateGradCaptureHook
 
 void DistEngine::globalCpuThread(
     const std::shared_ptr<ReadyQueue>& ready_queue) {
-    c10::setThreadName("pt_dist_engine");
+  c10::setThreadName("pt_dist_engine");
   while (true) {
     NodeTask task = ready_queue->pop();
     if (task.isShutdownTask_) {
