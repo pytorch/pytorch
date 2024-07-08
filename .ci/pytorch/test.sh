@@ -1302,21 +1302,19 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper_abi_compatible* ]]; then
   install_torchvision
   test_inductor_cpp_wrapper_abi_compatible
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  test_inductor_shard 1
-  test_inductor_aoti
-  test_inductor_distributed
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" -gt 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
-elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  test_dynamo_shard 1
-  test_aten
-elif [[ "${TEST_CONFIG}" == *dynamo* && $SHARD_NUMBER -gt 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    test_inductor_aoti
+    test_inductor_distributed
+  fi
+elif [[ "${TEST_CONFIG}" == *dynamo* ]]; then
   install_torchvision
   test_dynamo_shard "${SHARD_NUMBER}"
+  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    test_aten
+  fi
 elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
