@@ -356,9 +356,7 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                                                bool bidirectional,
                                                                                bool batch_first) {
   using namespace mps;
-  TORCH_CHECK(num_layers <= 2,
-              "MPS LSTM gradient kernel has an issue with the gradients for num_layers > 2. ",
-              "As a temporary fix, you can set the environment variable `PYTORCH_ENABLE_MPS_FALLBACK=1` ");
+  bool ismacos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
 
   const Tensor& grad_y_r = c10::value_or_else(grad_y_opt, [] { return Tensor(); });
   const Tensor& grad_hy_r = c10::value_or_else(grad_hy_opt, [] { return Tensor(); });
@@ -533,6 +531,10 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                   start:i - num_layers
                                                  length:1
                                                    name:nil];
+          if is_macos_14_4_or_newer {
+            // Prevents shape optimization bug in kernel when num_layers > 2
+            iterationInputTensor_ = [mpsGraph identityWithTensor:iterationInputTensor_ name:nil];
+          }
           iterationInputTensor_ = [mpsGraph squeezeTensor:iterationInputTensor_ axis:0 name:nil];
         }
 
