@@ -234,7 +234,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
         counter_to_decrement_when_ready_(counter_to_decrement_when_ready) {
     thread_ = std::make_unique<std::thread>([this]() {
       c10::setThreadName("pt_thread_pool");
-      this->ThreadFunc(); 
+      this->ThreadFunc();
     });
   }
 
