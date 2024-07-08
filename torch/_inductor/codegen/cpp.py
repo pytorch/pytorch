@@ -1345,36 +1345,24 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def floordiv(a, b):
-        def _floordiv(a, b):
-            _t = f"decltype({a})"
-            quot = f"{a} / {b}"
-            has_rem = f"({a} % {b} != {_t}(0))"
-            is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
-            return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
-
         # a and b are integer type
-        if a.dtype in [torch.uint8, torch.int8]:
-            # Since we load 16 int8 elements into vec512, the remaining bits of vec512 could be zero
-            # and causes div with float exception. Convert to int for div to avoid this issue.
-            a_cast = f"at::vec::convert<int32_t>({a})"
-            b_cast = f"at::vec::convert<int32_t>({b})"
-            floor_div = f"({_floordiv(a_cast, b_cast)})"
-            return f"at::vec::convert<{DTYPE_TO_CPP[a.dtype]}>({floor_div})"
-        else:
-            return _floordiv(a, b)
+        _t = f"decltype({a})"
+        if V.kernel._get_raw_num_vectors(b.dtype) < 1:
+            # Doing blend to set the remaining bits of b to non-zero
+            b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
+        quot = f"{a} / {b}"
+        has_rem = f"({a} % {b} != {_t}(0))"
+        is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
+        return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
 
     @staticmethod
     def truncdiv(a, b):
         # a and b are integer type
-        if a.dtype in [torch.uint8, torch.int8]:
-            # Since we load 16 int8 elements into vec512, the remaining bits of vec512 could be zero
-            # and causes div with float exception. Convert to int for div to avoid this issue.
-            a_cast = f"at::vec::convert<int32_t>({a})"
-            b_cast = f"at::vec::convert<int32_t>({b})"
-            trunc_div = f"{a_cast} / {b_cast}"
-            return f"at::vec::convert<{DTYPE_TO_CPP[a.dtype]}>({trunc_div})"
-        else:
-            return f"{a} / {b}"
+        if V.kernel._get_raw_num_vectors(b.dtype) < 1:
+            # Doing blend to set the remaining bits of b to non-zero
+            _t = f"decltype({b})"
+            b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
+        return f"{a} / {b}"
 
     @staticmethod
     def minimum(a, b):
@@ -2171,6 +2159,9 @@ class CppVecKernel(CppKernel):
         )
         assert num_vectors >= 1
         return num_vectors
+
+    def _get_raw_num_vectors(self, dtype: torch.dtype) -> float:
+        return self.tiling_factor * dtype.itemsize * 8 / self.vec_isa.bit_width()
 
     def _get_vec_type(self, dtype: torch.dtype) -> str:
         num_vectors = self._get_num_vectors(dtype)
