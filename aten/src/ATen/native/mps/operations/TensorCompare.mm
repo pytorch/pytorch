@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
+#include <ATen/native/TypeProperties.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -27,47 +28,106 @@ struct CachedGraph : public MPSCachedGraph {
   MPSGraphTensor *minTensor = nil, *maxTensor = nil;
 };
 
+static at::ScalarType clamp_type_promotion(const Tensor& input_tensor,
+                                           const OptionalScalarRef min_opt,
+                                           const OptionalScalarRef max_opt,
+                                           const Tensor& output_tensor) {
+  // Manual type promotion, adapted from clamp META_FUNC
+  ScalarType result_type = input_tensor.scalar_type();
+  TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
+  // Floating is the highest supported
+  if (!isFloatingType(result_type)) {
+    at::native::ResultTypeState state = {};
+    state = at::native::update_result_type_state(input_tensor, state);
+
+    if (min_opt.has_value()) {
+      state = at::native::update_result_type_state(min_opt.get(), state);
+    }
+    if (max_opt.has_value()) {
+      state = at::native::update_result_type_state(max_opt.get(), state);
+    }
+    result_type = at::native::result_type(state);
+  }
+
+  // disallow type promoting inplace op
+  TORCH_CHECK(result_type == input_tensor.scalar_type() || !output_tensor.is_same(input_tensor),
+              "result type ",
+              result_type,
+              " can't be cast to the desired output type ",
+              input_tensor.dtype());
+
+  return result_type;
+}
+
+static at::ScalarType clamp_type_promotion(const Tensor& input_tensor,
+                                           const OptionalTensorRef min_opt,
+                                           const OptionalTensorRef max_opt,
+                                           const Tensor& output_tensor) {
+  // Manual type promotion, adapted from clamp META_FUNC
+  ScalarType result_type = input_tensor.scalar_type();
+  TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
+  // Floating is the highest supported
+  if (!isFloatingType(result_type)) {
+    at::native::ResultTypeState state = {};
+    state = at::native::update_result_type_state(input_tensor, state);
+
+    if (min_opt.has_value() && min_opt->defined()) {
+      state = at::native::update_result_type_state(*min_opt, state);
+    }
+    if (max_opt.has_value() && max_opt->defined()) {
+      state = at::native::update_result_type_state(*max_opt, state);
+    }
+    result_type = at::native::result_type(state);
+  }
+
+  // disallow type promoting inplace op
+  TORCH_CHECK(result_type == input_tensor.scalar_type() || !output_tensor.is_same(input_tensor),
+              "result type ",
+              result_type,
+              " can't be cast to the desired output type ",
+              input_tensor.dtype());
+
+  return result_type;
+}
+
 static void clamp_mps_graph(CachedGraph* cachedGraph,
                             const Tensor& input_tensor,
-                            const Tensor& min_tensor,
-                            const Tensor& max_tensor) {
-  auto input_dtype = input_tensor.scalar_type();
-  auto min_dtype = cachedGraph->minTensor ? min_tensor.scalar_type() : input_dtype;
-  auto max_dtype = cachedGraph->maxTensor ? max_tensor.scalar_type() : input_dtype;
-
+                            const at::ScalarType min_type,
+                            const at::ScalarType max_type,
+                            const at::ScalarType result_type) {
   MPSGraph* mpsGraph = cachedGraph->graph();
 
   cachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
 
   auto minTensor = cachedGraph->minTensor;
   auto maxTensor = cachedGraph->maxTensor;
+  auto inputTensor = cachedGraph->inputTensor;
 
-  if (input_dtype != min_dtype) {
-    minTensor = castMPSTensor(mpsGraph, cachedGraph->minTensor, input_dtype);
+  if (minTensor && min_type != result_type) {
+    minTensor = castMPSTensor(mpsGraph, minTensor, result_type);
   }
-  if (input_dtype != max_dtype) {
-    maxTensor = castMPSTensor(mpsGraph, cachedGraph->maxTensor, input_dtype);
+  if (maxTensor && max_type != result_type) {
+    maxTensor = castMPSTensor(mpsGraph, maxTensor, result_type);
   }
-  if (c10::isIntegralType(input_dtype, /*includeBool=*/true)) {
+  if (input_tensor.scalar_type() != result_type) {
+    inputTensor = castMPSTensor(mpsGraph, inputTensor, result_type);
+  }
+  if (c10::isIntegralType(result_type, /*includeBool=*/true)) {
     if (minTensor && maxTensor) {
-      cachedGraph->outputTensor = [mpsGraph clampWithTensor:cachedGraph->inputTensor
+      cachedGraph->outputTensor = [mpsGraph clampWithTensor:inputTensor
                                              minValueTensor:minTensor
                                              maxValueTensor:maxTensor
                                                        name:nil];
     } else if (maxTensor) {
-      cachedGraph->outputTensor = [mpsGraph minimumWithPrimaryTensor:cachedGraph->inputTensor
-                                                     secondaryTensor:maxTensor
-                                                                name:nil];
+      cachedGraph->outputTensor = [mpsGraph minimumWithPrimaryTensor:inputTensor secondaryTensor:maxTensor name:nil];
     } else if (minTensor) {
-      cachedGraph->outputTensor = [mpsGraph maximumWithPrimaryTensor:cachedGraph->inputTensor
-                                                     secondaryTensor:minTensor
-                                                                name:nil];
+      cachedGraph->outputTensor = [mpsGraph maximumWithPrimaryTensor:inputTensor secondaryTensor:minTensor name:nil];
     }
     return;
   }
   // clampWithTensor doesn't propagate NaN through so simulate it as composition of
   // maximumWithNaNPropagationWithPrimaryTensor and minimumWithNaNPropagationWithPrimaryTensor
-  auto outputTensor = cachedGraph->inputTensor;
+  auto outputTensor = inputTensor;
   if (minTensor) {
     outputTensor = [mpsGraph maximumWithNaNPropagationWithPrimaryTensor:outputTensor
                                                         secondaryTensor:minTensor
@@ -134,6 +194,8 @@ static void clamp_tensor_out_mps(const Tensor& input_t,
   if (output_t.numel() == 0)
     return;
 
+  auto result_type = clamp_type_promotion(input_t, min_opt, max_opt, output_t);
+
   IntArrayRef new_min_shape;
   IntArrayRef new_max_shape;
 
@@ -182,7 +244,7 @@ static void clamp_tensor_out_mps(const Tensor& input_t,
         ;
       }
 
-      clamp_mps_graph(newCachedGraph, input_t, min_opt_tensor, max_opt_tensor);
+      clamp_mps_graph(newCachedGraph, input_t, min_opt_tensor.scalar_type(), max_opt_tensor.scalar_type(), result_type);
     });
 
     bool gatherTensorData = true;
@@ -238,21 +300,23 @@ static void clamp_scalar_out_mps(const Tensor& input_t,
   if (output_t.numel() == 0)
     return;
 
+  auto result_type = clamp_type_promotion(input_t, min_opt, max_opt, output_t);
+
   @autoreleasepool {
     // the optional min/max refs could affect how we build the cached graph
     string key = op_name + (has_min ? ("_min:" + std::to_string(min_scalar)) : "") +
         (has_max ? ("_max:" + std::to_string(max_scalar)) : "") + "_scalar:" + getTensorsStringKey({input_t});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       if (has_min)
-        newCachedGraph->minTensor = [mpsGraph
-            constantWithScalar:min_scalar
-                         shape:(mps::getMPSShape(input_t))dataType:(mps::getMPSScalarType(input_t.scalar_type()))];
+        newCachedGraph->minTensor =
+            [mpsGraph constantWithScalar:min_scalar
+                                   shape:(mps::getMPSShape(input_t))dataType:(mps::getMPSScalarType(result_type))];
       if (has_max)
-        newCachedGraph->maxTensor = [mpsGraph
-            constantWithScalar:max_scalar
-                         shape:(mps::getMPSShape(input_t))dataType:(mps::getMPSScalarType(input_t.scalar_type()))];
+        newCachedGraph->maxTensor =
+            [mpsGraph constantWithScalar:max_scalar
+                                   shape:(mps::getMPSShape(input_t))dataType:(mps::getMPSScalarType(result_type))];
 
-      clamp_mps_graph(newCachedGraph, input_t, input_t, input_t);
+      clamp_mps_graph(newCachedGraph, input_t, result_type, result_type, result_type);
     });
 
     bool gatherTensorData = true;
