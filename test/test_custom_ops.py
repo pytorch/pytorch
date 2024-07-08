@@ -3148,7 +3148,7 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertEqual(result, torch.ones(3))
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    def test_disable_kernel(self):
+    def test_set_kernel_enabled(self):
         x = torch.ones(1)
 
         @torch.library.custom_op("mylib::f", mutates_args=())
@@ -3156,12 +3156,14 @@ Please use `add.register_fake` to add an fake impl.""",
             return x + 1
 
         self.assertEqual(f(x), x + 1)
-
-        with self.assertWarnsOnceRegex(
-            RuntimeWarning, r".*no kernel was registered for this device type.*"
-        ):
-            with f.disable_kernel("gpu", disable=True):
+        with self.assertLogs(
+            "torch._library.custom_ops",
+        ) as captured:
+            with f.set_kernel_enabled("gpu", enabled=False):
                 self.assertEqual(f(x), x + 1)
+            self.assertIn(
+                "no kernel was registered for this device type", captured.output[0]
+            )
 
         @f.register_kernel("cpu")
         def _(x):
@@ -3169,23 +3171,29 @@ Please use `add.register_fake` to add an fake impl.""",
 
         self.assertEqual(f(x), x + 2)
 
-        with self.assertWarnsOnceRegex(RuntimeWarning, r".*already enabled.*"):
-            with f.disable_kernel("cpu", disable=False):
+        with self.assertLogs(
+            "torch._library.custom_ops",
+        ) as captured:
+            with f.set_kernel_enabled("cpu", enabled=True):
                 self.assertEqual(f(x), x + 2)
+            self.assertIn("already enabled", captured.output[0])
 
-        with f.disable_kernel("cpu", disable=True):
+        with f.set_kernel_enabled("cpu", enabled=False):
             self.assertEqual(f(x), x + 1)
 
-            with self.assertWarnsOnceRegex(RuntimeWarning, r".*already disabled.*"):
-                with f.disable_kernel("cpu", disable=True):
+            with self.assertLogs(
+                "torch._library.custom_ops",
+            ) as captured:
+                with f.set_kernel_enabled("cpu", enabled=False):
                     self.assertEqual(f(x), x + 1)
+                self.assertIn("already disabled", captured.output[0])
 
             self.assertEqual(f(x), x + 1)
 
-        with f.disable_kernel("cpu", disable=False):
+        with f.set_kernel_enabled("cpu", enabled=True):
             self.assertEqual(f(x), x + 2)
 
-        with f.disable_kernel("cpu", disable=True):
+        with f.set_kernel_enabled("cpu", enabled=False):
             self.assertEqual(f(x), x + 1)
 
 

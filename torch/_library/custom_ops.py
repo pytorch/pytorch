@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import inspect
-import warnings
+import logging
 import weakref
 from contextlib import contextmanager
 from typing import (
@@ -24,6 +24,7 @@ from . import utils
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
+log = logging.getLogger(__name__)
 
 
 @exposed_in("torch.library")
@@ -192,7 +193,7 @@ class CustomOpDef:
         return f"<CustomOpDef({self._qualname})>"
 
     @contextmanager
-    def disable_kernel(self, device_type: str, disable: bool = True):
+    def set_kernel_enabled(self, device_type: str, enabled: bool = True):
         """
         Disable or re-enable an already registered kernel for this custom operator.
 
@@ -205,27 +206,28 @@ class CustomOpDef:
             device_type (str): The device type to disable/enable the kernel for.
             disable (bool): Whether to disable or enable the kernel.
         """
-        action = "disable" if disable else "enable"
+        action = "enable" if enabled else "disable"
         originally_disabled = device_type in self._disabled_kernel
         if device_type not in self._backend_fns:
-            warnings.warn(
-                f"Attempted to {action} kernel for {device_type} but no kernel was registered for this device type.",
-                RuntimeWarning,
+            log.warning(
+                "Attempted to %s kernel for %s but no kernel was registered for this device type.",
+                action,
+                device_type,
             )
 
-        if disable:
+        if not enabled:
             if originally_disabled:
-                warnings.warn(
-                    f"Attempted to disable kernel for {device_type} but it was already disabled.",
-                    RuntimeWarning,
+                log.warning(
+                    "Attempted to disable kernel for %s but it was already disabled.",
+                    device_type,
                 )
             else:
                 self._disabled_kernel.add(device_type)
         else:  # enable the kernel
             if not originally_disabled:
-                warnings.warn(
-                    f"Attempted to enable kernel for {device_type} but it was already enabled.",
-                    RuntimeWarning,
+                log.warning(
+                    "Attempted to enable kernel for  %s but it was already enabled.",
+                    device_type,
                 )
             else:
                 self._disabled_kernel.remove(device_type)
