@@ -1258,14 +1258,14 @@ def flex_attention_backward(*args, **kwargs):
         mask_fn_other_buffers,
     ) = args
     (
-        full_sparse_kv_num_blocks,
-        full_sparse_kv_indices,
-        full_sparse_q_num_blocks,
-        full_sparse_q_indices,
-        partial_sparse_kv_num_blocks,
-        partial_sparse_kv_indices,
-        partial_sparse_q_num_blocks,
-        partial_sparse_q_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        full_q_num_blocks,
+        full_q_indices,
+        partial_kv_num_blocks,
+        partial_kv_indices,
+        partial_q_num_blocks,
+        partial_q_indices,
         SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
     ) = block_mask
@@ -1274,14 +1274,14 @@ def flex_attention_backward(*args, **kwargs):
         key,
         value,
         grad_out,
-        full_sparse_kv_num_blocks,
-        full_sparse_kv_indices,
-        full_sparse_q_num_blocks,
-        full_sparse_q_indices,
-        partial_sparse_kv_num_blocks,
-        partial_sparse_kv_indices,
-        partial_sparse_q_num_blocks,
-        partial_sparse_q_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        full_q_num_blocks,
+        full_q_indices,
+        partial_kv_num_blocks,
+        partial_kv_indices,
+        partial_q_num_blocks,
+        partial_q_indices,
     ]:
         buf.realize()
 
@@ -1382,14 +1382,14 @@ def flex_attention_backward(*args, **kwargs):
                 grad_out,
                 grad_query,
                 grad_value,
-                full_sparse_kv_num_blocks,
-                full_sparse_kv_indices,
-                full_sparse_q_num_blocks,
-                full_sparse_q_indices,
-                partial_sparse_kv_num_blocks,
-                partial_sparse_kv_indices,
-                partial_sparse_q_num_blocks,
-                partial_sparse_q_indices,
+                full_kv_num_blocks,
+                full_kv_indices,
+                full_q_num_blocks,
+                full_q_indices,
+                partial_kv_num_blocks,
+                partial_kv_indices,
+                partial_q_num_blocks,
+                partial_q_indices,
             ],
             layout=layout_k,  # We use store_output only for grad_key
             subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer, mask_graph_buffer],
@@ -1418,34 +1418,28 @@ def flex_attention_backward(*args, **kwargs):
             grad_out,
             grad_query,
             grad_value,
-            full_sparse_kv_num_blocks,
-            full_sparse_kv_indices,
-            full_sparse_q_num_blocks,
-            full_sparse_q_indices,
-            partial_sparse_kv_num_blocks,
-            partial_sparse_kv_indices,
-            partial_sparse_q_num_blocks,
-            partial_sparse_q_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+            full_q_num_blocks,
+            full_q_indices,
+            partial_kv_num_blocks,
+            partial_kv_indices,
+            partial_q_num_blocks,
+            partial_q_indices,
         ]
         + list(score_mod_other_buffers)
         + list(mask_fn_other_buffers)
     )
     input_gen_fns = {
-        9: create_num_blocks_fake_generator(
-            full_sparse_kv_indices
-        ),  # full_sparse_kv_num_blocks
+        9: create_num_blocks_fake_generator(full_kv_indices),  # full_kv_num_blocks
         10: create_indices_fake,
-        11: create_num_blocks_fake_generator(
-            full_sparse_q_indices
-        ),  # full_sparse_q_num_blocks
+        11: create_num_blocks_fake_generator(full_q_indices),  # full_q_num_blocks
         12: create_indices_fake,
         13: create_num_blocks_fake_generator(
-            partial_sparse_kv_indices
-        ),  # partial_sparse_kv_num_blocks
+            partial_kv_indices
+        ),  # partial_kv_num_blocks
         14: create_indices_fake,
-        15: create_num_blocks_fake_generator(
-            partial_sparse_q_indices
-        ),  # partial_sparse_q_num_blocks
+        15: create_num_blocks_fake_generator(partial_q_indices),  # partial_q_num_blocks
         16: create_indices_fake,
     }
 
