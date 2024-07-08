@@ -215,7 +215,7 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> FlatbufferSerializer::
   std::vector<flatbuffers::Offset<jit::mobile::serialization::Arg>> return_vec;
   return_vec.reserve(returns.size());
   for (const auto& arg : args) {
-    int index = storeIValueAndGetIndex(fbb, arg.default_value());
+    auto index = storeIValueAndGetIndex(fbb, arg.default_value());
     arg_vec.emplace_back(CreateArg(
         fbb,
         fbb.CreateSharedString(arg.name()),
@@ -225,7 +225,7 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> FlatbufferSerializer::
   }
 
   for (const auto& ret : returns) {
-    int index = storeIValueAndGetIndex(fbb, ret.default_value());
+    auto index = storeIValueAndGetIndex(fbb, ret.default_value());
     return_vec.emplace_back(CreateArg(
         fbb,
         fbb.CreateSharedString(ret.name()),
@@ -442,7 +442,7 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
       functions_offset,
       ivalue_index,
       fbb.CreateVector(ivalue_offsets_),
-      tensor_data_.size(),
+      static_cast<int32_t>(tensor_data_.size()),
       storage_data_offset,
       fbb.CreateVector(obj_types_offset_),
       jit_source_offset,
@@ -483,9 +483,9 @@ flatbuffers::Offset<mobile::serialization::Dict> FlatbufferSerializer::dictToFB(
   keys.reserve(dict.size());
   values.reserve(dict.size());
   for (const auto& entry : dict) {
-    int key_index = storeIValueAndGetIndex(fbb, entry.key());
+    auto key_index = storeIValueAndGetIndex(fbb, entry.key());
     keys.push_back(key_index);
-    int value_index = storeIValueAndGetIndex(fbb, entry.value());
+    auto value_index = storeIValueAndGetIndex(fbb, entry.value());
     values.push_back(value_index);
   }
 
@@ -611,10 +611,10 @@ flatbuffers::Offset<mobile::serialization::TensorMetadata> FlatbufferSerializer:
       0;
   if (quantized) {
     double scale = 0;
-    int32_t zero_point = 0;
+    int64_t zero_point = 0;
     flatbuffers::Offset<mobile::serialization::TensorMetadata> scales = 0;
     flatbuffers::Offset<mobile::serialization::TensorMetadata> zero_points = 0;
-    int32_t axis = 0;
+    int64_t axis = 0;
 
     switch (tensor.qscheme()) {
       case at::kPerTensorAffine:
@@ -639,10 +639,10 @@ flatbuffers::Offset<mobile::serialization::TensorMetadata> FlatbufferSerializer:
         fbb,
         static_cast<int8_t>(tensor.qscheme()),
         scale,
-        zero_point,
+        static_cast<int32_t>(zero_point),
         scales,
         zero_points,
-        axis);
+        static_cast<int32_t>(axis));
   }
 
   void* addr = storage.unsafeGetStorageImpl();
@@ -663,7 +663,8 @@ flatbuffers::Offset<mobile::serialization::TensorMetadata> FlatbufferSerializer:
       fbb,
       /* storage_location_index */ storage_index,
       /* scalar_type */ static_cast<int8_t>(tensor.scalar_type()),
-      /* int32_t storage_offset */ tensor.storage_offset(),
+      /* int32_t storage_offset */
+      static_cast<int32_t>(tensor.storage_offset()),
       /* sizes */ &sizes,
       /* strides */ &strides,
       /* bool requires_grad */ tensor.requires_grad(),
@@ -682,6 +683,7 @@ uint32_t FlatbufferSerializer::storeIValueAndGetIndex(
     if (iter != cached_ivalues_.end()) {
       return iter->second;
     }
+    // NOLINTNEXTLINE(bugprone-empty-catch)
   } catch (...) {
     // Threw if ivalue is not hashable or
     // if ivalue is don't have proper operator==
@@ -692,6 +694,7 @@ uint32_t FlatbufferSerializer::storeIValueAndGetIndex(
   uint32_t index = insertIValue(offset);
   try {
     cached_ivalues_[ivalue] = index;
+    // NOLINTNEXTLINE(bugprone-empty-catch)
   } catch (...) {
     // Threw if ivalue is not hashable or
     // if ivalue is don't have proper operator==

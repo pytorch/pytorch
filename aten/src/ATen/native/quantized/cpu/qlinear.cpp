@@ -1254,11 +1254,11 @@ class QLinearOnednn final {
       Tensor onednn_weight, // int8 tensor from MkldnnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
+      std::optional<at::Tensor> other, // extra input for binary post-op
       std::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
-      std::optional<at::Tensor> other, // extra input for binary post-op
       double other_scale,
       int64_t other_zero_point,
       c10::string_view binary_post_op, // e.g. "none", "sum", "add"
@@ -1286,11 +1286,11 @@ class QLinearOnednn final {
       Tensor onednn_weight, // int8 tensor from MkldnnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
+      std::optional<at::Tensor> other, // extra input for binary post-op
       std::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
-      std::optional<at::Tensor> other, // extra input for binary post-op
       double other_scale,
       int64_t other_zero_point,
       c10::string_view binary_post_op, // e.g. "none", "sum", "add"
