@@ -27,6 +27,7 @@ __all__ = [
     "fallthrough_kernel",
     "impl_abstract",
     "register_fake",
+    "register_torch_dispatch",
     "get_ctx",
     "custom_op",
 ]
