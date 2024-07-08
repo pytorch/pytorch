@@ -173,7 +173,7 @@ class InlineOptionalStreamGuard {
   /// Returns the stream that was set at the time the guard was most recently
   /// initialized, or nullopt if the guard is uninitialized.
   optional<Stream> original_stream() const {
-    return guard_.has_value() ? make_optional(guard_->original_stream())
+    return guard_.has_value() ? std::make_optional(guard_->original_stream())
                               : nullopt;
   }
 
@@ -181,7 +181,7 @@ class InlineOptionalStreamGuard {
   /// either from construction, or via reset_stream, if the guard is
   /// initialized, or nullopt if the guard is uninitialized.
   optional<Stream> current_stream() const {
-    return guard_.has_value() ? make_optional(guard_->current_stream())
+    return guard_.has_value() ? std::make_optional(guard_->current_stream())
                               : nullopt;
   }
 
