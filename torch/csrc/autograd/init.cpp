@@ -324,6 +324,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         torch::profiler::impl::ActivityType::CPU};
 #if defined(USE_KINETO) && \
     (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
+    if (at::hasMTIA()) {
+      activities.insert(torch::profiler::impl::ActivityType::MTIA);
+    }
     if (at::getNumGPUs() > 0) {
       activities.insert(torch::profiler::impl::ActivityType::CUDA);
     }
