@@ -3,7 +3,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
-#include <ATen/native/TypeProperties.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -27,68 +26,6 @@ struct CachedGraph : public MPSCachedGraph {
   MPSGraphTensor *inputTensor = nil, *outputTensor = nil;
   MPSGraphTensor *minTensor = nil, *maxTensor = nil;
 };
-
-static at::ScalarType clamp_type_promotion(const Tensor& input_tensor,
-                                           const OptionalScalarRef min_opt,
-                                           const OptionalScalarRef max_opt,
-                                           const Tensor& output_tensor) {
-  // Manual type promotion, adapted from clamp meta function in `aten/src/ATen/native/TensorCompare.cpp`
-  ScalarType result_type = input_tensor.scalar_type();
-  TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
-  // Floating is the highest supported
-  if (!isFloatingType(result_type)) {
-    at::native::ResultTypeState state = {};
-    state = at::native::update_result_type_state(input_tensor, state);
-
-    if (min_opt.has_value()) {
-      state = at::native::update_result_type_state(min_opt.get(), state);
-    }
-    if (max_opt.has_value()) {
-      state = at::native::update_result_type_state(max_opt.get(), state);
-    }
-    result_type = at::native::result_type(state);
-  }
-
-  // disallow type promoting inplace op
-  TORCH_CHECK(result_type == input_tensor.scalar_type() || !output_tensor.is_same(input_tensor),
-              "result type ",
-              result_type,
-              " can't be cast to the desired output type ",
-              input_tensor.dtype());
-
-  return result_type;
-}
-
-static at::ScalarType clamp_type_promotion(const Tensor& input_tensor,
-                                           const OptionalTensorRef min_opt,
-                                           const OptionalTensorRef max_opt,
-                                           const Tensor& output_tensor) {
-  // Manual type promotion, adapted from clamp meta function in `aten/src/ATen/native/TensorCompare.cpp`
-  ScalarType result_type = input_tensor.scalar_type();
-  TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
-  // Floating is the highest supported
-  if (!isFloatingType(result_type)) {
-    at::native::ResultTypeState state = {};
-    state = at::native::update_result_type_state(input_tensor, state);
-
-    if (min_opt.has_value() && min_opt->defined()) {
-      state = at::native::update_result_type_state(*min_opt, state);
-    }
-    if (max_opt.has_value() && max_opt->defined()) {
-      state = at::native::update_result_type_state(*max_opt, state);
-    }
-    result_type = at::native::result_type(state);
-  }
-
-  // disallow type promoting inplace op
-  TORCH_CHECK(result_type == input_tensor.scalar_type() || !output_tensor.is_same(input_tensor),
-              "result type ",
-              result_type,
-              " can't be cast to the desired output type ",
-              input_tensor.dtype());
-
-  return result_type;
-}
 
 static void clamp_mps_graph(CachedGraph* cachedGraph,
                             const Tensor& input_tensor,
@@ -194,7 +131,7 @@ static void clamp_tensor_out_mps(const Tensor& input_t,
   if (output_t.numel() == 0)
     return;
 
-  auto result_type = clamp_type_promotion(input_t, min_opt, max_opt, output_t);
+  auto result_type = output_t.scalar_type();
 
   IntArrayRef new_min_shape;
   IntArrayRef new_max_shape;
@@ -300,7 +237,7 @@ static void clamp_scalar_out_mps(const Tensor& input_t,
   if (output_t.numel() == 0)
     return;
 
-  auto result_type = clamp_type_promotion(input_t, min_opt, max_opt, output_t);
+  auto result_type = output_t.scalar_type();
 
   @autoreleasepool {
     // the optional min/max refs could affect how we build the cached graph
