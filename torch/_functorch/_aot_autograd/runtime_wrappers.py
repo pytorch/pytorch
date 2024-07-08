@@ -1813,7 +1813,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             subclass_metas=tangent_metadata,
                             is_joint_structure=False,
                             is_runtime=True,
-                            append_extra=config.append_backward
+                            append_extra=config.append_backward,
                         )
                     ) - len(
                         unwrap_tensor_subclasses(
@@ -1821,7 +1821,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             subclass_metas=None,
                             is_joint_structure=False,
                             is_runtime=True,
-                            append_extra=False
+                            append_extra=False,
                         )
                     )
 
@@ -1832,7 +1832,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         is_runtime=True,
                         append_extra=config.append_backward,
                     )
-                    tangents_start_idx = len(all_args) - len_tangents - len(rng_args) - len_extra_symints
+                    tangents_start_idx = (
+                        len(all_args) - len_tangents - len(rng_args) - len_extra_symints
+                    )
                     tangents_end_idx = tangents_start_idx + len_tangents
 
                 # Make the tangents contiguous. Note that we must do this after subclass desugaring
