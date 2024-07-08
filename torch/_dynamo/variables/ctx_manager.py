@@ -3,7 +3,7 @@ import dataclasses
 import inspect
 import sys
 import warnings
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Union
 
 import torch._C
 from torch._guards import Guard
@@ -118,15 +118,13 @@ class ContextWrappingVariable(VariableTracker):
 
 
 class GenericContextWrappingVariable(
-    ContextWrappingVariable, UserDefinedObjectVariable
+    UserDefinedObjectVariable
 ):
     # Some methods in ContextWrappingVariable assumes the arguments are
     # python contants. Which might not always be the case here.
     def __init__(self, cm_obj, **kwargs):
         assert cm_obj is not None
         super().__init__(
-            target_values=None,
-            initial_values=None,
             value=cm_obj,
             value_type=cm_obj.__class__,
             **kwargs,
@@ -1033,9 +1031,16 @@ class WithExitFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, ctx: ContextWrappingVariable, target, **kwargs):
+    def __init__(
+        self,
+        ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
+        target,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
-        assert isinstance(ctx, ContextWrappingVariable)
+        assert isinstance(
+            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+        )
         self.ctx = ctx
         self.target = target
 
