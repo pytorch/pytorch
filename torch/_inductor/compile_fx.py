@@ -40,8 +40,9 @@ from torch._inductor.codecache import (
 )
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
-    get_placeholders,
+    get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
+    PlaceholderInfo,
 )
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -54,7 +55,6 @@ from torch._inductor.utils import (
 )
 from torch._logging import trace_structured
 from torch._ops import OpOverload
-from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
@@ -444,8 +444,7 @@ def cudagraph_post_compile(
     is_inference: bool,
     is_backward: bool,
     stack_traces: List[Optional[str]],
-    placeholders: Sequence[torch.fx.Node],
-    example_inputs: List[Any],
+    placeholders: Sequence[PlaceholderInfo],
     static_input_idxs: Sequence[int],
 ):
     """
@@ -455,11 +454,11 @@ def cudagraph_post_compile(
     """
     assert compiled_graph.current_callable is not None
     if not cudagraph_fail_reasons:
-        if not config.triton.cudagraph_trees:
-            # Force specialize all inputs so that CUDA graphs will work
-            for t in example_inputs:
-                if isinstance(t, torch.SymInt):
-                    int(t)  # guard
+        # if not config.triton.cudagraph_trees:
+        #     # Force specialize all inputs so that CUDA graphs will work
+        #     for t in example_inputs:
+        #         if isinstance(t, torch.SymInt):
+        #             int(t)  # guard
 
         if (
             boxed_forward_device_index is not None
@@ -470,7 +469,6 @@ def cudagraph_post_compile(
 
         compiled_graph.current_callable = cudagraphify(
             compiled_graph.current_callable,
-            example_inputs,
             static_input_idxs=static_input_idxs,
             device_index=next(iter(compiled_graph.device_idxs)),
             stack_traces=stack_traces,
@@ -728,7 +726,7 @@ def compile_fx_inner(
                 for arg in output.args[0]
             ]
             cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
-            placeholders = tuple(get_placeholders(gm.graph))
+            placeholders = tuple(get_placeholder_info(gm.graph))
             cudagraph_post_compile(
                 cudagraphs,
                 compiled_graph,
@@ -739,7 +737,6 @@ def compile_fx_inner(
                 is_backward,
                 stack_traces,
                 placeholders,
-                example_inputs,
                 static_input_idxs,
             )
 
@@ -1039,7 +1036,6 @@ def align_inputs_from_check_idxs(
 @dynamo_utils.dynamo_timed
 def cudagraphify(
     model: torch.fx.GraphModule,
-    inputs: List[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
     *,
     device_index: int,
@@ -1068,10 +1064,6 @@ def cudagraphify(
         )
     else:
         cudagraphify_fn = cudagraphify_impl
-
-    # if using fake tensors, defer cudagraphs until we get real inputs at runtime
-    if not any(isinstance(inp, FakeTensor) for inp in inputs):
-        return cudagraphify_fn(model, inputs, static_input_idxs)
 
     compiled_fn = None
 

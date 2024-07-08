@@ -14,7 +14,7 @@ from torch._inductor.cudagraph_utils import (
     check_multiple_devices_or_any_cpu_nodes,
     format_default_skip_message,
     get_mutation_stack_trace,
-    get_placeholders,
+    get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
 )
 from torch._inductor.utils import (
@@ -149,7 +149,7 @@ def cudagraphs(dynamo_model, dynamo_inputs):
             is_backward=False,
             is_inference=False,
             stack_traces=get_stack_traces(aot_model),
-            placeholders=get_placeholders(aot_model.graph),
+            placeholders=get_placeholder_info(aot_model.graph),
             mutated_input_idxs=find_input_mutations(aot_model.graph),
         )
         out._boxed_call = True
@@ -187,7 +187,7 @@ def cudagraphs(dynamo_model, dynamo_inputs):
             is_backward=True,
             is_inference=False,
             stack_traces=get_stack_traces(aot_model),
-            placeholders=get_placeholders(aot_model.graph),
+            placeholders=get_placeholder_info(aot_model.graph),
             mutated_input_idxs=find_input_mutations(aot_model.graph),
         )
         out._boxed_call = True
