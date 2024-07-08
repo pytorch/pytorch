@@ -1397,11 +1397,6 @@ class GroupedSchedulerNode(BaseSchedulerNode):
     def add_fake_dep(self, name: Dep) -> None:
         self.set_read_writes(self.read_writes.with_read(name))
 
-    # Common methods
-    @cache_on_self
-    def get_names(self) -> Set[str]:
-        return {x.get_name() for x in self.snodes}
-
 
 def pick_loop_order(
     stride_lengths: List[List[int]],
@@ -2467,7 +2462,7 @@ class Scheduler:
             why("template epilogue not satisfied")
             return False
 
-        if (node1.get_names() | node2.get_names()) & V.graph.no_fuse_buffer_names:
+        if (node1.get_buffer_names() | node2.get_buffer_names()) & V.graph.no_fuse_buffer_names:
             why("fusion for buffer explicit disabled")
             return False
 

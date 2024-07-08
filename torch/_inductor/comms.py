@@ -60,7 +60,7 @@ def raise_comms_and_sink_waits(
     name_to_snode = {}
     scores_0, scores_1, scores_2 = {}, {}, {}
     for idx, snode in enumerate(snodes):
-        for name in snode.get_names():
+        for name in snode.get_buffer_names():
             name_to_snode[name] = snode
             scores_0[name] = sys.maxsize
             scores_1[name] = 0
@@ -79,7 +79,7 @@ def raise_comms_and_sink_waits(
     class Runnable:
         def __init__(self, snode):
             self.snode = snode
-            name = next(iter(snode.get_names()))
+            name = next(iter(snode.get_buffer_names()))
             self.score = (
                 scores_0[name],
                 scores_1[name],
@@ -121,7 +121,7 @@ def raise_comms_and_sink_waits(
     while len(ready):
         curr = heapq.heappop(ready).snode
         scheduled.append(curr)
-        for curr_name in curr.get_names():
+        for curr_name in curr.get_buffer_names():
             for snode in buffer_users[curr_name]:
                 snode_num_deps[snode] -= 1
                 if snode_num_deps[snode] == 0:
