@@ -105,82 +105,84 @@ class _BlockMask:
         s += ")"
         return s
 
-    # def sparsity(self) -> float:
-    #     """
-    #     Computes the percentage of blocks that are sparse (i.e. not computed)
-    #     """
-    #     dense_mask = self.to_dense()
-    #     dense_ratio = ((dense_mask != 0).sum()) / dense_mask.numel()
-    #     return 100 * (1 - dense_ratio)
+    def sparsity(self) -> float:
+        """
+        Computes the percentage of blocks that are sparse (i.e. not computed)
+        """
+        dense_mask = self.to_dense()
+        dense_ratio = ((dense_mask != 0).sum()) / dense_mask.numel()
+        return 100 * (1 - dense_ratio)
 
-    # def to_dense(self) -> torch.Tensor:
-    #     """
-    #     Returns a dense block that is equivalent to the block mask.
-    #     """
-    #     num_rows = self.kv_num_blocks.shape[-1]
-    #     num_cols = self.q_num_blocks.shape[-1]
-    #     batch, head = self.kv_num_blocks.shape[:2]
-    #     device = self.kv_num_blocks.device
-    #     assert batch == 1, head == 1
+    def to_dense(self) -> torch.Tensor:
+        """
+        Returns a dense block that is equivalent to the block mask.
+        """
+        num_rows = self.full_kv_num_blocks.shape[-1]
+        num_cols = self.full_q_num_blocks.shape[-1]
+        batch, head = self.full_kv_num_blocks.shape[:2]
+        device = self.full_kv_num_blocks.device
+        assert batch == 1, head == 1
+        kv_num_blocks = self.full_kv_num_blocks + self.partial_kv_num_blocks
+        kv_indices = self.full_kv_indices
 
-    #     def create_dense_one(kv_num_blocks, kv_indices):
-    #         dense_mask = kv_indices.new_zeros(num_rows, num_cols + 1, dtype=torch.int32)
+        def create_dense_one(kv_num_blocks, kv_indices):
+            dense_mask = kv_indices.new_zeros(num_rows, num_cols + 1, dtype=torch.int32)
 
-    #         row_indices = torch.arange(
-    #             num_rows, dtype=torch.int, device=device
-    #         ).unsqueeze(-1)
-    #         col_indices = torch.arange(num_cols, dtype=torch.int, device=device)
-    #         index_mask = col_indices < kv_num_blocks.unsqueeze(-1)
+            row_indices = torch.arange(
+                num_rows, dtype=torch.int, device=device
+            ).unsqueeze(-1)
+            col_indices = torch.arange(num_cols, dtype=torch.int, device=device)
+            index_mask = col_indices < kv_num_blocks.unsqueeze(-1)
 
-    #         # We write to one spot "out of bounds"
-    #         valid_indices = torch.where(index_mask, kv_indices, num_cols)
+            # We write to one spot "out of bounds"
+            valid_indices = torch.where(index_mask, kv_indices, num_cols)
 
-    #         # set the values in 'a' to 1 where the indices are valid
-    #         dense_mask[row_indices, valid_indices] = 1
-    #         return dense_mask[:, :num_cols]
+            # set the values in 'a' to 1 where the indices are valid
+            dense_mask[row_indices, valid_indices] = 1
+            return dense_mask[:, :num_cols]
 
-    #     out = create_dense_one(self.kv_num_blocks[0, 0], self.kv_indices[0, 0])
-    #     return out
+        out = create_dense_one(kv_num_blocks[0, 0], kv_indices[0, 0])
+        return out
 
-    # def to_string(self, grid_size=(20, 20)):
-    #     """
-    #     Returns a string representation of the block mask. Quite nifty.
+    def to_string(self, grid_size=(20, 20)):
+        """
+        Returns a string representation of the block mask. Quite nifty.
 
-    #     If grid_size is None, prints out an uncompressed version. Warning, it can be quite big!
-    #     """
-    #     dense_mask = self.to_dense()
-    #     num_rows, num_cols = dense_mask.shape
-    #     if isinstance(grid_size, int):
-    #         max_rows = grid_size
-    #         max_cols = grid_size
-    #     elif grid_size is None:
-    #         max_rows = num_rows
-    #         max_cols = num_cols
-    #     else:
-    #         max_rows, max_cols = grid_size
-    #     vis = ""
+        If grid_size is None, prints out an uncompressed version. Warning, it can be quite big!
+        """
+        dense_mask = self.to_dense()
+        num_rows, num_cols = dense_mask.shape
+        if isinstance(grid_size, int):
+            max_rows = grid_size
+            max_cols = grid_size
+        elif grid_size is None:
+            max_rows = num_rows
+            max_cols = num_cols
+        else:
+            max_rows, max_cols = grid_size
+        vis = ""
 
-    #     def summarize_section(section):
-    #         percentage = section.float().mean().item()
-    #         if percentage == 1:
-    #             return "█"
-    #         elif percentage == 0:
-    #             return " "
-    #         else:
-    #             return "░"
+        def summarize_section(section):
+            percentage = section.float().mean().item()
+            if percentage == 1:
+                return "█"
+            elif percentage == 0:
+                return " "
+            else:
+                return "░"
 
-    #     def cdiv(a, b):
-    #         return (a + (b - 1)) // b
+        def cdiv(a, b):
+            return (a + (b - 1)) // b
 
-    #     row_step = max(1, cdiv(num_rows, max_rows))
-    #     col_step = max(1, cdiv(num_cols, max_cols))
+        row_step = max(1, cdiv(num_rows, max_rows))
+        col_step = max(1, cdiv(num_cols, max_cols))
 
-    #     for r in range(0, num_rows, row_step):
-    #         for c in range(0, num_cols, col_step):
-    #             char = summarize_section(dense_mask[r : r + row_step, c : c + col_step])
-    #             vis += char * 2
-    #         vis += "\n"
-    #     return vis
+        for r in range(0, num_rows, row_step):
+            for c in range(0, num_cols, col_step):
+                char = summarize_section(dense_mask[r : r + row_step, c : c + col_step])
+                vis += char * 2
+            vis += "\n"
+        return vis
 
 
 def broadcast_to_dim(x, dim):
