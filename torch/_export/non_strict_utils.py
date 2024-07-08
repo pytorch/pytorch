@@ -80,7 +80,9 @@ def fakify(
     n_dims = len(t.shape)
     symbolic_context = StatelessSymbolicContext(
         dynamic_sizes=[DimDynamic.STATIC] * n_dims,
+        dynamic_strides=[DimDynamic.STATIC] * n_dims,
         constraint_sizes=[None] * n_dims,
+        constraint_strides=[None] * n_dims,
     )
     t_id = id(t)
     if t_id in t_constraints:

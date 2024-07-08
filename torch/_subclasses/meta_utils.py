@@ -892,7 +892,9 @@ class MetaConverter:
                     )
                 t_symbolic_context = SubclassSymbolicContext(
                     dynamic_sizes=t_dynamic_sizes,
+                    dynamic_strides=t_dynamic_sizes,
                     constraint_sizes=[None] * t.ndim,
+                    constraint_strides=[None] * t.ndim,
                     inner_contexts=inner_contexts,  # type: ignore[arg-type]
                     tensor_source=source,
                     view_base_context=view_base_context,
@@ -900,7 +902,9 @@ class MetaConverter:
             else:
                 t_symbolic_context = StatelessSymbolicContext(
                     dynamic_sizes=t_dynamic_sizes,
+                    dynamic_strides=t_dynamic_sizes,
                     constraint_sizes=[None] * t.ndim,
+                    constraint_strides=[None] * t.ndim,
                     view_base_context=view_base_context,
                 )
 
