@@ -13,6 +13,7 @@
 #include <torch/library.h>
 #include <exception>
 #include <unordered_map>
+#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -370,6 +371,18 @@ static inline void mtl_setBuffer(id<MTLComputeCommandEncoder> encoder, const Ten
   [encoder setBuffer:getMTLBufferStorage(t)
               offset:t.storage_offset() * t.element_size()
              atIndex:idx];
+}
+
+template<typename T,
+         typename = std::enable_if_t<std::is_integral_v<T> || std::is_same_v<T, float>>>
+static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const T val, unsigned idx) {
+  [encoder setBytes:&val length:sizeof(T) atIndex: idx];
+}
+
+template<typename Container,
+         typename = std::enable_if_t<std::is_integral_v<typename Container::size_type>>>
+static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Container& values, unsigned idx) {
+  [encoder setBytes:values.data() length:sizeof(typename Container::value_type) * values.size() atIndex: idx];
 }
 
 static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,

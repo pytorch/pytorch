@@ -166,9 +166,7 @@ def _ring_rotate(block: torch.Tensor, pg: dist.ProcessGroup) -> torch.Tensor:
     output_split_sizes = [0] * size
     output_split_sizes[(rank - 1) % size] = len(block)
 
-    out = ft_c.all_to_all_single_autograd(
-        block, output_split_sizes, input_split_sizes, pg
-    )
+    out = ft_c.all_to_all_single(block, output_split_sizes, input_split_sizes, pg)
     return out
 
 
