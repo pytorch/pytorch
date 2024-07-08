@@ -1,8 +1,9 @@
 import os
 import sys
 
-import torch.cuda
 from setuptools import setup
+
+import torch.cuda
 from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.utils.cpp_extension import (
     BuildExtension,

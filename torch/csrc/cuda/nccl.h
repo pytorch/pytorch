@@ -44,8 +44,9 @@ enum class ncclResult {
   InternalError = 3,
   InvalidArgument = 4,
   InvalidUsage = 5,
-  NumResults = 6,
-  InProgress = 7
+  RemoteError = 6,
+  InProgress = 7,
+  NumResults = 8
 };
 
 /* Reduction operation selector */
@@ -88,7 +89,7 @@ namespace detail {
 
 TORCH_CUDA_CPP_API void throw_nccl_error(ncclResult status);
 
-static inline void NCCL_CHECK(ncclResult status) {
+inline void NCCL_CHECK(ncclResult status) {
   if (status != ncclResult::Success) {
     throw_nccl_error(status);
   }

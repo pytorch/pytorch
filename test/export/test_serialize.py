@@ -7,16 +7,16 @@ with test_sym_bool)
 # Owner(s): ["oncall: export"]
 import copy
 import io
-import pathlib
 import tempfile
 import unittest
 import zipfile
+from pathlib import Path
 
 import torch
 import torch._dynamo as torchdynamo
 import torch.export._trace
 import torch.utils._pytree as pytree
-from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
+from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
     canonicalize,
@@ -38,7 +38,6 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TestCase,
 )
-
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
@@ -52,6 +51,52 @@ def get_filtered_export_db_tests():
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
+    def test_export_with_custom_op_serialization(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class FooCustomOp(torch.nn.Module):
+            pass
+
+        class FooCustomOpHandler(torch._export.serde.serialize.CustomOpHandler):
+            def namespace(self):
+                return "Foo"
+
+            def op_name(self, op_type):
+                if op_type == FooCustomOp:
+                    return "FooCustomOp"
+                return None
+
+            def op_type(self, op_name):
+                if op_name == "FooCustomOp":
+                    return FooCustomOp
+                return None
+
+            def op_schema(self, op_type):
+                if op_type == FooCustomOp:
+                    return self.attached_schema
+                return None
+
+        inp = (torch.ones(10),)
+        ep = export(TestModule(), inp)
+
+        # Register the custom op handler.
+        foo_custom_op = FooCustomOp()
+        foo_custom_op_handler = FooCustomOpHandler()
+        torch._export.serde.serialize.register_custom_op_handler(
+            foo_custom_op_handler, type(foo_custom_op)
+        )
+
+        # Inject the custom operator.
+        for node in ep.graph.nodes:
+            if node.name == "add":
+                foo_custom_op_handler.attached_schema = node.target._schema
+                node.target = foo_custom_op
+
+        # Serialization.
+        serialize(ep)
+
     def test_predispatch_export_with_autograd_op(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -207,7 +252,6 @@ class TestSerialize(TestCase):
                 return torch.split(x, 2)
 
         input = torch.arange(10.0).reshape(5, 2)
-        input.requires_grad = True
         exported_module = export(MyModule(), (input,)).run_decompositions()
 
         serialized = ExportedProgramSerializer().serialize(exported_module)
@@ -621,8 +665,6 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
-    # TODO: Failing due to "constraining non-Symbols NYI (Piecewise((1, Eq(u1, 1)), (0, True)), 1, 1)"
-    @unittest.expectedFailure
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -760,6 +802,49 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"x": {0: Dim("dim0"), 1: Dim("dim1")}}
         self.check_graph(Foo(), (torch.ones(4, 5),), dynamic_shapes=dynamic_shapes)
 
+    def test_multiple_getitem(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a, b = torch.topk(x, 2)
+                a = a * 2
+                return a, b
+
+        ep = torch.export.export(M(), (torch.ones(3),))
+
+        # insert another getitem node
+        for node in ep.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.mul.Tensor:
+                getitem_0 = node.args[0]
+                with ep.graph.inserting_before(getitem_0):
+                    getitem_copy = ep.graph.node_copy(getitem_0)
+                    mul_node = ep.graph.call_function(
+                        torch.ops.aten.mul.Tensor, (getitem_copy, 2)
+                    )
+                    mul_node.meta = copy.copy(getitem_copy.meta)
+                    node.args = (getitem_0, mul_node)
+
+        deserialized_ep = deserialize(serialize(ep))
+
+        inp = (torch.randn(3),)
+        orig_res = ep.module()(*inp)
+        res = deserialized_ep.module()(*inp)
+        self.assertTrue(torch.allclose(orig_res[0], res[0]))
+        self.assertTrue(torch.allclose(orig_res[1], res[1]))
+
+        # The deserialized graph should have deduped getitem calls
+        self.assertExpectedInline(
+            deserialized_ep.graph_module.code.strip("\n"),
+            """\
+def forward(self, x):
+    topk_default = torch.ops.aten.topk.default(x, 2);  x = None
+    getitem = topk_default[0]
+    getitem_1 = topk_default[1];  topk_default = None
+    mul_tensor = torch.ops.aten.mul.Tensor(getitem, 2)
+    mul = torch.ops.aten.mul.Tensor(getitem, mul_tensor);  getitem = mul_tensor = None
+    return (mul, getitem_1)
+    """,
+        )
+
     @parametrize(
         "name,case",
         get_filtered_export_db_tests(),
@@ -767,9 +852,8 @@ class TestDeserialize(TestCase):
     )
     def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
-        inputs = normalize_inputs(case.example_inputs)
         _check_meta = "map" not in name
-        self.check_graph(model, inputs.args, _check_meta=_check_meta)
+        self.check_graph(model, case.example_args, _check_meta=_check_meta)
 
     def test_constraints(self):
         class Module(torch.nn.Module):
@@ -906,9 +990,6 @@ class TestSchemaVersioning(TestCase):
 # We didn't set up kwargs input yet
 unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_fn_with_kwargs)
 
-# Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph.
-unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_scalar_output)
-
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSaveLoad(TestCase):
@@ -964,7 +1045,7 @@ class TestSaveLoad(TestCase):
         ep = export(f, inp)
 
         with TemporaryFileName() as fname:
-            path = pathlib.Path(fname)
+            path = Path(fname)
             save(ep, path)
             loaded_ep = load(path)
 

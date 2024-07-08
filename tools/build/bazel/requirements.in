@@ -1,6 +1,6 @@
 PyYAML==6.0.1
 numpy==1.26.4
-requests==2.31.0
+requests==2.32.2
 setuptools==69.5.1
 sympy==1.12
 typing_extensions==4.11.0

@@ -1163,7 +1163,7 @@ bool _use_cudnn_rnn_flatten_weight() {
 // NB: This a (composite) wrapper for _thnn_fused_lstm_cell_backward_impl.
 //     It duplicates the outputs of this function so the non-composite version doesn't have to.
 //     The point is so that we avoid triggering TensorImpl use count asserts in debug mode
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward( const std::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward( const std::optional<Tensor>& grad_hy_opt, const std::optional<Tensor>& grad_cy_opt,
       const Tensor& cx, const Tensor& cy,
       const Tensor& workspace, bool has_bias) {
   TORCH_INTERNAL_ASSERT(!GradMode::is_enabled());
@@ -1523,7 +1523,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 
 std::tuple<Tensor, Tensor> lstm_cell(
     const Tensor& input, TensorList hx,
-    const Tensor& w_ih, const Tensor& w_hh, const std::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+    const Tensor& w_ih, const Tensor& w_hh, const std::optional<Tensor>& b_ih_opt, const std::optional<Tensor>& b_hh_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
   const Tensor& b_ih = *b_ih_maybe_owned;
@@ -1539,9 +1539,9 @@ std::tuple<Tensor, Tensor> lstm_cell(
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
-_thnn_differentiable_lstm_cell_backward( const std::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
+_thnn_differentiable_lstm_cell_backward( const std::optional<Tensor>& grad_hy_opt, const std::optional<Tensor>& grad_cy_opt,
     const Tensor& input_gates,
-    const Tensor& hidden_gates, const std::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt,
+    const Tensor& hidden_gates, const std::optional<Tensor>& input_bias_opt, const std::optional<Tensor>& hidden_bias_opt,
     const Tensor& cx,
     const Tensor& cy) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -1597,7 +1597,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
     const Tensor& grad_hy,
     const Tensor& input_gates,
     const Tensor& hidden_gates,
-    const Tensor& hx, const std::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt){
+    const Tensor& hx, const std::optional<Tensor>& input_bias_opt, const std::optional<Tensor>& hidden_bias_opt){
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> input_bias_maybe_owned = at::borrow_from_optional_tensor(input_bias_opt);
   const Tensor& input_bias = *input_bias_maybe_owned;
@@ -1637,7 +1637,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
 
 Tensor gru_cell(
     const Tensor& input, const Tensor& hx,
-    const Tensor& w_ih, const Tensor& w_hh, const std::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+    const Tensor& w_ih, const Tensor& w_hh, const std::optional<Tensor>& b_ih_opt, const std::optional<Tensor>& b_hh_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
   const Tensor& b_ih = *b_ih_maybe_owned;
@@ -1651,7 +1651,7 @@ Tensor gru_cell(
 
 Tensor rnn_tanh_cell(
     const Tensor& input, const Tensor& hx,
-    const Tensor& w_ih, const Tensor& w_hh, const std::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+    const Tensor& w_ih, const Tensor& w_hh, const std::optional<Tensor>& b_ih_opt, const std::optional<Tensor>& b_hh_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
   const Tensor& b_ih = *b_ih_maybe_owned;
@@ -1665,7 +1665,7 @@ Tensor rnn_tanh_cell(
 
 Tensor rnn_relu_cell(
     const Tensor& input, const Tensor& hx,
-    const Tensor& w_ih, const Tensor& w_hh, const std::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+    const Tensor& w_ih, const Tensor& w_hh, const std::optional<Tensor>& b_ih_opt, const std::optional<Tensor>& b_hh_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
   const Tensor& b_ih = *b_ih_maybe_owned;

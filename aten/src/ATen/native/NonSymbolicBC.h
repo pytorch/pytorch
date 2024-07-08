@@ -9,7 +9,7 @@ namespace at::native {
 // In those cases, we will duplicate the signature here with non-symbolic ints, and also duplicate the C++ implementation.
 TORCH_API at::Tensor reshape(const at::Tensor& self, at::IntArrayRef proposed_shape);
 TORCH_API at::Tensor narrow(const at::Tensor& self, int64_t dim, int64_t start, int64_t length);
-TORCH_API at::Tensor _sparse_coo_tensor_unsafe(const at::Tensor & indices, const at::Tensor & values, at::IntArrayRef size, std::optional<at::ScalarType> dtype=c10::nullopt, c10::optional<at::Layout> layout=c10::nullopt, c10::optional<at::Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt, c10::optional<bool> is_coalesced=c10::nullopt);
+TORCH_API at::Tensor _sparse_coo_tensor_unsafe(const at::Tensor & indices, const at::Tensor & values, at::IntArrayRef size, std::optional<at::ScalarType> dtype=c10::nullopt, std::optional<at::Layout> layout=c10::nullopt, std::optional<at::Device> device=c10::nullopt, std::optional<bool> pin_memory=c10::nullopt, std::optional<bool> is_coalesced=c10::nullopt);
 TORCH_API at::Tensor nll_loss(const at::Tensor & self, const at::Tensor & target, const std::optional<at::Tensor>& weight_opt, int64_t reduction, int64_t ignore_index);
 TORCH_API at::Tensor nll_loss2d(const at::Tensor & self, const at::Tensor & target, const std::optional<at::Tensor>& weight_opt, int64_t reduction, int64_t ignore_index);
 // The below ops don't get a duplicated C++ implementation.

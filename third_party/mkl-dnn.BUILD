@@ -130,10 +130,7 @@ cc_library(
     ],
     deps = [
         "@mkl",
-    ] + select({
-        "@pytorch//tools/config:thread_sanitizer": [],
-        "//conditions:default": ["@tbb"],
-    }),
+    ],
     defines = [
         "DNNL_ENABLE_MAX_CPU_ISA",
         "DNNL_ENABLE_CONCURRENT_EXEC",

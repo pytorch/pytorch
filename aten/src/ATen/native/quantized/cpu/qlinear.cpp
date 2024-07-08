@@ -1131,7 +1131,9 @@ class QLinearLeakyReluInt8 final {
       double output_scale,
       int64_t output_zero_point,
       double negative_slope) {
+#if AT_MKLDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
     auto& ctx = at::globalContext();
+#endif
 #if AT_MKLDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       return dynamic_cast<PackedLinearWeightsOnednn*>(packed_weight.get())->apply_leaky_relu(
@@ -1153,7 +1155,9 @@ class QLinearTanhInt8 final {
       const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
+#if AT_MKLDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
     auto& ctx = at::globalContext();
+#endif
 #if AT_MKLDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       return dynamic_cast<PackedLinearWeightsOnednn*>(packed_weight.get())->apply_tanh(
@@ -1254,11 +1258,11 @@ class QLinearOnednn final {
       Tensor onednn_weight, // int8 tensor from MkldnnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
+      std::optional<at::Tensor> other, // extra input for binary post-op
       std::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
-      std::optional<at::Tensor> other, // extra input for binary post-op
       double other_scale,
       int64_t other_zero_point,
       c10::string_view binary_post_op, // e.g. "none", "sum", "add"
@@ -1286,11 +1290,11 @@ class QLinearOnednn final {
       Tensor onednn_weight, // int8 tensor from MkldnnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
+      std::optional<at::Tensor> other, // extra input for binary post-op
       std::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
-      std::optional<at::Tensor> other, // extra input for binary post-op
       double other_scale,
       int64_t other_zero_point,
       c10::string_view binary_post_op, // e.g. "none", "sum", "add"

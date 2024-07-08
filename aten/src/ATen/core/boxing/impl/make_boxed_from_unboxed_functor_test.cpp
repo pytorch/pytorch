@@ -51,17 +51,6 @@ void expectCallsIncrement(DispatchKey dispatch_key) {
   EXPECT_EQ(6, result[0].toInt());
 }
 
-void expectCallsDecrement(DispatchKey dispatch_key) {
-  at::AutoDispatchBelowAutograd mode;
-
-  // assert that schema and cpu kernel are present
-  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
-  ASSERT_TRUE(op.has_value());
-  auto result = callOp(*op, dummyTensor(dispatch_key), 5);
-  EXPECT_EQ(1, result.size());
-  EXPECT_EQ(4, result[0].toInt());
-}
-
 TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<IncrementKernel>(DispatchKey::CPU));
   expectCallsIncrement(DispatchKey::CPU);
@@ -684,7 +673,7 @@ std::optional<int64_t> called_arg3 = c10::nullopt;
 std::optional<std::string> called_arg4 = c10::nullopt;
 
 struct KernelWithOptInputWithoutOutput final : OperatorKernel {
-  void operator()(Tensor arg1, const std::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+  void operator()(Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
     called = true;
     called_arg2 = arg2;
     called_arg3 = arg3;
@@ -720,7 +709,7 @@ TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithOptionalInputs_w
 }
 
 struct KernelWithOptInputWithOutput final : OperatorKernel {
-  std::optional<Tensor> operator()(Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+  std::optional<Tensor> operator()(Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
     called = true;
     called_arg2 = arg2;
     called_arg3 = arg3;
@@ -759,8 +748,8 @@ TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithOptionalInputs_w
 }
 
 struct KernelWithOptInputWithMultipleOutputs final : OperatorKernel {
-  std::tuple<std::optional<Tensor>, c10::optional<int64_t>, c10::optional<std::string>>
-  operator()(Tensor arg1, const std::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+  std::tuple<std::optional<Tensor>, std::optional<int64_t>, std::optional<std::string>>
+  operator()(Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
     return std::make_tuple(arg2, arg3, arg4);
   }
 };

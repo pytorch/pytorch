@@ -651,6 +651,10 @@ mobile::Module _load_for_mobile(
     std::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
+  auto observer = torch::observerConfig().getModuleObserver();
+  if (observer) {
+    extra_files.insert(std::make_pair("model_path", filename));
+  }
   auto format = getFileFormat(filename);
 
   if (format == FileFormat::FlatbufferFileFormat) {

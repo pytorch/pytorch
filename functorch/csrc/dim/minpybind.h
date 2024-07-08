@@ -385,10 +385,6 @@ bool is_int(handle h) {
     return PyLong_Check(h.ptr());
 }
 
-bool is_float(handle h) {
-    return PyFloat_Check(h.ptr());
-}
-
 bool is_none(handle h) {
     return h.ptr() == Py_None;
 }

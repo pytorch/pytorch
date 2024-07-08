@@ -770,12 +770,6 @@ std::vector<int64_t> reverse_list(const IntArrayRef list) {
   return result;
 }
 
-Tensor reverse_dim(const Tensor& t, int64_t dim) {
-  Tensor index =
-      at::arange(t.sym_size(dim) - 1, -1, -1, t.options().dtype(at::kLong));
-  return t.index_select(dim, index);
-}
-
 Tensor prod_safe_zeros_backward(
     const Tensor& grad,
     const Tensor& inp,
@@ -799,11 +793,10 @@ Tensor prod_safe_zeros_backward(
   Tensor exclusive_normal = exclusive_normal_nocp.cumprod(dim);
 
   Tensor narrow_reverse =
-      reverse_dim(inp.narrow_symint(dim, 1, inp.sym_size(dim) - 1), dim);
+      inp.narrow_symint(dim, 1, inp.sym_size(dim) - 1).flip(dim);
   Tensor exclusive_reverse_nocp =
       at::cat({std::move(ones), std::move(narrow_reverse)}, dim);
-  Tensor exclusive_reverse =
-      reverse_dim(exclusive_reverse_nocp.cumprod(dim), dim);
+  Tensor exclusive_reverse = exclusive_reverse_nocp.cumprod(dim).flip(dim);
 
   return grad * (exclusive_normal * exclusive_reverse).conj();
 }
@@ -1019,6 +1012,23 @@ Tensor unbind_backward_nested(
   }
 
   return at::_nested_tensor_from_tensor_list(grads_tensors);
+}
+
+Tensor unbind_backward_nested_jagged(
+    const variable_list& grads,
+    const Tensor& self,
+    int64_t dim) {
+  TORCH_INTERNAL_ASSERT(
+      dim == 0, "unbind_backward_nested_jagged() only supports dim=0")
+  auto grad_nt = at::zeros_like(self);
+  auto unbound_grads = grad_nt.unbind();
+  for (int64_t i : c10::irange(static_cast<int64_t>(grads.size()))) {
+    if (grads[i].defined()) {
+      unbound_grads[i].copy_(static_cast<Tensor>(grads[i]));
+    }
+  }
+
+  return grad_nt;
 }
 
 Tensor unsqueeze_to(const Tensor& self, c10::SymIntArrayRef sym_sizes) {

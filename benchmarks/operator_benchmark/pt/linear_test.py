@@ -1,9 +1,8 @@
-import torch
-import torch.nn as nn
-
 from pt import configs
 
 import operator_benchmark as op_bench
+import torch
+import torch.nn as nn
 
 
 """Microbenchmarks for Linear operator."""

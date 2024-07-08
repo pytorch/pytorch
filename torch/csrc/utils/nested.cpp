@@ -9,8 +9,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 // NB: device_idx here is NOT a DeviceIndex, but index into PythonArgs
 static c10::TensorOptions typeIdWithDefault(
@@ -87,5 +86,4 @@ at::Tensor nested_tensor_ctor(
   return out;
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

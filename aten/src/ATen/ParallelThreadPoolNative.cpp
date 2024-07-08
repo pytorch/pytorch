@@ -1,5 +1,5 @@
 #include <ATen/Config.h>
-#if AT_PARALLEL_OPENMP || AT_PARALLEL_NATIVE || AT_PARALLEL_NATIVE_TBB
+#if AT_PARALLEL_OPENMP || AT_PARALLEL_NATIVE
 #include <ATen/Parallel.h>
 #include <ATen/PTThreadPool.h>
 #include <ATen/ThreadLocalState.h>

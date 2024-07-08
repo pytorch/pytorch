@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from collections import Counter
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -175,7 +176,7 @@ def stack_module_state(
         data = torch.randn(batch_size, 3)
 
         def wrapper(params, buffers, data):
-            return torch.func.functional_call(model[0], (params, buffers), data)
+            return torch.func.functional_call(models[0], (params, buffers), data)
 
         params, buffers = stack_module_state(models)
         output = vmap(wrapper, (0, 0, None))(params, buffers, data)

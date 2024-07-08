@@ -1,9 +1,9 @@
 import argparse
 import time
 
-import torch
-
 from common import SubTensor, SubWithTorchFunction, WithTorchFunction
+
+import torch
 
 NUM_REPEATS = 1000
 NUM_REPEAT_OF_REPEATS = 1000

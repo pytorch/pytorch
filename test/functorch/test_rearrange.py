@@ -28,7 +28,9 @@ SOFTWARE.
 from typing import List, Tuple
 
 import numpy as np
+
 import torch
+
 from functorch.einops import rearrange
 from torch.testing._internal.common_utils import run_tests, TestCase
 

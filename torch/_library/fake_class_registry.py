@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 from typing import Any, Dict, Optional, Protocol, Tuple
 
@@ -9,11 +10,29 @@ log = logging.getLogger(__name__)
 
 
 class FakeScriptObject:
-    def __init__(self, wrapped_obj: Any, script_class_name: str):
+    def __init__(self, wrapped_obj: Any, script_class_name: str, x: torch.ScriptObject):
         self.wrapped_obj = wrapped_obj
 
         # The fully qualified name of the class of original script object
         self.script_class_name = script_class_name
+        self.real_obj = x
+
+
+class FakeScriptMethod:
+    def __init__(
+        self,
+        self_fake_obj: FakeScriptObject,
+        method_name: str,
+        schema: Optional[torch.FunctionSchema],
+    ):
+        self.self_fake_obj = self_fake_obj
+        self.method_name = method_name
+        self.schema = schema
+
+    def __call__(self, *args, **kwargs):
+        from torch._higher_order_ops.torchbind import call_torchbind
+
+        return call_torchbind(self.self_fake_obj, self.method_name, *args, **kwargs)
 
 
 class HasStaticMethodFromReal(Protocol):
@@ -82,8 +101,14 @@ def _check_valid_flat_script_obj(flat_x):
 
 def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
     import torch.utils._pytree as pytree
+    from torch.utils._python_dispatch import _disable_current_modes
 
-    flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
+    # x.__obj_flatten__() could be calling some tensor operations inside but we don't
+    # want to call these ops in surrounding dispatch modes when executing it.
+    # Otherwise, for example, the fake tensor modes will error out when the tensors inside
+    # script obeject execute some operations like clone if allow_non_fake_input flag is set.
+    with _disable_current_modes():
+        flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
 
     _check_valid_flat_script_obj(flat_x)
 
@@ -95,25 +120,25 @@ def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
 
     fake_x = _find_fake_class_for_script_object(x).__obj_unflatten__(fake_flattened)
 
-    def _call_torchbind(method_name):
-        from torch._higher_order_ops.torchbind import call_torchbind
+    fake_x_wrapped = FakeScriptObject(fake_x, x._type().qualified_name(), x)  # type: ignore[attr-defined]
 
-        def wrapped(self_, *args, **kwargs):
-            return call_torchbind(self_, method_name, *args, **kwargs)
-
-        return wrapped
-
-    fake_x_wrapped = FakeScriptObject(fake_x, x._type().qualified_name())  # type: ignore[attr-defined]
     for name in x._method_names():  # type: ignore[attr-defined]
         attr = getattr(fake_x, name, None)
         if attr:
             if not callable(attr):
                 raise RuntimeError(f"Expect {name} to be a callable but got {attr}.")
 
+            real_attr = getattr(x, name)  # type: ignore[attr-defined]
+
+            # real attr sometimes is not torch.ScriptMethod thus doesn't have schema e.g. __init___ or __eq__
+            method_schema: Optional[torch.FunctionSchema] = None
+            if isinstance(real_attr, torch.ScriptMethod):
+                method_schema = real_attr.schema  # type: ignore[attr-defined]
+
             setattr(
                 fake_x_wrapped,
                 name,
-                _call_torchbind(name).__get__(fake_x_wrapped),
+                FakeScriptMethod(fake_x_wrapped, name, method_schema),
             )
         else:
             log.warning("fake object of %s doesn't implement method %s.", x, name)
@@ -270,6 +295,6 @@ def _fake_obj_from_real(fake_mode, x) -> Any:
         )
 
     # from_real defined by user need the ctx to fakify the tensor states.
-    ctx = torch._library.abstract_impl.AbstractImplCtx(fake_mode, None)
-    with torch._library.abstract_impl.set_ctx_getter(lambda: ctx):
+    ctx = torch._library.fake_impl.FakeImplCtx(fake_mode, None)
+    with torch._library.fake_impl.set_ctx_getter(lambda: ctx):
         return fake_class.from_real(x)

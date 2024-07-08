@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 """
 These are functions that should simply be applied to both mask and data.
@@ -9,6 +10,7 @@ a new MaskedTensor as a result.
 import torch
 
 from .core import _map_mt_args_kwargs, _wrap_result
+
 
 __all__ = []  # type: ignore[var-annotated]
 

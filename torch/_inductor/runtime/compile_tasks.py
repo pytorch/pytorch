@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
@@ -5,7 +6,7 @@ import os
 import sys
 import warnings
 from types import ModuleType
-from typing import Any, Callable
+from typing import Any, Callable, Dict
 
 
 def _reload_triton_kernel_in_subproc(reload_module, kernel_name):
@@ -33,7 +34,7 @@ def _reload_python_module_in_subproc(key, path):
 def _reload_python_module(key, path):
     with open(path) as f:
         try:
-            code = compile(f.read(), path, "exec")
+            code = compile(f.read(), path, "exec", dont_inherit=True)
         except Exception as e:
             raise RuntimeError(
                 f"Failed to import {path}\n{type(e).__name__}: {e}"
@@ -61,8 +62,7 @@ def _set_triton_ptxas_path() -> None:
         warnings.warn(f"{ptxas_path} exists but is not an executable")
 
 
-def _worker_compile_triton(
-    load_kernel: Callable[[], Any],
-):
+def _worker_compile_triton(load_kernel: Callable[[], Any], extra_env: Dict[str, str]):
     _set_triton_ptxas_path()
+    os.environ.update(extra_env)
     load_kernel().precompile(warm_cache_only=True)

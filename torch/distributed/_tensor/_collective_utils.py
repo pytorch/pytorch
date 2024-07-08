@@ -1,8 +1,8 @@
+# mypy: allow-untyped-defs
 import logging
 import math
 from dataclasses import dataclass
 from functools import lru_cache
-
 from typing import List, Optional
 
 import torch
@@ -19,6 +19,7 @@ from torch.distributed.distributed_c10d import (
     scatter,
     Work,
 )
+
 
 logger = logging.getLogger(__name__)
 

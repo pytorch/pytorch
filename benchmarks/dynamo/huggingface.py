@@ -7,13 +7,21 @@ import subprocess
 import sys
 import warnings
 
+try:
+    from .common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+except ImportError:
+    from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+
 import torch
-from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
 
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs
 
 log = logging.getLogger(__name__)
+
+# Enable FX graph caching
+if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
+    torch._inductor.config.fx_graph_cache = True
 
 
 def pip_install(package):
@@ -180,6 +188,9 @@ REQUIRE_HIGHER_TOLERANCE_TRAINING = {
 REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
     "GPT2ForSequenceClassification",
     "RobertaForQuestionAnswering",
+}
+REQUIRE_HIGHER_TOLERANCE_INFERENCE_CPU_ONLY = {
+    "LayoutLMForSequenceClassification",
 }
 
 
@@ -557,6 +568,11 @@ class HuggingfaceRunner(BenchmarkRunner):
                 return 1e-2, cosine
         else:
             if name in REQUIRE_HIGHER_TOLERANCE_INFERENCE:
+                return 4e-3, cosine
+            if (
+                current_device == "cpu"
+                and name in REQUIRE_HIGHER_TOLERANCE_INFERENCE_CPU_ONLY
+            ):
                 return 4e-3, cosine
         return 1e-3, cosine
 

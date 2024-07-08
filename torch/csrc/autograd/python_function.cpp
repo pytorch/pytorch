@@ -1718,7 +1718,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr},
     {"needs_input_grad",
      &getObject<&THPFunction::needs_input_grad>,
-     nullptr,
+     &setObject<&THPFunction::needs_input_grad>,
      nullptr,
      nullptr},
     {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},

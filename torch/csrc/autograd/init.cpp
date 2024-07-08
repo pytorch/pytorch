@@ -203,6 +203,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("sequence_nr", [](const KinetoEvent& e) { return e.sequenceNr(); })
       // absolute start time (since unix epoch) in ns
       .def("start_ns", [](const KinetoEvent& e) { return e.startNs(); })
+      // absolute end time (since unix epoch) in ns
+      .def("end_ns", [](const KinetoEvent& e) { return e.endNs(); })
       // duration in ns
       .def("duration_ns", [](const KinetoEvent& e) { return e.durationNs(); })
       // used for correlation between high-level PyTorch events
@@ -372,6 +374,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       at::SavedTensorDefaultHooks::is_enabled);
   m.def("_saved_tensors_hooks_enable", at::SavedTensorDefaultHooks::enable);
   m.def("_saved_tensors_hooks_disable", at::SavedTensorDefaultHooks::disable);
+  m.def(
+      "_saved_tensors_hooks_set_tracing",
+      at::SavedTensorDefaultHooks::set_tracing);
   m.def(
       "_saved_tensors_hooks_get_disabled_error_message",
       at::SavedTensorDefaultHooks::get_disabled_error_message);

@@ -24,7 +24,7 @@
 
 namespace at::native {
 
-void _backward(const Tensor& self, TensorList inputs, const std::optional<Tensor>& gradient_opt, c10::optional<bool> keep_graph, bool create_graph) {
+void _backward(const Tensor& self, TensorList inputs, const std::optional<Tensor>& gradient_opt, std::optional<bool> keep_graph, bool create_graph) {
   return self._backward(inputs, gradient_opt, keep_graph, create_graph);
 }
 

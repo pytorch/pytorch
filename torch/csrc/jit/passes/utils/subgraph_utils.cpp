@@ -606,7 +606,7 @@ static std::string truncateStrWithHash(const std::string& s, size_t maxlen) {
   if (s.size() <= maxlen) {
     return s;
   }
-  std::string hash_str = c10::to_string(c10::hash<std::string>{}(s));
+  std::string hash_str = std::to_string(c10::hash<std::string>{}(s));
   // If hash-string plus '_' can fit into maxlen, then truncate the original
   // string correspondingly so that the final string with the hash included fits
   // into maxlen. If that's not possible, at least truncate the original string

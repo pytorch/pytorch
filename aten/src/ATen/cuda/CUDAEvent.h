@@ -32,8 +32,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
   CUDAEvent(unsigned int flags) noexcept : flags_{flags} {}
 
   CUDAEvent(
-      DeviceIndex device_index, const cudaIpcEventHandle_t* handle) {
-      device_index_ = device_index;
+      DeviceIndex device_index, const cudaIpcEventHandle_t* handle) : device_index_(device_index) {
       CUDAGuard guard(device_index_);
 
       AT_CUDA_CHECK(cudaIpcOpenEventHandle(&event_, *handle));
