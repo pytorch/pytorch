@@ -2,6 +2,7 @@
 import pdb
 import sys
 import traceback
+from typing import Any, Dict
 
 import torch
 
@@ -74,7 +75,7 @@ if is_available():
             finally:
                 sys.stdin = _stdin
 
-    _breakpoint_cache = {}
+    _breakpoint_cache: Dict[int, Any] = {}
 
     def breakpoint(rank: int = 0, skip: int = 0):
         """
