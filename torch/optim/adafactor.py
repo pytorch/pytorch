@@ -232,15 +232,14 @@ def _single_tensor_adafactor(
 
         # update step
         step_t += 1
+        step_float = step_t.item()
 
         # Perform stepweight decay
         param.mul_(1 - lr * weight_decay)
 
-        import math
-
-        beta2_t = 1 - step_t.item() ** -0.8
-        step_size = min(0.01, 1 / math.sqrt(step_t))  # keras uses lr instead of 0.01
-        alpha = max(eps2, param.norm(2).item() / math.sqrt(param.numel())) * step_size
+        beta2_t = 1 - step_float**-0.8
+        rho_t = min(0.01, 1 / (step_float**0.5))  # keras uses lr instead of 0.01
+        alpha = max(eps2, param.norm(2).item() / (param.numel() ** 0.5)) * rho_t
 
         grad_squared_eps = grad * grad + eps1
         row_mean = grad_squared_eps.mean(dim=-1)
@@ -253,7 +252,7 @@ def _single_tensor_adafactor(
         var_estimate.rsqrt_()
 
         update = var_estimate.mul_(grad)
-        denom = max(1.0, update.norm(2).item() / (math.sqrt(update.numel()) * d))
+        denom = max(1.0, update.norm(2).item() / ((update.numel() ** 0.5) * d))
         param.add_(update, alpha=-alpha / denom)
 
 
