@@ -209,8 +209,11 @@ class BlockMask:
 
             for r in range(0, num_rows, row_step):
                 for c in range(0, num_cols, col_step):
+                    cur_mask = dense_mask
+                    for idx in batch_idx:
+                        cur_mask = cur_mask[idx]
                     char = summarize_section(
-                        dense_mask[*batch_idx, r : r + row_step, c : c + col_step]
+                        cur_mask[r : r + row_step, c : c + col_step]
                     )
                     vis += char * 2
                 vis += "\n"

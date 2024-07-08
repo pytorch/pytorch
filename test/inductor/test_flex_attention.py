@@ -943,7 +943,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertLess(metrics.num_bytes_accessed, accessed_bytes * num_accesses)
 
     @supported_platform
-    # @skip("Triton bug ")  # https://github.com/pytorch/pytorch/issues/124571
     @common_utils.parametrize("dtype", test_dtypes)
     def test_njt_causal(self, dtype):
         offsets = torch.tensor(
@@ -1273,6 +1272,15 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 )""",
         )
+
+        offset = torch.arange(8, device="cuda")
+
+        def causal_offset(score, b, h, q, kv):
+            return torch.where(q + offset[b] * 128 >= kv, score, -float("inf"))
+
+        block_mask = create_block_mask(causal_offset, 8, 1, 2048, 2048)
+        str_block_mask = str(block_mask)
+        self.assertTrue("sparsity=29.10" in str_block_mask)
 
     @supported_platform
     def test_fw_bw_graph_correctness(self):
