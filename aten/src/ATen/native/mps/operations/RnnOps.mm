@@ -356,7 +356,7 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                                                bool bidirectional,
                                                                                bool batch_first) {
   using namespace mps;
-  bool ismacos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
+  bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
 
   const Tensor& grad_y_r = c10::value_or_else(grad_y_opt, [] { return Tensor(); });
   const Tensor& grad_hy_r = c10::value_or_else(grad_hy_opt, [] { return Tensor(); });
