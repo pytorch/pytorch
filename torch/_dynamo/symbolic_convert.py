@@ -96,6 +96,7 @@ from .variables.lists import (
 )
 from .variables.misc import (
     ClosureVariable,
+    ExceptionVariable,
     GetAttrVariable,
     InlinedClosureVariable,
     NullVariable,
@@ -753,23 +754,16 @@ class InstructionTranslatorBase(
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
         try:
             value = fn.call_function(self, args, kwargs)
-        except torch._dynamo.exc.TorchDynamoException:
-            # We're already handling this exception - keep it going.
-            raise
-        except NotImplementedError as e:
-            # Unfortunately a number of places in dynamo raise
-            # NotImplementedError instead of a subtype of
-            # TorchDynamoException. Since we can't tell if this was an
-            # "internal" or "external" exception we need to assume it was
-            # internal.
-            raise
-        except RuntimeError as e:
+        except exc.TorchRuntimeError as e:
             # Our function call raised an exception. Treat it as an internal
             # exception and "handle" it.
-            log.debug("called function raised exception: %s (%s)", type(e), e)
-            self.exn_vt_stack.append(e)
-            unimplemented(f"raise '{e}' ({type(e)})")
-            return
+            log.debug("called function raised exception", exc_info=True)
+            # TODO: What about the traceback? ExceptionVariable doesn't seem to
+            # support that.
+            val = ExceptionVariable(RuntimeError, e.args)
+            # This is fundamentally what happens on a `RAISE_VARARGS 1`
+            self.exn_vt_stack.append(val)
+            raise exc.ObservedException(f"raised exception {val}") from e
         self.push(value)
 
     def inline_user_function_return(self, fn, args, kwargs):
@@ -1290,7 +1284,7 @@ class InstructionTranslatorBase(
 
             # User can raise exception in 2 ways
             #   1) raise exception type - raise NotImplementedError
-            #   2) raise execption instance - raise NotImplemetedError("foo")
+            #   2) raise exception instance - raise NotImplemetedError("foo")
 
             # 1) when user raises exception type
             if isinstance(val, variables.BuiltinVariable):
@@ -1304,7 +1298,7 @@ class InstructionTranslatorBase(
             # 2) when user raises exception instance
             if isinstance(val, variables.ExceptionVariable):
                 raise exc.ObservedException(f"raised exception {val}")
-            unimplemented(f"raise {exc}")
+            unimplemented(f"raise {val}")
         else:
             unimplemented("raise ... from ...")
 
@@ -1514,16 +1508,29 @@ class InstructionTranslatorBase(
             null = self.pop()
             assert isinstance(null, NullVariable)
 
-        if (
-            isinstance(fn, GetAttrVariable)
-            and isinstance(fn.obj, TensorVariable)
-            and fn.name == "view"
-            and isinstance(argsvars, (ConstantVariable, TensorVariable))
-        ):
-            # Hack to handle special case in some bert models.  Converts
-            # x.view(*shape) into x.view(shape), which is correct for view()
-            # but not generally.  See test_transpose_for_scores().
-            argsvars = TupleVariable([argsvars])
+        if isinstance(fn, GetAttrVariable) and isinstance(fn.obj, TensorVariable):
+            # realize is requires for Python 3.8
+            kwargsvars = kwargsvars.realize()
+            if fn.name == "view" and isinstance(
+                argsvars, (ConstantVariable, TensorVariable)
+            ):
+                # Hack to handle special case in some bert models.  Converts
+                # x.view(*shape) into x.view(shape), which is correct for view()
+                # but not generally.  See test_transpose_for_scores().
+                argsvars = TupleVariable([argsvars])
+            elif (
+                fn.name == "random_"
+                and isinstance(argsvars, TupleVariable)
+                and len(argsvars.items) == 0
+                and isinstance(kwargsvars, ConstDictVariable)
+                and ConstantVariable.create("from") in kwargsvars
+            ):
+                # `from`` is python keyword. Adding random_ with `from` in the
+                # Fx graph causes syntax error. Even if we convert the kwargs to
+                # args, aot_autograd/inductor while lowering generates
+                # aten.random.from, again causing syntax errors. Since this
+                # usecase is uncommon, graph break.
+                unimplemented("random_ op is called with from keyword")
 
         if not isinstance(
             argsvars, BaseListVariable
