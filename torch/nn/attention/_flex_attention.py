@@ -86,10 +86,7 @@ class BlockMask:
     def __str__(self):
         s = f"BlockMask(shape={self.shape()}, sparsity={self.sparsity():.2f}%, \n"
         mask_str = self.to_string().strip()
-        lines = mask_str.split("\n")
-        lines = ["  " + line for line in lines]
-        lines = "\n".join(lines)
-        s += lines
+        s += mask_str
         s += "\n)"
         return s
 
@@ -170,7 +167,7 @@ class BlockMask:
         out = create_dense_batched(self.kv_num_blocks, self.kv_indices)
         return out
 
-    def to_string(self, grid_size=(20, 20), limit=5):
+    def to_string(self, grid_size=(20, 20), limit=4):
         """
         Returns a string representation of the block mask. Quite nifty.
 
@@ -222,8 +219,11 @@ class BlockMask:
             return vis
 
         total_vis = []
-        for batch_idx in itertools.product(*[range(i) for i in batch_dims]):
-            if batch_idx == limit:
+        for idx, batch_idx in enumerate(itertools.product(*[range(i) for i in batch_dims])):
+            if idx == limit:
+                total_vis.append("...")
+                total_vis.append("To print out more, set BlockMask.to_string(limit=N)")
+                total_vis.append("You can also index (BlockMask[batch, head]) to choose a specific batch or head")
                 break
             block_vis = create_block_vis(*batch_idx)
             total_vis.append(block_vis)
