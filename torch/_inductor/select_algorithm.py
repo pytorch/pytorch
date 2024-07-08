@@ -1135,9 +1135,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO - assert that we have not mutating kernels here
 
-        # TODO(nmacchioni): remove once CI tests are fixed
-        choices = [choice for choice in choices if choice is not None]
-
         if mm_file_name := get_mm_log_filename():
             M, K = input_nodes[-2].get_size()[:2]
             N = input_nodes[-1].get_size()[-1]
