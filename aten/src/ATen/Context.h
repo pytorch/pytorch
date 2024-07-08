@@ -65,6 +65,8 @@ class TORCH_API Context {
         : at::getAccelerator(true).value();
     if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks();
+    } else if (device_type == at::kXPU) {
+      return at::detail::getXPUHooks();
     } else if (device_type == at::kMPS) {
       return at::detail::getMPSHooks();
     } else if (device_type == at::kPrivateUse1) {
@@ -216,10 +218,13 @@ class TORCH_API Context {
   void setSDPUseCuDNN(bool);
   bool userEnabledCuDNNSDP() const;
 
+  void setSDPUseOverrideable(bool);
+  bool userEnabledOverrideableSDP() const;
+
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend);
 
-  at::BlasBackend blasPreferredBackend() const;
+  at::BlasBackend blasPreferredBackend();
   void setBlasPreferredBackend(at::BlasBackend);
 
   // Note [Enabling Deterministic Operations]
@@ -368,6 +373,7 @@ class TORCH_API Context {
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
   bool enabled_cudnnSDP = true;
+  bool enabled_overrideable = true;
 #ifdef USE_ROCM
   bool benchmark_cudnn = true;
 #else
