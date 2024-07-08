@@ -24,6 +24,16 @@ from torch._inductor.utils import run_and_get_cpp_code
 from torch.export import Dim
 from torch.utils._triton import has_triton
 
+try:
+    try:
+        from .test_aot_inductor import AOTIRunnerUtil
+    except ImportError:
+        from test_aot_inductor import AOTIRunnerUtil
+except (unittest.SkipTest, ImportError) as e:
+    sys.stderr.write(f"{type(e)}: {e}\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
 
 @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
 @config.patch(memory_planning=True)
@@ -81,8 +91,6 @@ class TestMemoryPlanning(TestCase):
 
     @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
     def test_abi_compatible(self):
-        from test_aot_inductor import AOTIRunnerUtil
-
         f, args = self._generate(device="cuda")
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None)
