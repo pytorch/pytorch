@@ -2,12 +2,12 @@
 
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Optional.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/sparse_bitset.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
 #include <memory>
-#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>

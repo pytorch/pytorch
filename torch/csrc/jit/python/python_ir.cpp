@@ -138,17 +138,17 @@ std::optional<THPObjectPtr> ConcretePythonOp::autogradFunction() const {
 
   auto r = py::getattr(obj, "__self__", py::none());
   if (r.is_none())
-    return std::nullopt;
+    return c10::nullopt;
 
   auto apply = py::getattr(r, "apply", py::none());
   if (apply.is_none())
-    return std::nullopt;
+    return c10::nullopt;
 
   auto c = PyObject_RichCompareBool(apply.ptr(), obj.ptr(), Py_NE);
   if (PyErr_Occurred())
     throw py::error_already_set();
   if (c)
-    return std::nullopt;
+    return c10::nullopt;
 
   return THPObjectPtr(r.release().ptr());
 }

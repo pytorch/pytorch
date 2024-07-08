@@ -201,21 +201,13 @@ class TestCommModeFeatures(DTensorTestBase):
         # checks to see if all collectives were correctly traced at the module-level
 
         self.assertEqual(
-            comm_mode.comm_module_counts["Global"]["forward"][
-                c10d_functional.all_reduce
-            ],
-            1,
+            comm_mode.comm_module_counts["Global"][c10d_functional.all_reduce], 1
         )
         self.assertEqual(
-            comm_mode.comm_module_counts["MLPModule"]["forward"][
-                c10d_functional.all_reduce
-            ],
-            1,
+            comm_mode.comm_module_counts["MLPModule"][c10d_functional.all_reduce], 1
         )
         self.assertEqual(
-            comm_mode.comm_module_counts["MLPModule.net2"]["forward"][
-                c10d_functional.all_reduce
-            ],
+            comm_mode.comm_module_counts["MLPModule.net2"][c10d_functional.all_reduce],
             1,
         )
 
@@ -265,103 +257,97 @@ class TestCommModeFeatures(DTensorTestBase):
 
         # checks to see if all collectives were correctly traced at the module-level
         self.assertEqual(
-            comm_mode.comm_module_counts["Global"]["forward"][
-                c10d_functional.all_reduce
-            ],
-            6,
+            comm_mode.comm_module_counts["Global"][c10d_functional.all_reduce], 6
         )
         self.assertEqual(
-            comm_mode.comm_module_counts["Global"]["forward"][
+            comm_mode.comm_module_counts["Global"][
                 c10d_functional.all_gather_into_tensor
             ],
             1,
         )
         self.assertEqual(
-            comm_mode.comm_module_counts["Transformer"]["forward"][
-                c10d_functional.all_reduce
-            ],
-            6,
+            comm_mode.comm_module_counts["Transformer"][c10d_functional.all_reduce], 6
         )
         self.assertEqual(
-            comm_mode.comm_module_counts["Transformer"]["forward"][
+            comm_mode.comm_module_counts["Transformer"][
                 c10d_functional.all_gather_into_tensor
             ],
             1,
         )
         self.assertEqual(
-            comm_mode.comm_module_counts["Transformer.tok_embeddings"]["forward"][
+            comm_mode.comm_module_counts["Transformer.tok_embeddings"][
                 c10d_functional.all_reduce
             ],
             1,
         )
         self.assertEqual(
-            comm_mode.comm_module_counts["Transformer.pos_embeddings"]["forward"][
+            comm_mode.comm_module_counts["Transformer.pos_embeddings"][
                 c10d_functional.all_reduce
             ],
             1,
         )
         self.assertEqual(
-            comm_mode.comm_module_counts["Transformer.layers.0"]["forward"][
+            comm_mode.comm_module_counts["Transformer.layers.0"][
                 c10d_functional.all_reduce
             ],
             2,
         )
         self.assertEqual(
-            comm_mode.comm_module_counts["Transformer.layers.0.attention"]["forward"][
+            comm_mode.comm_module_counts["Transformer.layers.0.attention"][
                 c10d_functional.all_reduce
             ],
             1,
         )
         self.assertEqual(
             comm_mode.comm_module_counts["Transformer.layers.0.attention.wo"][
-                "forward"
-            ][c10d_functional.all_reduce],
+                c10d_functional.all_reduce
+            ],
             1,
         )
         self.assertEqual(
             comm_mode.comm_module_counts["Transformer.layers.0.feed_forward"][
-                "forward"
-            ][c10d_functional.all_reduce],
+                c10d_functional.all_reduce
+            ],
             1,
         )
         self.assertEqual(
             comm_mode.comm_module_counts["Transformer.layers.0.feed_forward.w2"][
-                "forward"
-            ][c10d_functional.all_reduce],
+                c10d_functional.all_reduce
+            ],
             1,
         )
         self.assertEqual(
-            comm_mode.comm_module_counts["Transformer.layers.1"]["forward"][
+            comm_mode.comm_module_counts["Transformer.layers.1"][
                 c10d_functional.all_reduce
             ],
             2,
         )
         self.assertEqual(
-            comm_mode.comm_module_counts["Transformer.layers.1.attention"]["forward"][
+            comm_mode.comm_module_counts["Transformer.layers.1.attention"][
                 c10d_functional.all_reduce
             ],
             1,
         )
         self.assertEqual(
             comm_mode.comm_module_counts["Transformer.layers.1.attention.wo"][
-                "forward"
-            ][c10d_functional.all_reduce],
+                c10d_functional.all_reduce
+            ],
             1,
         )
         self.assertEqual(
             comm_mode.comm_module_counts["Transformer.layers.1.feed_forward"][
-                "forward"
-            ][c10d_functional.all_reduce],
+                c10d_functional.all_reduce
+            ],
             1,
         )
         self.assertEqual(
             comm_mode.comm_module_counts["Transformer.layers.1.feed_forward.w2"][
-                "forward"
-            ][c10d_functional.all_reduce],
+                c10d_functional.all_reduce
+            ],
             1,
         )
         self.assertEqual(
-            comm_mode.comm_module_counts["Transformer.output"]["forward"][
+            comm_mode.comm_module_counts["Transformer.output"][
                 c10d_functional.all_gather_into_tensor
             ],
             1,

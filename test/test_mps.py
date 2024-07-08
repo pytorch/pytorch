@@ -11829,13 +11829,7 @@ class TestConsistency(TestCaseMPS):
         self.assertEqual(device, "cpu")
 
         def get_samples():
-            return op.sample_inputs(
-                device,
-                dtype,
-                requires_grad=(dtype.is_floating_point or dtype.is_complex),
-                # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-                set_seed=False,
-            )
+            return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
         cpu_samples = get_samples()
 
         for cpu_sample in cpu_samples:
@@ -11870,13 +11864,7 @@ class TestConsistency(TestCaseMPS):
         self.assertEqual(device, "cpu")
 
         def get_samples():
-            return op.sample_inputs(
-                device,
-                dtype,
-                requires_grad=(dtype.is_floating_point or dtype.is_complex),
-                # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-                set_seed=False,
-            )
+            return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
         cpu_samples = get_samples()
 
         for cpu_sample in cpu_samples:
@@ -11952,8 +11940,7 @@ class TestErrorInputs(TestCase):
     def test_error_inputs(self, device, op):
         self.assertEqual(device, "mps:0")
 
-        # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-        mps_samples = op.error_inputs(device, set_seed=False)
+        mps_samples = op.error_inputs(device)
 
         for mps_sample in mps_samples:
             mps_sample_input = mps_sample.sample_input
@@ -12028,12 +12015,7 @@ class TestCommon(TestCase):
         # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
         # get patched up and this workaround removed.
         broken_on_ref_inputs = op.name in ['clamp', 'where']
-
-        # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-        inputs = (
-            op.reference_inputs(device, dtype, set_seed=False) if not broken_on_ref_inputs
-            else op.sample_inputs(device, dtype, set_seed=False)
-        )
+        inputs = op.reference_inputs(device, dtype) if not broken_on_ref_inputs else op.sample_inputs(device, dtype)
         for sample_input in inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 

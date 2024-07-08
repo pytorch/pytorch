@@ -10,7 +10,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <c10/core/DeviceGuard.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 #include <memory>
 #include <optional>

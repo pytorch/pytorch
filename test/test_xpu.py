@@ -152,7 +152,7 @@ def run_model(model, input):
     model_xpu = copy.deepcopy(model).to('xpu')
     loss_xpu = model_xpu(input_xpu).sum()
     loss = model(input).sum()
-    torch.testing.assert_close(loss_xpu.cpu(), loss)
+    assert torch.allclose(loss_xpu.cpu(), loss)
 
 def test_multi_process(model, input):
     p = Process(target=run_model, args=(model, input))
@@ -160,11 +160,10 @@ def test_multi_process(model, input):
     p.join()
     assert p.exitcode == 0
 
-input = torch.rand(32, 3, 224, 224)
+input = torch.rand(1, 4, 16, 16)
 model = torch.nn.Sequential(
-    torch.nn.Conv2d(3, 64, 3, stride=2),
-    torch.nn.ReLU(),
-    torch.nn.MaxPool2d(2, 2),
+    torch.nn.Conv2d(4, 2, 1, stride=2),
+    torch.nn.BatchNorm2d(2, eps=1e-05, momentum=0.1),
 )
 test_multi_process(model, input)
 test_multi_process(model, input)
@@ -351,7 +350,7 @@ print(torch.xpu.device_count())
             self.assertEqual(copy.get_device(), original.get_device())
 
 
-instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
+instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
 
 
 class TestXpuAutocast(TestCase):
