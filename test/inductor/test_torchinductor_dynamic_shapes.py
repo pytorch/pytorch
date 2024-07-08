@@ -859,7 +859,7 @@ class TestInductorDynamic(TestCase):
         f(torch.tensor([5], device=device))
 
     def test_sort_dynamic_shape_with_check(self, device):
-        if TEST_WITH_ROCM or torch.device(device).type != "cuda":
+        if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
 
             def check_count(n):
                 self.assertEqual(metrics.generated_kernel_count, 0)

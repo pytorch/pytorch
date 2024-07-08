@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-
 try:
     # VS Code settings allow comments and trailing commas, which are not valid JSON.
     import json5 as json  # type: ignore[import]
