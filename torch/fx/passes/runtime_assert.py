@@ -153,12 +153,21 @@ def insert_deferred_runtime_asserts(
         if isinstance(expr, (Integer, Number, Symbol, BooleanAtom)):
             return sympy_interp(PythonReferenceAnalysis, expr_to_proxy, expr)
 
-        # hash cons on arguments, run expr handler
-        expr_to_proxy[expr] = _run_sympy_handler(
-            PythonReferenceAnalysis,
-            [_sympy_interp(expr_to_proxy, arg) for arg in expr.args],
-            expr,
-        )
+        # hash cons on arguments
+        fx_args = [_sympy_interp(expr_to_proxy, arg) for arg in expr.args]
+
+        # sympy function
+        if isinstance(expr, sympy.Function):
+            expr_to_proxy[expr] = fx.Proxy(
+                graph.call_function(
+                    expr.func,
+                    tuple((proxy.node if isinstance(proxy, fx.Proxy) else proxy) for proxy in fx_args),
+                ),
+            )
+        else:  # run expr handler
+            expr_to_proxy[expr] = _run_sympy_handler(
+                PythonReferenceAnalysis, fx_args, expr
+            )
         return expr_to_proxy[expr]
 
     def _is_bound_expr_for_symbol(expr: "sympy.Expr") -> bool:
