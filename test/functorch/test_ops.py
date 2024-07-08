@@ -462,11 +462,6 @@ class TestOperators(TestCase):
                 device_type="cuda",
             ),
             tol1(
-                "linalg.multi_dot",
-                {torch.float32: tol(atol=1e-05, rtol=8e-04)},
-                device_type="cuda",
-            ),
-            tol1(
                 "linalg.tensorsolve",
                 {torch.float32: tol(atol=3e-04, rtol=3e-04)},
                 device_type="cuda",
@@ -484,11 +479,6 @@ class TestOperators(TestCase):
                 "matmul",
                 {torch.float32: tol(atol=3e-04, rtol=3e-04)},
                 device_type="cuda",
-            ),
-            tol1(
-                "pca_lowrank",
-                {torch.float32: tol(atol=3e-05, rtol=4e-06)},
-                device_type="cpu",
             ),
         ),
     )
@@ -612,11 +602,6 @@ class TestOperators(TestCase):
                 device_type="cuda",
             ),
             tol1(
-                "masked.prod",
-                {torch.float32: tol(atol=1e-05, rtol=1.3e-05)},
-                device_type="cuda",
-            ),
-            tol1(
                 "nn.functional.binary_cross_entropy_with_logits",
                 {torch.float32: tol(atol=4e-04, rtol=4e-04)},
             ),
@@ -629,9 +614,6 @@ class TestOperators(TestCase):
             tol1(
                 "nn.functional.multi_head_attention_forward",
                 {torch.float32: tol(atol=6e-05, rtol=2e-05)},
-            ),
-            tol2(
-                "linalg.pinv", "hermitian", {torch.float32: tol(atol=5e-5, rtol=2e-5)}
             ),
         ),
     )
@@ -784,7 +766,7 @@ class TestOperators(TestCase):
             tol2(
                 "linalg.pinv", "hermitian", {torch.float32: tol(atol=1e-05, rtol=1e-05)}
             ),
-            tol1("linalg.tensorsolve", {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+            tol1("linalg.tensorsolve", {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
             tol1("linalg.multi_dot", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
             tol1("svd_lowrank", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
@@ -955,11 +937,6 @@ class TestOperators(TestCase):
                     "linalg.householder_product", decorator=runOnRocm
                 ),  # works on ROCm
                 xfail(
-                    # nans
-                    "masked.softmax",
-                    device_type="cpu",
-                ),
-                xfail(
                     "nanquantile", device_type="cpu"
                 ),  # vmap not implemented for at::equal.
                 xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
@@ -1051,12 +1028,9 @@ class TestOperators(TestCase):
         "test_vmapvjpvjp",
         (
             tol1("linalg.svd", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
-            tol1("linalg.lu", {torch.float32: tol(atol=5e-04, rtol=7e-04)}),
             tol1("linalg.lu_factor", {torch.float32: tol(atol=2e-03, rtol=2e-02)}),
-            tol1("linalg.multi_dot", {torch.float32: tol(atol=2e-03, rtol=2e-04)}),
             tol1("svd", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
             tol1("matrix_exp", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
-            tol1("masked.prod", {torch.float32: tol(atol=2e-03, rtol=2e-04)}),
         ),
     )
     @skipOps(
@@ -1201,22 +1175,12 @@ class TestOperators(TestCase):
             ),
             tol1(
                 "linalg.householder_product",
-                {torch.float32: tol(atol=3e-04, rtol=9e-04)},
+                {torch.float32: tol(atol=1e-04, rtol=1e-04)},
             ),
             tol1(
                 "matrix_exp",
                 {torch.float32: tol(atol=5e-04, rtol=1e-04)},
                 device_type="cuda",
-            ),
-            tol1(
-                "nn.functional.layer_norm",
-                {torch.float32: tol(atol=3e-4, rtol=1e-4)},
-                device_type="cpu",
-            ),
-            tol1(
-                "native_layer_norm",
-                {torch.float32: tol(atol=3e-4, rtol=1e-4)},
-                device_type="cpu",
             ),
         ),
     )
@@ -1832,12 +1796,7 @@ class TestOperators(TestCase):
             tol1("masked.cumprod", {torch.float32: tol(atol=1e-04, rtol=5e-04)}),
             tol1(
                 "cumprod",
-                {torch.float32: tol(atol=1e-03, rtol=5e-04)},
-                device_type="cuda",
-            ),
-            tol1(
-                "linalg.det",
-                {torch.float32: tol(atol=3e-05, rtol=5e-06)},
+                {torch.float32: tol(atol=1e-04, rtol=1.3e-05)},
                 device_type="cuda",
             ),
             tol1(
@@ -2411,18 +2370,13 @@ class TestOperators(TestCase):
         "test_vmap_autograd_grad",
         (
             tol1(
-                "ldexp",
-                {torch.float32: tol(atol=3e-04, rtol=1.6e-06)},
-                device_type="cuda",
-            ),
-            tol1(
                 "linalg.householder_product",
                 {torch.float32: tol(atol=5e-04, rtol=9e-03)},
                 device_type="cuda",
             ),
             tol1(
                 "linalg.householder_product",
-                {torch.float32: tol(atol=6e-03, rtol=1e-03)},
+                {torch.float32: tol(atol=1e-04, rtol=1e-04)},
                 device_type="cpu",
             ),
             tol1(

@@ -429,7 +429,7 @@ Node* createSingletonSubgraphAndUpdateAliasing(
     Symbol subgraphKind,
     AliasDb& db) {
   return executeSubgraphMergeAndUpdateAliasing(
-      to_merge, std::nullopt, db, [&]() {
+      to_merge, c10::nullopt, db, [&]() {
         return createSingletonSubgraph(to_merge, subgraphKind);
       });
 }

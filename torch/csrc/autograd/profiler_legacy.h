@@ -336,7 +336,7 @@ TORCH_API void enableProfilerLegacy(
 using thread_event_lists = std::vector<std::vector<LegacyEvent>>;
 TORCH_API thread_event_lists disableProfilerLegacy(
     std::optional<ProfilerDisableOptions> profilerDisableOptions =
-        std::nullopt);
+        c10::nullopt);
 
 // adds profiledEvents to the current thread local recorded events. Each event
 // will be marked with node ID given by fromNodeId.
@@ -377,9 +377,9 @@ struct TORCH_API TLSLegacyProfilerGuard {
   explicit TLSLegacyProfilerGuard(
       const torch::profiler::impl::ProfilerConfig& cfg,
       std::optional<std::function<void(const thread_event_lists&)>>
-          resultCallback = std::nullopt,
+          resultCallback = c10::nullopt,
       std::optional<ProfilerDisableOptions> profilerDisableOptions =
-          std::nullopt)
+          c10::nullopt)
       : cb_(std::move(resultCallback)),
         profilerDisableOptions_(profilerDisableOptions) {
     enableProfilerLegacy(cfg);

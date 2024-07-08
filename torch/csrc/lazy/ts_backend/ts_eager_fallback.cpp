@@ -137,7 +137,7 @@ std::optional<c10::Device> compute_target_device(
       }
     }
   }
-  return std::nullopt;
+  return c10::nullopt;
 }
 
 } // namespace

@@ -134,11 +134,11 @@ static std::optional<std::vector<Value*>> build_script_grad(
   auto graph = node->owningGraph();
   auto maybe_schema = node->maybeSchema();
   if (!maybe_schema) {
-    return std::nullopt;
+    return c10::nullopt;
   }
   auto compiled_graphs = gradientInfoForSchema(*maybe_schema);
   if (!compiled_graphs) {
-    return std::nullopt;
+    return c10::nullopt;
   }
   // Use forward graph to replace node in grad_desc.f
   value_list new_outputs;

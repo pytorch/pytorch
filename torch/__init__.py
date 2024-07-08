@@ -507,9 +507,6 @@ class SymInt:
     def __repr__(self):
         return str(self.node)
 
-    def _sympy_(self):
-        return self.node.expr
-
     def __hash__(self) -> builtins.int:
         if self.node.is_nested_int():
             return hash(self.node.nested_int())
@@ -618,9 +615,6 @@ class SymFloat:
     def __repr__(self):
         return self.node.str()
 
-    def _sympy_(self):
-        return self.node.expr
-
     def __hash__(self):
         if self.node.is_constant():
             return hash(self.node.float_())
@@ -685,9 +679,6 @@ class SymBool:
 
     def __repr__(self):
         return str(self.node)
-
-    def _sympy_(self):
-        return self.node.expr
 
     def __hash__(self):
         if self.node.is_constant():

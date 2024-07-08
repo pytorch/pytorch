@@ -99,7 +99,7 @@ static std::optional<size_t> bufSize(BufPtr buf) {
   size_t size = elementSize(buf->dtype().scalar_type()) * buf->dtype().lanes();
   for (auto& d : buf->dims()) {
     if (!d->isConstant()) {
-      return std::nullopt;
+      return c10::nullopt;
     }
     size = size * (*intValue(d));
   }
