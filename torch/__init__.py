@@ -507,12 +507,15 @@ class SymInt:
     def __repr__(self):
         return str(self.node)
 
+    def _get_int(self) -> int:
+        return self.node.nested_int() if self.node.is_nested_int() else builtins.int(self)
+
     def __hash__(self) -> builtins.int:
-        if self.node.is_nested_int():
-            return hash(self.node.nested_int())
-        else:
-            # Force specialization
-            return hash(builtins.int(self))
+        return hash(self._get_int())
+
+    def as_integer_ratio(self) -> _Tuple[int, int]:
+        """Represent this int as an exact integer ratio"""
+        return self, 1
 
 
 class SymFloat:
@@ -612,15 +615,18 @@ class SymFloat:
         """Return True if the float is an integer."""
         raise TypeError("type stub not overridden")
 
+    def as_integer_ratio(self) -> _Tuple[int, int]:
+        """Represent this float as an exact integer ratio"""
+        return self._get_float().as_integer_ratio()
+
     def __repr__(self):
         return self.node.str()
 
+    def _get_float(self) -> int:
+        return self.node.float_() if self.node.is_constant() else  builtins.float(self)
+
     def __hash__(self):
-        if self.node.is_constant():
-            return hash(self.node.float_())
-        else:
-            # Force specialization
-            return hash(builtins.float(self))
+        return hash(self._get_float())
 
 
 class SymBool:
