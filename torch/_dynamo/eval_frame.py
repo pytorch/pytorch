@@ -880,6 +880,12 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                                 else DimDynamic.STATIC
                                 for d in range(len(flat_args[i].shape))
                             ],
+                            dynamic_strides=[
+                                DimDynamic.DYNAMIC
+                                if d in flat_args_dynamic_dims[i]
+                                else DimDynamic.STATIC
+                                for d in range(len(flat_args[i].stride()))
+                            ],
                             constraint_sizes=[None] * len(flat_args[i].shape),
                         ),
                     )

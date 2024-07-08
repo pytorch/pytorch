@@ -3158,7 +3158,11 @@ class ShapeEnv:
             dynamic_dims = [DimDynamic.DUCK] * dim
             dynamic_strides = [DimDynamic.DUCK] * dim
             # symbolic_context is None - set one
-            symbolic_context = StatelessSymbolicContext(dynamic_sizes=dynamic_dims, dynamic_strides=dynamic_strides, constraint_sizes=constraint_dims)
+            symbolic_context = StatelessSymbolicContext(
+                dynamic_sizes=dynamic_dims,
+                dynamic_strides=dynamic_strides,
+                constraint_sizes=constraint_dims
+            )
         # We got a StatelessSymbolicContext
         _assert_symbol_context(symbolic_context)
         constraint_dims = symbolic_context.constraint_sizes
