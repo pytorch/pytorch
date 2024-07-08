@@ -771,115 +771,82 @@ Questions
 - Where should 'add_comms' be called? should it be called by a particular Schedule class's __init__, and possibly
     pass flags to control the heuristics of add_comms based on that schedule?
 
-What is the heuristic for adding FSDP comms?
-- the naive one is to allow one active F layer and one active B layer at a time, and perform unsharding/resharding
-    greedily when needed
-- prefetching can be as simple as moving an unshard 'backward' as many steps as possible without crossing a
-    different active layer, maybe?
-
-How should this code be structured?
-- send/recv is a global transform, we modify more than one rank at the same time.
-
-    Bad idea:
-    - its easiest to pick either 'sender' or 'receiever' as the source of truth, and then add the matching comm.
-    (e.g. if we prefer senders, we can iterate through rank0's actions and for every F, we insert a send and then
-        also insert a recv on the recieving rank)
-    - this seems totally error prone, actually. if we iterated through all of rank0's actions we'd end up appending
-      a bunch of recvs on other ranks.
-    but then whenn we iterate through other ranks actions and process their sends,
-    we'd need to insert recvs in 'the right place' in rank0 rather than just appending.
-
-    Idea 2 - we lower one whole 'time step' at a time
-        - at time 0 we have up to R actions.  For each action there are some sends.
-        - put those in a queue and then for each one,
-            append the send to the output trace of that rank and then append a recv to the recving rank
-
-- should we structure the FSDP stuff as a totally separate pass?
-    - its probably distracting to have to consider send/recv ops when doing prefetching
-    - not sure if it matters whether to start prefetch or start send/recv first relative to each other?
-    - Prefetching decisions are more 'across time for one rank' than 'across rank at one time',
-    so it seems messy to mix the two togehter
-
--  maybe easiest is, do prefetch first per rank, then do p2p
+TODO
+- add a few more test cases for the shard/unshard part
+  - refactor test helper for shard/unshard to only worry about one rank at a time
+- then do send/recv part and simplify the runtime. set up e2e tests.
 """
 
 
 def _add_unshard_reshard(
-    compute_actions: Dict[int, List[Optional[_Action]]],
-    max_active_layers: int = 3,
-) -> Dict[int, List[Optional[_Action]]]:
+    compute_actions: List[Optional[_Action]],
+    max_active_stages: int = 3,
+) -> List[Optional[_Action]]:
     """
     Adds unshard/reshard actions to the schedule.
 
     we abandon the "timestep lock"  during lowering
 
-    max_active_layers controls how many prefetches we allow. It should be measured in mb and tuneable but in practice
-    3 layers is probably the thing we want?  (to account for having one f and one b active, and something else prefetching?)
+    max_active_stages controls how many prefetches we allow. It should be measured in mb and tuneable but in practice
+    3 stages is probably the thing we want?
+    (to account for having one f and one b active, and something else prefetching?)
     """
 
     def next_stage_indices(next_actions: List[Optional[_Action]]) -> List[int]:
-        """Remove duplicates (same layer different microbatch) and tell me the order i'll encounter the stages in"""
+        """Remove duplicates (same stage, different microbatch) and tell me the order i'll encounter the stages in"""
         seen: Set[int] = set()
         ret: List[int] = []
 
         # this is actually not the right algorithm, i think i should allow duplicates in ret, just remove consecutive
-        # instances of the same layer? hmm. that's not quite right either.
+        # instances of the same stage? hmm. that's not quite right either.
         for a in next_actions:
             if a is not None and a.stage_index not in seen:
                 seen.add(a.stage_index)
                 ret.append(a.stage_index)
         return ret
 
-    def _per_rank_unshard(rank):
-        rank_actions = compute_actions[rank]
-        active_layers: Set[int] = set()
-        unshard_actions: List[Optional[_Action]] = []
+    active_stages: Set[int] = set()
+    unshard_actions: List[Optional[_Action]] = []
 
-        def _unshard(stage_index: int):
-            active_layers.add(stage_index)
-            unshard_actions.append(_Action(stage_index, UNSHARD))
+    def _unshard(stage_index: int):
+        active_stages.add(stage_index)
+        unshard_actions.append(_Action(stage_index, UNSHARD))
 
-        def _reshard(stage_index: int):
-            active_layers.remove(stage_index)
-            unshard_actions.append(_Action(stage_index, RESHARD))
+    def _reshard(stage_index: int):
+        active_stages.remove(stage_index)
+        unshard_actions.append(_Action(stage_index, RESHARD))
 
-        for i, action in enumerate(rank_actions):
-            if action is None:
-                continue
+    for i, action in enumerate(compute_actions):
+        if action is None:
+            continue
 
-            # We prefetch the next N layers we'll see, dropping existing layers to make room
-            next_n = next_stage_indices(rank_actions[i:])[:max_active_layers]
+        # We prefetch the next N stages we'll see, dropping existing stages to make room
+        next_n = next_stage_indices(compute_actions[i:])[:max_active_stages]
 
-            # fetch needs to be ordered correctly though, so don't use a set for it
-            fetch = [l for l in next_n[:max_active_layers] if l not in active_layers]
-            # evict order probably doesn't matter though?
-            evict_candidates = active_layers - set(fetch)
+        # fetch needs to be ordered correctly though, so don't use a set for it
+        fetch = [l for l in next_n[:max_active_stages] if l not in active_stages]
+        # evict order probably doesn't matter though?
+        evict_candidates = active_stages - set(fetch)
 
-            # evict_candidates isn't quite right-
-            # it thinks the currently active layer is evict-worthy since it doesn't show up in fetch.
-            # it's only saved by num_evict.  But i should figure out a cleaner way.
-            num_evict = max(
-                0, len(set(fetch + list(active_layers))) - max_active_layers
-            )
-            logger.debug(
-                "Rank %d Step %d active: %s fetch %s, evict_candidates %s, num_evict = %d",
-                # TODO why is rank a str?
-                int(rank),
-                i,
-                active_layers,
-                fetch,
-                evict_candidates,
-                num_evict,
-            )
-            for layer in list(evict_candidates)[:num_evict]:
-                _reshard(layer)
-            for layer in fetch:
-                _unshard(layer)
-            unshard_actions.append(action)
+        # evict_candidates isn't quite right-
+        # it thinks the currently active stage is evict-worthy since it doesn't show up in fetch.
+        # it's only saved by num_evict.  But i should figure out a cleaner way.
+        num_evict = max(0, len(list(itertools.chain(fetch, active_stages))) - max_active_stages)
+        logger.debug(
+            "_add_unshard_reshard Step %d active: %s fetch %s, evict_candidates %s, num_evict = %d",
+            i,
+            active_stages,
+            fetch,
+            evict_candidates,
+            num_evict,
+        )
+        for stage in list(evict_candidates)[:num_evict]:
+            _reshard(stage)
+        for stage in fetch:
+            _unshard(stage)
+        unshard_actions.append(action)
 
-        return unshard_actions
-
-    return {rank: _per_rank_unshard(rank) for rank in compute_actions}
+    return unshard_actions
 
 
 class PipelineScheduleMulti(_PipelineSchedule):
