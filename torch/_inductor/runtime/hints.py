@@ -123,7 +123,7 @@ class DeviceProperties(typing.NamedTuple):
                 regs_per_multiprocessor=props.regs_per_multiprocessor,
                 max_threads_per_multi_processor=props.max_threads_per_multi_processor,
                 multi_processor_count=props.multi_processor_count,
-                warp_size = 64 if torch.version.hip else 32  # Temporarily hard-coded (use device prop when #128449 is merged)
+                warp_size=props.warp_size
             )
         return cls(
             type=device_type,
