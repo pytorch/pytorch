@@ -1507,6 +1507,95 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
         self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
 
+    def test_construct_from_jagged_with_offsets_from_inputs(self):
+        #
+        # Basic case
+        #
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+
+        def fn(values, offsets):
+            return torch.nested.nested_tensor_from_jagged(values * 2, offsets) * 2
+
+        values = nt.values().requires_grad_(True)
+        out = torch.compile(fn, fullgraph=True, backend="aot_eager")(values, nt.offsets())
+
+        # Backward
+        grad, = torch.autograd.grad(out, inputs=(values,), grad_outputs=(torch.ones_like(out),))
+
+        # Correctness
+        ref_out = fn(values, nt.offsets())
+        ref_grad, = torch.autograd.grad(ref_out, inputs=(values,), grad_outputs=(torch.ones_like(ref_out),))
+        self.assertEqual(out, ref_out)
+        self.assertEqual(grad, ref_grad)
+
+        #
+        # Binary op guarding
+        #
+        def fn(values, offsets, offsets2):
+            nt1 = torch.nested.nested_tensor_from_jagged(values * 2, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values * 3, offsets2)
+            return nt1 * nt2
+
+        guard_codes = []
+
+        def guard_export_print(guards):
+            for g in guards:
+                if g.code_list is not None:
+                    guard_codes.append(g.code_list[0])
+
+        # Proper guard is attached
+        compiled_f = torch._dynamo.optimize(nopython=True, backend="aot_eager", guard_export_fn=guard_export_print, dynamic=True)(fn)
+        out = compiled_f(values, nt.offsets(), nt.offsets())
+        self.assertIn("L['offsets'] is L['offsets2']", guard_codes)
+
+        # Triggers recompile, and then properly errors due to jagged mismatch
+        with self.assertRaisesRegex(RuntimeError, "cannot call binary pointwise function mul.Tensor"):
+             compiled_f(values, nt.offsets(), nt2.offsets())
+
+        # Backward
+        grad, = torch.autograd.grad(out, inputs=(values,), grad_outputs=(torch.ones_like(out),))
+
+        # Correctness
+        ref_out = fn(values, nt.offsets(), nt.offsets())
+        ref_grad, = torch.autograd.grad(ref_out, inputs=(values,), grad_outputs=(torch.ones_like(ref_out),))
+        self.assertEqual(out, ref_out)
+        self.assertEqual(grad, ref_grad)
+
+        #
+        # Offsets which is an intermediate
+        #
+        def fn(values, offsets):
+            return torch.nested.nested_tensor_from_jagged(values * 2, offsets.clone()) * 2
+
+        out = torch.compile(fn, fullgraph=True, backend="aot_eager")(values, nt.offsets())
+
+        # Should not recompile when different offset is used
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            torch.compile(fn, fullgraph=True, backend="aot_eager")(values, nt2.offsets())
+
+        # Backward
+        grad, = torch.autograd.grad(out, inputs=(values,), grad_outputs=(torch.ones_like(out),))
+
+        # Correctness
+        ref_out = fn(values, nt.offsets())
+        ref_grad, = torch.autograd.grad(ref_out, inputs=(values,), grad_outputs=(torch.ones_like(ref_out),))
+        self.assertEqual(out, ref_out)
+        self.assertEqual(grad, ref_grad)
+
+        #
+        # Mixed case (This case still fails!)
+        #
+        # values = nt.values().detach() # requires_grad_(False)
+        # torch._dynamo.mark_dynamic(values, 0)
+
+        # def fn(nt, values, offsets):
+        #     nt2 = torch.nested.nested_tensor_from_jagged(values, offsets)
+        #     return nt * nt2
+
+        # out = torch.compile(fn, fullgraph=True, backend="aot_eager")(nt, values, nt.offsets())
+
+
     # TODO: cannot parametrize this test class with device for some reason
     def _test_autograd(self, backend):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)

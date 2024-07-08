@@ -16,8 +16,37 @@ def get_tensor_symint(tensor, *, coeff=1):
     global _tensor_id_counter
     tensor_symint = _tensor_symint_registry.get(tensor)
     if tensor_symint is None:
-        tensor_symint = torch._C._get_nested_int(_tensor_id_counter, coeff)
-        _tensor_id_counter += 1
+        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.functional_tensor import FunctionalTensor
+
+        if isinstance(tensor, FunctionalTensor):
+            tensor = torch._from_functional_tensor(tensor.elem)
+            return get_tensor_symint(tensor, coeff=coeff)
+        elif isinstance(tensor, FakeTensor):
+            shape_env = tensor.fake_mode.shape_env
+            hint = torch._C._get_nested_int(_tensor_id_counter, coeff)
+            _tensor_id_counter += 1
+            shape_env = tensor.fake_mode.shape_env
+            if tensor.source is None:
+                # Source is None in two cases:
+                # (1) tensor._base is _dummy_instance OR
+                # (2) tensor is an intermediate
+                src = torch._dynamo.source.EphemeralSource("intermediate_offsets")
+            else:
+                src = torch._dynamo.source.NestedIntSource(tensor.source)
+            ret = shape_env.create_symintnode(
+                sym=shape_env.create_symbol(
+                    val=hint,
+                    source=src,
+                ),
+                hint=hint,
+                source=src,
+            )
+            _tensor_symint_registry[tensor] = ret
+            return ret
+        else:
+            tensor_symint = torch._C._get_nested_int(_tensor_id_counter, coeff)
+            _tensor_id_counter += 1
         _tensor_symint_registry[tensor] = tensor_symint
     return tensor_symint
 

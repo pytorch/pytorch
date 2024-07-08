@@ -3960,6 +3960,10 @@ class ShapeEnv:
             else:
                 sources_tensors_constraints = [(source, t, context.constraint_sizes)]
 
+                from torch.nested._internal.nested_tensor import _tensor_symint_registry
+                if t in _tensor_symint_registry:
+                    track_symint(torch._dynamo.source.NestedIntSource(source), _tensor_symint_registry[t])
+
             for src, curr_t, constraint in sources_tensors_constraints:
                 if is_sparse_any(curr_t):
                     for i, ss in enumerate(curr_t.size()):

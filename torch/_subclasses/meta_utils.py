@@ -1545,6 +1545,7 @@ class MetaConverter:
                 r._is_param = True
 
             self.set_tensor_memo(t, r)
+            r.source = source
 
         return self.get_tensor_memo(t)
 

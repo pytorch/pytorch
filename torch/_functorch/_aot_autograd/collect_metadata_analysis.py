@@ -160,7 +160,10 @@ def run_functionalized_fw_and_collect_metadata(
         with disable_above, mode:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
+
+            tmp_counter = torch.nested._internal.nested_tensor._tensor_id_counter
             flat_f_outs = f(*flat_f_args)
+            torch.nested._internal.nested_tensor._tensor_id_counter = tmp_counter
             # We didn't do any tracing, so we don't need to process the
             # unbacked symbols, they will just disappear into the ether.
             # Also, prevent memoization from applying.
@@ -622,13 +625,17 @@ from a multi-output view call"
             output_info.append(out_info)
 
         # See Note [AOT Autograd: Views to avoid tangents aliasing inputs]
-        def view_avoid_dupes_with_primals(t):
+        def view_avoid_dupes_with_primals(t, parent_cls, attr):
             if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
                 return transform_subclass(
-                    t, lambda _, inner_t: view_avoid_dupes_with_primals(inner_t)
+                    t, lambda attr, inner_t: view_avoid_dupes_with_primals(inner_t, type(t), attr)
                 )
             if isinstance(t, Tensor):
-                return t.view(t.shape)
+                out = t.view(t.shape)
+                if parent_cls is  torch.nested._internal.nested_tensor.NestedTensor and (attr == "_offsets" or attr == "_lengths"):
+                    from torch.nested._internal.nested_tensor import _tensor_symint_registry
+                    _tensor_symint_registry[out] = _tensor_symint_registry[t]
+                return out
             return t
 
         # This analysis function returns *only* the outputs that are meant to be tangents to the backwards.
@@ -657,7 +664,7 @@ from a multi-output view call"
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
         traced_tangents = pytree.tree_map(from_fun, f_tangents)
         traced_tangents = pytree.tree_map(
-            view_avoid_dupes_with_primals, traced_tangents
+            lambda t: view_avoid_dupes_with_primals(t, None, None), traced_tangents
         )
         # See Note [Tangents must be contiguous]
         traced_tangents = pytree.tree_map(
