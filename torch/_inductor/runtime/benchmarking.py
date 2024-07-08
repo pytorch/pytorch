@@ -42,7 +42,7 @@ class Benchmarker:
 
         return timing
     
-    def benchmark_gpu(self, _callable: Callable[[], Any], estimation_iters: int = 5, memory_warmup_iters: int = 100, benchmark_iters: int = 25, max_benchmark_duration: int = 25) -> float:        
+    def benchmark_gpu(self, _callable: Callable[[], Any], estimation_iters: int = 5, memory_warmup_iters: int = 100, benchmark_iters: int = 100, max_benchmark_duration: int = 25) -> float:        
         def benchmark(buffer, _callable, iters, measure_launch_overhead=False):
             event_pairs = self.get_event_pairs(iters)
 
