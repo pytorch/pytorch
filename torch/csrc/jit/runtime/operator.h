@@ -322,7 +322,7 @@ std::optional<Operator> OperatorGenerator(
     torch::detail::SelectiveStr<false> schema_str,
     Func&& op,
     AliasAnalysisKind alias_analysis) {
-  return std::nullopt;
+  return c10::nullopt;
 }
 
 template <typename Func>

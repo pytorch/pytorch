@@ -42,7 +42,7 @@ inline DispatchKeySet computeDispatchKeySet(
   // be nice to only do one.  Can always_included be folded into the TLS?  Well,
   // it's a bit troublesome, because fastpath TLS access requires the type of
   // the TLS in question to be zero-initialized, so you don't actually win
-  // anything in that case.
+  // anyting in that case.
   return (((ks | local.included_) - local.excluded_) & key_mask);
 }
 

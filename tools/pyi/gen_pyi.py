@@ -1426,22 +1426,36 @@ def gen_pyi(
     fm.write_with_template(
         "torch/_C/__init__.pyi",
         "torch/_C/__init__.pyi.in",
-        lambda: env,
+        lambda: {
+            "generated_comment": "@" + "generated from torch/_C/__init__.pyi.in",
+            **env,
+        },
     )
     fm.write_with_template(
         "torch/_C/_VariableFunctions.pyi",
         "torch/_C/_VariableFunctions.pyi.in",
-        lambda: env,
+        lambda: {
+            "generated_comment": "@"
+            + "generated from torch/_C/_VariableFunctions.pyi.in",
+            **env,
+        },
     )
     fm.write_with_template(
         "torch/_VF.pyi",
         "torch/_C/_VariableFunctions.pyi.in",
-        lambda: env,
+        lambda: {
+            "generated_comment": "@"
+            + "generated from torch/_C/_VariableFunctions.pyi.in",
+            **env,
+        },
     )
     fm.write_with_template(
         "torch/return_types.pyi",
         "torch/_C/return_types.pyi.in",
-        lambda: env,
+        lambda: {
+            "generated_comment": "@" + "generated from torch/_C/return_types.pyi",
+            **env,
+        },
     )
     gen_nn_functional(fm)
 

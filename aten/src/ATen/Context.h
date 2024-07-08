@@ -224,7 +224,7 @@ class TORCH_API Context {
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend);
 
-  at::BlasBackend blasPreferredBackend();
+  at::BlasBackend blasPreferredBackend() const;
   void setBlasPreferredBackend(at::BlasBackend);
 
   // Note [Enabling Deterministic Operations]

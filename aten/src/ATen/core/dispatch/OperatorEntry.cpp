@@ -7,7 +7,6 @@ namespace c10 {
 namespace impl {
 
 namespace {
-#ifndef STRIP_ERROR_MESSAGES
   std::string toString(std::optional<DispatchKey> k) {
     if (k.has_value()) {
       return toString(*k);
@@ -15,7 +14,6 @@ namespace {
       return "(catch all)";
     }
   }
-#endif
 }
 
 OperatorEntry::OperatorEntry(OperatorName&& operator_name)
@@ -512,7 +510,6 @@ void OperatorEntry::reportSignatureError(const CppSignature& call_signature, con
   );
 };
 
-#ifndef STRIP_ERROR_MESSAGES
 static std::string post_process_dispatch_key_str(std::string dispatch_key) {
   const std::string substr = "PrivateUse1";
   if (substr.size() <= dispatch_key.size() && std::equal(substr.rbegin(), substr.rend(), dispatch_key.rbegin())) {
@@ -528,7 +525,6 @@ static std::string post_process_dispatch_key_str(std::string dispatch_key) {
   }
   return dispatch_key;
 }
-#endif
 
 void OperatorEntry::reportError(DispatchKey dispatchKey) const {
   // If there is an invariant problem, report it now.
