@@ -165,6 +165,41 @@ class TestCKBackend(TestCase):
             Y_eager = a @ b
             torch.testing.assert_close(Y_compiled, Y_eager)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    @parametrize("x_shape", ([4096, 2048], [2048], [4096, 1]))
+    def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape):
+
+        m, k, n = 4096, 25728, 2048
+        alpha, beta = 2., .4
+
+        tensor_options = {"device": "cuda", "dtype": torch.float16}
+        x = torch.randn(x_shape, **tensor_options)
+        a = torch.randn(m, k, **tensor_options)
+        b = torch.randn(k, n, **tensor_options)
+
+        assert "rocm" in dir(config)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "compile_threads": 2,
+                "rocm.ck_dir": self.ck_dir,
+                "rocm.n_max_profiling_configs": 2,
+            }
+        ):
+            @torch.compile(dynamic=False)
+            def addmm(x, a, b, alpha, beta):
+                return torch.addmm(x, a, b, alpha=alpha, beta=beta)
+
+            Y_compiled = addmm(x, a, b, alpha, beta)
+            Y_eager = torch.addmm(x, a, b, alpha=alpha, beta=beta)
+
+            torch.testing.assert_close(Y_compiled, Y_eager)
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu

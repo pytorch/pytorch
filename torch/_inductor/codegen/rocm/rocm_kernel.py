@@ -210,6 +210,24 @@ class ROCmTemplateKernel(ROCmKernel):
         val = sympy_product(sizes)
         return cexpr(self.rename_indexing(val))
 
+    def stride(self, node: IRNode, index: int, default_value: int = 0) -> str:
+        """
+        Hook called from template code to get the stride of an arg.
+        Generates code which represents stride of a given node at index.
+        If node is None, returns default_value.
+
+        TODO: Will add needed args to pass it in if it is dynamic.
+        """
+
+        if node is None:
+            return str(default_value)
+
+        index = _normalize_idx(index, len(node.get_size()))
+        if index < 0:
+            return str(default_value)
+
+        stride = node.get_stride()[index]
+        return cexpr(self.rename_indexing(stride))
 
 class ROCmTemplateCaller(ChoiceCaller):
     """
