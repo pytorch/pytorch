@@ -76,7 +76,6 @@ from torch._inductor.cpp_builder import (
     CppOptions,
     CppTorchCudaOptions,
     get_compiler_version_info,
-    get_name_and_dir_from_output_file_path,
 )
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, pick_vec_isa, VecISA
 from torch._inductor.runtime.compile_tasks import (
@@ -1598,22 +1597,15 @@ class AotCodeCompiler:
         cuda: bool,
     ) -> str:
         picked_vec_isa = pick_vec_isa()
-        vec_isa_cmd_gen = CppBuilder(
-            name="o",
-            sources="i",
-            BuildOption=CppTorchCudaOptions(
+        cpp_command = repr(
+            cpp_compile_command(
+                "i",
+                "o",
                 vec_isa=picked_vec_isa,
                 cuda=cuda,
                 aot_mode=graph.aot_mode,
-            ),
+            )
         )
-        # write function will calc source_code hash, the same source code with different
-        # ISA level should be generate different hash.
-        # So we need get a command_line which contains isa related parameter as a part of hash key.
-        # And then pass the command_line to below write function as extra parameter to
-        # guarantee the source code hash contains ISA difference.
-        cpp_command = repr(vec_isa_cmd_gen.get_command_line())
-
         fbcode_aot_cpu_re = False
         use_absolute_path = False
         if config.is_fbcode():
@@ -1863,6 +1855,7 @@ class AotCodeCompiler:
                 "linux": _compile_consts_linux,
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
+
             link_cmd = cpp_compile_command(
                 input=[output_o, consts_o],
                 output=output_so,
@@ -2059,6 +2052,8 @@ class CppCodeCache:
         }
 
         _set_gpu_runtime_env()  # cpp_extension consults the env
+
+        from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
 
         command_gen = CppBuilder(
             name="o", sources="i", BuildOption=CppTorchCudaOptions(**compile_command)
@@ -2370,27 +2365,17 @@ def _do_validate_cpp_commands(
     compile_only: bool,
     mmap_weights: bool,
     use_absolute_path: bool,
-    aot_mode: bool,
 ):
     # PreCI will failed if test machine can't run cuda.
     temp_dir = tempfile.TemporaryDirectory()
     test_dir_path = temp_dir.name
     test_cuda = torch.cuda.is_available() and cuda
-    input_path = os.path.join(test_dir_path, "dummy_file.cpp")
-    output_path = os.path.join(test_dir_path, "dummy_file.so")
+    input_path = os.path.join(test_dir_path, "dummy_input.cpp")
+    output_path = os.path.join(test_dir_path, "dummy_output.so")
     extra_flags = ["-D TEST_EXTRA_FLAGS"]
     if compile_only:
-        output_path = os.path.join(test_dir_path, "dummy_file.o")
+        output_path = os.path.join(test_dir_path, "dummy_output.o")
     picked_isa = pick_vec_isa()
-
-    # Simulate fb_code env:
-    if not (aot_mode and not use_absolute_path):
-        input_path = os.path.basename(input_path)
-        output_path = os.path.basename(output_path)
-
-    # Fix test_new_cpp_build_logical failed on MacOS
-    if sys.platform != "linux":
-        aot_mode = False
 
     old_cmd = cpp_compile_command(
         input=input_path,
@@ -2398,20 +2383,17 @@ def _do_validate_cpp_commands(
         include_pytorch=include_pytorch,
         vec_isa=picked_isa,
         cuda=test_cuda,
-        aot_mode=aot_mode,
+        aot_mode=False,
         compile_only=compile_only,
         use_absolute_path=use_absolute_path,
         use_mmap_weights=mmap_weights,
         extra_flags=extra_flags,
     ).split(" ")
 
-    name, dir = get_name_and_dir_from_output_file_path(input_path)
-
     dummy_build_option = CppTorchCudaOptions(
         vec_isa=picked_isa,
         include_pytorch=include_pytorch,
         cuda=test_cuda,
-        aot_mode=aot_mode,
         compile_only=compile_only,
         use_absolute_path=use_absolute_path,
         use_mmap_weights=mmap_weights,
@@ -2419,10 +2401,10 @@ def _do_validate_cpp_commands(
     )
 
     dummy_builder = CppBuilder(
-        name=name,
+        name="dummy_output",
         sources=input_path,
-        output_dir=dir,
         BuildOption=dummy_build_option,
+        output_dir=test_dir_path,
     )
     new_cmd = dummy_builder.get_command_line().split(" ")
 
@@ -2439,26 +2421,22 @@ def validate_new_cpp_commands():
     compile_only = [True, False]
     include_pytorch = [True, False]
     use_absolute_path = [True, False]
-    aot_mode = [False, True]
 
     for x in cuda:
         for y in use_mmap_weights:
             for z in compile_only:
                 for m in include_pytorch:
                     for n in use_absolute_path:
-                        for o in aot_mode:
-                            print(
-                                f"!!! cuda:{x}, use_mmap_weights:{y}, compile_only:{z}, include_pytorch:{m},"
-                                f" use_absolute_path:{n}, aot_mode:{o}"
-                            )
-                            _do_validate_cpp_commands(
-                                include_pytorch=m,
-                                cuda=x,
-                                mmap_weights=y,
-                                compile_only=z,
-                                use_absolute_path=n,
-                                aot_mode=o,
-                            )
+                        print(
+                            f"!!! cuda:{x}, use_mmap_weights:{y}, compile_only:{z}, include_pytorch:{m}， use_absolute_path:{n}"
+                        )
+                        _do_validate_cpp_commands(
+                            include_pytorch=m,
+                            cuda=x,
+                            mmap_weights=y,
+                            compile_only=z,
+                            use_absolute_path=n,
+                        )
 
 
 @clear_on_fresh_inductor_cache

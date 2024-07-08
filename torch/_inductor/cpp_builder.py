@@ -540,6 +540,20 @@ def _setup_standard_sys_libs(
     return cflags, include_dirs, passthough_args
 
 
+@functools.lru_cache
+def _cpp_prefix_path() -> str:
+    from torch._inductor.codecache import write  # TODO
+
+    path = Path(Path(__file__).parent).parent / "codegen/cpp_prefix.h"
+    with path.open() as f:
+        content = f.read()
+        _, filename = write(
+            content,
+            "h",
+        )
+    return filename
+
+
 def _get_build_args_of_chosen_isa(vec_isa: VecISA):
     macros = []
     build_flags = []
@@ -925,17 +939,14 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     libraries_dirs: List[str] = []
     libraries: List[str] = []
     passthough_args: List[str] = []
-    """
+
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
         os.environ["CUDA_HOME"] = build_paths.cuda()
-    """
-    from torch._inductor.codecache import _set_gpu_runtime_env, cpp_prefix_path
 
-    _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
     include_dirs = cpp_extension.include_paths(cuda)
@@ -960,9 +971,8 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
                     libraries += ["c10_cuda", "cuda", "torch_cuda"]
 
     if aot_mode:
-        if config.is_fbcode():
-            cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
-            include_dirs += cpp_prefix_include_dir
+        cpp_prefix_include_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
+        include_dirs += cpp_prefix_include_dir
 
         if cuda and torch.version.hip is None:
             _transform_cuda_paths(libraries_dirs)
@@ -1051,26 +1061,15 @@ class CppTorchCudaOptions(CppTorchOptions):
 
 
 def get_name_and_dir_from_output_file_path(
-    file_path: str,
+    aot_mode: bool, use_absolute_path: bool, file_path: str
 ):
-    """
-    This function help prepare parameters to new cpp_builder.
-    Example:
-        input_code: /tmp/tmpof1n5g7t/5c/c5crkkcdvhdxpktrmjxbqkqyq5hmxpqsfza4pxcf3mwk42lphygc.cpp
-        name, dir = get_name_and_dir_from_output_file_path(input_code)
-    Run result:
-        name = c5crkkcdvhdxpktrmjxbqkqyq5hmxpqsfza4pxcf3mwk42lphygc
-        dir = /tmp/tmpof1n5g7t/5c/
-
-    put 'name' and 'dir' to CppBuilder's 'name' and 'output_dir'.
-    CppBuilder --> get_target_file_path will format output path accoding OS:
-    Linux: /tmp/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.so
-    Windows: [Windows temp path]/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.dll
-    """
     name_and_ext = os.path.basename(file_path)
     name, ext = os.path.splitext(name_and_ext)
     dir = os.path.dirname(file_path)
 
+    if config.is_fbcode():
+        if not (aot_mode and not use_absolute_path):
+            dir = "."
     return name, dir
 
 
@@ -1119,23 +1118,17 @@ class CppBuilder:
         self._target_file = ""
 
         self._use_absolute_path: bool = False
-        self._aot_mode: bool = False
 
         self._name = name
 
         # Code start here, initial self internal veriables firstly.
         self._compiler = BuildOption.get_compiler()
         self._use_absolute_path = BuildOption.get_use_absolute_path()
-        self._aot_mode = BuildOption.get_aot_mode()
 
-        """
-        TODO: validate and remove:
         if len(output_dir) == 0:
             self._output_dir = os.path.dirname(os.path.abspath(__file__))
         else:
             self._output_dir = output_dir
-        """
-        self._output_dir = output_dir
 
         self._compile_only = BuildOption.get_compile_only()
         file_ext = (
@@ -1149,7 +1142,7 @@ class CppBuilder:
             sources = [sources]
 
         if config.is_fbcode():
-            if self._aot_mode and not self._use_absolute_path:
+            if BuildOption.get_aot_mode() and not self._use_absolute_path:
                 inp_name = sources
                 # output process @ get_name_and_dir_from_output_file_path
             else:
