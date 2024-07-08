@@ -14,6 +14,7 @@ static const char* FUSED_ADAM_OPS = R"METAL(
 constexpr constant uint kParamIdx = 0;
 constexpr constant uint kGradIdx = kParamIdx + kmaxTensors;
 constexpr constant uint kExpAvgIdx = kGradIdx + kmaxTensors;
+constexpr constant uint kMomentumBufferListIdx = kGradIdx + kmaxTensors;
 constexpr constant uint kExpAvgSqIdx = kExpAvgIdx + kmaxTensors;
 constexpr constant uint kMaxExpAvgSqIdx = kExpAvgSqIdx + kmaxTensors;
 constexpr constant uint kStateStepsIdx = kExpAvgSqIdx + kmaxTensors;
@@ -36,6 +37,19 @@ struct AdamAmsgradArguments {
     metal::array<device T *,  kmaxTensors>   exp_avg_sqs   [[ id(kExpAvgSqIdx) ]];
     metal::array<device T *,  kmaxTensors>   max_exp_avg_sqs   [[ id(kMaxExpAvgSqIdx) ]];
     metal::array<device state_steps_t *,  kmaxTensors>   state_steps   [[ id(kStateStepsIdxForAmsgrad) ]];
+};
+
+template<typename T>
+struct SgdArguments {
+    metal::array<device T *,  kmaxTensors>   params        [[ id(kParamIdx) ]];
+    metal::array<device T *,  kmaxTensors>   grads         [[ id(kGradIdx) ]];
+};
+
+template<typename T>
+struct SgdMomentumArguments {
+    metal::array<device T *,  kmaxTensors>   params        [[ id(kParamIdx) ]];
+    metal::array<device T *,  kmaxTensors>   grads         [[ id(kGradIdx) ]];
+    metal::array<device T *,  kmaxTensors>   momentum_buffer_list       [[ id(kMomentumBufferListIdx) ]];
 };
 
 struct MetadataArguments {
@@ -262,6 +276,162 @@ REGISTER_FUSED_ADAM_OP(float, float, ADAM_MODE::ADAMW, fused_adamw_amsgrad, fuse
 REGISTER_FUSED_ADAM_OP(float, half, ADAM_MODE::ADAMW, fused_adamw_amsgrad, fused_adam_amsgrad, AdamAmsgradArguments);
 REGISTER_FUSED_ADAM_OP(half, float, ADAM_MODE::ADAMW, fused_adamw_amsgrad, fused_adam_amsgrad, AdamAmsgradArguments);
 REGISTER_FUSED_ADAM_OP(half, half, ADAM_MODE::ADAMW, fused_adamw_amsgrad, fused_adam_amsgrad, AdamAmsgradArguments);
+
+template <typename T>
+inline void sgd_momentum_math(
+    device T & param,
+    device T & grad,
+    device T & momentum_buffer,
+    const float weight_decay,
+    const float momentum,
+    const float lr,
+    const float dampening,
+    const uint8_t nesterov,
+    const uint8_t maximize,
+    const uint8_t is_first_step
+) {
+  auto grad_ = grad;
+  if (maximize) {
+      grad_ *= -1.0;
+  }
+  if (weight_decay != 0) {
+      grad_ += weight_decay * param;
+  }
+
+  momentum_buffer = is_first_step ? grad_ : (momentum * momentum_buffer + (1 - dampening) * grad_);
+  if (nesterov) {
+      grad_ += momentum * momentum_buffer;
+  } else {
+      grad_ = momentum_buffer;
+  }
+
+  param -= lr * grad_;
+}
+
+template <typename T>
+inline void sgd_math(
+    device T & param,
+    device T & grad,
+    const float weight_decay,
+    const float momentum,
+    const float lr,
+    const float dampening,
+    const uint8_t nesterov,
+    const uint8_t maximize,
+    const uint8_t is_first_step
+) {
+  auto grad_ = grad;
+  if (maximize) {
+      grad_ *= -1.0;
+  }
+  if (weight_decay != 0) {
+      grad_ += weight_decay * param;
+  }
+
+  param -= lr * grad_;
+}
+
+template <typename T>
+kernel void fused_sgd(
+    device   SgdArguments<T> & args    [[buffer(0)]],
+    constant MetadataArguments & metadata_args [[buffer(1)]],
+    constant float & weight_decay   [[buffer(2)]],
+    constant float & momentum       [[buffer(3)]],
+    constant float & lr             [[buffer(4)]],
+    constant float & dampening          [[buffer(5)]],
+    constant uint8_t & nesterov          [[buffer(6)]],
+    constant uint8_t   & maximize       [[buffer(7)]],
+    constant uint8_t   & is_first_step       [[buffer(8)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint tptg [[threads_per_threadgroup]]) {
+
+    const uint32_t tensor_loc = metadata_args.threadgroup_to_tensor[tgid];
+    const uint32_t chunk_idx = metadata_args.threadgroup_to_chunk[tgid];
+    const uint32_t chunk_offset = chunk_idx * chunk_size;
+    const uint32_t numel = metadata_args.numels[tensor_loc] - chunk_offset;
+
+    // each chunk is a threadgroup
+    auto param = args.params[tensor_loc] + chunk_offset;
+    auto grad = args.grads[tensor_loc] + chunk_offset;
+
+    for (uint32_t i_start = tid; i_start < numel && i_start < chunk_size; i_start += tptg) {
+      sgd_math<T>(
+        *(param + i_start),
+        *(grad + i_start),
+        weight_decay,
+        momentum,
+        lr,
+        dampening,
+        nesterov,
+        maximize,
+        is_first_step
+      );
+    }
+}
+
+template <typename T>
+kernel void fused_sgd_momentum(
+    device   SgdMomentumArguments<T> & args    [[buffer(0)]],
+    constant MetadataArguments & metadata_args [[buffer(1)]],
+    constant float & weight_decay   [[buffer(2)]],
+    constant float & momentum       [[buffer(3)]],
+    constant float & lr             [[buffer(4)]],
+    constant float & dampening          [[buffer(5)]],
+    constant uint8_t & nesterov          [[buffer(6)]],
+    constant uint8_t   & maximize       [[buffer(7)]],
+    constant uint8_t   & is_first_step       [[buffer(8)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint tptg [[threads_per_threadgroup]]) {
+
+    const uint32_t tensor_loc = metadata_args.threadgroup_to_tensor[tgid];
+    const uint32_t chunk_idx = metadata_args.threadgroup_to_chunk[tgid];
+    const uint32_t chunk_offset = chunk_idx * chunk_size;
+    const uint32_t numel = metadata_args.numels[tensor_loc] - chunk_offset;
+
+    // each chunk is a threadgroup
+    auto param = args.params[tensor_loc] + chunk_offset;
+    auto grad = args.grads[tensor_loc] + chunk_offset;
+    auto momentum_buffer_list = args.momentum_buffer_list[tensor_loc] + chunk_offset;
+
+    for (uint32_t i_start = tid; i_start < numel && i_start < chunk_size; i_start += tptg) {
+      sgd_momentum_math<T>(
+        *(param + i_start),
+        *(grad + i_start),
+        *(momentum_buffer_list + i_start),
+        weight_decay,
+        momentum,
+        lr,
+        dampening,
+        nesterov,
+        maximize,
+        is_first_step
+      );
+    }
+}
+
+#define REGISTER_FUSED_SGD_OP(DTYPE, HOST_NAME, KERNEL_NAME, ARGUMENTS_STRUCT)       \
+template                                    \
+[[host_name(#HOST_NAME "_" #DTYPE)]]        \
+kernel void KERNEL_NAME<DTYPE>(             \
+    device   ARGUMENTS_STRUCT<DTYPE> & args    [[buffer(0)]],\
+    constant MetadataArguments & metadata_args [[buffer(1)]],\
+    constant float & weight_decay   [[buffer(2)]],\
+    constant float & momentum       [[buffer(3)]],\
+    constant float & lr             [[buffer(4)]],\
+    constant float & dampening          [[buffer(5)]],\
+    constant uint8_t & nesterov          [[buffer(6)]],\
+    constant uint8_t   & maximize       [[buffer(7)]],\
+    constant uint8_t   & is_first_step       [[buffer(8)]],\
+    uint tid [[thread_position_in_threadgroup]],\
+    uint tgid [[threadgroup_position_in_grid]],\
+    uint tptg [[threads_per_threadgroup]])
+
+REGISTER_FUSED_SGD_OP(float, fused_sgd, fused_sgd, SgdArguments);
+REGISTER_FUSED_SGD_OP(half, fused_sgd, fused_sgd, SgdArguments);
+REGISTER_FUSED_SGD_OP(float, fused_sgd_momentum, fused_sgd_momentum, SgdMomentumArguments);
+REGISTER_FUSED_SGD_OP(half, fused_sgd_momentum, fused_sgd_momentum, SgdMomentumArguments);
 
 )METAL";
 

@@ -938,8 +938,6 @@ class HistogramObserver(UniformQuantizationObserverBase):
 
     Args:
         bins: Number of bins to use for the histogram
-        upsample_rate: Factor by which the histograms are upsampled, this is
-                       used to interpolate histograms with varying ranges across observations
         dtype: dtype argument to the `quantize` node needed to implement the
                reference model spec
         qscheme: Quantization scheme to be used
@@ -964,7 +962,6 @@ class HistogramObserver(UniformQuantizationObserverBase):
     def __init__(
         self,
         bins: int = 2048,
-        upsample_rate: int = 128,
         dtype: torch.dtype = torch.quint8,
         qscheme=torch.per_tensor_affine,
         reduce_range=False,
@@ -994,7 +991,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
             factory_kwargs=factory_kwargs,
             eps=eps,
             is_dynamic=is_dynamic,
-            **kwargs
+            **kwargs,
         )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.bins = bins
@@ -1002,7 +999,9 @@ class HistogramObserver(UniformQuantizationObserverBase):
         self.register_buffer("min_val", torch.tensor(float("inf"), **factory_kwargs))
         self.register_buffer("max_val", torch.tensor(float("-inf"), **factory_kwargs))
         self.dst_nbins = 2 ** torch.iinfo(self.dtype).bits
-        self.upsample_rate = upsample_rate
+        self.upsample_rate = (
+            16  # used to reduce quantization errors when upscaling histogram
+        )
 
     def _get_norm(
         self, delta_begin: torch.Tensor, delta_end: torch.Tensor, density: torch.Tensor
@@ -1039,12 +1038,16 @@ class HistogramObserver(UniformQuantizationObserverBase):
 
         # which dst_bins the beginning and end of src_bin belong to?
         dst_bin_of_begin = torch.clamp(
-            torch.div(src_bin_begin, dst_bin_width, rounding_mode='floor'), 0, self.dst_nbins - 1
+            torch.div(src_bin_begin, dst_bin_width, rounding_mode="floor"),
+            0,
+            self.dst_nbins - 1,
         )
         dst_bin_of_begin_center = (dst_bin_of_begin + 0.5) * dst_bin_width
 
         dst_bin_of_end = torch.clamp(
-            torch.div(src_bin_end, dst_bin_width, rounding_mode='floor'), 0, self.dst_nbins - 1
+            torch.div(src_bin_end, dst_bin_width, rounding_mode="floor"),
+            0,
+            self.dst_nbins - 1,
         )
         density = self.histogram / bin_width
 
@@ -1052,9 +1055,11 @@ class HistogramObserver(UniformQuantizationObserverBase):
 
         delta_begin = src_bin_begin - dst_bin_of_begin_center
         delta_end = dst_bin_width / 2
-        norm += self._get_norm(delta_begin,
-                               torch.ones(self.bins, device=self.histogram.device) * delta_end,
-                               density)
+        norm += self._get_norm(
+            delta_begin,
+            torch.ones(self.bins, device=self.histogram.device) * delta_end,
+            density,
+        )
 
         norm += (dst_bin_of_end - dst_bin_of_begin - 1) * self._get_norm(
             torch.tensor(-dst_bin_width / 2), torch.tensor(dst_bin_width / 2), density
@@ -1131,68 +1136,82 @@ class HistogramObserver(UniformQuantizationObserverBase):
         new_max = self.min_val + bin_width * (end_bin + 1)
         return new_min, new_max
 
-    def _adjust_min_max(
-        self, combined_min: torch.Tensor, combined_max: torch.Tensor, upsample_rate: int
-    ) -> Tuple[torch.Tensor, torch.Tensor, int, int]:
-        # We ensure that:
-        # (combined_max - combined_min)/(downsample_rate*Nbins) = (max - min)/(upsample_rate*Nbins)
-        # This allows us to have a common grid of resolution s, where we can align
-        # the input histogram
-        # start_idx maps min_val to the histogram bin index.
+    def _upscale_histogram(
+        self,
+        histogram: torch.Tensor,
+        orig_min: torch.Tensor,
+        orig_max: torch.Tensor,
+        update_min: torch.Tensor,
+        update_max: torch.Tensor,
+    ):
+        # this turns the histogram into a more fine-coarsed histogram to reduce
+        # bin quantization errors
+        histogram = histogram.repeat_interleave(self.upsample_rate) / self.upsample_rate
+        bin_size = (orig_max - orig_min) / (self.bins * self.upsample_rate)
+        mid_points_histogram = (
+            torch.linspace(orig_min, orig_max, self.bins * self.upsample_rate + 1, device=orig_min.device)[
+                :-1
+            ].to(histogram.device)
+            + 0.5 * bin_size
+        )
+        new_bin_size = (update_min - update_max) / self.bins
+        boundaries_new_histogram = torch.linspace(update_min, update_max, self.bins + 1, device=update_min.device).to(
+            histogram.device
+        )
+        # this maps the mid-poits of the histogram to the new histogram's space
+        bucket_assignments = (
+            torch.bucketize(mid_points_histogram, boundaries_new_histogram) - 1
+        )
+        # this then maps the histogram mid-points in the new space, weighted by the original histogram's values
+        # this is just the old histogram in the new histogram's space
 
-        # Compute the width of histogram bins is a straightforward solution, where
-        # hist_bin_width = (self.max_val - self.min_val) / (self.bins * upsample_rate)
-        # Underflow happens if the numerator is close to the smallest positive subnormal number of FP32
-        # Therefore, we avoid such division operation.
-        downsample_rate = int(
-            torch.ceil(
-                ((combined_max - combined_min) / (self.max_val - self.min_val)) * upsample_rate
-            ).item()
+        update_histogram = torch.bincount(
+            bucket_assignments, weights=histogram, minlength=self.bins
         )
-        e = downsample_rate / upsample_rate * (self.max_val - self.min_val) - (combined_max - combined_min)
-        start_idx = int(
-            torch.round((self.min_val - combined_min) / (self.max_val - self.min_val) * self.bins * upsample_rate).item()
-        )
-        combined_max = combined_max + e
-        return combined_min, combined_max, downsample_rate, start_idx
+        return update_histogram
 
     def _combine_histograms(
         self,
         orig_hist: torch.Tensor,
-        new_hist: torch.Tensor,
-        upsample_rate: int,
-        downsample_rate: int,
-        start_idx: int,
-        Nbins: int,
+        orig_min: torch.Tensor,
+        orig_max: torch.Tensor,
+        update_hist: torch.Tensor,
+        update_min: torch.Tensor,
+        update_max: torch.Tensor,
     ) -> torch.Tensor:
-        # First up-sample the histogram with new data by a factor of L
-        # This creates an approximate probability density thats piecewise constant
-        upsampled_histogram = new_hist.repeat_interleave(upsample_rate)
-        # Now insert the upsampled histogram into the output
-        # histogram, which is initialized with zeros.
-        # The offset at which the histogram is introduced is determined
-        # by the start index as the output histogram can cover a wider range
-        histogram_with_output_range = torch.zeros(
-            (Nbins * downsample_rate), device=orig_hist.device
-        )
-        histogram_with_output_range[
-            start_idx : Nbins * upsample_rate + start_idx
-        ] = upsampled_histogram
-        # Compute integral histogram, double precision is needed to ensure
-        # that there are no overflows
-        integral_histogram = torch.cumsum(
-            histogram_with_output_range, 0, dtype=torch.double
-        )[downsample_rate - 1 :: downsample_rate]
-        # Finally perform interpolation
-        shifted_integral_histogram = torch.zeros((Nbins), device=orig_hist.device)
-        shifted_integral_histogram[1:Nbins] = integral_histogram[0:-1]
-        interpolated_histogram = (
-            integral_histogram - shifted_integral_histogram
-        ) / upsample_rate
-        orig_hist = orig_hist + interpolated_histogram.to(torch.float)
-        return orig_hist
+        # If the new min and max are the same as the current min and max,
+        # we can just add the new histogram to the original histogram
+        if update_min == orig_min and update_max == orig_max:
+            return orig_hist + update_hist
 
-    def reset_histogram(self, x: torch.Tensor, min_val: torch.Tensor, max_val: torch.Tensor) -> None:
+        # If the orig hist only has one value (i.e., the min and max are the same)
+        # we can just add it into new histogram
+        if orig_min == orig_max:
+            bin_value = torch.sum(update_hist)
+            transformed_orig_hist = (
+                torch.histc(orig_min, bins=self.bins, min=update_min, max=update_max)  # type: ignore[arg-type]
+                * bin_value
+            )
+            return transformed_orig_hist + update_hist
+
+        # We assume the update_hist is already in the target range, we will map the orig_max to it
+        assert update_min <= orig_min
+        assert update_max >= orig_max
+
+        # Now we need to turn the old_histogram, into the range of the new histogram
+        transformed_orig_hist = self._upscale_histogram(
+            orig_hist,
+            orig_min,
+            orig_max,
+            update_min,
+            update_max,
+        )
+
+        return update_hist + transformed_orig_hist
+
+    def reset_histogram(
+        self, x: torch.Tensor, min_val: torch.Tensor, max_val: torch.Tensor
+    ) -> None:
         self.min_val.resize_(min_val.shape)
         self.min_val.copy_(min_val)
         self.max_val.resize_(max_val.shape)
@@ -1200,11 +1219,11 @@ class HistogramObserver(UniformQuantizationObserverBase):
         assert (
             min_val.numel() == 1 and max_val.numel() == 1
         ), "histogram min/max values must be scalar."
-        torch.histc(
-            x, self.bins, min=min_val, max=max_val, out=self.histogram  # type: ignore[arg-type]
-        )
+        new_histogram = torch.histc(x, self.bins, min=min_val, max=max_val)  # type: ignore[arg-type]
+        self.histogram.detach_().resize_(new_histogram.shape)
+        self.histogram.copy_(new_histogram)
 
-    def forward(self, x_orig: torch.Tensor) -> torch.Tensor:
+    def forward(self, x_orig: torch.Tensor) -> torch.Tensor:  # pyre-ignore[14]
         if x_orig.numel() == 0:
             return x_orig
         x = x_orig.detach()
@@ -1218,65 +1237,43 @@ class HistogramObserver(UniformQuantizationObserverBase):
             if x.numel() == 0:
                 return x_orig
             x_min, x_max = torch.aminmax(x)
-        min_val = self.min_val
-        max_val = self.max_val
-        same_values = min_val.item() == max_val.item()
-        # When (max_val - min_val) is very small, downsample_rate will be large.
-        # This can cause OOM issue in the allocation of histogram_with_output_range tensor.
-        close_values = (self.max_val - self.min_val) < 1e-6
-        is_uninitialized = min_val == float("inf") and max_val == float("-inf")
-        if is_uninitialized or same_values or close_values:
-            min_val, max_val = x_min, x_max
-            self.reset_histogram(x, min_val, max_val)
+
+        current_min = self.min_val
+        current_max = self.max_val
+
+        is_uninitialized = self.min_val == float("inf") or self.max_val == float("-inf")
+        if is_uninitialized:
+            self.reset_histogram(x, x_min, x_max)
         else:
-            new_min, new_max = x_min, x_max
-            combined_min = torch.min(new_min, min_val)
-            combined_max = torch.max(new_max, max_val)
-            # combine the existing histogram and new histogram into 1 histogram
-            # We do this by first upsampling the histogram to a dense grid
-            # and then downsampling the histogram efficiently
-            (
-                combined_min,
-                combined_max,
-                downsample_rate,
-                start_idx,
-            ) = self._adjust_min_max(combined_min, combined_max, self.upsample_rate)
-            assert (
-                combined_min.numel() == 1 and combined_max.numel() == 1
-            ), "histogram min/max values must be scalar."
+            update_min, update_max = x_min, x_max
+            new_min = torch.min(current_min, update_min)
+            new_max = torch.max(current_max, update_max)
 
             # TODO: For some reason, this is required for it to pass torchscript test
-            # combined_min and combined_max should already have requires_grad set to False
-            combined_min, combined_max = combined_min.detach(), combined_max.detach()
-
-            combined_histogram = torch.histc(
-                x, self.bins, min=combined_min, max=combined_max  # type: ignore[arg-type]
-            )
-            if combined_min == min_val and combined_max == max_val:
-                combined_histogram += self.histogram
+            # new_min and new_max should already have requires_grad set to False
+            new_min, new_max = new_min.detach(), new_max.detach()
+            update_histogram = torch.histc(
+                x, self.bins, min=new_min, max=new_max  # type: ignore[arg-type]
+            ).to(self.histogram.device)
+            if new_min == current_min and new_max == current_max:
+                combined_histogram = self.histogram + update_histogram
+                self.histogram.detach_().resize_(combined_histogram.shape)
+                self.histogram.copy_(combined_histogram)
             else:
-                MAX_HISTOGRAM_SIZE = 1e9  # 1 GB
-                histogram_size = self.bins * downsample_rate * 4
-                if histogram_size > MAX_HISTOGRAM_SIZE:
-                    warnings.warn(
-                        "Fail to combine histograms. Fall back to reset histogram."
-                    )
-                    self.reset_histogram(x, x_min, x_max)
-                else:
-                    combined_histogram = self._combine_histograms(
-                        combined_histogram,
-                        self.histogram,
-                        self.upsample_rate,
-                        downsample_rate,
-                        start_idx,
-                        self.bins,
-                    )
-                    self.histogram.detach_().resize_(combined_histogram.shape)
-                    self.histogram.copy_(combined_histogram)
-                    self.min_val.detach_().resize_(combined_min.shape)
-                    self.min_val.copy_(combined_min)
-                    self.max_val.detach_().resize_(combined_max.shape)
-                    self.max_val.copy_(combined_max)
+                combined_histogram = self._combine_histograms(
+                    self.histogram,
+                    current_min,
+                    current_max,
+                    update_histogram,
+                    new_min,
+                    new_max,
+                )
+                self.histogram.detach_().resize_(combined_histogram.shape)
+                self.histogram.copy_(combined_histogram)
+                self.min_val.detach_().resize_(new_min.shape)
+                self.min_val.copy_(new_min)
+                self.max_val.detach_().resize_(new_max.shape)
+                self.max_val.copy_(new_max)
 
         return x_orig
 
@@ -1290,7 +1287,9 @@ class HistogramObserver(UniformQuantizationObserverBase):
                 "must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point "
             )
-            return torch.tensor([1.0], device=self.min_val.device.type), torch.tensor([0], device=self.min_val.device.type)
+            return torch.tensor([1.0], device=self.min_val.device.type), torch.tensor(
+                [0], device=self.min_val.device.type
+            )
         assert self.bins == len(self.histogram), (
             "The number of bins in histogram should be equal to the number of bins "
             "supplied while making this observer"

@@ -3,13 +3,14 @@ from typing import Optional
 
 import torch
 from torch import Tensor
+from torch.nn import functional as F, init
 from torch.nn.parameter import Parameter
 
 from .module import Module
-from .. import functional as F
-from .. import init
 
-__all__ = ['Embedding', 'EmbeddingBag']
+
+__all__ = ["Embedding", "EmbeddingBag"]
+
 
 class Embedding(Module):
     r"""A simple lookup table that stores embeddings of a fixed dictionary and size.
@@ -109,8 +110,15 @@ class Embedding(Module):
                 [ 0.6778,  0.5803,  0.2678]], requires_grad=True)
     """
 
-    __constants__ = ['num_embeddings', 'embedding_dim', 'padding_idx', 'max_norm',
-                     'norm_type', 'scale_grad_by_freq', 'sparse']
+    __constants__ = [
+        "num_embeddings",
+        "embedding_dim",
+        "padding_idx",
+        "max_norm",
+        "norm_type",
+        "scale_grad_by_freq",
+        "sparse",
+    ]
 
     num_embeddings: int
     embedding_dim: int
@@ -122,31 +130,49 @@ class Embedding(Module):
     freeze: bool
     sparse: bool
 
-    def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
-                 max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
-                 sparse: bool = False, _weight: Optional[Tensor] = None, _freeze: bool = False,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(
+        self,
+        num_embeddings: int,
+        embedding_dim: int,
+        padding_idx: Optional[int] = None,
+        max_norm: Optional[float] = None,
+        norm_type: float = 2.0,
+        scale_grad_by_freq: bool = False,
+        sparse: bool = False,
+        _weight: Optional[Tensor] = None,
+        _freeze: bool = False,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         if padding_idx is not None:
             if padding_idx > 0:
-                assert padding_idx < self.num_embeddings, 'Padding_idx must be within num_embeddings'
+                assert (
+                    padding_idx < self.num_embeddings
+                ), "Padding_idx must be within num_embeddings"
             elif padding_idx < 0:
-                assert padding_idx >= -self.num_embeddings, 'Padding_idx must be within num_embeddings'
+                assert (
+                    padding_idx >= -self.num_embeddings
+                ), "Padding_idx must be within num_embeddings"
                 padding_idx = self.num_embeddings + padding_idx
         self.padding_idx = padding_idx
         self.max_norm = max_norm
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
         if _weight is None:
-            self.weight = Parameter(torch.empty((num_embeddings, embedding_dim), **factory_kwargs),
-                                    requires_grad=not _freeze)
+            self.weight = Parameter(
+                torch.empty((num_embeddings, embedding_dim), **factory_kwargs),
+                requires_grad=not _freeze,
+            )
             self.reset_parameters()
         else:
-            assert list(_weight.shape) == [num_embeddings, embedding_dim], \
-                'Shape of weight does not match num_embeddings and embedding_dim'
+            assert list(_weight.shape) == [
+                num_embeddings,
+                embedding_dim,
+            ], "Shape of weight does not match num_embeddings and embedding_dim"
             self.weight = Parameter(_weight, requires_grad=not _freeze)
 
         self.sparse = sparse
@@ -162,27 +188,40 @@ class Embedding(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         return F.embedding(
-            input, self.weight, self.padding_idx, self.max_norm,
-            self.norm_type, self.scale_grad_by_freq, self.sparse)
+            input,
+            self.weight,
+            self.padding_idx,
+            self.max_norm,
+            self.norm_type,
+            self.scale_grad_by_freq,
+            self.sparse,
+        )
 
     def extra_repr(self) -> str:
-        s = '{num_embeddings}, {embedding_dim}'
+        s = "{num_embeddings}, {embedding_dim}"
         if self.padding_idx is not None:
-            s += ', padding_idx={padding_idx}'
+            s += ", padding_idx={padding_idx}"
         if self.max_norm is not None:
-            s += ', max_norm={max_norm}'
+            s += ", max_norm={max_norm}"
         if self.norm_type != 2:
-            s += ', norm_type={norm_type}'
+            s += ", norm_type={norm_type}"
         if self.scale_grad_by_freq is not False:
-            s += ', scale_grad_by_freq={scale_grad_by_freq}'
+            s += ", scale_grad_by_freq={scale_grad_by_freq}"
         if self.sparse is not False:
-            s += ', sparse=True'
+            s += ", sparse=True"
         return s.format(**self.__dict__)
 
     @classmethod
-    def from_pretrained(cls, embeddings, freeze=True, padding_idx=None,
-                        max_norm=None, norm_type=2., scale_grad_by_freq=False,
-                        sparse=False):
+    def from_pretrained(
+        cls,
+        embeddings,
+        freeze=True,
+        padding_idx=None,
+        max_norm=None,
+        norm_type=2.0,
+        scale_grad_by_freq=False,
+        sparse=False,
+    ):
         r"""Create Embedding instance from given 2-dimensional FloatTensor.
 
         Args:
@@ -209,8 +248,9 @@ class Embedding(Module):
             >>> embedding(input)
             tensor([[ 4.0000,  5.1000,  6.3000]])
         """
-        assert embeddings.dim() == 2, \
-            'Embeddings parameter is expected to be 2-dimensional'
+        assert (
+            embeddings.dim() == 2
+        ), "Embeddings parameter is expected to be 2-dimensional"
         rows, cols = embeddings.shape
         embedding = cls(
             num_embeddings=rows,
@@ -221,7 +261,8 @@ class Embedding(Module):
             max_norm=max_norm,
             norm_type=norm_type,
             scale_grad_by_freq=scale_grad_by_freq,
-            sparse=sparse)
+            sparse=sparse,
+        )
         return embedding
 
 
@@ -303,9 +344,17 @@ class EmbeddingBag(Module):
                 mode='sum')
     """
 
-    __constants__ = ['num_embeddings', 'embedding_dim', 'max_norm', 'norm_type',
-                     'scale_grad_by_freq', 'mode', 'sparse', 'include_last_offset',
-                     'padding_idx']
+    __constants__ = [
+        "num_embeddings",
+        "embedding_dim",
+        "max_norm",
+        "norm_type",
+        "scale_grad_by_freq",
+        "mode",
+        "sparse",
+        "include_last_offset",
+        "padding_idx",
+    ]
 
     num_embeddings: int
     embedding_dim: int
@@ -318,12 +367,22 @@ class EmbeddingBag(Module):
     include_last_offset: bool
     padding_idx: Optional[int]
 
-    def __init__(self, num_embeddings: int, embedding_dim: int,
-                 max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
-                 mode: str = 'mean', sparse: bool = False, _weight: Optional[Tensor] = None,
-                 include_last_offset: bool = False, padding_idx: Optional[int] = None,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(
+        self,
+        num_embeddings: int,
+        embedding_dim: int,
+        max_norm: Optional[float] = None,
+        norm_type: float = 2.0,
+        scale_grad_by_freq: bool = False,
+        mode: str = "mean",
+        sparse: bool = False,
+        _weight: Optional[Tensor] = None,
+        include_last_offset: bool = False,
+        padding_idx: Optional[int] = None,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -332,17 +391,25 @@ class EmbeddingBag(Module):
         self.scale_grad_by_freq = scale_grad_by_freq
         if padding_idx is not None:
             if padding_idx > 0:
-                assert padding_idx < self.num_embeddings, 'padding_idx must be within num_embeddings'
+                assert (
+                    padding_idx < self.num_embeddings
+                ), "padding_idx must be within num_embeddings"
             elif padding_idx < 0:
-                assert padding_idx >= -self.num_embeddings, 'padding_idx must be within num_embeddings'
+                assert (
+                    padding_idx >= -self.num_embeddings
+                ), "padding_idx must be within num_embeddings"
                 padding_idx = self.num_embeddings + padding_idx
         self.padding_idx = padding_idx
         if _weight is None:
-            self.weight = Parameter(torch.empty((num_embeddings, embedding_dim), **factory_kwargs))
+            self.weight = Parameter(
+                torch.empty((num_embeddings, embedding_dim), **factory_kwargs)
+            )
             self.reset_parameters()
         else:
-            assert list(_weight.shape) == [num_embeddings, embedding_dim], \
-                'Shape of weight does not match num_embeddings and embedding_dim'
+            assert list(_weight.shape) == [
+                num_embeddings,
+                embedding_dim,
+            ], "Shape of weight does not match num_embeddings and embedding_dim"
             self.weight = Parameter(_weight)
         self.mode = mode
         self.sparse = sparse
@@ -357,7 +424,12 @@ class EmbeddingBag(Module):
             with torch.no_grad():
                 self.weight[self.padding_idx].fill_(0)
 
-    def forward(self, input: Tensor, offsets: Optional[Tensor] = None, per_sample_weights: Optional[Tensor] = None) -> Tensor:
+    def forward(
+        self,
+        input: Tensor,
+        offsets: Optional[Tensor] = None,
+        per_sample_weights: Optional[Tensor] = None,
+    ) -> Tensor:
         """Forward pass of EmbeddingBag.
 
         Args:
@@ -388,30 +460,46 @@ class EmbeddingBag(Module):
               :attr:`input` will be viewed as having ``B`` bags. Empty bags (i.e., having 0-length) will have
               returned vectors filled by zeros.
         """
-        return F.embedding_bag(input, self.weight, offsets,
-                               self.max_norm, self.norm_type,
-                               self.scale_grad_by_freq, self.mode, self.sparse,
-                               per_sample_weights, self.include_last_offset,
-                               self.padding_idx)
+        return F.embedding_bag(
+            input,
+            self.weight,
+            offsets,
+            self.max_norm,
+            self.norm_type,
+            self.scale_grad_by_freq,
+            self.mode,
+            self.sparse,
+            per_sample_weights,
+            self.include_last_offset,
+            self.padding_idx,
+        )
 
     def extra_repr(self) -> str:
-        s = '{num_embeddings}, {embedding_dim}'
+        s = "{num_embeddings}, {embedding_dim}"
         if self.max_norm is not None:
-            s += ', max_norm={max_norm}'
+            s += ", max_norm={max_norm}"
         if self.norm_type != 2:
-            s += ', norm_type={norm_type}'
+            s += ", norm_type={norm_type}"
         if self.scale_grad_by_freq is not False:
-            s += ', scale_grad_by_freq={scale_grad_by_freq}'
-        s += ', mode={mode}'
+            s += ", scale_grad_by_freq={scale_grad_by_freq}"
+        s += ", mode={mode}"
         if self.padding_idx is not None:
-            s += ', padding_idx={padding_idx}'
+            s += ", padding_idx={padding_idx}"
         return s.format(**{k: repr(v) for k, v in self.__dict__.items()})
 
     @classmethod
-    def from_pretrained(cls, embeddings: Tensor, freeze: bool = True, max_norm: Optional[float] = None,
-                        norm_type: float = 2., scale_grad_by_freq: bool = False,
-                        mode: str = 'mean', sparse: bool = False, include_last_offset: bool = False,
-                        padding_idx: Optional[int] = None) -> 'EmbeddingBag':
+    def from_pretrained(
+        cls,
+        embeddings: Tensor,
+        freeze: bool = True,
+        max_norm: Optional[float] = None,
+        norm_type: float = 2.0,
+        scale_grad_by_freq: bool = False,
+        mode: str = "mean",
+        sparse: bool = False,
+        include_last_offset: bool = False,
+        padding_idx: Optional[int] = None,
+    ) -> "EmbeddingBag":
         r"""Create EmbeddingBag instance from given 2-dimensional FloatTensor.
 
         Args:
@@ -438,8 +526,9 @@ class EmbeddingBag(Module):
             >>> embeddingbag(input)
             tensor([[ 2.5000,  3.7000,  4.6500]])
         """
-        assert embeddings.dim() == 2, \
-            'Embeddings parameter is expected to be 2-dimensional'
+        assert (
+            embeddings.dim() == 2
+        ), "Embeddings parameter is expected to be 2-dimensional"
         rows, cols = embeddings.shape
         embeddingbag = cls(
             num_embeddings=rows,
@@ -451,6 +540,7 @@ class EmbeddingBag(Module):
             mode=mode,
             sparse=sparse,
             include_last_offset=include_last_offset,
-            padding_idx=padding_idx)
+            padding_idx=padding_idx,
+        )
         embeddingbag.weight.requires_grad = not freeze
         return embeddingbag

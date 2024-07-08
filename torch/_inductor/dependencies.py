@@ -235,10 +235,7 @@ class StarDep(Dep):
 # materialize that buffer
 @dataclasses.dataclass(frozen=True)
 class WeakDep(Dep):
-    # Fake dependency on unused buffer
     name: str
-    # Buffer that is doing the mutation
-    mutating_buf: str
 
     @property
     def index(self):
@@ -249,7 +246,7 @@ class WeakDep(Dep):
 
     def rename(self, renames: Dict[str, str]) -> "WeakDep":
         if self.name in renames:
-            return WeakDep(renames[self.name], self.mutating_buf)
+            return WeakDep(renames[self.name])
         return self
 
     def numbytes_hint(self):
@@ -560,20 +557,18 @@ def extract_input_node_reduction_ranges(
             buffer = V.graph.get_buffer(read.name)
             if buffer is None:
                 continue
-            if (
-                isinstance(buffer, ComputedBuffer)
-                and len(buffer.get_reduction_size()) > 0
-            ):
+            op = buffer.get_defining_op()
+            if op is None:
+                continue
+
+            if isinstance(op, ComputedBuffer) and len(op.get_reduction_size()) > 0:
                 if reduction_size is None:
-                    reduction_size = buffer.get_reduction_size()
-                    size = buffer.get_size()
-                elif (
-                    reduction_size != buffer.get_reduction_size()
-                    or size != buffer.get_size()
-                ):
+                    reduction_size = op.get_reduction_size()
+                    size = op.get_size()
+                elif reduction_size != op.get_reduction_size() or size != op.get_size():
                     return (None, None)
             else:
-                new_reads.extend(buffer.get_reads())
+                new_reads.extend(op.get_reads())
         if reads == new_reads:
             return (size, reduction_size)
         else:
@@ -609,6 +604,9 @@ class FreeUnbackedSymbolsOpsHandler:
         return (None,) * 2
 
     def scan(self, dtypes, combine_fn, values):
+        return (None,) * len(values)
+
+    def sort(self, dtypes, values, stable, descending):
         return (None,) * len(values)
 
     def reduction(

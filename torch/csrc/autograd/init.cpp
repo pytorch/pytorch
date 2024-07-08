@@ -203,6 +203,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("sequence_nr", [](const KinetoEvent& e) { return e.sequenceNr(); })
       // absolute start time (since unix epoch) in ns
       .def("start_ns", [](const KinetoEvent& e) { return e.startNs(); })
+      // absolute end time (since unix epoch) in ns
+      .def("end_ns", [](const KinetoEvent& e) { return e.endNs(); })
       // duration in ns
       .def("duration_ns", [](const KinetoEvent& e) { return e.durationNs(); })
       // used for correlation between high-level PyTorch events

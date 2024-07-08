@@ -124,8 +124,11 @@ class TunableOp {
       std::string id_name = "Default";
       ParamsT* reference_params = nullptr;
 
+      // numeric check option is controlled by non-static env var, so check it once per tuned operator
+      bool do_numerics_check = ctx->IsNumericsCheckEnabled();
+
       // calcaulte a reference answer for numerical check
-      if (ctx->IsNumericsCheckEnabled()) {
+      if (do_numerics_check) {
         reference_params = params->DeepCopy(false);
         TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
       }
@@ -156,10 +159,11 @@ class TunableOp {
       for (size_t i = 0; i < op_names_.size(); i++) {
         auto* candidate = ops_[op_names_[i]].get(); // borrow pointer
 
-        if (ctx->IsNumericsCheckEnabled()) {
+        if (do_numerics_check) {
           ParamsT* numerical_params = params->DeepCopy(false);
           auto status = candidate->Call(numerical_params);
           if (status != OK) {
+            numerical_params->Delete();
             TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
             continue;
           }
