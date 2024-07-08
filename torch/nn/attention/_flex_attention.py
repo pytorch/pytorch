@@ -294,7 +294,7 @@ def _create_mask_from_score_mod(
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None))
     with TransformGetItemToIndex():
         out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
-    mask = torch.where(torch.isinf(out), False, True)
+        mask = torch.where(torch.isinf(out), False, True)
     return mask
 
 
@@ -325,8 +325,9 @@ def _create_mask_from_score_mod(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None))
-    out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
-    mask = torch.where(torch.isinf(out), False, True)
+    with TransformGetItemToIndex():
+        out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
+        mask = torch.where(torch.isinf(out), False, True)
     return mask
 
 
