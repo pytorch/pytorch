@@ -35,6 +35,7 @@ except (unittest.SkipTest, ImportError) as e:
         sys.exit(0)
     raise
 
+
 @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
 @config.patch(memory_planning=True)
 class TestMemoryPlanning(TestCase):
