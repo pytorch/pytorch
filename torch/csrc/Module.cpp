@@ -1956,7 +1956,13 @@ Call this whenever a new thread is created in order to propagate values from
                        bool is_causal,
                        bool enable_gqa) {
         return sdp::sdp_params{
-            query, key, value, std::move(attn_mask), dropout, is_causal, enable_gqa};
+            query,
+            key,
+            value,
+            std::move(attn_mask),
+            dropout,
+            is_causal,
+            enable_gqa};
       }))
       .def_readonly("query", &sdp::sdp_params::query)
       .def_readonly("key", &sdp::sdp_params::key)

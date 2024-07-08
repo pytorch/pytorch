@@ -218,7 +218,9 @@ class CausalBias(torch.Tensor):
             )
         elif attn_mask.variant == CausalVariant.LOWER_RIGHT:
             _validate_sdpa_input(query, key, value, None, dropout_p, is_causal, scale)
-            sdpa_params = SDPAParams(query, key, value, None, dropout_p, is_causal, enable_gqa)
+            sdpa_params = SDPAParams(
+                query, key, value, None, dropout_p, is_causal, enable_gqa
+            )
             if can_use_flash_attention(sdpa_params):
                 needs_padding = query.size(-1) % 8 != 0
                 og_head_size = query.size(-1)
