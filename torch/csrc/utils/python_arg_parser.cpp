@@ -313,7 +313,7 @@ static py::object dispatch_on_subclass(
     if (!is_torch_function) {
       auto maybe_torch_dispatch_rule = maybe_get_registered_torch_dispatch_rule(
           torch_api_function, py::reinterpret_borrow<py::object>(arg));
-      if (maybe_torch_dispatch_rule.ptr() != Py_None) {
+      if (!maybe_torch_dispatch_rule.is_none()) {
         torch_function = maybe_torch_dispatch_rule;
         auto py_arg = py::reinterpret_borrow<py::object>(arg);
         ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
@@ -393,7 +393,7 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
   if (!is_torch_function) {
     auto maybe_torch_dispatch_rule =
         maybe_get_registered_torch_dispatch_rule(torch_api_function, mode_obj);
-    if (maybe_torch_dispatch_rule.ptr() != Py_None) {
+    if (!maybe_torch_dispatch_rule.is_none()) {
       auto ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
           maybe_torch_dispatch_rule.ptr(),
           mode_obj.ptr(),

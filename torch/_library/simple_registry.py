@@ -46,7 +46,7 @@ class SimpleOperatorEntry:
         self.qualname: str = qualname
         self.fake_impl: FakeImplHolder = FakeImplHolder(qualname)
         self.torch_dispatch_rules: GenericTorchDispatchRuleHolder = (
-            GenericTorchDispatchRuleHolder()
+            GenericTorchDispatchRuleHolder(qualname)
         )
 
     # For compatibility reasons. We can delete this soon.
@@ -56,15 +56,16 @@ class SimpleOperatorEntry:
 
 
 class GenericTorchDispatchRuleHolder:
-    def __init__(self):
+    def __init__(self, qualname):
         self._data = {}
+        self.qualname = qualname
 
     def register(
         self, torch_dispatch_class: type, func: Callable
     ) -> RegistrationHandle:
         if self.find(torch_dispatch_class):
             raise RuntimeError(
-                f"{torch_dispatch_class} already has a `__torch_dispatch__` rule registered"
+                f"{torch_dispatch_class} already has a `__torch_dispatch__` rule registered for {self.qualname}"
             )
         self._data[torch_dispatch_class] = func
 

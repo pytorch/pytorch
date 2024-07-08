@@ -269,6 +269,80 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
+    def test_no_tensor_computation(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                return y
+
+        f = Module()
+        inp = ([torch.ones(1, 3)], 1)
+        ep = export(f, inp)
+        self.assertEqual(ep.module()(*inp), f(*inp))
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %x_0 : [num_users=0] = placeholder[target=x_0]
+    %y : [num_users=0] = placeholder[target=y]
+    return (1,)""",
+        )
+
+    def test_no_tensor_computation_2(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                return x
+
+        f = Module()
+        inp = (torch.randn(3), 1)
+        ep = export(f, inp)
+        self.assertEqual(ep.module()(*inp), f(*inp))
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %y : [num_users=0] = placeholder[target=y]
+    return (x,)""",
+        )
+
+    # Errors because fake mode is not detected from non-tensor inputs
+    @testing.expectedFailureTrainingIRToRunDecomp
+    def test_no_tensor_computation_3(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                return 5
+
+        f = Module()
+        inp = (2, 1)
+        ep = export(f, inp)
+        self.assertEqual(ep.module()(*inp), f(*inp))
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %x : [num_users=0] = placeholder[target=x]
+    %y : [num_users=0] = placeholder[target=y]
+    return (5,)""",
+        )
+
+    def test_no_tensor_computation_4(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                return x
+
+        f = Module()
+        inp = ([torch.randn(3)], 1)
+        ep = export(f, inp)
+        self.assertEqual(ep.module()(*inp), f(*inp))
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %x_0 : [num_users=1] = placeholder[target=x_0]
+    %y : [num_users=0] = placeholder[target=y]
+    return (x_0,)""",
+        )
+
     # Errors because non-strict is not supported in training IR (T193692164)
     @testing.expectedFailureTrainingIRToRunDecomp
     def test_external_call_non_strict_real_tensor(self):
