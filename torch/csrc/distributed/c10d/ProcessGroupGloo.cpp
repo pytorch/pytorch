@@ -198,6 +198,7 @@ ReduceFunc toFunction(const ReduceOp& r) {
     case ReduceOp::PREMUL_SUM:
       TORCH_CHECK(false, "Cannot use ReduceOp.PREMUL_SUM with Gloo");
       break;
+    case ReduceOp::UNUSED:
     default:
       break;
   }
@@ -261,6 +262,7 @@ ReduceFunc toFunction(const ReduceOp& r) {
     case ReduceOp::PREMUL_SUM:
       TORCH_CHECK(false, "Cannot use ReduceOp.PREMUL_SUM with Gloo");
       break;
+    case ReduceOp::UNUSED:
     default:
       break;
   }
