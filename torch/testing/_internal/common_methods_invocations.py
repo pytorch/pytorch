@@ -12738,6 +12738,11 @@ op_db: List[OpInfo] = [
                             'TestNNCOpInfo',
                             'test_nnc_correctness',
                             dtypes=(torch.bool,)),
+               # MPS does not support float64, while numpy does internal computations in float64.
+               # See https://github.com/pytorch/pytorch/blob/3c1cf03fde145bdbe1f5ffb81765d076c10b4c04/test/test_ops.py#L260-L264
+               DecorateInfo(unittest.expectedFailure,
+                            'TestCommon',
+                            'test_numpy_ref_mps'),
            )),
     UnaryUfuncInfo('positive',
                    ref=np.positive,
