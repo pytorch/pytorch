@@ -2624,6 +2624,60 @@ class TestCustomOpAPI(TestCase):
                 return
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_torch_dispatch_rule_subclass(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def f(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        z = TwoTensor(x, y)
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            called = 0
+
+            def TwoTensor_foo(cls, func, types, args, kwargs):
+                nonlocal called
+                assert cls is TwoTensor
+                called += 1
+                return x.sin()
+
+            m._register_torch_dispatch_rule("foo", TwoTensor, TwoTensor_foo)
+
+            out = f(z)
+            out2 = z.cos()
+
+        self.assertEqual(called, 1)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_torch_dispatch_rule_mode(self):
+        from torch.testing._internal.two_tensor import TwoTensorMode
+
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def f(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        x = torch.randn(3)
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            called = 0
+
+            def TwoTensor_foo(mode, func, types, args, kwargs):
+                nonlocal called
+                called += 1
+                return x.sin()
+
+            m._register_torch_dispatch_rule("foo", TwoTensorMode, TwoTensor_foo)
+
+            with TwoTensorMode():
+                out = f(x)
+                out2 = x.cos()
+
+        self.assertEqual(called, 1)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @parametrize("idx", [0, 1, 2, 3, 4, 5])
     def test_library_register_fake_source(self, idx):
         opname = f"source{idx}"
