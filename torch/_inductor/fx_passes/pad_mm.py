@@ -638,7 +638,7 @@ def run_autoheuristic(
     choice2should_pad = {orig_choice: False, pad_choice: True, "autotune": None}
     ah_should_pad = choice2should_pad.get(choice, None)
 
-    if torch._inductor.config.autoheuristic_mode == "COLLECT_DATA":
+    if torch._inductor.config.collect_autoheuristic("pad_mm"):
         ah_ori_time = autoheuristic.get_collected_feedback(orig_choice)
         ah_pad_time = autoheuristic.get_collected_feedback(pad_choice)
 
