@@ -147,9 +147,11 @@ flex_attention_template = TritonTemplate(
     # is not masked out? If so, we can skip an extra safety check
     # OUTPUT_LOGSUMEXP: We only need to store the logsumexp if we require grad
     #
-    # The following SPARSE_* is defined in the block sparse mask grid, rather than the thread block grid.
-    # SPARSE_KV_NUM_BLKS: The number of unmasked K/V blocks for each query.
-    # SPARSE_KV_IDX: The indices of unmasked K/V blocks for each query.
+    # The following FULL_* and PARTIAL_* is defined in the block sparse mask grid, rather than the thread block grid.
+    # FULL_KV_NUM_BLKS: The number of fully unmasked K/V blocks for each query.
+    # FULL_KV_IDX: The indices of fully unmasked K/V blocks for each query.
+    # PARTIAL_KV_NUM_BLKS: The number of partially unmasked K/V blocks for each query.
+    # PARTIAL_KV_IDX: The indices of partially unmasked K/V blocks for each query.
 
     tl.static_assert(SPARSE_Q_BLOCK_SIZE >= BLOCK_M and SPARSE_Q_BLOCK_SIZE % BLOCK_M == 0)
     tl.static_assert(SPARSE_KV_BLOCK_SIZE >= BLOCK_N and SPARSE_KV_BLOCK_SIZE % BLOCK_N == 0)
@@ -204,7 +206,7 @@ flex_attention_template = TritonTemplate(
     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
 
     # ~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # SPARSE_KV_IDX and SPARSE_KV_NUM_BLKS are always contiguous.
+    # FULL_KV_IDX and FULL_KV_NUM_BLKS are always contiguous.
     sparse_hz_offset = sparse_idx_z * SPARSE_H + sparse_idx_h
     sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + start_m // SPARSE_Q_MULTIPLE
     sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (start_m // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
@@ -297,8 +299,9 @@ flex_attention_template = TritonTemplate(
         V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
         K_block_ptr = tl.advance(K_block_ptr, (0, offset))
         offs_n = offs_n + offset
+
     # ~~~~~~~~~~~~~~ partially unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # SPARSE_KV_IDX and SPARSE_KV_NUM_BLKS are always contiguous.
+    # PARTIAL_KV_IDX and PARTIAL_KV_NUM_BLKS are always contiguous.
     sparse_hz_offset = sparse_idx_z * SPARSE_H + sparse_idx_h
     sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + start_m // SPARSE_Q_MULTIPLE
     sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (start_m // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
@@ -559,14 +562,14 @@ def flex_attention(*args, **kwargs):
         mask_fn_other_buffers,
     ) = args
     (
-        full_sparse_kv_num_blocks,
-        full_sparse_kv_indices,
-        full_sparse_q_num_blocks,
-        full_sparse_q_indices,
-        partial_sparse_kv_num_blocks,
-        partial_sparse_kv_indices,
-        partial_sparse_q_num_blocks,
-        partial_sparse_q_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        full_q_num_blocks,
+        full_q_indices,
+        partial_kv_num_blocks,
+        partial_kv_indices,
+        partial_q_num_blocks,
+        partial_q_indices,
         SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
     ) = block_mask
@@ -574,14 +577,14 @@ def flex_attention(*args, **kwargs):
         query,
         key,
         value,
-        full_sparse_kv_num_blocks,
-        full_sparse_kv_indices,
-        full_sparse_q_num_blocks,
-        full_sparse_q_indices,
-        partial_sparse_kv_num_blocks,
-        partial_sparse_kv_indices,
-        partial_sparse_q_num_blocks,
-        partial_sparse_q_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        full_q_num_blocks,
+        full_q_indices,
+        partial_kv_num_blocks,
+        partial_kv_indices,
+        partial_q_num_blocks,
+        partial_q_indices,
     ]:
         buf.realize()
     placeholder_inps = [
@@ -656,10 +659,10 @@ def flex_attention(*args, **kwargs):
                 key,
                 value,
                 logsumexp,
-                full_sparse_kv_num_blocks,
-                full_sparse_kv_indices,
-                partial_sparse_kv_num_blocks,
-                partial_sparse_kv_indices,
+                full_kv_num_blocks,
+                full_kv_indices,
+                partial_kv_num_blocks,
+                partial_kv_indices,
             ],
             layout=layout,
             subgraphs=[
@@ -688,23 +691,21 @@ def flex_attention(*args, **kwargs):
             key,
             value,
             logsumexp,
-            full_sparse_kv_num_blocks,
-            full_sparse_kv_indices,
-            partial_sparse_kv_num_blocks,
-            partial_sparse_kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+            partial_kv_num_blocks,
+            partial_kv_indices,
         ]
         + list(score_mod_other_buffers)
         + list(mask_fn_other_buffers)
     )
     input_gen_fns = {
-        4: create_num_blocks_fake_generator(
-            full_sparse_kv_indices
-        ),  # full_sparse_kv_num_blocks
-        5: create_indices_fake,  # full_sparse_kv_indices
+        4: create_num_blocks_fake_generator(full_kv_indices),  # full_kv_num_blocks
+        5: create_indices_fake,  # full_kv_indices
         6: create_num_blocks_fake_generator(
-            partial_sparse_kv_indices
-        ),  # partial_sparse_kv_num_blocks
-        7: create_indices_fake,  # partial_sparse_kv_indices
+            partial_kv_indices
+        ),  # partial_kv_num_blocks
+        7: create_indices_fake,  # partial_kv_indices
     }
     return (
         autotune_select_algorithm(
@@ -762,11 +763,15 @@ flex_attention_backward_template = TritonTemplate(
     # SCORE_MOD_IS_LINEAR: Is the score modifier linear? If so, we can lift the
     # change of base out of the loop
     #
-    # The following SPARSE_* is defined in the block sparse mask grid, rather than the thread block grid.
-    # SPARSE_KV_NUM_BLKS: The number of unmasked K/V blocks for each query.
-    # SPARSE_KV_IDX: The indices of unmasked K/V blocks for each query.
-    # SPARSE_Q_NUM_BLKS: The number of unmasked Q blocks for each key/value.
-    # SPARSE_Q_IDX: The indices of unmasked Q blocks for each key/value.
+    # The following FULL_* and PARTIAL_* is defined in the block sparse mask grid, rather than the thread block grid.
+    # FULL_KV_NUM_BLKS: The number of fully unmasked K/V blocks for each query.
+    # FULL_KV_IDX: The indices of fully unmasked K/V blocks for each query.
+    # FULL_Q_NUM_BLKS: The number of fully unmasked Q blocks for each key/value.
+    # FULL_Q_IDX: The indices of fully unmasked Q blocks for each key/value.
+    # PARTIAL_KV_NUM_BLKS: The number of partially unmasked K/V blocks for each query.
+    # PARTIAL_KV_IDX: The indices of partially unmasked K/V blocks for each query.
+    # PARTIAL_Q_NUM_BLKS: The number of partially unmasked Q blocks for each key/value.
+    # PARTIAL_Q_IDX: The indices of partially unmasked Q blocks for each key/value.
 
     # Define Q Strides
     stride_qz = {{stride("Q", 0)}}
