@@ -25,6 +25,7 @@ from torch.nn.attention._flex_attention import (
     _flex_attention,
     _generate_alibi_bias,
     _identity,
+    _no_mask,
     _rel_bias,
     _rel_causal,
 )
@@ -106,6 +107,11 @@ def _trig2(score, b, h, m, n):
     sin_score = torch.sin(score)
     z = cos_score * sin_score + torch.tan(b)
     return z
+
+
+# --------- Useful mask functions for testing ---------
+def _causal_mask(batch, head, token_q, token_kv):
+    return token_q >= token_kv
 
 
 test_score_mods = [
@@ -578,6 +584,7 @@ class TestFlexAttention(InductorTestCase):
                 v,
                 _causal,
                 block_mask,
+                _causal_mask,
             )
             out = _flex_attention(
                 q,
@@ -585,13 +592,14 @@ class TestFlexAttention(InductorTestCase):
                 v2,
                 _causal,
                 block_mask,
+                _causal_mask,
             )
             return out
 
         _, code = run_and_get_code(func, q, k, v, k2, v2)
         # Ensure _create_block_mask_from_mask is compiled and generates 3 kernels,
         # 2 flex_attention generates 2 kernels.
-        FileCheck().check_count(".run(", 5, True).run(code[0])
+        FileCheck().check_count(".run(", 6, True).run(code[0])
 
     @supported_platform
     def test_doc_mask_sparse(self):
@@ -1067,7 +1075,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        block_mask = _create_empty_block_mask(q, k, v)
+        block_mask = _create_block_mask(
+            score_mod, 1, 1, q.shape[-2], k.shape[-2], q.device
+        )
+        if score_mod == _identity:
+            mask_fn = _no_mask
+        elif score_mod == _causal:
+            mask_fn = _causal_mask
+        else:
+            raise AssertionError("Illegal score mod")
 
         @torch.compile
         def sdpa_hop(q, k, v, score_mod, block_mask):
@@ -1077,6 +1093,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
+                mask_fn,
             )
 
         @torch.compile(backend="aot_eager")
@@ -1091,6 +1108,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
+                mask_fn,
             )
 
         ref_out, ref_lse = eager_sdpa_hop(
@@ -1138,21 +1156,26 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        block_mask = _create_empty_block_mask(q, k, v)
+        score_mod = _identity
+        mask_fn = _no_mask
+        block_mask = _create_block_mask(
+            score_mod, 1, 1, q.shape[-2], k.shape[-2], q.device
+        )
 
         @torch.compile
-        def func(q, k, v, score_mod, block_mask):
+        def func(q, k, v, score_mod, block_mask, mask_fn):
             _, lse = flex_attention_hop(
                 q,
                 k,
                 v,
                 score_mod,
                 block_mask.as_tuple(),
+                mask_fn,
             )
             lse_2 = lse * 2
             return lse_2
 
-        _, code = run_and_get_code(func, q, k, v, _identity, block_mask)
+        _, code = run_and_get_code(func, q, k, v, score_mod, block_mask, mask_fn)
         # Ensure that two kernels are generated
         FileCheck().check_count(".run(", 2, True).run(code[0])
 
@@ -1166,21 +1189,26 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        block_mask = _create_empty_block_mask(q, k, v)
+        score_mod = _identity
+        mask_fn = _no_mask
+        block_mask = _create_block_mask(
+            score_mod, 1, 1, q.shape[-2], k.shape[-2], q.device
+        )
 
         @torch.compile
-        def func(q, k, v, score_mod, block_mask):
+        def func(q, k, v, score_mod, block_mask, mask_fn):
             out, lse = flex_attention_hop(
                 q,
                 k,
                 v,
                 score_mod,
                 block_mask.as_tuple(),
+                mask_fn,
             )
             lse_2 = lse * 2
             return out, lse_2
 
-        _, code = run_and_get_code(func, q, k, v, _identity, block_mask)
+        _, code = run_and_get_code(func, q, k, v, score_mod, block_mask, mask_fn)
         # Ensure that two kernels are generated
         FileCheck().check_count(".run(", 2, True).run(code[0])
 

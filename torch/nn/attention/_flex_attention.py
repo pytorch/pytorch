@@ -298,39 +298,6 @@ def _create_mask_from_score_mod(
     return mask
 
 
-def _create_mask_from_score_mod(
-    score_mod: _score_mod_signature,
-    B: int,
-    H: int,
-    M: int,
-    N: int,
-    device: str = "cuda",
-):
-    r"""This function creates a mask tensor from a score_mod function.
-    Args:
-        score_mod (Callable): Function to modify attention scores.
-        B (int): Batch size.
-        H (int): Number of heads.
-        M (int): Sequence length of query.
-        N (int): Sequence length of key/value.
-        device (str): Device to run the mask creation on.
-    Returns:
-        mask (Tensor): A mask tensor with shape (B, H, M, N).
-    """
-    b = torch.arange(0, B, device=device)
-    h = torch.arange(0, H, device=device)
-    m = torch.arange(0, M, device=device)
-    n = torch.arange(0, N, device=device)
-    score_mod = torch.vmap(score_mod, in_dims=(0, None, None, None, 0))
-    score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None))
-    score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
-    score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None))
-    with TransformGetItemToIndex():
-        out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
-        mask = torch.where(torch.isinf(out), False, True)
-    return mask
-
-
 def _create_mask_from_mask_fn(
     mask_fn: _mask_signature,
     B: int,
