@@ -74,8 +74,50 @@ def set_(tensor, data):
     tensor.set_(data)
 
 
+"""
+[Note: Avoiding functionalization for fsdp.set_ and inductor.resize_storage_bytes_(0)]
+
+Currently we don't functionalize `fsdp.set_` op or `inductor.resize_storage_bytes_(0)` op
+(i.e. they show up as a mutation op in the middle of the AOT joint graph).
+
+Reason:
+Traceable FSDP2 compiled autograd BWD graph have the following traits:
+(1) Two inputs of the graph were aliased to each other (one from hook closed-over tensors, one from FWD saved tensors).
+(2) One of them is mutated (set_ and resize_(0) to handle the all-gathered param).
+(3) They are both subclasses.
+The combination of these traits is not supported by AOTAutograd (it's difficult to reason about subclass aliasing).
+So this doesn't work at all for Traceable FSDP2.
+
+The compromise we use is to avoid functionalization for the FSDP2 set_ and resize_(0) ops.
+This avoids the problem above, because from AOTAutograd point-of-view there are no mutations
+that functionalization needs to handle. (Although we need to be careful not to DCE those mutable ops.)
+
+We can avoid this functionalization because:
+(1) The nn.Parameter is never used before its .set_() is called in eager code (i.e. no alias of it is created),
+so it's safe to call .set_() in the middle of the graph to swap out its storage and start using the nn.Parameter downstream.
+(2) We always re-allocate the buffer for nn.Parameter to store the AllGather output and to be used in downstream user ops.
+So calling resize-to-0 in the middle of the graph to free nn.Parameter memory after use should always be okay
+(since we always allocate anew next time we need it, we strictly don't need to keep the old tensor storage around anymore).
+
+Q: But doesn't the torch.compile stack have the "functional graph" assumption in many places?
+A: Yes - this is WIP but we will try to get back to functional graph as early as possible in the lowering process.
+Specifically, we believe we can move both .set_ and .resize_(0) ops to end of graph in AOT joint graph before partitioner
+(i.e. effectively "re-functionalizing" those ops). Put it in another way, we avoid functionalization for those two ops just to
+make AOTAutograd alias analysis happy, and as soon as we are past that point, we "re-functionalize" the graph.
+This requires a custom FX pass but we believe it's not hard to write and maintain.
+
+Q: What's the importance of partitioner not saving views of nn.Parameter as FWD saved tensors?
+A: This is critical: we do want to save FWD nn.Parameter graph input (instead of its view) for BWD use,
+so that downstream ops in BWD graph uses the post-`.set_` nn.Parameter instead of any of its saved views as input.
+This is because .set_ will not update any of the nn.Parameter's views, so BWD downstream ops must use the original
+nn.Parameter in order to see the result of .set_.
+"""
+
+
 @torch.library.impl(lib, "set_", "Functionalize")
 def set__functionalize(tensor, data):
+    torch._sync(tensor)
+    torch._sync(data)
     tensor_inner = torch._from_functional_tensor(tensor)
     data_inner = torch._from_functional_tensor(data)
     tensor_inner.set_(data_inner)  # type: ignore[call-overload]

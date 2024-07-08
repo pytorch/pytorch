@@ -254,7 +254,7 @@ def tensor_to_scale(x: torch.Tensor, float8_dtype: torch.dtype, dim=None):
     if dim is None:
         amax = torch.max(torch.abs(x))
     else:
-        amax = torch.max(torch.abs(x), dim=dim).values
+        amax = torch.max(torch.abs(x), dim=dim, keepdim=True).values
 
     return amax_to_scale(amax, float8_dtype, x.dtype)
 
@@ -387,6 +387,55 @@ class TestFP8MatmulCuda(TestCase):
 
         x = torch.randn(16, 16, device="cuda", dtype=base_dtype)
         y = torch.randn(32, 16, device="cuda", dtype=base_dtype).t()
+
+        x_scale = tensor_to_scale(x, input_dtype).float()
+        y_scale = tensor_to_scale(y, input_dtype).float()
+
+        x_fp8 = to_fp8_saturated(x * x_scale, input_dtype)
+        y_fp8 = to_fp8_saturated(y * y_scale, input_dtype)
+
+        # Calculate actual F8 mm
+        out_scaled_mm = mm_float8(
+            x_fp8,
+            y_fp8,
+            a_scale=x_scale,
+            b_scale=y_scale,
+            output_dtype=output_dtype
+        )
+
+        # Calculate emulated F8 mm
+        out_emulated = mm_float8_emulated(
+            x_fp8,
+            x_scale,
+            y_fp8,
+            y_scale,
+            output_dtype
+        )
+
+        if output_dtype != base_dtype:
+            out_scaled_mm = out_scaled_mm.to(compare_type)
+            out_scaled_mm = out_scaled_mm / tensor_to_scale(out_scaled_mm, input_dtype)
+
+            out_emulated = out_emulated.to(compare_type)
+            out_emulated = out_emulated / tensor_to_scale(out_emulated, input_dtype)
+
+        if base_dtype in {torch.bfloat16, torch.float16}:
+            atol, rtol = 7e-2, 7e-2
+        else:
+            atol, rtol = 3e-3, 3e-3
+
+        torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_scaled_mm_change_stride(self, base_dtype):
+        torch.manual_seed(42)
+        input_dtype = e4m3_type
+        output_dtype = base_dtype
+        compare_type = torch.float32
+
+        x = torch.empty_strided((16, 16), (16, 1), device="cuda", dtype=base_dtype)
+        y = torch.empty_strided((16, 32), (1, 64), device="cuda", dtype=base_dtype)
 
         x_scale = tensor_to_scale(x, input_dtype).float()
         y_scale = tensor_to_scale(y, input_dtype).float()
@@ -619,8 +668,8 @@ class TestFP8MatmulCuda(TestCase):
         x_scales = tensor_to_scale(x, input_dtype, dim=1).float()
         y_scales = tensor_to_scale(y, input_dtype, dim=0).float()
 
-        x_fp8 = to_fp8_saturated(x * x_scales[:, None], e4m3_type)
-        y_fp8 = to_fp8_saturated(y * y_scales[None, :], e4m3_type)
+        x_fp8 = to_fp8_saturated(x * x_scales, e4m3_type)
+        y_fp8 = to_fp8_saturated(y * y_scales, e4m3_type)
 
         # Calculate actual F8 mm
         out_scaled_mm = mm_float8(
@@ -629,7 +678,7 @@ class TestFP8MatmulCuda(TestCase):
 
         # Calculate emulated F8 mm
         out_emulated = mm_float8_emulated(
-            x_fp8, x_scales[:, None], y_fp8, y_scales[None, :], output_dtype
+            x_fp8, x_scales, y_fp8, y_scales, output_dtype
         )
 
         if base_dtype in {torch.bfloat16, torch.float16}:
