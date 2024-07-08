@@ -888,11 +888,14 @@ def register_torch_dispatch(
     The ``torch_dispatch_class`` is either a Tensor subclass with ``__torch_dispatch__`` or a
     TorchDispatchMode.
 
-    If it is a Tensor subclass, we expect fn to have the following signature:
+    If it is a Tensor subclass, we expect ``func`` to have the following signature:
     ``(cls, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any``
 
-    If it is a TorchDispatchMode, we expect fn to have the following signature:
+    If it is a TorchDispatchMode, we expect ``func`` to have the following signature:
     ``(mode, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any``
+
+    ``args`` and ``kwargs`` will have been normalized the same way they are
+    in ``__torch_dispatch__`` (see :ref:`torch-dispatch-calling-convention`).
 
     Examples:
 
