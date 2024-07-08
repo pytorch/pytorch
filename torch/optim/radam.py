@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+r"""Implementation for the RAdam algorithm."""
 from typing import cast, List, Optional, Tuple, Union
 
 import torch
@@ -13,6 +15,7 @@ from .optimizer import (
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
+    _maximize_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -22,7 +25,7 @@ from .optimizer import (
 __all__ = ["RAdam", "radam"]
 
 
-class RAdam(Optimizer):
+class RAdam(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
@@ -33,9 +36,10 @@ class RAdam(Optimizer):
         decoupled_weight_decay: bool = False,
         *,
         foreach: Optional[bool] = None,
+        maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
-    ):
+    ):  # noqa: D107
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -52,6 +56,7 @@ class RAdam(Optimizer):
             betas=betas,
             eps=eps,
             weight_decay=weight_decay,
+            maximize=maximize,
             foreach=foreach,
             capturable=capturable,
             decoupled_weight_decay=decoupled_weight_decay,
@@ -59,10 +64,11 @@ class RAdam(Optimizer):
         )
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("foreach", None)
+            group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
             group.setdefault("decoupled_weight_decay", False)
             group.setdefault("capturable", False)
@@ -115,7 +121,7 @@ class RAdam(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -151,6 +157,7 @@ class RAdam(Optimizer):
                 lr=group["lr"],
                 weight_decay=group["weight_decay"],
                 eps=group["eps"],
+                maximize=group["maximize"],
                 foreach=group["foreach"],
                 capturable=group["capturable"],
                 differentiable=group["differentiable"],
@@ -169,14 +176,17 @@ RAdam.__doc__ = (
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{input}      : \gamma \text{ (lr)}, \: \beta_1, \beta_2
                 \text{ (betas)}, \: \theta_0 \text{ (params)}, \:f(\theta) \text{ (objective)}, \:
-                \lambda \text{ (weightdecay)},                                                   \\
+                \lambda \text{ (weightdecay)}, \:\textit{maximize}                               \\
             &\hspace{13mm} \epsilon \text{ (epsilon)}, \textit{decoupled\_weight\_decay}         \\
             &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
                 v_0 \leftarrow 0 \text{ ( second moment)},                                       \\
             &\hspace{18mm} \rho_{\infty} \leftarrow 2/(1-\beta_2) -1                      \\[-1.ex]
             &\rule{110mm}{0.4pt}  \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
-            &\hspace{6mm} g_t \leftarrow \nabla_{\theta} f_t (\theta_{t-1})                      \\
+            &\hspace{6mm}\textbf{if} \: \textit{maximize}:                                       \\
+            &\hspace{12mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})         \\
+            &\hspace{6mm}\textbf{else}                                                           \\
+            &\hspace{12mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})          \\
             &\hspace{6mm} \theta_t \leftarrow \theta_{t-1}                                       \\
             &\hspace{6mm} \textbf{if} \: \lambda \neq 0                                          \\
             &\hspace{12mm}\textbf{if} \: \textit{decoupled\_weight\_decay}                       \\
@@ -223,6 +233,7 @@ RAdam.__doc__ = (
         decoupled_weight_decay (bool, optional): whether to use decoupled weight
             decay as in AdamW to obtain RAdamW (default: False)
         {_foreach_doc}
+        {_maximize_doc}
         {_differentiable_doc}
         {_capturable_doc}
 
@@ -251,11 +262,12 @@ def _single_tensor_radam(
     eps: float,
     decoupled_weight_decay: bool,
     differentiable: bool,
+    maximize: bool,
     capturable: bool,
     has_complex: bool,
 ):
     for i, param in enumerate(params):
-        grad = grads[i]
+        grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
@@ -349,6 +361,7 @@ def _multi_tensor_radam(
     eps: float,
     decoupled_weight_decay: bool,
     differentiable: bool,
+    maximize: bool,
     capturable: bool,
     has_complex: bool,
 ):
@@ -394,6 +407,9 @@ def _multi_tensor_radam(
                 grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_avg_sqs
             )
 
+        if maximize:
+            grouped_grads = torch._foreach_neg(grouped_grads)  # type: ignore[assignment]
+
         # maximum length of the approximated SMA
         rho_inf = 2 / (1 - beta2) - 1
         # compute the length of the approximated SMA
@@ -425,9 +441,15 @@ def _multi_tensor_radam(
             if decoupled_weight_decay:
                 torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
             else:
-                grouped_grads = torch._foreach_add(  # type: ignore[assignment]
-                    grouped_grads, grouped_params, alpha=weight_decay
-                )
+                # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+                if maximize:
+                    torch._foreach_add_(
+                        grouped_grads, grouped_params, alpha=weight_decay
+                    )
+                else:
+                    grouped_grads = torch._foreach_add(  # type: ignore[assignment]
+                        grouped_grads, grouped_params, alpha=weight_decay
+                    )
 
         # Decay the first and second moment running average coefficient
         torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)
@@ -527,6 +549,7 @@ def radam(
     differentiable: bool = False,
     capturable: bool = False,
     has_complex: bool = False,
+    maximize: bool = False,
     *,
     beta1: float,
     beta2: float,
@@ -538,7 +561,6 @@ def radam(
 
     See :class:`~torch.optim.RAdam` for details.
     """
-
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
@@ -568,6 +590,7 @@ def radam(
         lr=lr,
         weight_decay=weight_decay,
         eps=eps,
+        maximize=maximize,
         decoupled_weight_decay=decoupled_weight_decay,
         differentiable=differentiable,
         capturable=capturable,

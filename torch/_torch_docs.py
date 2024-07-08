@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Adds docstrings to functions defined in the torch._C module."""
 
 import re
@@ -7009,6 +7010,7 @@ add_docstr(
 nanmean(input, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes the mean of all `non-NaN` elements along the specified dimensions.
+Input must be floating point or complex.
 
 This function is identical to :func:`torch.mean` when there are no `NaN` values
 in the :attr:`input` tensor. In the presence of `NaN`, :func:`torch.mean` will
@@ -7018,7 +7020,7 @@ propagate the `NaN` to the output whereas :func:`torch.nanmean` will ignore the
 {keepdim_details}
 
 Args:
-    {input}
+    input (Tensor): the input tensor, either of floating point or complex dtype
     {opt_dim}
     {keepdim}
 
@@ -7755,12 +7757,11 @@ Keyword args:
 
 Example::
 
-    >>> b = torch.tensor(
-           [[0, 0, 0, 2, 0, 0, 2],
-            [0, 3, 0, 0, 2, 0, 1],
-            [2, 2, 2, 0, 0, 0, 3],
-            [2, 2, 3, 0, 1, 1, 0],
-            [1, 1, 0, 0, 2, 0, 2]])
+    >>> b = torch.tensor([[0, 0, 0, 2, 0, 0, 2],
+    ...                   [0, 3, 0, 0, 2, 0, 1],
+    ...                   [2, 2, 2, 0, 0, 0, 3],
+    ...                   [2, 2, 3, 0, 1, 1, 0],
+    ...                   [1, 1, 0, 0, 2, 0, 2]])
     >>> torch.mode(b, 0)
     torch.return_types.mode(
     values=tensor([0, 2, 0, 0, 0, 0, 2]),
@@ -11422,7 +11423,7 @@ Example::
 add_docstr(
     torch.rot90,
     r"""
-rot90(input, k=1, dims=[0,1]) -> Tensor
+rot90(input, k=1, dims=(0, 1)) -> Tensor
 
 Rotate an n-D tensor by 90 degrees in the plane specified by dims axis.
 Rotation direction is from the first towards the second axis if k > 0, and from the second towards the first for k < 0.

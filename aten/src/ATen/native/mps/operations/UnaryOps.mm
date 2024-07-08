@@ -26,7 +26,6 @@
 #include <ATen/ops/cumsum_native.h>
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/exp2_native.h>
-#include <ATen/ops/exp_native.h>
 #include <ATen/ops/expm1_native.h>
 #include <ATen/ops/floor_native.h>
 #include <ATen/ops/frac_native.h>
@@ -54,7 +53,6 @@
 #include <ATen/ops/sinh_native.h>
 #include <ATen/ops/sqrt_native.h>
 #include <ATen/ops/tan_native.h>
-#include <ATen/ops/tanh_native.h>
 #include <ATen/ops/trunc_native.h>
 #include <ATen/ops/view_as_real.h>
 #endif
@@ -236,7 +234,6 @@ CREATE_MPS_STRUCTURED_UNARY_ROUNDING_TORCH_IMPL_FUNC(round_out_mps, round)
     });                                                                                                          \
   }
 
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(exp_out_mps, exponent)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(exp2_out_mps, exponentBase2)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(reciprocal_out_mps, reciprocal)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(sqrt_out_mps, squareRoot)
@@ -254,7 +251,6 @@ CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acos_out_mps, acos)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atan_out_mps, atan)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(sinh_out_mps, sinh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(cosh_out_mps, cosh)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(tanh_out_mps, tanh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asinh_out_mps, asinh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)

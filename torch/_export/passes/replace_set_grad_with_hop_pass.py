@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import copy
 
@@ -146,11 +147,25 @@ def _sequential_split_and_maybe_inline_subgraphs(
             need_replacing = True
 
     if need_replacing:
+        # sequential_split returns a new graph module that could have different output
+        # args names. We need to fix the graph signature.
         new_gm = sequential_split(gm, _is_set_grad_enabled_node)
 
         replace_ctx = contextlib.nullcontext()
+        new_signature = None
         if graph_signature is not None:
-            replace_ctx = new_gm._set_replace_hook(graph_signature.get_replace_hook())  # type: ignore[assignment]
+            new_signature = copy.deepcopy(graph_signature)
+            new_gm_out_node = next(reversed(new_gm.graph.find_nodes(op="output")))
+            assert new_gm_out_node.op == "output" and len(
+                new_gm_out_node.args[0]
+            ) == len(new_signature.output_specs)
+            for arg_node, out_spec in zip(
+                new_gm_out_node.args[0], new_signature.output_specs
+            ):
+                if out_spec.arg.name != arg_node.name:
+                    out_spec.arg.name = arg_node.name
+
+            replace_ctx = new_gm._set_replace_hook(new_signature.get_replace_hook())  # type: ignore[assignment]
 
         with replace_ctx:
 
@@ -169,22 +184,24 @@ def _sequential_split_and_maybe_inline_subgraphs(
                 ),
             )
         new_gm.recompile()
-        return new_gm
+        return new_gm, new_signature
 
-    return gm
+    return gm, graph_signature
 
 
 def replace_set_grad_with_hop_pass(gm: torch.fx.GraphModule, graph_signature):
-    new_gm = _sequential_split_and_maybe_inline_subgraphs(gm, graph_signature)
+    new_gm, new_signature = _sequential_split_and_maybe_inline_subgraphs(
+        gm, graph_signature
+    )
     # recursively call
     for node in new_gm.graph.nodes:
         if node.op == "get_attr":
             subgm = getattr(new_gm, node.target)
             if not isinstance(subgm, torch.fx.GraphModule):
                 continue
-            new_subgm = replace_set_grad_with_hop_pass(subgm, None)
+            new_subgm, _ = replace_set_grad_with_hop_pass(subgm, None)
             setattr(new_gm, node.target, new_subgm)
 
     new_gm.recompile()
     new_gm.graph.lint()
-    return new_gm
+    return new_gm, new_signature

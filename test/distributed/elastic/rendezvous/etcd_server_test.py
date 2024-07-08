@@ -10,6 +10,7 @@ import sys
 import unittest
 
 import etcd
+
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import (
     EtcdRendezvous,
     EtcdRendezvousHandler,

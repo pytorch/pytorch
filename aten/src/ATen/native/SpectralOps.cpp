@@ -1195,15 +1195,6 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 #undef REPR
 }
 
-static Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
-             const optional<int64_t> win_lengthOpt, const Tensor& window,
-             const bool center, const bool normalized, const optional<bool> onesidedOpt,
-             const optional<int64_t> lengthOpt) {
-  return at::native::istft(
-      self, n_fft, hop_lengthOpt, win_lengthOpt, window, center, normalized,
-      onesidedOpt, lengthOpt, /*return_complex=*/false);
-}
-
 void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
   const auto input_sizes = input.sizes();
   const auto input_strides = input.strides();

@@ -1120,6 +1120,34 @@ torch.cuda.synchronize()
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
 
+    @onlyCPU
+    @dtypes(torch.int32, torch.int64)
+    def test_max_pool2d_corner_cases(self, device, dtype):
+        def check(x, args, expected, memory_format):
+            model = torch.nn.MaxPool2d(*args)
+            if isinstance(x, list):
+                x = torch.tensor(x, device=device, dtype=dtype).to(
+                    memory_format=memory_format
+                )
+                expected = torch.tensor(expected, device=device, dtype=dtype).to(
+                    memory_format=memory_format
+                )
+            self.assertEqual(model(x), expected)
+
+        # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
+        check(
+            [[[[-1, -2], [-3, -4]]]],
+            (2, 2, 1, 2, False, True),
+            [[[[-4, -4], [-4, -4]]]],
+            torch.contiguous_format,
+        )
+        check(
+            [[[[-1, -2], [-3, -4]]]],
+            (2, 2, 1, 2, False, True),
+            [[[[-4, -4], [-4, -4]]]],
+            torch.channels_last,
+        )
+
     @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)

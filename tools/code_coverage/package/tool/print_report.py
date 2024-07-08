@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import os
 import subprocess
-from typing import Dict, IO, List, Set, Tuple
+from typing import IO, Tuple
 
 from ..oss.utils import get_pytorch_folder
 from ..util.setting import SUMMARY_FOLDER_DIR, TestList, TestStatusType
+
 
 CoverageItem = Tuple[str, float, int, int]
 
@@ -16,7 +19,7 @@ def key_by_name(x: CoverageItem) -> str:
     return x[0]
 
 
-def is_intrested_file(file_path: str, interested_folders: List[str]) -> bool:
+def is_intrested_file(file_path: str, interested_folders: list[str]) -> bool:
     if "cuda" in file_path:
         return False
     if "aten/gen_aten" in file_path or "aten/aten_" in file_path:
@@ -27,7 +30,7 @@ def is_intrested_file(file_path: str, interested_folders: List[str]) -> bool:
     return False
 
 
-def is_this_type_of_tests(target_name: str, test_set_by_type: Set[str]) -> bool:
+def is_this_type_of_tests(target_name: str, test_set_by_type: set[str]) -> bool:
     # tests are divided into three types: success / partial success / fail to collect coverage
     for test in test_set_by_type:
         if target_name in test:
@@ -36,7 +39,7 @@ def is_this_type_of_tests(target_name: str, test_set_by_type: Set[str]) -> bool:
 
 
 def print_test_by_type(
-    tests: TestList, test_set_by_type: Set[str], type_name: str, summary_file: IO[str]
+    tests: TestList, test_set_by_type: set[str], type_name: str, summary_file: IO[str]
 ) -> None:
     print("Tests " + type_name + " to collect coverage:", file=summary_file)
     for test in tests:
@@ -48,8 +51,8 @@ def print_test_by_type(
 def print_test_condition(
     tests: TestList,
     tests_type: TestStatusType,
-    interested_folders: List[str],
-    coverage_only: List[str],
+    interested_folders: list[str],
+    coverage_only: list[str],
     summary_file: IO[str],
     summary_type: str,
 ) -> None:
@@ -77,10 +80,10 @@ def print_test_condition(
 def line_oriented_report(
     tests: TestList,
     tests_type: TestStatusType,
-    interested_folders: List[str],
-    coverage_only: List[str],
-    covered_lines: Dict[str, Set[int]],
-    uncovered_lines: Dict[str, Set[int]],
+    interested_folders: list[str],
+    coverage_only: list[str],
+    covered_lines: dict[str, set[int]],
+    uncovered_lines: dict[str, set[int]],
 ) -> None:
     with open(os.path.join(SUMMARY_FOLDER_DIR, "line_summary"), "w+") as report_file:
         print_test_condition(
@@ -119,13 +122,13 @@ def print_file_summary(
 
 def print_file_oriented_report(
     tests_type: TestStatusType,
-    coverage: List[CoverageItem],
+    coverage: list[CoverageItem],
     covered_summary: int,
     total_summary: int,
     summary_file: IO[str],
     tests: TestList,
-    interested_folders: List[str],
-    coverage_only: List[str],
+    interested_folders: list[str],
+    coverage_only: list[str],
 ) -> None:
     coverage_percentage = print_file_summary(
         covered_summary, total_summary, summary_file
@@ -155,10 +158,10 @@ def print_file_oriented_report(
 def file_oriented_report(
     tests: TestList,
     tests_type: TestStatusType,
-    interested_folders: List[str],
-    coverage_only: List[str],
-    covered_lines: Dict[str, Set[int]],
-    uncovered_lines: Dict[str, Set[int]],
+    interested_folders: list[str],
+    coverage_only: list[str],
+    covered_lines: dict[str, set[int]],
+    uncovered_lines: dict[str, set[int]],
 ) -> None:
     with open(os.path.join(SUMMARY_FOLDER_DIR, "file_summary"), "w+") as summary_file:
         covered_summary = 0
@@ -193,7 +196,7 @@ def file_oriented_report(
         )
 
 
-def get_html_ignored_pattern() -> List[str]:
+def get_html_ignored_pattern() -> list[str]:
     return ["/usr/*", "*anaconda3/*", "*third_party/*"]
 
 

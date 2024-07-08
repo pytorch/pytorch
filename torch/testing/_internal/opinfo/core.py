@@ -11,8 +11,6 @@ from functools import partial
 from itertools import product
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
-from torchgen.utils import dataclass_repr
-
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
@@ -30,11 +28,14 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     noncontiguous_like,
+    OPINFO_SAMPLE_INPUT_INDEX,
     TEST_WITH_ROCM,
     torch_to_numpy_dtype_dict,
     TrackedInputIter,
 )
 from torch.testing._internal.opinfo import utils
+
+from torchgen.utils import dataclass_repr
 
 # Reasonable testing sizes for dimensions
 L = 20
@@ -727,6 +728,9 @@ class OpInfo:
     # dtypes this function is expected to work with on ROCM
     dtypesIfROCM: _dispatch_dtypes = None
 
+    # dtypes this function is expected to work with on XPU
+    dtypesIfXPU: _dispatch_dtypes = None
+
     # backward dtypes this function is expected to work with
     backward_dtypes: _dispatch_dtypes = None
 
@@ -891,7 +895,12 @@ class OpInfo:
 
         assert self.dtypes is not None, f"OpInfo for {self.name} has no dtypes!"
 
-        dtypes_args = (self.dtypes, self.dtypesIfCUDA, self.dtypesIfROCM)
+        dtypes_args = (
+            self.dtypes,
+            self.dtypesIfCUDA,
+            self.dtypesIfROCM,
+            self.dtypesIfXPU,
+        )
 
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in dtypes_args:
@@ -959,6 +968,9 @@ class OpInfo:
             set(self.dtypesIfROCM)
             if self.dtypesIfROCM is not None
             else self.dtypesIfCUDA
+        )
+        self.dtypesIfXPU = (
+            set(self.dtypesIfXPU) if self.dtypesIfXPU is not None else self.dtypesIfCUDA
         )
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
@@ -1166,6 +1178,7 @@ class OpInfo:
         tensor in a sequence input conjugated.
         """
 
+        set_seed = kwargs.pop("set_seed", True)
         samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
         conj_samples = list(samples)
 
@@ -1182,7 +1195,12 @@ class OpInfo:
             else:
                 sample.input[0] = conjugate(sample.input[0])
 
-        return TrackedInputIter(iter(conj_samples), "conjugate sample input")
+        return TrackedInputIter(
+            iter(conj_samples),
+            "conjugate sample input",
+            set_seed=set_seed,
+            restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
+        )
 
     def sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """
@@ -1191,6 +1209,7 @@ class OpInfo:
         These samples should be sufficient to test the function works correctly
         with autograd, TorchScript, etc.
         """
+        set_seed = kwargs.pop("set_seed", True)
         samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
 
         if kwargs.get("include_conjugated_inputs", False):
@@ -1201,7 +1220,12 @@ class OpInfo:
             samples_list.extend(conj_samples)
             samples = tuple(samples_list)
 
-        return TrackedInputIter(iter(samples), "sample input")
+        return TrackedInputIter(
+            iter(samples),
+            "sample input",
+            set_seed=set_seed,
+            restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
+        )
 
     def reference_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """
@@ -1211,11 +1235,17 @@ class OpInfo:
         of inputs when reference_inputs_func is defined. If undefined this returns
         the sample inputs.
         """
+        set_seed = kwargs.pop("set_seed", True)
         if self.reference_inputs_func is None:
             samples = self.sample_inputs_func(
                 self, device, dtype, requires_grad, **kwargs
             )
-            return TrackedInputIter(iter(samples), "sample input")
+            return TrackedInputIter(
+                iter(samples),
+                "reference input",
+                set_seed=set_seed,
+                restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
+            )
 
         if kwargs.get("include_conjugated_inputs", False):
             raise NotImplementedError
@@ -1223,15 +1253,25 @@ class OpInfo:
         references = self.reference_inputs_func(
             self, device, dtype, requires_grad, **kwargs
         )
-        return TrackedInputIter(iter(references), "reference input")
+        return TrackedInputIter(
+            iter(references),
+            "reference input",
+            set_seed=set_seed,
+            restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
+        )
 
     def error_inputs(self, device, **kwargs):
         """
         Returns an iterable of ErrorInputs.
         """
+        set_seed = kwargs.pop("set_seed", True)
         errs = self.error_inputs_func(self, device, **kwargs)
         return TrackedInputIter(
-            iter(errs), "error input", callback=lambda e: e.sample_input
+            iter(errs),
+            "error input",
+            callback=lambda e: e.sample_input,
+            set_seed=set_seed,
+            restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
 
     def error_inputs_sparse(self, device, layout, **kwargs):
@@ -1346,6 +1386,8 @@ class OpInfo:
         device_type = torch.device(device_type).type
         if device_type == "cuda":
             return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
+        if device_type == "xpu":
+            return self.dtypesIfXPU
         return self.dtypes
 
     def supported_backward_dtypes(self, device_type):
@@ -2631,6 +2673,7 @@ class ShapeFuncInfo(OpInfo):
         dtypes=floating_types(),
         dtypesIfCUDA=None,
         dtypesIfROCM=None,
+        dtypesIfXPU=None,
         sample_inputs_func=None,
         **kwargs,
     ):
@@ -2639,6 +2682,7 @@ class ShapeFuncInfo(OpInfo):
             dtypes=dtypes,
             dtypesIfCUDA=dtypesIfCUDA,
             dtypesIfROCM=dtypesIfROCM,
+            dtypesIfXPU=dtypesIfXPU,
             sample_inputs_func=sample_inputs_func,
             **kwargs,
         )

@@ -5,6 +5,7 @@
 #include <ATen/ExpandUtils.h>
 #include <torch/library.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/native/quantized/cpu/BinaryOps.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
@@ -500,7 +501,7 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 
 }  // namespace
 
-static Tensor quantized_add(Tensor qa, Tensor qb, double scale, int64_t zero_point){
+Tensor quantized_add(Tensor qa, Tensor qb, double scale, int64_t zero_point){
   return qadd<false>(std::move(qa), std::move(qb), scale, zero_point);
 }
 

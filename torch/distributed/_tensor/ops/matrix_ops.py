@@ -4,7 +4,7 @@ import itertools
 from typing import List, Optional
 
 import torch
-from torch.distributed._tensor.op_schema import OpSchema, OpStrategy, PlacementStrategy
+from torch.distributed._tensor._op_schema import OpSchema, OpStrategy, PlacementStrategy
 from torch.distributed._tensor.ops.basic_strategy import gen_einsum_strategies
 from torch.distributed._tensor.ops.utils import (
     generate_redistribute_costs,
@@ -19,8 +19,8 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
-
 from torch.distributed.device_mesh import DeviceMesh
+
 
 aten = torch.ops.aten
 

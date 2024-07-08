@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import cProfile
 import dis
@@ -178,9 +179,7 @@ def preserve_global_state(fn):
             finally:
                 cleanup.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
-                torch.torch.autograd.grad_mode._enter_inference_mode(
-                    prior_inference_mode
-                )
+                torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
                 torch.use_deterministic_algorithms(
                     prior_deterministic, warn_only=prior_warn_only
                 )
@@ -361,17 +360,34 @@ def cprofile_wrapper(func):
     return profile_wrapper
 
 
-def convert_frame_assert(
-    compiler_fn: CompilerFn,
-    one_graph: bool = True,
-    export: bool = False,
-    export_constraints=None,
-):
-    """Fully convert a frame into an FX graph"""
-    reset_graph_break_dup_checker()
+class ConvertFrameAssert:
+    def __init__(
+        self,
+        compiler_fn: CompilerFn,
+        one_graph: bool = True,
+        export: bool = False,
+        export_constraints=None,
+    ):
+        reset_graph_break_dup_checker()
+        self._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
+        self._one_graph = one_graph
+        self._export = export
+        self._export_constraints = export_constraints
 
-    def _convert_frame_assert(
-        frame: types.FrameType, cache_entry, hooks: Hooks, frame_state, *, skip: int = 0
+    @property
+    def _clone_with_backend(self):
+        return lambda backend: convert_frame_assert(
+            backend, self._one_graph, self._export, self._export_constraints
+        )
+
+    def __call__(
+        self,
+        frame: types.FrameType,
+        cache_entry,
+        hooks: Hooks,
+        frame_state,
+        *,
+        skip: int = 0,
     ):
         increment_frame()
 
@@ -458,10 +474,10 @@ def convert_frame_assert(
             frame.f_globals,
             frame.f_locals,
             frame.f_builtins,
-            compiler_fn,
-            one_graph,
-            export,
-            export_constraints,
+            self._torchdynamo_orig_callable,
+            self._one_graph,
+            self._export,
+            self._export_constraints,
             hooks,
             cache_entry,
             cache_size,
@@ -471,13 +487,15 @@ def convert_frame_assert(
             skip=skip + 1,
         )
 
-    _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
 
-    def _clone_with_backend(backend):
-        return convert_frame_assert(backend, one_graph, export, export_constraints)
-
-    _convert_frame_assert._clone_with_backend = _clone_with_backend  # type: ignore[attr-defined]
-    return _convert_frame_assert
+def convert_frame_assert(
+    compiler_fn: CompilerFn,
+    one_graph: bool = True,
+    export: bool = False,
+    export_constraints=None,
+):
+    """Fully convert a frame into an FX graph"""
+    return ConvertFrameAssert(compiler_fn, one_graph, export, export_constraints)
 
 
 from collections import OrderedDict
@@ -876,6 +894,7 @@ def _compile(
                 dynamo_time_before_restart = time.time() - start_time
 
             metrics = CompilationMetrics(
+                str(compile_id),
                 frame_key,
                 code.co_name,
                 code.co_filename,
@@ -906,16 +925,27 @@ def _compile(
             torch._dynamo.callback_handler.run_end_callbacks()
 
 
-def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
-    """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
+class ConvertFrame:
+    def __init__(self, compiler_fn: CompilerFn, hooks: Hooks):
+        self._torchdynamo_orig_callable = compiler_fn
+        self._inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
+        self._hooks = hooks
 
-    def _convert_frame(
-        frame: types.FrameType, cache_entry, hooks: Hooks, frame_state, skip: int = 0
+    @property
+    def _clone_with_backend(self):
+        return lambda backend: convert_frame(backend, self._hooks)
+
+    def __call__(
+        self,
+        frame: types.FrameType,
+        cache_entry,
+        hooks: Hooks,
+        frame_state,
+        skip: int = 0,
     ):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(
+            result = self._inner_convert(
                 frame, cache_entry, hooks, frame_state, skip=skip + 1
             )
             counters["frames"]["ok"] += 1
@@ -979,9 +1009,10 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
                 log.warning(error_msg, exc_info=True)
         return None
 
-    _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
-    _convert_frame._clone_with_backend = lambda backend: convert_frame(backend, hooks)  # type: ignore[attr-defined]
-    return _convert_frame
+
+def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
+    """Try to convert a frame into an FX graph, if error leave frame unmodified"""
+    return ConvertFrame(compiler_fn, hooks)
 
 
 # TODO mlazos: add support for same args, or record them
@@ -1022,22 +1053,31 @@ def first_real_inst_idx(code):
     raise RuntimeError("RESUME instruction not found in code")
 
 
-def catch_errors_wrapper(callback, hooks: Hooks):
-    @functools.wraps(callback)
-    def catch_errors(frame, cache_entry, frame_state):
+class CatchErrorsWrapper:
+    def __init__(self, callback, hooks):
+        functools.wraps(callback)(self)
+        self._torchdynamo_orig_callable = callback
+        self.hooks = hooks
+
+    def __call__(self, frame, cache_entry, frame_state):
         assert frame_state is not None
 
         is_skipfile = trace_rules.check(frame.f_code)
+        if sys.version_info >= (3, 13):
+            has_started_execution = frame.f_lasti > first_real_inst_idx(frame.f_code)
+        else:
+            has_started_execution = frame.f_lasti >= first_real_inst_idx(frame.f_code)
         if (
             # TODO: the first condition is not covered by any test
-            frame.f_lasti >= first_real_inst_idx(frame.f_code)
+            has_started_execution
             or is_skipfile
             or config.disable
         ):
             if log.isEnabledFor(logging.DEBUG):
+                print(frame.f_lasti, first_real_inst_idx(frame.f_code))
                 skip_reason = (
                     "traced frame already"
-                    if frame.f_lasti >= first_real_inst_idx(frame.f_code)
+                    if has_started_execution
                     else (
                         "in skipfiles"
                         if trace_rules.check(frame.f_code)
@@ -1062,19 +1102,26 @@ def catch_errors_wrapper(callback, hooks: Hooks):
 
                     ddp_optimizer = DDPOptimizer(
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
-                        backend_compile_fn=callback._torchdynamo_orig_callable,
+                        backend_compile_fn=self._torchdynamo_orig_callable._torchdynamo_orig_callable,
                     )
                     assert hasattr(
-                        callback, "_clone_with_backend"
+                        self._torchdynamo_orig_callable, "_clone_with_backend"
                     ), "DDPOptimizer only supports callback fns that know how to clone themselves."
-                    hijacked_callback = callback._clone_with_backend(
-                        ddp_optimizer.compile_fn,
+                    hijacked_callback = (
+                        self._torchdynamo_orig_callable._clone_with_backend(
+                            ddp_optimizer.compile_fn,
+                        )
                     )
-                    return hijacked_callback(frame, cache_entry, hooks, frame_state)
+                    return hijacked_callback(
+                        frame, cache_entry, self.hooks, frame_state
+                    )
 
         with compile_lock, _disable_current_modes():
             # skip=1: skip this frame
-            return callback(frame, cache_entry, hooks, frame_state, skip=1)
+            return self._torchdynamo_orig_callable(
+                frame, cache_entry, self.hooks, frame_state, skip=1
+            )
 
-    catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
-    return catch_errors
+
+def catch_errors_wrapper(callback, hooks: Hooks):
+    return CatchErrorsWrapper(callback, hooks)

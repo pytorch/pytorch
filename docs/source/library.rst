@@ -1,3 +1,5 @@
+.. _torch-library-docs:
+
 torch.library
 ===================================
 .. py:module:: torch.library
@@ -9,7 +11,8 @@ custom operators, and extending operators defined with PyTorch's C++ operator
 registration APIs (e.g. aten operators).
 
 For a detailed guide on effectively using these APIs, please see
-`this gdoc <https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ/edit>`_
+Please see :ref:`custom-ops-landing-page`
+for more details on how to effectively use these APIs.
 
 Testing custom ops
 ------------------
@@ -41,6 +44,7 @@ via PyTorch's C++ operator registration APIs).
 .. autofunction:: register_fake
 .. autofunction:: impl_abstract
 .. autofunction:: get_ctx
+.. autofunction:: infer_schema
 
 Low-level APIs
 --------------

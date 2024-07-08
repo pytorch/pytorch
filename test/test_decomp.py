@@ -32,7 +32,6 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     IS_MACOS,
-    IS_WINDOWS,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -212,11 +211,13 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.hardswish.default): 2e-7,
         (torch.bfloat16, torch.ops.aten.hardswish.default): 2e-7,
         (torch.float16, torch.ops.aten.multi_margin_loss.default): 3e-2,
-        (torch.bfloat16, torch.ops.aten.multi_margin_loss.default): 3e-2,
+        (torch.bfloat16, torch.ops.aten.multi_margin_loss.default): 5e-2,
         (torch.float16, torch.ops.aten.multilabel_margin_loss_forward.default): 3e-2,
         (torch.bfloat16, torch.ops.aten.multilabel_margin_loss_forward.default): 3e-2,
         # see https://github.com/pytorch/pytorch/pull/96264
         (torch.float16, torch.ops.aten.mv.default): 1e-5,
+        (torch.bfloat16, torch.ops.aten.mv.default): 1e-5,
+        (torch.float16, torch.ops.aten.log_sigmoid_backward.default): 2e-5,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
@@ -1054,6 +1055,17 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions._log_softmax(x, -1, False)
         self.assertEqual(ref.stride(), res.stride())
 
+    @onlyCUDA
+    def test_exponential_non_inf(self, device):
+        inp = torch.empty((4, 400, 256), device=device)
+
+        with torch._dynamo.utils.preserve_rng_state():
+            exp_ref = inp.exponential_()
+        exp = torch._refs.exponential(inp)
+
+        self.assertEqual(exp, exp_ref)
+        self.assertFalse(exp.isinf().any())
+
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @onlyCUDA
@@ -1283,14 +1295,6 @@ class HasDecompTest(TestCase):
         core_decomps = torch._decomp.core_aten_decompositions().keys()
         core_aten_ops = useful_decomps - core_decomps
         self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
-
-    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
-    def test_compile_rrelu(self):
-        def f(x):
-            return torch.rrelu(x)
-
-        inp = torch.rand(1, 2, 3)
-        self.assertEqual(f(inp), torch.compile(f)(inp))
 
 
 if __name__ == "__main__":

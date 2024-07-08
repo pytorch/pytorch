@@ -26,7 +26,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
-from ..bytecode_transformation import create_call_method
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented, UserError, UserErrorType
 from ..external_utils import call_hook_from_backward_state
@@ -125,6 +124,7 @@ class TensorVariable(VariableTracker):
         is_quantized,
         is_sparse,
         class_type,
+        has_grad_fn,
         size=None,
         stride=None,
         is_contiguous=None,
@@ -144,6 +144,7 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
+        self.has_grad_fn = has_grad_fn
         if _is_name_set is None:
             # no need to rename inputs
             _is_name_set = self.proxy.node.op == "placeholder"
@@ -171,6 +172,13 @@ class TensorVariable(VariableTracker):
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
+        try:
+            props["has_grad_fn"] = value.grad_fn is not None
+        except Exception:
+            # Workaround for issues with create_parameter_op in Dynamo. Reading
+            # grad_fn should never cause an issue.
+            props["has_grad_fn"] = False
+
         if is_sparse_any(value) and not has_free_symbols(value):
             props["size"] = tuple(
                 [int(s) if is_symbolic(s) else s for s in value.size()]
@@ -313,6 +321,12 @@ class TensorVariable(VariableTracker):
     def method_attr_data(self, tx):
         return self.call_method(tx, "detach", [], {})
 
+    def method_attr_grad_fn(self, tx):
+        if self.has_grad_fn:
+            unimplemented("TensorVariable has a grad_fn")
+        else:
+            return variables.ConstantVariable(None)
+
     def method_attr__version(self, tx):
         from ..tensor_version_op import _tensor_version
 
@@ -406,21 +420,33 @@ class TensorVariable(VariableTracker):
     def unpack_var_sequence(self, tx, idxes=None):
         from .builder import wrap_fx_proxy_cls
 
-        if idxes is None:
-            if self.size:
-                length = self.size[0]
+        if self.size:
+            size_len = len(self.size)
+        else:
+            size_var = self.call_method(tx, "size", [], {})
+            assert isinstance(size_var, SizeVariable)
+            size_len = len(size_var.items)
+        # Ensure we don't unpack a scalar tensor.
+        assert size_len != 0, "Can't unpack scalar tensors."
+
+        if self.size:
+            length = self.size[0]
+        else:
+            dyn_length = self.call_method(tx, "size", [ConstantVariable.create(0)], {})
+            # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values produced through
+            # symbolic_shapes, but that end up as int/sympy.Integer
+            assert isinstance(dyn_length, (SymNodeVariable, ConstantVariable))
+            if isinstance(dyn_length, SymNodeVariable):
+                length = dyn_length.evaluate_expr(tx.output)
             else:
-                dyn_length = self.call_method(
-                    tx, "size", [ConstantVariable.create(0)], {}
-                )
-                # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values produced through
-                # symbolic_shapes, but that end up as int/sympy.Integer
-                assert isinstance(dyn_length, (SymNodeVariable, ConstantVariable))
-                if isinstance(dyn_length, SymNodeVariable):
-                    length = dyn_length.evaluate_expr(tx.output)
-                else:
-                    length = dyn_length.value
+                length = dyn_length.value
+
+        if idxes is None:
             idxes = range(length)
+        else:
+            assert (
+                len(idxes) == length
+            ), f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
         return [
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
@@ -1296,5 +1322,5 @@ class UntypedStorageVariable(VariableTracker):
 
     def reconstruct(self, codegen):
         codegen(self.from_tensor)
-        codegen.append_output(codegen.create_load_method("untyped_storage"))
-        codegen.extend_output(create_call_method(0))
+        codegen.load_method("untyped_storage")
+        codegen.call_method(0)

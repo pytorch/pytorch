@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import (  # for onnx.ModelProto (ONNXProgram) and onnxruntime (ONNXRuntimeOptions)
     annotations,
 )
@@ -30,7 +31,6 @@ from typing import (
     TypeVar,
     Union,
 )
-
 from typing_extensions import Self
 
 import torch
@@ -1277,6 +1277,12 @@ class Exporter:
                     "ONNXScript optimizer is not available. Skipping optimization. "
                     "Please `pip install onnxscript -U` to enable post-export optimization."
                 )
+            except Exception as e:
+                warnings.warn(
+                    "ONNXScript optimizer failed. Skipping optimization. "
+                    "\n\nPLEASE REPORT A BUG AT https://github.com/microsoft/onnxscript/issues "
+                    f"\n\nDetail:\n{e}"
+                )
 
             return torch.onnx.ONNXProgram(
                 onnx_model,
@@ -1495,12 +1501,15 @@ def dynamo_export(
     _assert_dependencies(resolved_export_options)
 
     try:
-        return Exporter(
-            options=resolved_export_options,
-            model=model,
-            model_args=model_args,
-            model_kwargs=model_kwargs,
-        ).export()
+        from torch._dynamo import config as _dynamo_config
+
+        with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
+            return Exporter(
+                options=resolved_export_options,
+                model=model,
+                model_args=model_args,
+                model_kwargs=model_kwargs,
+            ).export()
     except Exception as e:
         sarif_report_path = _DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH
         resolved_export_options.diagnostic_context.dump(sarif_report_path)

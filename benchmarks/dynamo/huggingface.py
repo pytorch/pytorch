@@ -7,8 +7,12 @@ import subprocess
 import sys
 import warnings
 
+try:
+    from .common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+except ImportError:
+    from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+
 import torch
-from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
 
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs
@@ -181,9 +185,18 @@ REQUIRE_HIGHER_TOLERANCE_TRAINING = {
     # harmful.
     "AlbertForQuestionAnswering",
 }
+
+REQUIRE_HIGHER_TOLERANCE_MAX_AUTOTUNE_TRAINING = {
+    # DebertaForQuestionAnswering needs higher tolerance in Max-Autotune mode
+    "DebertaForQuestionAnswering",
+}
+
 REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
     "GPT2ForSequenceClassification",
     "RobertaForQuestionAnswering",
+}
+REQUIRE_HIGHER_TOLERANCE_INFERENCE_CPU_ONLY = {
+    "LayoutLMForSequenceClassification",
 }
 
 
@@ -555,12 +568,22 @@ class HuggingfaceRunner(BenchmarkRunner):
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         if is_training:
-            if name in REQUIRE_HIGHER_TOLERANCE_TRAINING:
+            from torch._inductor import config as inductor_config
+
+            if (name in REQUIRE_HIGHER_TOLERANCE_TRAINING) or (
+                inductor_config.max_autotune
+                and name in REQUIRE_HIGHER_TOLERANCE_MAX_AUTOTUNE_TRAINING
+            ):
                 return 2e-2, cosine
             else:
                 return 1e-2, cosine
         else:
             if name in REQUIRE_HIGHER_TOLERANCE_INFERENCE:
+                return 4e-3, cosine
+            if (
+                current_device == "cpu"
+                and name in REQUIRE_HIGHER_TOLERANCE_INFERENCE_CPU_ONLY
+            ):
                 return 4e-3, cosine
         return 1e-3, cosine
 

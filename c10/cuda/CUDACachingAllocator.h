@@ -170,8 +170,9 @@ struct TraceEntry {
     SEGMENT_UNMAP, // unmap part of a segment (used with expandable segments)
     SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
               // events
-    OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free
-        // bytes reported by cuda)
+    OOM, // the allocator threw an OutOfMemoryError (addr_ is the amount of free
+         // bytes reported by cuda)
+    USER_DEFINED // a call made from user defined API such as record_function
   };
   TraceEntry(
       Action action,
@@ -289,6 +290,7 @@ class CUDAAllocator : public Allocator {
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
       RecordContext when) = 0;
+  virtual void recordAnnotation(const std::shared_ptr<GatheredContext>& name){};
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
   // Attached AllocatorTraceTracker callbacks will be called while the
@@ -426,6 +428,10 @@ inline void recordHistory(
     RecordContext when) {
   return get()->recordHistory(
       enabled, context_recorder, alloc_trace_max_entries, when);
+}
+
+inline void recordAnnotation(const std::shared_ptr<GatheredContext>& name) {
+  return get()->recordAnnotation(name);
 }
 
 inline bool isHistoryEnabled() {

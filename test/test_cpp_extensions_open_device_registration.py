@@ -7,12 +7,18 @@ import tempfile
 import types
 import unittest
 from typing import Union
+from unittest.mock import patch
 
 import torch
 
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
-from torch.testing._internal.common_utils import IS_ARM64, skipIfTorchDynamo, TEST_CUDA
+from torch.testing._internal.common_utils import (
+    IS_ARM64,
+    skipIfTorchDynamo,
+    TemporaryFileName,
+    TEST_CUDA,
+)
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 
@@ -571,6 +577,24 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         z = torch._foreach_add(x, y)
         self.assertEqual(z_cpu, z[0])
         self.assertEqual(z_cpu, z[1])
+
+    def test_open_device_numpy_serialization_map_location(self):
+        torch.utils.rename_privateuse1_backend("foo")
+        device = self.module.custom_device()
+        default_protocol = torch.serialization.DEFAULT_PROTOCOL
+        # This is a hack to test serialization through numpy
+        with patch.object(torch._C, "_has_storage", return_value=False):
+            x = torch.randn(2, 3)
+            x_foo = x.to(device)
+            sd = {"x": x_foo}
+            rebuild_func = x_foo._reduce_ex_internal(default_protocol)[0]
+            self.assertTrue(
+                rebuild_func is torch._utils._rebuild_device_tensor_from_numpy
+            )
+            with TemporaryFileName() as f:
+                torch.save(sd, f)
+                sd_loaded = torch.load(f, map_location="cpu")
+                self.assertTrue(sd_loaded["x"].is_cpu)
 
 
 if __name__ == "__main__":

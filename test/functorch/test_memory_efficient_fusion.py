@@ -8,6 +8,7 @@ from typing import Callable
 import torch
 import torch.fx as fx
 import torch.nn as nn
+
 from functorch import make_fx
 from functorch.compile import memory_efficient_fusion
 from torch._functorch.compile_utils import fx_graph_cse

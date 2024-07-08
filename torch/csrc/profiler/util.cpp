@@ -13,9 +13,7 @@
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #endif // USE_DISTRIBUTED
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 namespace {
 std::optional<bool> soft_assert_raises_;
@@ -392,6 +390,9 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
   }
   auto& groupRanks = debugInfo->getGroupRanks();
   map.emplace(kGroupRanks, format_list(groupRanks, truncate));
+
+  auto rank = debugInfo->getRank();
+  map.emplace(kRank, std::to_string(rank));
 #endif // USE_DISTRIBUTED
   return map;
 }
@@ -747,6 +748,4 @@ uint64_t computeFlops(
   return 0;
 }
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl
