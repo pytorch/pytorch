@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
+# flake8: noqa C101
 """This module implements the user facing API for flex_attention in PyTorch."""
 import functools
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Optional, Tuple
 
 import torch
 from torch._higher_order_ops.flex_attention import (
@@ -239,7 +240,7 @@ def _create_block_mask_from_mask(
         mask, KV_BLOCK_SIZE=KV_BLOCK_SIZE, Q_BLOCK_SIZE=Q_BLOCK_SIZE
     )
 
-    def create_block_mask_obj(block_mask: torch.Tensor) -> Tuple:
+    def create_block_mask_tuple(block_mask: torch.Tensor) -> Tuple:
         block_mask = block_mask.to(dtype=torch.int32)
         kv_num_blocks = block_mask.sum(dim=3)
         kv_indices = torch.argsort(block_mask, dim=3, descending=True, stable=True)
@@ -254,14 +255,20 @@ def _create_block_mask_from_mask(
             q_indices.to(torch.int32).to(mask.device).contiguous(),
         )
 
-    full_bm = create_block_mask_obj(full_blocks)
-    partial_bm = create_block_mask_obj(partial_blocks)
+    full_bm = create_block_mask_tuple(full_blocks)
+    partial_bm = create_block_mask_tuple(partial_blocks)
 
     return _BlockMask(
-        *full_bm,
-        *partial_bm,
-        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
-        Q_BLOCK_SIZE=Q_BLOCK_SIZE,
+        full_bm[0],
+        full_bm[1],
+        full_bm[2],
+        full_bm[3],
+        partial_bm[0],
+        partial_bm[1],
+        partial_bm[2],
+        partial_bm[3],
+        KV_BLOCK_SIZE,
+        Q_BLOCK_SIZE,
     )
 
 
@@ -333,7 +340,7 @@ def _create_mask_from_mask_fn(
 
 
 def _create_block_mask(
-    fn: Union[_score_mod_signature, _mask_signature],
+    fn: Callable,
     B: int,
     H: int,
     M: int,
@@ -471,6 +478,8 @@ def _flex_attention(
             score_mod,
             mask_fn,
             block_mask.as_tuple(),
+            (),
+            (),
         )
         return out
 
@@ -494,6 +503,8 @@ def _flex_attention(
                     score_mod,
                     mask_fn,
                     block_mask.as_tuple(),
+                    (),
+                    (),
                 )
                 return out
 
