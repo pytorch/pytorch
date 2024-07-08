@@ -615,7 +615,7 @@ std::tuple<at::Tensor, at::Tensor> pre_process_group_query_attention_input(
     const at::Tensor& key,
     const at::Tensor& value,
     const bool enable_gqa) {
-  
+
   if (!enable_gqa) {
     return std::make_tuple(key, value);
   }
@@ -634,7 +634,7 @@ std::tuple<at::Tensor, at::Tensor> pre_process_group_query_attention_input(
   }
   auto repeat_key_shape = query.sym_size(-3) / key.sym_size(-3);
   auto repeat_value_shape = query.sym_size(-3) / value.sym_size(-3);
-  
+
   at::Tensor key_repeated = key.repeat_interleave_symint(repeat_key_shape, -3);
   at::Tensor value_repeated = value.repeat_interleave_symint(repeat_value_shape, -3);
   return std::make_tuple(std::move(key_repeated), std::move(value_repeated));
@@ -774,7 +774,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         attn_mask = at::ones_symint({L, S}, query.options().dtype(at::kBool)).tril();
         attn_mask = convert_boolean_attn_mask(attn_mask, query.dtype());
     }
-    
+
+
     // MQA/GQA handling
     auto [key_expanded, value_expanded] = pre_process_group_query_attention_input(query_, key, value, enable_gqa);
     auto attn = at::matmul(query, key_expanded.transpose(-2, -1) * scaling_factor);
