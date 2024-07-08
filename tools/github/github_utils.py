@@ -1,10 +1,10 @@
 """GitHub Utilities"""
 
+from __future__ import annotations
+
 import json
 import os
-
-from typing import Any, Callable, cast, Dict, Optional, Tuple
-
+from typing import Any, Callable, cast, Dict
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -13,11 +13,11 @@ from urllib.request import Request, urlopen
 def gh_fetch_url_and_headers(
     url: str,
     *,
-    headers: Optional[Dict[str, str]] = None,
-    data: Optional[Dict[str, Any]] = None,
-    method: Optional[str] = None,
+    headers: dict[str, str] | None = None,
+    data: dict[str, Any] | None = None,
+    method: str | None = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
-) -> Tuple[Any, Any]:
+) -> tuple[Any, Any]:
     if headers is None:
         headers = {}
     token = os.environ.get("GITHUB_TOKEN")
@@ -44,9 +44,9 @@ def gh_fetch_url_and_headers(
 def gh_fetch_url(
     url: str,
     *,
-    headers: Optional[Dict[str, str]] = None,
-    data: Optional[Dict[str, Any]] = None,
-    method: Optional[str] = None,
+    headers: dict[str, str] | None = None,
+    data: dict[str, Any] | None = None,
+    method: str | None = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
 ) -> Any:
     return gh_fetch_url_and_headers(
@@ -56,8 +56,8 @@ def gh_fetch_url(
 
 def _gh_fetch_json_any(
     url: str,
-    params: Optional[Dict[str, Any]] = None,
-    data: Optional[Dict[str, Any]] = None,
+    params: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
 ) -> Any:
     headers = {"Accept": "application/vnd.github.v3+json"}
     if params is not None and len(params) > 0:
@@ -69,13 +69,13 @@ def _gh_fetch_json_any(
 
 def gh_fetch_json_dict(
     url: str,
-    params: Optional[Dict[str, Any]] = None,
-    data: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    params: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return cast(Dict[str, Any], _gh_fetch_json_any(url, params, data))
 
 
-def gh_fetch_commit(org: str, repo: str, sha: str) -> Dict[str, Any]:
+def gh_fetch_commit(org: str, repo: str, sha: str) -> dict[str, Any]:
     return gh_fetch_json_dict(
         f"https://api.github.com/repos/{org}/{repo}/commits/{sha}"
     )
