@@ -17,8 +17,14 @@ class FunctionID:
 
 @dataclasses.dataclass(frozen=True)
 class PlaceholderInfo:
+    """
+    A serializable version of torch.fx.Node that contains information
+    pertinent to placeholder stack traces. We use these in logging and error messages
+    related to cudagraphs, and will cache these results.
+    """
     name: str
     stack_trace: Optional[str]
+    # This field is recursive, but never cyclic (since a node never uses itself)
     users: List[PlaceholderInfo]
     mutating_use_stack_trace: Optional[str]
 
