@@ -3,7 +3,7 @@
 import functools
 import itertools
 import operator
-from typing import cast, Iterable, List, Sequence, Tuple, Union
+from typing import cast, Iterable, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch.distributed._tensor._collective_utils import redistribute_cost
@@ -237,7 +237,7 @@ def generate_redistribute_costs(
 def expand_to_full_mesh_op_strategy(
     mesh: DeviceMesh,
     op_schema: OpSchema,
-    single_mesh_dim_strategies: List[List[Placement]],
+    single_mesh_dim_strategies: List[List[Optional[Placement]]],
     *,
     input_index: int = 1,
     inplace_op: bool = False,
@@ -251,7 +251,10 @@ def expand_to_full_mesh_op_strategy(
     for strategy_comb in strategy_combs:
         spec_list = []
         for specs in zip(*strategy_comb):
-            spec_list.append(DTensorSpec(mesh, tuple(specs)))
+            if specs[0] is not None:
+                spec_list.append(DTensorSpec(mesh, specs))
+            else:
+                spec_list.append(None)
 
         input_specs = spec_list[input_index:]
         input_args_strategy = op_schema.args_strategy
