@@ -16729,7 +16729,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # Lazy tensor failures: mutating and aliasing ops should all have codegen'd kernels
-               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
                DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
                # Could not run 'aten::narrow_copy.out' with arguments from the 'CUDA' backend
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace',
