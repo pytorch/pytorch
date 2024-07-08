@@ -24,7 +24,7 @@ class ThreadPool {
       (void)i; // Suppress unused variable warning
       threads_.emplace_back([this]() {
         c10::setThreadName("pt_thread_pool");
-        Worker(); 
+        Worker();
       });
     }
   }
