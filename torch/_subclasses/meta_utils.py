@@ -806,7 +806,8 @@ class MetaConverter:
                             if symbolic_context is None
                             else symbolic_context.inner_contexts[attr]
                         ),
-                    )
+                    ),
+                    orig_t=inner_t,
                 )
                 if self.copy_data:
                     with torch.no_grad(), no_dispatch():
