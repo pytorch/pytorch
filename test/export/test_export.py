@@ -4432,7 +4432,7 @@ graph():
                 return torch.randn(3, 4), torch.randn(3, 4)
 
         f = Module()
-        ep = torch.export.export(f, ())
+        ep = export(f, ())
         a, b = ep.module()()
         self.assertEqual(a.size(), torch.Size([3, 4]))
         self.assertEqual(b.size(), torch.Size([3, 4]))
@@ -4445,7 +4445,7 @@ graph():
                 return (torch.full((i0,), 0.0),)
 
         f = M()
-        ep = torch.export.export(f, ())
+        ep = export(f, ())
         a = ep.module()()[0]
         self.assertEqual(a.size(), torch.Size([11]))
         self.assertEqual(a, torch.zeros(11))
