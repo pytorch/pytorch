@@ -4381,9 +4381,14 @@ class ExternKernel(InputsKernel):
         # propagated the graph with, because for some operators running without a
         # constant would trigger an error / DataDependentException
         for x in tensor_args:
-            if x.get_name() in V.graph.constants:
+            # if x is a view of a constant, we need to realize the view
+            # (we can't pass the constant into the kernel directly)
+            if not isinstance(x, BaseView) and x.get_name() in V.graph.constants:
                 example_args.append(V.graph.constants[x.get_name()])
-            elif x.get_name() in V.graph.torchbind_constants:
+            elif (
+                not isinstance(x, BaseView)
+                and x.get_name() in V.graph.torchbind_constants
+            ):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
