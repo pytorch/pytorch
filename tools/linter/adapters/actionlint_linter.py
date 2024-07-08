@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import concurrent.futures
 import json
@@ -8,7 +10,7 @@ import subprocess
 import sys
 import time
 from enum import Enum
-from typing import List, NamedTuple, Optional, Pattern
+from typing import NamedTuple
 
 
 LINTER_CODE = "ACTIONLINT"
@@ -22,18 +24,18 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: Optional[str]
-    line: Optional[int]
-    char: Optional[int]
+    path: str | None
+    line: int | None
+    char: int | None
     code: str
     severity: LintSeverity
     name: str
-    original: Optional[str]
-    replacement: Optional[str]
-    description: Optional[str]
+    original: str | None
+    replacement: str | None
+    description: str | None
 
 
-RESULTS_RE: Pattern[str] = re.compile(
+RESULTS_RE: re.Pattern[str] = re.compile(
     r"""(?mx)
     ^
     (?P<file>.*?):
@@ -47,8 +49,8 @@ RESULTS_RE: Pattern[str] = re.compile(
 
 
 def run_command(
-    args: List[str],
-) -> "subprocess.CompletedProcess[bytes]":
+    args: list[str],
+) -> subprocess.CompletedProcess[bytes]:
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
@@ -64,7 +66,7 @@ def run_command(
 def check_file(
     binary: str,
     file: str,
-) -> List[LintMessage]:
+) -> list[LintMessage]:
     try:
         proc = run_command(
             [
