@@ -323,6 +323,21 @@ def should_exclude_padding_time(match, arg_name):
     return node_def.op != "placeholder"
 
 
+def should_pad(key, ori_time, pad_time) -> bool:
+    multiplier = 1.1
+    # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
+    # tradeoff between performance improvement from shape padding and overhead from additional memory ops
+    # TODO: Build a learned model which would be better than this heuristic
+    if "shape_padding_multiplier" in torch._inductor.config.post_grad_fusion_options:
+        multiplier = torch._inductor.config.post_grad_fusion_options[
+            "shape_padding_multiplier"
+        ].get("value", 1.1)
+        counters["inductor"]["shape_padding_multiplier"] += 1
+    should_pad = _skip_do_bench_times or ori_time > pad_time * multiplier
+    set_cached_should_pad(key, should_pad)
+    return should_pad
+
+
 def should_pad_bench(
     match, mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
@@ -498,12 +513,11 @@ def should_pad_bench(
             for fn in fns:
                 fn()
 
-        pad_time = None
         if (
             torch._inductor.config.autoheuristic_mode != "OFF"
             and op is torch.ops.aten.mm
         ):
-            (ah_should_pad, ah_ori_time, ah_pad_time) = run_autoheuristic(
+            ah_should_pad = run_autoheuristic(
                 mat1,
                 mat2,
                 orig_bench_fn,
@@ -514,37 +528,19 @@ def should_pad_bench(
                 do_bench,
                 mat1_pre_padded,
                 mat2_pre_padded,
+                ori_time,
+                ori_time_key,
+                key,
             )
-            if ori_time is None and ah_ori_time is not None:
-                ori_time = ah_ori_time
-                set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
-            pad_time = ah_pad_time
             if ah_should_pad is not None:
-                set_cached_should_pad(key, ah_should_pad)
                 return ah_should_pad
 
         if ori_time is None:
             ori_time = do_bench(orig_bench_fn)
             set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
 
-        if pad_time is None:
-            pad_time = do_bench(pad_bench_fn)
-
-        # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
-        # tradeoff between performance improvement from shape padding and overhead from additional memory ops
-        # TODO: Build a learned model which would be better than this heuristic
-        multiplier = 1.1
-        if (
-            "shape_padding_multiplier"
-            in torch._inductor.config.post_grad_fusion_options
-        ):
-            multiplier = torch._inductor.config.post_grad_fusion_options[
-                "shape_padding_multiplier"
-            ].get("value", 1.1)
-            counters["inductor"]["shape_padding_multiplier"] += 1
-        should_pad = _skip_do_bench_times or ori_time > pad_time * multiplier
-        set_cached_should_pad(key, should_pad)
-        return should_pad
+        pad_time = do_bench(pad_bench_fn)
+        return should_pad(key, ori_time, pad_time)
 
 
 def get_context(
@@ -604,6 +600,9 @@ def run_autoheuristic(
     do_bench,
     mat1_pre_padded,
     mat2_pre_padded,
+    ori_time,
+    ori_time_key,
+    key,
 ):
     def feedback_fn(choice):
         if choice == orig_choice:
@@ -642,10 +641,15 @@ def run_autoheuristic(
     choice2should_pad = {orig_choice: False, pad_choice: True, "autotune": None}
     ah_should_pad = choice2should_pad.get(choice, None)
 
-    # get benchmarking times to avoid benchmarking again
-    ori_time = autoheuristic.get_collected_feedback(orig_choice)
-    pad_time = autoheuristic.get_collected_feedback(pad_choice)
-    return (ah_should_pad, ori_time, pad_time)
+    if torch._inductor.config.autoheuristic_mode == "COLLECT_DATA":
+        ah_ori_time = autoheuristic.get_collected_feedback(orig_choice)
+        ah_pad_time = autoheuristic.get_collected_feedback(pad_choice)
+        if ori_time is None:
+            set_cached_base_mm_benchmark_time(ori_time_key, ah_ori_time)
+        return should_pad(key, ah_ori_time, ah_pad_time)
+    if ah_should_pad is not None:
+        set_cached_should_pad(key, ah_should_pad)
+    return ah_should_pad
 
 
 def mm_pattern(mat1: Tensor, mat2: Tensor) -> Tensor:
