@@ -1408,7 +1408,7 @@ def forward(self, getitem, const):
                 def false_fn(x):
                     return (x - 1).sum()
 
-                return control_flow.cond(x.sum() > 4, true_fn, false_fn, [x])
+                return control_flow.cond(x.shape[0] > 4, true_fn, false_fn, [x])
 
         mod_for_compile = torch.compile(Foo(), backend=cnt, dynamic=True)
         mod_for_eager = Foo()
@@ -6146,16 +6146,12 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return cond_op(pred=pred, true_fn=true_fn, false_fn=false_fn, operands=[x])
 
         cnt = CompileCounter()
-        opt_test = torch.compile(test, backend=cnt, fullgraph=True)
+        opt_test = torch.compile(test, backend=cnt)
         inp = torch.ones(3, 3)
-        true_pred = torch.Tensor([True])
-        false_pred = torch.Tensor([False])
-        self.assertTrue(torch.allclose(test(true_pred, inp), opt_test(true_pred, inp)))
+        self.assertTrue(torch.allclose(test(True, inp), opt_test(True, inp)))
         self.assertEqual(cnt.frame_count, 1)
-        self.assertTrue(
-            torch.allclose(test(false_pred, inp), opt_test(false_pred, inp))
-        )
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertTrue(torch.allclose(test(False, inp), opt_test(False, inp)))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_cond_with_invalid_kwargs(self):
         from torch._higher_order_ops.cond import cond_op
