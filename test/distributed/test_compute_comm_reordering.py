@@ -195,10 +195,11 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             b = torch.matmul(a, a)
             c = torch.relu(b)
             d = torch.matmul(c, c)
-            e = _functional_collectives.all_reduce(b, "sum", "0")
+            b1 = torch.matmul(b, b)
+            e = _functional_collectives.all_reduce(b1, "sum", "0")
             f = torch.relu(d)
             g = torch.matmul(f, f)
-            return torch.mm(e, g)
+            return torch.matmul(e, g)
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
@@ -207,15 +208,15 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # Things to verify:
             # - The clone prologue of the all_reduce_ should not be fused with
             # any relus.
-            # - The all_reduce_ and its prologue should be raised above the 2nd
-            # matmul but below the 1st matmul.
-            # - The wait_tensor should be sinked below the 3rd matmul but above
-            # the 4th matmul.
+            # - The all_reduce_ and its prologue `b1 = torch.matmul(b, b)` should be raised above
+            # `c = torch.relu(b); d = torch.matmul(c, c)` but below `b = torch.matmul(a, a)`.
+            # - The wait_tensor should be sinked below the 4th matmul but above
+            # the 5th matmul.
             (
                 FileCheck()
-                .check("extern_kernels.mm")
-                .check("triton_poi_fused_all_reduce_0")
-                .check("torch.ops._c10d_functional.all_reduce_.default")
+                .check("extern_kernels.mm(arg0_1, arg0_1, out=buf0)")
+                .check("extern_kernels.mm(buf0, buf0, out=buf1)")
+                .check("torch.ops._c10d_functional.all_reduce_.default(buf1,")
                 .check("triton_poi_fused_relu")
                 .check("extern_kernels.mm")
                 .check("triton_poi_fused_relu")
