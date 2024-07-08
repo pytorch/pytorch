@@ -229,11 +229,11 @@ static void searchsorted_mps_contiguous(Tensor& result,
       mtl_setBuffer(computeEncoder, input, 0);
       mtl_setBuffer(computeEncoder, boundaries, 1);
       mtl_setBuffer(computeEncoder, result, 2);
-      [computeEncoder setBytes:&idim_in length:sizeof(int64_t) atIndex:3];
-      [computeEncoder setBytes:&idim_bd length:sizeof(int64_t) atIndex:4];
-      [computeEncoder setBytes:&numel_in length:sizeof(int64_t) atIndex:5];
-      [computeEncoder setBytes:&right_i64 length:sizeof(int64_t) atIndex:6];
-      [computeEncoder setBytes:&is_1d_boundaries length:sizeof(int64_t) atIndex:7];
+      mtl_setBytes(computeEncoder, idim_in, 3);
+      mtl_setBytes(computeEncoder, idim_bd, 4);
+      mtl_setBytes(computeEncoder, numel_in, 5);
+      mtl_setBytes(computeEncoder, right_i64, 6);
+      mtl_setBytes(computeEncoder, is_1d_boundaries, 7);
       if (sorter.defined())
         mtl_setBuffer(computeEncoder, sorter, 8);
 
