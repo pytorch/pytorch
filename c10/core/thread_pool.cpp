@@ -42,10 +42,10 @@ ThreadPool::ThreadPool(
       numa_node_id_(numa_node_id) {
   for (std::size_t i = 0; i < threads_.size(); ++i) {
     threads_[i] = std::thread([this, i, init_thread]() {
+      c10::setThreadName("pt_thread_pool");
       if (init_thread) {
         init_thread();
       }
-      c10::setThreadName("pt_thread_pool");
       this->main_loop(i);
     });
   }
