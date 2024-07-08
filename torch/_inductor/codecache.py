@@ -1595,6 +1595,8 @@ class AotCodeCompiler:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> str:
+        _set_gpu_runtime_env()  # cpp_extension consults the env
+
         picked_vec_isa = pick_vec_isa()
         vec_isa_cmd_gen = CppBuilder(
             name="o",
@@ -2438,6 +2440,10 @@ def validate_new_cpp_commands():
     include_pytorch = [True, False]
     use_absolute_path = [True, False]
     aot_mode = [False, True]
+
+    # Try to pass it in fb_code.
+    if config.is_fbcode():
+        return
 
     for x in cuda:
         for y in use_mmap_weights:
