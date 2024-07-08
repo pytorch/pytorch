@@ -3993,7 +3993,7 @@ class KernelGroup:
         arg_defs = ",\n".ljust(25).join(arg_defs)
         func_export_decl = self.get_export_declaration()
         code.writeline(
-            f'extern "C" {func_export_decl} void {kernel_decl_name}({arg_defs})'
+            f'extern "C" {func_export_decl} void inline __attribute__((always_inline)) {kernel_decl_name}({arg_defs})'
         )
 
         # 3. Function body
