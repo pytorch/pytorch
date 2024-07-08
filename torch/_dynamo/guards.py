@@ -18,6 +18,7 @@ import sys
 import textwrap
 import types
 import weakref
+from contextlib import contextmanager
 from inspect import currentframe, getframeinfo
 from typing import (
     Any,
@@ -154,6 +155,16 @@ class GuardManager:
         self.id_matched_objs = None
         self.no_tensor_aliasing_sources = []
 
+        self.print_no_tensor_aliasing_guard = True
+
+    @contextmanager
+    def _preserve_print_no_tensor_aliasing_flag(self):
+        self.print_no_tensor_aliasing_guard = True
+        try:
+            yield
+        finally:
+            self.print_no_tensor_aliasing_guard = True
+
     def get_guard_lines(self, guard):
         guard_name = guard.__class__.__name__
         parts = guard.verbose_code_parts()
@@ -183,7 +194,18 @@ class GuardManager:
     def construct_manager_string(self, mgr, body):
         with body.indent():
             for guard in mgr.get_leaf_guards():
-                body.writelines(self.get_guard_lines(guard))
+                if isinstance(guard, torch._C._dynamo.guards.NO_TENSOR_ALIASING):  # type: ignore[attr-defined]
+                    if self.print_no_tensor_aliasing_guard:
+                        self.print_no_tensor_aliasing_guard = False
+                        body.writelines(self.get_guard_lines(guard))
+                    else:
+                        body.writelines(
+                            [
+                                guard.__class__.__name__,
+                            ]
+                        )
+                else:
+                    body.writelines(self.get_guard_lines(guard))
 
             # This works for both DictGuardManager and SubclassedDictGuardManager
             if isinstance(mgr, DictGuardManager):
@@ -211,15 +233,16 @@ class GuardManager:
                 else:
                     super().writeline("+- " + line)
 
-        body = IndentedBufferWithPrefix()
-        body.tabwidth = 1
-        body.writeline("", skip_prefix=True)
-        body.writeline("TREE_GUARD_MANAGER:", skip_prefix=True)
-        body.writeline("RootGuardManager")
-        self.construct_manager_string(self.root, body)
-        for guard in self.root.get_epilogue_lambda_guards():
-            body.writelines(self.get_guard_lines(guard))
-        return body.getvalue()
+        with self._preserve_print_no_tensor_aliasing_flag():
+            body = IndentedBufferWithPrefix()
+            body.tabwidth = 1
+            body.writeline("", skip_prefix=True)
+            body.writeline("TREE_GUARD_MANAGER:", skip_prefix=True)
+            body.writeline("RootGuardManager")
+            self.construct_manager_string(self.root, body)
+            for guard in self.root.get_epilogue_lambda_guards():
+                body.writelines(self.get_guard_lines(guard))
+            return body.getvalue()
 
     def check(self, x):
         # Only needed for debugging purposes.
