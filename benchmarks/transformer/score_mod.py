@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 import torch
 import torch.nn.functional as F
-from torch.nn.attention._flex_attention import _flex_attention
+from torch.nn.attention._flex_attention import flex_attention
 
 torch._dynamo.config.automatic_dynamic_shapes = False
 # Needed since changing args to function causes recompiles
@@ -127,10 +127,10 @@ def run_single_experiment(
 
     if max_autotune:
         compiled_sdpa = torch.compile(
-            _flex_attention, dynamic=dynamic, mode="max-autotune-no-cudagraphs"
+            flex_attention, dynamic=dynamic, mode="max-autotune-no-cudagraphs"
         )
     else:
-        compiled_sdpa = torch.compile(_flex_attention, dynamic=dynamic)
+        compiled_sdpa = torch.compile(flex_attention, dynamic=dynamic)
 
     score_mod = config.score_mod
 
