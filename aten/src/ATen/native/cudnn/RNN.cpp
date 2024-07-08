@@ -2241,8 +2241,9 @@ std::tuple<Tensor, Tensor> unpack_hidden(
 template <typename hidden_type>
 hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) {
   static_assert(
-      false && sizeof(hidden_type),
+      std::is_same<hidden_type, void>::value,
       "pack_hidden not implemented for this type");
+  AT_ERROR("NOT IMPLEMENTED");
 }
 
 template <>

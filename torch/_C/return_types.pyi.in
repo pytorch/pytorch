@@ -1,5 +1,5 @@
-# ${generated_comment}
 # mypy: allow-untyped-defs
+# ${generated_comment}
 
 from typing import (
     Any,

@@ -365,7 +365,7 @@ void loadFunctions() {
         [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
         1);
     compilation_unit->define(
-        std::nullopt, shape_compute_functions, resolver, nullptr);
+        c10::nullopt, shape_compute_functions, resolver, nullptr);
     loadModule(*compilation_unit);
   } catch (...) {
     // Reset the cache and compilation unit so that we don't get weird errors
@@ -391,7 +391,7 @@ std::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
   }
   GRAPH_DEBUG("Could not find schema: ", schema);
 
-  return std::nullopt;
+  return c10::nullopt;
 }
 
 TORCH_API std::optional<BoundedShapeGraphs> boundedGraphsForSchema(
@@ -406,7 +406,7 @@ TORCH_API std::optional<BoundedShapeGraphs> boundedGraphsForSchema(
     return cache_it->second;
   }
 
-  return std::nullopt;
+  return c10::nullopt;
 }
 
 void RegisterShapeComputeGraphForSchema(

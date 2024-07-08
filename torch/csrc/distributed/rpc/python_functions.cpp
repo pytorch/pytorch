@@ -261,7 +261,7 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
         functionSchema,
         argsTuple.cast<py::args>(),
         kwargsDict.cast<py::kwargs>(),
-        std::nullopt);
+        c10::nullopt);
   }
   DCHECK(!PyGILState_Check());
   c10::intrusive_ptr<c10::ivalue::Future> fut = rpcTorchscript(
@@ -408,7 +408,7 @@ PyRRef pyRemoteTorchscript(
     // Acquire GIL for py::args and py::kwargs processing.
     py::gil_scoped_acquire ag;
     stack = torch::jit::createStackForSchema(
-        functionSchema, args, kwargs, std::nullopt);
+        functionSchema, args, kwargs, c10::nullopt);
   }
   DCHECK(!PyGILState_Check());
   auto rrefPtr = remoteTorchscript(
