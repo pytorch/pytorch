@@ -307,6 +307,22 @@ def _replace_pattern(
                     first_user_node = n
                     break
 
+        if len(match.returning_nodes) == 1:
+            # Extract context hints from node
+            meta = match.returning_nodes[0].meta
+            if meta and meta.get("context_hints", None):
+                context_hints = meta["context_hints"]
+                for node in replacement_graph.nodes:
+                    if node.op == "placeholder" or node.op == "output":
+                        continue
+                    node.meta["context_hints"] = context_hints
+        else:
+            # Only assert when there is more than one returning nodes and any
+            # of them has hints in meta.
+            for n in match.returning_nodes:
+                if n.meta.get("context_hints", None):
+                    assert False, "only support 1:n mapping when preserving meta information"
+
         with original_graph.inserting_before(first_user_node):  # type: ignore[possibly-undefined]
             copied_returning_nodes = original_graph.graph_copy(replacement_graph, val_map)
 

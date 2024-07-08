@@ -1265,7 +1265,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
         )
 
-
 class HintedContextHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def create_wrapped_node(self, tx, args, kwargs, description):
         # See NOTE [HigherOrderOperator tracing design] for more details
@@ -1288,7 +1287,6 @@ class HintedContextHigherOrderVariable(TorchHigherOrderOperatorVariable):
         body_gmod.meta["hint"] = kwargs["hint"].value
         body_name = add_subgraph(
             tx,
-            self.source,
             "hinted_context_body",
             body_gmod,
         )
@@ -1319,10 +1317,15 @@ class HintedContextHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
 
-        return _call_function_and_unflatten_output(
-            tx, self.value, tuple(p_args), p_kwargs, body_r, treespec
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
         )
 
+        return _call_function_and_unflatten_output(
+            tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
+        )
 
 class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
