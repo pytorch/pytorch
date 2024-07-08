@@ -2,10 +2,10 @@
 
 import contextlib
 import functools
+import inspect
 import itertools
 import logging
 import types
-import inspect
 
 from typing import Dict, List, Optional, TYPE_CHECKING
 
@@ -406,7 +406,10 @@ def speculate_subgraph(
         )
 
         with tx.output.subtracer(source_target, tracer) as subtracer:
-            sub_args_names = position_args_names(f)
+            sub_args_names = maybe_positional_arg_names(f)
+            # User mismatch in the number of args. Will eventually lead to an error.
+            if sub_args_names is not None and len(sub_args_names) < len(sub_args):
+                sub_args_names = None
             args = validate_args_and_maybe_create_graph_inputs(
                 sub_args,
                 subtracer,
@@ -1908,7 +1911,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         )
 
 
-def position_args_names(func):
+def maybe_positional_arg_names(func):
     result = []
     if not hasattr(func, "get_function"):
         return None
@@ -1916,11 +1919,20 @@ def position_args_names(func):
         fn = func.get_function()
     except (Unsupported, NotImplementedError):
         return None
-    for name, param in inspect.signature(func.get_function()).parameters.items():
+    try:
+        sig = inspect.signature(func.get_function())
+    except ValueError:
+        return None
+    for name, param in sig.parameters.items():
         if param.kind is inspect.Parameter.VAR_POSITIONAL:
             return None
-        if param.kind is inspect.Parameter.POSITIONAL_ONLY:
-            result.append(name)
-        if param.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD:
-            result.append(name)
+        if (
+            param.kind is inspect.Parameter.POSITIONAL_ONLY
+            or param.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+        ):
+            if name == "self":
+                # FX graphs can't have a placeholder named self
+                result.append("self_")
+            else:
+                result.append(name)
     return result
