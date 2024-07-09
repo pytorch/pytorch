@@ -327,8 +327,8 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
     const char* torch_function_name_str) {
   // Disable mode on the inside; this makes for a more user-friendly
   // experience if you try to, e.g., print your tensors.
-  at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
-  at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
+  std::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
+  std::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
   py::object mode_obj;
   // NB: We only really need keep the mode_obj live if the function call
   // fails for error reporting, but whatever, Python refcounts are cheap
