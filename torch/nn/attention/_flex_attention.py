@@ -1,10 +1,13 @@
 # mypy: allow-untyped-defs
 """This module implements the user facing API for flex_attention in PyTorch."""
 import functools
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 
 import torch
-from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
+from torch._higher_order_ops.flex_attention import (
+    flex_attention as flex_attention_hop,
+    TransformGetItemToIndex,
+)
 from torch._higher_order_ops.utils import _set_compilation_env
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
@@ -76,6 +79,89 @@ class _BlockMask:
             self.Q_BLOCK_SIZE,
         )
 
+    def __str__(self):
+        s = f"BlockMask(sparsity={self.sparsity():.2f}%, mask=\n"
+        s += self.to_string()
+        s += ")"
+        return s
+
+    def sparsity(self) -> float:
+        """
+        Computes the percentage of blocks that are sparse (i.e. not computed)
+        """
+        dense_mask = self.to_dense()
+        dense_ratio = ((dense_mask != 0).sum()) / dense_mask.numel()
+        return 100 * (1 - dense_ratio)
+
+    def to_dense(self) -> torch.Tensor:
+        """
+        Returns a dense block that is equivalent to the block mask.
+        """
+        num_rows = self.kv_num_blocks.shape[-1]
+        num_cols = self.q_num_blocks.shape[-1]
+        batch, head = self.kv_num_blocks.shape[:2]
+        device = self.kv_num_blocks.device
+        assert batch == 1, head == 1
+
+        def create_dense_one(kv_num_blocks, kv_indices):
+            dense_mask = kv_indices.new_zeros(num_rows, num_cols + 1, dtype=torch.int32)
+
+            row_indices = torch.arange(
+                num_rows, dtype=torch.int, device=device
+            ).unsqueeze(-1)
+            col_indices = torch.arange(num_cols, dtype=torch.int, device=device)
+            index_mask = col_indices < kv_num_blocks.unsqueeze(-1)
+
+            # We write to one spot "out of bounds"
+            valid_indices = torch.where(index_mask, kv_indices, num_cols)
+
+            # set the values in 'a' to 1 where the indices are valid
+            dense_mask[row_indices, valid_indices] = 1
+            return dense_mask[:, :num_cols]
+
+        out = create_dense_one(self.kv_num_blocks[0, 0], self.kv_indices[0, 0])
+        return out
+
+    def to_string(self, grid_size=(20, 20)):
+        """
+        Returns a string representation of the block mask. Quite nifty.
+
+        If grid_size is None, prints out an uncompressed version. Warning, it can be quite big!
+        """
+        dense_mask = self.to_dense()
+        num_rows, num_cols = dense_mask.shape
+        if isinstance(grid_size, int):
+            max_rows = grid_size
+            max_cols = grid_size
+        elif grid_size is None:
+            max_rows = num_rows
+            max_cols = num_cols
+        else:
+            max_rows, max_cols = grid_size
+        vis = ""
+
+        def summarize_section(section):
+            percentage = section.float().mean().item()
+            if percentage == 1:
+                return "█"
+            elif percentage == 0:
+                return " "
+            else:
+                return "░"
+
+        def cdiv(a, b):
+            return (a + (b - 1)) // b
+
+        row_step = max(1, cdiv(num_rows, max_rows))
+        col_step = max(1, cdiv(num_cols, max_cols))
+
+        for r in range(0, num_rows, row_step):
+            for c in range(0, num_cols, col_step):
+                char = summarize_section(dense_mask[r : r + row_step, c : c + col_step])
+                vis += char * 2
+            vis += "\n"
+        return vis
+
 
 def broadcast_to_dim(x, dim):
     while x.dim() < dim:
@@ -121,7 +207,7 @@ def _create_block_mask_from_mask(
     mask: torch.Tensor,
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
-) -> Tuple:
+) -> _BlockMask:
     block_mask = _convert_mask_to_block_mask(
         mask, KV_BLOCK_SIZE=KV_BLOCK_SIZE, Q_BLOCK_SIZE=Q_BLOCK_SIZE
     )
@@ -139,7 +225,7 @@ def _create_block_mask_from_mask(
         q_indices=q_indices.to(torch.int32).to(mask.device).contiguous(),
         KV_BLOCK_SIZE=KV_BLOCK_SIZE,
         Q_BLOCK_SIZE=Q_BLOCK_SIZE,
-    ).as_tuple()
+    )
 
 
 def _create_mask(
@@ -171,7 +257,8 @@ def _create_mask(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None))
-    out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
+    with TransformGetItemToIndex():
+        out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
     mask = torch.where(torch.isinf(out), False, True)
     return mask
 
@@ -215,7 +302,7 @@ def _create_block_mask(
 """
 
 
-def _create_empty_block_mask(query, key, value) -> Tuple:
+def _create_empty_block_mask(query, key, value) -> _BlockMask:
     device = query.device
     kv_len = key.size()[-2]
     q_len = query.size()[-2]
@@ -226,7 +313,7 @@ def _create_empty_block_mask(query, key, value) -> Tuple:
         q_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
         KV_BLOCK_SIZE=kv_len,
         Q_BLOCK_SIZE=q_len,
-    ).as_tuple()
+    )
 
 
 def _flex_attention(
@@ -234,7 +321,7 @@ def _flex_attention(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: _score_mod_signature = _identity,
-    block_mask: Optional[Tuple] = None,
+    block_mask: Optional[_BlockMask] = None,
 ) -> torch.Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -295,7 +382,7 @@ def _flex_attention(
             key,
             value,
             score_mod,
-            block_mask,
+            block_mask.as_tuple(),
         )
         return out
 
@@ -317,7 +404,7 @@ def _flex_attention(
                     key,
                     value,
                     score_mod,
-                    block_mask,
+                    block_mask.as_tuple(),
                 )
                 return out
 
