@@ -514,7 +514,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
         outputs = [None] * len(a_list_input)
         for (device, use_foreach), group in groups.items():
-            operation_list: List[str] = []
+            buffer_list = []
             for (
                 output_ind,
                 args,
@@ -531,11 +531,10 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                     and use_foreach
                     and realize_outputs
                 ):
-                    output.realize()
-                    operation_list.append(output.get_operation_name())
+                    buffer_list.append(output.realize())
 
-            if operation_list:
-                V.graph.register_operation_list(operation_list)
+            if buffer_list:
+                V.graph.register_list(buffer_list)
 
         assert all(x is not None for x in outputs)
         return outputs
@@ -765,7 +764,12 @@ def squeeze(x, dim=None):
     if dim is None:
         return TensorBox(SqueezeView.create(x.data))
 
-    dim = canonicalize_dims(len(x.get_size()), dim)
+    dim = (
+        V.graph.sizevars.evaluate_static_shape(dim)
+        if isinstance(dim, (int, sympy.Expr))
+        else tuple(V.graph.sizevars.evaluate_static_shape(d) for d in dim)
+    )
+    dim = canonicalize_dims(len(x.get_size()), dim)  # type: ignore[call-overload]
     dims = set((dim,) if not isinstance(dim, tuple) else dim)
 
     new_shape = []
@@ -1590,7 +1594,7 @@ def unsqueeze_(x, dim):
 
 
 def _validate_dim(x, dim, offset=0):
-    assert isinstance(dim, int)
+    dim = V.graph.sizevars.shape_env.evaluate_expr(sympy.sympify(dim))
     ndim = len(x.get_size())
     if dim < 0:
         dim += ndim + offset
@@ -1613,11 +1617,8 @@ def fallback_handler(kernel, add_to_fallback_set=True):
         fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
-        def wrap_tensors(x):
-            return TensorBox.create(x) if isinstance(x, ir.IRNode) else x
-
         return pytree.tree_map(
-            wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
+            TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
         )
 
     return handler
@@ -2157,7 +2158,7 @@ make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 # Haven't checked but sound difficult / impossible
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
-make_fallback(aten._embedding_bag_dense_backward)
+make_fallback(aten._embedding_bag_backward)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
@@ -2588,7 +2589,6 @@ def _local_scalar_dense(data):
     binding_sym, keypath = next(iter(unbacked_bindings.items()))
     buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
-    V.graph.register_operation(buffer)
     # NB: the replaced expr is OK to use directly downstream, we want
     # simplifications in this case!
     val = V.graph.current_node.meta["val"]
@@ -3166,7 +3166,6 @@ def index_put_impl_(self, indices, values, accumulate, check):
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
-    V.graph.register_operation(buffer)
 
     if x_ndim == 0:
         self = view(self, [])
@@ -3387,7 +3386,6 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             zero_out,
         )
         buffer.name = V.graph.register_buffer(buffer)
-        V.graph.register_operation(buffer)
 
     # self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
     # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
@@ -3406,7 +3404,6 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
-    V.graph.register_operation(buffer)
 
     if ndim == 0:
         self = view(self, [])
