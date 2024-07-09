@@ -47,6 +47,13 @@ torch.set_float32_matmul_precision("high")
 index = torch.ops.aten.index
 
 
+def rmse(ref, res):
+    """
+    Calculate root mean squared error
+    """
+    return torch.sqrt(torch.mean(torch.square(ref - res)))
+
+
 def create_attention(score_mod, block_mask):
     return functools.partial(flex_attention, score_mod=score_mod, block_mask=block_mask)
 
@@ -1209,26 +1216,45 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_comparison_vs_sdpa(self):
         inputs = [
-            torch.randn(2, 2, 2048, 128, device="cuda", dtype=torch.float16)
+            torch.randn(
+                2, 2, 2048, 128, device="cuda", dtype=torch.float16, requires_grad=True
+            )
             for _ in range(3)
         ]
+        gradOut = torch.randn(2, 2, 2048, 128, device="cuda", dtype=torch.float16)
         out_ref = torch.nn.functional.scaled_dot_product_attention(
             *inputs, is_causal=True
         )
+        out_ref.backward(gradOut)
 
         def causal(score, b, h, q_idx, kv_idx):
             return torch.where(q_idx >= kv_idx, score, -float("inf"))
 
-        inputs_flex = [i.clone() for i in inputs]
+        inputs_flex = [i.detach().clone().requires_grad_(True) for i in inputs]
         out_flex = torch.compile(flex_attention)(*inputs_flex, causal)
-        inputs_golden = [i.clone().to(dtype=torch.float64) for i in inputs]
+        out_flex.backward(gradOut)
+        inputs_golden = [
+            i.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+            for i in inputs
+        ]
         out_golden = torch.nn.functional.scaled_dot_product_attention(
             *inputs_golden, is_causal=True
         )
+        out_golden.backward(gradOut.to(dtype=torch.float64))
 
-        ref_error = (out_ref - out_golden).abs().mean()
-        flex_error = (out_flex - out_golden).abs().mean()
-        self.assertTrue(ref_error < flex_error * 2)
+        for ref, flex, golden in [
+            (out_ref, out_flex, out_golden),
+            (inputs[0].grad, inputs_flex[0].grad, inputs_golden[0].grad),
+            (inputs[1].grad, inputs_flex[1].grad, inputs_golden[1].grad),
+            (inputs[2].grad, inputs_flex[2].grad, inputs_golden[2].grad),
+        ]:
+            ref_error = rmse(ref, golden)
+            flex_error = rmse(flex, golden)
+            # Note: This has been carefully tested that FlexAttention is within
+            # 10% of the average error of SDPA! Do not bump this tolerance
+            # unless you are absolutely sure you are not worsening the accuracy
+            # of FlexAttention!
+            self.assertTrue(ref_error < flex_error * 1.1)
 
     @supported_platform
     def test_block_mask_attributes(self):

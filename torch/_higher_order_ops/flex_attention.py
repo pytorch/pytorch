@@ -146,8 +146,8 @@ def math_attention(
     # todo: We wouldn't need these overrides in this file if Dynamo always did the
     # rewriting.
     with TransformGetItemToIndex():
-        scores = scores * scale
-        scores = score_mod(scores, b, h, m, n, *other_buffers).to(working_precision)
+        scores = (scores * scale).to(working_precision)
+        scores = score_mod(scores, b, h, m, n, *other_buffers)
 
     # TODO Unconditionally return logsumexp for backwards
     # if any(t.requires_grad for t in (query, key, value)):
@@ -568,8 +568,6 @@ def sdpa_dense_backward(
     working_precision = torch.float64 if query.dtype == torch.float64 else torch.float32
     scores = (query @ key.transpose(-2, -1)).to(working_precision)
 
-    scores = scores * scale
-
     b = torch.arange(0, scores.size(0), device=scores.device)
     h = torch.arange(0, scores.size(1), device=scores.device)
     m = torch.arange(0, scores.size(2), device=scores.device)
@@ -582,6 +580,7 @@ def sdpa_dense_backward(
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None) + in_dim_buffers)
 
     with TransformGetItemToIndex():
+        scores = scores * scale
         post_mod_scores = score_mod(scores, b, h, m, n, *other_buffers).to(
             working_precision
         )
