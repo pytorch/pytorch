@@ -2,16 +2,17 @@
 """ Triton Implementation of the flex_attention Kernel"""
 
 import logging
+from enum import auto, Enum
 from typing import Any, List, Tuple
 
 import torch
-from torch.utils._pytree import tree_map
 from .. import config
 from ..ir import (
     ComputedBuffer,
     FixedLayout,
     FlexibleLayout,
     InputBuffer,
+    IRNode,
     StorageBox,
     Subgraph,
     TensorBox,
@@ -21,6 +22,14 @@ from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+
+
+class SubgraphType(Enum):
+    """The type of subgraph for which we want to generate an output buffer."""
+
+    FWD = auto()  # Forward pass
+    JOINT_FWD = auto()  # The recompute step fo the of the bwds kernel
+    JOINT_BWD = auto()  # The bwd pass of the joint
 
 
 def flex_attention_grid(batch_size, num_heads, num_queries, d_model, meta):
@@ -42,16 +51,64 @@ def create_placeholder(
     return TensorBox.create(input_buffer)
 
 
+def index_to_other_buffers(cnt: int, graph_type: SubgraphType) -> int:
+    """This function needs to be aware of the signatures for flex_attention_forward
+    and flex_attention_backward. If new args are added, or the signature changes
+    be sure to update the indexing math
+
+    Args:
+        cnt (int): The current index of the placeholder node
+        is_joint_graph (bool): Whether or not this subgraph represents the joint graph
+    """
+    # Current fwd_args = [
+    #   query,
+    #   key,
+    #   value,
+    #   score_mod,
+    #   block_mask,
+    #   *other_buffers
+    # ]
+    # For fwd_graphs we have 5 dummy values this when the first lifted args
+    # is seen cnt = 5 and the start of the index_buffers is at args[5]
+    # thus we add 0 from the current cnt
+    if graph_type == SubgraphType.FWD:
+        return cnt + 0
+
+    # Current bwd_args = [
+    #   q,
+    #   k,
+    #   v,
+    #   out,
+    #   lse,
+    #   grad_out,
+    #   fw_graph,
+    #   joint_graph,
+    #   block_mask,
+    #   *other_buffers
+    # ]
+    # We have 5 dummy values but the start of other_buffers is at index 9
+    if graph_type == SubgraphType.JOINT_FWD:
+        return cnt + 4
+
+    # Same bwd args but now with 6 dummy values while other_buffers still start at 9
+    if graph_type == SubgraphType.JOINT_BWD:
+        return cnt + 3
+
+
 def build_subgraph_buffer(
-    args: List[TensorBox],
+    args: Tuple[IRNode],
+    placeholder_inps: List[TensorBox],
     subgraph: Subgraph,
-):
+    graph_type: SubgraphType,
+) -> ComputedBuffer:
     """This function's goal is to take in the required args and produce the subgraph buffer
     The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
 
     Args:
-        args: The args that are passed into the subgraph. Contains both fixed and lifted inputs.
+        args: The args that were passed into the flex_attention kernel
+        placeholder_inps: The list of scalar inputs, these were created on the fly through `create_placeholder`
         subgraph: The Subgraph ir for which to produce the output node
+        graph_type: The type of subgraph for which we want to produce the output node, see enum above for details
     """
     cnt = 0
     env = {}
@@ -64,45 +121,51 @@ def build_subgraph_buffer(
         # expect that these are lifted inputs that fill up the '*other_buffers'
         # tuple and already have corresponding TensorBoxes passed in as args.
         if node.op == "placeholder":
-            env[node] = args[cnt]
+            is_lifted_input = cnt >= len(placeholder_inps)
+            lifted_input_index = index_to_other_buffers(cnt, graph_type)
+            env[node] = (
+                args[lifted_input_index] if is_lifted_input else placeholder_inps[cnt]
+            )
             cnt += 1
         elif node.op == "call_function":
             # For call_function we use the default lowerings and pass in the
             # already created TensorBoxes as args
+            from torch.utils._pytree import tree_map
 
             args, kwargs = tree_map(
                 lambda x: env[x] if x in env else x, (node.args, node.kwargs)
             )
             env[node] = lowerings[node.target](*args, **kwargs)
         elif node.op == "output":
-
-            def convert_output_node_to_buffer(output):
-                if output is None:
-                    return None
-                output_node = output
-                output_buffer = env[output_node]
-                assert isinstance(output_buffer, TensorBox), (
-                    "The output node  for flex attention's subgraph must be a TensorBox, but got: ",
-                    type(output_buffer),
-                )
-                assert isinstance(output_buffer.data, StorageBox), (
-                    "The output node for the flex attention subgraph must be a StorageBox, but got: ",
-                    type(output_buffer),
-                )
-                subgraph_buffer = ComputedBuffer(
-                    name=None,
-                    layout=FlexibleLayout(
-                        device=output_buffer.data.get_device(),
-                        dtype=output_buffer.data.get_dtype(),
-                        size=output_buffer.data.get_size(),
-                    ),
-                    data=output_buffer.data.data,  # type: ignore[arg-type]
-                )
-                return subgraph_buffer
-
-            # node.args[0] is either a single element or a list of elements
-            # representing all outputs of the function.
-            return tree_map(convert_output_node_to_buffer, node.args[0])
+            # For the output node we need to create a ComputedBuffer
+            # which represents the actual score modification
+            # The joint_graph's output should be of the form[grad_score, None, None, None, None]
+            # This is because only the 'score' requires grad and the other outputs are
+            # the non-differentiable index scalars
+            if graph_type == SubgraphType.FWD or graph_type == SubgraphType.JOINT_FWD:
+                output_node = node.args[0]
+            else:
+                output_node = node.args[0][0]
+            output_buffer = env[output_node]
+            assert isinstance(output_buffer, TensorBox), (
+                "The output node  for flex attention's subgraph must be a TensorBox, but got: ",
+                type(output_buffer),
+            )
+            assert isinstance(output_buffer.data, StorageBox), (
+                "The output node for the flex attention subgraph must be a StorageBox, but got: ",
+                type(output_buffer),
+            )
+            # Create the ComputedBuffer directly that will be inlined into the modification block
+            subgraph_buffer = ComputedBuffer(
+                name=None,
+                layout=FlexibleLayout(
+                    device=output_buffer.data.get_device(),
+                    dtype=output_buffer.data.get_dtype(),
+                    size=output_buffer.data.get_size(),
+                ),
+                data=output_buffer.data.data,  # type: ignore[arg-type]
+            )
+            return subgraph_buffer
 
     raise ValueError("FlexAttention was passed a subgraph with no output node!")
 
@@ -117,21 +180,18 @@ flex_attention_template = TritonTemplate(
     # Q: Query, K: Key, V: Value
     # M: Number of queries, N: Number of keys/values, D: Model dimension
     # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head
+    # (Modifiable) Config options:
+    # BLOCK_M: The thread block size across the seqlen dim of Q.
+    # BLOCK_N: Iterate over BLOCK_N across the seqlen dim of K/V in each thread block.
+    # SCORE_MOD_IS_LINEAR: Is the score modifier linear? If so, we can lift the
+    # change of base out of the loop
+    # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row
+    # is not masked out? If so, we can skip an extra safety check
+    # OUTPUT_LOGSUMEXP: We only need to store the logsumexp if we require grad
+    #
     # The following SPARSE_* is defined in the block sparse mask grid, rather than the thread block grid.
     # SPARSE_KV_NUM_BLKS: The number of unmasked K/V blocks for each query.
     # SPARSE_KV_IDX: The indices of unmasked K/V blocks for each query.
-    # OUTPUT_LOGSUMEXP: We only need to store the logsumexp if we require grad
-    #
-    # (Modifiable) Performance tuning options
-    # BLOCK_M: The thread block size across the seqlen dim of Q.
-    # BLOCK_N: Iterate over BLOCK_N across the seqlen dim of K/V in each thread block.
-
-    # The below are kernel options that can be applied for certain score_mods,
-    # or involve a numerics vs. perf tradeoff
-    # PRESCALE_QK: Whether to pre-scale QK by 1/sqrt(d) and change of base. Has
-    # about 20% more numerical error, but slightly faster.
-    # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row
-    # is not masked out? If so, we can skip an extra safety check
 
     tl.static_assert(SPARSE_Q_BLOCK_SIZE >= BLOCK_M and SPARSE_Q_BLOCK_SIZE % BLOCK_M == 0)
     tl.static_assert(SPARSE_KV_BLOCK_SIZE >= BLOCK_N and SPARSE_KV_BLOCK_SIZE % BLOCK_N == 0)
@@ -157,6 +217,7 @@ flex_attention_template = TritonTemplate(
     Q_LEN = {{size("Q", 2)}}
     KV_LEN = {{size("K", 2)}}
 
+    qk_scale = 1.0
     MATMUL_PRECISION = Q.dtype.element_ty
 
     start_m = tl.program_id(0)
@@ -220,10 +281,9 @@ flex_attention_template = TritonTemplate(
     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
 
     q = tl.load(Q_block_ptr)
-    RCP_LN2 = 1.44269504
-
-    if PRESCALE_QK:
-        q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
+    if SCORE_MOD_IS_LINEAR:
+        qk_scale *= 1.44269504
+    q = (q * qk_scale).to(MATMUL_PRECISION)
 
     # loop over k, v and update accumulator
     lo = 0
@@ -234,8 +294,6 @@ flex_attention_template = TritonTemplate(
         k = tl.load(K_block_ptr)
         # -- compute qk ---
         qk = tl.dot(q, k)
-        if not PRESCALE_QK:
-            qk *= SM_SCALE
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = offs_n[None, :]
@@ -250,8 +308,8 @@ flex_attention_template = TritonTemplate(
             out="qk"
         ) | indent_except_first(2) }}
         # TODO: In the case that score_mod is linear, this can be LICMed
-        if not PRESCALE_QK:
-            post_mod_scores *= RCP_LN2
+        if not SCORE_MOD_IS_LINEAR:
+            post_mod_scores *= 1.44269504
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # -- compute scaling constant ---
@@ -427,7 +485,6 @@ def flex_attention(*args, **kwargs):
         value,
         subgraph,
         block_mask,
-        scale,
         *other_buffers,
     ) = args
     (
@@ -458,7 +515,9 @@ def flex_attention(*args, **kwargs):
             ("n", torch.int32),
         ]
     ]
-    subgraph_buffer = build_subgraph_buffer(placeholder_inps + other_buffers, subgraph)
+    subgraph_buffer = build_subgraph_buffer(
+        args, placeholder_inps, subgraph, graph_type=SubgraphType.FWD
+    )
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
@@ -516,18 +575,15 @@ def flex_attention(*args, **kwargs):
             num_stages=num_stages,
             num_warps=num_warps,
             call_sizes=query.get_size(),
-            OUTPUT_LOGSUMEXP=True,
-            SM_SCALE=scale,
-            BLOCK_DMODEL=query.get_size()[-1],
-            # Performance tuning
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
-            # Blocksparse options
+            BLOCK_DMODEL=query.get_size()[-1],
+            # For now, we always assume the "sound" option
+            SCORE_MOD_IS_LINEAR=False,
+            ROWS_GUARANTEED_SAFE=False,
+            OUTPUT_LOGSUMEXP=True,
             SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
-            # For now, we always assume the "sound" option
-            ROWS_GUARANTEED_SAFE=False,
-            PRESCALE_QK=False,
         )
     inputs_for_autotuning = [
         query,
@@ -589,22 +645,19 @@ flex_attention_backward_template = TritonTemplate(
     # inductor codegen
     # M: Number of queries, N: Number of keys/values, D: Model dimension
     # z: Batch size, h: Number of heads, m: Number of queries or keys/values, d: Head dim
-    # (Modifiable) Performance tuning options
+    # (Modifiable) Config options:
     # BLOCK_M1: when calculating DK & DV, iterate over BLOCK_M1 across the seqlen dim of Q in each thread block.
     # BLOCK_N1: when calculating DK & DV, the thread block size across the seqlen dim of K/V.
     # BLOCK_M2: when calculating DQ, the thread block size across the seqlen dim of Q.
     # BLOCK_N2: when calculating DQ, iterate over BLOCK_N2 across the seqlen dim of K/V in each thread block.
+    # SCORE_MOD_IS_LINEAR: Is the score modifier linear? If so, we can lift the
+    # change of base out of the loop
     #
     # The following SPARSE_* is defined in the block sparse mask grid, rather than the thread block grid.
     # SPARSE_KV_NUM_BLKS: The number of unmasked K/V blocks for each query.
     # SPARSE_KV_IDX: The indices of unmasked K/V blocks for each query.
     # SPARSE_Q_NUM_BLKS: The number of unmasked Q blocks for each key/value.
     # SPARSE_Q_IDX: The indices of unmasked Q blocks for each key/value.
-
-    # The below are kernel options that can be applied for certain score_mods,
-    # or involve a numerics vs. perf tradeoff
-    # PRESCALE_QK: Whether to pre-scale QK by 1/sqrt(d) and change of base. Has
-    # about 20% more numerical error, but slightly faster.
 
     # Define Q Strides
     stride_qz = {{stride("Q", 0)}}
@@ -671,7 +724,6 @@ flex_attention_backward_template = TritonTemplate(
     LSE += off_chz
     DELTA += off_chz
 
-    RCP_LN2 = 1.44269504
     offs_k = tl.arange(0, BLOCK_DMODEL)
 
     if pid >= NUM_KV_BLOCKS:
@@ -713,15 +765,11 @@ flex_attention_backward_template = TritonTemplate(
 
         curr_n = start_n2
         hi = sparse_kv_num_blocks * SPARSE_KV_MULTIPLE
-        if PRESCALE_QK:
-            q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
         for start_n in range(0, hi):
             offs_n2 = curr_n + tl.arange(0, BLOCK_N2)
             kT = tl.load(kT_ptrs)
             vT = tl.load(vT_ptrs)
             qk = tl.dot(q, kT)
-            if not PRESCALE_QK:
-                qk *= SM_SCALE
             # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
             pre_mod_scores = qk
             m = offs_m2[:, None]
@@ -737,9 +785,9 @@ flex_attention_backward_template = TritonTemplate(
                 out="qk"
             ) | indent_except_first(3) }}
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            if not PRESCALE_QK:
-                post_mod_scores *= RCP_LN2
-            p = tl.math.exp2(post_mod_scores - lse)
+            if not SCORE_MOD_IS_LINEAR:
+                post_mod_scores *= 1.44269504
+            p = tl.math.exp2(post_mod_scores - lse).to(MATMUL_PRECISION)
             # Compute dP and dS.
             dp = tl.dot(do, vT)
             ds = p * (dp - Di[:, None])
@@ -775,7 +823,6 @@ flex_attention_backward_template = TritonTemplate(
 
         # Write back dQ.
         dq_ptrs = DQ + offs_m2[:, None] * stride_dqm + offs_k[None, :] * stride_dqd
-        dq *= SM_SCALE
         tl.store(dq_ptrs, dq)
     else:
         # THIS BLOCK DOES DK & DV
@@ -804,8 +851,6 @@ flex_attention_backward_template = TritonTemplate(
 
         # load K and V: they stay in SRAM throughout the inner loop.
         k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd)
-        if PRESCALE_QK:
-            k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
         v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd)
 
         offs_m1 = start_m1 + tl.arange(0, BLOCK_M1)
@@ -823,8 +868,6 @@ flex_attention_backward_template = TritonTemplate(
             offs_m1 = curr_m + tl.arange(0, BLOCK_M1)
             lse = tl.load(LSE + offs_m1)
             qkT = tl.dot(k, qT)
-            if not PRESCALE_QK:
-                qkT *= SM_SCALE
             # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
             m = offs_m1[None, :]
             n = offs_n1[:, None]
@@ -840,8 +883,8 @@ flex_attention_backward_template = TritonTemplate(
                 out="qkT"
             ) | indent_except_first(3) }}
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            if not PRESCALE_QK:
-                post_mod_scores *= RCP_LN2
+            if not SCORE_MOD_IS_LINEAR:
+                post_mod_scores *= 1.44269504
             pT = tl.math.exp2(post_mod_scores - lse[None, :])
             do = tl.load(do_ptrs)
             # Compute dV.
@@ -887,7 +930,6 @@ flex_attention_backward_template = TritonTemplate(
         index_n = offs_n1[:, None]
         index_k = offs_k[None, :]
 
-        dk *= SM_SCALE
         mask = index_n <= KV_LEN
         {{store_output(("off_z", "off_h", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
  """,
@@ -909,7 +951,6 @@ def flex_attention_backward(*args, **kwargs):
         fw_graph,
         joint_graph,
         block_mask,
-        scale,
         *other_buffers,
     ) = args
     (
@@ -920,7 +961,6 @@ def flex_attention_backward(*args, **kwargs):
         SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
     ) = block_mask
-
     for buf in [
         query,
         key,
@@ -947,14 +987,14 @@ def flex_attention_backward(*args, **kwargs):
         ]
     ]
     fw_subgraph_buffer = build_subgraph_buffer(
-        fwd_placeholder_inps + other_buffers, fw_graph
+        args, fwd_placeholder_inps, fw_graph, graph_type=SubgraphType.JOINT_FWD
     )
 
     joint_placeholder_inps = fwd_placeholder_inps + [
         create_placeholder("grad_score_mod", dtype, device)
     ]
-    joint_subgraph_buffer, *_ = build_subgraph_buffer(
-        joint_placeholder_inps + other_buffers, joint_graph
+    joint_subgraph_buffer = build_subgraph_buffer(
+        args, joint_placeholder_inps, joint_graph, graph_type=SubgraphType.JOINT_BWD
     )
 
     layout_k = FixedLayout(
@@ -1019,18 +1059,15 @@ def flex_attention_backward(*args, **kwargs):
             call_sizes=query.get_size() + [key.get_size()[2]],
             num_stages=num_stages,
             num_warps=num_warps,
-            SM_SCALE=scale,
-            BLOCK_DMODEL=query.get_size()[-1],
-            # Performance tuning
             BLOCK_M1=BLOCK1,
             BLOCK_N1=BLOCK2,
             BLOCK_M2=BLOCK2,
             BLOCK_N2=BLOCK1,
-            # Blocksparse options
+            BLOCK_DMODEL=query.get_size()[-1],
+            # For now, we always assume the "sound" option
+            SCORE_MOD_IS_LINEAR=False,
             SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
-            # For now, we always assume the "sound" option
-            PRESCALE_QK=False,
         )
     inputs_for_autotuning = [
         query,
