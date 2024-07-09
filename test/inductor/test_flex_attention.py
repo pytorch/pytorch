@@ -47,9 +47,12 @@ torch.set_float32_matmul_precision("high")
 index = torch.ops.aten.index
 
 
-def create_attention(score_mod, block_mask, is_gqa=False):
+def create_attention(score_mod, block_mask, enable_gqa=False):
     return functools.partial(
-        flex_attention, score_mod=score_mod, block_mask=block_mask, is_gqa=is_gqa
+        flex_attention,
+        score_mod=score_mod,
+        block_mask=block_mask,
+        enable_gqa=enable_gqa,
     )
 
 
@@ -232,7 +235,9 @@ class TestFlexAttention(InductorTestCase):
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
         block_mask = create_block_mask_test(score_mod, q, k)
-        sdpa_partial = create_attention(score_mod, block_mask, is_gqa=(not Q_H == KV_H))
+        sdpa_partial = create_attention(
+            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
+        )
         compiled_sdpa = torch.compile(sdpa_partial)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)

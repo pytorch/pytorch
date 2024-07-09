@@ -447,7 +447,7 @@ def flex_attention(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: _score_mod_signature = _identity,
-    is_gqa: bool = False,
+    enable_gqa: bool = False,
     block_mask: Optional[BlockMask] = None,
 ) -> torch.Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
@@ -478,6 +478,7 @@ def flex_attention(
         key (Tensor): Key tensor; shape :math:`(B, Hkv, S, E)`.
         value (Tensor): Value tensor; shape :math:`(B, Hkv, S, Ev)`.
         score_mod (Callable): Function to modify attention scores. By default no score_mod is applied.
+        enable_gqa (bool): Whether to enable GQA (Grouped Query Attention). Default: False
 
     Returns:
         output (Tensor): Attention output; shape :math:`(B, Hq, L, Ev)`.
@@ -497,19 +498,22 @@ def flex_attention(
     """
 
     if not query.size(-1) == key.size(-1):
+        raise ValueError("Embedding dimension of the query and key must be the same")
+    if (not enable_gqa) and query.size(-3) != key.size(-3):
         raise ValueError(
-            "NYI: Embedding dimension of the query and key must be the same"
-        )
-    if (not is_gqa) and query.size(-3) != key.size(-3):
-        raise ValueError(
-            "NYI: Num of query heads must equal to kv heads. Try setting is_gqa=True for GQA. "
+            f"Expect query and key/value to have the same number of heads "
+            f"but got Hq={query.size(-3)} and Hkv={key.size(-3)}. "
+            f"Try setting enable_gqa=True for GQA."
         )
 
-    if is_gqa:
+    if enable_gqa:
         Hq = query.size(1)
         Hkv = key.size(1)
         if Hq % Hkv != 0:
-            raise ValueError("NYI: Num of query heads must be a multiple of kv heads. ")
+            raise ValueError(
+                f"Expect number of query heads to be a multiple of kv heads for GQA "
+                f"but got Hq={Hq} and Hkv={Hkv}."
+            )
 
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key, value)
