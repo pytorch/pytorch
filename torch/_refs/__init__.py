@@ -2209,7 +2209,6 @@ def _make_copy_from_view(fn):
     aten_fn = getattr(aten, fn.__name__)
     annotations = fn.__annotations__
     fn = out_wrapper()(aten_fn)
-    fn.__annotations__.update(annotations)
 
     @wraps(fn)
     def _fn(*args, out=None, **kwargs):
@@ -2224,7 +2223,8 @@ def _make_copy_from_view(fn):
 
     copy_name = f"{fn.__name__}_copy"
     _fn.__name__ = copy_name
-    _fn = register_decomposition(getattr(aten, copy_name))(_fn)
+    _fn.__annotations__.update(annotations)
+    register_decomposition(getattr(aten, copy_name))(_fn)
     return _fn
 
 

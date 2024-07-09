@@ -3,7 +3,7 @@ import inspect
 import warnings
 from functools import wraps
 
-from typing import Callable, Dict, NamedTuple, Optional, overload, Sequence, Tuple
+from typing import Callable, NamedTuple, Optional, overload, Sequence, Tuple
 
 import torch
 import torch._prims_common as utils
@@ -320,7 +320,12 @@ def out_wrapper(
             out_type,
         )
         params = *sig.parameters.values(), out_param
+
+        # If there's a Parameter.VAR_KEYWORD parameter (like **kwds), it must appear
+        # after the out= parameter, which is Parameter.KEYWORD_ONLY. Sorting by
+        # Parameter.kind guarantees that all the parameters are in legal order.
         params = sorted(params, key=lambda p: p.kind)
+
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
             parameters=params, return_annotation=return_type  # type: ignore[arg-type]
         )
