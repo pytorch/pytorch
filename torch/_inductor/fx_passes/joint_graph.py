@@ -223,7 +223,6 @@ class UniformValueConstantFolder(ConstantFolder):
         return True
 
     def insertable_tensor_check(self, t: torch.Tensor) -> bool:
-        # TODO - we could also Tensors which get replaced with arange here
         return True
 
     def add_node_replacement(self, node: torch.fx.Node, tensor: torch.Tensor) -> None:
@@ -257,7 +256,7 @@ class UniformValueConstantFolder(ConstantFolder):
             and node.target == torch.ops.aten.lift_fresh_copy.default
         ):
             out = super(ConstantFolder, self).run_node(node)
-            if isinstance(out, torch.Tensor) and out.numel() <= 1:
+            if isinstance(out, torch.Tensor) and out.numel() == 1:
                 return out
 
         # constructors ops
