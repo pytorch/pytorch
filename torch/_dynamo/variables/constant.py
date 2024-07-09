@@ -1,6 +1,5 @@
 # mypy: ignore-errors
 
-import numbers
 import operator
 from typing import Dict, List
 
@@ -159,7 +158,7 @@ class ConstantVariable(VariableTracker):
         if isinstance(self.value, str) and name in str.__dict__.keys():
             method = getattr(self.value, name)
             return ConstantVariable.create(method(*const_args, **const_kwargs))
-        elif isinstance(self.value, numbers.Number):
+        elif isinstance(self.value, (float, int)):
             if not (args or kwargs):
                 return ConstantVariable.create(getattr(self.value, name)())
             if (
