@@ -5,7 +5,7 @@ import dis
 import itertools
 import sys
 import types
-from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Tuple, Union
 
 from .bytecode_analysis import (
     get_indexof,
@@ -85,6 +85,12 @@ class _NotProvided:
         return "_NotProvided"
 
 
+def inst_has_op_bits(name):
+    return (sys.version_info >= (3, 11) and name == "LOAD_GLOBAL") or (
+        sys.version_info >= (3, 12) and name in ("LOAD_ATTR", "LOAD_SUPER_ATTR")
+    )
+
+
 def create_instruction(
     name, *, arg=None, argval=_NotProvided, target=None
 ) -> Instruction:
@@ -97,18 +103,25 @@ def create_instruction(
     If `arg` is not provided, it will be computed during assembly from
     `argval` or `target`.
 
-    Do not use for LOAD_GLOBAL - use create_load_global instead.
-    Do not use for LOAD_ATTR - use create_load_attr instead.
-    Do not use for LOAD_SUPER_ATTR - if you need to create this instruction,
-        implement a create_load_super_attr function.
+    Bits in the args of instructions LOAD_GLOBAL, LOAD_ATTR (3.12+), and LOAD_SUPER_ATTR
+    modify the behavior of the instruction. In this case, we allow both `arg`
+    and `argval` to be set. The value of `arg` here is expected to be the value of
+    the op bits and the true value of `arg` will be computed during assembly.
+    If `arg` is not set, the bits are assumed to be 0.
     """
-    if name in ("LOAD_GLOBAL", "LOAD_ATTR", "LOAD_SUPER_ATTR"):
-        raise RuntimeError(f"cannot create_instruction with {name}")
-    cnt = (arg is not None) + (argval is not _NotProvided) + (target is not None)
-    if cnt > 1:
-        raise RuntimeError(
-            "only one of arg, argval, and target can be not None/_NotProvided"
-        )
+
+    # allow for instructions with op bits to have both arg and argval specified
+    if inst_has_op_bits(name):
+        if target is not None:
+            raise RuntimeError("target cannot be specified for instruction")
+        if arg is None:
+            arg = 0
+    else:
+        cnt = (arg is not None) + (argval is not _NotProvided) + (target is not None)
+        if cnt > 1:
+            raise RuntimeError(
+                "only one of arg, argval, and target can be not None/_NotProvided"
+            )
     if arg is not None and not isinstance(arg, int):
         raise RuntimeError("instruction arg must be int or None")
     return Instruction(
@@ -120,31 +133,6 @@ def create_instruction(
 def create_jump_absolute(target) -> Instruction:
     inst = "JUMP_FORWARD" if sys.version_info >= (3, 11) else "JUMP_ABSOLUTE"
     return create_instruction(inst, target=target)
-
-
-def create_load_global(name, push_null) -> Instruction:
-    """
-    `name` is the name of the global to be loaded.
-    `push_null` specifies whether or not a NULL should be pushed to the stack
-    before the global (Python 3.11+ only).
-
-    Python 3.11 changed the LOAD_GLOBAL instruction in that the first bit of
-    the instruction arg specifies whether a NULL should be pushed to the stack
-    before the global. The remaining bits of the instruction arg contain the
-    name index. See `create_call_function` for why this NULL is needed.
-
-    The instruction's `arg` is actually computed when assembling the bytecode.
-    For Python 3.11, push_null information is propagated through the arg.
-
-    NOTE: we don't use create_instruction since LOAD_GLOBAL is the only instruction
-    where both arg and argval need to be specified.
-    """
-    return Instruction(
-        opcode=dis.opmap["LOAD_GLOBAL"],
-        opname="LOAD_GLOBAL",
-        arg=push_null,
-        argval=name,
-    )
 
 
 def create_dup_top() -> Instruction:
@@ -182,6 +170,93 @@ def create_rot_n(n) -> List[Instruction]:
     return [create_instruction("ROT_N", arg=n)]
 
 
+def add_push_null(
+    inst_or_insts: Union[Instruction, List[Instruction]],
+) -> List[Instruction]:
+    """
+    Appends or prepends a PUSH_NULL instruction to `inst_or_insts`,
+    depending on Python version. Used when you know that
+    `inst_or_insts` generates a callable that will be called.
+
+    NOTE: Assumes `inst_or_insts` is a single instruction or sequence of
+    instructions that pushes exactly 1 object to the stack that is to
+    be called. It is important that you include ALL instructions that
+    construct the callable - not just the first instruction/a prefix.
+
+    Will attempt to use the NULL push bit for instructions
+    with such bits (LOAD_GLOBAL 3.11+, LOAD_ATTR 3.12+, LOAD_SUPER_ATTR).
+    In this case, instructions WILL be modified.
+    """
+    if isinstance(inst_or_insts, Instruction):
+        insts = [inst_or_insts]
+    else:
+        insts = inst_or_insts
+
+    def inst_has_bit_set(idx):
+        assert insts[idx].arg is not None
+        return insts[idx].arg & 1 == 1
+
+    def set_inst_bit(idx):
+        assert insts[idx].arg is not None
+        insts[idx].arg |= 1
+
+    if sys.version_info >= (3, 13):
+        # In 3.13, NULL follows the callable
+        if inst_has_op_bits(insts[-1].opname) and not inst_has_bit_set(-1):
+            # All insts with op bits have the push_null bit as the last one.
+            # Only set the bit if it hasn't been set - otherwise, we need
+            # to add another PUSH_NULL.
+            set_inst_bit(-1)
+        else:
+            insts = insts + [create_instruction("PUSH_NULL")]
+    elif sys.version_info >= (3, 12):
+        # LOAD_ATTR/LOAD_SUPER_ATTR at the end
+        # We assume that `insts` will only load 1 object, so
+        # LOAD_GLOBAL at the end doesn't need to be checked
+        if inst_has_op_bits(insts[-1].opname) and not inst_has_bit_set(-1):
+            set_inst_bit(-1)
+        elif insts[0].opname == "LOAD_GLOBAL" and not inst_has_bit_set(0):
+            set_inst_bit(0)
+        else:
+            insts = [create_instruction("PUSH_NULL")] + insts
+    elif sys.version_info >= (3, 11):
+        # 3.11 introduced NULL preceding callable
+        if inst_has_op_bits(insts[0].opname) and not inst_has_bit_set(0):
+            set_inst_bit(0)
+        else:
+            insts = [create_instruction("PUSH_NULL")] + insts
+    return insts
+
+
+def add_push_null_call_function_ex(
+    inst_or_insts: Union[Instruction, List[Instruction]],
+) -> List[Instruction]:
+    """Like add_push_null, but the low bit of LOAD_ATTR/LOAD_SUPER_ATTR
+    is not set, due to an expected CALL_FUNCTION_EX instruction.
+    """
+    if isinstance(inst_or_insts, Instruction):
+        insts = [inst_or_insts]
+    else:
+        insts = inst_or_insts
+
+    if sys.version_info < (3, 11):
+        return insts
+
+    idx = -1 if sys.version_info >= (3, 13) else 0
+    if insts[idx].opname == "LOAD_GLOBAL":
+        assert insts[idx].arg is not None
+        if insts[idx].arg & 1 == 0:  # type: ignore[operator]
+            insts[idx].arg |= 1  # type: ignore[operator]
+            return insts
+
+    if sys.version_info >= (3, 13):
+        insts = insts + [create_instruction("PUSH_NULL")]
+    else:
+        insts = [create_instruction("PUSH_NULL")] + insts
+
+    return insts
+
+
 def create_call_function(nargs, push_null) -> List[Instruction]:
     """
     Creates a sequence of instructions that makes a function call.
@@ -191,20 +266,45 @@ def create_call_function(nargs, push_null) -> List[Instruction]:
     and we know that the NULL has not been pushed yet. We will push a
     NULL and rotate it to the correct position immediately before making
     the function call.
-    push_null should default to True unless you know you are calling a function
-    that you codegen'd with a null already pushed, for example
-    (assume `math` is available in the global scope),
 
-    create_load_global("math", True)  # pushes a null
-    create_load_attr("sqrt")
-    create_instruction("LOAD_CONST", argval=25)
-    create_call_function(1, False)
+    `push_null` should be True if no NULL is pushed for the callable.
+    Conversely, `push_null` should be False if a NULL was pushed for the callable.
+    Prefer using `push_null=False` when possible since we will not need to rotate
+    NULL to the right place, which is less efficient.
+
+    Generally, you should codegen a function by using `add_push_null` then
+    `create_call_function` with `push_null=False`.
+
+    Example of when to set push_null False:
+
+    insts = [
+        create_instruction("LOAD_GLOBAL", argval="torch"),
+        create_instruction("LOAD_ATTR", argval="nn"),
+        create_instruction("LOAD_ATTR", argval="functional"),
+        create_instruction("LOAD_ATTR", argval="relu"),
+    ]
+    insts = add_push_null(insts)
+    insts.append(create_instruction("LOAD_FAST", argval="x"))
+    insts.extend(create_call_function(1, False))
+
+    Example of when to set push_null True:
+
+    insts = [create_instruction("LOAD_FAST", x)]
+    for should_wrap, wrapper_name in wrappers:
+        if should_wrap:
+            insts.extend([
+                create_instruction("LOAD_GLOBAL", argval="wrapper1"),
+                create_instruction("SWAP", arg=2),
+                *create_call_function(1, True),
+            )
     """
     if sys.version_info >= (3, 11):
         output = []
         if push_null:
             output.append(create_instruction("PUSH_NULL"))
-            output.extend(create_rot_n(nargs + 2))
+            # 3.13 swapped NULL and callable
+            rots = nargs + 1 if sys.version_info >= (3, 13) else nargs + 2
+            output.extend(create_rot_n(rots))
         if sys.version_info < (3, 12):
             output.append(create_instruction("PRECALL", arg=nargs))
         output.append(create_instruction("CALL", arg=nargs))
@@ -223,25 +323,10 @@ def create_call_method(nargs) -> List[Instruction]:
     return [create_instruction("CALL_METHOD", arg=nargs)]
 
 
-def create_load_attr(name) -> Instruction:
-    # in 3.12, create a LOAD_ATTR instruction with the low bit unset
-    return Instruction(
-        opcode=dis.opmap["LOAD_ATTR"],
-        opname="LOAD_ATTR",
-        arg=False,  # lowbit for 3.12
-        argval=name,
-    )
-
-
 def create_load_method(name) -> Instruction:
     if sys.version_info >= (3, 12):
         # in 3.12, create a LOAD_ATTR instruction with the low bit set
-        return Instruction(
-            opcode=dis.opmap["LOAD_ATTR"],
-            opname="LOAD_ATTR",
-            arg=True,  # lowbit for 3.12
-            argval=name,
-        )
+        return create_instruction("LOAD_ATTR", arg=1, argval=name)
     return create_instruction("LOAD_METHOD", argval=name)
 
 
@@ -1071,10 +1156,10 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
             return instructions[i].argval is not _NotProvided
 
         if instructions[i].opname == "LOAD_GLOBAL":
-            # 3.11 LOAD_GLOBAL requires both arg and argval - see create_load_global
-            assert instructions[i].arg is not None
+            # 3.11 LOAD_GLOBAL requires both arg and argval - see create_instruction
             assert instructions[i].argval is not _NotProvided
             if sys.version_info >= (3, 11):
+                assert instructions[i].arg is not None
                 instructions[i].arg = (get_name_index(instructions[i].argval) << 1) + (
                     cast(int, instructions[i].arg) % 2
                 )
@@ -1082,9 +1167,9 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
                 instructions[i].arg = get_name_index(instructions[i].argval)
         elif instructions[i].opname == "LOAD_ATTR":
             # 3.12 LOAD_ATTR requires both arg and argval, like LOAD_GLOBAL
-            assert instructions[i].arg is not None
             assert instructions[i].argval is not _NotProvided
             if sys.version_info >= (3, 12):
+                assert instructions[i].arg is not None
                 instructions[i].arg = (get_name_index(instructions[i].argval) << 1) + (
                     cast(int, instructions[i].arg) % 2
                 )

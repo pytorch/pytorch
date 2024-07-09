@@ -728,7 +728,7 @@ def _compile(
             hooks.guard_fail_fn if hooks else None,
         )
 
-        guarded_code = GuardedCode(out_code, check_fn.check_fn)
+        guarded_code = GuardedCode(out_code, check_fn.check_fn, compile_id)
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
             # We should not run the guard_export_fn when Dynamo does not
@@ -1063,16 +1063,21 @@ class CatchErrorsWrapper:
         assert frame_state is not None
 
         is_skipfile = trace_rules.check(frame.f_code)
+        if sys.version_info >= (3, 13):
+            has_started_execution = frame.f_lasti > first_real_inst_idx(frame.f_code)
+        else:
+            has_started_execution = frame.f_lasti >= first_real_inst_idx(frame.f_code)
         if (
             # TODO: the first condition is not covered by any test
-            frame.f_lasti >= first_real_inst_idx(frame.f_code)
+            has_started_execution
             or is_skipfile
             or config.disable
         ):
             if log.isEnabledFor(logging.DEBUG):
+                print(frame.f_lasti, first_real_inst_idx(frame.f_code))
                 skip_reason = (
                     "traced frame already"
-                    if frame.f_lasti >= first_real_inst_idx(frame.f_code)
+                    if has_started_execution
                     else (
                         "in skipfiles"
                         if trace_rules.check(frame.f_code)
