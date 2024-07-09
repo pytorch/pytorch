@@ -14,6 +14,8 @@ class OrderedSet(MutableSet[T]):
     Insertion ordered set, similar to OrderedDict.
     """
 
+    __slots__ = ("_dict",)
+
     def __init__(self, iterable: Optional[Iterable[T]] = None):
         self._dict: dict[T, None] = {}
         if iterable is not None:
