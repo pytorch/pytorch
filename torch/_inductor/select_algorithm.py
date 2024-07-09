@@ -1122,11 +1122,8 @@ class AlgorithmSelectorCache(PersistentCache):
         # arg, the function will be called instead of
         # generating a random torch.Tensor for benchmarking.
         input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
-        precompilation_timeout_seconds: int = 60 * 60,
         return_multi_template=False,
     ):
-        assert config.search_autotune_cache or config.max_autotune_gemm or config.max_autotune
-
         if len(choices) == 0:
             raise NoValidChoicesError(
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
@@ -1158,45 +1155,20 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
         if cached_choice_to_timing == {}:
-            if not (config.max_autotune_gemm or config.max_autotune):
-                selected_choice = choices[0]
-
-                log.debug("One or more missing cached autotunings, selecting default %s.", selected_choice)
-
-                wait_on_precompile = precompile([selected_choice])
-                wait_on_precompile()
-
-                return selected_choice.output_node
-            else:
-                log.debug("One or more missing cached autotunings, proceeding to autotuning.")
+            log.debug("One or more autotunings missing in cache, proceeding to autotuning.")
         else:
             if return_multi_template:
                 wait_on_precompile = precompile(choices)
 
-                def get_cached_choice_to_timing():
+                def wait_and_return():
                     wait_on_precompile()
-
-                    min_extern_choice_timing = float("inf")
-                    for choice, timing in cached_choice_to_timing.items():
-                        if isinstance(choice, ExternKernelCaller):
-                            min_extern_choice_timing = min(timing, min_extern_choice_timing)
-                    
-                    cached_choice_to_timing = {
-                        choice: timing
-                        for choice, timing in cached_choice_to_timing.items()
-                        if (
-                            (timing <= min_extern_choice_timing)
-                            or not isinstance(choice, ExternKernelCaller)
-                        )
-                    }
-
-                    return cached_choice_to_timing
+                    return choice_to_timing
 
                 return torch._inductor.ir.TensorBox.create(
                     torch._inductor.ir.MultiTemplateBuffer(
                         layout,
                         input_nodes,
-                        get_cached_choice_to_timing,
+                        wait_and_return,
                     )
                 )
             else:
@@ -1208,8 +1180,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 wait_on_precompile()
 
                 return selected_choice.output_node()
-        
-        assert config.max_autotune_gemm or config.max_autotune
 
         log.debug("Autotuning selecting from %s choices.", str(len(choices)))
 
@@ -1267,30 +1237,11 @@ class AlgorithmSelectorCache(PersistentCache):
         wait_on_precompile = precompile(choices)
         
         if return_multi_template:
-            def get_choice_timings():
-                choice_to_timing = autotune(wait_on_precompile)
-
-                min_extern_choice_timing = float("inf")
-                for choice, timing in choice_to_timing.items():
-                    if isinstance(choice, ExternKernelCaller):
-                        min_extern_choice_timing = min(timing, min_extern_choice_timing)
-                
-                choice_to_timing = {
-                    choice: timing
-                    for choice, timing in choice_to_timing.items()
-                    if (
-                        (timing <= min_extern_choice_timing)
-                        or not isinstance(choice, ExternKernelCaller)
-                    )
-                }
-
-                return choice_to_timing
-
             return torch._inductor.ir.TensorBox.create(
                 torch._inductor.ir.MultiTemplateBuffer(
                     layout,
                     input_nodes,
-                    get_choice_timings,
+                    autotune(wait_on_precompile),
                 )
             )
         else:
