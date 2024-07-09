@@ -616,7 +616,6 @@ class TestGenXPUByBackendWhitelist(unittest.TestCase):
             cuda_fm=cuda_fm,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
-            whitelist_keys=whitelist_keys,
             rocm=False,
             force_schema_registration=False,
             per_operator_headers=True,
@@ -638,7 +637,6 @@ class TestGenXPUByBackendWhitelist(unittest.TestCase):
             ops_fm=ops_fm,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
-            whitelist_keys=whitelist_keys,
             rocm=False,
             per_operator_headers=True,
         )
