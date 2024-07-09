@@ -178,7 +178,7 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
     # placement list stores placements of [output, weight, input_indices]
     # first we always have replicate all for inputs and output
-    all_replicate: List[Placement] = [Replicate()] * 3
+    all_replicate: List[Optional[Placement]] = [Replicate()] * 3
     single_mesh_dim_strategies.append(all_replicate)
 
     # colwise sharding, output shard on last dim, weight shard on dim 1, input replicate
@@ -224,7 +224,7 @@ def embedding_dense_backward_strategy(
 
     # placement list stores placements of [output, weight, input_indices]
     # first we always have replicate all for inputs and output
-    all_replicate: List[Placement] = [Replicate()] * 3
+    all_replicate: List[Optional[Placement]] = [Replicate()] * 3
     single_mesh_dim_strategies.append(all_replicate)
 
     # colwise sharding backward, grad_out shard on last dim, input replicate,
