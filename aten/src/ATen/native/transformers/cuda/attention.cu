@@ -775,6 +775,19 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
       max_seqlen_batch_k == max_seqlen_batch_v,
       "Key and Value must have the same sequence length");
 
+  auto attn_bias_ = attn_bias;
+  if (attn_bias_.has_value()) {
+    if (attn_bias_.value().dim() == 2) {
+      attn_bias_ = attn_bias_.value().expand({batch_size, 1, attn_bias_.value().size(0), attn_bias_.value().size(1)}).to(at::kFloat);
+    } else {
+      TORCH_CHECK(false, "cuDNN SDPA expects either a 2D or 4D attn_bias");
+    }
+	  TORCH_WARN("SHAPES?", query.sizes(), " ", attn_bias_.value().sizes());
+	  TORCH_WARN("STRIDES?", attn_bias_.value().strides());
+  }
+  TORCH_WARN("IS CAUSAL?", is_causal);
+  TORCH_WARN("DTYPE?", attn_bias.value().dtype());
+
   Tensor attention, log_sumexp;
 
   at::Tensor cudnn_seed, cudnn_offset;
@@ -818,6 +831,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                       query/* Tensor q*/,
                       key/* Tensor k*/,
                       value/* Tensor v*/,
+		      attn_bias_ /* std::optional<Tensor> */,
                       log_sumexp/*Tensor softmaxstats*/,
                       attention/*Tensor o*/,
                       cudnn_seed/*Tensor dropoutseed*/,

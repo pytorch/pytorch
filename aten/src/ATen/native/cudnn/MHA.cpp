@@ -22,6 +22,7 @@ void run_cudnn_SDP_fprop(
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
     Tensor& softmaxstats,
     Tensor& o,
     Tensor& dropoutseed,
@@ -86,9 +87,9 @@ using graph_and_tensors = std::tuple<
     std::shared_ptr<fe::graph::Tensor_attributes>, // Q,
     std::shared_ptr<fe::graph::Tensor_attributes>, // K,
     std::shared_ptr<fe::graph::Tensor_attributes>, // V,
+    std::optional<std::shared_ptr<fe::graph::Tensor_attributes>>, // Bias
     std::shared_ptr<fe::graph::Tensor_attributes>, // Attn_scale,
     // TODO(eqy): additional options
-    // std::shared_ptr<fe::graph::Tensor_attributes>, // Bias,
     // std::shared_ptr<fe::graph::Tensor_attributes>, // SEQ_LEN_Q,
     // std::shared_ptr<fe::graph::Tensor_attributes>, // SEQ_LEN_KV,
     std::shared_ptr<fe::graph::Tensor_attributes>, // Seed,
@@ -104,7 +105,8 @@ using graph_and_tensors_backward = std::tuple<
     std::shared_ptr<fe::graph::Tensor_attributes>, // Q,
     std::shared_ptr<fe::graph::Tensor_attributes>, // K,
     std::shared_ptr<fe::graph::Tensor_attributes>, // V,
-    std::shared_ptr<fe::graph::Tensor_attributes>, // Attn_scale
+    std::optional<std::shared_ptr<fe::graph::Tensor_attributes>>, // Bias,
+    std::shared_ptr<fe::graph::Tensor_attributes>, // Attn_scale,
     std::shared_ptr<fe::graph::Tensor_attributes>, // Seed,
     std::shared_ptr<fe::graph::Tensor_attributes>, // Offset,
     std::shared_ptr<fe::graph::Tensor_attributes>, // O,
@@ -135,6 +137,7 @@ struct MHAParams {
   double dropout_probability;
   bool is_causal;
   bool return_softmaxstats;
+  bool has_attn_bias;
 };
 
 void setMHAParams(
@@ -150,7 +153,8 @@ void setMHAParams(
     const Tensor& v,
     double dropout_probability,
     bool is_causal,
-    bool return_softmaxstats) {
+    bool return_softmaxstats,
+    bool has_attn_bias) {
   memset(&params, 0, sizeof(MHAParams));
   params.device_id = at::cuda::current_device();
   params.dataType = fe::DataType_t::HALF;
@@ -166,6 +170,7 @@ void setMHAParams(
   params.dropout_probability = dropout_probability;
   params.is_causal = is_causal;
   params.return_softmaxstats = return_softmaxstats;
+  params.has_attn_bias = has_attn_bias;
   TORCH_INTERNAL_ASSERT(
       q.sizes().size() == MAX_MHA_DIM,
       "Q tensor has unexpected number of dims, please report a bug to PyTorch.");
@@ -205,7 +210,8 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
       const Tensor& v,
       double dropout_probability,
       bool is_causal,
-      bool return_softmaxstats) {
+      bool return_softmaxstats,
+      bool has_attn_bias) {
     setMHAParams(
         this->pod,
         b,
@@ -219,7 +225,8 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
         v,
         dropout_probability,
         is_causal,
-        return_softmaxstats);
+        return_softmaxstats,
+	has_attn_bias);
   }
 };
 
@@ -285,6 +292,7 @@ auto build_graph_and_tensors(
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
     Tensor& softmaxstats,
     Tensor& o,
     Tensor& dropoutseed,
@@ -301,6 +309,30 @@ auto build_graph_and_tensors(
   mha_graph->set_io_data_type(dtype)
       .set_intermediate_data_type(fe::DataType_t::FLOAT)
       .set_compute_data_type(fe::DataType_t::FLOAT);
+  auto attn_scale =
+      mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_name("Attn_scale")
+                            .set_dim({1, 1, 1, 1})
+                            .set_stride({1, 1, 1, 1})
+                            .set_is_pass_by_value(true)
+                            .set_data_type(fe::DataType_t::FLOAT));
+  auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                    .set_name("Seed")
+                                    .set_dim({1, 1, 1, 1})
+                                    .set_stride({1, 1, 1, 1})
+                                    .set_data_type(fe::DataType_t::INT32));
+  auto offset = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                      .set_name("Offset")
+                                      .set_dim({1, 1, 1, 1})
+                                      .set_stride({1, 1, 1, 1})
+                                      .set_data_type(fe::DataType_t::INT32));
+  auto scaled_dot_product_flash_attention_options =
+      fe::graph::SDPA_attributes()
+          .set_name("CUDNN_SDPA")
+          .set_is_inference(return_softmaxstats == false)
+          .set_causal_mask(is_causal)
+          .set_attn_scale(attn_scale)
+          .set_dropout(dropout_probability, seed, offset);
   auto Q = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_name("Q")
@@ -331,40 +363,18 @@ auto build_graph_and_tensors(
               std::vector<int64_t>(
                   v.strides().data(),
                   v.strides().data() + v.strides().size()))));
-  auto attn_scale =
-      mha_graph->tensor(fe::graph::Tensor_attributes()
-                            .set_name("Attn_scale")
-                            .set_dim({1, 1, 1, 1})
-                            .set_stride({1, 1, 1, 1})
-                            .set_is_pass_by_value(true)
-                            .set_data_type(fe::DataType_t::FLOAT));
-  // TODO(eqy): support bias in the future in a follow-up PR
-  // auto bias = mha_graph->tensor(fe::graph::Tensor_attributes()
-  //                         .set_name("bias")
-  //                         .set_dim({b, 1, s_q, s_kv})
-  //                         .set_stride({s_q * s_kv, s_q * s_kv, s_kv, 1}));
-  auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                    .set_name("Seed")
-                                    .set_dim({1, 1, 1, 1})
-                                    .set_stride({1, 1, 1, 1})
-                                    .set_data_type(fe::DataType_t::INT32));
-  auto offset = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                      .set_name("Offset")
-                                      .set_dim({1, 1, 1, 1})
-                                      .set_stride({1, 1, 1, 1})
-                                      .set_data_type(fe::DataType_t::INT32));
-  auto scaled_dot_product_flash_attention_options =
-      fe::graph::SDPA_attributes()
-          .set_name("CUDNN_SDPA")
-          .set_is_inference(return_softmaxstats == false)
-          .set_causal_mask(is_causal)
-          .set_attn_scale(attn_scale)
-          .set_dropout(dropout_probability, seed, offset);
-  // Optional bias in flash attention is only supported 8.9.3 onwards
-  if (cudnnGetVersion() >= 8904) {
-    // scaled_dot_product_flash_attention_options.set_alibi_mask(true);
+  std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
+  if (attn_bias.has_value()) {
+    bias = mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_name("bias")
+  			  .set_dim(std::vector<int64_t>(
+  			      attn_bias.value().sizes().data(), attn_bias.value().sizes().data() + attn_bias.value().sizes().size()))
+  			  .set_stride(
+  			      std::vector<int64_t>(
+  				  attn_bias.value().strides().data(),
+  				  attn_bias.value().strides().data() + attn_bias.value().strides().size())));
+    scaled_dot_product_flash_attention_options.set_bias(bias.value());
   }
-
   auto seq_q = mha_graph->tensor(fe::graph::Tensor_attributes()
                                      .set_name("Seq_q")
                                      .set_dim({b, 1, 1, 1})
@@ -376,12 +386,6 @@ auto build_graph_and_tensors(
                                       .set_stride({1, 1, 1, 1})
                                       .set_data_type(fe::DataType_t::INT32));
 
-  // if (cudnnGetVersion() >= 8903) {
-  //     scaled_dot_product_flash_attention_options.set_bias(bias)
-  //         .set_padding_mask(true)
-  //         .set_seq_len_q(seq_q)
-  //         .set_seq_len_kv(seq_kv);
-  // }
 
   auto [O, Stats] =
       mha_graph->sdpa(Q, K, V, scaled_dot_product_flash_attention_options);
@@ -407,6 +411,7 @@ auto build_graph_and_tensors(
       std::move(Q),
       std::move(K),
       std::move(V),
+      std::move(bias),
       std::move(attn_scale),
       std::move(seed),
       std::move(offset),
@@ -427,6 +432,7 @@ auto build_graph_and_tensors_backward(
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
     const Tensor& o,
     const Tensor& dO,
     const Tensor& softmaxstats,
@@ -447,6 +453,17 @@ auto build_graph_and_tensors_backward(
   mha_graph->set_io_data_type(dtype)
       .set_intermediate_data_type(fe::DataType_t::FLOAT)
       .set_compute_data_type(fe::DataType_t::FLOAT);
+  auto attn_scale =
+      mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_name("Attn_scale")
+                            .set_dim({1, 1, 1, 1})
+                            .set_stride({1, 1, 1, 1})
+                            .set_is_pass_by_value(true)
+                            .set_data_type(fe::DataType_t::FLOAT));
+  auto sdpa_backward_options = fe::graph::SDPA_backward_attributes()
+                                   .set_name("CUDNN_SDPA_BACKWARD")
+                                   .set_causal_mask(is_causal)
+                                   .set_attn_scale(attn_scale);
   auto Q = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_name("Q")
@@ -465,13 +482,18 @@ auto build_graph_and_tensors_backward(
           .set_dim(std::vector<int64_t>(v.sizes().begin(), v.sizes().end()))
           .set_stride(
               std::vector<int64_t>(v.strides().begin(), v.strides().end())));
-  auto attn_scale =
-      mha_graph->tensor(fe::graph::Tensor_attributes()
-                            .set_name("Attn_scale")
-                            .set_dim({1, 1, 1, 1})
-                            .set_stride({1, 1, 1, 1})
-                            .set_is_pass_by_value(true)
-                            .set_data_type(fe::DataType_t::FLOAT));
+  std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
+  if (attn_bias.has_value()) {
+    bias = mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_name("bias")
+  			  .set_dim(std::vector<int64_t>(
+  			      attn_bias.value().sizes().data(), attn_bias.value().sizes().data() + attn_bias.value().sizes().size()))
+  			  .set_stride(
+  			      std::vector<int64_t>(
+  				  attn_bias.value().strides().data(),
+  				  attn_bias.value().strides().data() + attn_bias.value().strides().size())));
+    sdpa_backward_options.set_bias(bias.value());
+  }
   auto Seed = mha_graph->tensor(fe::graph::Tensor_attributes()
                                     .set_name("Seed")
                                     .set_dim({1, 1, 1, 1})
@@ -502,10 +524,6 @@ auto build_graph_and_tensors_backward(
           .set_dim(std::vector<int64_t>(dO.sizes().begin(), dO.sizes().end()))
           .set_stride(
               std::vector<int64_t>(dO.strides().begin(), dO.strides().end())));
-  auto sdpa_backward_options = fe::graph::SDPA_backward_attributes()
-                                   .set_name("CUDNN_SDPA_BACKWARD")
-                                   .set_causal_mask(is_causal)
-                                   .set_attn_scale(attn_scale);
   if (dropout_probability != 0.0f) {
     sdpa_backward_options.set_dropout(dropout_probability, Seed, Offset);
   }
@@ -534,6 +552,7 @@ auto build_graph_and_tensors_backward(
       std::move(Q),
       std::move(K),
       std::move(V),
+      std::move(bias),
       std::move(attn_scale),
       std::move(Seed),
       std::move(Offset),
@@ -559,6 +578,7 @@ void run_cudnn_SDP_fprop(
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
     Tensor& softmaxstats,
     Tensor& o,
     Tensor& dropoutseed,
@@ -585,7 +605,8 @@ void run_cudnn_SDP_fprop(
       v,
       dropout_probability,
       is_causal,
-      return_softmaxstats);
+      return_softmaxstats,
+      attn_bias.has_value());
   auto graph_and_tensors_ptr = mhagraphcache.find(key);
   graph_and_tensors graph_and_tensors_values;
   if (graph_and_tensors_ptr) {
@@ -605,13 +626,14 @@ void run_cudnn_SDP_fprop(
         q,
         k,
         v,
+	attn_bias,
         softmaxstats,
         o,
         dropoutseed,
         dropoutoffset,
         handle);
   }
-  auto [mha_graph, Q, K, V, attn_scale, seed, offset, O, Stats] =
+  auto [mha_graph, Q, K, V, bias, attn_scale, seed, offset, O, Stats] =
       graph_and_tensors_values;
   std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*>
       variant_pack = {
@@ -619,12 +641,14 @@ void run_cudnn_SDP_fprop(
           {K, k.data_ptr()},
           {V, v.data_ptr()},
           {attn_scale, &scaling_factor},
-          //{bias, bias.data_ptr()},
           {seed, dropoutseed.data_ptr()},
           {offset, dropoutoffset.data_ptr()},
           {O, o.data_ptr()}};
   if (return_softmaxstats) {
     variant_pack[Stats] = softmaxstats.data_ptr();
+  }
+  if (attn_bias.has_value()) {
+    variant_pack[bias.value()] = attn_bias.value().data_ptr();
   }
   auto workspace_size = mha_graph->get_workspace_size();
   auto workspace_ptr =
@@ -647,6 +671,7 @@ void run_cudnn_SDP_bprop(
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
     const Tensor& o,
     const Tensor& dO,
     const Tensor& softmaxstats,
@@ -696,7 +721,9 @@ void run_cudnn_SDP_bprop(
       v,
       dropout_probability,
       is_causal,
-      true);
+      true,
+      attn_bias.has_value()
+      );
   auto graph_and_tensors_backward_ptr = mhagraphbackwardcache.find(key);
   graph_and_tensors_backward graph_and_tensors_backward_values;
   if (graph_and_tensors_backward_ptr) {
@@ -715,6 +742,7 @@ void run_cudnn_SDP_bprop(
         q,
         k,
         v,
+	attn_bias,
         o,
         dO_,
         softmaxstats,
@@ -726,7 +754,7 @@ void run_cudnn_SDP_bprop(
         handle);
   }
   auto
-      [mha_graph, Q, K, V, attn_scale, Seed, Offset, O, Do, Stats, Dq, Dk, Dv] =
+      [mha_graph, Q, K, V, bias, attn_scale, Seed, Offset, O, Do, Stats, Dq, Dk, Dv] =
           graph_and_tensors_backward_values;
   std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*>
       variant_pack = {// inputs
@@ -745,6 +773,9 @@ void run_cudnn_SDP_bprop(
   if (dropout_probability != 0.0f) {
     variant_pack[Seed] = dropoutseed.data_ptr();
     variant_pack[Offset] = dropoutoffset.data_ptr();
+  }
+  if (attn_bias.has_value()) {
+    variant_pack[bias.value()] = attn_bias.value().data_ptr();
   }
   auto workspace_size = mha_graph->get_workspace_size();
   auto workspace_ptr =

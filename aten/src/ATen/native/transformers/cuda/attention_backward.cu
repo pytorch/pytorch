@@ -195,6 +195,24 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
     const int64_t num_heads = query.size(1);
     const int64_t head_dim_qk = query.size(3);
     const int64_t head_dim_v = value.size(3);
+
+    // This is needed because SaveVariable automatically converts
+    // std::optional to undefined tensor
+    std::optional<Tensor> attn_bias_;
+    if (attn_bias.defined()) {
+      attn_bias_ = attn_bias;
+    }
+
+    if (attn_bias_.has_value()) {
+      if (attn_bias_.value().dim() == 2) {
+        attn_bias_ = attn_bias_.value().expand({batch_size, 1, attn_bias_.value().size(0), attn_bias_.value().size(1)}).to(at::kFloat);
+      } else {
+        TORCH_CHECK(false, "cuDNN SDPA expects either a 2D or 4D attn_bias");
+      }
+            TORCH_WARN("SHAPES?", query.sizes(), " ", attn_bias_.value().sizes());
+            TORCH_WARN("STRIDES?", attn_bias_.value().strides());
+    }
+
     const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
     auto dq = at::empty_like(query);
     auto dk = at::empty_like(key);
@@ -211,6 +229,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
                         query /*const Tensor& q*/,
                         key /*const Tensor& k*/,
                         value /*const Tensor& v*/,
+			attn_bias_ /*const std::optional<Tensor>& attn_bias*/,
                         out /*const Tensor& o*/,
                         grad_out/*const Tensor& dO*/,
                         logsumexp.unsqueeze(-1)/*const Tensor& softmaxstats*/,
