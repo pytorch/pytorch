@@ -1217,11 +1217,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_comparison_vs_sdpa(self):
         inputs = [
             torch.randn(
-                2, 2, 2048, 128, device="cuda", dtype=torch.float16, requires_grad=True
+                2, 2, 2048, 64, device="cuda", dtype=torch.float16, requires_grad=True
             )
             for _ in range(3)
         ]
-        gradOut = torch.randn(2, 2, 2048, 128, device="cuda", dtype=torch.float16)
+        gradOut = torch.randn(2, 2, 2048, 64, device="cuda", dtype=torch.float16)
         out_ref = torch.nn.functional.scaled_dot_product_attention(
             *inputs, is_causal=True
         )
