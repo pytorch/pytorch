@@ -728,7 +728,7 @@ def _compile(
             hooks.guard_fail_fn if hooks else None,
         )
 
-        guarded_code = GuardedCode(out_code, check_fn.check_fn)
+        guarded_code = GuardedCode(out_code, check_fn.check_fn, compile_id)
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
             # We should not run the guard_export_fn when Dynamo does not

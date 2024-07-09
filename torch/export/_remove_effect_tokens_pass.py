@@ -115,8 +115,6 @@ def _remove_effect_tokens_from_graph_helper(
         ep.graph.erase_node(inp_token)
 
     ep.graph.eliminate_dead_code()
-    # Make graph_module.code to be consistent with the graph
-    ep.graph_module.recompile()
 
 
 def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
