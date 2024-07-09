@@ -495,7 +495,9 @@ class LocalBufferContext:
                         patch.object(scheduler_node, "outputs", new_outputs)
                     )
                     self.exit_stack.enter_context(
-                        patch.object(scheduler_node, "outputs_by_name", new_outputs_by_name)
+                        patch.object(
+                            scheduler_node, "outputs_by_name", new_outputs_by_name
+                        )
                     )
 
     def localize_function(
