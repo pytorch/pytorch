@@ -12,6 +12,7 @@ import warnings
 import weakref
 
 from test import support
+from torch.testing._internal.common_utils import TestCase
 
 from torch.utils.ordered_set import OrderedSet
 
@@ -426,7 +427,7 @@ class TestJointOps:
         support.check_free_after_iterating(self, iter, self.thetype)
 
 
-class TestSet(TestJointOps, unittest.TestCase):
+class TestSet(TestJointOps, TestCase):
     thetype = OrderedSet
     basetype = OrderedSet
 
@@ -843,7 +844,7 @@ class TestBasicOps:
 # ------------------------------------------------------------------------------
 
 
-class TestBasicOpsEmpty(TestBasicOps, unittest.TestCase):
+class TestBasicOpsEmpty(TestBasicOps, TestCase):
     def setUp(self):
         self.case = "empty OrderedSet"
         self.values = []
@@ -856,7 +857,7 @@ class TestBasicOpsEmpty(TestBasicOps, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestBasicOpsSingleton(TestBasicOps, unittest.TestCase):
+class TestBasicOpsSingleton(TestBasicOps, TestCase):
     def setUp(self):
         self.case = "unit OrderedSet (number)"
         self.values = [3]
@@ -875,7 +876,7 @@ class TestBasicOpsSingleton(TestBasicOps, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestBasicOpsTuple(TestBasicOps, unittest.TestCase):
+class TestBasicOpsTuple(TestBasicOps, TestCase):
     def setUp(self):
         self.case = "unit OrderedSet (tuple)"
         self.values = [(0, "zero")]
@@ -894,7 +895,7 @@ class TestBasicOpsTuple(TestBasicOps, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestBasicOpsTriple(TestBasicOps, unittest.TestCase):
+class TestBasicOpsTriple(TestBasicOps, TestCase):
     def setUp(self):
         self.case = "triple OrderedSet"
         self.values = [0, "zero", operator.add]
@@ -907,7 +908,7 @@ class TestBasicOpsTriple(TestBasicOps, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestBasicOpsString(TestBasicOps, unittest.TestCase):
+class TestBasicOpsString(TestBasicOps, TestCase):
     def setUp(self):
         self.case = "string OrderedSet"
         self.values = ["a", "b", "c"]
@@ -923,7 +924,7 @@ class TestBasicOpsString(TestBasicOps, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestBasicOpsBytes(TestBasicOps, unittest.TestCase):
+class TestBasicOpsBytes(TestBasicOps, TestCase):
     def setUp(self):
         self.case = "bytes OrderedSet"
         self.values = [b"a", b"b", b"c"]
@@ -939,7 +940,7 @@ class TestBasicOpsBytes(TestBasicOps, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestBasicOpsMixedStringBytes(TestBasicOps, unittest.TestCase):
+class TestBasicOpsMixedStringBytes(TestBasicOps, TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", BytesWarning)
         self.case = "string and bytes OrderedSet"
@@ -965,7 +966,7 @@ def gooditer():
     yield True
 
 
-class TestExceptionPropagation(unittest.TestCase):
+class TestExceptionPropagation(TestCase):
     """SF 628246:  Set constructor should not trap iterator TypeErrors"""
 
     def test_instanceWithException(self):
@@ -994,7 +995,7 @@ class TestExceptionPropagation(unittest.TestCase):
 # ==============================================================================
 
 
-class TestSetOfSets(unittest.TestCase):
+class TestSetOfSets(TestCase):
     def test_constructor(self):
         inner = frozenset([1])
         outer = OrderedSet([inner])
@@ -1009,7 +1010,7 @@ class TestSetOfSets(unittest.TestCase):
 # ==============================================================================
 
 
-class TestBinaryOps(unittest.TestCase):
+class TestBinaryOps(TestCase):
     def setUp(self):
         self.OrderedSet = OrderedSet((2, 4, 6))
 
@@ -1084,7 +1085,7 @@ class TestBinaryOps(unittest.TestCase):
 # ==============================================================================
 
 
-class TestUpdateOps(unittest.TestCase):
+class TestUpdateOps(TestCase):
     def setUp(self):
         self.OrderedSet = OrderedSet((2, 4, 6))
 
@@ -1172,7 +1173,7 @@ class TestUpdateOps(unittest.TestCase):
 # ==============================================================================
 
 
-class TestMutate(unittest.TestCase):
+class TestMutate(TestCase):
     def setUp(self):
         self.values = ["a", "b", "c"]
         self.OrderedSet = OrderedSet(self.values)
@@ -1290,7 +1291,7 @@ class TestSubsets:
 # ------------------------------------------------------------------------------
 
 
-class TestSubsetEqualEmpty(TestSubsets, unittest.TestCase):
+class TestSubsetEqualEmpty(TestSubsets, TestCase):
     left = OrderedSet()
     right = OrderedSet()
     name = "both empty"
@@ -1300,7 +1301,7 @@ class TestSubsetEqualEmpty(TestSubsets, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestSubsetEqualNonEmpty(TestSubsets, unittest.TestCase):
+class TestSubsetEqualNonEmpty(TestSubsets, TestCase):
     left = OrderedSet([1, 2])
     right = OrderedSet([1, 2])
     name = "equal pair"
@@ -1310,7 +1311,7 @@ class TestSubsetEqualNonEmpty(TestSubsets, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestSubsetEmptyNonEmpty(TestSubsets, unittest.TestCase):
+class TestSubsetEmptyNonEmpty(TestSubsets, TestCase):
     left = OrderedSet()
     right = OrderedSet([1, 2])
     name = "one empty, one non-empty"
@@ -1320,7 +1321,7 @@ class TestSubsetEmptyNonEmpty(TestSubsets, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestSubsetPartial(TestSubsets, unittest.TestCase):
+class TestSubsetPartial(TestSubsets, TestCase):
     left = OrderedSet([1])
     right = OrderedSet([1, 2])
     name = "one a non-empty proper subset of other"
@@ -1330,7 +1331,7 @@ class TestSubsetPartial(TestSubsets, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestSubsetNonOverlap(TestSubsets, unittest.TestCase):
+class TestSubsetNonOverlap(TestSubsets, TestCase):
     left = OrderedSet([1])
     right = OrderedSet([2])
     name = "neither empty, neither contains"
@@ -1458,7 +1459,7 @@ class TestOnlySetsInBinaryOps:
 # ------------------------------------------------------------------------------
 
 
-class TestOnlySetsNumeric(TestOnlySetsInBinaryOps, unittest.TestCase):
+class TestOnlySetsNumeric(TestOnlySetsInBinaryOps, TestCase):
     def setUp(self):
         self.OrderedSet = OrderedSet((1, 2, 3))
         self.other = 19
@@ -1468,7 +1469,7 @@ class TestOnlySetsNumeric(TestOnlySetsInBinaryOps, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestOnlySetsDict(TestOnlySetsInBinaryOps, unittest.TestCase):
+class TestOnlySetsDict(TestOnlySetsInBinaryOps, TestCase):
     def setUp(self):
         self.OrderedSet = OrderedSet((1, 2, 3))
         self.other = {1: 2, 3: 4}
@@ -1478,7 +1479,7 @@ class TestOnlySetsDict(TestOnlySetsInBinaryOps, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestOnlySetsOperator(TestOnlySetsInBinaryOps, unittest.TestCase):
+class TestOnlySetsOperator(TestOnlySetsInBinaryOps, TestCase):
     def setUp(self):
         self.OrderedSet = OrderedSet((1, 2, 3))
         self.other = operator.add
@@ -1488,7 +1489,7 @@ class TestOnlySetsOperator(TestOnlySetsInBinaryOps, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestOnlySetsTuple(TestOnlySetsInBinaryOps, unittest.TestCase):
+class TestOnlySetsTuple(TestOnlySetsInBinaryOps, TestCase):
     def setUp(self):
         self.OrderedSet = OrderedSet((1, 2, 3))
         self.other = (2, 4, 6)
@@ -1498,7 +1499,7 @@ class TestOnlySetsTuple(TestOnlySetsInBinaryOps, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestOnlySetsString(TestOnlySetsInBinaryOps, unittest.TestCase):
+class TestOnlySetsString(TestOnlySetsInBinaryOps, TestCase):
     def setUp(self):
         self.OrderedSet = OrderedSet((1, 2, 3))
         self.other = "abc"
@@ -1508,7 +1509,7 @@ class TestOnlySetsString(TestOnlySetsInBinaryOps, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestOnlySetsGenerator(TestOnlySetsInBinaryOps, unittest.TestCase):
+class TestOnlySetsGenerator(TestOnlySetsInBinaryOps, TestCase):
     def setUp(self):
         def gen():
             for i in range(0, 10, 2):
@@ -1544,7 +1545,7 @@ class TestCopying:
 # ------------------------------------------------------------------------------
 
 
-class TestCopyingEmpty(TestCopying, unittest.TestCase):
+class TestCopyingEmpty(TestCopying, TestCase):
     def setUp(self):
         self.OrderedSet = OrderedSet()
 
@@ -1552,7 +1553,7 @@ class TestCopyingEmpty(TestCopying, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestCopyingSingleton(TestCopying, unittest.TestCase):
+class TestCopyingSingleton(TestCopying, TestCase):
     def setUp(self):
         self.OrderedSet = OrderedSet(["hello"])
 
@@ -1560,7 +1561,7 @@ class TestCopyingSingleton(TestCopying, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestCopyingTriple(TestCopying, unittest.TestCase):
+class TestCopyingTriple(TestCopying, TestCase):
     def setUp(self):
         self.OrderedSet = OrderedSet(["zero", 0, None])
 
@@ -1568,7 +1569,7 @@ class TestCopyingTriple(TestCopying, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestCopyingTuple(TestCopying, unittest.TestCase):
+class TestCopyingTuple(TestCopying, TestCase):
     def setUp(self):
         self.OrderedSet = OrderedSet([(1, 2)])
 
@@ -1576,7 +1577,7 @@ class TestCopyingTuple(TestCopying, unittest.TestCase):
 # ------------------------------------------------------------------------------
 
 
-class TestCopyingNested(TestCopying, unittest.TestCase):
+class TestCopyingNested(TestCopying, TestCase):
     def setUp(self):
         self.OrderedSet = OrderedSet([((1, 2), (3, 4))])
 
@@ -1584,7 +1585,7 @@ class TestCopyingNested(TestCopying, unittest.TestCase):
 # ==============================================================================
 
 
-class TestIdentities(unittest.TestCase):
+class TestIdentities(TestCase):
     def setUp(self):
         self.a = OrderedSet("abracadabra")
         self.b = OrderedSet("alacazam")
@@ -1736,7 +1737,7 @@ def L(seqn):
     return chain(map(lambda x: x, R(Ig(G(seqn)))))
 
 
-class TestVariousIteratorArgs(unittest.TestCase):
+class TestVariousIteratorArgs(TestCase):
     def test_constructor(self):
         for cons in (OrderedSet, frozenset):
             for s in ("123", "", range(1000), ("do", 1.2), range(2000, 2200, 5)):
@@ -1839,7 +1840,7 @@ class bad_dict_clear:
         return 0
 
 
-class TestWeirdBugs(unittest.TestCase):
+class TestWeirdBugs(TestCase):
     def test_8420_set_merge(self):
         # This used to segfault
         global be_bad, set2, dict2
@@ -1943,7 +1944,7 @@ def faces(G):
     return f
 
 
-class TestGraphs(unittest.TestCase):
+class TestGraphs(TestCase):
     def test_cube(self):
         g = cube(3)  # vert --> {v1, v2, v3}
         vertices1 = OrderedSet(g)
