@@ -1,10 +1,13 @@
 # mypy: allow-untyped-defs
+import logging
 import pdb
 import sys
 import traceback
 from typing import Any, Dict
 
 import torch
+
+log = logging.getLogger(__name__)
 
 
 def is_available() -> bool:
@@ -91,7 +94,7 @@ if is_available():
             counter = _breakpoint_cache.get(key, 0) + 1
             _breakpoint_cache[key] = counter
             if counter <= skip:
-                print(f"Skip the breakpoint, {counter=}.")
+                log.warning("Skip the breakpoint, counter=%d", counter)
                 return
 
         if get_rank() == rank:
