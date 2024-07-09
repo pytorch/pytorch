@@ -2141,6 +2141,36 @@ class CPUReproTests(TestCase):
             check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
+    def test_vec_randn(self):
+        for dtype in [
+            torch.bfloat16,
+            torch.float16,
+            torch.float32,
+        ]:
+            with config.patch(
+                {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+            ):
+                torch._dynamo.reset()
+                metrics.reset()
+
+                def func(seed):
+                    torch.manual_seed(seed)
+                    return torch.randn(64, dtype=dtype)
+
+                cfn = torch.compile(func)
+                # Check the result is deterministic with mauanl seed
+                self.assertEqual(cfn(2024), cfn(2024))
+                check_metrics_vec_kernel_count(1)
+                res_vec = cfn(2024)
+
+                torch._dynamo.reset()
+                metrics.reset()
+                with config.patch({"cpp.simdlen": 0}):
+                    res_scalar = torch.compile(func)(2024)
+                    # Check the same result between scalar and vec
+                    self.assertEqual(res_vec, res_scalar)
+
+    @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
         def fn(x):

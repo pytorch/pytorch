@@ -1243,6 +1243,39 @@ class CppVecOverrides(CppOverrides):
             return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
 
     @staticmethod
+    def load_seed(name, offset):
+        assert isinstance(V.kernel, CppVecKernel)
+        return f"{V.kernel.load(name, offset)}"
+
+    @staticmethod
+    def randn(seed, offset):
+        assert isinstance(V.kernel, CppVecKernel)
+        code = BracesBuffer()
+        code.writeline("[&]()")
+        with code.indent():
+            code.writeline(
+                f"{DTYPE_TO_CPP[seed.dtype]} seed[{V.kernel.tiling_factor}];"
+            )
+            code.writeline(
+                f"{DTYPE_TO_CPP[offset.dtype]} offset[{V.kernel.tiling_factor}];"
+            )
+            code.writeline(
+                f"{DTYPE_TO_CPP[torch.float32]} result[{V.kernel.tiling_factor}];"
+            )
+            code.writeline(f"{offset}.store(offset);")
+            code.writeline(f"{seed}.store(seed);")
+            code.writeline(
+                f"for( {DTYPE_TO_CPP[offset.dtype]} offset_idx = 0; offset_idx < {V.kernel.tiling_factor}; offset_idx++ )"
+            )
+            with code.indent():
+                code.writeline(
+                    "result[offset_idx] = randn_cpu(seed[offset_idx], offset[offset_idx]);"
+                )
+            code.writeline("return at::vec::Vectorized<float>::loadu(result);")
+        code.writeline("()")
+        return code
+
+    @staticmethod
     def tan(a):
         return f"{a}.tan()"
 
@@ -3050,11 +3083,13 @@ class CppVecKernelChecker(CppVecKernel):
                     assert len(self.ranges) == len(self.itervars)
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
+                    support_ops = list(BIN_CMP_OPS)
+                    support_ops.append("randn")
                     if (
                         dtype == torch.int64
                         and can_use_int32()
                         and all(
-                            user.target in BIN_CMP_OPS
+                            user.target in support_ops
                             for user in node_ctx.current_node.users
                         )
                     ):
