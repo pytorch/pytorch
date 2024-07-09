@@ -5,7 +5,7 @@ import types
 import warnings
 from bisect import bisect_right
 from collections import Counter
-from functools import partial
+from functools import partial, wraps
 from typing import (
     Any,
     Callable,
@@ -129,6 +129,7 @@ class LRScheduler:
                 opt_ref = ref(self.optimizer)
                 func = step_fn.__func__
 
+                @wraps(func)
                 def wrapper(*args, **kwargs):
                     opt = opt_ref()
                     opt._opt_called = True  # type: ignore[union-attr]
