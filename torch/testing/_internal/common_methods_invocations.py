@@ -18326,7 +18326,11 @@ op_db: List[OpInfo] = [
            supports_scripting=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs__unsafe_masked_index),
+           sample_inputs_func=sample_inputs__unsafe_masked_index,
+           skips=(
+               DecorateInfo(slowTest, 'TestDecomp', 'test_quick_core_backward', device_type='cpu',
+                            dtypes=(torch.float64,), active_if=IS_WINDOWS),
+           ),),
     OpInfo('_unsafe_masked_index_put_accumulate',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
@@ -18340,7 +18344,11 @@ op_db: List[OpInfo] = [
                    'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'
                ),
            ),
-           sample_inputs_func=sample_inputs__unsafe_masked_index_put_accumulate),
+           sample_inputs_func=sample_inputs__unsafe_masked_index_put_accumulate,
+           skips=(
+               DecorateInfo(slowTest, 'TestDecomp', 'test_quick_core_backward', device_type='cpu',
+                            dtypes=(torch.float64,), active_if=IS_WINDOWS),
+           ),),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
@@ -20641,7 +20649,11 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sampler_2d,
         supports_gradgrad=False,
-        gradcheck_nondet_tol=1e-15),
+        gradcheck_nondet_tol=1e-15,
+        skips=(
+            DecorateInfo(slowTest, 'TestDecomp', 'test_comprehensive', dtypes=(torch.float32, torch.float64),
+                         active_if=IS_WINDOWS),
+        ),),
     OpInfo(
         "argwhere",
         ref=np.argwhere,
