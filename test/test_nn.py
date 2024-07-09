@@ -131,6 +131,16 @@ class TestNN(NNTestCase):
             d_params.append(p.grad)
         return params, d_params
 
+    def test_nn_parameter_module(self):
+        for name in nn.parameter.__all__:
+            member = getattr(nn.parameter, name)
+            # __module__ should be torch.nn.parameter if set
+            # otherwise it should be None
+            self.assertEqual(
+                getattr(member, "__module__", "torch.nn.parameter"),
+                "torch.nn.parameter",
+            )
+
     def test_parse_to(self):
         # Test for buggy use of THPMemoryFormat_New
         self.assertEqual(
