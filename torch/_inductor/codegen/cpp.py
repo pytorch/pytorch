@@ -2161,7 +2161,7 @@ class CppVecKernel(CppKernel):
         return num_vectors
 
     def _get_raw_num_vectors(self, dtype: torch.dtype) -> float:
-        # This utility function is used to check if the bit width has been
+        # This utility function is used to check if the vector lanes has been
         # fully utilized. For example, uint8 will only use 1/4 of the vector lanes.
         return self.tiling_factor * dtype.itemsize * 8 / self.vec_isa.bit_width()
 
