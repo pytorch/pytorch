@@ -247,7 +247,18 @@ class UniformValueConstantFolder(ConstantFolder):
         # 3. for pointwise ops, run node to get the substitute value
         # 4. deal with some special ops
         # otherwise, stop deduce value and return unknown value
-        # TODO: deal with arange op ?
+
+        # TODO: cat, indexing
+        # TODO - do on cpu to avoid syncs
+
+        # single-elem attrs
+        if node.op == "get_attr" or (
+            node.op == "call_function"
+            and node.target == torch.ops.aten.lift_fresh_copy.default
+        ):
+            out = super(ConstantFolder, self).run_node(node)
+            if isinstance(out, torch.Tensor) and out.numel() <= 1:
+                return out
 
         # constructors ops
         if (
