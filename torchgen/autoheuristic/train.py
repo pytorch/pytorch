@@ -82,8 +82,8 @@ class AHTrain:
         self.add_real_datasets(datasets, other_datasets, cat_feature2cats)
 
         # We will do a grid search over the values
-        max_depths = [5]
-        min_samples_leafs = [10]
+        max_depths = [5, 10, 13, 15, 17, 20, 23, None]
+        min_samples_leafs = [1, 2, 5, 10]
         choice_columns = [f"{CHOICE_COL}_{choice}" for choice in choices]
         (results_df, best_model, threshold) = self.train_and_evaluate_models(
             datasets, feature_columns, choice_columns, max_depths, min_samples_leafs
