@@ -2278,6 +2278,9 @@ class TestRefsOpsInfo(TestCase):
         "_refs.var_mean",
         "_refs.std_mean",
         "_refs.native_layer_norm",
+        # There's a better decomposition in torch._decomp that uses
+        # _unsafe_masked_index
+        "_refs.constant_pad_nd",
     }
 
     @parametrize("op", ref_ops_names)

@@ -2606,7 +2606,11 @@ class CppVecKernel(CppKernel):
             assert upper
             cond = f"{var} < {upper}"
             cond_print = f"{var} < {upper_scalar}"
-        cond = f"({self._get_mask_type(var.dtype)}({cond})).all_masked()"
+        cond = f"({self._get_mask_type(var.dtype)}({cond}))"
+        if self._load_mask is not None:
+            # We need not check when load_mask is False
+            cond = f"({cond} | ~({self._load_mask}))"
+        cond = f"{cond}.all_masked()"
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
 
