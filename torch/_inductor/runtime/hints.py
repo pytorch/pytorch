@@ -160,15 +160,19 @@ class HalideInputSpec(typing.NamedTuple):
 class HalideMeta(typing.NamedTuple):
     argtypes: List[HalideInputSpec]
     target: str
-    scheduler: str
-    scheduler_flags: Dict[str, Union[int, str]]
+    scheduler: Optional[str] = None
+    scheduler_flags: Optional[Dict[str, Union[int, str]]] = None
     cuda_device: Optional[int] = None
 
     def args(self):
         """Command line args to pass to halide generator"""
-        args = [f"target={self.target}", f"autoscheduler={self.scheduler}"]
-        for k, v in self.scheduler_flags.items():
-            args.append(f"autoscheduler.{k}={v}")
+        args = [f"target={self.target}"]
+        if self.scheduler:
+            args.append(f"autoscheduler={self.scheduler}")
+        if self.scheduler_flags:
+            assert self.scheduler
+            for k, v in self.scheduler_flags.items():
+                args.append(f"autoscheduler.{k}={v}")
         return args
 
     def is_cuda(self):
