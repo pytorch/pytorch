@@ -268,7 +268,7 @@ static py::object dispatch_on_subclass(
     bool is_torch_function,
     const char* torch_function_name_str,
     std::optional<c10::impl::TorchDispatchModeKey> maybe_mode_key =
-        c10::nullopt) {
+        std::nullopt) {
   py::object ret;
   for (auto& arg : overloaded_args) {
     py::object torch_function =
@@ -1005,11 +1005,11 @@ std::string FunctionParameter::type_name() const {
 
 static inline std::optional<int64_t> parse_as_integer(const std::string& s) {
   if (s.empty())
-    return c10::nullopt;
+    return std::nullopt;
   char* str_end = nullptr;
   long ans = strtol(s.c_str(), &str_end, 0);
   // *str_end == 0 if the entire string was parsed as an integer.
-  return (*str_end == 0) ? std::optional<int64_t>(ans) : c10::nullopt;
+  return (*str_end == 0) ? std::optional<int64_t>(ans) : std::nullopt;
 }
 
 /*
