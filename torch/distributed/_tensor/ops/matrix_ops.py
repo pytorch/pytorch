@@ -258,7 +258,7 @@ def scaled_dot_product_flash_attention_backward_strategy(
     # placement list stores placements of [outputs, inputs]
     # in the spda backward case, we have 3 tensor outputs and 6 to 10 tensor inputs
     # first we can always accept full replication for both inputs and outputs
-    all_replicate: List[Placement] = [Replicate()] * (3 + num_tensor_inputs)
+    all_replicate: List[Optional[Placement]] = [Replicate()] * (3 + num_tensor_inputs)
 
     single_mesh_dim_strategies.append(all_replicate)
 
@@ -270,7 +270,7 @@ def scaled_dot_product_flash_attention_backward_strategy(
     logsumexp_sharding = Shard(1)  # num head dim
     grad_qkv_sharding = Shard(1)  # num head dim
 
-    num_heads_dim_sharding: List[Placement] = [
+    num_heads_dim_sharding = [
         grad_qkv_sharding,
         grad_qkv_sharding,
         grad_qkv_sharding,
