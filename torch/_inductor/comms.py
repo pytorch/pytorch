@@ -14,6 +14,7 @@ from torch import _inductor
 from . import config, ir
 from .dependencies import WeakDep
 from .utils import contains_collective, contains_wait, is_collective, tuple_sorted
+from .virtualized import V  # TODO: remove this when ready to merge!
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
@@ -110,8 +111,8 @@ def raise_comms_and_sink_waits(
                 if snode_num_deps[snode] == 0:
                     heapq.heappush(ready, Runnable(snode))
 
-    for snode, num_deps in snode_num_deps.items():
-        assert num_deps == 0, "Unscheduled nodes"
+    snode_with_nonzero_num_deps = {snode: num_deps for snode, num_deps in snode_num_deps.items() if num_deps > 0}
+    assert len(snode_with_nonzero_num_deps) == 0, f"Unscheduled nodes: {snode_with_nonzero_num_deps}"
     return scheduled
 
 
@@ -484,17 +485,25 @@ def enforce_comm_ordering_for_fsdp(
 ) -> List[_inductor.scheduler.BaseSchedulerNode]:
     from . import scheduler
 
-    name_to_fused_node = kwargs["name_to_fused_node"]
+    name_to_fused_node = kwargs["name_to_fused_node"]  # op name to (maybe fused) op
+    print(f"name_to_fused_node: {name_to_fused_node}")
     graph_inputs = kwargs["graph_inputs"]
-    name_to_op = kwargs["name_to_op"]
+    name_to_buf = kwargs["name_to_buf"]
 
+    def buf_name_to_snode(buf_name):
+        return name_to_buf[buf_name].defining_op
+    
     def _find_all_recursive_deps_of_node_up_to_criteria(
         snode, collected_node_set, criteria_cb
     ):
         collected_node_set.add(snode)
-        for dep in get_all_reads(snode):
+        for dep in snode.unmet_dependencies:
             if not criteria_cb(dep):
-                dep_node = name_to_fused_node[dep.name]
+                try:
+                    dep_node = name_to_fused_node[buf_name_to_snode(dep.name).get_name()]
+                except Exception as e:
+                    print(f"V.graph.name_to_buffer[dep.name]: {V.graph.name_to_buffer[dep.name]}")
+                    raise
                 if dep_node in collected_node_set:
                     continue
                 _find_all_recursive_deps_of_node_up_to_criteria(
@@ -505,16 +514,15 @@ def enforce_comm_ordering_for_fsdp(
     scheduled = set()
     ag_nodes = []
     rs_nodes = []
+    snode_name_to_final_snode = {}
 
-    def _create_and_schedule_group_node(nodes_to_group):
-        group_node = scheduler.GroupedSchedulerNode.create(nodes_to_group)
-        scheduled.update(nodes_to_group)
-        new_order.append(group_node)
+    def _create_and_schedule_group_node(snodes_to_group):
+        group_node = scheduler.GroupedSchedulerNode.create(snodes_to_group)
+        for snode in snodes_to_group:
+            snode_name_to_final_snode[snode.get_name()] = group_node
         return group_node
 
     for snode in snodes:
-        if snode in scheduled:
-            continue
         if (
             isinstance(snode.node, ir.FallbackKernel)
             and snode.node.op_overload is torch.ops.fsdp.split_with_sizes_copy.default
@@ -529,9 +537,9 @@ def enforce_comm_ordering_for_fsdp(
                 criteria_cb=lambda dep: dep.name in graph_inputs,
             )
 
-            # sort nodes by original buffer order
+            # sort nodes by original operation order
             collected_nodes = sorted(
-                collected_node_set, key=lambda x: int(x.get_name()[3:])
+                collected_node_set, key=lambda x: int(x.get_name()[2:])
             )
 
             # Group "cast + copy_in + getitem + all_gather" into one GroupedSchedulerNode
@@ -558,13 +566,13 @@ def enforce_comm_ordering_for_fsdp(
             isinstance(snode.node, ir._WaitKernel)
             and any(
                 is_collective(
-                    name_to_op[x],
+                    name_to_fused_node[x].node,
                     op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
                 )
                 for x in snode.ancestors
             )
             and any(
-                is_fallback_op(name_to_op[x], torch.ops.fsdp.chunk_cat.default)
+                is_fallback_op(name_to_fused_node[x].node, torch.ops.fsdp.chunk_cat.default)
                 for x in snode.ancestors
             )
         ):
@@ -576,12 +584,12 @@ def enforce_comm_ordering_for_fsdp(
                 snode,
                 collected_node_set,
                 criteria_cb=lambda dep: is_fallback_op(
-                    name_to_fused_node[dep.name], torch.ops.fsdp.chunk_cat.default
+                    name_to_fused_node[buf_name_to_snode(dep.name).get_name()], torch.ops.fsdp.chunk_cat.default
                 ),
             )
-            # sort nodes by original buffer order
+            # sort nodes by original operation order
             collected_nodes = sorted(
-                collected_node_set, key=lambda x: int(x.get_name()[3:])
+                collected_node_set, key=lambda x: int(x.get_name()[2:])
             )
 
             # Group "reduce_scatter copy-in + reduce_scatter comm" into one GroupedSchedulerNode
@@ -608,8 +616,18 @@ def enforce_comm_ordering_for_fsdp(
                 )
             )
         else:
-            scheduled.add(snode)
-            new_order.append(snode)
+            snode_name_to_final_snode[snode.get_name()] = snode
+
+    for snode in snodes:
+        assert snode.get_name() in snode_name_to_final_snode
+        final_snode = snode_name_to_final_snode[snode.get_name()]
+        if final_snode in scheduled:
+            continue
+        print(f"final_snode: {final_snode}, final_snode.debug_str(): {final_snode.debug_str()}")
+        new_order.append(final_snode)
+        if isinstance(snode, _inductor.scheduler.GroupedSchedulerNode):
+            scheduled.update(final_snode.snodes)
+        scheduled.add(final_snode)
 
     # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
     # before next AllGather's "copy_in then AG" group node

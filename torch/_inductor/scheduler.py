@@ -1390,13 +1390,47 @@ class GroupedSchedulerNode(BaseSchedulerNode):
     def get_buffer_names(self) -> Set[str]:
         return set.union(*[x.get_buffer_names() for x in self.snodes])
 
-    # GroupedSchedulerNode specific methods
+    def get_outputs(self) -> List[SchedulerBuffer]:
+        result: List[SchedulerBuffer] = []
+        for node in self.snodes:
+            result.extend(node.get_outputs())
+        return result
+
+    def get_nodes(self) -> Sequence[BaseSchedulerNode]:
+        return self.snodes
+
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
         return False
 
     def add_fake_dep(self, name: Dep) -> None:
         self.set_read_writes(self.read_writes.with_read(name))
+
+    def debug_str(self) -> str:
+        """Longer form printout for trace logs"""
+        name = self.get_name()
+        node_typestr = ",".join(type(n).__name__ for n in self.snodes)
+        buf = IndentedBuffer()
+        buf.splice(
+            f"""\
+{name}: {type(self).__name__}({node_typestr})
+{name}.writes = {pformat(self.read_writes.writes)}
+{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}
+{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}
+{name}.outputs = [
+            """
+        )
+        with buf.indent():
+            for out in self.get_outputs():
+                buf.splice(out.debug_str())
+        buf.writeline("]")
+
+        try:
+            buf.splice(self.debug_str_extra())
+        except Exception:
+            log.warning("Ignoring error in debug_str()", exc_info=True)
+
+        return buf.getrawvalue().rstrip()
 
 
 def pick_loop_order(
@@ -1551,7 +1585,7 @@ class Scheduler:
                 self.nodes,
                 name_to_fused_node=self.name_to_fused_node,  # type: ignore[call-arg]
                 graph_inputs=V.graph.graph_inputs,  # type: ignore[call-arg]
-                name_to_op=V.graph.name_to_op,  # type: ignore[call-arg]
+                name_to_buf=self.name_to_buf,
             )  # type: ignore[arg-type]
         self.nodes = self.fuse_nodes(self.nodes)
         self.finalize_multi_template_buffers()
