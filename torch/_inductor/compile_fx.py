@@ -137,7 +137,7 @@ def get_static_input_idxs(num_fixed):
     if not context or not context.fw_metadata:
         return fixed
 
-    return fixed + context.fw_metadata.static_parameter_indices
+    return fixed + context.fw_metadata.static_input_indices
 
 
 @functools.lru_cache(None)
@@ -1094,11 +1094,13 @@ def cudagraphify_impl(
 
     # allocate static tensor inputs
     static_inputs = [
-        x
-        if not isinstance(x, torch.Tensor)
-        else static_input(x)
-        if idx not in static_input_idxs
-        else x.detach()
+        (
+            x
+            if not isinstance(x, torch.Tensor)
+            else static_input(x)
+            if idx not in static_input_idxs
+            else x.detach()
+        )
         for idx, x in enumerate(inputs)
     ]
 
@@ -1254,7 +1256,7 @@ def fw_compiler_freezing(
                 params_flat[i] = None
 
         if tracing_context.fw_metadata:
-            static_input_idxs += tracing_context.fw_metadata.static_parameter_indices
+            static_input_idxs += tracing_context.fw_metadata.static_input_indices
 
     with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
@@ -1309,12 +1311,14 @@ def compile_fx(
                 "cpp_wrapper": False,
                 # For triton.autotune_at_compile_time, disable by default for
                 # FBCode, but enabled by default for OSS.
-                "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
-                if config.is_fbcode()
-                else os.environ.get(
-                    "TORCHINDUCTOR_TRITON_AUTOTUNE_AT_COMPILE_TIME", "1"
-                )
-                == "1",
+                "triton.autotune_at_compile_time": (
+                    config.triton.autotune_at_compile_time
+                    if config.is_fbcode()
+                    else os.environ.get(
+                        "TORCHINDUCTOR_TRITON_AUTOTUNE_AT_COMPILE_TIME", "1"
+                    )
+                    == "1"
+                ),
                 "triton.autotune_cublasLt": False,
                 "triton.cudagraphs": False,
                 "triton.store_cubin": True,
