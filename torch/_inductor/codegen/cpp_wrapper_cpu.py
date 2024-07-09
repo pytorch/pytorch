@@ -81,6 +81,7 @@ class CppWrapperCpu(WrapperCodeGen):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        node_name=None,
     ):
         """
         Generates kernel call code.
@@ -1270,7 +1271,7 @@ class CppWrapperCpu(WrapperCodeGen):
             super().generate_fallback_kernel(fallback_kernel, args)
 
     def generate_extern_kernel_out(
-        self, kernel: str, out: str, out_view: Optional[str], args: List[str]
+        self, kernel: str, out: str, out_view: Optional[str], args: List[str], node_name=None
     ):
         if out_view:
             out_name = f"{out}_as_strided"

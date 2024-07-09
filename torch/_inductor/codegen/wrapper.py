@@ -907,21 +907,23 @@ class WrapperCodeGen(CodeGen):
         """
         Create stream and stream_raw outside the main function.
         """
-        stream_creation_str="\n"
-        if config.multiple_streams:
-            for index, num_used in enumerate(V.graph.stream_graph.stream_pool):
-                if index == 0:
-                    continue
-                if num_used > 0:
-                    stream_creation_str+=f"stream{index}_raw = torch.cuda.Stream()\n"
-                    stream_creation_str+=f"stream{index} = stream{index}_raw.cuda_stream\n"
-            stream_creation_str+=f"stream0_raw = torch.cuda.default_stream()\n"
-        if V.graph.device_ops:
-            stream_creation_str+= "{}\n".format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
-            stream_creation_str+= f"stream0 = get_raw_stream(0)\n"
-        self.header.splice(stream_creation_str)
-        if config.triton.autotune_at_compile_time:
-            self.kernel_autotune_calls.splice(stream_creation_str)
+        # @TODO: Need a better skip
+        if not V.graph.cpp_wrapper:
+            stream_creation_str="\n"
+            if config.multiple_streams:
+                for index, num_used in enumerate(V.graph.stream_graph.stream_pool):
+                    if index == 0:
+                        continue
+                    if num_used > 0:
+                        stream_creation_str+=f"stream{index}_raw = torch.cuda.Stream()\n"
+                        stream_creation_str+=f"stream{index} = stream{index}_raw.cuda_stream\n"
+                stream_creation_str+=f"stream0_raw = torch.cuda.default_stream()\n"
+            if V.graph.device_ops:
+                stream_creation_str+= "{}\n".format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
+                stream_creation_str+= f"stream0 = get_raw_stream(0)\n"
+            self.header.splice(stream_creation_str)
+            if config.triton.autotune_at_compile_time:
+                self.kernel_autotune_calls.splice(stream_creation_str)
 
 
 

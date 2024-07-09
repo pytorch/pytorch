@@ -78,7 +78,7 @@ class CppWrapperCuda(CppWrapperCpu):
         return super().generate(is_inference)
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name, grid, configs, args, triton_meta, raw_args
+        self, kernel_name, grid, configs, args, triton_meta, raw_args, node_name=None
     ):
         assert len(grid) != 0
         if len(grid) == 1:
@@ -105,6 +105,7 @@ class CppWrapperCuda(CppWrapperCpu):
             cuda=True,
             triton=True,
             triton_meta=triton_meta,
+            node_name=node_name
         )
 
     @functools.lru_cache(None)  # noqa: B019
@@ -203,6 +204,7 @@ class CppWrapperCuda(CppWrapperCpu):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        node_name=None,
     ):
         assert arg_types is not None and len(call_args) == len(
             arg_types
