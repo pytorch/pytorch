@@ -1011,7 +1011,11 @@ class CppVecOverrides(CppOverrides):
                             else:
                                 arg = ops.constant(arg, arg_dtype)
                             arg = arg.value if isinstance(arg, OpsValue) else arg
-                        if isinstance(arg, CppCSEVariable) and not arg.is_vec:
+                        if (
+                            isinstance(arg, CppCSEVariable)
+                            and not arg.is_vec
+                            and func is not CppVecOverrides.randn
+                        ):
                             assert isinstance(V.kernel, CppVecKernel)
                             # align scalar data type to the vector for binary ops
                             if len(args) == 2 and arg.dtype != vec_dtype:
@@ -1109,6 +1113,21 @@ class CppVecOverrides(CppOverrides):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
         assert x.dtype is not None
+        if (
+            x.dtype in [torch.int32, torch.int64]
+            and y.dtype in [torch.int32, torch.int64]
+            and x.dtype != y.dtype
+        ):
+            x = (
+                f"at::vec::convert<int64_t,2,int32_t,1>({x})"
+                if x.dtype == torch.int32
+                else x
+            )
+            y = (
+                f"at::vec::convert<int64_t,2,int32_t,1>({y})"
+                if y.dtype == torch.int32
+                else y
+            )
         return f"{V.kernel._get_mask_type(x.dtype)}({x} == {y})"
 
     @staticmethod
@@ -1254,22 +1273,18 @@ class CppVecOverrides(CppOverrides):
         code.writeline("[&]()")
         with code.indent():
             code.writeline(
-                f"{DTYPE_TO_CPP[seed.dtype]} seed[{V.kernel.tiling_factor}];"
-            )
-            code.writeline(
                 f"{DTYPE_TO_CPP[offset.dtype]} offset[{V.kernel.tiling_factor}];"
             )
             code.writeline(
                 f"{DTYPE_TO_CPP[torch.float32]} result[{V.kernel.tiling_factor}];"
             )
             code.writeline(f"{offset}.store(offset);")
-            code.writeline(f"{seed}.store(seed);")
             code.writeline(
                 f"for( {DTYPE_TO_CPP[offset.dtype]} offset_idx = 0; offset_idx < {V.kernel.tiling_factor}; offset_idx++ )"
             )
             with code.indent():
                 code.writeline(
-                    "result[offset_idx] = randn_cpu(seed[offset_idx], offset[offset_idx]);"
+                    f"result[offset_idx] = randn_cpu({seed}, offset[offset_idx]);"
                 )
             code.writeline("return at::vec::Vectorized<float>::loadu(result);")
         code.writeline("()")
