@@ -419,6 +419,12 @@ if(BUILD_ONEDNN_GRAPH)
   endif()
 endif()
 
+if(${CMAKE_BUILD_TYPE} STREQUAL "RelWithAssert")
+   # Workaround numerous decret-without-a-gil warnings from JIT
+   # see https://github.com/pytorch/pytorch/issues/130073
+   target_compile_definitions(torch_python PRIVATE "-DPYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF")
+endif()
+
 if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
     set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
 endif()
