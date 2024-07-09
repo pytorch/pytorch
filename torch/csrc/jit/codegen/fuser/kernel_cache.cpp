@@ -60,30 +60,30 @@ int64_t store(std::shared_ptr<Graph> graph) {
 }
 
 // XXX: Does not grab mutex
-static std::optional<KernelSpec*> nolock_retrieve(
+static at::optional<KernelSpec*> nolock_retrieve(
     KernelCacheImpl& cache,
     const int64_t key) {
   auto it = cache.specMap_.find(key);
   if (it == cache.specMap_.end())
-    return std::nullopt;
+    return at::nullopt;
   return &(it->second);
 }
 
-std::optional<KernelSpec*> retrieve(const int64_t key) {
+at::optional<KernelSpec*> retrieve(const int64_t key) {
   auto& cache = getKernelCache();
   std::lock_guard<std::mutex> guard{cache.mutex_};
   return nolock_retrieve(cache, key);
 }
 
 // precondition: graph has been normalized via normalizeGraphForCache
-std::optional<KernelSpec*> lookupGraph(std::shared_ptr<Graph> graph) {
+at::optional<KernelSpec*> lookupGraph(std::shared_ptr<Graph> graph) {
   auto& cache = getKernelCache();
   std::string repr = graph->toString(false);
 
   std::lock_guard<std::mutex> guard{cache.mutex_};
   auto it = cache.graphToKey_.find(repr);
   if (it == cache.graphToKey_.end())
-    return std::nullopt;
+    return at::nullopt;
   return nolock_retrieve(cache, it->second);
 }
 
