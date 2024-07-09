@@ -199,6 +199,7 @@ jobs:
       - win-vs2019-cpu-py3-build
       - target-determination
     with:
+      sync-tag: win-vs2019-cpu-py3-test
       build-environment: win-vs2019-cpu-py3
       cuda-version: cpu
       test-matrix: ${{ needs.win-vs2019-cpu-py3-build.outputs.test-matrix }}
