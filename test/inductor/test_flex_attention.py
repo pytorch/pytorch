@@ -485,7 +485,6 @@ class TestFlexAttention(InductorTestCase):
         ),  # additional buffer on multiple dim + shared dimension
     ]
 
-    @skip
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize(

@@ -330,7 +330,7 @@ def _create_mask(
         Hq = 1
 
     b = torch.arange(0, B, device=device)
-    h =  torch.arange(0, Hq, device=device)
+    h = torch.arange(0, Hq, device=device)
     m = torch.arange(0, M, device=device)
     n = torch.arange(0, N, device=device)
     # TODO: fix this
