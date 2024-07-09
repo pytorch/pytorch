@@ -180,6 +180,7 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
         source=source,
         symbolic_context=StatelessSymbolicContext(
             dynamic_sizes=dynamic_dims,
+            dynamic_strides=dynamic_dims,
             constraint_sizes=constraint_dims,
             constraint_strides=constraint_strides,
         ),
