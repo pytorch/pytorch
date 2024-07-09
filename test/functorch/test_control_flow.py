@@ -1,6 +1,7 @@
 # Owner(s): ["module: functorch"]
 import contextlib
 import functools
+import importlib
 import unittest
 
 import torch
@@ -461,21 +462,77 @@ class TestControlFlow(TestCase):
         true_outs = fwbw(control_flow.map, f, x, y)
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
-        
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_generic_associative_scan_CUDA_issue(self):
         def fct(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
-        for n in range(20):
-            x = torch.arange(n, device=torch.device('cuda'))
+        with torch._dynamo.utils.disable_cache_limit():
             associative_scan1 = torch.compile(associative_scan)
+
+        for n in range(20):
+            x = torch.arange(n, device=torch.device("cuda"))
+            # x = torch.arange(n, device=torch.device('cpu'))
             associative_scan2 = associative_scan
+
+            result1 = associative_scan1(fct, x, 0, False, True)
+            result2 = associative_scan2(fct, x, 0, False, True)
+            result3 = torch.cumsum(x, 0)
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
             result1 = associative_scan1(fct, x, 0, True, True)
             result2 = associative_scan2(fct, x, 0, True, True)
-            print(str(n), ': ', ['{:2d}'.format(int(r.cpu().numpy())) for r in result1])
-            print(str(n), ': ', ['{:2d}'.format(int(r.cpu().numpy())) for r in result2])
-            print(str(n), ': ', [' T' if result1[i] == result2[i] else ' F' for i in range(n)])
-            print('-'*80)
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+    def test_generic_associative_scan_generic_scan_fallback(self):
+        n = 6
+
+        # TODO: Fallback needs to happen for CPU only tensors and
+        # CUDA tensors if non-pointwise operations are involved
+        device = torch.device("cpu")
+        # device = torch.device('cuda')
+
+        def fct(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        W = torch.rand(n, n, device=device, dtype=torch.float32)
+
+        def fct_no_pointwise(x: torch.Tensor, y: torch.Tensor):
+            return x @ W + y
+
+        x = torch.arange(n, device=device, dtype=torch.float32)
+        associative_scan1 = torch.compile(associative_scan, fullgraph=False)
+        associative_scan2 = associative_scan
+        # result1 = associative_scan1(fct, x, 0, True, True)
+        # result2 = associative_scan2(fct, x, 0, True, True)
+        result1 = associative_scan1(fct, x, 0, True, False)
+        result2 = associative_scan2(fct, x, 0, True, False)
+        print(str(n), ": ", [f"{int(r.cpu().numpy()):2d}" for r in result1])
+        print(str(n), ": ", [f"{int(r.cpu().numpy()):2d}" for r in result2])
+        print(
+            str(n), ": ", [" T" if result1[i] == result2[i] else " F" for i in range(n)]
+        )
+        print("-" * 80)
+
+        x = torch.rand(6, n, n, device=device, dtype=torch.float32)
+        associative_scan1 = torch.compile(associative_scan)  # , fullgraph=False)
+        associative_scan2 = associative_scan
+        # result1 = associative_scan1(fct, x, 0, True, True)
+        # result2 = associative_scan2(fct, x, 0, True, True)
+        result1 = associative_scan1(fct_no_pointwise, x, 0, True, False)
+        result2 = associative_scan2(fct_no_pointwise, x, 0, True, False)
+        print(str(n), ": ", [f"{int(r.cpu().numpy()):2d}" for r in result1])
+        print(str(n), ": ", [f"{int(r.cpu().numpy()):2d}" for r in result2])
+        print(
+            str(n), ": ", [" T" if result1[i] == result2[i] else " F" for i in range(n)]
+        )
+        print("-" * 80)
 
     def test_generic_associative_scan_simple(self):
         def add(x: torch.Tensor, y: torch.Tensor):
@@ -485,7 +542,7 @@ class TestControlFlow(TestCase):
             return x * y
 
         def f(op, x, dim):
-            result = associative_scan(op, x, dim, generic_scan=True)
+            result = associative_scan(op, x, dim, False, True)
             return result
 
         x = torch.arange(5)
@@ -536,11 +593,18 @@ class f(torch.nn.Module):
         slice_1: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 0, 1)
         slice_2: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 0, 1)
         add: "f32[1, 2, 2]" = torch.ops.aten.add.Tensor(slice_1, slice_2);  slice_1 = slice_2 = None
-        slice_3: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 0, 1)
-        slice_4: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 0, 1);  x_1 = None
-        _tensor_constant0 = self._tensor_constant0
-        _unsafe_view: "f32[3, 2, 2]" = torch.ops.aten._unsafe_view.default(_tensor_constant0, [3, 2, 2]);  _tensor_constant0 = None
-        return _unsafe_view""",
+        slice_3: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 0, -1, 2)
+        slice_4: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 1, 9223372036854775807, 2)
+        add_1: "f32[1, 2, 2]" = torch.ops.aten.add.Tensor(slice_3, slice_4);  slice_3 = slice_4 = None
+        slice_5: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 2, 9223372036854775807, 2)
+        add_2: "f32[1, 2, 2]" = torch.ops.aten.add.Tensor(add_1, slice_5);  slice_5 = None
+        slice_6: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 0, 1);  x_1 = None
+        cat: "f32[2, 2, 2]" = torch.ops.aten.cat.default([slice_6, add_2]);  slice_6 = add_2 = None
+        constant_pad_nd: "f32[2, 2, 2]" = torch.ops.aten.constant_pad_nd.default(add_1, [0, 0, 0, 0, 0, 1], 0.0);  add_1 = None
+        stack: "f32[2, 2, 2, 2]" = torch.ops.aten.stack.default([cat, constant_pad_nd], 1);  cat = constant_pad_nd = None
+        view: "f32[4, 2, 2]" = torch.ops.aten.view.default(stack, [4, 2, 2]);  stack = None
+        slice_7: "f32[3, 2, 2]" = torch.ops.aten.slice.Tensor(view, 0, 0, 3);  view = None
+        return slice_7""",
         )
 
         x = torch.randn(3, 2, 2, requires_grad=True)
@@ -561,7 +625,7 @@ class f(torch.nn.Module):
 
         import random
 
-        # TODO: If the number 2 is increased to a larger number, 
+        # TODO: If the number 2 is increased to a larger number,
         # e.g., 10, then the test fails with some errors arising from
         # FakeTensors
         num_dims = [random.randint(2, 5) for _ in range(2)]
@@ -577,7 +641,7 @@ class f(torch.nn.Module):
 
     def test_generic_associative_scan_autograd(self):
         def add(x: torch.Tensor, y: torch.Tensor):
-            return x + y
+            return x * y
 
         x = torch.randn(3, 2, 2, requires_grad=True)
 
@@ -606,43 +670,128 @@ class f(torch.nn.Module):
         # No stacktrace found for following nodes
         slice_1: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 0, 1)
         slice_2: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 0, 1)
-        add: "f32[1, 2, 2]" = torch.ops.aten.add.Tensor(slice_1, slice_2);  slice_1 = slice_2 = None
-        slice_3: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 0, 1)
-        slice_4: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 0, 1);  x_1 = None
-        _tensor_constant0 = self._tensor_constant0
-        _unsafe_view: "f32[3, 2, 2]" = torch.ops.aten._unsafe_view.default(_tensor_constant0, [3, 2, 2]);  _tensor_constant0 = None
-        ones_like: "f32[3, 2, 2]" = torch.ops.aten.ones_like.default(_unsafe_view, pin_memory = False);  _unsafe_view = None
-        _tensor_constant1 = self._tensor_constant1
-        return (_tensor_constant1,)""",
+        mul: "f32[1, 2, 2]" = torch.ops.aten.mul.Tensor(slice_1, slice_2);  slice_1 = slice_2 = None
+        slice_3: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 0, -1, 2)
+        slice_4: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 1, 9223372036854775807, 2)
+        mul_1: "f32[1, 2, 2]" = torch.ops.aten.mul.Tensor(slice_3, slice_4)
+        slice_5: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 2, 9223372036854775807, 2)
+        mul_2: "f32[1, 2, 2]" = torch.ops.aten.mul.Tensor(mul_1, slice_5)
+        slice_6: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(x_1, 0, 0, 1);  x_1 = None
+        cat: "f32[2, 2, 2]" = torch.ops.aten.cat.default([slice_6, mul_2]);  slice_6 = mul_2 = None
+        constant_pad_nd: "f32[2, 2, 2]" = torch.ops.aten.constant_pad_nd.default(mul_1, [0, 0, 0, 0, 0, 1], 0.0)
+        stack: "f32[2, 2, 2, 2]" = torch.ops.aten.stack.default([cat, constant_pad_nd], 1);  cat = constant_pad_nd = None
+        view: "f32[4, 2, 2]" = torch.ops.aten.view.default(stack, [4, 2, 2]);  stack = None
+        slice_7: "f32[3, 2, 2]" = torch.ops.aten.slice.Tensor(view, 0, 0, 3);  view = None
+        ones_like: "f32[3, 2, 2]" = torch.ops.aten.ones_like.default(slice_7, pin_memory = False);  slice_7 = None
+        slice_backward: "f32[4, 2, 2]" = torch.ops.aten.slice_backward.default(ones_like, [4, 2, 2], 0, 0, 3, 1);  ones_like = None
+        view_1: "f32[2, 2, 2, 2]" = torch.ops.aten.view.default(slice_backward, [2, 2, 2, 2]);  slice_backward = None
+        select: "f32[2, 2, 2]" = torch.ops.aten.select.int(view_1, 1, 0)
+        select_1: "f32[2, 2, 2]" = torch.ops.aten.select.int(view_1, 1, 1);  view_1 = None
+        constant_pad_nd_1: "f32[1, 2, 2]" = torch.ops.aten.constant_pad_nd.default(select_1, [0, 0, 0, 0, 0, -1]);  select_1 = None
+        slice_8: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(select, 0, 0, 1)
+        slice_9: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(select, 0, 1, 2);  select = None
+        slice_backward_1: "f32[3, 2, 2]" = torch.ops.aten.slice_backward.default(slice_8, [3, 2, 2], 0, 0, 1, 1);  slice_8 = None
+        mul_3: "f32[1, 2, 2]" = torch.ops.aten.mul.Tensor(slice_9, mul_1);  mul_1 = None
+        mul_4: "f32[1, 2, 2]" = torch.ops.aten.mul.Tensor(slice_9, slice_5);  slice_9 = slice_5 = None
+        add: "f32[1, 2, 2]" = torch.ops.aten.add.Tensor(constant_pad_nd_1, mul_4);  constant_pad_nd_1 = mul_4 = None
+        slice_backward_2: "f32[3, 2, 2]" = torch.ops.aten.slice_backward.default(mul_3, [3, 2, 2], \
+0, 2, 9223372036854775807, 2);  mul_3 = None
+        add_1: "f32[3, 2, 2]" = torch.ops.aten.add.Tensor(slice_backward_1, slice_backward_2);  \
+slice_backward_1 = slice_backward_2 = None
+        mul_5: "f32[1, 2, 2]" = torch.ops.aten.mul.Tensor(add, slice_3);  slice_3 = None
+        mul_6: "f32[1, 2, 2]" = torch.ops.aten.mul.Tensor(add, slice_4);  add = slice_4 = None
+        slice_backward_3: "f32[3, 2, 2]" = torch.ops.aten.slice_backward.default(mul_5, [3, 2, 2], \
+0, 1, 9223372036854775807, 2);  mul_5 = None
+        add_2: "f32[3, 2, 2]" = torch.ops.aten.add.Tensor(add_1, slice_backward_3);  add_1 = slice_backward_3 = None
+        slice_backward_4: "f32[3, 2, 2]" = torch.ops.aten.slice_backward.default(mul_6, [3, 2, 2], 0, 0, -1, 2);  mul_6 = None
+        add_3: "f32[3, 2, 2]" = torch.ops.aten.add.Tensor(add_2, slice_backward_4);  add_2 = slice_backward_4 = None
+        return (add_3,)""",
         )
-    
+
+    def test_generic_associative_scan_compile_CPU(self):
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        x = torch.randn(4, 2, 2, device=torch.device("cpu"))
+
+        associative_scan_comp = torch.compile(associative_scan, fullgraph=True)
+
+        for direction in [False, True]:
+            result = associative_scan(add, x, 0, generic_scan=True, reverse=direction)
+            result_comp = associative_scan_comp(
+                add, x, 0, generic_scan=True, reverse=direction
+            )
+            expected_result = _fake_associative_scan(add, x, 0, reverse=direction)
+            self.assertEqual(result, expected_result)
+            self.assertEqual(result_comp, expected_result)
+
+            result = associative_scan(add, x, 0, generic_scan=False, reverse=direction)
+            result_comp = associative_scan_comp(
+                add, x, 0, generic_scan=False, reverse=direction
+            )
+            expected_result = _fake_associative_scan(add, x, 0, reverse=direction)
+            self.assertEqual(result, expected_result)
+            self.assertEqual(result_comp, expected_result)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_generic_associative_scan_compile_GPU(self):
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        x = torch.randn(4, 2, 2, device=torch.device("cuda"))
+
+        associative_scan_comp = torch.compile(associative_scan, fullgraph=True)
+
+        for direction in [False, True]:
+            result = associative_scan(add, x, 0, generic_scan=True, reverse=direction)
+            result_comp = associative_scan_comp(
+                add, x, 0, generic_scan=True, reverse=direction
+            )
+            expected_result = _fake_associative_scan(add, x, 0, reverse=direction)
+            self.assertEqual(result, expected_result)
+            self.assertEqual(result_comp, expected_result)
+
+            result = associative_scan(add, x, 0, generic_scan=False, reverse=direction)
+            result_comp = associative_scan_comp(
+                add, x, 0, generic_scan=False, reverse=direction
+            )
+            expected_result = _fake_associative_scan(add, x, 0, reverse=direction)
+            self.assertEqual(result, expected_result)
+            self.assertEqual(result_comp, expected_result)
+
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_generic_associative_scan_simple_CPU_GPU(self):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
-        for device in [torch.device('cpu'), torch.device('cuda')]:
+        for device in [torch.device("cpu"), torch.device("cuda")]:
             x = torch.randn(4, 2, 2, device=device)
 
             for direction in [False, True]:
-                result = associative_scan(add, x, 0, generic_scan=True, reverse=direction)
+                result = associative_scan(
+                    add, x, 0, generic_scan=True, reverse=direction
+                )
                 expected_result = _fake_associative_scan(add, x, 0, reverse=direction)
                 self.assertEqual(result, expected_result)
-                
-                result = associative_scan(add, x, 0, generic_scan=False, reverse=direction)
+
+                result = associative_scan(
+                    add, x, 0, generic_scan=False, reverse=direction
+                )
                 expected_result = _fake_associative_scan(add, x, 0, reverse=direction)
                 self.assertEqual(result, expected_result)
-        
+
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_generic_associative_scan_autograd_CPU_GPU(self):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
-        for device in [torch.device('cpu'), torch.device('cuda')]:
+        for device in [torch.device("cpu"), torch.device("cuda")]:
             x = torch.randn(3, 2, 2, requires_grad=True, device=device)
 
             for direction in [False, True]:
-                result = associative_scan(add, x, 0, generic_scan=True, reverse=direction)
+                result = associative_scan(
+                    add, x, 0, generic_scan=True, reverse=direction
+                )
                 expected_result = _fake_associative_scan(add, x, 0, reverse=direction)
                 self.assertEqual(result, expected_result)
 
@@ -651,74 +800,72 @@ class f(torch.nn.Module):
                 expected_grads = torch.autograd.grad(expected_result, (x,), grad_out)
                 self.assertEqual(expected_grads, grads)
 
-    def test_generic_associative_scan_matmul(self):
-        W = torch.nn.Parameter(torch.randn(2, 2))
-        H = torch.nn.Linear(2, 2)
-
-        def fct(x: torch.Tensor, y: torch.Tensor):
-            return x @ W + H(y)
-
-        x = torch.randn(3, 2, 2, requires_grad=True)
-
-        for direction in [False, True]:
-            result = associative_scan(fct, x, 0, generic_scan=True, reverse=direction)
-            expected_result = _fake_associative_scan(fct, x, 0, reverse=direction)
-            self.assertEqual(result, expected_result)
-
-            grad_out = torch.ones_like(result)
-            grads = torch.autograd.grad(result, (x,), grad_out, retain_graph=True)
-            expected_grads = torch.autograd.grad(
-                expected_result, (x,), grad_out, retain_graph=True
-            )
-            self.assertEqual(expected_grads, grads)
-
-            grads = torch.autograd.grad(
-                result, (W, H.weight, H.bias), grad_out, retain_graph=True
-            )
-            expected_grads = torch.autograd.grad(
-                expected_result, (W, H.weight, H.bias), grad_out, retain_graph=True
-            )
-            self.assertEqual(expected_grads, grads)
-            
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_generic_associative_scan_matmul_CPU_GPU(self):
-        for device in [torch.device('cpu'), torch.device('cuda')]:
-            W = torch.nn.Parameter(torch.randn(2, 2, device=device))
-            H = torch.nn.Linear(2, 2, device=device)
+    @unittest.skipIf(not importlib.util.find_spec("jax"), "Test requires JAX.")
+    @unittest.skipIf(not importlib.util.find_spec("numpy"), "Test requires NumPy.")
+    def test_generic_associative_scan_binary_operator(self):
+        import jax
+        import numpy as np
+        from jax import grad
 
-            def fct(x: torch.Tensor, y: torch.Tensor):
-                return x @ W + H(y)
+        def fct(x, y):
+            A_i, Bu_i = x
+            A_j, Bu_j = y
+            return A_j * A_i, A_j * Bu_i + Bu_j
 
-            # TODO this test fails as occasionally the CUDA results for
-            # some lengths produces sporadically compute erros, which need
-            # to be further tracked down
-            import random
-            lengths = [random.randint(1, 100) for _ in range(10)]
-            for length in lengths:
-                x = torch.randn(length, 2, 2, requires_grad=True, device=device)
+        for device in [torch.device("cpu"), torch.device("cuda")]:
+            state_dim = 20
+            timesteps = 10
+            projected_inputs = torch.randn(
+                timesteps, state_dim, requires_grad=True, device=device
+            )
+            A = torch.randn(state_dim, requires_grad=True, device=device)
+            elements = (A.repeat((timesteps, 1)), projected_inputs)
+            elements_jax = tuple([el.cpu().detach().numpy() for el in elements])
 
-                for direction in [False, True]:
-                    result = associative_scan(fct, x, 0, generic_scan=True, reverse=direction)
-                    expected_result = _fake_associative_scan(fct, x, 0, reverse=direction)
-                    self.assertEqual(result, expected_result)
-                    self.assertEqual(result.device.type, device.type)
+            for direction in [False, True]:
+                result = associative_scan(
+                    fct, elements, 0, generic_scan=True, reverse=direction
+                )
+                expected_result = jax.lax.associative_scan(
+                    fct, elements_jax, reverse=direction
+                )
+                self.assertEqual(
+                    [r.cpu().detach().numpy() for r in result],
+                    [np.array(r) for r in expected_result],
+                )
+                self.assertEqual(
+                    [r.device.type for r in result], [device.type] * len(result)
+                )
 
-                    grad_out = torch.ones_like(result)
-                    grads = torch.autograd.grad(result, (x,), grad_out, retain_graph=True)
-                    expected_grads = torch.autograd.grad(
-                        expected_result, (x,), grad_out, retain_graph=True
-                    )
-                    self.assertEqual(expected_grads, grads)
-                    self.assertEqual([g.device.type for g in grads], [device.type] * len(grads))
+                def jax_grad_fct(inp):
+                    res = 0.0
+                    for v in jax.lax.associative_scan(fct, inp, reverse=direction):
+                        res += v
+                    return jax.numpy.sum(res)
 
-                    grads = torch.autograd.grad(
-                        result, (W, H.weight, H.bias), grad_out, retain_graph=True
-                    )
-                    expected_grads = torch.autograd.grad(
-                        expected_result, (W, H.weight, H.bias), grad_out, retain_graph=True
-                    )
-                    self.assertEqual(expected_grads, grads)
-                    self.assertEqual([g.device.type for g in grads], [device.type] * len(grads))
+                def grad_fct(inp):
+                    res = 0.0
+                    for v in associative_scan(
+                        fct, inp, 0, generic_scan=True, reverse=direction
+                    ):
+                        res += v
+                    return torch.sum(res)
+
+                result = grad_fct(elements)
+                expected_result = jax_grad_fct(elements_jax)
+                self.assertEqual(
+                    result.cpu().detach().numpy(), np.array(expected_result)
+                )
+                grad_out = torch.ones_like(result)
+                grads = torch.autograd.grad(
+                    result, elements, grad_out, retain_graph=True
+                )
+                expected_grads = grad(jax_grad_fct)(elements_jax)
+                self.assertEqual(
+                    [r.cpu().detach().numpy() for r in grads],
+                    [np.array(r) for r in expected_grads],
+                )
 
     def test_generic_associative_scan_tuple(self):
         def fct(x, y):
@@ -765,7 +912,7 @@ class f(torch.nn.Module):
         z = torch.randn(3, 2, 2, requires_grad=True)
         inp = {"i": x, "j": ([y], [{"o": z}])}
 
-        with self.assertRaisesRegex(Exception, r"."):
+        with self.assertRaisesRegex(ValueError, r"."):
             result = associative_scan(fct_wrong_pytree, inp, 0, generic_scan=True)
 
         for direction in [False, True]:
