@@ -4,7 +4,6 @@ Utils for caching the outputs of AOTAutograd
 """
 from __future__ import annotations
 
-import functools
 import logging
 import os
 import pickle
@@ -25,7 +24,6 @@ from torch._inductor.codecache import (
     FxGraphCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
-    get_code_hash,
     write_atomic,
 )
 
@@ -135,12 +133,6 @@ def check_node_safe(node: Node):
         raise BypassAOTAutogradCache(f"Unsupported node op {node.op}")
 
 
-@functools.lru_cache(None)
-def get_autograd_code_hash():
-    autograd_root = os.path.dirname(__file__)
-    return get_code_hash([autograd_root])
-
-
 def check_cacheable(gm: torch.fx.GraphModule):
     """
     Checks that the graph module only uses supported operators
@@ -180,7 +172,6 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.grad_enabled = torch.is_grad_enabled()
         self.disable_amp = torch._C._is_any_autocast_enabled()
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
-        self.code_hash = get_autograd_code_hash()
         self.autograd_config = config.save_config()
         try:
             # We don't use FxGraphHashDetails to hash example_inputs because it expects
