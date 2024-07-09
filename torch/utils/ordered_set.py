@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import MutableSet, Set as AbstractSet
-from typing import Any, cast, Iterable, Iterator, Optional, TypeVar
+from typing import Any, cast, Iterable, Iterator, List, Optional, Tuple, Type, TypeVar
 
 T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
@@ -19,7 +19,7 @@ class OrderedSet(MutableSet[T]):
     def __init__(self, iterable: Optional[Iterable[T]] = None):
         self._dict: dict[T, None] = {}
         if iterable is not None:
-            self.update(iterable)
+            self._dict = {k: None for k in iterable}
 
     #
     # Required overriden abstract methods
@@ -83,9 +83,10 @@ class OrderedSet(MutableSet[T]):
             self |= other  # type: ignore[operator, arg-type]
 
     def intersection(self, *others: Iterable[T]) -> OrderedSet[T]:
-        res = self if len(others) else self.copy()
+        res = self.copy()
         for other in others:
-            res = res & other  # type: ignore[operator, arg-type]
+            if other is not self:
+                res &= other  # type: ignore[operator, arg-type]
         return res
 
     def intersection_update(self, *others: Iterable[T]) -> None:
@@ -105,11 +106,14 @@ class OrderedSet(MutableSet[T]):
         self ^= other  # type: ignore[operator, arg-type]
 
     def union(self, *others: Iterable[T]) -> OrderedSet[T]:
-        res = self if len(others) else self.copy()
+        res = self.copy()
         for other in others:
-            res = res | other  # type: ignore[operator, arg-type]
+            if other is not self:
+                res |= other  # type: ignore[operator, arg-type]
         return res
 
+    # Specify here for correct type inference, otherwise would
+    # return AbstractSet[T]
     # Specify here for correct type inference, otherwise would
     # return AbstractSet[T]
     def __sub__(self, other: AbstractSet[T_co]) -> OrderedSet[T]:
@@ -126,3 +130,12 @@ class OrderedSet(MutableSet[T]):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({list(self)})"
+
+    def __getstate__(self) -> List[T]:
+        return list(self._dict.keys())
+
+    def __setstate__(self, state: List[T]) -> None:
+        self._dict = {k: None for k in state}
+
+    def __reduce__(self) -> Tuple[Type[OrderedSet[T]], Tuple[List[T]]]:
+        return (OrderedSet, (list(self),))
