@@ -1109,6 +1109,21 @@ class CppVecOverrides(CppOverrides):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
         assert x.dtype is not None
+        if (
+            x.dtype in [torch.int32, torch.int64]
+            and y.dtype in [torch.int32, torch.int64]
+            and x.dtype != y.dtype
+        ):
+            x = (
+                f"at::vec::convert<int64_t,2,int32_t,1>({x})"
+                if x.dtype == torch.int32
+                else x
+            )
+            y = (
+                f"at::vec::convert<int64_t,2,int32_t,1>({y})"
+                if y.dtype == torch.int32
+                else y
+            )
         return f"{V.kernel._get_mask_type(x.dtype)}({x} == {y})"
 
     @staticmethod
@@ -3051,7 +3066,7 @@ class CppVecKernelChecker(CppVecKernel):
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
                     if (
-                        dtype == torch.int64
+                        dtype in [torch.int32, torch.int64]
                         and can_use_int32()
                         and all(
                             user.target in BIN_CMP_OPS
