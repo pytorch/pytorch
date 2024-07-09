@@ -641,9 +641,12 @@ def run_autoheuristic(
     if torch._inductor.config.autoheuristic_mode == "COLLECT_DATA":
         ah_ori_time = autoheuristic.get_collected_feedback(orig_choice)
         ah_pad_time = autoheuristic.get_collected_feedback(pad_choice)
-        if ori_time is None:
-            set_cached_base_mm_benchmark_time(ori_time_key, ah_ori_time)
-        return should_pad(key, ah_ori_time, ah_pad_time)
+
+        # if precondition is not satisifed, autoheuristic does not collect data
+        if ah_ori_time is not None and ah_pad_time is not None:
+            if ori_time is None:
+                set_cached_base_mm_benchmark_time(ori_time_key, ah_ori_time)
+            return should_pad(key, ah_ori_time, ah_pad_time)
     if ah_should_pad is not None:
         set_cached_should_pad(key, ah_should_pad)
     return ah_should_pad
