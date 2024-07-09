@@ -969,9 +969,6 @@ class _ModuleStackTracer(PythonKeyTracer):
         class AttrProxy:
             def __init__(self, base, path):
                 # Class is modified to be a subclass of torch.nn.Module
-                self.reset(base, path)
-
-            def reset(self, base, path):
                 self.__class__ = type(
                     base.__class__.__name__,
                     (self.__class__, base.__class__),
@@ -980,6 +977,9 @@ class _ModuleStackTracer(PythonKeyTracer):
                 self.__dict__ = base.__dict__
                 self.__class__.__module__ = base.__class__.__module__
                 self.__class__.__qualname__ = base.__class__.__qualname__
+                self.reset_proxy_mapping(base, path)
+
+            def reset_proxy_mapping(self, base, path):
                 self_.proxy_paths[self] = path
                 self_.proxy_modules[self] = base
 
@@ -1002,7 +1002,7 @@ class _ModuleStackTracer(PythonKeyTracer):
                     # 2. Instead of creating a new AttrProxy, we just reset the path of existing one. This is to avoid
                     # dynamo creating multiple guards for the same attr_val but different AttrProxy when exporting
                     # a model that calls torch.compile (e.g when a model uses torch.cond.)
-                    self_.attr_proxy_map[attr_val].reset(attr_val, self_.proxy_paths[self] + "." + name)
+                    self_.attr_proxy_map[attr_val].reset_proxy_mapping(attr_val, self_.proxy_paths[self] + "." + name)
                 return self_.attr_proxy_map[attr_val]
 
             @property
@@ -1043,7 +1043,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         if attr_val not in self.attr_proxy_map:
             self.attr_proxy_map[attr_val] = self.proxy_type(attr_val, attr)
         else:
-            self.attr_proxy_map[attr_val].reset(attr_val, attr)
+            self.attr_proxy_map[attr_val].reset_proxy_mapping(attr_val, attr)
         return self.attr_proxy_map[attr_val]
 
     def trace(self, root, concrete_args):

@@ -98,6 +98,7 @@ from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # no
 from .utils import (
     common_constant_types,
     dict_keys_repr,
+    get_custom_getattr,
     guard_failures,
     istype,
     key_is_id,
@@ -848,7 +849,8 @@ class GuardBuilder(GuardBuilderBase):
 
             if (
                 isinstance(base_example_value, torch.nn.Module)
-                and base_example_value.__getattr__ is unpatched_nn_module_getattr
+                and get_custom_getattr(base_example_value)
+                is unpatched_nn_module_getattr
             ):
                 out = self.getattr_on_nn_module(
                     source,
@@ -1136,7 +1138,8 @@ class GuardBuilder(GuardBuilderBase):
                 # guard by going through __dict__ attrs.
                 if (
                     isinstance(base_example_value, torch.nn.Module)
-                    and base_example_value.__getattr__ is unpatched_nn_module_getattr
+                    and get_custom_getattr(base_example_value)
+                    is unpatched_nn_module_getattr
                 ):
                     return self.getattr_on_nn_module(
                         source,
