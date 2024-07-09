@@ -50,7 +50,6 @@ inductor_decompositions = get_decompositions(
         aten.bitwise_and_,
         aten.bitwise_or_,
         aten.clamp_min_,
-        aten.constant_pad_nd,
         aten.dist,
         aten.empty_like,
         aten.flip,
@@ -98,6 +97,7 @@ decomps_to_exclude = [
     aten.clamp_min,
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
+    aten.slice_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.split.Tensor,  # inductor lowers this directly
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
@@ -646,7 +646,9 @@ def masked_scatter(self, mask, source):
         # use a 1-shot serial iteration.
         self, mask = aten.broadcast_tensors([self, mask])
         source_idx = mask.reshape(-1).cumsum(0) - 1
-        return inductor_prims.masked_scatter_with_index(self, mask, source_idx, source)
+        self_flat, mask_flat, source_flat = (x.flatten() for x in (self, mask, source))
+        result = aten._unsafe_masked_index(source_flat, mask_flat, [source_idx], 0)
+        return torch.where(mask_flat, result, self_flat).view(self.shape)
     return NotImplemented
 
 

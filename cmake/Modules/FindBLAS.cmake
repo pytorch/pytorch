@@ -409,6 +409,7 @@ ENDIF(NOT BLAS_FOUND)
 
 # Blas has bfloat16 support?
 IF(BLAS_LIBRARIES)
+  INCLUDE(CheckFunctionExists)
   SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
   check_function_exists("sbgemm_" BLAS_HAS_SBGEMM)
   set(CMAKE_REQUIRED_LIBRARIES)
