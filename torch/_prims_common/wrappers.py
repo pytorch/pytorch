@@ -211,7 +211,6 @@ def _safe_copy_out(
 
 def out_wrapper(
     *out_names: str,
-    annotations: Optional[Dict] = None,
     exact_dtype: bool = False,
     pass_is_out: bool = False,
     preserve_memory_format: bool = False,
@@ -325,11 +324,6 @@ def out_wrapper(
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
             parameters=params, return_annotation=return_type  # type: ignore[arg-type]
         )
-
-        if annotations is None:
-            _fn.__annotations__ = dict(fn.__annotations__)
-        else:
-            _fn.__annotations__ = annotations
 
         _fn.__annotations__["out"] = out_type
         _fn.__annotations__["return"] = return_type
