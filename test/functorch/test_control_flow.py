@@ -966,12 +966,12 @@ class f(torch.nn.Module):
             result_exp = fn({"t": [a, {"b": b}, (c,)]})
             self.assertEqual(result, result_exp)
 
-            # TODO: Gradient computation for such complex pytree output does not work
-            # only forward path is tested
+            result_flat, _ = pytree.tree_flatten(result)
+            result_exp_flat, _ = pytree.tree_flatten(result_exp)
 
-            grad_out = torch.ones_like(a)
-            expected_grads = torch.autograd.grad(result_exp, (a,), grad_out)
-            grads = torch.autograd.grad(result, (a,), grad_out)
+            grad_out = [torch.ones_like(g) for g in result_flat]
+            expected_grads = torch.autograd.grad(result_exp_flat, (c,), grad_out)
+            grads = torch.autograd.grad(result_flat, (c,), grad_out)
             self.assertEqual(expected_grads, grads)
 
         def f(pred):
@@ -2493,7 +2493,7 @@ def forward(self, a_1, b_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [a_1, b_1]);  gt = true_graph_0 = false_graph_0 = a_1 = b_1 = None
+    conditional = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (a_1, b_1));  gt = true_graph_0 = false_graph_0 = a_1 = b_1 = None
     getitem = conditional[0];  conditional = None
     return getitem""",  # noqa: B950
         )
