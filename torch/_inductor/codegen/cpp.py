@@ -3086,7 +3086,7 @@ class CppVecKernelChecker(CppVecKernel):
                     support_ops = list(BIN_CMP_OPS)
                     support_ops.append("randn")
                     if (
-                        dtype == torch.int64
+                        dtype in [torch.int32, torch.int64]
                         and can_use_int32()
                         and all(
                             user.target in support_ops

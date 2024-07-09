@@ -1915,7 +1915,7 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
     def inner_fn(index):
         return getattr(ops, mode)(
             seed_loader([]),
-            ops.index_expr(random_pos(index), torch.int64),
+            ops.index_expr(random_pos(index), torch.int32),
         )
 
     result = Pointwise.create(
