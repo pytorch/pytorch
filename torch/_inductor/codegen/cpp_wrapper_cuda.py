@@ -267,17 +267,20 @@ class CppWrapperCuda(CppWrapperCpu):
         if grid_uses_symbolic_shapes:
             self.writeline(f"if ({grid_name}.is_non_zero()) {{")
         kernel_var_name = f"kernels.{name}" if V.graph.aot_mode else name
-        self.writeline(
-            "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
-                kernel_var_name,
-                f"{grid_name}.grid_x",
-                f"{grid_name}.grid_y",
-                f"{grid_name}.grid_z",
-                params["num_warps"],
-                params["shared_mem"],
-                kernel_args_var,
-                stream,
-            )
+        launch_kernel_call = """launchKernel({}, {}, {}, {}, {}, {}, {}, {});""".format(
+            kernel_var_name,
+            f"{grid_name}.grid_x",
+            f"{grid_name}.grid_y",
+            f"{grid_name}.grid_z",
+            params["num_warps"],
+            params["shared_mem"],
+            kernel_args_var,
+            stream,
         )
         if grid_uses_symbolic_shapes:
+            # TODO: Use codegen `do_indent()` to properly generate the indentation.
+            # This works in this case as there's only one `if` condition.
+            self.writeline("    " + launch_kernel_call)
             self.writeline("}")
+        else:
+            self.writeline(launch_kernel_call)
