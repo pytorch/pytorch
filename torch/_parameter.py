@@ -4,6 +4,10 @@ import torch
 from torch._C import _disabled_torch_function_impl, _TensorMeta
 
 
+# black magic to set the __module__ attribute for the following classes and functions
+__name__: str = "torch.nn.parameter"
+
+
 # Metaclass to combine _TensorMeta and the instance check override for Parameter.
 class _ParameterMeta(_TensorMeta):
     # Make `isinstance(t, Parameter)` return True for custom tensor instances that have the _is_param flag.
@@ -33,8 +37,6 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
             :class:`~no_grad` mode. See :ref:`locally-disable-grad-doc` for more
             details. Default: `True`
     """
-
-    __module__ = "torch.nn.parameter"
 
     def __new__(cls, data=None, requires_grad=True):
         if data is None:
@@ -92,8 +94,6 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
 
 
 class UninitializedTensorMixin:
-    __module__ = "torch.nn.parameter"
-
     _allowed_methods = [
         torch.Tensor.__hash__,
         torch.Tensor.size,
@@ -179,9 +179,6 @@ def is_lazy(param):
     return isinstance(param, UninitializedTensorMixin)
 
 
-is_lazy.__module__ = "torch.nn.parameter"
-
-
 class UninitializedParameter(UninitializedTensorMixin, Parameter):
     r"""A parameter that is not initialized.
 
@@ -198,7 +195,6 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
     during construction using e.g. ``device='cuda'``.
     """
 
-    __module__ = "torch.nn.parameter"
     cls_to_become = Parameter
 
     def __new__(cls, requires_grad=True, device=None, dtype=None) -> None:
@@ -231,7 +227,6 @@ class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     during construction using e.g. ``device='cuda'``.
     """
 
-    __module__ = "torch.nn.parameter"
     cls_to_become = torch.Tensor
 
     def __new__(cls, requires_grad=False, device=None, dtype=None) -> None:
