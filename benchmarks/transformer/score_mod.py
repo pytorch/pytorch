@@ -36,7 +36,7 @@ class ExperimentConfig:
     calculate_bwd_time: bool
 
     def __post_init__(self):
-        assert len(self.shape) == 4, "Shape must be of length 4"
+        assert len(self.shape) == 6, "Shape must be of length 6" # [B, Hq, M, Hkv, N, D]
 
     def asdict(self):
         # Convert the dataclass instance to a dictionary
@@ -71,16 +71,17 @@ class Experiment:
 
 def generate_inputs(
     batch_size: int,
-    num_heads: int,
+    q_heads: int,
     q_sequence_length: int,
+    kv_heads: int,
     kv_sequence_length: int,
     head_dim: int,
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
 ):
-    q_shape = (batch_size, q_sequence_length, num_heads * head_dim)
-    kv_shape = (batch_size, kv_sequence_length, num_heads * head_dim)
+    q_shape = (batch_size, q_sequence_length, q_heads * head_dim)
+    kv_shape = (batch_size, kv_sequence_length, kv_heads * head_dim)
 
     make_q = partial(
         torch.rand, q_shape, device=device, dtype=dtype, requires_grad=requires_grad
@@ -90,17 +91,17 @@ def generate_inputs(
     )
     query = (
         make_q()
-        .view(batch_size, q_sequence_length, num_heads, head_dim)
+        .view(batch_size, q_sequence_length, q_heads, head_dim)
         .transpose(1, 2)
     )
     key = (
         make_kv()
-        .view(batch_size, kv_sequence_length, num_heads, head_dim)
+        .view(batch_size, kv_sequence_length, kv_heads, head_dim)
         .transpose(1, 2)
     )
     value = (
         make_kv()
-        .view(batch_size, kv_sequence_length, num_heads, head_dim)
+        .view(batch_size, kv_sequence_length, kv_heads, head_dim)
         .transpose(1, 2)
     )
     return query, key, value
@@ -110,12 +111,13 @@ def run_single_experiment(
     config: ExperimentConfig, dynamic=False, max_autotune=False
 ) -> ExperimentResults:
     device = torch.device("cuda")
-    batch_size, num_heads, q_seq_len, head_dim = config.shape
+    batch_size, q_heads, q_seq_len, kv_heads, kv_seq_len, head_dim = config.shape
     query, key, value = generate_inputs(
         batch_size,
-        num_heads,
+        q_heads,
         q_seq_len,
-        q_seq_len,
+        kv_heads,
+        kv_seq_len,
         head_dim,
         config.dtype,
         device,
@@ -123,7 +125,8 @@ def run_single_experiment(
     )
 
     def eager_sdpa(query, key, value, _):
-        return F.scaled_dot_product_attention(query, key, value)
+        flattened_query = query.reshape(batch_size, kv_heads, -1, head_dim)
+        return F.scaled_dot_product_attention(flattened_query, key, value)
 
     if max_autotune:
         compiled_sdpa = torch.compile(
@@ -138,7 +141,7 @@ def run_single_experiment(
         eager_sdpa, query, key, value, score_mod
     )
     forward_compiled_time = benchmark_torch_function_in_microseconds(
-        compiled_sdpa, query, key, value, score_mod
+        compiled_sdpa, query.reshape(batch_size, kv_heads, -1, head_dim), key, value, score_mod,
     )
 
     if config.calculate_bwd_time:
@@ -148,8 +151,8 @@ def run_single_experiment(
             out_eager.backward, dOut, retain_graph=True
         )
 
-        out_compile = compiled_sdpa(query, key, value, score_mod)
-        dOut = torch.randn_like(out_eager)
+        out_compile = compiled_sdpa( query.reshape(batch_size, kv_heads, -1, head_dim), key, value, score_mod, )
+        dOut = torch.randn_like(out_compile)
         backward_compile_time = benchmark_torch_function_in_microseconds(
             out_compile.backward, dOut, retain_graph=True
         )
@@ -277,7 +280,7 @@ def generate_experiment_configs(
     calculate_bwd: bool,
     dtype: torch.dtype,
     batch_sizes: List[int],
-    num_heads: List[int],
+    num_heads: List[Tuple[int, int]],
     seq_lens: List[int],
     head_dims: List[int],
     score_mods: List[str],
@@ -288,7 +291,7 @@ def generate_experiment_configs(
     all_configs = []
     for (
         bsz,
-        n_heads,
+        (Hq, Hkv),
         (q_seq_len, kv_seq_len),
         head_dim,
         score_mod,
@@ -299,7 +302,7 @@ def generate_experiment_configs(
         assert q_seq_len == kv_seq_len, "Only equal length inputs supported for now."
         all_configs.append(
             ExperimentConfig(
-                shape=(bsz, n_heads, q_seq_len, head_dim),
+                shape=(bsz, Hq, q_seq_len, Hkv, kv_seq_len, head_dim),
                 score_mod=score_mod,
                 dtype=dtype,
                 calculate_bwd_time=calculate_bwd,
@@ -350,7 +353,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-b", type=int, nargs="+", help="batch sizes", default=[2, 8, 16]
     )
-    parser.add_argument("-nh", type=int, nargs="+", help="# of heads", default=[16])
+    parser.add_argument("-nh", type=Tuple[int, int], nargs="+", help="# of heads (Hq, Hkv)", default=[(16, 16)])
     parser.add_argument(
         "-s", type=int, nargs="+", help="sequence lengths", default=[512, 1024, 4096]
     )
