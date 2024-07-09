@@ -1533,7 +1533,11 @@ Arguments:
       .def_property_readonly(
           "_underlying_non_prefix_store",
           &::c10d::PrefixStore::getUnderlyingNonPrefixStore,
-          R"(Recursively to get the store before layers of wrapping with PrefixStore.)");
+          R"(Recursively to get the store before layers of wrapping with PrefixStore.)")
+      .def_property_readonly(
+          "prefix",
+          &::c10d::PrefixStore::prefix,
+          "Gets the prefix string that is prepended to each key before being inserted into the store.");
 
   using namespace std::chrono_literals;
 

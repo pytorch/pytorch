@@ -607,6 +607,26 @@ class RendezvousTest(TestCase):
         with self.assertRaisesRegex(AssertionError, "has node-specific arguments"):
             dist.rendezvous("file://foo?rank=12&world_size=16", 12, 16)
 
+    def test_shared_store(self):
+        store = dist.TCPStore(
+            host_name="localhost",
+            port=0,
+            is_master=True,
+            wait_for_workers=False,
+            use_libuv=True,
+        )
+
+        os.environ["RANK"] = "2"
+        os.environ["WORLD_SIZE"] = "1"
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_PORT"] = str(store.port)
+        os.environ["TORCHELASTIC_USE_AGENT_STORE"] = str(True)
+        os.environ["TORCHELASTIC_RESTART_COUNT"] = str(123)
+
+        rdzv_iterator = dist.rendezvous("env://")
+        client_store, _, _ = next(rdzv_iterator)
+        self.assertEqual(client_store.prefix, "/worker/attempt_123")
+
 
 class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures

@@ -128,4 +128,8 @@ c10::intrusive_ptr<Store> PrefixStore::getUnderlyingNonPrefixStore() {
   return store;
 }
 
+const std::string& PrefixStore::prefix() const {
+  return prefix_;
+}
+
 } // namespace c10d
