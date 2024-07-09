@@ -77,7 +77,6 @@ from .lower_to_fbgemm import lower_to_fbgemm
 from ._decomposed import quantized_decomposed_lib  # noqa: F401
 from torch.ao.quantization.pt2e.generate_numeric_debug_handle import NUMERIC_DEBUG_HANDLE_KEY
 import operator
-from torch.ao.quantization.pt2e.generate_numeric_debug_handle import NUMERIC_DEBUG_HANDLE_KEY
 
 __all__ = [
     "convert",

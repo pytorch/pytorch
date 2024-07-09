@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
+import copy
 import unittest
 from collections import Counter
 from typing import Dict
@@ -15,8 +16,6 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
 )
-from torch.fx import Node
-import copy
 from torch.testing._internal.common_quantization import TestHelperModules
 from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
 
@@ -108,7 +107,9 @@ class TestGenerateNumericDebugHandle(TestCase):
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
 
-    @unittest.skip("reexport is not fully supported yet, need to add support for output node")
+    @unittest.skip(
+        "reexport is not fully supported yet, need to add support for output node"
+    )
     def test_re_export_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
