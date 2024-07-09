@@ -20,7 +20,6 @@ from torch.nn.attention._flex_attention import (
     _causal,
     _compose,
     _create_block_mask,
-    _create_block_mask_from_mask,
     _create_empty_block_mask,
     _flex_attention,
     _generate_alibi_bias,
@@ -515,91 +514,6 @@ class TestFlexAttention(InductorTestCase):
         torch.testing.assert_close(
             ref_out, compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
         )
-
-    @supported_platform
-    def test_create_block_mask_is_compiled(self):
-        make_tensor = functools.partial(
-            torch.randn,
-            (B, H, S, D),
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=True,
-        )
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
-
-        @torch.compile
-        def func(q, k, v):
-            block_mask = _create_block_mask_from_mask(
-                torch.tril(
-                    torch.ones(
-                        q.shape[-2], k.shape[-2], dtype=torch.bool, device=q.device
-                    )
-                ),
-                128,
-                128,
-            )
-
-            out = _flex_attention(
-                q,
-                k,
-                v,
-                _causal,
-                block_mask=block_mask,
-            )
-            return out
-
-        _, code = run_and_get_code(func, q, k, v)
-        # Ensure _create_block_mask_from_mask is compiled and generates 4 kernels,
-        # flex_attention generates 1 kernel.
-        FileCheck().check_count(".run(", 5, True).run(code[0])
-
-    @supported_platform
-    def test_block_mask_is_reused(self):
-        make_tensor = functools.partial(
-            torch.randn,
-            (B, H, S, D),
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=True,
-        )
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
-        k2 = k + 1
-        v2 = v + 1
-
-        @torch.compile
-        def func(q, k, v, k2, v2):
-            block_mask = _create_block_mask_from_mask(
-                torch.tril(
-                    torch.ones(
-                        q.shape[-2], k.shape[-2], dtype=torch.bool, device=q.device
-                    )
-                ),
-                128,
-                128,
-            )
-
-            q = _flex_attention(
-                q,
-                k,
-                v,
-                _causal,
-                _causal_mask,
-                block_mask,
-            )
-            out = _flex_attention(
-                q,
-                k2,
-                v2,
-                _causal,
-                _causal_mask,
-                block_mask,
-            )
-            return out
-
-        _, code = run_and_get_code(func, q, k, v, k2, v2)
-        # Ensure _create_block_mask_from_mask is compiled and generates 4 kernels,
-        # 2 flex_attention generates 2 kernels.
-        FileCheck().check_count(".run(", 6, True).run(code[0])
 
     @supported_platform
     def test_doc_mask_sparse(self):

@@ -52,7 +52,6 @@ class FlexAttentionHOP(HigherOrderOperator):
         key: torch.Tensor,
         value: torch.Tensor,
         score_mod: Callable,
-        mask_fn: Callable,
         block_mask: Tuple,
         score_mod_other_buffers: Tuple = (),
         mask_fn_other_buffers: Tuple = (),
@@ -67,7 +66,6 @@ class FlexAttentionHOP(HigherOrderOperator):
             key,
             value,
             score_mod,
-            mask_fn,
             block_mask,
             score_mod_other_buffers,
             mask_fn_other_buffers,
@@ -92,7 +90,6 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
         grad_out: torch.Tensor,
         fw_graph: Union[Callable, GraphModule],
         joint_graph: GraphModule,
-        mask_graph: Union[Callable, GraphModule],
         block_mask: Tuple,
         score_mod_other_buffers: Tuple = (),
         mask_fn_other_buffers: Tuple = (),
@@ -111,7 +108,6 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
             grad_out,
             fw_graph,
             joint_graph,
-            mask_graph,
             block_mask,
             score_mod_other_buffers,
             mask_fn_other_buffers,
@@ -127,7 +123,6 @@ def math_attention(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: Callable,
-    mask_fn: Callable,
     block_mask: Tuple,
     score_mod_other_buffers: Tuple = (),
     mask_fn_other_buffers: Tuple = (),
@@ -168,6 +163,7 @@ def math_attention(
         score_mod, in_dims=(0, 0, None, None, None) + score_mod_in_dim_buffers
     )
 
+    mask_fn = block_mask[-1]
     mask_fn_in_dim_buffers = (None,) * len(mask_fn_other_buffers)
     mask_fn = torch.vmap(
         mask_fn, in_dims=(None, None, None, 0) + mask_fn_in_dim_buffers
@@ -208,7 +204,6 @@ def sdpa_dense(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: Callable,
-    mask_fn: Callable,
     block_mask: Tuple,
     score_mod_other_buffers: Tuple = (),
     mask_fn_other_buffers: Tuple = (),
@@ -218,7 +213,6 @@ def sdpa_dense(
         key,
         value,
         score_mod,
-        mask_fn,
         block_mask,
         score_mod_other_buffers,
         mask_fn_other_buffers,
@@ -233,7 +227,6 @@ def trace_flex_attention(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: Callable,
-    mask_fn: Callable,
     block_mask: Tuple,
     score_mod_other_buffers: Tuple = (),
     mask_fn_other_buffers: Tuple = (),
@@ -249,7 +242,6 @@ def trace_flex_attention(
         key,
         value,
         score_mod,
-        mask_fn,
         block_mask,
         score_mod_other_buffers,
         mask_fn_other_buffers,
@@ -258,6 +250,7 @@ def trace_flex_attention(
         torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
     ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
     mask_example_vals = [torch.zeros((), dtype=torch.int) for _ in range(4)]
+    mask_fn = block_mask[-1]
     with TransformGetItemToIndex():
         score_graph = reenter_make_fx(score_mod)(
             *example_vals, *score_mod_other_buffers
@@ -265,6 +258,7 @@ def trace_flex_attention(
         mask_graph = reenter_make_fx(mask_fn)(
             *mask_example_vals, *mask_fn_other_buffers
         )
+    block_mask = block_mask[:-1] + (mask_graph,)
     qualname = proxy_mode.tracer.get_fresh_qualname("sdpa_score")
     proxy_mode.tracer.root.register_module(qualname, score_graph)
     mask_qualname = proxy_mode.tracer.get_fresh_qualname("sdpa_mask")
@@ -274,7 +268,6 @@ def trace_flex_attention(
         key,
         value,
         score_graph,
-        mask_graph,
         block_mask,
         score_mod_other_buffers,
         mask_fn_other_buffers,
@@ -295,7 +288,6 @@ def flex_attention_proxy_torch_dispatch_mode(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: Callable,
-    mask_fn: Callable,
     block_mask: Tuple,
     score_mod_other_buffers: Tuple = (),
     mask_fn_other_buffers: Tuple = (),
@@ -308,7 +300,6 @@ def flex_attention_proxy_torch_dispatch_mode(
             key,
             value,
             score_mod,
-            mask_fn,
             block_mask,
             score_mod_other_buffers,
             mask_fn_other_buffers,
@@ -319,7 +310,6 @@ def flex_attention_proxy_torch_dispatch_mode(
             key,
             value,
             score_mod,
-            mask_fn,
             block_mask,
             score_mod_other_buffers,
             mask_fn_other_buffers,
@@ -333,7 +323,6 @@ def flex_attention_functionalize(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: Callable,
-    mask_fn: Callable,
     block_mask: Tuple,
     score_mod_other_buffers: Tuple = (),
     mask_fn_other_buffers: Tuple = (),
@@ -380,14 +369,14 @@ def flex_attention_functionalize(
         if mutates:
             raise UnsupportedAliasMutationException("Mutations detected in score_mod")
 
-        functional_mask_fn = ctx.functionalize(mask_fn)
+        # mask_fn = block_mask[-1]
+        # functional_mask_fn = ctx.functionalize(mask_fn)
 
         out = flex_attention(
             query_unwrapped,
             key_unwrapped,
             value_unwrapped,
             functional_score_mod,
-            functional_mask_fn,
             block_mask_unwrapped,
             score_mod_other_buffers_unwrapped,
             mask_fn_other_buffers_unwrapped,
@@ -402,7 +391,6 @@ def flex_attention_fake_tensor_mode(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: Callable,
-    mask_fn: Callable,
     block_mask: Tuple,
     score_mod_other_buffers: Tuple = (),
     mask_fn_other_buffers: Tuple = (),
@@ -503,7 +491,6 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         value,
         fw_graph,
         joint_graph,
-        mask_graph,
         block_mask,
         score_mod_other_buffers,
         mask_fn_other_buffers,
@@ -517,7 +504,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         ), "Captured buffers that require grad are not yet supported."
         ctx._fw_graph = fw_graph
         ctx._joint_graph = joint_graph
-        ctx._mask_graph = mask_graph
+        ctx._mask_graph = block_mask[-1]
         # KV_BLOCK_SIZE and Q_BLOCK_SIZE are integers, so can't use ctx.save_for_backward
         ctx._KV_BLOCK_SIZE = block_mask[8]
         ctx._Q_BLOCK_SIZE = block_mask[9]
@@ -528,7 +515,6 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 key,
                 value,
                 fw_graph,
-                mask_graph,
                 block_mask,
                 score_mod_other_buffers,
                 mask_fn_other_buffers,
@@ -585,7 +571,6 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             grad_out,
             fw_graph,
             joint_graph,
-            mask_graph,
             (
                 full_kv_num_blocks,
                 full_kv_indices,
@@ -597,6 +582,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 partial_q_indices,
                 KV_BLOCK_SIZE,
                 Q_BLOCK_SIZE,
+                mask_graph,
             ),
             score_mod_other_buffers,
             mask_fn_other_buffers,
@@ -610,7 +596,6 @@ def flex_attention_autograd(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: Callable,
-    mask_fn: Callable,
     block_mask: Tuple,
     score_mod_other_buffers: Tuple = (),
     mask_fn_other_buffers: Tuple = (),
@@ -626,14 +611,12 @@ def flex_attention_autograd(
             )
         else:
             fw_graph, bw_graph = score_mod, None
-        mask_graph = mask_fn
         out, logsumexp = FlexAttentionAutogradOp.apply(
             query,
             key,
             value,
             fw_graph,
             bw_graph,
-            mask_graph,
             block_mask,
             score_mod_other_buffers,
             mask_fn_other_buffers,
@@ -654,7 +637,6 @@ def sdpa_dense_backward(
     grad_out: torch.Tensor,
     fw_graph: Callable,  # GraphModule type hint?
     joint_graph: Callable,
-    mask_graph: Callable,
     block_mask: Tuple,
     score_mod_other_buffers: Tuple = (),
     mask_fn_other_buffers: Tuple = (),
@@ -682,6 +664,7 @@ def sdpa_dense_backward(
     )
 
     mask_fn_in_dim_buffers = (None,) * len(mask_fn_other_buffers)
+    mask_graph = block_mask[-1]
     mask_graph = torch.vmap(
         mask_graph, in_dims=(None, None, None, 0) + mask_fn_in_dim_buffers
     )
@@ -762,7 +745,6 @@ def trace_flex_attention_backward(
     grad_out: torch.Tensor,
     fw_graph: Union[Callable, GraphModule],
     joint_graph: GraphModule,
-    mask_graph: Union[Callable, GraphModule],
     block_mask: Tuple,
     score_mod_other_buffers: Tuple = (),
     mask_fn_other_buffers: Tuple = (),
@@ -777,7 +759,6 @@ def trace_flex_attention_backward(
         grad_out,
         fw_graph,
         joint_graph,
-        mask_graph,
         block_mask,
         score_mod_other_buffers,
         mask_fn_other_buffers,
@@ -788,6 +769,7 @@ def trace_flex_attention_backward(
     ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
     bw_example_vals = fw_example_vals + [torch.zeros((), dtype=query.dtype)]
     mask_example_vals = [torch.zeros((), dtype=torch.int) for _ in range(4)]
+    mask_graph = block_mask[-1]
     with TransformGetItemToIndex():
         fw_graph = reenter_make_fx(fw_graph)(*fw_example_vals, *score_mod_other_buffers)
         joint_graph = reenter_make_fx(joint_graph)(
@@ -796,6 +778,7 @@ def trace_flex_attention_backward(
         mask_graph = reenter_make_fx(mask_graph)(
             *mask_example_vals, *mask_fn_other_buffers
         )
+    block_mask = block_mask[:-1] + (mask_graph,)
     proxy_mode.tracer.root.register_module("fw_graph", fw_graph)
     proxy_mode.tracer.root.register_module("joint_graph", joint_graph)
     proxy_mode.tracer.root.register_module("mask_graph", mask_graph)
@@ -808,7 +791,6 @@ def trace_flex_attention_backward(
         grad_out,
         fw_graph,
         joint_graph,
-        mask_graph,
         block_mask,
         score_mod_other_buffers,
         mask_fn_other_buffers,
@@ -837,7 +819,6 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
     grad_out: torch.Tensor,
     fw_graph: Union[Callable, GraphModule],
     joint_graph: GraphModule,
-    mask_graph: Union[Callable, GraphModule],
     block_mask: Tuple,
     score_mod_other_buffers: Tuple = (),
     mask_fn_other_buffers: Tuple = (),
@@ -854,7 +835,6 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
             grad_out,
             fw_graph,
             joint_graph,
-            mask_graph,
             block_mask,
             score_mod_other_buffers,
             mask_fn_other_buffers,
@@ -869,7 +849,6 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
             grad_out,
             fw_graph,
             joint_graph,
-            mask_graph,
             block_mask,
             score_mod_other_buffers,
             mask_fn_other_buffers,
@@ -887,7 +866,6 @@ def flex_attention_backward_functionalize(
     grad_out: torch.Tensor,
     fw_graph: Union[Callable, GraphModule],
     joint_graph: GraphModule,
-    mask_graph: Union[Callable, GraphModule],
     block_mask: Tuple,
     score_mod_other_buffers: Tuple = (),
     mask_fn_other_buffers: Tuple = (),
@@ -926,7 +904,7 @@ def flex_attention_backward_functionalize(
     with ctx.redispatch_to_next() as m:
         functional_fw_graph = ctx.functionalize(fw_graph)
         functional_joint_graph = ctx.functionalize(joint_graph)
-        functional_mask_graph = ctx.functionalize(mask_graph)
+        functional_mask_graph = ctx.functionalize(block_mask[-1])
 
         grad_query, grad_key, grad_value = flex_attention_backward(
             query_unwrapped,
@@ -937,7 +915,6 @@ def flex_attention_backward_functionalize(
             grad_out_unwrapped,
             functional_fw_graph,  # type: ignore[arg-type]
             functional_joint_graph,  # type: ignore[arg-type]
-            functional_mask_graph,  # type: ignore[arg-type]
             block_mask_unwrapped,
             score_mod_other_buffers_unwrapped,
             mask_fn_other_buffers_unwrapped,
@@ -957,7 +934,6 @@ def flex_attention_backward_fake_tensor_mode(
     grad_out: torch.Tensor,
     fw_graph: Union[Callable, GraphModule],
     joint_graph: GraphModule,
-    mask_graph: Union[Callable, GraphModule],
     block_mask: Tuple,
     score_mod_other_buffers: Tuple = (),
     mask_fn_other_buffers: Tuple = (),

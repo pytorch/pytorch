@@ -556,7 +556,6 @@ def flex_attention(*args, **kwargs):
         key,
         value,
         subgraph,
-        mask_graph,
         block_mask,
         score_mod_other_buffers,
         mask_fn_other_buffers,
@@ -572,6 +571,7 @@ def flex_attention(*args, **kwargs):
         partial_q_indices,
         SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
+        mask_graph,
     ) = block_mask
     for buf in [
         query,
@@ -1252,7 +1252,6 @@ def flex_attention_backward(*args, **kwargs):
         grad_out,
         fw_graph,
         joint_graph,
-        mask_graph,
         block_mask,
         score_mod_other_buffers,
         mask_fn_other_buffers,
@@ -1268,6 +1267,7 @@ def flex_attention_backward(*args, **kwargs):
         partial_q_indices,
         SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
+        mask_graph,
     ) = block_mask
     for buf in [
         query,
