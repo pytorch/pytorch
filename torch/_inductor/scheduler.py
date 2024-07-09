@@ -1543,11 +1543,15 @@ class Scheduler:
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.logged_slow_fusion: Set[Tuple[str, str]] = set()
-        self.nodes = comms.enforce_comm_ordering_for_fsdp(
-            self.name_to_fused_node, V.graph.graph_inputs, self.nodes
-        )
+        # TODO: should we dynamically enable the enforce_comm_ordering_for_fsdp pass only when FSDP2 is traced
+        # (by setting Inductor config dynamically)?
         if config.pre_fusion_custom_pass is not None:
-            self.nodes = config.pre_fusion_custom_pass(self.nodes)
+            self.nodes = config.pre_fusion_custom_pass(
+                self.nodes,
+                name_to_fused_node=self.name_to_fused_node,  # type: ignore[call-arg]
+                graph_inputs=V.graph.graph_inputs,  # type: ignore[call-arg]
+                name_to_op=V.graph.name_to_op,  # type: ignore[call-arg]
+            )  # type: ignore[arg-type]
         self.nodes = self.fuse_nodes(self.nodes)
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:

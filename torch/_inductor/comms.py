@@ -9,10 +9,11 @@ from collections import defaultdict
 from typing import Dict, List, Set, Tuple, TYPE_CHECKING
 
 import torch
+from torch import _inductor
 
 from . import config, ir
 from .dependencies import WeakDep
-from .utils import contains_collective, contains_wait, tuple_sorted
+from .utils import contains_collective, contains_wait, is_collective, tuple_sorted
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
@@ -66,12 +67,12 @@ def raise_comms_and_sink_waits(
 
     comm_idx = 0
     for snode in snodes:
-        if raise_comms and contains_collective(snode.node):
+        if raise_comms and contains_collective(snode):
             scores_0[snode.get_name()] = comm_idx
             for anc in snode.ancestors:
                 scores_0[anc] = min(scores_0[anc], comm_idx)
             comm_idx += 1
-        elif sink_waits and contains_wait(snode.node):
+        elif sink_waits and contains_wait(snode):
             scores_1[snode.get_name()] = 1
 
     class Runnable:
@@ -142,17 +143,18 @@ def get_descendants(node, node_users):
     return descendants
 
 
-def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
+def item(x: Set[str]) -> str:
+    assert len(x) == 1
+    return next(iter(x))
+
+
+def decide_global_ordering_of_comms(snodes: List[BaseSchedulerNode]):
     """
     Decide global ordering of comms, by just enforcing the ordering that's in the input graph
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
-    comm_nodes = [n for n in nodes if contains_collective(n.node)]
-
-    def item(x: Set[str]) -> str:
-        assert len(x) == 1
-        return next(iter(x))
+    comm_nodes = [snode for snode in snodes if contains_collective(snode)]
 
     for i in range(1, len(comm_nodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
@@ -160,7 +162,7 @@ def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
 
 
 def assert_no_comm_nodes(snodes: List[BaseSchedulerNode]) -> None:
-    assert not any(contains_collective(snode.node) for snode in snodes)
+    assert not any(contains_collective(snode) for snode in snodes)
 
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
@@ -235,7 +237,7 @@ def reorder_compute_for_overlap(
 
     comm_nodes = []
     for snode in snodes:
-        if contains_collective(snode.node):
+        if contains_collective(snode):
             comm_nodes.append(snode)
     if len(comm_nodes) == 0:
         # if there is no comm nodes, return the current order
@@ -402,7 +404,7 @@ def visualize_overlap(order):
     cur_comm_node = None
     for snode in order:
         if cur_comm_node is None:
-            if contains_collective(snode.node):
+            if contains_collective(snode):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
             elif contains_wait(snode.node):
@@ -413,7 +415,7 @@ def visualize_overlap(order):
                 total_est_runtime += estimate_op_runtime(snode)
             overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
         else:  # cur_comm_node is not None
-            if contains_collective(snode.node):
+            if contains_collective(snode):
                 raise AssertionError(
                     "Found two collectives running at the same time. "
                     "`visualize_overlap` needs to be updated to handle this case"
@@ -461,27 +463,31 @@ def get_all_reads(snode):
     reads = set()
     reads.update(snode.read_writes.reads)
     if isinstance(
-        snode, (scheduler.FusedSchedulerNode, scheduler.GroupedSchedulerNode)
+        snode,
+        (
+            _inductor.scheduler.FusedSchedulerNode,
+            _inductor.scheduler.GroupedSchedulerNode,
+        ),
     ):
         for sub_snode in snode.snodes:
             reads.update(get_all_reads(sub_snode))
     return reads
 
 
-def is_collective_op(snode, op):
-    return isinstance(snode.node, ir.CollectiveKernel) and snode.node.op_overload is op
+def is_fallback_op(node, op):
+    return isinstance(node, ir.FallbackKernel) and node.op_overload is op
 
 
-def is_fallback_op(snode):
-    return isinstance(snode.node, ir._FallbackKernel) and snode.node.op_overload is op
-
-
-# TODO: can we simplify the input args to just be `snodes`?
 def enforce_comm_ordering_for_fsdp(
-    name_to_fused_node: Dict[str, scheduler.BaseSchedulerNode],
-    graph_inputs: Dict[str, Buffer],
-    snodes: List[scheduler.BaseSchedulerNode],
-) -> List[scheduler.BaseSchedulerNode]:
+    snodes: List[_inductor.scheduler.BaseSchedulerNode],
+    **kwargs,
+) -> List[_inductor.scheduler.BaseSchedulerNode]:
+    from . import scheduler
+
+    name_to_fused_node = kwargs["name_to_fused_node"]
+    graph_inputs = kwargs["graph_inputs"]
+    name_to_op = kwargs["name_to_op"]
+
     def _find_all_recursive_deps_of_node_up_to_criteria(
         snode, collected_node_set, criteria_cb
     ):
@@ -495,7 +501,7 @@ def enforce_comm_ordering_for_fsdp(
                     dep_node, collected_node_set, criteria_cb
                 )
 
-    new_order = []
+    new_order: list[BaseSchedulerNode] = []
     scheduled = set()
     ag_nodes = []
     rs_nodes = []
@@ -519,7 +525,7 @@ def enforce_comm_ordering_for_fsdp(
             # Case 1: Handle AllGather
 
             # Find the "cast + copy_in + getitem + all_gather + all_gather_wait_tensor + copy_out" block
-            collected_node_set = set()
+            collected_node_set: set[scheduler.BaseSchedulerNode] = set()
             _find_all_recursive_deps_of_node_up_to_criteria(
                 snode,
                 collected_node_set,
@@ -554,13 +560,14 @@ def enforce_comm_ordering_for_fsdp(
         elif (
             isinstance(snode.node, ir._WaitKernel)
             and any(
-                is_collective_op(
-                    x, torch.ops._c10d_functional.reduce_scatter_tensor.default
+                is_collective(
+                    name_to_op[x],
+                    op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
                 )
                 for x in snode.ancestors
             )
             and any(
-                is_fallback_op(x, torch.ops.fsdp.chunk_cat.default)
+                is_fallback_op(name_to_op[x], torch.ops.fsdp.chunk_cat.default)
                 for x in snode.ancestors
             )
         ):
@@ -577,7 +584,7 @@ def enforce_comm_ordering_for_fsdp(
             )
             # sort nodes by original buffer order
             collected_nodes = sorted(
-                list(collected_node_set), key=lambda x: int(x.get_name()[3:])
+                collected_node_set, key=lambda x: int(x.get_name()[3:])
             )
 
             # Group "reduce_scatter copy-in + reduce_scatter comm" into one GroupedSchedulerNode
@@ -605,18 +612,20 @@ def enforce_comm_ordering_for_fsdp(
             scheduled.add(snode)
             new_order.append(snode)
 
-    # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run before next AllGather's "copy_in then AG" group node
+    # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
+    # before next AllGather's "copy_in then AG" group node
     prev_ag_wait = None
     for ag_group_node, wait_group_node in ag_nodes:
         if prev_ag_wait is not None:
             ag_group_node.add_fake_dep(WeakDep(item(prev_ag_wait.get_buffer_names())))
         prev_ag_wait = wait_group_node
 
-    # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run before next ReduceScatter's "copy_in then RS" group node
+    # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
+    # before next ReduceScatter's "copy_in then RS" group node
     prev_rs_wait = None
     for rs_group_node, wait_group_node in rs_nodes:
         if prev_rs_wait is not None:
             rs_group_node.add_fake_dep(WeakDep(item(prev_rs_wait.get_buffer_names())))
         prev_rs_wait = wait_group_node
 
-    return new_order
+    return new_order  # type: ignore[return-value]

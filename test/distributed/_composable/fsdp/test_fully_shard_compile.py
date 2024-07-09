@@ -10,6 +10,7 @@ import torch._dynamo.testing
 import torch.distributed._composable.fsdp._fsdp_param
 from torch import nn
 from torch._dynamo import compiled_autograd
+from torch._inductor import comms
 
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
@@ -133,11 +134,23 @@ class TestFullyShardCompile(FSDPTest):
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
 
-    # TODO: add small unit test to show that enforce FSDP comm ordering pass works, by using FSDP AG ops and RS ops (and their associated copy ops)
+    # @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    # @skip_if_lt_x_gpu(2)
+    # def test_enforce_comm_ordering_for_fsdp(self):
+    #     pass
+
+    # # TODO: add small unit test to show that enforce FSDP comm ordering pass works,
+    # # by using FSDP AG ops and RS ops (and their associated copy ops)
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._functorch.config.patch(recompute_views=True)
     @torch._functorch.config.patch(cse=False)
+    @torch._inductor.config.patch(
+        # TODO: we should merge these two configs (`reorder_for_compute_comm_overlap...`) into one
+        reorder_for_compute_comm_overlap=True,
+        reorder_for_compute_comm_overlap_passes=["sink_waits", "raise_comms"],
+        pre_fusion_custom_pass=comms.enforce_comm_ordering_for_fsdp,
+    )
     def _test_traceable_fsdp(
         self, model_init_fn, input_creation_fn, backend, fullgraph
     ):
