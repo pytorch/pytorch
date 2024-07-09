@@ -711,6 +711,7 @@ class WrapperCodeGen(CodeGen):
         if config.triton.autotune_at_compile_time:
             # mimic logic of EnterDeviceContextManagerLine.codegen for the autotune code block
             self.write_triton_header_once()
+            self.generate_stream_creation()
             self.kernel_autotune_calls.writeline(
                 f"with {V.graph.device_ops.device_guard(device_idx)}:"
             )
@@ -901,22 +902,27 @@ class WrapperCodeGen(CodeGen):
     ):
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})", node_name=node_name)
 
+    @cache_on_self
     def generate_stream_creation(self):
         """
         Create stream and stream_raw outside the main function.
         """
-        self.header.writeline(f"")
+        stream_creation_str="\n"
         if config.multiple_streams:
             for index, num_used in enumerate(V.graph.stream_graph.stream_pool):
                 if index == 0:
                     continue
                 if num_used > 0:
-                    self.header.writeline(f"stream{index}_raw = torch.cuda.Stream()")
-                    self.header.writeline(f"stream{index} = stream{index}_raw.cuda_stream")
-            self.header.writeline(f"stream0_raw = torch.cuda.default_stream()")
+                    stream_creation_str+=f"stream{index}_raw = torch.cuda.Stream()\n"
+                    stream_creation_str+=f"stream{index} = stream{index}_raw.cuda_stream\n"
+            stream_creation_str+=f"stream0_raw = torch.cuda.default_stream()\n"
         if V.graph.device_ops:
-            self.header.writeline("{}".format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")))
-            self.header.writeline(f"stream0 = get_raw_stream(0)")
+            stream_creation_str+= "{}\n".format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
+            stream_creation_str+= f"stream0 = get_raw_stream(0)\n"
+        self.header.splice(stream_creation_str)
+        if config.triton.autotune_at_compile_time:
+            self.kernel_autotune_calls.splice(stream_creation_str)
+
 
 
     @dynamo_timed
