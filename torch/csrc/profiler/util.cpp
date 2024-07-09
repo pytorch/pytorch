@@ -390,6 +390,9 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
   }
   auto& groupRanks = debugInfo->getGroupRanks();
   map.emplace(kGroupRanks, format_list(groupRanks, truncate));
+
+  auto rank = debugInfo->getRank();
+  map.emplace(kRank, std::to_string(rank));
 #endif // USE_DISTRIBUTED
   return map;
 }

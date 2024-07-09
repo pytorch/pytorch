@@ -60,7 +60,7 @@ static PyObject* THXPEvent_get_sycl_event(THXPEvent* self, void* unused) {
 
 static PyObject* THXPEvent_get_device(THXPEvent* self, void* unused) {
   HANDLE_TH_ERRORS
-  at::optional<at::Device> device = self->xpu_event.device();
+  std::optional<at::Device> device = self->xpu_event.device();
   if (!device) {
     Py_RETURN_NONE;
   }
