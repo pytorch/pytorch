@@ -42,17 +42,12 @@ IF(NOT MKLDNN_FOUND)
         list(APPEND DNNL_MAKE_COMMAND "--" "-l" "$ENV{MAX_JOBS}")
       endif()
     endif()
-    if(LINUX)
-      # Workaround about XPU ABI neutral build
-      set(ABI_NEUTRAL_FLAGS -fpreview-breaking-changes)
-    endif()
     ExternalProject_Add(xpu_mkldnn_proj
       SOURCE_DIR ${MKLDNN_ROOT}
       PREFIX ${XPU_MKLDNN_DIR_PREFIX}
       BUILD_IN_SOURCE 0
       CMAKE_ARGS  -DCMAKE_C_COMPILER=icx
       -DCMAKE_CXX_COMPILER=${SYCL_CXX_DRIVER}
-      -DCMAKE_CXX_FLAGS=${ABI_NEUTRAL_FLAGS}
       -DDNNL_GPU_RUNTIME=SYCL
       -DDNNL_CPU_RUNTIME=THREADPOOL
       -DDNNL_BUILD_TESTS=OFF
