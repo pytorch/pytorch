@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import functools
+import itertools
 import logging
 import operator
 import warnings
@@ -109,32 +110,23 @@ class OpDispatcher:
         """
         Main dispatching logic
         """
-        if logger.isEnabledFor(logging.DEBUG):
-            tensor_args = ""
-            for idx, arg in enumerate(args):
-                if not isinstance(arg, torch.Tensor):
-                    continue
-                if hasattr(arg, "_spec"):
-                    tensor_args += f"\n  arg_{idx} (dtensor): {arg.shape=} {arg._spec=}"
-                else:
-                    tensor_args += f"\n  arg_{idx} (tensor): {arg.shape=}"
-
-            for key, arg in kwargs.items():
-                if not isinstance(arg, torch.Tensor):
-                    continue
-                if hasattr(arg, "_spec"):
-                    tensor_args += f"\n  arg_{key} (dtensor): {arg.shape=} {arg._spec=}"
-                else:
-                    tensor_args += f"\n  arg_{key} (tensor): {arg.shape=}"
-
-            logger.debug("Dispatching op_call: %s%s", op_call, tensor_args)
-
         # operators that does not need to go through sharding propagation
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
         # extract local tensor and sharding infos to a OpInfo
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
+        if logger.isEnabledFor(logging.DEBUG):
+            tensor_args = ""
+            for idx, arg in enumerate(
+                itertools.chain(op_info.local_args, op_info.local_kwargs)
+            ):
+                if isinstance(arg, dtensor.DTensor):
+                    tensor_args += f"\n  arg_{idx} (dtensor): {arg.shape=} {arg._spec=}"
+                elif isinstance(arg, torch.Tensor):
+                    tensor_args += f"\n  arg_{idx} (tensor): {arg.shape=}"
+
+            logger.debug("Dispatching op_call: %s%s", op_call, tensor_args)
 
         self.sharding_propagator.propagate(op_info)
         output_sharding = op_info.output_sharding
