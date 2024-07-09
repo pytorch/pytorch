@@ -1212,7 +1212,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 choices,
                 name,
                 inputs_key,
-                lambda: make_benchmark_fn()(choices),
+                lambda choices: make_benchmark_fn()(choices),
             )
             end_time = time.perf_counter()
             autotuning_time = end_time - start_time
