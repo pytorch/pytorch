@@ -15,7 +15,7 @@ if [[ -z "${USE_XPU}" ]]; then
 else
     # The Triton xpu logic is as follows:
     # 1. By default, install pre-built whls.
-    # 2. [Not exposed to user] If the user set `TRITON_XPU_BUILD_FROM_SOURCE=1` flag, 
+    # 2. [Not exposed to user] If the user set `TRITON_XPU_BUILD_FROM_SOURCE=1` flag,
     #    it will install Triton from the source.
 
     TRITON_VERSION="pytorch-triton-xpu==$(cat .ci/docker/triton_version.txt)"
