@@ -708,6 +708,9 @@ class InstructionTranslatorBase(
                     return True
         return False
 
+    def is_tracing_nn_module(self):
+        return len(self.nn_module_stack) > 0
+
     def cell_and_freevars(self):
         if not hasattr(self, "_cell_and_freevars"):
             self._cell_and_freevars = tuple(
