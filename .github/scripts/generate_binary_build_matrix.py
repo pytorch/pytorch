@@ -325,7 +325,7 @@ def generate_wheels_matrix(
         package_type = "manywheel"
 
     if python_versions is None:
-        python_versions = FULL_PYTHON_VERSIONS
+        python_versions = FULL_PYTHON_VERSIONS + ["3.13"]
 
     if arches is None:
         # Define default compute archivectures
@@ -356,6 +356,10 @@ def generate_wheels_matrix(
                 or arch_version == "cuda-aarch64"
                 else arch_version
             )
+
+            # TODO: Enable python 3.13 on rocm, aarch64, windows
+            if (gpu_arch_type == "rocm" or os != "linux") and python_version == "3.13":
+                continue
 
             # 12.1 linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
             if (
