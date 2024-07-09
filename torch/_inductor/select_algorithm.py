@@ -1286,9 +1286,8 @@ class AlgorithmSelectorCache(PersistentCache):
             + str(torch.get_float32_matmul_precision())
             + "".join([choice.hash_key() for choice in choices])
         )
-        precompile_hash = hash(precompile_key)
 
-        wait_on_precompile = self.precompile_cache.get(precompile_hash, None)
+        wait_on_precompile = self.precompile_cache.get(precompile_key, None)
         if wait_on_precompile is not None:
             return wait_on_precompile
 
