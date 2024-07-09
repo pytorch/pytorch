@@ -4616,7 +4616,7 @@ def _reflection_pad_backward(grad_output, x, padding):
 
     def index_range_condition(index_range):
         i, lb, ub = index_range
-        return torch.logical_and(i >= lb, i < ub)
+        return torch.logical_and(i >= lb, i <= ub)
 
     # Areas after reflection:
     #
