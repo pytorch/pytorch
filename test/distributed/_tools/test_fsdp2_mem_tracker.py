@@ -28,8 +28,19 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     TransformerBlock,
 )
 
-c10d_ops = torch.ops.c10d
-funcol = torch.ops.c10d_functional
+
+def _init_cublas_workspace(dev: torch.device):
+    lin = torch.nn.Linear(768, 768, device=dev)
+    inp = torch.randn(1, 768, device=dev)
+    lin(inp).sum().backward()
+    del lin
+    del inp
+
+
+def _reset_mem_stats(dev: torch.device):
+    torch.cuda.empty_cache()
+    torch.cuda.reset_accumulated_memory_stats(dev)
+    torch.cuda.reset_peak_memory_stats(dev)
 
 
 class TestTrackerFullyShard1DTrainingCore(FSDPTest):
@@ -68,15 +79,9 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
     ):
         debug = False
         dev = torch.device(torch.cuda.current_device())
-        lin = torch.nn.Linear(768, 768, device=dev)
-        inp = torch.randn(1, 768, device=dev)
-        lin(inp).sum().backward()
-        del lin
-        del inp
-        gc.collect(1)
-        torch.cuda.empty_cache()
-        torch.cuda.reset_accumulated_memory_stats(dev)
-        torch.cuda.reset_peak_memory_stats(dev)
+        _init_cublas_workspace(dev)
+        gc.collect()
+        _reset_mem_stats(dev)
         mem_stats = torch.cuda.memory_stats(dev)
         pre_cuda_active = mem_stats["active_bytes.all.current"]
         torch.manual_seed(42)
@@ -129,15 +134,9 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
         """
         debug = False
         dev = torch.device(torch.cuda.current_device())
-        lin = torch.nn.Linear(768, 768, device=dev)
-        inp = torch.randn(1, 768, device=dev)
-        lin(inp).sum().backward()
-        del lin
-        del inp
-        gc.collect(1)
-        torch.cuda.empty_cache()
-        torch.cuda.reset_accumulated_memory_stats(dev)
-        torch.cuda.reset_peak_memory_stats(dev)
+        _init_cublas_workspace(dev)
+        gc.collect()
+        _reset_mem_stats(dev)
         mem_stats = torch.cuda.memory_stats(dev)
         pre_cuda_active = mem_stats["active_bytes.all.current"]
         torch.manual_seed(42)
@@ -200,15 +199,9 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
         assert checkpoint_impl in ("composable", "wrapper")
         debug = False
         dev = torch.device(torch.cuda.current_device())
-        lin = torch.nn.Linear(768, 768, device=dev)
-        inp = torch.randn(1, 768, device=dev)
-        lin(inp).sum().backward()
-        del lin
-        del inp
-        gc.collect(1)
-        torch.cuda.empty_cache()
-        torch.cuda.reset_accumulated_memory_stats(dev)
-        torch.cuda.reset_peak_memory_stats(dev)
+        _init_cublas_workspace(dev)
+        gc.collect()
+        _reset_mem_stats(dev)
         mem_stats = torch.cuda.memory_stats(dev)
         pre_cuda_active = mem_stats["active_bytes.all.current"]
         torch.manual_seed(42)

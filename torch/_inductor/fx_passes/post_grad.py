@@ -21,6 +21,7 @@ from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config, ir, pattern_matcher
+from ..codegen.common import BackendFeature, has_backend_feature
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 
 from ..lowering import lowerings as L
@@ -44,6 +45,7 @@ from ..pattern_matcher import (
 )
 from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
+from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import patterns as micro_pipeline_tp_patterns
@@ -109,6 +111,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 optimus_scuba_log[
                     f"{pattern_matcher_pass.pass_name}_post_grad"
                 ] = upload_graph(gm.graph)
+        if config.b2b_gemm_pass:
+            B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
     if config._micro_pipeline_tp:
         micro_pipeline_tp_patterns.apply(gm)
@@ -319,6 +323,7 @@ def cuda_and_enabled_mixed_mm(match):
             match.kwargs["mat2_dtype"].itemsize
             > match.kwargs["mat2"].meta.get("val").dtype.itemsize
         )
+        and has_backend_feature("cuda", BackendFeature.TRITON_TEMPLATES)
     )
 
 
@@ -1010,6 +1015,29 @@ def fused_int_mm_mul(match: Match, mat1, mat2, mat3, out_dtype=None):
     return inductor.kernel.mm.tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype)
 
 
+def is_index_put_and_requires_h2d_sync_for_cuda_value(node):
+    if node.target is not torch.ops.aten.index_put.default:
+        return False
+    # Inductor falls back to aten.index_put_.
+    # index_put_ will will call nonzero() and perform a H2D sync if
+    # any of its indices are bool/byte tensors
+    # However, it will short-circuit this H2D sync and run mask_fill_
+    # if the value we are putting is a cpu scalar.
+    # Therefore, when inductor sees an index_put_ with byte tensor indices,
+    # it should *not* convert the cpu scalar value into a cuda tensor.
+    any_byte_bool_indices = False
+    indices = node.args[1]
+    for i in indices:
+        if i is not None and i.meta["val"].dtype in [torch.bool, torch.int8]:
+            any_byte_bool_indices = True
+
+    val = node.args[2].meta["val"]
+    val_is_cpu_scalar = val.device.type == "cpu" and val.numel() == 1
+    # If both these conditions hold, then converting the val
+    # to a cuda tensor will incur a H2D sync when inductor calls aten.index_put_
+    return any_byte_bool_indices and val_is_cpu_scalar
+
+
 class ConstructorMoverPass:
     def __init__(self, target: str, allow_outputs: bool = False) -> None:
         """
@@ -1062,6 +1090,8 @@ class ConstructorMoverPass:
             isinstance(node.target, torch._ops.OpOverload)
             and node.target.namespace in ("prims", "aten")
         ):
+            return True
+        if is_index_put_and_requires_h2d_sync_for_cuda_value(node):
             return True
 
         return False
