@@ -1499,7 +1499,8 @@ class TestSDPAFailureModes(NNTestCase):
 
         with sdpa_kernel(fused_kernel):
             with self.assertRaisesRegex(RuntimeError, "No available kernel"):
-                with self.assertWarnsRegex(UserWarning, "For dense inputs (not nested tensor), both fused kernels require query, key and value to have the same batch_size and num_heads"):
+                with self.assertWarnsRegex(UserWarning, "For dense inputs (not nested tensor), both fused kernels require query, "
+                                           "key and value to have the same batch_size and num_heads"):
                     F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0, is_causal=False, enable_gqa=True)
 
     @onlyCPU
@@ -1512,7 +1513,8 @@ class TestSDPAFailureModes(NNTestCase):
 
         with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
             with self.assertRaisesRegex(RuntimeError, "No available kernel"):
-                with self.assertWarnsRegex(UserWarning, "For dense inputs (not nested tensor), both fused kernels require query, key and value to have the same batch_size and num_heads"):
+                with self.assertWarnsRegex(UserWarning, "For dense inputs (not nested tensor), both fused kernels require query, "
+                                           "key and value to have the same batch_size and num_heads"):
                     F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0, is_causal=False, enable_gqa=True)
 
     @onlyCUDA
