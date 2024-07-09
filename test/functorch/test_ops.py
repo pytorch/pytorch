@@ -934,7 +934,6 @@ class TestOperators(TestCase):
                 skip("ormqr"),  # Takes too long
                 xfail("as_strided"),  # incorrect output
                 xfail("as_strided", "partial_views"),  # incorrect output
-                xfail("as_strided_copy"),  # incorrect output
                 xfail("as_strided_scatter"),  # incorrect output
                 skip("bernoulli"),  # calls random op
                 xfail("bfloat16"),  # rank 4 tensor for channels_last
@@ -1064,6 +1063,7 @@ class TestOperators(TestCase):
         "test_vmapvjpvjp",
         {
             xfail("as_strided", "partial_views"),
+            xfail("as_strided_copy"),
         },
     )
     def test_vmapvjpvjp(self, device, dtype, op):
@@ -1177,7 +1177,6 @@ class TestOperators(TestCase):
             xfail("nn.functional.max_unpool2d", "grad"),
             xfail("sparse.sampled_addmm", ""),
             xfail("sparse.mm", "reduce"),
-            xfail("as_strided_copy", ""),  # calls as_strided
             xfail("as_strided_scatter", ""),  # calls as_strided
             xfail("index_reduce", "prod"),  # .item() call
             # ---------------------------------------------------------------------
@@ -1292,7 +1291,6 @@ class TestOperators(TestCase):
         xfail("quantile"),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip("as_strided"),  # Test runner cannot handle this
         # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
-        xfail("as_strided_copy"),
         xfail("as_strided_scatter"),
         xfail(
             "nn.functional.gaussian_nll_loss"
@@ -1345,6 +1343,7 @@ class TestOperators(TestCase):
         "test_vmapjvpall",
         vmapjvpall_fail.union(
             {
+                xfail("as_strided_copy"),
                 decorate(
                     "linalg.det",
                     "singular",
@@ -1431,11 +1430,10 @@ class TestOperators(TestCase):
                 xfail("as_strided_scatter", ""),
                 xfail("masked.cumprod", ""),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
-            }
-        ).difference(
-            {
-                # as_strided_copy fails test_vmapvjp, succeeds here
-                xfail("as_strided_copy", ""),
+                xfail("t_copy"),
+                xfail("transpose_copy"),
+                xfail("squeeze_copy"),
+                xfail("unsqueeze_copy"),
             }
         ),
     )
@@ -1511,6 +1509,7 @@ class TestOperators(TestCase):
                 ),  # aten::scatter_reduce.two hit the vmap fallback
                 xfail("quantile"),
                 xfail("renorm"),
+                xfail("squeeze_copy"),
                 xfail("take"),
                 xfail("tensor_split"),
                 xfail("to_sparse"),
@@ -1572,11 +1571,9 @@ class TestOperators(TestCase):
                 xfail(
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
-            }
-        ).difference(
-            {
-                # as_strided_copy fails test_vmapvjp, succeeds here
-                xfail("as_strided_copy", ""),
+                xfail("t_copy"),
+                xfail("transpose_copy"),
+                xfail("unsqueeze_copy"),
             }
         ),
     )
