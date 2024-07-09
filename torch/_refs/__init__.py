@@ -2565,6 +2565,14 @@ def addr(
         vec2.ndim == 1,
         lambda: f"addr: Expected 1-D argument vec2, but got {vec2.ndim}-D",
     )
+    for arg, arg_name in ((alpha, "alpha"), (beta, "beta")):
+        if isinstance(arg, bool):
+            torch._check(
+                utils.is_boolean_dtype(self.dtype)
+                and utils.is_boolean_dtype(vec1.dtype)
+                and utils.is_boolean_dtype(vec2.dtype),
+                lambda: f"Boolean {arg_name} only supported for Boolean results.",
+            )
     self = self.expand(vec1.shape[0], vec2.shape[0])
     if utils.is_boolean_dtype(self.dtype):
         # Integers are accepted for booleans
@@ -3848,7 +3856,7 @@ def rot90(
     elif k == 3:
         return torch.transpose(torch.flip(a, (dims[0],)), dims[0], dims[1])
     else:
-        return clone(a, memory_format=torch.contiguous_format)
+        return a.clone(memory_format=torch.contiguous_format)
 
 
 def _check_stack_inputs(tensors: TensorSequenceType) -> None:

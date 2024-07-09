@@ -45,7 +45,7 @@ bool init_amx() {
     return false;
   }
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && defined(__x86_64__)
 #define XFEATURE_XTILECFG 17
 #define XFEATURE_XTILEDATA 18
 #define XFEATURE_MASK_XTILECFG (1 << XFEATURE_XTILECFG)
