@@ -289,7 +289,7 @@ static optional<c10::SymInt> maximum_indexable_location(
     c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides, const c10::SymInt& storage_offset) {
   auto result = native::storage_size_for(sizes, strides);
   if (result == 0) {
-    return nullopt;
+    return std::nullopt;
   }
   return result + storage_offset;
 }
