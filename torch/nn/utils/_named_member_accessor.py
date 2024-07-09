@@ -59,13 +59,11 @@ def swap_tensor(
         else:
             del module._buffers[name]
     else:
-        try:
+        if hasattr(module, name):
             orig_tensor = getattr(module, name)
-        except AttributeError as ex:
+        else:
             if not allow_missing:
-                raise AttributeError(
-                    f"{module._get_name()} has no attribute `{name}`"
-                ) from ex
+                raise AttributeError(f"{module._get_name()} has no attribute `{name}`")
             orig_tensor = _MISSING
         if (
             orig_tensor is not _MISSING

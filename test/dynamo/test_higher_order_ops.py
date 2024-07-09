@@ -1250,7 +1250,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem, const):
+def forward(self, getitem, const_unused):
     add = getitem + 3;  getitem = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
@@ -1284,7 +1284,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem, const):
+def forward(self, getitem, const_unused):
     add = getitem + 3;  getitem = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
@@ -2470,9 +2470,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([])""",
+            """torch._functorch.pyfunctorch.compare_functorch_state([])""",
             munge_exc(record.getMessage()),
         )
 
@@ -2502,9 +2500,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "forward_ad")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch.autograd.forward_ad._current_level == -1""",
+            """torch.autograd.forward_ad._current_level == -1""",
             munge_exc(record.getMessage()),
         )
 
@@ -2534,17 +2530,13 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         if self.hasRecord(records, "pyfunctorch"):
             record = self.getRecord(records, "pyfunctorch")
             self.assertIn(
-                """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([])""",
+                """torch._functorch.pyfunctorch.compare_functorch_state([])""",
                 munge_exc(record.getMessage()),
             )
         elif self.hasRecord(records, "forward_ad"):
             record = self.getRecord(records, "forward_ad")
             self.assertIn(
-                """\
-    triggered by the following guard failure(s):
-    - torch.autograd.forward_ad._current_level == -1""",
+                """torch.autograd.forward_ad._current_level == -1""",
                 munge_exc(record.getMessage()),
             )
 
@@ -2588,9 +2580,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])""",
+            """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])""",
             record.getMessage(),
         )
 
@@ -2614,9 +2604,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
+            """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
             record.getMessage(),
         )
 
@@ -2644,9 +2632,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
+            """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
             munge_exc(record.getMessage()),
         )
 
@@ -2665,9 +2651,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])""",
+            """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])""",
             munge_exc(record.getMessage()),
         )
 
@@ -3570,13 +3554,11 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_model_parameters_weight_: "f32[3, 3]", L_model_parameters_bias_: "f32[3]", L_inputs_: "f32[64, 3]", L_targets_: "f32[64, 3]"):
-        l_model_parameters_weight_ = L_model_parameters_weight_
-        l_model_parameters_bias_ = L_model_parameters_bias_
+    def forward(self, L_inputs_: "f32[64, 3]", L_targets_: "f32[64, 3]"):
         l_inputs_ = L_inputs_
         l_targets_ = L_targets_
 
-        prediction: "f32[64, 3]" = torch._C._nn.linear(l_inputs_, l_model_parameters_weight_, l_model_parameters_bias_);  l_inputs_ = l_model_parameters_weight_ = l_model_parameters_bias_ = None
+        prediction: "f32[64, 3]" = self.model(l_inputs_);  l_inputs_ = None
 
         mse_loss: "f32[]" = torch.nn.functional.mse_loss(prediction, l_targets_);  prediction = l_targets_ = None
         return (mse_loss,)
@@ -3616,15 +3598,12 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_params_l1_weight_: "f32[1, 1]", L_params_l1_bias_: "f32[1]", L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
-        l_params_l1_weight_ = L_params_l1_weight_
-        l_params_l1_bias_ = L_params_l1_bias_
+    def forward(self, L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
         l_buffers_buffer_ = L_buffers_buffer_
         l_inputs_ = L_inputs_
 
-        linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_params_l1_weight_, l_params_l1_bias_);  l_inputs_ = l_params_l1_weight_ = l_params_l1_bias_ = None
-
-        add: "f32[1, 1]" = linear + l_buffers_buffer_;  linear = l_buffers_buffer_ = None
+        l__model___l1: "f32[1, 1]" = self.L__model___l1(l_inputs_);  l_inputs_ = None
+        add: "f32[1, 1]" = l__model___l1 + l_buffers_buffer_;  l__model___l1 = l_buffers_buffer_ = None
         return (add,)
 """,
         )
