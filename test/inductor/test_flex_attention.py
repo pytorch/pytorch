@@ -928,7 +928,20 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         q, k, v = (torch.randn(1, 8, 1024, 64, device="cuda") for _ in range(3))
         metrics.reset()
-        f(q, k, v)
+        _, code = run_and_get_code(f, q, k, v)
+        # TODO: attention output is not being DCE'd
+        fc = FileCheck()
+        fc.check("buf0 = empty_strided_cuda((1, 1, 1)")  # SPARSE_KV_NUM_BLKS
+        fc.check("buf1 = empty_strided_cuda((1, 1, 1, 1)")  # SPARSE_KV_IDX
+        fc.check("buf4 = empty_strided_cuda")  # logsumexp
+        fc.check("buf5 = empty_strided_cuda")  # attention output
+        fc.check("buf7 = empty_strided_cuda")  # cos(attention)
+        fc.run(code[0])
+        fc = FileCheck()
+        fc.check_not("buf2 =")  # Dead buffer
+        fc.check_not("buf3 =")  # Dead buffer
+        fc.check_not("buf6 =")  # Mutation-buffer, not allocated
+        fc.run(code[0])
         accessed_bytes = 1 * 8 * 1024 * 64 * torch.float32.itemsize
         num_accesses = 4  # q, k, v reads, one output.
         # TODO: Get rid of this fudge factor
