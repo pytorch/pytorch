@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
+import itertools
 import traceback
 from typing import (
     Any,
@@ -11,6 +12,7 @@ from typing import (
     OrderedDict,
     overload,
     Tuple,
+    TYPE_CHECKING,
     TypeVar,
 )
 
@@ -23,6 +25,9 @@ from torch.nn.utils.rnn import PackedSequence
 
 
 __all__ = []  # type: ignore[var-annotated]
+
+if TYPE_CHECKING:
+    from torch.distributed._tensor import DeviceMesh
 
 
 def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str, ...]]:
@@ -327,6 +332,35 @@ def _sync_params_and_buffers(
         dist._broadcast_coalesced(
             process_group, module_states, broadcast_bucket_size, src
         )
+
+
+def _sync_module_states_with_mesh(module: nn.Module, mesh: "DeviceMesh") -> None:
+    """
+    Broadcast from the module states of the first rank of ``mesh`` to other ranks
+    within the same ``mesh``.
+
+    This API is similar to ``_sync_module_states`` but is designed for DeviceMesh.
+    Instead of extending ``_sync_module_states``, creating a new API makes the
+    samentic simpler (e.g., the meaning of ``src`` is different for PG and
+    DeviceMesh).
+    """
+    module_states: List[torch.Tensor] = []
+
+    # Lazy import to avoid circular dependency
+    from torch.distributed._tensor import DTensor
+
+    for state in itertools.chain(module.parameters(), module.buffers()):
+        module_states.append(state.to_local() if isinstance(state, DTensor) else state)
+
+    with torch.no_grad():
+        pg = mesh.get_group()
+        src = dist.get_process_group_ranks(pg)[0]
+        _verify_param_shape_across_processes(pg, module_states)
+
+        for state in module_states:
+            # `dist._broadcast_coalesced` will increase the peak memory usage due to
+            # recordStream. We can implement the broadcast coalescing to speed up.
+            dist.broadcast(state, src, group=pg)
 
 
 def _replace_by_prefix(
