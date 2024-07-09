@@ -1016,7 +1016,12 @@ def fused_int_mm_mul(match: Match, mat1, mat2, mat3, out_dtype=None):
 
 
 def is_index_put_and_requires_h2d_sync_for_cuda_value(node):
-    if node.target is not torch.ops.aten.index_put.default:
+    from torch.fx.operator_schemas import normalize_function
+
+    if node.target not in [
+        torch.ops.aten.index_put.default,
+        torch.ops.aten.index_put_.default,
+    ]:
         return False
     # Inductor falls back to aten.index_put_.
     # index_put_ will will call nonzero() and perform a H2D sync if
@@ -1025,13 +1030,14 @@ def is_index_put_and_requires_h2d_sync_for_cuda_value(node):
     # if the value we are putting is a cpu scalar.
     # Therefore, when inductor sees an index_put_ with byte tensor indices,
     # it should *not* convert the cpu scalar value into a cuda tensor.
+    args_, kwargs_ = normalize_function(node.target, node.args, node.kwargs)
     any_byte_bool_indices = False
-    indices = node.args[1]
+    indices = args_[1]
     for i in indices:
         if i is not None and i.meta["val"].dtype in [torch.bool, torch.int8]:
             any_byte_bool_indices = True
 
-    val = node.args[2].meta["val"]
+    val = args_[2].meta["val"]
     val_is_cpu_scalar = val.device.type == "cpu" and val.numel() == 1
     # If both these conditions hold, then converting the val
     # to a cuda tensor will incur a H2D sync when inductor calls aten.index_put_
