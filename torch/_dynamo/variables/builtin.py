@@ -1018,9 +1018,11 @@ class BuiltinVariable(VariableTracker):
     call_float = _call_int_float
 
     def call_str(self, tx, arg):
-        # Handle `str` on a user defined function
+        # Handle `str` on a user defined function or object
         if isinstance(arg, (variables.UserFunctionVariable)):
             return variables.ConstantVariable.create(value=str(arg.fn))
+        elif isinstance(arg, (variables.UserDefinedObjectVariable)):
+            return variables.ConstantVariable.create(value=str(arg.value))
 
     def _call_min_max(self, tx, *args):
         if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
