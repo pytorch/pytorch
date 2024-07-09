@@ -189,7 +189,6 @@ class SubclassCreationMeta:
     # This is needed because we need the autograd metadata on the original subclass
     # (this is guaranteed to be a wrapper subclass that holds a fake tensor,
     #  so holding onto this at runtime shouldn't leak memory)
-    # This field is nulled out after calling make_runtime_safe()
     original_subclass: Optional[torch.Tensor]
 
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
@@ -264,7 +263,6 @@ class SubclassCreationMeta:
     def make_runtime_safe(self):
         assert self.original_subclass is not None
         self.original_subclass_type = type(self.original_subclass)
-        self.original_subclass = None
         # Recurse on nested subclass info
         for creation_meta in self.attrs.values():
             if creation_meta is not None:
