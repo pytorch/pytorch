@@ -734,6 +734,51 @@ def test_cpp_extensions_aot_no_ninja(test_module, test_directory, options):
     return _test_cpp_extensions_aot(test_directory, options, use_ninja=False)
 
 
+def test_autoload_enable(test_module, test_directory, options):
+    return _test_autoload(test_directory, options, enable=True)
+
+
+def test_autoload_disable(test_module, test_directory, options):
+    return _test_autoload(test_directory, options, enable=False)
+
+
+def _test_autoload(test_directory, options, enable=True):
+    # Wipe the build folder, if it exists already
+    cpp_extensions_test_dir = os.path.join(test_directory, "cpp_extensions")
+    cpp_extensions_test_build_dir = os.path.join(cpp_extensions_test_dir, "build")
+    if os.path.exists(cpp_extensions_test_build_dir):
+        shutil.rmtree(cpp_extensions_test_build_dir)
+
+    # Build the test cpp extensions modules
+    cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
+    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=os.environ)
+    if return_code != 0:
+        return return_code
+
+    # "install" the test modules and run tests
+    python_path = os.environ.get("PYTHONPATH", "")
+
+    try:
+        cpp_extensions = os.path.join(test_directory, "cpp_extensions")
+        install_directory = ""
+        # install directory is the one that is named site-packages
+        for root, directories, _ in os.walk(os.path.join(cpp_extensions, "install")):
+            for directory in directories:
+                if "-packages" in directory:
+                    install_directory = os.path.join(root, directory)
+
+        assert install_directory, "install_directory must not be empty"
+        os.environ["PYTHONPATH"] = os.pathsep.join([install_directory, python_path])
+        os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = str(int(enable))
+
+        cmd = [sys.executable, "test_autoload.py"]
+        return_code = shell(cmd, cwd=test_directory, env=os.environ)
+        return return_code
+    finally:
+        os.environ["PYTHONPATH"] = python_path
+        os.environ.pop("TORCH_DEVICE_BACKEND_AUTOLOAD")
+
+
 def test_distributed(test_module, test_directory, options):
     # MPI tests are broken with Python-3.9
     mpi_available = subprocess.call(
@@ -1052,6 +1097,8 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/cuda/test_tensorpipe_agent": run_test_with_subprocess,
     "doctests": run_doctests,
     "test_ci_sanity_check_fail": run_ci_sanity_check,
+    "test_autoload_enable": test_autoload_enable,
+    "test_autoload_disable": test_autoload_disable,
 }
 
 

@@ -548,6 +548,34 @@ class TestFlexAttention(InductorTestCase):
         self.run_test(document_masking_causal, torch.float16)
 
     @supported_platform
+    def test_index_multiple(self):
+        bias = torch.randn(B, S, device="cuda")
+
+        def index_multiple(score, b, h, q_idx, kv_idx):
+            return score + bias[b][q_idx]
+
+        self.run_test(index_multiple, torch.float16)
+
+    @supported_platform
+    def test_index_weird1(self):
+        bias = torch.randn(4, B, H, S, device="cuda")
+
+        def index_weird1(score, b, h, q_idx, kv_idx):
+            return score + bias[0][b, h][q_idx]
+
+        self.run_test(index_weird1, torch.float16)
+
+    @supported_platform
+    def test_index_weird2(self):
+        bias = torch.randn(B, H, 4, S, device="cuda")
+        which_bias = torch.tensor(0, device="cuda")
+
+        def index_weird2(score, b, h, q_idx, kv_idx):
+            return score + bias[b][h][which_bias, q_idx]
+
+        self.run_test(index_weird2, torch.float16)
+
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     def test_skip_odd_keys(self, dtype: torch.dtype):
         def score_mod(score, b, h, q, kv):
@@ -915,7 +943,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertLess(metrics.num_bytes_accessed, accessed_bytes * num_accesses)
 
     @supported_platform
-    @skip("Triton bug ")  # https://github.com/pytorch/pytorch/issues/124571
     @common_utils.parametrize("dtype", test_dtypes)
     def test_njt_causal(self, dtype):
         offsets = torch.tensor(
@@ -1183,6 +1210,29 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    def test_block_mask_attributes(self):
+        offset = torch.zeros(8, device="cuda")
+
+        def causal(score, b, h, q, kv):
+            return torch.where(q + offset[b] * 128 >= kv, score, -float("inf"))
+
+        block_mask = create_block_mask(causal, 4, 2, 2048, 2048)
+        self.assertEqual(block_mask.shape, (4, 2, 2048, 2048))
+        self.assertEqual(block_mask[0].shape, (2, 2048, 2048))
+        self.assertEqual(block_mask[0, 0].shape, (2048, 2048))
+        self.assertEqual(block_mask.numel(), 4 * 2 * 2048 * 2048)
+        self.assertEqual(block_mask.sparsity(), 46.875)
+        self.assertEqual(block_mask[0].sparsity(), 46.875)
+        self.assertEqual(block_mask[1, 0].sparsity(), 46.875)
+        self.assertEqual(block_mask.sparsity(), block_mask[1].sparsity())
+
+        offset = torch.arange(8, device="cuda")
+        block_mask = create_block_mask(causal, 8, 1, 2048, 2048)
+        self.assertEqual(block_mask.sparsity(), 29.1015625)
+        self.assertTrue(block_mask.sparsity() < block_mask[0].sparsity())
+        self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
+
+    @supported_platform
     def test_block_mask_viz(self):
         def causal(score, b, h, q, kv):
             return torch.where(q >= kv, score, -float("inf"))
@@ -1202,7 +1252,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertExpectedInline(
             replace_non_printable(str(block_mask)),
             """\
-BlockMask(sparsity=46.88%,smask=
+BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
+(0,s0)
 @@ssssssssssssssssssssssssssssss
 @@@@ssssssssssssssssssssssssssss
 @@@@@@ssssssssssssssssssssssssss
@@ -1221,6 +1272,15 @@ BlockMask(sparsity=46.88%,smask=
 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 )""",
         )
+
+        offset = torch.arange(8, device="cuda")
+
+        def causal_offset(score, b, h, q, kv):
+            return torch.where(q + offset[b] * 128 >= kv, score, -float("inf"))
+
+        block_mask = create_block_mask(causal_offset, 8, 1, 2048, 2048)
+        str_block_mask = str(block_mask)
+        self.assertTrue("sparsity=29.10" in str_block_mask)
 
     @supported_platform
     def test_fw_bw_graph_correctness(self):
