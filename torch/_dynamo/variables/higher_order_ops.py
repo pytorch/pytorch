@@ -1265,6 +1265,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
         )
 
+
 class HintedContextHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def create_wrapped_node(self, tx, args, kwargs, description):
         # See NOTE [HigherOrderOperator tracing design] for more details
@@ -1326,6 +1327,7 @@ class HintedContextHigherOrderVariable(TorchHigherOrderOperatorVariable):
         return _call_function_and_unflatten_output(
             tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
         )
+
 
 class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(

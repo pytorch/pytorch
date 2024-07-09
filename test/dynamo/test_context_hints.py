@@ -37,6 +37,7 @@ class HintChecker:
     def was_order_hint_found(self):
         return self.found_order_hint
 
+
 class ToyModelBase(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -331,11 +332,13 @@ class ToyModelAutogradOverrideWithNestedHints(torch.nn.Module):
 
         return torch.reshape(out, (out.size(0), out.size(1)))
 
+
 class ComplexOperationWithPreservedOrder(torch.autograd.Function):
     @staticmethod
     def forward(ctx, tensor, const1, const2):
         ctx.const1 = const1
         ctx.const2 = const2
+
         def forward_part1(tensor, const1, hint):
             return tensor * const1
 
@@ -396,12 +399,27 @@ class ComplexOperationWithPreservedOrder(torch.autograd.Function):
             return tensor + const2
 
         def forward_hinted(tensor, const1, const2, hint):
-            out = torch.ops.higher_order.hinted_context(forward_part1, tensor, const1, hint='{"part": "pre"}')
-            out = torch.ops.higher_order.hinted_context(forward_part2_serial, out, hint='{"part_id": "middle_serial"}')
-            out = torch.ops.higher_order.hinted_context(forward_part2_interleaved, out, hint='{"part_id": "middle_interleaved"}')
-            out = torch.ops.higher_order.hinted_context(forward_part3, out, const2, hint='{"part_id": "post"}')
+            out = torch.ops.higher_order.hinted_context(
+                forward_part1, tensor, const1, hint='{"part": "pre"}'
+            )
+            out = torch.ops.higher_order.hinted_context(
+                forward_part2_serial, out, hint='{"part_id": "middle_serial"}'
+            )
+            out = torch.ops.higher_order.hinted_context(
+                forward_part2_interleaved, out, hint='{"part_id": "middle_interleaved"}'
+            )
+            out = torch.ops.higher_order.hinted_context(
+                forward_part3, out, const2, hint='{"part_id": "post"}'
+            )
             return out
-        return torch.ops.higher_order.hinted_context(forward_hinted, tensor, const1, const2, hint='{"some_complex_op_fwd": true, "preserve_order": true}')
+
+        return torch.ops.higher_order.hinted_context(
+            forward_hinted,
+            tensor,
+            const1,
+            const2,
+            hint='{"some_complex_op_fwd": true, "preserve_order": true}',
+        )
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -465,27 +483,45 @@ class ComplexOperationWithPreservedOrder(torch.autograd.Function):
             return tensor + const2
 
         def backward_hinted(grad_output, const1, const2, hint):
-            out = torch.ops.higher_order.hinted_context(backward_part1, grad_output, const1, hint='{"part": "pre"}')
-            out = torch.ops.higher_order.hinted_context(backward_part2_serial, out, hint='{"part_id": "middle_serial"}')
-            out = torch.ops.higher_order.hinted_context(backward_part2_interleaved, out, hint='{"part_id": "middle_interleaved"}')
-            out = torch.ops.higher_order.hinted_context(backward_part3, out, const2, hint='{"part_id": "post"}')
+            out = torch.ops.higher_order.hinted_context(
+                backward_part1, grad_output, const1, hint='{"part": "pre"}'
+            )
+            out = torch.ops.higher_order.hinted_context(
+                backward_part2_serial, out, hint='{"part_id": "middle_serial"}'
+            )
+            out = torch.ops.higher_order.hinted_context(
+                backward_part2_interleaved,
+                out,
+                hint='{"part_id": "middle_interleaved"}',
+            )
+            out = torch.ops.higher_order.hinted_context(
+                backward_part3, out, const2, hint='{"part_id": "post"}'
+            )
             return out
-        return torch.ops.higher_order.hinted_context(backward_hinted, grad_output, ctx.const1, ctx.const2, hint='{"some_complex_op_bwd": true, "preserve_order": true}'), None, None
+
+        return (
+            torch.ops.higher_order.hinted_context(
+                backward_hinted,
+                grad_output,
+                ctx.const1,
+                ctx.const2,
+                hint='{"some_complex_op_bwd": true, "preserve_order": true}',
+            ),
+            None,
+            None,
+        )
+
 
 class ToyModelAutogradOverrideWithPreservedOrder(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.layers = torch.nn.ModuleList([
-                        torch.nn.Sequential(
-                            torch.nn.Linear(10, 15),
-                            torch.nn.ReLU()),
-                        torch.nn.Sequential(
-                            torch.nn.Linear(15, 20),
-                            torch.nn.ReLU()),
-                        torch.nn.Sequential(
-                            torch.nn.Linear(20, 15),
-                            torch.nn.ReLU())
-                      ])
+        self.layers = torch.nn.ModuleList(
+            [
+                torch.nn.Sequential(torch.nn.Linear(10, 15), torch.nn.ReLU()),
+                torch.nn.Sequential(torch.nn.Linear(15, 20), torch.nn.ReLU()),
+                torch.nn.Sequential(torch.nn.Linear(20, 15), torch.nn.ReLU()),
+            ]
+        )
         self.softmax = torch.nn.Softmax(dim=1)
 
     def forward(self, x):
@@ -497,7 +533,8 @@ class ToyModelAutogradOverrideWithPreservedOrder(torch.nn.Module):
 
         out = ComplexOperationWithPreservedOrder.apply(out, 1.05, 0.05)
 
-        return torch.reshape(out, (out.size(0),out.size(1)))
+        return torch.reshape(out, (out.size(0), out.size(1)))
+
 
 def _inner_compile(graph_module, example_inputs, is_fwd):
     print("#### _inner_compile BEGIN", "FWD" if is_fwd else "BWD")
@@ -510,8 +547,12 @@ def _inner_compile(graph_module, example_inputs, is_fwd):
     class DummySupportedOps:
         def is_node_supported(self, submodules, node: torch.fx.Node):
             return False
+
     from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
-    partitioner = CapabilityBasedPartitioner(graph_module, DummySupportedOps(), allows_single_node_partition=True)
+
+    partitioner = CapabilityBasedPartitioner(
+        graph_module, DummySupportedOps(), allows_single_node_partition=True
+    )
     partitions = partitioner.propose_partitions()
     partitioner.fuse_partitions(partitions)
 
@@ -775,6 +816,7 @@ class ContextHintsTests(TestCase):
 
         # No loss testing in this case due to lack of mathematically correct BWD
         # formula, this is just hints showcase.
+
 
 if __name__ == "__main__":
     torch.manual_seed(0xBADC0FEE)

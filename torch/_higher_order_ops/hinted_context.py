@@ -1,17 +1,17 @@
 import logging
+from typing import Any
 
-import torch
 from torch._ops import HigherOrderOperator
-import torch._dynamo.config
+from torch.fx.graph_module import GraphModule
 
 log = logging.getLogger(__name__)
 
 
 class HintedContext(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("hinted_context")
 
-    def __call__(self, gmod, *args, **kwargs):
+    def __call__(self, gmod: GraphModule, *args: Any, **kwargs: Any) -> Any:
         import torch.fx.traceback as fx_traceback
         from torch._higher_order_ops.hint_tracker import ContextHintTracker
         from torch.fx import Interpreter
