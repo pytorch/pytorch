@@ -650,7 +650,11 @@ class Node(_NodeBase):
 
         # Check if an impure function.
         if self.op == "call_function":
-            return self.target in _side_effectful_functions
+            schema = getattr(self.target, "_schema", None)
+            schema_mutable = False
+            if schema is not None:
+                schema_mutable = schema.is_mutable
+            return schema_mutable or self.target in _side_effectful_functions
 
         # Check if an impure module.
         if self.op == "call_module":
