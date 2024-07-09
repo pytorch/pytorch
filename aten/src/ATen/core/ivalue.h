@@ -120,14 +120,14 @@ struct OptionalArray {
 
   operator std::optional<c10::ArrayRef<T>>() {
     if (!list) {
-      return nullopt;
+      return std::nullopt;
     }
     return *list;
   }
 
   operator c10::OptionalArrayRef<T>() {
     if (!list) {
-      return nullopt;
+      return std::nullopt;
     }
     return *list;
   }
