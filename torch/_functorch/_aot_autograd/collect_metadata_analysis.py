@@ -140,6 +140,8 @@ def run_functionalized_fw_and_collect_metadata(
 
     @wraps(f)
     def inner(*flat_args):
+        import torch.nested._internal.nested_tensor
+
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
 
