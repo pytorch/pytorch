@@ -1222,7 +1222,10 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     foo(*inps)
                 except Exception as e:
                     thrown = True
-                    self.assertTrue("at::cuda::blas::gemm<float>" in str(e))
+                    self.assertTrue(
+                        "at::cuda::blas::gemm<float>" in str(e)
+                        or "at::cuda::blas::gemm_internal_cublas<float>" in str(e)
+                    )
                     self.assertTrue(
                         "getCurrentCUDABlasHandle" in str(e)
                         or "getNewWorkspace" in str(e)
