@@ -272,7 +272,7 @@ Tensor rms_norm(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  auto bias_opt = at::optional<Tensor>();
+  auto bias_opt = std::optional<Tensor>();
   const Tensor& bias = *at::borrow_from_optional_tensor(bias_opt);
   (void) _check_layer_norm_inputs(input, normalized_shape, weight, bias);
 
