@@ -1428,11 +1428,6 @@ if(NOT INTERN_BUILD_MOBILE)
     add_compile_options(-mcpu=cortex-a9)
   endif()
 
-  if(WIN32 AND NOT CYGWIN)
-    set(BLAS_INSTALL_LIBRARIES "OFF"
-      CACHE BOOL "Copy the required BLAS DLLs into the TH install dirs")
-  endif()
-
   find_package(LAPACK)
   if(LAPACK_FOUND)
     set(USE_LAPACK 1)
