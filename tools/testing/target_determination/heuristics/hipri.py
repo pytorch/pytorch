@@ -1,5 +1,6 @@
 
 from __future__ import annotations
+from typing import Any
 
 from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
