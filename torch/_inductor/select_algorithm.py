@@ -1201,8 +1201,13 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
-            precompile_key = (
-                f"{name}: {inputs_key} : {torch.get_float32_matmul_precision()}"
+            precompile_key = ":".join(
+                [
+                    name,
+                    inputs_key,
+                    torch.get_float32_matmul_precision(),
+                ]
+                + [choice.hash_key() for choice in choices]
             )
             if precompile_func := self.precompile_cache.get(precompile_key):
                 return precompile_func
