@@ -1,11 +1,15 @@
 # mypy: allow-untyped-defs
+import collections
 import copy
 import dataclasses
 import inspect
 import logging
 import threading
+import typing
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Union
+
+import torch.fx as fx
 
 import torch.utils._pytree as pytree
 from torch import Tensor
@@ -743,6 +747,8 @@ triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)
 # The "TritonHOPifier": a class that transforms a call to a triton kernel into
 # a call to the triton_kernel_wrapper_mutation HOP.
 
+fx_acceptable_types = typing.get_args(fx.node.BaseArgumentTypes)
+
 
 class TritonHOPifier:
     """Orchestrator for converting a user-defined triton kernel into a call
@@ -1022,34 +1028,31 @@ class TracingTritonHOPifier(TritonHOPifier):
         return grid(meta)
 
     def check_grid(self, grid):
-        if not isinstance(grid, tuple):
+        if not isinstance(grid, collections.abc.Sequence):
             raise RuntimeError(
-                "capture_triton can only handle grids that resolve to Tuple[int, ...]."
+                "capture_triton can only handle grids that resolve to Sequence[int]."
             )
-        return grid
+        # normalize to tuple
+        return tuple(grid)
 
     def call_HOP(self, variable, grids, combined_args, tx):
         assert tx is None
-        import torch
 
         non_graphable_args = {
             k: v
             for k, v in combined_args.items()
-            if not isinstance(v, (torch.Tensor, int, float, bool))
+            if not isinstance(v, fx_acceptable_types)
         }
         graphable_args = {
-            k: v
-            for k, v in combined_args.items()
-            if isinstance(v, (torch.Tensor, int, float, bool))
+            k: v for k, v in combined_args.items() if isinstance(v, fx_acceptable_types)
         }
-        meta = graphable_args
 
         constant_args_idx = kernel_side_table.add_constant_args(non_graphable_args)
         return triton_kernel_wrapper_mutation(
             kernel_idx=variable.kernel_idx,
             constant_args_idx=constant_args_idx,
             grid=grids,
-            kwargs=meta,
+            kwargs=graphable_args,
         )
 
 

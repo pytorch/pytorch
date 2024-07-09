@@ -733,8 +733,10 @@ def forward(self, x_1, output_1):
                 grid = (x.numel(),)
             elif grid_type == 1:
                 grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            else:
+            elif grid_type == 2:
                 grid = grid_fn
+            else:
+                grid = [x.numel()]
 
             if autotuned:
                 capture_triton(add_kernel_autotuned)[grid](x, y, output, n_elements)
@@ -759,9 +761,11 @@ def forward(self, x_1, output_1):
             functools.partial(call_triton_add, grid_type=1),
             functools.partial(call_triton_add, grid_type=1, num=1, positional=True),
             functools.partial(call_triton_add, grid_type=2, num=200),
+            functools.partial(call_triton_add, grid_type=3),
             functools.partial(call_triton_add, grid_type=0, autotuned=True),
             functools.partial(call_triton_add, grid_type=1, num=1, autotuned=True),
             functools.partial(call_triton_add, grid_type=2, num=200, autotuned=True),
+            functools.partial(call_triton_add, grid_type=3, autotuned=True),
         ]
         from functorch import make_fx
 
