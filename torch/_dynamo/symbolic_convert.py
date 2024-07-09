@@ -993,11 +993,7 @@ class InstructionTranslatorBase(
     def LOAD_CONST(self, inst):
         self.push(self._load_const(inst))
 
-    def LOAD_GLOBAL(self, inst):
-        if sys.version_info >= (3, 11):
-            if inst.arg % 2:
-                self.PUSH_NULL(inst)
-
+    def _load_global(self, inst):
         name = inst.argval
 
         if self.exec_recorder:
@@ -1019,6 +1015,20 @@ class InstructionTranslatorBase(
 
         source = GlobalSource(name)
         self.push(VariableBuilder(self, source)(value))
+
+    @functools.cached_property
+    def nn_modules_globals_vt(self):
+        module_name = "torch.nn.modules.module"
+        module_source = self.import_source(module_name)
+        fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+        return VariableBuilder(self, module_source)(fglobals_value)
+
+    def LOAD_GLOBAL(self, inst):
+        if sys.version_info >= (3, 11) and sys.version_info < (3, 13) and inst.arg % 2:
+            self.PUSH_NULL(inst)
+        self._load_global(inst)
+        if sys.version_info >= (3, 13) and inst.arg % 2:
+            self.PUSH_NULL(inst)
 
     def STORE_GLOBAL(self, inst):
         value = self.pop()
@@ -1485,16 +1495,29 @@ class InstructionTranslatorBase(
             null = self.pop()
             assert isinstance(null, NullVariable)
 
-        if (
-            isinstance(fn, GetAttrVariable)
-            and isinstance(fn.obj, TensorVariable)
-            and fn.name == "view"
-            and isinstance(argsvars, (ConstantVariable, TensorVariable))
-        ):
-            # Hack to handle special case in some bert models.  Converts
-            # x.view(*shape) into x.view(shape), which is correct for view()
-            # but not generally.  See test_transpose_for_scores().
-            argsvars = TupleVariable([argsvars])
+        if isinstance(fn, GetAttrVariable) and isinstance(fn.obj, TensorVariable):
+            # realize is requires for Python 3.8
+            kwargsvars = kwargsvars.realize()
+            if fn.name == "view" and isinstance(
+                argsvars, (ConstantVariable, TensorVariable)
+            ):
+                # Hack to handle special case in some bert models.  Converts
+                # x.view(*shape) into x.view(shape), which is correct for view()
+                # but not generally.  See test_transpose_for_scores().
+                argsvars = TupleVariable([argsvars])
+            elif (
+                fn.name == "random_"
+                and isinstance(argsvars, TupleVariable)
+                and len(argsvars.items) == 0
+                and isinstance(kwargsvars, ConstDictVariable)
+                and ConstantVariable.create("from") in kwargsvars
+            ):
+                # `from`` is python keyword. Adding random_ with `from` in the
+                # Fx graph causes syntax error. Even if we convert the kwargs to
+                # args, aot_autograd/inductor while lowering generates
+                # aten.random.from, again causing syntax errors. Since this
+                # usecase is uncommon, graph break.
+                unimplemented("random_ op is called with from keyword")
 
         if not isinstance(
             argsvars, BaseListVariable
@@ -1540,7 +1563,10 @@ class InstructionTranslatorBase(
     def LOAD_METHOD(self, inst):
         self._load_attr(inst)
         obj = self.pop()
-        if sys.version_info >= (3, 11):
+        if sys.version_info >= (3, 13):
+            self.push(obj)
+            self.PUSH_NULL(inst)
+        elif sys.version_info >= (3, 11):
             # always follow the NULL + fn convention, since if obj
             # is actually a method, self is already bound to it, so it
             # doesn't need to be passed in as an arg.
@@ -2972,14 +2998,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             global_source = GetItemSource(globals_source, name)  # type: ignore[assignment]
         return fglobals_value, fglobals_vt, global_source
 
-    def LOAD_GLOBAL(self, inst):
+    def _load_global(self, inst):
         if self.output.global_scope is self.f_globals:
-            super().LOAD_GLOBAL(inst)
+            super()._load_global(inst)
         else:
-            if sys.version_info >= (3, 11):
-                if inst.arg % 2:
-                    self.PUSH_NULL(inst)
-
             name = inst.argval
 
             _, fglobals_vt, global_source = self.get_globals_source_and_value(name)

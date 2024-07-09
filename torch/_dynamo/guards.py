@@ -49,6 +49,8 @@ from torch._dynamo.source import (
     TensorPropertySource,
 )
 from torch._guards import (
+    CompileContext,
+    CompileId,
     DuplicateInputs,
     Guard,
     GuardBuilderBase,
@@ -89,6 +91,7 @@ from .source import (
     OptimizerSource,
     ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
+    SubclassAttrListSource,
     TupleIteratorGetItemSource,
     TypeSource,
     WeakRefCallSource,
@@ -972,6 +975,14 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, SubclassAttrListSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x.__tensor_flatten__()[0],
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, FlattenScriptObjectSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.lambda_manager(
@@ -1207,33 +1218,6 @@ class GuardBuilder(GuardBuilderBase):
             self.get_guard_manager(guard).add_dict_contains_guard(
                 not invert, key, get_verbose_code_parts(code, guard)
             )
-        else:
-            self._produce_guard_code(guard, [code])
-
-    def BOOL_FALSE(self, guard: Guard):
-        # Guard on the runtime value being 'False',
-        # can be faster than seemingly equivalent checks like DICT_KEYS for empty dict
-        #
-        # WARNING: this guard is not safe to use generally.  It only works if the runtime
-        # value is of a type that supports bool(), and some types e.g. Tensor do not.
-        # Only use this guard in cases you can guarantee the runtime type will be friendly.
-        # (e.g. Specialized NNModule with mutation protection via setattr)
-        #
-        # Why not simply check the runtime type inside this guard?  It's slow enough to defeat
-        # the purpose of using this guard, which itself is supposed to be a faster alternative
-        # to DICT_KEYS.
-        ref = self.arg_ref(guard)
-        code = f"not {ref}"
-        self._set_guard_export_info(guard, [code])
-
-        if config.enable_cpp_guard_manager:
-            # BOOL_FALSE is a weird guard. It is used to effectively check
-            # len(dict) == 0. Since it is used only and only for dicts, we don't
-            # have to anything here. DictGuardManager internally stores the size
-            # of the dict, and checks its size on every invocation. PyDict_Size
-            # is very fast, so we don't need BOOL_FALSE optimization. Just
-            # construct the dict guard manager to install a DictGuardManager.
-            self.get_guard_manager(guard)
         else:
             self._produce_guard_code(guard, [code])
 
@@ -1502,7 +1486,10 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
-        self.TYPE_MATCH(guard)
+        if not (config.enable_cpp_guard_manager and isinstance(value, dict)):
+            # C++ DICT_LENGTH checks for type
+            self.TYPE_MATCH(guard)
+
         code = list()
         if len(value) == 0:
             code.append(f"not {ref}")
@@ -1601,30 +1588,6 @@ class GuardBuilder(GuardBuilderBase):
         if config.enable_cpp_guard_manager:
             self.get_guard_manager(guard).add_not_none_guard(
                 get_verbose_code_parts(code, guard)
-            )
-        else:
-            self._produce_guard_code(guard, code)
-
-    def NN_MODULE_PARAM_NAMES(self, guard):
-        ref = self.arg_ref(guard)
-        value = self.get(guard.name)
-        t = type(value)
-        keys = {k for k, v in value.named_parameters()}
-
-        self.TYPE_MATCH(guard)
-        code = list()
-        code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
-
-        self._set_guard_export_info(guard, code)
-        if config.enable_cpp_guard_manager:
-            # TODO(anijain2305) - Consider moving this guard to C++. anijain2305
-            # tried but unable to come up with a testcase that installs this
-            # guard.
-            def fn(x):
-                return {k for k, v in x.named_parameters()} == keys
-
-            self.get_guard_manager(guard).add_lambda_guard(
-                fn, get_verbose_code_parts(code, guard)
             )
         else:
             self._produce_guard_code(guard, code)
@@ -1757,17 +1720,18 @@ class GuardBuilder(GuardBuilderBase):
                 self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
+        # For FSDP modules, we can skip guards on nn module tensors because FSDP
+        # eager assumes that the params are unchanged once the model is wrapped.
+        if guard.is_fsdp_module():
+            return
+
         # For tensors that are part of the Dynamo extracted Fx graph module, an
         # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
         # will be lifted as inputs and have a TENSOR_MATCH guard.
-        # For FSDP modules, we must use TENSOR_MATCH because FSDP module is
-        # traced using UnspecializedNNModuleVariable and therefore lifts the
-        # params as inputs.
         # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
         # to a new tensor everytime and therefore id differs.
         if (
             guard.is_nn_module()
-            and not guard.is_fsdp_module()
             and not isinstance(guard.originating_source, NumpyTensorSource)
         ) or match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
@@ -2141,6 +2105,7 @@ class CheckFunctionManager:
             guard.create(builder)
 
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
+
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
@@ -2160,6 +2125,19 @@ class CheckFunctionManager:
             assert self.guard_manager  # to make mypy happy
             self.guard_manager.id_matched_objs = builder.id_matched_objs
             self.check_fn = self.guard_manager
+
+            # Check that the guard returns True. False means that we will always
+            # recompile.
+            # TODO(anijain2305, ydwu4) - Skipping export because of following test
+            # python -s test/dynamo/test_export.py -k test_export_with_symbool_inputs
+            if not output_graph.export:
+                if not self.guard_manager.check(output_graph.local_scope):
+                    reasons = get_guard_fail_reason_helper(
+                        self.guard_manager,  # type: ignore[arg-type]
+                        output_graph.local_scope,
+                        CompileContext.current_compile_id(),
+                    )
+                    raise AssertionError(f"Guard check failed: {reasons}")
 
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
@@ -2325,9 +2303,10 @@ class CheckFunctionManager:
                 add_code_part(code, gcl.guard, config.enable_cpp_guard_manager)
 
         # OK, all done generating guards
-        torch._logging.trace_structured(
-            "dynamo_guards", payload_fn=lambda: [f() for f in structured_guard_fns]
-        )
+        if structured_guard_fns:
+            torch._logging.trace_structured(
+                "dynamo_guards", payload_fn=lambda: [f() for f in structured_guard_fns]
+            )
 
         global_state = convert_frame.initial_global_state
         if global_state is None:
@@ -2494,10 +2473,10 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
     return [f"Duplicate tensors found: {reason}"]
 
 
-def get_guard_fail_reason(
+def get_guard_fail_reason_helper(
     guard_fn: GuardFn,
-    code: types.CodeType,
     f_locals: Dict[str, object],
+    compile_id: CompileId,
 ) -> str:
     """
     Return the reason why `guard_fn` failed.
@@ -2562,7 +2541,17 @@ def get_guard_fail_reason(
                 if not is_recompiles_verbose_enabled():
                     break
 
-    reason_str = "\n".join(reasons)
+    reason_str = f"{compile_id}: " + "; ".join(reasons)
+    return reason_str
+
+
+def get_guard_fail_reason(
+    guard_fn: GuardFn,
+    code: types.CodeType,
+    f_locals: Dict[str, object],
+    compile_id: CompileId,
+) -> str:
+    reason_str = get_guard_fail_reason_helper(guard_fn, f_locals, compile_id)
     guard_failures[orig_code_map[code]].append(reason_str)
 
     try:
@@ -2589,7 +2578,10 @@ def get_and_maybe_log_recompilation_reason(
     reasons = []
     while cache_entry is not None:
         reason = get_guard_fail_reason(
-            cache_entry.check_fn, cache_entry.code, frame.f_locals
+            cache_entry.check_fn,
+            cache_entry.code,
+            frame.f_locals,
+            cache_entry.compile_id,
         )
         if reason:
             reasons.append(reason)
@@ -2622,6 +2614,15 @@ def get_and_maybe_log_recompilation_reason(
                 recompiles_log.debug(message)
         if config.error_on_recompile:
             raise exc.RecompileError(message)
+
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "recompile_reasons",
+            "encoding": "json",
+        },
+        payload_fn=lambda: reasons,
+    )
 
     return reasons
 

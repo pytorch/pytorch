@@ -1912,8 +1912,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
+            torch._dynamo.exc.CondOpArgsMismatchError,
+            "Expected to return same number of outputs but got:",
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -2085,8 +2085,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
+            torch._dynamo.exc.CondOpArgsMismatchError,
+            "Expected to return same number of outputs but got:",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 

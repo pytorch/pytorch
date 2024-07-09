@@ -1068,13 +1068,8 @@ class X86InductorQuantizer(Quantizer):
         quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[FilterFn] = None,
     ):
-        if (quantization_config is None) or (
-            quantization_config.input_activation
-            and not quantization_config.input_activation.is_dynamic
-        ):
-            # <TODO> Weiwen: Dynamic Quant of linear unary will be supported in next step
-            self._annotate_linear_binary_unary(model, quantization_config, filter_fn)
-            self._annotate_linear_unary(model, quantization_config, filter_fn)
+        self._annotate_linear_binary_unary(model, quantization_config, filter_fn)
+        self._annotate_linear_unary(model, quantization_config, filter_fn)
         self._annotate_linear(model, quantization_config, filter_fn)
 
     def _annotate_matmul(

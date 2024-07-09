@@ -536,11 +536,6 @@ def is_complex_value(x: _C.Value) -> bool:
 
 
 @_beartype.beartype
-def is_caffe2_aten_fallback() -> bool:
-    return False
-
-
-@_beartype.beartype
 def _get_tensor_rank(x: _C.Value) -> Optional[int]:
     if not _is_tensor(x) or x.type() is None:
         return None

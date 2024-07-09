@@ -35,6 +35,13 @@ CO_ASYNC_GENERATOR = 0x0200
 TORCH_DYNAMO_RESUME_IN_PREFIX = "torch_dynamo_resume_in"
 
 
+def _initial_push_null(insts):
+    if sys.version_info >= (3, 11):
+        insts.append(create_instruction("PUSH_NULL"))
+        if sys.version_info < (3, 13):
+            insts.append(create_instruction("SWAP", arg=2))
+
+
 @dataclasses.dataclass(frozen=True)
 class ReenterWith:
     stack_index: int
@@ -71,15 +78,21 @@ class ReenterWith:
         )
         cleanup_complete_jump_target = create_instruction("NOP")
 
-        setup_finally = [
-            *load_args,
-            *create_call_function(len(load_args), True),
-            create_instruction("STORE_FAST", argval=ctx_name),
-            create_instruction("LOAD_FAST", argval=ctx_name),
-            create_load_method("__enter__"),
-            *create_call_method(0),
-            create_instruction("POP_TOP"),
-        ]
+        setup_finally: List[Instruction] = []
+        _initial_push_null(setup_finally)
+
+        # TODO(williamwen42) call method order is wrong for 3.13+ - will fix later
+        setup_finally.extend(
+            [
+                *load_args,
+                *create_call_function(len(load_args), False),
+                create_instruction("STORE_FAST", argval=ctx_name),
+                create_instruction("LOAD_FAST", argval=ctx_name),
+                create_load_method("__enter__"),
+                *create_call_method(0),
+                create_instruction("POP_TOP"),
+            ]
+        )
 
         if sys.version_info < (3, 11):
             setup_finally.append(
@@ -277,12 +290,17 @@ class ReenterWith:
                 cleanup_complete_jump_target,
             ] + cleanup
 
-            return [
-                *load_args,
-                *create_call_function(len(load_args), True),
-                create_instruction("BEFORE_WITH"),
-                exn_tab_1_begin,  # POP_TOP
-            ], exn_tab_1_target
+            ret: List[Instruction] = []
+            _initial_push_null(ret)
+            ret.extend(
+                [
+                    *load_args,
+                    *create_call_function(len(load_args), False),
+                    create_instruction("BEFORE_WITH"),
+                    exn_tab_1_begin,  # POP_TOP
+                ]
+            )
+            return ret, exn_tab_1_target
 
 
 @dataclasses.dataclass
@@ -308,7 +326,7 @@ def _filter_iter(l1, l2, cond):
     returns the instructions with offsets in sorted_offsets
     """
     it = iter(l2)
-    res = []
+    res: List[Instruction] = []
     try:
         cur = next(it)
         for val in l1:
@@ -321,10 +339,8 @@ def _filter_iter(l1, l2, cond):
 
 
 def _load_tuple_and_call(tup):
-    insts = []
-    if sys.version_info >= (3, 11):
-        insts.append(create_instruction("PUSH_NULL"))
-        insts.append(create_instruction("SWAP", arg=2))
+    insts: List[Instruction] = []
+    _initial_push_null(insts)
     for val in tup:
         insts.append(create_instruction("LOAD_CONST", argval=val))
     insts.extend(create_call_function(len(tup), False))
