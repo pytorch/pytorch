@@ -901,6 +901,15 @@ class LeafGuard {
   // This is on the hot path and avoids any refcounting code from pybind. This
   // is not exposed to Python and can only be called from C++.
   virtual bool check_nopybind(PyObject* value) = 0;
+
+  bool can_skip_if_dict_tag_matches() {
+    return _skip_if_dict_tag_matches;
+  }
+
+  void mark_skippable_on_dict_tag_match() {
+    _skip_if_dict_tag_matches = true;
+  }
+
   virtual ~LeafGuard() = default;
 
  protected:
@@ -912,6 +921,8 @@ class LeafGuard {
   // This is set while constructing the leaf guard. This is used for identifying
   // the cause of recompilation.
   py::list _verbose_code_parts;
+  // Skip this check if the dict tag matches.
+  bool _skip_if_dict_tag_matches{false};
 };
 
 /**
@@ -974,7 +985,9 @@ class TYPE_MATCH : public LeafGuard {
   // type_id = id(type(obj))
   TYPE_MATCH(py::object type_id, py::object verbose_code_parts)
       : LeafGuard(std::move(verbose_code_parts)),
-        _expected(py::cast<intptr_t>(std::move(type_id))) {}
+        _expected(py::cast<intptr_t>(std::move(type_id))) {
+    mark_skippable_on_dict_tag_match();
+  }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -991,7 +1004,9 @@ class ID_MATCH : public LeafGuard {
   // obj_id = id(obj)
   ID_MATCH(py::object obj_id, py::object verbose_code_parts)
       : LeafGuard(std::move(verbose_code_parts)),
-        _expected(py::cast<intptr_t>(std::move(obj_id))) {}
+        _expected(py::cast<intptr_t>(std::move(obj_id))) {
+    mark_skippable_on_dict_tag_match();
+  }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -1008,7 +1023,9 @@ class EQUALS_MATCH : public LeafGuard {
   EQUALS_MATCH(py::object value, py::object verbose_code_parts)
       : LeafGuard(std::move(verbose_code_parts)),
         _value(value),
-        _value_type(Py_TYPE(value.ptr())) {}
+        _value_type(Py_TYPE(value.ptr())) {
+    mark_skippable_on_dict_tag_match();
+  }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // Fast path - pointer equality check. Pointer equality checks are ok
@@ -1114,7 +1131,9 @@ class DICT_LENGTH : public LeafGuard {
 class NOT_NONE : public LeafGuard {
  public:
   NOT_NONE(py::object verbose_code_parts)
-      : LeafGuard(std::move(verbose_code_parts)) {}
+      : LeafGuard(std::move(verbose_code_parts)) {
+    mark_skippable_on_dict_tag_match();
+  }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return value != Py_None;
@@ -1191,6 +1210,7 @@ class DATA_PTR_MATCH : public LeafGuard {
       throw std::runtime_error("DATA_PTR_MATCH guard requires a tensor");
     }
     _data_ptr = THPVariable_Unpack(value).data_ptr();
+    mark_skippable_on_dict_tag_match();
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -1362,7 +1382,9 @@ class DYNAMIC_INDICES : public LeafGuard {
  public:
   DYNAMIC_INDICES(py::set dynamic_indices, py::object verbose_code_parts)
       : LeafGuard(std::move(verbose_code_parts)),
-        _dynamic_indices(std::move(dynamic_indices)) {}
+        _dynamic_indices(std::move(dynamic_indices)) {
+    mark_skippable_on_dict_tag_match();
+  }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // Make an interned string
@@ -1588,13 +1610,19 @@ class GuardManager {
   // does not change the state of the guard, e.g., it does not shuffle the
   // guards and does not change the fail count. For simplicity, we duplicate
   // the code here.
-  virtual bool check_nopybind(PyObject* value) { // borrowed ref
+  virtual bool check_nopybind(
+      PyObject* value,
+      bool matches_dict_tag = false) { // borrowed ref
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
-      if (!guard->check_nopybind(value)) { // early exit
-        _fail_count += 1;
-        // no need of sorting, just return.
-        return false;
+      bool skip_guard =
+          matches_dict_tag && guard->can_skip_if_dict_tag_matches();
+      if (!skip_guard) {
+        if (!guard->check_nopybind(value)) { // early exit
+          _fail_count += 1;
+          // no need of sorting, just return.
+          return false;
+        }
       }
     }
 
@@ -1778,7 +1806,8 @@ class RootGuardManager : public GuardManager {
   }
 
   // Fast check function.
-  bool check_nopybind(PyObject* value) override { // borrowed ref
+  bool check_nopybind(PyObject* value, bool matches_dict_tag = false)
+      override { // borrowed ref
     // Check [Note on GIL interaction with mutex lock] for details on why we
     // need mutex and its interactions wth GIL.
     PyThreadState* _save = nullptr;
@@ -1792,7 +1821,7 @@ class RootGuardManager : public GuardManager {
       _local_state = state;
     }
 
-    if (!GuardManager::check_nopybind(value)) {
+    if (!GuardManager::check_nopybind(value, matches_dict_tag)) {
       _reset_relational_guard_state();
       return false;
     }
@@ -1937,7 +1966,9 @@ class DictGuardManager : public GuardManager {
       : GuardManager(root, std::move(source)),
         _size(PyDict_Size(example_value.ptr())),
         _expected_type(Py_TYPE(example_value.ptr())),
-        _is_exact_dict_type(PyDict_CheckExact(example_value.ptr())) {}
+        _is_exact_dict_type(PyDict_CheckExact(example_value.ptr())) {
+    _tag = get_dict_version_unchecked(example_value.ptr());
+  }
 
   GuardManager* get_key_manager(
       py::object key_index,
@@ -1973,8 +2004,8 @@ class DictGuardManager : public GuardManager {
     return key_value_manager.second.get();
   }
 
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
-    // TODO(janimesh) - Implement a fast-path using dict versions.
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
 
     if (Py_TYPE(obj) != _expected_type) {
       _fail_count += 1;
@@ -1990,6 +2021,10 @@ class DictGuardManager : public GuardManager {
     if (_size == 0) {
       return true;
     }
+
+    uint64_t new_tag = get_dict_version_unchecked(obj);
+    bool is_dict_tag_match = new_tag == _tag;
+    is_dict_tag_match = false;
 
     // Invokes the base class's check_nopybind method. We permit a limited set
     // of leaf guards and accessors within the DictGuardManager framework.
@@ -2020,16 +2055,22 @@ class DictGuardManager : public GuardManager {
         index_pointer += 1;
         KeyValueManager& key_value_manager = _key_value_managers[dict_pointer];
         std::unique_ptr<GuardManager>& key_manager = key_value_manager.first;
-        if (key_manager && !key_manager->check_nopybind(key)) {
+        if (key_manager &&
+            !key_manager->check_nopybind(key, is_dict_tag_match)) {
           return false;
         }
         std::unique_ptr<GuardManager>& value_manager = key_value_manager.second;
-        if (value_manager && !value_manager->check_nopybind(value)) {
+        if (value_manager &&
+            !value_manager->check_nopybind(value, is_dict_tag_match)) {
           return false;
         }
       }
       dict_pointer += 1;
     }
+
+    // It is possible that the tag changed but the contents of the dict is
+    // unchanged. Save the new tag to optimize the for next run.
+    _tag = new_tag;
     return true;
   }
 
@@ -2174,6 +2215,10 @@ class DictGuardManager : public GuardManager {
   bool _is_exact_dict_type; // Useful to check getattr_manager validity.
   std::vector<Py_ssize_t> _indices;
   std::unordered_map<Py_ssize_t, KeyValueManager> _key_value_managers;
+
+ private:
+  // Saved dict version.
+  uint64_t _tag;
 };
 
 /**
@@ -2197,7 +2242,8 @@ class DictSubclassGuardManager : public DictGuardManager {
       : DictGuardManager(root, std::move(source), example_value) {}
 
  public:
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
     // TODO(janimesh) - Implement a fast-path using dict versions.
 
     if (Py_TYPE(obj) != _expected_type) {
@@ -2427,6 +2473,7 @@ class TENSOR_MATCH : public LeafGuard {
         std::move(tensor),
         std::move(tensor_dims_size),
         std::move(tensor_dims_stride));
+    mark_skippable_on_dict_tag_match();
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
