@@ -80,7 +80,7 @@ class BaseSchedulerNode:
         # e.g. if the FusedSchedulerNode includes nodes (op_1, op_2, op_3), and op_X is X-th node
         # in `self.scheduler.nodes`, then for this FusedSchedulerNode, .min_order is 1 and .max_order is 3.
         # For non-"grouped" nodes (i.e. regular SchedulerNode),
-        # .min_order = .max_order = the index of this node in `self.scheduler.nodes`.
+        # .min_order = .max_order = X if this node is X-th node in `self.scheduler.nodes`.
         self.min_order: int
         self.max_order: int
         self.last_usage: Set[
