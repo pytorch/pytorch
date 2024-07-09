@@ -507,6 +507,9 @@ class SymInt:
     def __repr__(self):
         return str(self.node)
 
+    def _sympy_(self):
+        return self.node.expr
+
     def __hash__(self) -> builtins.int:
         if self.node.is_nested_int():
             return hash(self.node.nested_int())
@@ -615,6 +618,9 @@ class SymFloat:
     def __repr__(self):
         return self.node.str()
 
+    def _sympy_(self):
+        return self.node.expr
+
     def __hash__(self):
         if self.node.is_constant():
             return hash(self.node.float_())
@@ -679,6 +685,9 @@ class SymBool:
 
     def __repr__(self):
         return str(self.node)
+
+    def _sympy_(self):
+        return self.node.expr
 
     def __hash__(self):
         if self.node.is_constant():
@@ -2555,3 +2564,50 @@ def _constrain_as_size(
 from torch import _logging
 
 _logging._init_logs()
+
+
+def _import_device_backends():
+    """
+    Leverage the Python plugin mechanism to load out-of-the-tree device extensions.
+    See this RFC: https://github.com/pytorch/pytorch/issues/122468
+    """
+    from importlib.metadata import entry_points
+
+    group_name = "torch.backends"
+    if sys.version_info < (3, 10):
+        backend_extensions = entry_points().get(group_name, ())
+    else:
+        backend_extensions = entry_points(group=group_name)
+
+    for backend_extension in backend_extensions:
+        try:
+            # Load the extension
+            entrypoint = backend_extension.load()
+            # Call the entrypoint
+            entrypoint()
+        except Exception as err:
+            raise RuntimeError(
+                f"Failed to load the backend extension: {backend_extension.name}. "
+                f"You can disable extension auto-loading with TORCH_DEVICE_BACKEND_AUTOLOAD=0."
+            ) from err
+
+
+def _is_device_backend_autoload_enabled() -> builtins.bool:
+    """
+    Whether autoloading out-of-the-tree device extensions is enabled.
+    The switch depends on the value of the environment variable
+    `TORCH_DEVICE_BACKEND_AUTOLOAD`.
+
+    Returns:
+        bool: Whether to enable autoloading the extensions. Enabled by default.
+
+    Examples:
+        >>> torch._is_device_backend_autoload_enabled()
+        True
+    """
+    # enabled by default
+    return os.getenv("TORCH_DEVICE_BACKEND_AUTOLOAD", "1") == "1"
+
+
+if _is_device_backend_autoload_enabled():
+    _import_device_backends()
