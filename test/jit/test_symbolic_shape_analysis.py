@@ -482,7 +482,10 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         for inp, graph_in in zip(given_ins, graph_ins):
             graph_in.setType(graph_in.type().with_sizes(inp.size()))
 
-        out_sizes = [out.size() for out in expected_res]
+        if isinstance(expected_res, torch.Tensor):
+            out_sizes = expected_res.size()
+        else:
+            out_sizes = [out.size() for out in expected_res]
         self.checkShapeAnalysis(out_sizes, g, assert_propagation=True)
 
     def test_argmax(self):
