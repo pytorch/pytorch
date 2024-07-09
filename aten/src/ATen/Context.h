@@ -65,6 +65,8 @@ class TORCH_API Context {
         : at::getAccelerator(true).value();
     if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks();
+    } else if (device_type == at::kXPU) {
+      return at::detail::getXPUHooks();
     } else if (device_type == at::kMPS) {
       return at::detail::getMPSHooks();
     } else if (device_type == at::kPrivateUse1) {
@@ -222,7 +224,7 @@ class TORCH_API Context {
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend);
 
-  at::BlasBackend blasPreferredBackend() const;
+  at::BlasBackend blasPreferredBackend();
   void setBlasPreferredBackend(at::BlasBackend);
 
   // Note [Enabling Deterministic Operations]
