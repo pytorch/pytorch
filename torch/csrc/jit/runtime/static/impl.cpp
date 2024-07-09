@@ -55,12 +55,13 @@ C10_DEFINE_bool(
 namespace torch::jit {
 
 namespace {
-
+#ifndef STRIP_ERROR_MESSAGES
 std::string iValueToString(const c10::IValue& val) {
   std::ostringstream oss;
   oss << val;
   return oss.str();
 }
+#endif
 
 bool allArgsAreTensors(const Node* node) {
   const auto& inputs = node->inputs();

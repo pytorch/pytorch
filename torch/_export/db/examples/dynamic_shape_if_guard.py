@@ -14,6 +14,6 @@ class DynamicShapeIfGuard(torch.nn.Module):
 
         return x.sin()
 
-example_inputs = (torch.randn(3, 2, 2),)
+example_args = (torch.randn(3, 2, 2),)
 tags = {"torch.dynamic-shape", "python.control-flow"}
 model = DynamicShapeIfGuard()
