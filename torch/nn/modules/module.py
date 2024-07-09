@@ -467,6 +467,8 @@ class Module:
     _load_state_dict_post_hooks: Dict[int, Callable]
     _modules: Dict[str, Optional["Module"]]
     call_super_init: bool = False
+    # TODO(anijain2305) - This could be wrong if users manually delete the hooks w/o using any API.
+    _has_local_forward_or_backward_hooks: bool = False
     _compiled_call_impl: Optional[Callable] = None
 
     def __init__(self, *args, **kwargs) -> None:
@@ -1362,6 +1364,7 @@ class Module:
                 ``handle.remove()``
 
         """
+        self._has_local_forward_or_backward_hooks = True
         handle = RemovableHandle(self._backward_pre_hooks)
         self._backward_pre_hooks[handle.id] = hook
         if prepend:
@@ -1388,6 +1391,7 @@ class Module:
                 "single Module. Please use only one of them."
             )
 
+        self._has_local_forward_or_backward_hooks = True
         self._is_full_backward_hook = False
 
         handle = RemovableHandle(self._backward_hooks)
@@ -1609,6 +1613,7 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
+        self._has_local_forward_or_backward_hooks = True
         handle = RemovableHandle(
             self._forward_pre_hooks, extra_dict=self._forward_pre_hooks_with_kwargs
         )
@@ -1673,6 +1678,7 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
+        self._has_local_forward_or_backward_hooks = True
         handle = RemovableHandle(
             self._forward_hooks,
             extra_dict=[
@@ -1721,7 +1727,7 @@ class Module:
         forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
         # this function, and just call forward.
-        if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks
+        if not (self._has_local_forward_or_backward_hooks
                 or _global_backward_pre_hooks or _global_backward_hooks
                 or _global_forward_hooks or _global_forward_pre_hooks):
             return forward_call(*args, **kwargs)
