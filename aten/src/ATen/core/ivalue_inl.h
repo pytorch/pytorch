@@ -2392,7 +2392,7 @@ inline PyObject* IValue::toPyObject() const {
 template <typename T>
 inline optional<T> IValue::toOptional() {
   if (this->isNone()) {
-    return nullopt;
+    return std::nullopt;
   }
   return this->to<T>();
 }
@@ -2400,7 +2400,7 @@ inline optional<T> IValue::toOptional() {
 template <typename T>
 inline optional<T> IValue::toOptional() const {
   if (this->isNone()) {
-    return nullopt;
+    return std::nullopt;
   }
   return this->to<T>();
 }
