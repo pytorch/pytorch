@@ -25,6 +25,7 @@ keyword_synonyms: dict[str, list[str]] = {
     "decomp": ["decomposition", "decompositions"],
     "numpy": ["torch_np", "numpy_tests"],
     "ops": ["opinfo"],
+    "hop": ["higher_order_op"]
 }
 
 not_keyword = [
