@@ -8780,7 +8780,7 @@ class CommonTemplate:
 
     def test_vectorized_ops_masked(self):
         def fn(x):
-            index = torch.arange(64)
+            index = torch.arange(64, device=x.device)
             mask = index.view(1, 1, 64) < 63
             indices = [None, None, index]
             return torch.ops.aten._unsafe_masked_index(x, mask, indices, 7)
