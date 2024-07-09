@@ -160,11 +160,6 @@ def with_effects_proxy(
     proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
 
-    from torch.fx.node import has_side_effect
-
-    # To aoivd being DCEed.
-    has_side_effect(op)
-
     out_proxy = mode.tracer.create_proxy(
         "call_function",
         with_effects,

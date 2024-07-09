@@ -5,7 +5,8 @@
 
 namespace at::native {
 namespace {
-static std::string shapes_as_str(TensorList tensors) {
+#ifndef STRIP_ERROR_MESSAGES
+inline std::string shapes_as_str(TensorList tensors) {
   std::ostringstream os;
   bool first = true;
   for (auto& tensor : tensors) {
@@ -19,9 +20,10 @@ static std::string shapes_as_str(TensorList tensors) {
   }
   return os.str();
 }
+#endif
 } // anonymous namespace
 
-static std::tuple<bool, Tensor> canDispatchToMaskedFill(const Tensor& self, const torch::List<std::optional<at::Tensor>>& indices,
+inline std::tuple<bool, Tensor> canDispatchToMaskedFill(const Tensor& self, const torch::List<std::optional<at::Tensor>>& indices,
 const Tensor& value){
   if (!(value.numel() ==1 && value.device().is_cpu())){
     return std::make_tuple(false,Tensor());
@@ -54,8 +56,8 @@ const Tensor& value){
   return std::make_tuple(true, mask);
 }
 
-static AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
-  checkIndexTensorTypes(orig, /*allow_int*/ true);
+inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
+  checkIndexTensorTypes(orig);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
   // next broadcast all index tensors together
