@@ -44,8 +44,7 @@ IF(NOT MKLDNN_FOUND)
     endif()
     if(LINUX)
       # Workaround about XPU ABI neutral build
-      set(ABI_NEUTRAL_FLAGS
-        -fpreview-breaking-changes -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI} -D__INTEL_PREVIEW_BREAKING_CHANGES)
+      set(ABI_NEUTRAL_FLAGS -fpreview-breaking-changes)
     endif()
     ExternalProject_Add(xpu_mkldnn_proj
       SOURCE_DIR ${MKLDNN_ROOT}
@@ -53,7 +52,7 @@ IF(NOT MKLDNN_FOUND)
       BUILD_IN_SOURCE 0
       CMAKE_ARGS  -DCMAKE_C_COMPILER=icx
       -DCMAKE_CXX_COMPILER=${SYCL_CXX_DRIVER}
-      -DCMAKE_CXX_FLAGS=ABI_NEUTRAL_FLAGS
+      -DCMAKE_CXX_FLAGS=${ABI_NEUTRAL_FLAGS}
       -DDNNL_GPU_RUNTIME=SYCL
       -DDNNL_CPU_RUNTIME=THREADPOOL
       -DDNNL_BUILD_TESTS=OFF
