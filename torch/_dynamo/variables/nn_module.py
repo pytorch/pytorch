@@ -777,6 +777,16 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         super().__init__(value=value, **kwargs)
         self.is_state_mutated = False
+
+        if torch._dynamo.config.inline_inbuilt_nn_modules:
+            from ..decorators import mark_static_address
+
+            for p in value.parameters():
+                mark_static_address(p, guard=False)
+
+            for b in value.buffers():
+                mark_static_address(b, guard=False)
+
         # nn_module_stack_source is used to ensure BC for nn_module_stack.
         # Downstream users prefer mod.linear instead of mod._modules['linear']
         # as the module stack. When Dynamo inlines the __getattr__ method, we

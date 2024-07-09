@@ -1298,9 +1298,21 @@ class VariableBuilder:
         # it would have already been wrapped
         assert value not in self.tx.output.side_effects
 
+        is_static_input = get_static_address_type(value) is not None
+
+        if (
+            config.inline_inbuilt_nn_modules
+            and not is_static_input
+            and isinstance(value, torch.nn.Parameter)
+        ):
+            from ..decorators import mark_static_address
+
+            mark_static_address(value, guard=False)
+            is_static_input = True
+
         if (
             source.guard_source().is_nn_module()
-            or get_static_address_type(value) is not None
+            or (is_static_input and not config.inline_inbuilt_nn_modules)
         ) and not source.guard_source().is_fsdp_module():
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
@@ -1402,6 +1414,7 @@ class VariableBuilder:
             example_value=value,
             subclass_type=subclass_type,
             source=source,
+            is_static_input=is_static_input,
             **options,
         )
 
@@ -1800,13 +1813,14 @@ def _dataclasses_fields_lambda(obj):
 
 
 def wrap_fx_proxy(
-    tx, proxy, example_value=None, subclass_type=None, **options
+    tx, proxy, example_value=None, subclass_type=None, is_static_input=False, **options
 ) -> VariableTracker:
     kwargs = {
         "tx": tx,
         "proxy": proxy,
         "example_value": example_value,
         "subclass_type": subclass_type,
+        "is_static_input": is_static_input,
         **options,
     }
     if subclass_type is None:
@@ -1862,7 +1876,13 @@ def wrap_fx_proxy(
 # SOMETHING INTO THE GRAPH.  This is sort of obvious, because you can't call
 # this function without a proxy.
 def wrap_fx_proxy_cls(
-    target_cls, tx, proxy, example_value=None, subclass_type=None, **options
+    target_cls,
+    tx,
+    proxy,
+    example_value=None,
+    subclass_type=None,
+    is_static_input=False,
+    **options,
 ):
     from ..symbolic_convert import InstructionTranslatorBase
 
@@ -1943,6 +1963,7 @@ def wrap_fx_proxy_cls(
         # tensor, the stored example value will update too!)
         example_value = _clone_input(example_value)
         set_example_value(proxy.node, example_value)
+        proxy.node.meta["is_static_input"] = is_static_input
         specialized_props = target_cls.specialize(example_value)
         # TODO: not sure about this fake mode test
         if (
