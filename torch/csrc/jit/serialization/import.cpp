@@ -44,7 +44,9 @@ static void postSetStateValidate(const IValue& v) {
   const auto& objType = obj->type();
   for (const auto i : c10::irange(objType->numAttributes())) {
     const auto& attrType = objType->getAttribute(i);
+#ifndef STRIP_ERROR_MESSAGES
     const auto& attrName = objType->getAttributeName(i);
+#endif
     const auto& slot = obj->getSlot(i);
     // const auto attrType = objType->getAttribute(i);
     // Verify that all the non-optional attributes have been initialized
