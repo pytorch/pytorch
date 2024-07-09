@@ -20,7 +20,6 @@ from torch.nn.attention._flex_attention import (
     _causal,
     _compose,
     _create_block_mask,
-    _create_block_mask_from_mask,
     _create_empty_block_mask,
     _flex_attention,
     _generate_alibi_bias,
@@ -517,91 +516,6 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
-    def test_create_block_mask_is_compiled(self):
-        make_tensor = functools.partial(
-            torch.randn,
-            (B, H, S, D),
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=True,
-        )
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
-
-        @torch.compile
-        def func(q, k, v):
-            block_mask = _create_block_mask_from_mask(
-                torch.tril(
-                    torch.ones(
-                        q.shape[-2], k.shape[-2], dtype=torch.bool, device=q.device
-                    )
-                ),
-                128,
-                128,
-            )
-
-            out = _flex_attention(
-                q,
-                k,
-                v,
-                _causal,
-                block_mask=block_mask,
-            )
-            return out
-
-        _, code = run_and_get_code(func, q, k, v)
-        # Ensure _create_block_mask_from_mask is compiled and generates 4 kernels,
-        # flex_attention generates 1 kernel.
-        FileCheck().check_count(".run(", 5, True).run(code[0])
-
-    @supported_platform
-    def test_block_mask_is_reused(self):
-        make_tensor = functools.partial(
-            torch.randn,
-            (B, H, S, D),
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=True,
-        )
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
-        k2 = k + 1
-        v2 = v + 1
-
-        @torch.compile
-        def func(q, k, v, k2, v2):
-            block_mask = _create_block_mask_from_mask(
-                torch.tril(
-                    torch.ones(
-                        q.shape[-2], k.shape[-2], dtype=torch.bool, device=q.device
-                    )
-                ),
-                128,
-                128,
-            )
-
-            q = _flex_attention(
-                q,
-                k,
-                v,
-                _causal,
-                _causal_mask,
-                block_mask,
-            )
-            out = _flex_attention(
-                q,
-                k2,
-                v2,
-                _causal,
-                _causal_mask,
-                block_mask,
-            )
-            return out
-
-        _, code = run_and_get_code(func, q, k, v, k2, v2)
-        # Ensure _create_block_mask_from_mask is compiled and generates 4 kernels,
-        # 2 flex_attention generates 2 kernels.
-        FileCheck().check_count(".run(", 6, True).run(code[0])
-
-    @supported_platform
     def test_doc_mask_sparse(self):
         document_id = torch.zeros(S, dtype=torch.int, device="cuda")
         for i in range(0, S, 256):
@@ -1075,15 +989,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        block_mask = _create_block_mask(
-            score_mod, 1, 1, q.shape[-2], k.shape[-2], q.device
-        )
         if score_mod == _identity:
             mask_fn = _no_mask
         elif score_mod == _causal:
             mask_fn = _causal_mask
         else:
             raise AssertionError("Illegal score mod")
+        block_mask = _create_block_mask(
+            mask_fn, 1, 1, q.shape[-2], k.shape[-2], q.device
+        )
 
         @torch.compile
         def sdpa_hop(q, k, v, score_mod, block_mask):
@@ -1092,7 +1006,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                mask_fn,
                 block_mask.as_tuple(),
             )
 
@@ -1107,7 +1020,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                mask_fn,
                 block_mask.as_tuple(),
             )
 
@@ -1159,7 +1071,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         score_mod = _identity
         mask_fn = _no_mask
         block_mask = _create_block_mask(
-            score_mod, 1, 1, q.shape[-2], k.shape[-2], q.device
+            mask_fn, 1, 1, q.shape[-2], k.shape[-2], q.device
         )
 
         @torch.compile
@@ -1169,7 +1081,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                mask_fn,
                 block_mask.as_tuple(),
             )
             lse_2 = lse * 2
@@ -1192,7 +1103,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         score_mod = _identity
         mask_fn = _no_mask
         block_mask = _create_block_mask(
-            score_mod, 1, 1, q.shape[-2], k.shape[-2], q.device
+            mask_fn, 1, 1, q.shape[-2], k.shape[-2], q.device
         )
 
         @torch.compile
@@ -1202,7 +1113,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 k,
                 v,
                 score_mod,
-                mask_fn,
                 block_mask.as_tuple(),
             )
             lse_2 = lse * 2
@@ -1354,7 +1264,7 @@ class GraphModule(torch.nn.Module):
         new_empty_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         new_empty_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, mask_fn_0, (ones, zeros, ones_1, zeros_1, zeros_2, zeros_3, zeros_4, zeros_5, 8, 8), (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = mask_fn_0 = ones = zeros = ones_1 = zeros_1 = zeros_2 = zeros_3 = zeros_4 = zeros_5 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (ones, zeros, ones_1, zeros_1, zeros_2, zeros_3, zeros_4, zeros_5, 8, 8, mask_fn_0), (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = ones = zeros = ones_1 = zeros_1 = zeros_2 = zeros_3 = zeros_4 = zeros_5 = mask_fn_0 = None
         out: "f64[2, 2, 8, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -1365,8 +1275,8 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, new_empty_5: "i32[]", new_empty_6: "i32[]", new_empty_7: "i32[]", new_empty_8: "i32[]"):
-            ge: "b8[]" = new_empty_7 >= 0;  new_empty_7 = None
-            return ge
+            new_ones: "b8[]" = new_empty_7.new_ones(size = (), dtype = torch.bool, device = device(type='cuda', index=0));  new_empty_7 = None
+            return new_ones
 """,  # noqa: B950
         )
         # Save the AOT graphs
@@ -1394,7 +1304,7 @@ class GraphModule(torch.nn.Module):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
         mask_graph = self.mask_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, mask_graph, (full_default, full_default_1, full_default, full_default_1, full_default_4, full_default_1, full_default_4, full_default_1, 8, 8), (), ());  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = mask_graph = full_default = full_default_1 = full_default_4 = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, (full_default, full_default_1, full_default, full_default_1, full_default_4, full_default_1, full_default_4, full_default_1, 8, 8, mask_graph), (), ());  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = full_default_4 = mask_graph = None
         getitem_2: "f64[2, 2, 8, 4]" = flex_attention_backward[0]
         getitem_3: "f64[2, 2, 8, 4]" = flex_attention_backward[1]
         getitem_4: "f64[2, 2, 8, 4]" = flex_attention_backward[2];  flex_attention_backward = None
@@ -1415,8 +1325,8 @@ class GraphModule(torch.nn.Module):
 
     class <lambda>(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
-            ge: "b8[]" = torch.ops.aten.ge.Scalar(arg2_1, 0);  arg2_1 = None
-            return ge
+            full: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+            return full
 """,  # noqa: B950
         )
 

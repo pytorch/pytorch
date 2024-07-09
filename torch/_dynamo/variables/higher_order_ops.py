@@ -1567,13 +1567,15 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             key,
             value,
             score_mod,
-            mask_fn,
             block_mask,
         ) = self.normalize_to_args(args, kwargs)
 
         score_mod_node, score_mod_lifted_args = self.create_wrapped_node(
             tx, query, score_mod, "score_mod"
         )
+        mask_fn = block_mask.items[-1]
+        if isinstance(mask_fn, ConstantVariable):
+            mask_fn = UserFunctionVariable(torch.nn.attention._flex_attention._no_mask)
         mask_fn_node, mask_fn_lifted_args = self.create_wrapped_node(
             tx, query, mask_fn, "mask_fn"
         )
@@ -1581,7 +1583,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             query,
             key,
             value,
-            block_mask,
+            TupleVariable(block_mask.items[:-1], source=block_mask.source),
         ]
 
         # Store the invocation as a call
@@ -1598,21 +1600,20 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             lse_meta = query_meta.new_empty(logsumexp_shape, dtype=torch.float32)
         example_value = (out_meta, lse_meta)
 
+        # breakpoint()
         # Compose the ordered HOO args from the following args:
         # - inp_args: [query, key, value, block_mask]
         # - score_mod_node and score_mod_lifted_args
         # - mask_fn_node and mask_fn_lifted_args
+        block_mask = tuple(inp_args[-1] + (mask_fn_node,))
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
                 self.value,
                 args=inp_args[:3]
-                + (
-                    score_mod_node,
-                    mask_fn_node,
-                )
-                + inp_args[3:]
+                + (score_mod_node,)
+                + (block_mask,)
                 + (
                     score_mod_lifted_args,
                     mask_fn_lifted_args,
