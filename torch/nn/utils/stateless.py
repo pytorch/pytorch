@@ -45,7 +45,6 @@ def _untie_named_tensors_map(
     all_named_tensors.update(module.named_buffers(remove_duplicate=False))
 
     # A map of {tensor: set(all_tied_names)} for all tensor names in the module.
-    # tensor_to_tied_names_map: Dict[Tensor, Set[str]] = defaultdict(set)
     tensor_to_tied_names_map: Dict[Tensor, Set[str]] = {}
     for name, tensor in all_named_tensors.items():
         if tensor not in tensor_to_tied_names_map:
@@ -62,11 +61,13 @@ def _untie_named_tensors_map(
 
     # Make sure the user didn't pass multiple values for the same tied tensor.
     given_names = set(parameters_and_buffers.keys())
+    # same as given_names.intersection(tied_names_map.keys()) but dynamo can't
+    # handle that
     given_names_for_tied_tensors: set[str] = set()
     for name in given_names:
         if name in tied_names_map:
             given_names_for_tied_tensors.add(name)
-    # given_names_for_tied_tensors = given_names.intersection(tied_names_map.keys())
+
     for given_name in given_names_for_tied_tensors:
         tied_names = tied_names_map[given_name]
         if (
