@@ -8,6 +8,8 @@ class _ParameterMeta(_TensorMeta):
     def __instancecheck__(self, instance: object) -> bool: ...
 
 class Parameter(Tensor, metaclass=_ParameterMeta):
+    __module__: str = "torch.nn.parameter"
+
     def __init__(
         self,
         data: Tensor | None = None,
@@ -19,6 +21,8 @@ def is_lazy(
 ) -> TypeGuard[UninitializedParameter | UninitializedBuffer]: ...
 
 class UninitializedParameter(Parameter):
+    __module__: str = "torch.nn.parameter"
+
     def __init__(
         self,
         requires_grad: bool = True,
@@ -33,6 +37,8 @@ class UninitializedParameter(Parameter):
     ) -> None: ...
 
 class UninitializedBuffer(Tensor):
+    __module__: str = "torch.nn.parameter"
+
     def __init__(
         self,
         requires_grad: bool = False,
