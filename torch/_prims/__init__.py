@@ -335,6 +335,11 @@ def _make_prim(
         ]
         tags_intersection = set(overload_tags[0])
         tags_intersection.intersection_update(*overload_tags[1:])
+
+        # dont inadvertently add to prim ops
+        if torch.Tag.core in tags_intersection:
+            tags_intersection.remove(torch.Tag.core)
+
         # iter over first tags for determinism
         _prim._tags = tuple(t for t in overload_tags[0] if t in tags_intersection)
 
