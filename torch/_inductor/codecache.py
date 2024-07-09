@@ -1597,6 +1597,8 @@ class AotCodeCompiler:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> str:
+        _set_gpu_runtime_env()  # cpp_extension consults the env
+
         picked_vec_isa = pick_vec_isa()
         vec_isa_cmd_gen = CppBuilder(
             name="o",
@@ -1782,6 +1784,7 @@ class AotCodeCompiler:
                 else os.path.splitext(input_path)[0] + ".so"
             )
 
+            output_o = os.path.splitext(input_path)[0] + ".o"
             consts_size = sum(
                 torch.ops.mkldnn._nbytes(tensor)
                 if tensor.is_mkldnn
@@ -1793,26 +1796,16 @@ class AotCodeCompiler:
             use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
-
-            (
-                object_output_name,
-                object_output_dir,
-            ) = get_name_and_dir_from_output_file_path(input_path)
-            object_builder = CppBuilder(
-                name=object_output_name,
-                sources=input_path,
-                output_dir=object_output_dir,
-                BuildOption=CppTorchCudaOptions(
-                    vec_isa=picked_vec_isa,
-                    cuda=cuda,
-                    aot_mode=graph.aot_mode,
-                    compile_only=True,
-                    use_absolute_path=use_absolute_path,
-                    use_mmap_weights=use_mmap_weights,
-                ),
+            compile_cmd = cpp_compile_command(
+                input=input_path,
+                output=output_o,
+                vec_isa=picked_vec_isa,
+                cuda=cuda,
+                aot_mode=graph.aot_mode,
+                compile_only=True,
+                use_absolute_path=use_absolute_path,
+                use_mmap_weights=use_mmap_weights,
             )
-            compile_cmd = object_builder.get_command_line()
-            output_o = object_builder.get_target_file_path()
             log.debug("aot compilation command: %s", compile_cmd)
             if fbcode_aot_cpu_re:
                 compile_file(input_path, output_o, compile_cmd.split())
@@ -1872,21 +1865,14 @@ class AotCodeCompiler:
                 "linux": _compile_consts_linux,
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
-
-            output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
-            so_builder = CppBuilder(
-                name=output_name,
-                sources=[output_o, consts_o],
-                output_dir=output_dir,
-                BuildOption=CppTorchCudaOptions(
-                    vec_isa=picked_vec_isa,
-                    cuda=cuda,
-                    aot_mode=graph.aot_mode,
-                    use_absolute_path=use_absolute_path,
-                ),
+            link_cmd = cpp_compile_command(
+                input=[output_o, consts_o],
+                output=output_so,
+                vec_isa=picked_vec_isa,
+                cuda=cuda,
+                aot_mode=graph.aot_mode,
+                use_absolute_path=use_absolute_path,
             )
-            link_cmd = so_builder.get_command_line()
-            output_so = so_builder.get_target_file_path()
             log.debug("aot linkage command: %s", link_cmd)
             if fbcode_aot_cpu_re:
                 compile_file([output_o, consts_o], output_so, link_cmd.split())
@@ -2091,35 +2077,17 @@ class CppCodeCache:
             from filelock import FileLock
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
-            output_name, output_dir = get_name_and_dir_from_output_file_path(input_path)
-            """
-            If `fb_code` env, it need to be dispatched to original `compile_file` function.
-            So, we still need to prepare parameters for the function: `input_path` and `fb_output_path`.
-            """
-            fb_output_path = input_path[:-3] + "so"
+            output_path = input_path[:-3] + "so"
             future: Optional[Future[Any]] = None
             lib = None
-
-            cpp_build_option = CppTorchCudaOptions(**compile_command)
-            cpp_builder = CppBuilder(
-                name=output_name,
-                sources=input_path,
-                output_dir=output_dir,
-                BuildOption=cpp_build_option,
-            )
-
             worker_fn = functools.partial(
                 _worker_compile_cpp,
                 lock_path,
-                cpp_builder,
                 input_path,
-                fb_output_path,
-            )
-
-            binary_path = (
-                fb_output_path
-                if config.is_fbcode()
-                else cpp_builder.get_target_file_path()
+                output_path,
+                cpp_compile_command(
+                    input=input_path, output=output_path, **compile_command
+                ),
             )
 
             def load_fn():
@@ -2129,13 +2097,13 @@ class CppCodeCache:
                         future.result()
                     result = worker_fn()
                     assert result is None
-                    lib = cls._load_library(binary_path, key)
+                    lib = cls._load_library(output_path, key)
                     assert lib is not None
                 return lib
 
             if submit_fn is not None:
                 with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-                    if not os.path.exists(binary_path):
+                    if not os.path.exists(output_path):
                         future = submit_fn(worker_fn)
 
             cls.cache[key] = load_fn
@@ -2147,27 +2115,12 @@ class CppCodeCache:
         return cls.load_async(source_code, cuda)()
 
 
-def _worker_compile_cpp(
-    lock_path,
-    cpp_builder: CppBuilder,
-    fb_input_path: str,
-    fb_output_path: str,
-):
+def _worker_compile_cpp(lock_path, input_path, output_path, cmd):
     from filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-        binary_path = (
-            fb_output_path if config.is_fbcode() else cpp_builder.get_target_file_path()
-        )
-        if not os.path.exists(binary_path):
-            if config.is_fbcode():
-                compile_file(
-                    fb_input_path,
-                    fb_output_path,
-                    shlex.split(cpp_builder.get_command_line()),
-                )
-            else:
-                cpp_builder.build()
+        if not os.path.exists(output_path):
+            compile_file(input_path, output_path, shlex.split(cmd))
 
 
 # Customized Python binding for cpp kernels
@@ -2489,6 +2442,10 @@ def validate_new_cpp_commands():
     include_pytorch = [True, False]
     use_absolute_path = [True, False]
     aot_mode = [False, True]
+
+    # Try to pass it in fb_code.
+    if config.is_fbcode():
+        return
 
     for x in cuda:
         for y in use_mmap_weights:
