@@ -20,7 +20,7 @@ class ConstrainAsValueExample(torch.nn.Module):
         return y.cos()
 
 
-example_inputs = (torch.tensor(4), torch.randn(5, 5))
+example_args = (torch.tensor(4), torch.randn(5, 5))
 tags = {
     "torch.dynamic-value",
     "torch.escape-hatch",
