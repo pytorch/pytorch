@@ -22,10 +22,10 @@ TORCH_API std::shared_ptr<Graph> normalizeGraphForCache(
 TORCH_API int64_t store(std::shared_ptr<Graph> graph);
 
 // Given a graph, find a KernelSpec based on it
-TORCH_API at::optional<KernelSpec*> lookupGraph(std::shared_ptr<Graph> graph);
+TORCH_API std::optional<KernelSpec*> lookupGraph(std::shared_ptr<Graph> graph);
 
 // Returns the graph corresponding to the given key (if it exists)
-TORCH_API at::optional<KernelSpec*> retrieve(const int64_t key);
+TORCH_API std::optional<KernelSpec*> retrieve(const int64_t key);
 
 // Returns the size of the fusion key -> KernelSpec cache.
 // Only used for testing.

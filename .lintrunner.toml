@@ -204,6 +204,8 @@ include_patterns = [
     'torch/csrc/*.cpp',
     'torch/csrc/**/*.h',
     'torch/csrc/**/*.cpp',
+    'torch/csrc/jit/serialization/*.h',
+    'torch/csrc/jit/serialization/*.cpp',
 ]
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
@@ -232,6 +234,7 @@ exclude_patterns = [
     'torch/csrc/dynamo/eval_frame.h',
     'torch/csrc/inductor/**/*',
     'torch/csrc/jit/**/*',
+    'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/lazy/**/*',
 ]
 init_command = [
