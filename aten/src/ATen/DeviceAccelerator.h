@@ -22,4 +22,6 @@ namespace at {
 // When checked is true, the returned optional always has a value.
 TORCH_API std::optional<c10::DeviceType> getAccelerator(bool checked = false);
 
+TORCH_API bool isAccelerator(c10::DeviceType d);
+
 } // namespace at

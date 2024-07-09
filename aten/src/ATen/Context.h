@@ -101,7 +101,9 @@ class TORCH_API Context {
       std::optional<DeviceType> device_type = std::nullopt) {
     auto opt_device_type =
         device_type.has_value() ? device_type.value() : at::getAccelerator();
-    if (!opt_device_type.has_value()) {
+    if (!opt_device_type.has_value() || // there is no accelerator
+        !at::isAccelerator(
+            opt_device_type.value())) { // passed device not an accelerator
       return false;
     }
     return getAcceleratorHooksInterface(opt_device_type.value())
