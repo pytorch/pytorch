@@ -713,6 +713,7 @@ def forward(self, x_1, output_1):
         output2 = torch.zeros_like(t1, requires_grad=grad)
         self.assertEqual(compiled_func(t1, t2, output2), torch_result)
 
+    @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     def test_triton_kernel_tracing(self, dynamic):
         def call_triton_add(

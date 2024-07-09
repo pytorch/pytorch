@@ -955,6 +955,7 @@ def capture_triton(triton_kernel, /):
 
     Examples:
 
+        >>> # xdoctest: +SKIP
         >>> import torch
         >>> import triton
         >>> from triton import language as tl
