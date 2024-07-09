@@ -1045,6 +1045,15 @@ def trace(
 
         def _log_exportability(func_to_export, export_func, export_args, export_type):
             try:
+                traced_result = func_to_export(*export_args)
+            except Exception as e:
+                _ = e
+                log_torch_jit_trace_exportability(
+                    "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
+                )
+                return
+
+            try:
                 ep_module = export_func(func_to_export, export_args)
             except Exception as e:
                 log_torch_jit_trace_exportability(
@@ -1060,15 +1069,6 @@ def trace(
             except Exception as e:
                 log_torch_jit_trace_exportability(
                     "trace", str(export_type), str(_ExportOutcome.FAILED_TO_RUN), str(e)
-                )
-                return
-
-            try:
-                traced_result = func_to_export(*export_args)
-            except Exception as e:
-                _ = e
-                log_torch_jit_trace_exportability(
-                    "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
                 )
                 return
 
