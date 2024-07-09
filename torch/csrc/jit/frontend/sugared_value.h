@@ -305,7 +305,7 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
 };
 
 struct TORCH_API BuiltinModule : public SugaredValue {
-  BuiltinModule(std::string name, std::optional<int64_t> version = at::nullopt)
+  BuiltinModule(std::string name, std::optional<int64_t> version = std::nullopt)
       : name(std::move(name)), version(version) {}
 
   std::string kind() const override {
@@ -514,8 +514,8 @@ struct TORCH_API CastValue : public BuiltinFunction {
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
     if (args.size() == 1 && kwargs.empty()) {
-      auto len_op = std::make_shared<BuiltinFunction>(aten::len, at::nullopt);
-      auto gt_op = std::make_shared<BuiltinFunction>(aten::gt, at::nullopt);
+      auto len_op = std::make_shared<BuiltinFunction>(aten::len, std::nullopt);
+      auto gt_op = std::make_shared<BuiltinFunction>(aten::gt, std::nullopt);
       auto zero = m.graph()->insertConstant(0);
 
       auto v = args[0].value(*m.graph());
