@@ -41,6 +41,19 @@ class PyProcessGroup : public ProcessGroup {
 
       return Work::getFuture();
     }
+
+    // Take a reference of the corresponding py::object.
+    // With functional collectives, ownership of work objects is generally
+    // transferred to C++. For pure C++ work objects, it is sufficient to
+    // transfer the ownership of work object. For user-defined work objects in
+    // Python, it is necessary to keep the corresponding py::object alive in
+    // addition to ensure that the user-defined methods can be executed.
+    void ref_py_object() {
+      py_obj_ = py::cast(this);
+    }
+
+   private:
+    py::object py_obj_;
   };
 
   using ProcessGroup::ProcessGroup;
