@@ -463,8 +463,7 @@ class TestControlFlow(TestCase):
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_generic_associative_scan_CUDA_issue(self):
+    def test_generic_associative_scan_CPU_flip(self):
         def fct(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
@@ -472,8 +471,7 @@ class TestControlFlow(TestCase):
             associative_scan1 = torch.compile(associative_scan)
 
         for n in range(20):
-            x = torch.arange(n, device=torch.device("cuda"))
-            # x = torch.arange(n, device=torch.device('cpu'))
+            x = torch.arange(n, device=torch.device("cpu"))
             associative_scan2 = associative_scan
 
             result1 = associative_scan1(fct, x, 0, False, True)
@@ -483,6 +481,103 @@ class TestControlFlow(TestCase):
             self.assertEqual(result1, result2)
             self.assertEqual(result1, result3)
 
+            # Flip only non-compiled and compare with compiled reverse=True
+            result1 = associative_scan1(fct, x, 0, True, True)
+            result2 = torch.flip(
+                associative_scan2(fct, torch.flip(x, [0]), 0, False, True), [0]
+            )
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Flip only compiled and compare with non-compiled reverse=True
+            result1 = torch.flip(
+                associative_scan1(fct, torch.flip(x, [0]), 0, False, True), [0]
+            )
+            result2 = associative_scan2(fct, x, 0, True, True)
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Use reverse=False, but flip both results before and after
+            result1 = torch.flip(
+                associative_scan1(fct, torch.flip(x, [0]), 0, False, True), [0]
+            )
+            result2 = torch.flip(
+                associative_scan2(fct, torch.flip(x, [0]), 0, False, True), [0]
+            )
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Reverse=True
+            result1 = associative_scan1(fct, x, 0, True, True)
+            result2 = associative_scan2(fct, x, 0, True, True)
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_generic_associative_scan_CUDA_flip(self):
+        def fct(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        with torch._dynamo.utils.disable_cache_limit():
+            associative_scan1 = torch.compile(associative_scan)
+            # associative_scan1 = associative_scan
+
+        for n in range(20):
+            x = torch.arange(n, device=torch.device("cuda"))
+            associative_scan2 = associative_scan
+
+            result1 = associative_scan1(fct, x, 0, False, True)
+            result2 = associative_scan2(fct, x, 0, False, True)
+            result3 = torch.cumsum(x, 0)
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Flip only non-compiled and compare with compiled reverse=True
+            # The commented lines would work
+            result1 = associative_scan1(fct, x, 0, True, True)
+            # result1 = associative_scan1(fct, x, 0, False, True)
+            result2 = torch.flip(
+                associative_scan2(fct, torch.flip(x, [0]), 0, False, True), [0]
+            )
+            # result2 = torch.flip(associative_scan2(fct, torch.flip(x, [0]), 0, True, True), [0])
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+            # result3 = torch.cumsum(x, 0)
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Flip only compiled and compare with non-compiled reverse=True
+            result1 = torch.flip(
+                associative_scan1(fct, torch.flip(x, [0]), 0, False, True), [0]
+            )
+            result2 = associative_scan2(fct, x, 0, True, True)
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Use reverse=False, but flip both results before and after
+            result1 = torch.flip(
+                associative_scan1(fct, torch.flip(x, [0]), 0, False, True), [0]
+            )
+            result2 = torch.flip(
+                associative_scan2(fct, torch.flip(x, [0]), 0, False, True), [0]
+            )
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Reverse=True
             result1 = associative_scan1(fct, x, 0, True, True)
             result2 = associative_scan2(fct, x, 0, True, True)
             result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
