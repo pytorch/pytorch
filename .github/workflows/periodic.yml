@@ -168,6 +168,7 @@ jobs:
     uses: ./.github/workflows/_win-build.yml
     with:
       build-environment: win-vs2019-cuda11.8-py3
+      sync-tag: win-vs2019-cuda11.8-py3-build
       cuda-version: "11.8"
       test-matrix: |
         { include: [
@@ -186,6 +187,7 @@ jobs:
       - target-determination
     with:
       build-environment: win-vs2019-cuda11.8-py3
+      sync-tag: win-vs2019-cuda11.8-py3-test
       cuda-version: "11.8"
       test-matrix: ${{ needs.win-vs2019-cuda11_8-py3-build.outputs.test-matrix }}
 
