@@ -5,7 +5,7 @@
 #include <ATen/core/Generator.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <c10/core/GeneratorImpl.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 namespace at {
 namespace mps::detail {

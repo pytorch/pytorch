@@ -1137,21 +1137,15 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def get_producer_subnode_for(
         self, consumer: BaseSchedulerNode
     ) -> Optional[BaseSchedulerNode]:
-        producers = []
         for rd in consumer.read_writes.reads:
             if rd.name not in self.scheduler.name_to_buf:
                 continue
 
             node_name = self.scheduler.name_to_buf[rd.name].defining_op.get_name()
             if node_name in self.name_to_node:
-                producers.append(self.name_to_node[node_name])
+                return self.name_to_node[node_name]
 
-        # Don't permit fusion if there are multiple subnodes
-        # that this consumer reads from
-        if len(producers) == 1:
-            return producers[0]
-        else:
-            return None
+        return None
 
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:

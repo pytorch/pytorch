@@ -2,7 +2,6 @@
 
 #include <condition_variable>
 #include <memory>
-#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -910,7 +909,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   using WeakStorage = c10::weak_intrusive_ptr<c10::StorageImpl>;
   void markCompleted(
       IValue value,
-      std::optional<std::vector<WeakStorage>> storages = std::nullopt) {
+      std::optional<std::vector<WeakStorage>> storages = c10::nullopt) {
     // Start by performing all steps that can throw, before setting any field.
     // Do this before even acquiring the mutex, because extractStorages might
     // acquire the GIL, which could lead to a lock inversion with our mutex.
@@ -1587,11 +1586,11 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   c10::intrusive_ptr<Object> copy() const;
 
   c10::intrusive_ptr<Object> deepcopy(
-      std::optional<at::Device> device = std::nullopt) const;
+      std::optional<at::Device> device = c10::nullopt) const;
 
   c10::intrusive_ptr<Object> deepcopy(
       IValue::HashIdentityIValueMap& memo,
-      std::optional<at::Device> device = std::nullopt) const;
+      std::optional<at::Device> device = c10::nullopt) const;
 
   bool is_weak_compilation_ref() const {
     return !type_.holds_strong_ref();
@@ -1614,7 +1613,7 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
  public:
   virtual PyObject* getPyObject() = 0;
   virtual c10::InferredType tryToInferType() = 0;
-  virtual IValue toIValue(const TypePtr& type, std::optional<int32_t> N = std::nullopt) = 0;
+  virtual IValue toIValue(const TypePtr& type, std::optional<int32_t> N = c10::nullopt) = 0;
   virtual std::string toStr() = 0;
   virtual std::vector<at::Tensor> extractTensors() = 0;
 
@@ -1912,7 +1911,7 @@ std::unordered_map<K, V> generic_to(
 template <typename T>
 std::optional<T> generic_to(IValue ivalue, _fake_type<std::optional<T>>) {
   if (ivalue.isNone()) {
-    return std::nullopt;
+    return c10::nullopt;
   }
   return std::move(ivalue).to<T>();
 }
@@ -2281,7 +2280,7 @@ inline IValue::IValue(std::optional<T> v) : IValue() {
   }
 }
 
-inline IValue::IValue(std::nullopt_t) : IValue() {}
+inline IValue::IValue(c10::nullopt_t) : IValue() {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
     : tag(Tag::Object) {
@@ -2364,7 +2363,7 @@ inline const std::string& IValue::toStringRef() const {
 inline std::optional<std::reference_wrapper<const std::string>> IValue::
     toOptionalStringRef() const {
   if (isNone()) {
-    return std::nullopt;
+    return c10::nullopt;
   }
   AT_ASSERT(isString(), "Expected optional<string> but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
