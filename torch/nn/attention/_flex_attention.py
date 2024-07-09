@@ -476,6 +476,10 @@ def flex_attention(
         Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
     """
+    # Some basic input validation
+    _validate_sdpa_input(query, key, value)
+    if query.size(-2) % 128 != 0:
+        raise NotImplementedError("NYI: S and L must be a multiple of 128")
 
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key, value)
