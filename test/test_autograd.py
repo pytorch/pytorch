@@ -4661,7 +4661,7 @@ Done""",
         self.assertEqual(avg.device_time_total, 0)
 
     def test_profiler_shapes(self):
-        print("")
+        print()
         layer1 = torch.nn.Linear(20, 30)
         layer2 = torch.nn.Linear(30, 40)
         input = torch.randn(128, 20)
@@ -4683,7 +4683,7 @@ Done""",
         self.assertEqual(len(found_indices), len(linear_expected_shapes))
 
     def test_profiler_aggregation_lstm(self):
-        print("")
+        print()
         rnn = torch.nn.LSTM(10, 20, 2)
         total_time_s = 0
         with profile(record_shapes=True, use_kineto=kineto_available()) as prof:
