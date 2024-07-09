@@ -302,7 +302,6 @@ def _create_sparse_block_from_block_mask(
 def _create_mask(
     score_mod: _score_mod_signature,
     B: Optional[int],
-    Hkv: Optional[int],
     Hq: Optional[int],
     M: int,
     N: int,
@@ -310,36 +309,28 @@ def _create_mask(
     _compiled: bool = False,
 ):
     r"""This function creates a mask tensor from a score_mod function.
-        B, Hq, Hkv can be set to None to broadcast the mask along B & H dim.
+        B, Hq can be set to None to broadcast the mask along B & H dim.
 
     Args:
         score_mod (Callable): Function to modify attention scores.
         B (int): Batch size.
-        Hkv (int): Number of key/value heads.
-        Hq(int): Number of query heads.
+        Hq (int): Number of query heads.
         M (int): Sequence length of query.
         N (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
 
     Returns:
-        mask (Tensor): A mask tensor with shape (B, Hkv, M * G, N).
+        mask (Tensor): A mask tensor with shape (B, Hq, M, N).
     """
     from contextlib import nullcontext
 
     if B is None:
         B = 1
-    if Hq is None and Hkv is None:
+    if Hq is None:
         Hq = 1
-        Hkv = 1
-    if Hq is None or Hkv is None:
-        raise ValueError("Hq and Hkv must be both None or both specified. ")
 
-    G = Hq // Hkv
-    assert Hq % Hkv == 0
     b = torch.arange(0, B, device=device)
-    hkv = torch.arange(0, Hkv, device=device)
-    g = torch.arange(0, G, device=device)
-    hq = hkv[:, None] * G + g[None, :]
+    h =  torch.arange(0, Hq, device=device)
     m = torch.arange(0, M, device=device)
     n = torch.arange(0, N, device=device)
     # TODO: fix this
@@ -352,21 +343,20 @@ def _create_mask(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, None, None, 0))
     score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
-    score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None))
 
     with ctx:
-        out = score_mod(torch.zeros(B, Hkv, G, M, N, device=device), b, hq, m, n)
+        out = score_mod(torch.zeros(B, Hq, M, N, device=device), b, h, m, n)
         mask = torch.where(torch.isneginf(out), False, True)
-    return torch.flatten(mask, start_dim=-3, end_dim=-2)
+    return mask
 
 
 # Done as a workaround around torch.compile not compiling what we want in the
 # presence of the torchfunctionmdoe
 def _create_block_mask_inner(
-    score_mod, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
+    score_mod, B, Hq, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
 ):
-    mask = _create_mask(score_mod, B, H, M, N, device, _compiled=True)
+    mask = _create_mask(score_mod, B, Hq, M, N, device, _compiled=True)
     block_mask = _convert_mask_to_block_mask(
         mask, KV_BLOCK_SIZE=KV_BLOCK_SIZE, Q_BLOCK_SIZE=Q_BLOCK_SIZE
     )
@@ -376,7 +366,6 @@ def _create_block_mask_inner(
 def create_block_mask(
     score_mod: _score_mod_signature,
     B: Optional[int],
-    Hkv: Optional[int],
     Hq: Optional[int],
     M: int,
     N: int,
@@ -386,12 +375,11 @@ def create_block_mask(
     _compiled=False,
 ):
     r"""This function creates a block mask tuple from a score_mod function.
-        B, Hq, Hkv can be set to None to broadcast the mask along B & H dim.
+        B, Hq can be set to None to broadcast the mask along B & H dim.
 
     Args:
         score_mod (Callable): Function to modify attention scores.
         B (int): Batch size.
-        Hkv (int): Number of KV heads.
         Hq (int): Number of query heads.
         M (int): Sequence length of query.
         N (int): Sequence length of key/value.
@@ -409,7 +397,7 @@ def create_block_mask(
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
     with TransformGetItemToIndex():
         block_mask = inner_func(
-            score_mod, B, Hkv, Hq, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
+            score_mod, B, Hq, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
         )
     return _create_sparse_block_from_block_mask(block_mask)
 
