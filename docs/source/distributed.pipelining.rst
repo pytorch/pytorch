@@ -20,7 +20,7 @@ Pipeline parallelism can be an effective technique for:
 
 * large-scale training
 * bandwidth-limited clusters
-* large model inference.
+* large model inference
 
 The above scenarios share a commonality that the computation per device cannot
 hide the communication of conventional parallelism, for example, the weight
@@ -416,6 +416,16 @@ You can implement your own pipeline schedule by extending one of the following t
 For example, ``ScheduleGPipe`` and ``Schedule1F1B`` are subclasses of ``PipelineScheduleSingle``.
 Whereas, ``ScheduleFlexibleInterleaved1F1B``, ``ScheduleInterleaved1F1B`` and ``ScheduleLoopedBFS``
 are subclasses of ``PipelineScheduleMulti``.
+
+
+Logging
+*******
+
+You can turn on additional logging using the `TORCH_LOGS` environment variable from [`torch._logging`](https://pytorch.org/docs/main/logging.html#module-torch._logging):
+
+* `TORCH_LOGS=+pp` will display `logging.DEBUG` messages and all levels above it.
+* `TORCH_LOGS=pp` will display `logging.INFO` messages and above.
+* `TORCH_LOGS=-pp` will display `logging.WARNING` messages and above.
 
 
 API Reference

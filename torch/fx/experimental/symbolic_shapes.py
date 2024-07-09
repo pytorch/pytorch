@@ -1475,7 +1475,8 @@ class RuntimeAssert:
 
 # Used for printing SymExprs in compile_fx
 class SymExprPrinter(StrPrinter):
-    pass
+    def _print_Float(self, expr):
+        return str(float(expr))
 
 
 class ShapeGuardPrinter(SymExprPrinter):
@@ -2451,7 +2452,7 @@ class ShapeEnv:
         specialize_zero_one=True,
         # When True, assume input sizes which have the same size are
         # symbolically equal.
-        duck_shape=True,
+        duck_shape: Optional[bool] = None,
         # For debugging
         co_fields=None,
         # When True, whenever safe, we will generate a deferred runtime assert
@@ -2469,6 +2470,9 @@ class ShapeEnv:
         # XXX Add any new settings that could affect FakeTensor evaluation
         # to: torch._subclasses.fake_tensor._ShapeEnvSettings
     ):
+        if duck_shape is None:
+            duck_shape = config.use_duck_shape
+
         self.settings = ShapeEnvSettings(
             # Not directly used by ShapeEnv; indirectly used by FakeTensor
             allow_scalar_outputs=allow_scalar_outputs,
@@ -2806,17 +2810,17 @@ class ShapeEnv:
             if not (min <= int(a) <= max):
                 raise ValueRangeError(f"Invalid value {int(a)} for range [{min}:{max}]")
             return
-        assert isinstance(a, sympy.Symbol), "constraining non-Symbols NYI"
 
         # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
         # semantics that this is an "unchecked" assert (but it this actually
         # something useful?  Might be better to restrict only for unbacked
         # SymInt).
-        self.constrain_symbol_range(
-            a,
-            compiler_min=min,
-            compiler_max=max,
-        )
+        if isinstance(a, sympy.Symbol):
+            self.constrain_symbol_range(
+                a,
+                compiler_min=min,
+                compiler_max=max,
+            )
 
     @record_shapeenv_event()
     def _constrain_unify(self, a, b):
