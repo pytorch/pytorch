@@ -2122,3 +2122,7 @@ def make_runtime_safe(
     fw_metadata.make_runtime_safe()
     if maybe_subclass_meta is not None:
         maybe_subclass_meta.fw_metadata.make_runtime_safe()
+        if maybe_subclass_meta.grad_input_metas:
+            for meta in maybe_subclass_meta.grad_input_metas:
+                if isinstance(meta, SubclassCreationMeta):
+                    meta.make_runtime_safe()
