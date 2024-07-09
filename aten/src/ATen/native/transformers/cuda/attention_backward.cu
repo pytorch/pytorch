@@ -29,6 +29,7 @@
 #include <ATen/ops/_efficient_attention_backward.h>
 #include <ATen/ops/_efficient_attention_backward_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_backward_native.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 #ifdef USE_FLASH_ATTENTION
@@ -204,13 +205,16 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
     }
 
     if (attn_bias_.has_value()) {
+      if (attn_bias_.value().dtype() == at::kBool) {
+        auto float_bias = at::zeros(attn_bias_.value().sizes(), attn_bias_.value().options().dtype(query.dtype()));
+        float_bias.masked_fill_(attn_bias_.value().logical_not(), -std::numeric_limits<float>::infinity());
+        attn_bias_ = float_bias;
+      }
       if (attn_bias_.value().dim() == 2) {
-        attn_bias_ = attn_bias_.value().expand({batch_size, 1, attn_bias_.value().size(0), attn_bias_.value().size(1)}).to(at::kFloat);
+        attn_bias_ = attn_bias_.value().expand({batch_size, 1, attn_bias_.value().size(0), attn_bias_.value().size(1)});
       } else {
         TORCH_CHECK(false, "cuDNN SDPA expects either a 2D or 4D attn_bias");
       }
-            TORCH_WARN("SHAPES?", query.sizes(), " ", attn_bias_.value().sizes());
-            TORCH_WARN("STRIDES?", attn_bias_.value().strides());
     }
 
     const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
