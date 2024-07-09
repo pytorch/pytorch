@@ -1616,6 +1616,7 @@ class GraphLowering(torch.fx.Interpreter):
             # second pass
             self.cpp_wrapper = True
             self.removed_buffers.clear()
+            self.removed_operations.clear()
             self.inplaced_to_remove.clear()
             V.graph.sizevars.precomputed_replacements.clear()
             V.graph.sizevars.inv_precomputed_replacements.clear()
