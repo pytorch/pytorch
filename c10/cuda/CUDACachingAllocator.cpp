@@ -901,9 +901,15 @@ class DeviceCachingAllocator {
   bool record_history = false;
 
   std::atomic<CreateContextFn> context_recorder_;
-  size_t alloc_trace_next = 0;
   RecordContext record_context_ = RecordContext::NEVER;
   size_t alloc_trace_max_entries_ = 1;
+
+  // Both alloc_trace and alloc_trace_next needs to be used
+  // under alloc_trace_lock.
+  // TODO: reduce risk of deadlock and remove recursive lock by
+  //       wrapping this into a class instance.
+  std::recursive_mutex alloc_trace_lock;
+  size_t alloc_trace_next = 0;
   std::vector<TraceEntry>*
       alloc_trace; // pointer because we need to intentionally leak this on
                    // deallocation it can hold references to Python state which
@@ -953,6 +959,7 @@ class DeviceCachingAllocator {
     alloc_trace_max_entries_ = std::max(size_t(1), alloc_trace_max_entries);
     record_context_ = enabled ? when : RecordContext::NEVER;
     if (!enabled) {
+      std::lock_guard<std::recursive_mutex> lk(alloc_trace_lock);
       alloc_trace_next = 0;
       alloc_trace->clear();
     }
@@ -1765,19 +1772,23 @@ class DeviceCachingAllocator {
       const std::function<time_t(approx_time_t)>& tsc_to_us) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     std::vector<TraceEntry> result;
-    result.reserve(alloc_trace->size());
-    result.insert(
-        result.end(),
-        alloc_trace->begin() +
-            static_cast<std::vector<TraceEntry>::difference_type>(
-                alloc_trace_next),
-        alloc_trace->end());
-    result.insert(
-        result.end(),
-        alloc_trace->begin(),
-        alloc_trace->begin() +
-            static_cast<std::vector<TraceEntry>::difference_type>(
-                alloc_trace_next));
+
+    {
+      std::lock_guard<std::recursive_mutex> lk(alloc_trace_lock);
+      result.reserve(alloc_trace->size());
+      result.insert(
+          result.end(),
+          alloc_trace->begin() +
+              static_cast<std::vector<TraceEntry>::difference_type>(
+                  alloc_trace_next),
+          alloc_trace->end());
+      result.insert(
+          result.end(),
+          alloc_trace->begin(),
+          alloc_trace->begin() +
+              static_cast<std::vector<TraceEntry>::difference_type>(
+                  alloc_trace_next));
+    }
 
     // Convert all the timestamps from tsc to epoch time in microseconds.
     for (auto& te : result) {
@@ -2872,6 +2883,7 @@ class DeviceCachingAllocator {
     }
 
     if (record_history) {
+      std::lock_guard<std::recursive_mutex> lk(alloc_trace_lock);
       if (alloc_trace->size() < alloc_trace_max_entries_) {
         alloc_trace->emplace_back(te);
       } else {
