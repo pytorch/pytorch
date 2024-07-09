@@ -11,6 +11,7 @@ from torch.distributed.pipelining import (
 )
 from torch.distributed.pipelining.schedules import (
     _Action,
+    _add_send_recv,
     _add_unshard_reshard,
     _format_pipeline_order,
     _validate_pipeline_order,
@@ -168,6 +169,61 @@ class TestScheduleLowering(TestCase):
                 ),
             )
 
+    @parametrize(
+        "test_info",
+        [
+            {
+                "compute": {
+                    "0": ["0F0", "0F1", "   ", "0B0", "   ", "0B1"],
+                    "1": ["   ", "1F0", "1B0", "1F1", "1B1", "   "],
+                },
+                "comms": {
+                    "0": [
+                        "0F0",
+                        "0F0SEND",
+                        "0F1",
+                        "0F1SEND",
+                        "0B0RECV",
+                        "0B0",
+                        "0B1RECV",
+                        "0B1",
+                    ],
+                    "1": [
+                        "1F0RECV",
+                        "1F0",
+                        "1F1RECV",
+                        "1B0",
+                        "1B0SEND",
+                        "1F1",
+                        "1B1",
+                        "1B1SEND",
+                    ],
+                },
+            },
+        ],
+    )
+    def test_send_recv(self, test_info):
+        compute_sch = {
+            rank: self._parse_actions(test_info["compute"][rank])
+            for rank in test_info["compute"]
+        }
+        expected_comms_sch = {
+            rank: self._parse_actions(test_info["comms"][rank])
+            for rank in test_info["comms"]
+        }
+
+        comms_sch = _add_send_recv(compute_sch)
+        for rank in expected_comms_sch:
+            for expected, actual in zip(expected_comms_sch[rank], comms_sch[rank]):
+                self.assertEqual(
+                    expected,
+                    actual,
+                    (
+                        f"Mismatch: expected action {expected} but found {actual}."
+                        f"\nWhole Schedule: {comms_sch}"
+                    ),
+                )
+            self.assertEqual(len(comms_sch[rank]), len(expected_comms_sch[rank]))
 
 instantiate_parametrized_tests(TestScheduleLowering)
 

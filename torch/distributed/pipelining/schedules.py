@@ -38,6 +38,8 @@ class _ComputationType(Enum):
     WEIGHT = 3
     UNSHARD = 4
     RESHARD = 5
+    SEND = 6
+    RECV = 7
 
     def __str__(self):
         str_map = {
@@ -46,6 +48,8 @@ class _ComputationType(Enum):
             _ComputationType.WEIGHT: "W",
             _ComputationType.UNSHARD: "UNSHARD",
             _ComputationType.RESHARD: "RESHARD",
+            _ComputationType.SEND: "SEND",
+            _ComputationType.RECV: "RECV",
         }
         return str_map[self]
 
@@ -61,6 +65,10 @@ class _ComputationType(Enum):
             return _ComputationType.UNSHARD
         elif action == "RESHARD":
             return _ComputationType.RESHARD
+        elif action == "SEND":
+            return _ComputationType.SEND
+        elif action == "RECV":
+            return _ComputationType.RECV
         else:
             raise RuntimeError(f"Invalid computation type {action}")
 
@@ -70,38 +78,50 @@ B = _ComputationType.BACKWARD
 W = _ComputationType.WEIGHT
 UNSHARD = _ComputationType.UNSHARD
 RESHARD = _ComputationType.RESHARD
+SEND = _ComputationType.SEND
+RECV = _ComputationType.RECV
 
-_action_regex = re.compile(r"(\d+)([F,B,W]|UNSHARD|RESHARD)(\d*)")
+_action_regex = re.compile(r"(\d+)([F,B,W]{0,1})(\d*)(UNSHARD|RESHARD|SEND|RECV){0,1}")
 
 
 class _Action(NamedTuple):
     stage_index: int
-    computation_type: _ComputationType
+    computation_type: Optional[_ComputationType] = None
     microbatch_index: Optional[int] = None
+    comm_type: Optional[_ComputationType] = None
 
     def __repr__(self):
+        repr = str(self.stage_index)
+        if self.computation_type is not None:
+            repr += str(self.computation_type)
         if self.microbatch_index is not None:
-            return f"{self.stage_index}{self.computation_type}{self.microbatch_index}"
-        return f"{self.stage_index}{self.computation_type}"
+            repr += str(self.microbatch_index)
+        if self.comm_type is not None:
+            repr += str(self.comm_type)
+        return repr
 
     @staticmethod
     def from_str(str):
         """
         Reverse of __repr__
 
-        String should be formatted as [stage][action type][microbatch] e.g. `2F0`
+        String should be formatted as [stage][(action type)][(microbatch)][(comm type)]
+            e.g. `2F0`, `1UNSHARD`, `3F1SEND`
         """
         if match := _action_regex.match(str):
-            stage_index, computation_type, microbatch_index = match.groups()
+            stage_index, computation_type, microbatch_index, comm_type = match.groups()
             return _Action(
                 int(stage_index),
-                _ComputationType.from_str(computation_type),
+                _ComputationType.from_str(computation_type)
+                if computation_type
+                else None,
                 int(microbatch_index) if len(microbatch_index) else None,
+                _ComputationType.from_str(comm_type) if comm_type else None,
             )
         elif str == "" or str.isspace():
             return None
         raise RuntimeError(
-            f"Invalid action string: {str}, should be formatted as [stage][action type][microbatch] e.g. 2F0"
+            f"Invalid action string: {str}, should be formatted as [stage][(action type)][(microbatch)][(comm type)] e.g. 2F0"
         )
 
 
@@ -194,8 +214,8 @@ def _validate_pipeline_order(
             computation_type = action.computation_type
             mb_index = action.microbatch_index
             assert (
-                mb_index is not None
-            ), "All currently supported action types require valid microbatch_index"
+                mb_index is not None and computation_type is not None
+            ), "All currently supported action types require valid microbatch_index and computation_type"
             if mb_index >= num_microbatches:
                 error_msg.append(f"Microbatch index {mb_index} out of range")
 
@@ -812,11 +832,11 @@ def _add_unshard_reshard(
 
     def _unshard(stage_index: int):
         active_stages.add(stage_index)
-        unshard_actions.append(_Action(stage_index, UNSHARD))
+        unshard_actions.append(_Action(stage_index, None, None, UNSHARD))
 
     def _reshard(stage_index: int):
         active_stages.remove(stage_index)
-        unshard_actions.append(_Action(stage_index, RESHARD))
+        unshard_actions.append(_Action(stage_index, None, None, RESHARD))
 
     for i, action in enumerate(compute_actions):
         if action is None:
@@ -844,6 +864,12 @@ def _add_unshard_reshard(
         unshard_actions.append(action)
 
     return unshard_actions
+
+
+def _add_send_recv(
+    compute_actions: Dict[int, List[Optional[_Action]]],
+) -> Dict[int, List[Optional[_Action]]]:
+    return compute_actions
 
 
 class PipelineScheduleMulti(_PipelineSchedule):
