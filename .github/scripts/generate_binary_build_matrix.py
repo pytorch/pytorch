@@ -413,7 +413,7 @@ def generate_wheels_matrix(
                             ),
                         }
                     )
-                    # special build building  PyThon 3.11 for 12.1 CUDA
+                    # Special build building to use on Colab. PyThon 3.11 for 12.1 CUDA
                     if python_version == "3.10" and arch_version == "12.1":
                         ret.append(
                             {
@@ -460,6 +460,6 @@ def generate_wheels_matrix(
     return ret
 
 
-#validate_nccl_dep_consistency("12.4")
-#validate_nccl_dep_consistency("12.1")
-#validate_nccl_dep_consistency("11.8")
+validate_nccl_dep_consistency("12.4")
+validate_nccl_dep_consistency("12.1")
+validate_nccl_dep_consistency("11.8")
