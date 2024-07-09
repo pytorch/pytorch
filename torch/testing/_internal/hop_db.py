@@ -10,8 +10,9 @@ from torch.testing._internal.opinfo.core import (
     SampleInput,
 )
 from torch.testing._internal.common_dtype import all_types_and, custom_types
+from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.opinfo.core import DecorateInfo
-from torch.nn.attention._flex_attention import _flex_attention
+from torch.nn.attention._flex_attention import flex_attention
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
@@ -222,7 +223,7 @@ hop_db = [
     OpInfo(
         name="flex_attention",
         variant_test_name="simple",
-        op=_flex_attention,
+        op=flex_attention,
         sample_inputs_func=sample_inputs_flex_attention,
         dtypes=custom_types(torch.float16, torch.float32),
         supports_out=False,
@@ -235,12 +236,24 @@ hop_db = [
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
-        )
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestProxyTensorOpInfo",
+                "test_make_fx_symbolic_exhaustive",
+                active_if=not IS_WINDOWS,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestEagerFusionOpInfo",
+                "test_aot_autograd_symbolic_exhaustive",
+                active_if=not IS_WINDOWS,
+            ),
+        ),
     ),
     OpInfo(
         name="flex_attention_backward",
         variant_test_name="simple",
-        op=_flex_attention,
+        op=flex_attention,
         sample_inputs_func=sample_inputs_flex_attention,
         dtypes=custom_types(torch.float16, torch.float32),
         supports_out=False,
@@ -253,6 +266,18 @@ hop_db = [
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
-        )
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestProxyTensorOpInfo",
+                "test_make_fx_symbolic_exhaustive",
+                active_if=not IS_WINDOWS,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestEagerFusionOpInfo",
+                "test_aot_autograd_symbolic_exhaustive",
+                active_if=not IS_WINDOWS,
+            ),
+        ),
     )
 ]

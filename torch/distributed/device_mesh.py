@@ -346,7 +346,7 @@ else:
                         if self.get_rank() in subgroup_ranks:
                             if len(dim_group_infos) > dim:
                                 raise RuntimeError(
-                                    f"Each device mesh dimension should get only one process group, but got {self.get_rank} "
+                                    f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
                                     f"in {subgroup_ranks}!"
                                 )
                             dim_group_infos.append(

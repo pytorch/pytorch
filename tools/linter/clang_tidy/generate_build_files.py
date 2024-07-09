@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import os
 import subprocess
 import sys
-from typing import List
 
 
-def run_cmd(cmd: List[str]) -> None:
+def run_cmd(cmd: list[str]) -> None:
     print(f"Running: {cmd}")
     result = subprocess.run(
         cmd,
