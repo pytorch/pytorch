@@ -246,6 +246,65 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             requires_grad=requires_grad,
         )
 
+        def maybe_pad_local_tensor(local_tensor, spec):
+            global_shape = spec.tensor_meta.shape
+            mesh = spec.mesh
+            placements = spec.placements
+
+            # 1. compute global padding size on global shape
+            num_chunks_by_dim = [1 for _ in range(len(global_shape))]
+            for mesh_idx, placement in enumerate(placements):
+                if placement.is_shard():
+                    tensor_dim = placement.dim  # type: ignore[attr-defined]
+                    mesh_dim_size = mesh.size(mesh_idx)
+                    num_chunks_by_dim[tensor_dim] *= mesh_dim_size
+
+            pad_sizes = []
+            for tensor_dim, num_chunks in enumerate(num_chunks_by_dim):
+                tensor_dim_size = global_shape[tensor_dim]
+                if num_chunks == 1 or num_chunks == tensor_dim_size:
+                    pad_sizes.append(0)
+                elif tensor_dim_size > num_chunks:
+                    padded_tensor_dim_size = (
+                        tensor_dim_size + num_chunks - (tensor_dim_size % num_chunks)
+                    )
+                    pad_sizes.append(padded_tensor_dim_size - tensor_dim_size)
+                elif tensor_dim_size < num_chunks:
+                    pad_sizes.append(num_chunks - tensor_dim_size)
+
+            # 2. short-circuit return if no padding is needed 
+            if all(pad_size == 0 for pad_size in pad_sizes):
+                spec.local_tensor_slice_indices = None
+                return local_tensor, spec
+
+            # 3. get global_shape with padding added
+            padded_global_shape = [
+                tensor_dim_size + pad_size
+                for tensor_dim_size, pad_size in zip(global_shape, pad_sizes)
+            ]
+
+            # 4. get padded local tensor size. this would be uniform across all the ranks.
+            padded_local_shape = [
+                padded_dim_size // num_chunks
+                for padded_dim_size, num_chunks in zip(
+                    padded_global_shape, num_chunks_by_dim
+                )
+            ]
+
+            # 5. pad local tensor with zeros
+            padded_local_tensor = local_tensor.new_zeros(padded_local_shape)
+
+            # 6. copy local tensor into padded local tensor
+            slices = [
+                slice(0, tensor_dim_size) for tensor_dim_size in local_tensor.shape
+            ]
+            spec.local_tensor_slice_indices = slices
+            padded_local_tensor[slices].copy_(local_tensor)
+
+            return padded_local_tensor, spec
+
+        local_tensor, spec = maybe_pad_local_tensor(local_tensor, spec)
+
         r._spec = spec
         r._local_tensor = local_tensor
         return r
@@ -420,7 +479,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             will depend on if the `DTensor` requires_grad or not.
         """
         if not torch.is_grad_enabled():
-            return self._local_tensor
+            if self._spec.local_tensor_slice_indices is None:
+                return self._local_tensor
+            else:
+                return self._local_tensor[self._spec.local_tensor_slice_indices]
 
         if grad_placements is not None and not isinstance(grad_placements, tuple):
             grad_placements = tuple(grad_placements)

@@ -884,5 +884,38 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
 
 
+class DTensorStaticPadding(DTensorTestBase):
+    @with_comms
+    @torch.no_grad()
+    def test_dtensor_uneven(self):
+        from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
+
+        torch.manual_seed(self.rank)
+        if self.rank < 3:
+            local_tensor = torch.ones(3) * self.rank
+        else:
+            local_tensor = torch.ones(2) * self.rank
+
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        sharding_spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            tensor_meta=TensorMeta(
+                shape=(11,),
+                stride=local_tensor.stride(),
+                dtype=local_tensor.dtype,
+            ),
+        )
+
+        dtensor = DTensor(
+            local_tensor,
+            sharding_spec,
+            requires_grad=False,
+        )
+
+        print(f"{self.rank=}, {dtensor=}, {dtensor.shape=}, {dtensor.to_local()=}")
+
+
 if __name__ == "__main__":
     run_tests()
