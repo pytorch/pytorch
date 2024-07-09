@@ -314,18 +314,21 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_size()[index]
         return texpr(self.rename_indexing(val))
 
-    def stride(self, name, index):
+    def stride(self, name, index=None):
         """
         Hook called from template code to get the stride of an arg.
         Will add needed args to pass it in if it is dynamic.
         """
-        assert isinstance(index, int)
         if name is None:
-            val = self.output_node.get_stride()[index]
+            val = self.output_node.get_stride()
         else:
             assert isinstance(name, str)
-            val = self.named_input_nodes[name].get_stride()[index]
-        return texpr(self.rename_indexing(val))
+            val = self.named_input_nodes[name].get_stride()
+
+        if isinstance(index, int):
+            return texpr(self.rename_indexing(val[index]))
+        else:
+            return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
     def modification(
         self, subgraph_number: int, output_name: str, **fixed_inputs
@@ -376,9 +379,9 @@ class TritonTemplateKernel(TritonKernel):
                     subgraph, ir.ComputedBuffer
                 ), f"Expected the subgraph to be a ComputedBuffer, got {type(subgraph)}"
                 if isinstance(subgraph.data, ir.InputBuffer):
-                    out = subgraph.data.make_loader()((1,))
+                    out = subgraph.data.make_loader()(())
                 else:
-                    out = subgraph.data.inner_fn((1,))
+                    out = subgraph.data.inner_fn(())
 
             self.codegen_body()
             self.body.writeline(f"{output_name} = {out.value}")
