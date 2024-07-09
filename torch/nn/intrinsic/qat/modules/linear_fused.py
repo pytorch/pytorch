@@ -8,8 +8,9 @@ appropriate file under the `torch/ao/nn/intrinsic/qat/modules`,
 while adding an import statement here.
 """
 
-__all__ = [
-    'LinearBn1d',
-]
-
 from torch.ao.nn.intrinsic.qat import LinearBn1d
+
+
+__all__ = [
+    "LinearBn1d",
+]

@@ -8,7 +8,7 @@ appropriate file under the `torch/ao/nn/quantized/modules`,
 while adding an import statement here.
 """
 
-__all__ = ['LinearPackedParams', 'Linear']
+from torch.ao.nn.quantized.modules.linear import Linear, LinearPackedParams
 
-from torch.ao.nn.quantized.modules.linear import Linear
-from torch.ao.nn.quantized.modules.linear import LinearPackedParams
+
+__all__ = ["LinearPackedParams", "Linear"]

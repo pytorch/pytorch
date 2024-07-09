@@ -1,6 +1,4 @@
-from .linear_relu import LinearReLU
-from .linear_fused import LinearBn1d
-from .conv_fused import (
+from torch.nn.intrinsic.qat.modules.conv_fused import (
     ConvBn1d,
     ConvBn2d,
     ConvBn3d,
@@ -10,9 +8,12 @@ from .conv_fused import (
     ConvReLU1d,
     ConvReLU2d,
     ConvReLU3d,
-    update_bn_stats,
     freeze_bn_stats,
+    update_bn_stats,
 )
+from torch.nn.intrinsic.qat.modules.linear_fused import LinearBn1d
+from torch.nn.intrinsic.qat.modules.linear_relu import LinearReLU
+
 
 __all__ = [
     "LinearReLU",
