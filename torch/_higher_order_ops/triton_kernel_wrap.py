@@ -1083,7 +1083,7 @@ class TraceableTritonKernelWrapper:
 
         if not is_fx_tracing() or torch._dynamo.is_compiling():
             assert self.kernel is not None
-            return self.kernel[self.grid](*args, **kwargs)
+            return self.kernel.run(*args, **kwargs, grid=self.grid, warmup=False)
 
         return tracing_triton_hopifier_singleton.call_triton_kernel(
             self, args, kwargs, None
