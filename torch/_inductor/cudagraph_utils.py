@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
+
 import dataclasses
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -22,6 +23,7 @@ class PlaceholderInfo:
     pertinent to placeholder stack traces. We use these in logging and error messages
     related to cudagraphs, and will cache these results.
     """
+
     name: str
     stack_trace: Optional[str]
     # This field is recursive, but never cyclic (since a node never uses itself)

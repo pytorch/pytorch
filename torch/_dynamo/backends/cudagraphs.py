@@ -87,7 +87,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
     if not mutation_indices:
         return None
 
-    placeholders = [node for node in aot_model.graph.nodes if node.op == "placeholder"]
+    placeholders = get_placeholder_info(aot_model.graph)
     return get_mutation_stack_trace(placeholders, mutation_indices)
 
 

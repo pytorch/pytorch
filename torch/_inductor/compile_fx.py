@@ -437,6 +437,7 @@ def with_fresh_cache_if_config(fn):
 
 def cudagraph_post_compile(
     cudagraphs: BoxedBool,
+    example_inputs: List[Any],
     compiled_graph: CompiledFxGraph,
     cudagraph_fail_reasons: List[str],
     inputs_to_check: Sequence[int],
@@ -454,11 +455,11 @@ def cudagraph_post_compile(
     """
     assert compiled_graph.current_callable is not None
     if not cudagraph_fail_reasons:
-        # if not config.triton.cudagraph_trees:
-        #     # Force specialize all inputs so that CUDA graphs will work
-        #     for t in example_inputs:
-        #         if isinstance(t, torch.SymInt):
-        #             int(t)  # guard
+        if not config.triton.cudagraph_trees:
+            # Force specialize all inputs so that CUDA graphs will work
+            for t in example_inputs:
+                if isinstance(t, torch.SymInt):
+                    int(t)  # guard
 
         if (
             boxed_forward_device_index is not None
@@ -729,6 +730,7 @@ def compile_fx_inner(
             placeholders = tuple(get_placeholder_info(gm.graph))
             cudagraph_post_compile(
                 cudagraphs,
+                example_inputs,
                 compiled_graph,
                 cudagraph_fail_reasons,
                 inputs_to_check,
