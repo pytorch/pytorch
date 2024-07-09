@@ -1,6 +1,6 @@
 import collections
 import json
-from typing import Any, Deque, TypeVar
+from typing import Any, Deque, TypeVar, Union
 
 S = TypeVar("S", bound="ContextHintTracker")
 
@@ -19,14 +19,14 @@ class ContextHintTracker:
         ContextHintTracker.hint_stack.pop()
 
     @staticmethod
-    def get_last_hint() -> str | None:
+    def get_last_hint() -> Union[str, None]:
         if len(ContextHintTracker.hint_stack):
             return ContextHintTracker.hint_stack[-1]
         else:
             return None
 
     @staticmethod
-    def get_hints_merged() -> str | None:
+    def get_hints_merged() -> Union[str, None]:
         if len(ContextHintTracker.hint_stack):
             merged_hints = {}
             for hint in ContextHintTracker.hint_stack:
