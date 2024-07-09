@@ -280,7 +280,7 @@ static py::object dispatch_on_subclass(
     bool is_torch_function,
     const char* torch_function_name_str,
     std::optional<c10::impl::TorchDispatchModeKey> maybe_mode_key =
-        c10::nullopt) {
+        std::nullopt) {
   py::object ret;
   for (auto& arg : overloaded_args) {
     py::object torch_function =
@@ -362,8 +362,8 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
     const char* torch_function_name_str) {
   // Disable mode on the inside; this makes for a more user-friendly
   // experience if you try to, e.g., print your tensors.
-  at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
-  at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
+  std::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
+  std::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
   py::object mode_obj;
   // NB: We only really need keep the mode_obj live if the function call
   // fails for error reporting, but whatever, Python refcounts are cheap
@@ -1059,11 +1059,11 @@ std::string FunctionParameter::type_name() const {
 
 static inline std::optional<int64_t> parse_as_integer(const std::string& s) {
   if (s.empty())
-    return c10::nullopt;
+    return std::nullopt;
   char* str_end = nullptr;
   long ans = strtol(s.c_str(), &str_end, 0);
   // *str_end == 0 if the entire string was parsed as an integer.
-  return (*str_end == 0) ? std::optional<int64_t>(ans) : c10::nullopt;
+  return (*str_end == 0) ? std::optional<int64_t>(ans) : std::nullopt;
 }
 
 /*
