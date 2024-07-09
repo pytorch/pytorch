@@ -2314,6 +2314,23 @@ class GraphModule(torch.nn.Module):
             """{'sin': ['sin']}""",
         )
 
+    def test_vmap_multiply_scalar(self):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def g(x):
+            return torch.vmap(torch.mul, in_dims=(0, None))(x, 3.14)
+
+        x = torch.randn(3)
+        y = g(x)
+        self.assertEqual(y, x * 3.14)
+
+        @torch.compile(backend="inductor", fullgraph=True)
+        def f(x):
+            return torch.vmap(torch.mul, in_dims=(0, None))(x, 314)
+
+        x = torch.randn(3)
+        y = f(x)
+        self.assertEqual(y, x * 314)
+
     def test_vmap_source_fn_stack(self):
         backend = EagerAndRecordGraphs()
 
