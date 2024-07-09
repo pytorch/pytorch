@@ -1,21 +1,27 @@
 # mypy: allow-untyped-defs
 
 import hashlib
+from itertools import chain
+from typing import Any, Dict, Optional, TYPE_CHECKING
+
 import torch
 import torch.fx
-from typing import Any, Dict, Optional, TYPE_CHECKING
-from torch.fx.node import _get_qualified_name, _format_arg
-from torch.fx.graph import _parse_stack_trace
-from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx._compatibility import compatibility
-from itertools import chain
+from torch.fx.graph import _parse_stack_trace
+from torch.fx.node import _format_arg, _get_qualified_name
+from torch.fx.passes.shape_prop import TensorMetadata
 
-__all__ = ['FxGraphDrawer']
+
 try:
     import pydot
+
     HAS_PYDOT = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_PYDOT = False
+    pydot = None
+
+
+__all__ = ["FxGraphDrawer"]
 
 _COLOR_MAP = {
     "placeholder": '"AliceBlue"',

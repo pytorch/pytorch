@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import builtins
 import functools
 import itertools
 import numbers
@@ -784,6 +783,70 @@ def slice_forward(
         )
     else:
         return self.as_strided(sizes, strides, storage_offset)
+
+
+def _normalize_start_end(
+    x: Tensor, dim: int, start: Optional[int], end: Optional[int]
+) -> Tuple[int, int]:
+    """
+    Normalize start and end such that both are in the range
+    [0, x.get_size()[dim]] and start <= end.
+    """
+    dim_size = x.shape[dim]
+
+    def clamp_wrap(val, lower, upper, default) -> int:
+        if val is None:
+            return default
+        if val < 0:
+            val = val + dim_size
+        return min(max(val, lower), upper)
+
+    start = clamp_wrap(start, 0, dim_size, 0)
+    end = clamp_wrap(end, start, dim_size, dim_size)
+    return start, end
+
+
+# This is not in torch._refs because aten.index used by
+# aten._unsafe_masked_index does not have a decomposition.
+@register_decomposition(aten.slice_scatter)
+@out_wrapper()
+def slice_scatter(
+    input: Tensor,
+    src: Tensor,
+    dim: int = 0,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    step: int = 1,
+):
+    dim = utils.canonicalize_dim(input.ndim, dim)
+    dim_size = input.shape[dim]
+    start, end = _normalize_start_end(input, dim, start, end)
+
+    src_size = list(input.shape)
+    src_size[dim] = (end - start + (step - 1)) // step
+    src = src.expand(src_size)
+
+    if start == 0 and end == dim_size and step == 1:
+        return src.clone()
+
+    indices = [None] * input.dim()
+    idx = torch.arange(dim_size, device=input.device)
+    indices[dim] = (idx - start) // step
+
+    mask = torch.ones(dim_size, device=input.device, dtype=torch.bool)
+    if start != 0:
+        mask = torch.logical_and(mask, idx >= start)
+
+    if end != dim_size:
+        mask = torch.logical_and(mask, idx < end)
+
+    if step != 1:
+        mask = torch.logical_and(mask, (idx - start) % step == 0)
+
+    mask_shape = [1] * input.dim()
+    mask_shape[dim] = -1
+    mask = mask.view(mask_shape)
+    return aten.where(mask, aten._unsafe_masked_index(src, mask, indices, 0), input)
 
 
 @register_decomposition(aten.select_backward)
@@ -3777,68 +3840,6 @@ def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
 
     masked_value = values.masked_fill(~mask, 0)
     return aten._unsafe_index_put(x, indices, masked_value, accumulate=True)
-
-
-@register_decomposition(aten.constant_pad_nd)
-@out_wrapper()
-def constant_pad_nd(
-    input: Tensor,
-    pad: Tuple[int, ...],
-    value: NumberType = 0,
-) -> Tensor:
-    # Avoid importing sympy at a module level
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
-
-    if builtins.all(statically_known_true(p <= 0) for p in pad):
-        import torch._refs as refs
-
-        return refs.constant_pad_nd(input, pad, value)
-
-    torch._check(
-        len(pad) % 2 == 0,
-        lambda: "constant_pad_nd requires an even number of padding",
-    )
-
-    dim = len(pad) // 2
-    inp_shape = input.shape[-dim:]
-    nc_dim = input.dim() - dim
-
-    pad_left = [pad[2 * (dim - 1 - i)] for i in range(dim)]
-    pad_right = [pad[2 * (dim - 1 - i) + 1] for i in range(dim)]
-
-    if input.numel() == 0:
-        shape = list(input.shape)
-        for i in range(dim):
-            shape[input.ndim - 1 - i] += pad[2 * i] + pad[2 * i + 1]
-        result = input.new_full(shape, value)
-        memory_format = utils.suggest_memory_format(input)
-        result = result.contiguous(memory_format=memory_format)
-        return result
-
-    out_indices = [
-        torch.arange(
-            -pad_left[i], inp_shape[i] + pad_right[i], device=input.device
-        ).reshape(-1, *[1] * (dim - 1 - i))
-        for i in range(dim)
-    ]
-
-    indices: List[Any] = [None] * input.dim()
-    for i in range(dim):
-        indices[i + nc_dim] = out_indices[i]
-
-    conds = []
-    for i in range(dim):
-        view_shape = [1] * input.dim()
-        view_shape[nc_dim + i] = out_indices[i].shape[0]
-        idx = out_indices[i].view(view_shape)
-        conds.append(torch.logical_and(idx >= 0, idx < input.shape[nc_dim + i]))
-    mask = reduce(torch.logical_and, conds)
-    result = aten._unsafe_masked_index(input, mask, indices, value)
-
-    # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(input)
-    result = result.contiguous(memory_format=memory_format)
-    return result
 
 
 def _nll_loss_forward(
