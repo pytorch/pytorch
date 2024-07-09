@@ -740,7 +740,7 @@ Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
       [computeEncoder setComputePipelineState:quantizedPSO];
       mtl_setBuffer(computeEncoder, weight, 0);
       mtl_setBuffer(computeEncoder, weight_packed, 1);
-      [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:2];
+      mtl_setBytes(computeEncoder, sizes, 2);
       [computeEncoder dispatchThreads:MTLSizeMake(N, K / 2, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCapturing()) {
@@ -799,7 +799,7 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
       mtl_setBuffer(computeEncoder, B, 1);
       mtl_setBuffer(computeEncoder, qScaleAndZeros, 2);
       mtl_setBuffer(computeEncoder, C, 3);
-      [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
+      mtl_setBytes(computeEncoder, sizes, 4);
       [computeEncoder dispatchThreads:MTLSizeMake(N / 4 * 32, 1, M) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCapturing()) {
@@ -854,7 +854,7 @@ Tensor _weight_int8pack_mm_mps(const Tensor& A, const Tensor& B, const Tensor& s
       mtl_setBuffer(computeEncoder, B, 1);
       mtl_setBuffer(computeEncoder, scales, 2);
       mtl_setBuffer(computeEncoder, C, 3);
-      [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
+      mtl_setBytes(computeEncoder, sizes, 4);
       if (M < 12) {
         [computeEncoder setThreadgroupMemoryLength:32 atIndex:0];
         [computeEncoder dispatchThreadgroups:MTLSizeMake((N + 7) / 8, M, 1)

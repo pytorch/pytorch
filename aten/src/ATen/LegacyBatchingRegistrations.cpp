@@ -512,7 +512,7 @@ static optional<int64_t> maximum_indexable_location(
     IntArrayRef sizes, IntArrayRef strides, int64_t storage_offset) {
   auto result = native::storage_size_for(sizes, strides);
   if (result == 0) {
-    return nullopt;
+    return std::nullopt;
   }
   return result + storage_offset;
 }
