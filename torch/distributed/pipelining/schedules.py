@@ -792,17 +792,19 @@ def _add_unshard_reshard(
     (to account for having one f and one b active, and something else prefetching?)
     """
 
-    def next_stage_indices(next_actions: List[Optional[_Action]]) -> List[int]:
+    def next_stage_indices(
+        count: int, next_actions: List[Optional[_Action]]
+    ) -> List[int]:
         """Remove duplicates (same stage, different microbatch) and tell me the order i'll encounter the stages in"""
         seen: Set[int] = set()
         ret: List[int] = []
 
-        # this is actually not the right algorithm, i think i should allow duplicates in ret, just remove consecutive
-        # instances of the same stage? hmm. that's not quite right either.
         for a in next_actions:
             if a is not None and a.stage_index not in seen:
                 seen.add(a.stage_index)
                 ret.append(a.stage_index)
+                if len(ret) == count:
+                    break
         return ret
 
     active_stages: Set[int] = set()
@@ -821,26 +823,21 @@ def _add_unshard_reshard(
             continue
 
         # We prefetch the next N stages we'll see, dropping existing stages to make room
-        next_n = next_stage_indices(compute_actions[i:])[:max_active_stages]
+        next_n = next_stage_indices(max_active_stages, compute_actions[i:])
+        # Fetch needs to be ordered correctly, so don't use a set
+        fetch = list(filter(lambda s: s not in active_stages, next_n))
+        # Unclear what the best policy is for eviction, but we can maintain order so we do
+        evict = list(filter(lambda s: s not in next_n, active_stages))
 
-        # fetch needs to be ordered correctly though, so don't use a set for it
-        fetch = [l for l in next_n[:max_active_stages] if l not in active_stages]
-        # evict order probably doesn't matter though?
-        evict_candidates = active_stages - set(fetch)
-
-        # evict_candidates isn't quite right-
-        # it thinks the currently active stage is evict-worthy since it doesn't show up in fetch.
-        # it's only saved by num_evict.  But i should figure out a cleaner way.
-        num_evict = max(0, len(list(itertools.chain(fetch, active_stages))) - max_active_stages)
         logger.debug(
-            "_add_unshard_reshard Step %d active: %s fetch %s, evict_candidates %s, num_evict = %d",
+            "_add_unshard_reshard Step %d active: %s fetch %s, evict %s",
             i,
             active_stages,
             fetch,
-            evict_candidates,
-            num_evict,
+            evict,
         )
-        for stage in list(evict_candidates)[:num_evict]:
+
+        for stage in evict:
             _reshard(stage)
         for stage in fetch:
             _unshard(stage)
