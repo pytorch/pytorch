@@ -1,21 +1,11 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-from functools import lru_cache
-from pathlib import Path
-from typing import Any, Callable
-from warnings import warn
-
 from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
     TestPrioritizations,
 )
 
-from tools.testing.target_determination.heuristics.utils import (
-    normalize_ratings,
-    query_changed_files,
-)
 from tools.testing.test_run import TestRun
 
 class HiPri(HeuristicInterface):
