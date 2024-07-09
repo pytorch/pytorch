@@ -1332,7 +1332,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
             executor.shutdown(wait=True)
 
-        self.precompile_cache[precompile_hash] = wait_on_precompile
+        self.precompile_cache[precompile_key] = wait_on_precompile
 
         return wait_on_precompile
 
