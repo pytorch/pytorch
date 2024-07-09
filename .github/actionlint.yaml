@@ -1,0 +1,49 @@
+self-hosted-runner:
+  labels:
+    # GitHub hosted x86 Linux runners
+    - linux.20_04.4x
+    - linux.20_04.16x
+    # Repo-specific LF hosted ARC runners
+    - linux.large.arc
+    # Organization-wide AWS Linux Runners
+    - linux.large
+    - linux.2xlarge
+    - linux.4xlarge
+    - linux.12xlarge
+    - linux.24xlarge
+    - linux.arm64.2xlarge
+    - linux.4xlarge.nvidia.gpu
+    - linux.8xlarge.nvidia.gpu
+    - linux.16xlarge.nvidia.gpu
+    - linux.g5.4xlarge.nvidia.gpu
+    # Organization-wide AWS Linux Runners on Linux Foundation account
+    - lf.linux.large
+    - lf.linux.2xlarge
+    - lf.linux.4xlarge
+    - lf.linux.12xlarge
+    - lf.linux.24xlarge
+    - lf.linux.arm64.2xlarge
+    - lf.linux.4xlarge.nvidia.gpu
+    - lf.linux.8xlarge.nvidia.gpu
+    - lf.linux.16xlarge.nvidia.gpu
+    - lf.linux.g5.4xlarge.nvidia.gpu
+    # Repo-specific IBM hosted S390x runner
+    - linux.s390x
+    # Organization wide AWS Windows runners
+    - windows.4xlarge.nonephemeral
+    - windows.8xlarge.nvidia.gpu
+    - windows.8xlarge.nvidia.gpu.nonephemeral
+    - windows.g5.4xlarge.nvidia.gpu
+    # Organization-wide AMD hosted MI300 runners
+    - linux.rocm.gpu
+    # Repo-specific Apple hosted  runners
+    - macos-m1-ultra
+    - macos-m2-14
+    # Org wise AWS `mac2.metal` runners (2020 Mac mini hardware powered by Apple silicon M1 processors)
+    - macos-m1-stable
+    - macos-m1-13
+    - macos-m1-14
+    # GitHub-hosted MacOS runners
+    - macos-latest-xlarge
+    - macos-13-xlarge
+    - macos-14-xlarge
