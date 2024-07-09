@@ -111,7 +111,11 @@ class DeviceProperties(typing.NamedTuple):
         import torch
         from torch._dynamo.device_interface import get_interface_for_device
 
-        device_type = device.type if torch.version.hip is None else "hip"
+        device_type = device.type
+
+        if torch.version.hip and device_type == "cuda":
+            device_type = "hip"
+
         device_interface = get_interface_for_device(device)
         if device_type in ["cuda", "hip"]:
             props = device_interface.get_device_properties(device)
