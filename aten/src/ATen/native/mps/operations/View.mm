@@ -829,8 +829,8 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
     [computeEncoder setComputePipelineState:gatherPSO];
     mtl_setBuffer(computeEncoder, src, 0);
     mtl_setBuffer(computeEncoder, dst.has_storage() ? dst : output, 1);
-    [computeEncoder setBytes:&src_sizes[0] length:sizeof(uint32_t) * kernel_size atIndex:2];
-    [computeEncoder setBytes:&src_strides[0] length:sizeof(uint32_t) * kernel_size atIndex:3];
+    [computeEncoder setBytes:&src_sizes[0] length:sizeof(uint32_t) * src_sizes.size() atIndex:2];
+    [computeEncoder setBytes:&src_strides[0] length:sizeof(uint32_t) * src_strides.size() atIndex:3];
     [computeEncoder setBytes:&numThreads length:sizeof(uint32_t) atIndex:4];
     mtl_dispatch1DJob(computeEncoder, gatherPSO, numThreads);
 
@@ -885,8 +885,8 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
       [computeEncoder setComputePipelineState:scatterPSO];
       mtl_setBuffer(computeEncoder, src, 0);
       mtl_setBuffer(computeEncoder, output, 1);
-      [computeEncoder setBytes:&output_sizes[0] length:sizeof(uint32_t) * kernel_size atIndex:2];
-      [computeEncoder setBytes:&output_strides[0] length:sizeof(uint32_t) * kernel_size atIndex:3];
+      [computeEncoder setBytes:&output_sizes[0] length:sizeof(uint32_t) * output_sizes.size() atIndex:2];
+      [computeEncoder setBytes:&output_strides[0] length:sizeof(uint32_t) * output_strides.size() atIndex:3];
       [computeEncoder setBytes:&numThreads length:sizeof(uint32_t) atIndex:4];
       mtl_dispatch1DJob(computeEncoder, scatterPSO, numThreads);
 
