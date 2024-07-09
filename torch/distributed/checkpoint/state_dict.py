@@ -458,6 +458,7 @@ def _maybe_full_or_cpu_state_dict(
         return state_dict
 
 
+@torch.no_grad()
 def _get_model_state_dict(
     model: nn.Module, info: _StateDictInfo
 ) -> Dict[str, ValueType]:
@@ -525,6 +526,7 @@ def _get_model_state_dict(
     return _maybe_full_or_cpu_state_dict(state_dict, info)
 
 
+@torch.no_grad()
 def _load_model_state_dict(
     model: nn.Module,
     state_dict: Dict[str, ValueType],
@@ -718,6 +720,7 @@ def _unflatten_optim_state_dict(
     return return_osd
 
 
+@torch.no_grad()
 def _get_optim_state_dict(
     model: nn.Module,
     optimizers: Tuple[torch.optim.Optimizer, ...],
@@ -853,6 +856,7 @@ def _split_optim_state_dict(
     return return_osd
 
 
+@torch.no_grad()
 def _load_optim_state_dict(
     model: nn.Module,
     optimizers: Tuple[torch.optim.Optimizer, ...],
