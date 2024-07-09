@@ -848,7 +848,7 @@ if(NOT Python_EXECUTABLE)
 endif()
 
 if(BUILD_PYTHON)
-  set(PYTHON_COMPONENTS Development)
+  set(PYTHON_COMPONENTS Development.Module)
   if(USE_NUMPY)
     list(APPEND PYTHON_COMPONENTS NumPy)
   endif()
@@ -868,7 +868,7 @@ endif()
 
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
-  if(Python_Development_FOUND)
+  if(Python_Development.Module_FOUND)
     if(USE_NUMPY)
       if(NOT Python_NumPy_FOUND)
         message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
