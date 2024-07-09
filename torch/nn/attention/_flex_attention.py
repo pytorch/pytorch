@@ -301,30 +301,45 @@ def _create_sparse_block_from_block_mask(
 
 def _create_mask(
     score_mod: _score_mod_signature,
-    B: int,
-    H: int,
+    B: Optional[int],
+    Hkv: Optional[int],
+    Hq: Optional[int],
     M: int,
     N: int,
     device: str = "cuda",
     _compiled: bool = False,
 ):
     r"""This function creates a mask tensor from a score_mod function.
+        B, Hq, Hkv can be set to None to broadcast the mask along B & H dim.
 
     Args:
         score_mod (Callable): Function to modify attention scores.
         B (int): Batch size.
-        H (int): Number of heads.
+        Hkv (int): Number of key/value heads.
+        Hq(int): Number of query heads.
         M (int): Sequence length of query.
         N (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
 
     Returns:
-        mask (Tensor): A mask tensor with shape (B, H, M, N).
+        mask (Tensor): A mask tensor with shape (B, Hkv, M * G, N).
     """
     from contextlib import nullcontext
 
+    if B is None:
+        B = 1
+    if Hq is None and Hkv is None:
+        Hq = 1
+        Hkv = 1
+    if Hq is None or Hkv is None:
+        raise ValueError("Hq and Hkv must be both None or both specified. ")
+
+    G = Hq // Hkv
+    assert Hq % Hkv == 0
     b = torch.arange(0, B, device=device)
-    h = torch.arange(0, H, device=device)
+    hkv = torch.arange(0, Hkv, device=device)
+    g = torch.arange(0, G, device=device)
+    hq = hkv[:, None] * G + g[None, :]
     m = torch.arange(0, M, device=device)
     n = torch.arange(0, N, device=device)
     # TODO: fix this
@@ -337,12 +352,13 @@ def _create_mask(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, None, None, 0))
     score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
+    score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None))
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None))
 
     with ctx:
-        out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
+        out = score_mod(torch.zeros(B, Hkv, G, M, N, device=device), b, hq, m, n)
         mask = torch.where(torch.isneginf(out), False, True)
-    return mask
+    return torch.flatten(mask, start_dim=-3, end_dim=-2)
 
 
 # Done as a workaround around torch.compile not compiling what we want in the
@@ -359,8 +375,9 @@ def _create_block_mask_inner(
 
 def create_block_mask(
     score_mod: _score_mod_signature,
-    B: int,
-    H: int,
+    B: Optional[int],
+    Hkv: Optional[int],
+    Hq: Optional[int],
     M: int,
     N: int,
     device: str = "cuda",
@@ -369,11 +386,13 @@ def create_block_mask(
     _compiled=False,
 ):
     r"""This function creates a block mask tuple from a score_mod function.
+        B, Hq, Hkv can be set to None to broadcast the mask along B & H dim.
 
     Args:
         score_mod (Callable): Function to modify attention scores.
         B (int): Batch size.
-        H (int): Number of heads.
+        Hkv (int): Number of KV heads.
+        Hq (int): Number of query heads.
         M (int): Sequence length of query.
         N (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
@@ -390,7 +409,7 @@ def create_block_mask(
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
     with TransformGetItemToIndex():
         block_mask = inner_func(
-            score_mod, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
+            score_mod, B, Hkv, Hq, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
         )
     return _create_sparse_block_from_block_mask(block_mask)
 
@@ -403,17 +422,35 @@ def create_block_mask(
 """
 
 
-def _create_empty_block_mask(query, key, value) -> BlockMask:
+def _create_empty_block_mask(
+    query,
+    key,
+    value,
+    KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
+    Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
+) -> BlockMask:
     device = query.device
-    kv_len = key.size()[-2]
-    q_len = query.size()[-2]
+    Q_NUM_BLOCKS = (query.shape[-2] - 1) // Q_BLOCK_SIZE + 1
+    KV_NUM_BLOCKS = (key.shape[-2] - 1) // KV_BLOCK_SIZE + 1
+
+    q_range = torch.arange(Q_NUM_BLOCKS, dtype=torch.int32, device=device)
+    kv_range = torch.arange(KV_NUM_BLOCKS, dtype=torch.int32, device=device)
+
     return BlockMask(
-        kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
-        kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
-        q_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
-        q_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
-        KV_BLOCK_SIZE=kv_len,
-        Q_BLOCK_SIZE=q_len,
+        kv_num_blocks=torch.full(
+            [1, 1, Q_NUM_BLOCKS], KV_NUM_BLOCKS, dtype=torch.int32, device=device
+        ).contiguous(),
+        kv_indices=torch.broadcast_to(
+            kv_range[None, None, None, :], [1, 1, Q_NUM_BLOCKS, KV_NUM_BLOCKS]
+        ).contiguous(),
+        q_num_blocks=torch.full(
+            [1, 1, KV_NUM_BLOCKS], Q_NUM_BLOCKS, dtype=torch.int32, device=device
+        ).contiguous(),
+        q_indices=torch.broadcast_to(
+            q_range[None, None, None, :], [1, 1, KV_NUM_BLOCKS, Q_NUM_BLOCKS]
+        ).contiguous(),
+        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
+        Q_BLOCK_SIZE=Q_BLOCK_SIZE,
     )
 
 
@@ -422,6 +459,7 @@ def flex_attention(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: _score_mod_signature = _identity,
+    is_gqa: bool = False,
     block_mask: Optional[BlockMask] = None,
 ) -> torch.Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
@@ -437,7 +475,7 @@ def flex_attention(
         def score_mod(
             score: torch.Tensor,
             batch: torch.Tensor,
-            head: torch.Tensor,
+            q_head: torch.Tensor,
             token_q: torch.Tensor,
             token_kv: torch.Tensor
         ) -> torch.Tensor:
@@ -445,18 +483,16 @@ def flex_attention(
     Where:
         - ``score``: A scalar tensor representing the attention score,
           with the same data type and device as the query, key, and value tensors.
-        - ``b``, ``h``, ``q_idx``, ``kv_idx``: Scalar tensors indicating
-          the batch index, head index, query index, and key/value index, respectively.
-          These should have the ``torch.int`` data type and be located on the same device as the score tensor.
-
+        - ``b``, ``h_q``, ``q_idx``, ``kv_idx``: Scalar tensors indicating
+          the batch index, query head index, query index, and key/value index, respectively.
     Args:
-        query (Tensor): Query tensor; shape :math:`(B, H, L, E)`.
-        key (Tensor): Key tensor; shape :math:`(B, H, S, E)`.
-        value (Tensor): Value tensor; shape :math:`(B, H, S, Ev)`.
+        query (Tensor): Query tensor; shape :math:`(B, Hq, L, E)`.
+        key (Tensor): Key tensor; shape :math:`(B, Hkv, S, E)`.
+        value (Tensor): Value tensor; shape :math:`(B, Hkv, S, Ev)`.
         score_mod (Callable): Function to modify attention scores. By default no score_mod is applied.
 
     Returns:
-        output (Tensor): Attention output; shape :math:`(B, H, L, Ev)`.
+        output (Tensor): Attention output; shape :math:`(B, Hq, L, Ev)`.
 
     Shape legend:
         - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
@@ -472,12 +508,30 @@ def flex_attention(
 
     """
 
+    if not query.size(-1) == key.size(-1):
+        raise ValueError(
+            "NYI: Embedding dimension of the query and key must be the same"
+        )
+    if (not is_gqa) and query.size(-3) != key.size(-3):
+        raise ValueError(
+            "NYI: Num of query heads must equal to kv heads. Try setting is_gqa=True for GQA. "
+        )
+
+    if is_gqa:
+        Hq = query.size(1)
+        Hkv = key.size(1)
+        if Hq % Hkv != 0:
+            raise ValueError("NYI: Num of query heads must be a multiple of kv heads. ")
+
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key, value)
+
     if torch.compiler.is_dynamo_compiling():
-        # mark head_dim always to be static
+        # mark head_dim & num of heads always to be static
         for x in [query, key, value]:
             torch._dynamo.mark_static(x, -1)
+            torch._dynamo.mark_static(x, -3)
+
         out, _ = flex_attention_hop(
             query,
             key,

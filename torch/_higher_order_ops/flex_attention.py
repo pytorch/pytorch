@@ -125,23 +125,32 @@ def math_attention(
     """
     working_precision = torch.float64 if query.dtype == torch.float64 else torch.float32
 
+    query = query.view(
+        query.size(0), key.size(1), -1, query.size(-2), query.size(-1)
+    )  # [B, Hq, Mq, D] -> [B, Hkv, G, Mq, D], G=Hq//Hkv
+    key = torch.unsqueeze(key, 2)  # [B, Hkv, Mkv, D] -> [B, Hkv, 1, Mkv, D]
+    value = torch.unsqueeze(value, 2)  # [B, Hkv, Mkv, D] -> [B, Hkv, 1, Mkv, D]
+
     scores = (query @ key.transpose(-2, -1)).to(dtype=working_precision)
 
     b = torch.arange(0, scores.size(0), device=scores.device)
-    h = torch.arange(0, scores.size(1), device=scores.device)
-    m = torch.arange(0, scores.size(2), device=scores.device)
-    n = torch.arange(0, scores.size(3), device=scores.device)
+    hkv = torch.arange(0, scores.size(1), device=scores.device)
+    g = torch.arange(0, scores.size(2), device=scores.device)
+    hq = hkv[:, None] * scores.size(2) + g[None, :]
+    m = torch.arange(0, scores.size(-2), device=scores.device)
+    n = torch.arange(0, scores.size(-1), device=scores.device)
 
     in_dim_buffers = (None,) * len(other_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, None, None, None, 0) + in_dim_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None) + in_dim_buffers)
+    score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None) + in_dim_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None) + in_dim_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None) + in_dim_buffers)
 
     # todo: We wouldn't need these overrides in this file if Dynamo always did the
     # rewriting.
     with TransformGetItemToIndex():
-        scores = score_mod(scores, b, h, m, n, *other_buffers).to(working_precision)
+        scores = score_mod(scores, b, hq, m, n, *other_buffers).to(working_precision)
 
     # TODO Unconditionally return logsumexp for backwards
     # if any(t.requires_grad for t in (query, key, value)):
@@ -149,7 +158,12 @@ def math_attention(
 
     scores = scores.softmax(dim=-1)
 
-    return scores.to(query.dtype) @ value, logsumexp
+    output = scores.to(query.dtype) @ value
+
+    output = torch.flatten(output, 1, 2)
+    logsumexp = torch.flatten(logsumexp, 1, 2)
+
+    return output, logsumexp
 
 
 @flex_attention.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -541,21 +555,35 @@ def sdpa_dense_backward(
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     working_precision = torch.float64 if query.dtype == torch.float64 else torch.float32
+
+    # [B, Hq, Mq, D] -> [B, Hkv, G, Mq, D], G=Hq//Hkv
+    q_gqa_shape = (query.size(0), key.size(1), -1, query.size(-2), query.size(-1))
+    query = query.view(q_gqa_shape)
+    out = out.view(q_gqa_shape)
+    grad_out = grad_out.view(q_gqa_shape)
+    logsumexp = logsumexp.view(q_gqa_shape[:-1])
+
+    key = torch.unsqueeze(key, 2)  # [B, Hkv, Mkv, D] -> [B, Hkv, 1, Mkv, D]
+    value = torch.unsqueeze(value, 2)  # [B, Hkv, Mkv, D] -> [B, Hkv, 1, Mkv, D]
+
     scores = (query @ key.transpose(-2, -1)).to(working_precision)
 
     b = torch.arange(0, scores.size(0), device=scores.device)
-    h = torch.arange(0, scores.size(1), device=scores.device)
-    m = torch.arange(0, scores.size(2), device=scores.device)
-    n = torch.arange(0, scores.size(3), device=scores.device)
+    hkv = torch.arange(0, scores.size(1), device=scores.device)
+    g = torch.arange(0, scores.size(2), device=scores.device)
+    hq = hkv[:, None] * scores.size(2) + g[None, :]
+    m = torch.arange(0, scores.size(-2), device=scores.device)
+    n = torch.arange(0, scores.size(-1), device=scores.device)
 
     in_dim_buffers = (None,) * len(other_buffers)
     score_mod = torch.vmap(fw_graph, in_dims=(0, None, None, None, 0) + in_dim_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None) + in_dim_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None) + in_dim_buffers)
+    score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None) + in_dim_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None) + in_dim_buffers)
 
     with TransformGetItemToIndex():
-        post_mod_scores = score_mod(scores, b, h, m, n, *other_buffers).to(
+        post_mod_scores = score_mod(scores, b, hq, m, n, *other_buffers).to(
             working_precision
         )
 
@@ -588,17 +616,28 @@ def sdpa_dense_backward(
     )
     joint_score_mod = torch.vmap(
         joint_score_mod,
+        in_dims=(0, None, 0, None, None, 0) + in_dim_buffers,
+        out_dims=out_dims,
+    )
+    joint_score_mod = torch.vmap(
+        joint_score_mod,
         in_dims=(0, 0, None, None, None, 0) + in_dim_buffers,
         out_dims=out_dims,
     )
     with TransformGetItemToIndex():
         grad_scores, *_ = joint_score_mod(
-            scores, b, h, m, n, grad_score_mod, *other_buffers
+            scores, b, hq, m, n, grad_score_mod, *other_buffers
         )
     grad_scores = grad_scores.to(query.dtype)
 
     grad_query = grad_scores @ key
     grad_key = grad_scores.transpose(-2, -1) @ query
+
+    # Flatten GQA dimensions. [Hkv, G] -> [Hq]
+    grad_query = torch.flatten(grad_query, 1, 2)
+    grad_key = torch.sum(grad_key, 2, keepdim=False)
+    grad_value = torch.sum(grad_value, 2, keepdim=False)
+
     return grad_query.contiguous(), grad_key.contiguous(), grad_value.contiguous()
 
 
