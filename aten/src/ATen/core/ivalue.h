@@ -820,7 +820,7 @@ struct TORCH_API IValue final {
   IValue(std::optional<T> v);
   template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(c10::OptionalArrayRef<T> v);
-  IValue(c10::nullopt_t);
+  IValue(std::nullopt_t);
 
   // ClassType
   IValue(c10::intrusive_ptr<ivalue::Object> v);
@@ -1145,10 +1145,10 @@ struct TORCH_API IValue final {
   // TODO: There are several places that recurse over IValue. This is fragile.
   // This visitor should be used to recurse over ivalues.
   void visit(const std::function<bool(const IValue&)>& visitor) const;
-  IValue deepcopy(std::optional<at::Device> device = c10::nullopt) const;
+  IValue deepcopy(std::optional<at::Device> device = std::nullopt) const;
   IValue deepcopy(
       HashIdentityIValueMap& memo,
-      std::optional<at::Device> device = c10::nullopt) const;
+      std::optional<at::Device> device = std::nullopt) const;
 
  private:
   static c10::intrusive_ptr_target* null_to_undefined_tensor(
@@ -1523,24 +1523,24 @@ struct TORCH_API WeakTypePtr {
 struct WeakOrStrongCompilationUnit {
   explicit WeakOrStrongCompilationUnit(
       std::shared_ptr<torch::jit::CompilationUnit> shared_cu)
-      : strong_ptr_(std::move(shared_cu)), weak_ptr_(c10::nullopt) {}
+      : strong_ptr_(std::move(shared_cu)), weak_ptr_(std::nullopt) {}
 
   explicit WeakOrStrongCompilationUnit(
       std::weak_ptr<torch::jit::CompilationUnit> weak_cu)
-      : strong_ptr_(c10::nullopt), weak_ptr_(std::move(weak_cu)) {}
+      : strong_ptr_(std::nullopt), weak_ptr_(std::move(weak_cu)) {}
 
   std::shared_ptr<torch::jit::CompilationUnit> getStrongRefOrThrow() const {
-    TORCH_INTERNAL_ASSERT(strong_ptr_ != c10::nullopt);
+    TORCH_INTERNAL_ASSERT(strong_ptr_ != std::nullopt);
     return *strong_ptr_;
   }
 
   std::weak_ptr<torch::jit::CompilationUnit> getWeakRefOrThrow() const {
-    TORCH_INTERNAL_ASSERT(weak_ptr_ != c10::nullopt);
+    TORCH_INTERNAL_ASSERT(weak_ptr_ != std::nullopt);
     return *weak_ptr_;
   }
 
   bool holdingStrongRef() const {
-    return strong_ptr_ != c10::nullopt;
+    return strong_ptr_ != std::nullopt;
   }
 
   bool holdingEmptyStrongRef() const {
