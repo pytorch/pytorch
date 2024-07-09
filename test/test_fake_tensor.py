@@ -644,7 +644,8 @@ class FakeTensorTest(TestCase):
             symbolic_context=StatelessSymbolicContext(
                 dynamic_sizes=[DimDynamic.DYNAMIC],
                 dynamic_strides=[DimDynamic.DYNAMIC],
-                constraint_sizes=[None]
+                constraint_sizes=[None],
+                constraint_strides=[None]
             ),
         )
         mode2 = FakeTensorMode(shape_env=shape_env)

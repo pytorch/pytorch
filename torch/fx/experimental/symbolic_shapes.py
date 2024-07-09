@@ -1242,6 +1242,8 @@ class StatelessSymbolicContext(SymbolicContext):
     def __post_init__(self):
         if self.constraint_sizes is None:
             object.__setattr__(self, 'constraint_sizes', [None] * len(self.dynamic_sizes))
+        if self.constraint_strides is None:
+            object.__setattr__(self, 'constraint_strides', [None] * len(self.dynamic_sizes))
 
 
 # note [Tensor Fakification and Symbol Caching]

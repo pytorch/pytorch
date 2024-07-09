@@ -168,6 +168,7 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
     if source is None:
         source = ConstantSource(name)
     constraint_dims = [None] * arg.dim()
+    constraint_strides = [None] * arg.dim()
     if dynamic_dims is None:
         dynamic_dims = [DimDynamic.DUCK] * arg.dim()
     (
@@ -178,7 +179,9 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
         arg,
         source=source,
         symbolic_context=StatelessSymbolicContext(
-            dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims
+            dynamic_sizes=dynamic_dims,
+            constraint_sizes=constraint_dims,
+            constraint_strides=constraint_strides,
         ),
     )
     return FakeSymbolicTensor(
