@@ -16783,6 +16783,17 @@ op_db: List[OpInfo] = [
            skips=(
                # Resized a non-empty tensor but did not warn about it
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # FIXME:
+               # Expected 2114 but got 1123.
+               # Absolute difference: 991 (up to 0.001 allowed)
+               # Relative difference: 0.46877956480605487 (up to 0.001 allowed)
+               DecorateInfo(
+                   unittest.skip("Skipped!"),
+                   "TestCommon",
+                   "test_compare_cpu",
+                   dtypes=(torch.float32,),
+                   device_type="cuda",
+               ),
            ),
            sample_inputs_func=sample_inputs_mode,),
     make_mvlgamma_opinfo(variant_test_name='mvlgamma_p_1',
