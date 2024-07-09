@@ -36,7 +36,9 @@ class ExperimentConfig:
     calculate_bwd_time: bool
 
     def __post_init__(self):
-        assert len(self.shape) == 6, "Shape must be of length 6" # [B, Hq, M, Hkv, N, D]
+        assert (
+            len(self.shape) == 6
+        ), "Shape must be of length 6"  # [B, Hq, M, Hkv, N, D]
 
     def asdict(self):
         # Convert the dataclass instance to a dictionary
@@ -90,9 +92,7 @@ def generate_inputs(
         torch.rand, kv_shape, device=device, dtype=dtype, requires_grad=requires_grad
     )
     query = (
-        make_q()
-        .view(batch_size, q_sequence_length, q_heads, head_dim)
-        .transpose(1, 2)
+        make_q().view(batch_size, q_sequence_length, q_heads, head_dim).transpose(1, 2)
     )
     key = (
         make_kv()
@@ -141,7 +141,11 @@ def run_single_experiment(
         eager_sdpa, query, key, value, score_mod
     )
     forward_compiled_time = benchmark_torch_function_in_microseconds(
-        compiled_sdpa, query.reshape(batch_size, kv_heads, -1, head_dim), key, value, score_mod,
+        compiled_sdpa,
+        query.reshape(batch_size, kv_heads, -1, head_dim),
+        key,
+        value,
+        score_mod,
     )
 
     if config.calculate_bwd_time:
@@ -151,7 +155,12 @@ def run_single_experiment(
             out_eager.backward, dOut, retain_graph=True
         )
 
-        out_compile = compiled_sdpa( query.reshape(batch_size, kv_heads, -1, head_dim), key, value, score_mod, )
+        out_compile = compiled_sdpa(
+            query.reshape(batch_size, kv_heads, -1, head_dim),
+            key,
+            value,
+            score_mod,
+        )
         dOut = torch.randn_like(out_compile)
         backward_compile_time = benchmark_torch_function_in_microseconds(
             out_compile.backward, dOut, retain_graph=True
@@ -353,7 +362,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "-b", type=int, nargs="+", help="batch sizes", default=[2, 8, 16]
     )
-    parser.add_argument("-nh", type=Tuple[int, int], nargs="+", help="# of heads (Hq, Hkv)", default=[(16, 16)])
+    parser.add_argument(
+        "-nh",
+        type=Tuple[int, int],
+        nargs="+",
+        help="# of heads (Hq, Hkv)",
+        default=[(16, 16)],
+    )
     parser.add_argument(
         "-s", type=int, nargs="+", help="sequence lengths", default=[512, 1024, 4096]
     )
