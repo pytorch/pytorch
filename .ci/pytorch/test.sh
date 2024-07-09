@@ -349,7 +349,7 @@ test_inductor_shard() {
     --verbose
 
   # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
-  python test/run_test.py \
+  python test/run_test.py --full-trace \
     --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
