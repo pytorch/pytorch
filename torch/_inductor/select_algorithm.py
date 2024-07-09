@@ -1141,33 +1141,68 @@ class AlgorithmSelectorCache(PersistentCache):
         inputs_key = repr([self.key_of(x) for x in input_nodes])
 
         precompile = functools.partial(self.precompile, name, inputs_key)
+
+        # Templates selected with input_gen_fns require specific input data to avoid IMA
+        # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
+        # TODO(jgong5): support multi-template on CPU
+        if input_gen_fns is not None or layout.device.type == "cpu":
+            return_multi_template = False
         
-        if config.search_autotune_cache:
-            log.debug("Selecting best of %s choices from cached autotunings.", str(len(choices)))
+        log.debug("Selecting best of %s choices from cached autotunings.", str(len(choices)))
 
-            cached_timings = self.lookup(
-                choices,
-                name,
-                inputs_key,
-                None,
-            )
+        cached_choice_to_timing = self.lookup(
+            choices,
+            name,
+            inputs_key,
+            None,
+        )
 
-            if cached_timings == {}:
-                if not (config.max_autotune_gemm or config.max_autotune):
-                    selected_choice = choices[0]
+        if cached_choice_to_timing == {}:
+            if not (config.max_autotune_gemm or config.max_autotune):
+                selected_choice = choices[0]
 
-                    log.debug("One or more missing cached autotunings, selecting default %s.", selected_choice)
+                log.debug("One or more missing cached autotunings, selecting default %s.", selected_choice)
 
-                    wait_on_precompile = precompile([selected_choice])
+                wait_on_precompile = precompile([selected_choice])
+                wait_on_precompile()
+
+                return selected_choice.output_node
+            else:
+                log.debug("One or more missing cached autotunings, proceeding to autotuning.")
+        else:
+            if return_multi_template:
+                wait_on_precompile = precompile(choices)
+
+                def get_cached_choice_to_timing():
                     wait_on_precompile()
 
-                    return selected_choice.output_node
-                else:
-                    log.debug("One or more missing cached autotunings, proceeding to autotuning.")
-            else:
-                selected_choice = min(cached_timings, key=cached_timings.__getitem__)
+                    min_extern_choice_timing = float("inf")
+                    for choice, timing in cached_choice_to_timing.items():
+                        if isinstance(choice, ExternKernelCaller):
+                            min_extern_choice_timing = min(timing, min_extern_choice_timing)
+                    
+                    cached_choice_to_timing = {
+                        choice: timing
+                        for choice, timing in cached_choice_to_timing.items()
+                        if (
+                            (timing <= min_extern_choice_timing)
+                            or not isinstance(choice, ExternKernelCaller)
+                        )
+                    }
 
-                log.debug("Selecting choice %s from cached autotunings.", selected_choice)
+                    return cached_choice_to_timing
+
+                return torch._inductor.ir.TensorBox.create(
+                    torch._inductor.ir.MultiTemplateBuffer(
+                        layout,
+                        input_nodes,
+                        get_cached_choice_to_timing,
+                    )
+                )
+            else:
+                selected_choice = min(cached_choice_to_timing, key=cached_choice_to_timing.__getitem__)
+
+                log.debug("Selected choice %s from cached autotunings.", selected_choice)
 
                 wait_on_precompile = precompile([selected_choice])
                 wait_on_precompile()
@@ -1177,12 +1212,6 @@ class AlgorithmSelectorCache(PersistentCache):
         assert config.max_autotune_gemm or config.max_autotune
 
         log.debug("Autotuning selecting from %s choices.", str(len(choices)))
-
-        # Templates selected with input_gen_fns require specific input data to avoid IMA
-        # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
-        # TODO(jgong5): support multi-template on CPU
-        if input_gen_fns is not None or layout.device.type == "cpu":
-            return_multi_template = False
 
         # TODO - assert that we have not mutating kernels here
 
