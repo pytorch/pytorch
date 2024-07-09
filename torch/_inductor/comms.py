@@ -506,13 +506,10 @@ def enforce_comm_ordering_for_fsdp(
     ag_nodes = []
     rs_nodes = []
 
-    def _create_group_node(nodes_to_group):
+    def _create_and_schedule_group_node(nodes_to_group):
         group_node = scheduler.GroupedSchedulerNode.create(nodes_to_group)
         scheduled.update(nodes_to_group)
         new_order.append(group_node)
-        name_to_fused_node[group_node.get_name()] = group_node
-        for node in nodes_to_group:
-            name_to_fused_node[node.get_name()] = group_node
         return group_node
 
     for snode in snodes:
@@ -546,11 +543,11 @@ def enforce_comm_ordering_for_fsdp(
                 if isinstance(collected_nodes[i + 1].node, ir._WaitKernel):
                     wait_node_idx = i + 1
                     break
-            ag_group_node = _create_group_node(nodes_to_group)
+            ag_group_node = _create_and_schedule_group_node(nodes_to_group)
 
             # Group "all_gather_wait_tensor + copy_out" into one GroupedSchedulerNode
             nodes_to_group = collected_nodes[wait_node_idx:]
-            wait_group_node = _create_group_node(nodes_to_group)
+            wait_group_node = _create_and_schedule_group_node(nodes_to_group)
             ag_nodes.append(
                 (
                     ag_group_node,
@@ -597,10 +594,12 @@ def enforce_comm_ordering_for_fsdp(
                     wait_node_idx = i + 1
                     break
             assert wait_node_idx is not None
-            rs_group_node = _create_group_node(nodes_to_group)
+            rs_group_node = _create_and_schedule_group_node(nodes_to_group)
 
             # Group "reduce_scatter wait + related output nodes" into one GroupedSchedulerNode
-            wait_group_node = _create_group_node(collected_nodes[wait_node_idx:])
+            wait_group_node = _create_and_schedule_group_node(
+                collected_nodes[wait_node_idx:]
+            )
 
             rs_nodes.append(
                 (

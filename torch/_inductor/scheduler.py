@@ -1358,6 +1358,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         assert not any(isinstance(x, FusedSchedulerNode) for x in snodes)
         self.snodes = snodes
         self.scheduler = scheduler
+        scheduler.name_to_fused_node[self.get_name()] = self
         for snode in snodes:
             scheduler.name_to_fused_node[snode.get_name()] = self
         self.node = None
