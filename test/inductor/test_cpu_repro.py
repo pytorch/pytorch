@@ -2121,16 +2121,19 @@ class CPUReproTests(TestCase):
             torch.float16,
             torch.float32,
         ]:
-            x = (
-                torch.randn(64, dtype=dtype)
-                if is_float_dtype(dtype)
-                else torch.randint(1, 100, (64,), dtype=dtype)
-            )
-            y = (
-                torch.randn(64, dtype=dtype)
-                if is_float_dtype(dtype)
-                else torch.randint(1, 100, (64,), dtype=dtype)
-            )
+            if is_float_dtype(dtype):
+                x = torch.randn(64, dtype=dtype)
+                y = torch.randn(64, dtype=dtype)
+            else:
+                lower = 1 if dtype == torch.uint8 else -100
+                x = torch.randint(lower, 100, (64,), dtype=dtype)
+                y = torch.randint(lower, 100, (64,), dtype=dtype)
+                y = torch.where(
+                    y == torch.zeros_like(y),
+                    torch.ones_like(y),
+                    y,
+                )
+
             torch._dynamo.reset()
             metrics.reset()
             _args = (x, y)
