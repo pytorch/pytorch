@@ -1856,35 +1856,14 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         for i, a in enumerate(all_args)
                     ]
 
-                    # there should be a better way to get the number of extra symints
-                    len_extra_symints = len(
-                        unwrap_tensor_subclasses(
-                            all_args,
-                            subclass_metas=tangent_metadata,
-                            is_joint_structure=False,
-                            is_runtime=True,
-                            append_extra=True,
-                        )
-                    ) - len(
-                        unwrap_tensor_subclasses(
-                            all_args,
-                            subclass_metas=None,
-                            is_joint_structure=False,
-                            is_runtime=True,
-                            append_extra=False,
-                        )
-                    )
-
                     all_args = unwrap_tensor_subclasses(
                         all_args,
                         subclass_metas=tangent_metadata,
                         is_joint_structure=False,
                         is_runtime=True,
-                        append_extra=True,
+                        append_extra=False,
                     )
-                    tangents_start_idx = (
-                        len(all_args) - len_tangents - len(rng_args) - len_extra_symints
-                    )
+                    tangents_start_idx = len(all_args) - len_tangents - len(rng_args)
                     tangents_end_idx = tangents_start_idx + len_tangents
 
                 # Make the tangents contiguous. Note that we must do this after subclass desugaring

@@ -69,9 +69,6 @@ def dedupe_symints(graph: torch.fx.Graph):
     sym_dict = _SymHashingDict()
     resolvable_from_input_symints = set()
 
-    # print()
-    # print(graph)
-
     for node in graph.nodes:
         val = node.meta.get("val", None)
         if val is None or not isinstance(val, py_sym_types):
@@ -92,5 +89,3 @@ def dedupe_symints(graph: torch.fx.Graph):
         elif all(n in resolvable_from_input_symints for n in node.all_input_nodes):
             sym_dict[val] = node
             resolvable_from_input_symints.add(node)
-
-    # print(graph)
