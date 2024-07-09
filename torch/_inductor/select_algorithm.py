@@ -626,10 +626,10 @@ class TritonTemplate(KernelTemplate):
 
         numel = sympy_product(layout.size)
         buffers = itertools.chain(input_nodes, (fake_out,))
-        # if not TritonScheduling.can_use_32bit_indexing(numel, buffers):
-        #     raise NotImplementedError(
-        #         "64-bit indexing is not yet implemented for triton templates"
-        #     )
+        if not TritonScheduling.can_use_32bit_indexing(numel, buffers):
+            index_dtype = "tl.int64"
+        else:
+            index_dtype = "tl.int32"
 
         if call_sizes is None:
             call_sizes = layout.size
@@ -645,7 +645,7 @@ class TritonTemplate(KernelTemplate):
             prefix_args=prefix_args,
             suffix_args=suffix_args,
             epilogue_fn=epilogue_fn,
-            index_dtype="tl.int32",
+            index_dtype=index_dtype,
             subgraphs=subgraphs,
         )
 
