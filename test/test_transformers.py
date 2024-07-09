@@ -3552,7 +3552,6 @@ class TestAttnBias(NNTestCase):
         if causal_variant == CausalVariant.UPPER_LEFT:
             attn_bias = causal_upper_left(seq_len_q, seq_len_kv)
         else:
-            print(seq_len_q, seq_len_kv)
             attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION,
