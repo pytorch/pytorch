@@ -338,10 +338,10 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # Check if the pin_memory is functioning properly on custom device
         cpu_tensor = torch.empty(3)
         self.assertFalse(cpu_tensor.is_foo)
-        self.assertFalse(cpu_tensor.is_pinned("foo"))
+        self.assertFalse(cpu_tensor.is_pinned())
 
-        cpu_tensor_pin = cpu_tensor.pin_memory("foo")
-        self.assertTrue(cpu_tensor_pin.is_pinned("foo"))
+        cpu_tensor_pin = cpu_tensor.pin_memory()
+        self.assertTrue(cpu_tensor_pin.is_pinned())
 
         # Test storage pin_memory and is_pin
         cpu_storage = cpu_tensor.storage()
@@ -349,18 +349,18 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # for custom device. Once tensor.pin_memory() has been called,
         # then tensor.is_pinned() will always return true no matter
         # what tensor it's called on.
-        self.assertTrue(cpu_storage.is_pinned("foo"))
+        self.assertTrue(cpu_storage.is_pinned())
 
-        cpu_storage_pinned = cpu_storage.pin_memory("foo")
-        self.assertTrue(cpu_storage_pinned.is_pinned("foo"))
+        cpu_storage_pinned = cpu_storage.pin_memory()
+        self.assertTrue(cpu_storage_pinned.is_pinned())
 
         # Test untyped storage pin_memory and is_pin
         cpu_tensor = torch.randn([3, 2, 1, 4])
         cpu_untyped_storage = cpu_tensor.untyped_storage()
-        self.assertTrue(cpu_untyped_storage.is_pinned("foo"))
+        self.assertTrue(cpu_untyped_storage.is_pinned())
 
-        cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory("foo")
-        self.assertTrue(cpu_untyped_storage_pinned.is_pinned("foo"))
+        cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory()
+        self.assertTrue(cpu_untyped_storage_pinned.is_pinned())
 
     @unittest.skip(
         "Temporarily disable due to the tiny differences between clang++ and g++ in defining static variable in inline function"
