@@ -376,6 +376,8 @@ class PyCodegen:
         assert sys.version_info >= (3, 11)
         return [
             self._create_load_const(lambda: None),
+            # 3.13 swapped NULL and callable
+            *((create_instruction("SWAP", arg=2),) if sys.version_info >= (3, 13) else ()),
             *create_call_function(0, False),
             create_instruction("POP_TOP"),
         ]
