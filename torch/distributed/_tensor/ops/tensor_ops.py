@@ -372,7 +372,7 @@ def scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # first we always have replicate all for inputs and output
     if len(op_schema.args_strategy) < 3:
         # scatter_.src/scatter.src with src be float number instead of tensor
-        all_replicate: List[Placement] = [Replicate()] * 3
+        all_replicate: List[Optional[Placement]] = [Replicate()] * 3
     else:
         all_replicate = [Replicate()] * 4
     single_mesh_dim_strategies.append(all_replicate)
@@ -399,7 +399,7 @@ def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
     # placement list stores placements of [output, input, index]
     # first we always have replicate all for inputs and output
-    all_replicate: List[Placement] = [Replicate()] * 3
+    all_replicate: List[Optional[Placement]] = [Replicate()] * 3
     single_mesh_dim_strategies.append(all_replicate)
 
     # input sharding, input sharded, index accepts mask partial, output follows index

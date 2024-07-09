@@ -249,7 +249,7 @@ def expand_to_full_mesh_op_strategy(
 
     all_strategies = []
     for strategy_comb in strategy_combs:
-        spec_list = []
+        spec_list: List[Optional[DTensorSpec]] = []
         for specs in zip(*strategy_comb):
             if specs[0] is not None:
                 spec_list.append(DTensorSpec(mesh, specs))
