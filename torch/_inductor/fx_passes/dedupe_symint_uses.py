@@ -1,10 +1,8 @@
 # mypy: allow-untyped-defs
-from collections import Counter
 from dataclasses import dataclass
 from typing import Union
 
 import torch
-import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import py_sym_types, SymBool, SymFloat, SymInt
 
 
@@ -85,7 +83,7 @@ def dedupe_symints(graph: torch.fx.Graph):
             resolvable_from_input_symints.add(node)
             sym_dict[val] = node
         elif existing_node := sym_dict.get(val):
-            if node.op == 'placeholder':
+            if node.op == "placeholder":
                 continue
 
             existing_node = sym_dict.get(val)
