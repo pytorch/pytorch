@@ -186,9 +186,9 @@ jobs:
       runner: "${{ windows.4xlarge.nonephemeral"
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
-          { config: "slow", shard: 2, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
-          { config: "slow", shard: 3, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+          { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
         ]}
 
   win-vs2019-cpu-py3-test:
@@ -198,6 +198,7 @@ jobs:
       - win-vs2019-cpu-py3-build
       - target-determination
     with:
+      sync-tag: win-vs2019-cpu-py3-test
       build-environment: win-vs2019-cpu-py3
       cuda-version: cpu
       test-matrix: ${{ needs.win-vs2019-cpu-py3-build.outputs.test-matrix }}
@@ -207,7 +208,7 @@ jobs:
     uses: ./.github/workflows/_win-build.yml
     with:
       build-environment: win-vs2019-cuda11.8-py3
-      sync-tag: win-vs2019-cuda11.8-py3
+      sync-tag: win-vs2019-cuda11.8-py3-build
       cuda-version: "11.8"
       test-matrix: |
         { include: [
@@ -225,5 +226,6 @@ jobs:
       - target-determination
     with:
       build-environment: win-vs2019-cuda11.8-py3
+      sync-tag: win-vs2019-cuda11.8-py3-test
       cuda-version: "11.8"
       test-matrix: ${{ needs.win-vs2019-cuda11_8-py3-build.outputs.test-matrix }}
