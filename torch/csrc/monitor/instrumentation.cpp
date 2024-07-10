@@ -1,15 +1,15 @@
 #include <torch/csrc/monitor/instrumentation.h>
 #include <torch/csrc/monitor/stats.h>
 
-#include <atomic>
-#include <utility>
-#include <optional>
-#include <c10/util/Synchronized.h>
-#include <memory>
-#include <unordered_map>
-#include <thread>
-#include <fmt/format.h>
 #include <c10/util/Logging.h>
+#include <c10/util/Synchronized.h>
+#include <fmt/format.h>
+#include <atomic>
+#include <memory>
+#include <optional>
+#include <thread>
+#include <unordered_map>
+#include <utility>
 
 namespace torch {
 namespace monitor {
@@ -23,9 +23,7 @@ ssize_t toTimestampUs(std::chrono::steady_clock::time_point now) {
 } // namespace
 
 struct WaitCounterHandle::State {
-  explicit State(const std::string& key)
-      : stats_{key},
-        key_{key} {}
+  explicit State(const std::string& key) : stats_{key}, key_{key} {}
 
   ~State() {
     DCHECK(
@@ -159,8 +157,8 @@ static Counters* countersSingleton = new Counters();
 // Normal Singleton Implementation
 class CountersPublisher {
  public:
-  CountersPublisher(CountersPublisher &other) = delete;
-  void operator=(const CountersPublisher &) = delete;
+  CountersPublisher(CountersPublisher& other) = delete;
+  void operator=(const CountersPublisher&) = delete;
 
   static CountersPublisher& getInstance() {
     // If the instance doesn't exist, create it.
@@ -178,7 +176,8 @@ class CountersPublisher {
       while (!terminated_) {
         auto now = std::chrono::steady_clock::now();
         {
-          countersSingleton->waitCountersMap.withLock([&](auto& rWaitCountersMap){
+          countersSingleton->waitCountersMap.withLock([&](auto&
+                                                              rWaitCountersMap) {
             for (const auto& [_, statePtrWeak] : rWaitCountersMap) {
               auto statePtr = statePtrWeak.lock();
               CHECK(statePtr)
@@ -208,25 +207,26 @@ bool CountersPublisher::terminated_ = false;
 auto& publisherSingleton = CountersPublisher::getInstance();
 } // namespace
 
-WaitCounterHandle::WaitCounterHandle(std::string_view key)
-    : key_(key) {
+WaitCounterHandle::WaitCounterHandle(std::string_view key) : key_(key) {
   {
-    countersSingleton->waitCountersMap.withLock([&](auto& wCounters){
-      if (wCounters.find(key_) == wCounters.end()){
-        state_ = std::make_shared<State>(key_);
-        wCounters.emplace(key_, state_);
-      } else {
-        auto statePtr = wCounters.find(key_)->second.lock();
-        CHECK(statePtr) << "State weak_ptr should be removed from the map once expired";
-        state_ = statePtr;
-      }
-    });
+    countersSingleton->waitCountersMap.withLock(
+        [&](auto& wCounters) {
+          if (wCounters.find(key_) == wCounters.end()) {
+            state_ = std::make_shared<State>(key_);
+            wCounters.emplace(key_, state_);
+          } else {
+            auto statePtr = wCounters.find(key_)->second.lock();
+            CHECK(statePtr)
+                << "State weak_ptr should be removed from the map once expired";
+            state_ = statePtr;
+          }
+        });
   }
 }
 
 WaitCounterHandle::~WaitCounterHandle() {
-  countersSingleton->waitCountersMap.withLock([&](auto& wCounters){
-    std::weak_ptr<State> stateWeak = std::exchange(state_, {});;
+  countersSingleton->waitCountersMap.withLock([&](auto& wCounters) {
+    std::weak_ptr<State> stateWeak = std::exchange(state_, {});
     if (stateWeak.expired()) {
       wCounters.erase(key_);
     }

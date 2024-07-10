@@ -9,13 +9,11 @@ namespace detail {
 class StatImpl {};
 } // namespace detail
 
-IntegralStat::IntegralStat(std::string_view key)
-    : impl_(nullptr) {}
+IntegralStat::IntegralStat(std::string_view key) : impl_(nullptr) {}
 
 void IntegralStat::addValue(
     double value,
-    std::chrono::steady_clock::time_point now =
-        std::chrono::steady_clock::now()) {
+    std::chrono::steady_clock::time_point now) {
   // implement
 }
 

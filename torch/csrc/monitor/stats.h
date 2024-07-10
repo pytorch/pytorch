@@ -1,7 +1,7 @@
-# pragma once
+#pragma once
 #include <chrono>
-#include <string_view>
 #include <memory>
+#include <string_view>
 
 namespace torch {
 namespace monitor {
@@ -11,9 +11,13 @@ class StatImpl;
 } // namespace detail
 
 class IntegralStat {
- public: 
+ public:
   explicit IntegralStat(std::string_view key);
-  void addValue(double value, std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
+  void addValue(
+      double value,
+      std::chrono::steady_clock::time_point now =
+          std::chrono::steady_clock::now());
+
  private:
   std::shared_ptr<detail::StatImpl> impl_;
 };
