@@ -90,6 +90,7 @@ from ..utils import (
     is_function_or_wrapper,
     is_lru_cache_wrapped_function,
     is_namedtuple,
+    is_parameter_freezing,
     is_typing,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -1230,10 +1231,7 @@ class VariableBuilder:
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if torch._dynamo.config.inline_inbuilt_nn_modules:
-                freezing = (
-                    torch._inductor.config.freezing and not torch.is_grad_enabled()
-                )
-
+                freezing = is_parameter_freezing()
                 for p in value.parameters():
                     self.mark_static_input(p, guard=freezing)
 
@@ -1319,9 +1317,12 @@ class VariableBuilder:
         ):
             self.mark_static_input(value, guard=False)
 
+        make_graph_attribute = is_static_input and (
+            not config.inline_inbuilt_nn_modules or is_parameter_freezing()
+        )
+
         if (
-            source.guard_source().is_nn_module()
-            or (is_static_input and not config.inline_inbuilt_nn_modules)
+            source.guard_source().is_nn_module() or make_graph_attribute
         ) and not source.guard_source().is_fsdp_module():
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
@@ -1883,12 +1884,7 @@ def wrap_fx_proxy(
 # SOMETHING INTO THE GRAPH.  This is sort of obvious, because you can't call
 # this function without a proxy.
 def wrap_fx_proxy_cls(
-    target_cls,
-    tx,
-    proxy,
-    example_value=None,
-    subclass_type=None,
-    **options,
+    target_cls, tx, proxy, example_value=None, subclass_type=None, **options
 ):
     from ..symbolic_convert import InstructionTranslatorBase
 
