@@ -15,6 +15,12 @@
 
 namespace c10 {
 
+/**
+ * Extension of std::string_view with methods from C++20,
+ * hence it is designed to be interchangeable with std::string_view.
+ * However, std::string_view should be used in most cases,
+ * and c10::string_view should be removed once we move to C++20.
+ */
 template <class CharT, class Traits = std::char_traits<CharT>>
 class basic_string_view final : public std::basic_string_view<CharT, Traits> {
  public:
