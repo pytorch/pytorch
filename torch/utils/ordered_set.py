@@ -131,9 +131,7 @@ class OrderedSet(MutableSet[T]):
     # Specify here for correct type inference, otherwise would
     # return AbstractSet[T]
     def __sub__(self, other: AbstractSet[T_co]) -> OrderedSet[T]:
-        res = self.copy()
-        res -= other
-        return res
+        return cast(OrderedSet[T], super().__sub__(other))
 
     def __ior__(self, other: Iterable[T]) -> OrderedSet[T]:  # type: ignore[misc, override]   # noqa: PYI034
         if isinstance(other, OrderedSet):
