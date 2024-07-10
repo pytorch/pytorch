@@ -4513,6 +4513,19 @@ graph():
         self.assertEqual(a.size(), torch.Size([3, 4]))
         self.assertEqual(b.size(), torch.Size([3, 4]))
 
+        # Contains unbacked symint
+        class M(torch.nn.Module):
+            def forward(self):
+                full = torch.full((), 11)
+                i0 = full.item()
+                return (torch.full((i0,), 0.0),)
+
+        f = M()
+        ep = torch.export.export(f, ())
+        a = ep.module()()[0]
+        self.assertEqual(a.size(), torch.Size([11]))
+        self.assertEqual(a, torch.zeros(11))
+
     def test_pad_sequence(self):
         class Module(torch.nn.Module):
             def forward(self, x):
