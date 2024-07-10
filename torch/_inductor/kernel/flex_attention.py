@@ -1456,7 +1456,6 @@ def flex_attention_backward(*args, **kwargs):
             query,
             key,
             value,
-            out,
             logsumexp,
             delta,
             grad_out,
