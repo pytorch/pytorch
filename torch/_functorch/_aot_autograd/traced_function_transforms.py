@@ -700,18 +700,20 @@ def aot_dispatch_subclass(
         return inner_fn(fw_only, primals, use_trace_joint=False)
 
     args_unwrapped = unwrap_tensor_subclasses(
-        args, is_joint_structure=is_joint_structure
+        args, is_joint_structure=is_joint_structure, return_indices=True
     )
 
     if is_joint_structure:
         primals_unwrapped, new_ind_to_old_ind = args_unwrapped[0]
+        args_unwrapped = primals_unwrapped, args_unwrapped[1][0]
         fn_to_trace = joint_fn
     else:
         primals_unwrapped, new_ind_to_old_ind = args_unwrapped
+        args_unwrapped = primals_unwrapped
         fn_to_trace = fw_fn
 
     # remap static indices after subclass desugaring
-    static_indices = set(meta.static_input_indices)
+    static_indices = set(meta.static_input_indices or [])
     remapped_static_indices = []
     for new_ind, old_ind in enumerate(new_ind_to_old_ind):
         if old_ind in static_indices:
