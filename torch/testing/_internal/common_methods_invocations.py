@@ -16121,8 +16121,7 @@ op_db: List[OpInfo] = [
         skip_cow_input_backward=True,
         # FIXME: mask_type == 2 (LowerRight)
         decorators=[
-            skipCUDAIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "This platform doesn't support efficient attention"),
-            ],
+            skipCUDAIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "This platform doesn't support efficient attention")],
         skips=(
             # for element 1, was torch.Size([4, 4, 11]) but real shape was torch.Size([16, 11])
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace", device_type="cuda",
