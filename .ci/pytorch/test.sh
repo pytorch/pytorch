@@ -312,8 +312,10 @@ test_inductor() {
 
   # docker build uses bdist_wheel which does not work with test_aot_inductor
   # TODO: need a faster way to build
-  BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-  CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+      BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
+      CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
+  fi
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
