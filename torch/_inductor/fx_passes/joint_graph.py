@@ -203,7 +203,12 @@ class UniformValueConstantFolder(ConstantFolder):
         # see: [constant folding refining of symints]
         self.node_replacements_shapes: Dict[torch.fx.Node, List[int]] = {}
 
+        # initialize symint -> node mapping so that we can
+        # use symint nodes in full constructors
         self.symint_nodes = _SymHashingDict()
+        for n in self.module.graph.nodes:
+            if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
+                self.symint_nodes[n.meta["val"]] = n
 
         # reference from torch/_funtorch/partitioners.py:get_default_op_list
         self.view_op_packets = [
@@ -233,9 +238,7 @@ class UniformValueConstantFolder(ConstantFolder):
     def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
         for n in self.module.graph.find_nodes(op="placeholder"):
             if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
-                s = n.meta["val"]
-                env[n] = s
-                self.symint_nodes[s] = n
+                env[n] = n.meta["val"]
             else:
                 env[n] = self.unknown_value
 
@@ -281,9 +284,7 @@ class UniformValueConstantFolder(ConstantFolder):
         # if we see them in a pointwise node (e.g., tensor * symint)
         # we will bail
         if "val" in node.meta and isinstance(node.meta["val"], torch.SymInt):
-            s = node.meta["val"]
-            self.symint_nodes[node] = s
-            return s
+            return node.meta["val"]
 
         # pointwise ops
         if isinstance(node.target, torch._ops.OpOverload) and (
@@ -369,6 +370,13 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
             # replace SymInt as Node before creating a new full node
             # e.g. (1, s0) -> (1, arg0_1)
+            node_shape = node_replacements_shapes[node]
+            if not all(
+                not isinstance(s, torch.SymInt) or s in cf.symint_nodes
+                for s in node_shape
+            ):
+                continue
+
             shapes = [
                 cf.symint_nodes[s] if isinstance(s, torch.SymInt) else s
                 for s in node_replacements_shapes[node]
