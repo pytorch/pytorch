@@ -1,3 +1,12 @@
+"""
+The `torch.nn.parameter` module provides a kind of Tensor that is to be
+considered a module parameter.
+
+The class definitions need to be here instead of inside torch/nn/ so it can be
+used in other places in torch/ (namely torch.autograd) without running into
+circular dependency problems
+"""
+
 from collections import OrderedDict
 
 import torch
