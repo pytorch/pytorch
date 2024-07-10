@@ -20,6 +20,8 @@ from torch.distributed.pipelining.schedules import (
     RESHARD,
     UNSHARD,
     W,
+    SEND,
+    RECV,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase
 from torch.testing._internal.common_utils import (
@@ -135,8 +137,10 @@ class TestScheduleLowering(TestCase):
             ("1F0", _Action(1, F, 0)),
             ("2B1", _Action(2, B, 1)),
             ("0W3", _Action(0, W, 3)),
-            ("1UNSHARD", _Action(1, UNSHARD)),
-            ("3RESHARD", _Action(3, RESHARD)),
+            ("1UNSHARD", _Action(1, None, None, UNSHARD)),
+            ("3RESHARD", _Action(3, None, None, RESHARD)),
+            ("2B2SEND", _Action(2, B, 2, SEND)),
+            ("1F1RECV", _Action(1, F, 1, RECV)),
         ],
     )
     def test_action_parse(self, action_str_and_ref):
@@ -199,6 +203,8 @@ class TestScheduleLowering(TestCase):
                         "1B1SEND",
                     ],
                 },
+                "stage_to_rank": lambda stage_idx: stage_idx,
+                "num_stages": 2,
             },
         ],
     )
@@ -212,7 +218,7 @@ class TestScheduleLowering(TestCase):
             for rank in test_info["comms"]
         }
 
-        comms_sch = _add_send_recv(compute_sch)
+        comms_sch = _add_send_recv(compute_sch, test_info["stage_to_rank"], test_info["num_stages"])
         for rank in expected_comms_sch:
             for expected, actual in zip(expected_comms_sch[rank], comms_sch[rank]):
                 self.assertEqual(
