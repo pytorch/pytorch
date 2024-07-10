@@ -411,7 +411,7 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
         return super()._share_filename_cpu_(*args, **kwargs)
 
 def _load_from_bytes(b):
-    return torch.load(io.BytesIO(b))
+    return torch.load(io.BytesIO(b), weights_only=False)
 
 
 _StorageBase.type = _type  # type: ignore[assignment]
