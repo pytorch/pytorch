@@ -100,7 +100,11 @@ def _check_valid_flat_script_obj(flat_x):
 
 
 def tracing_with_real(x: torch.ScriptObject) -> bool:
-    return hasattr(x, "safe_to_trace_with_real_obj") and x.safe_to_trace_with_real_obj()
+    if not hasattr(x, "tracing_mode"):
+        return False
+
+    assert x.tracing_mode() in ["real", "fake"], f"tracing_mode can be either real or fake but got {x.tracing_mode()}"
+    return  x.tracing_mode() == "real"
 
 
 def to_fake_obj(

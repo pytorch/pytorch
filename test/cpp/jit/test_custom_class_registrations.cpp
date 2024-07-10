@@ -229,8 +229,8 @@ struct ConstantTensorContainer : torch::CustomClassHolder {
     return x_;
   }
 
-  bool safe_to_trace_with_real_obj() {
-    return true;
+  std::string tracing_mode() {
+    return "real";
   }
 
  private:
@@ -466,8 +466,8 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def(torch::init<at::Tensor>())
       .def("get", &ConstantTensorContainer::get)
       .def(
-          "safe_to_trace_with_real_obj",
-          &ConstantTensorContainer::safe_to_trace_with_real_obj);
+          "tracing_mode",
+          &ConstantTensorContainer::tracing_mode);
 
   m.def(
       "takes_foo(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> Tensor");
