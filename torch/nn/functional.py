@@ -5613,8 +5613,7 @@ greater than 0.0 is specified. The optional scale argument can only be specified
 .. code-block:: python
 
     # Efficient implementation equivalent to the following:
-    def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0,
-                                     is_causal=False, scale=None, enable_gqa=False) -> torch.Tensor:
+    def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None, enable_gqa=False) -> torch.Tensor:
         L, S = query.size(-2), key.size(-2)
         scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
         attn_bias = torch.zeros(L, S, dtype=query.dtype)
@@ -5748,7 +5747,7 @@ Examples:
     >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
     >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
     >>> with sdpa_kernel(backends=[SDPBackend.MATH]):
-    >>>     F.scaled_dot_product_attention(query,key,value, enable_gqa=True)
+    >>>     F.scaled_dot_product_attention(query,key,value,enable_gqa=True)
 
 
 .. _FlashAttention-2\: Faster Attention with Better Parallelism and Work Partitioning:
