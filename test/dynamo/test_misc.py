@@ -371,6 +371,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             unpack4,
             2,
             expected_ops=5,
+            expected_ops_dynamic=ifdynstaticdefault(5, 7),
         )
 
     def test_unpack5(self):
@@ -387,6 +388,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             unpack5,
             2,
             expected_ops=5,
+            expected_ops_dynamic=ifdynstaticdefault(5, 7),
         )
 
     def test_matmul1(self):
@@ -410,7 +412,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             return x + y
 
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 9)
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 11)
         )
 
     @torch._dynamo.config.patch(only_allow_pt2_compliant_ops=True)
@@ -583,6 +585,22 @@ class MiscTests(torch._inductor.test_case.TestCase):
                 torch.ops.mylib.foo(x, out)
 
             f(x, out)
+
+    def test_auto_functionalize_self_as_mutate_arg(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("foo(Tensor(a!) self) -> None")
+
+            def foo_impl(self: torch.Tensor) -> None:
+                self.sin_()
+
+            x = torch.randn(3)
+            lib.impl("foo", foo_impl, "CompositeExplicitAutograd")
+
+            @torch.compile(backend="inductor", fullgraph=True)
+            def f(x):
+                torch.ops.mylib.foo(x)
+
+            f(x)
 
     def test_user_defined_setattr1(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -957,7 +975,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             return x + p
 
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 6)
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 10)
         )
 
     def test_int_shape_inplace_binops(self):
@@ -981,7 +999,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             return x + y
 
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 2)
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 4)
         )
 
     def test_int_int_comparisons(self):
@@ -1083,7 +1101,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(counts.op_count, """1""")
         else:
-            self.assertExpectedInline(counts.op_count, """9""")
+            self.assertExpectedInline(counts.op_count, """11""")
 
     def test_user_defined_binop(self):
         class MyClass:
@@ -1110,7 +1128,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(counts.op_count, """1""")
         else:
-            self.assertExpectedInline(counts.op_count, """2""")
+            self.assertExpectedInline(counts.op_count, """4""")
 
     def test_user_defined_iter(self):
         class Mod:
@@ -1413,14 +1431,14 @@ utils_device.CURRENT_DEVICE == None""".split(
             get_test_fn(func=min),
             2,
             expected_ops=1,
-            expected_ops_dynamic=ifdynstaticdefault(1, 10),
+            expected_ops_dynamic=ifdynstaticdefault(1, 14),
         )
         torch._dynamo.testing.standard_test(
             self,
             get_test_fn(func=max),
             2,
             expected_ops=1,
-            expected_ops_dynamic=ifdynstaticdefault(1, 5),
+            expected_ops_dynamic=ifdynstaticdefault(1, 17),
         )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
@@ -1753,7 +1771,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             fn=fn,
             nargs=1,
             expected_ops=3,
-            expected_ops_dynamic=ifdynstaticdefault(3, 4),
+            expected_ops_dynamic=ifdynstaticdefault(3, 6),
         )
 
     def test_pair(self):
@@ -1769,7 +1787,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             fn=fn,
             nargs=1,
             expected_ops=5,
-            expected_ops_dynamic=5,
+            expected_ops_dynamic=ifdynstaticdefault(5, 8),
         )
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
@@ -1945,7 +1963,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         # expect 3 ops post folding for dynamic case: size, index, add
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=1
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 3)
         )
 
     def test_tuple_iadd_with_shape(self):
@@ -1957,9 +1975,9 @@ utils_device.CURRENT_DEVICE == None""".split(
             output += (2, 3)
             return output
 
-        # expect 4 add / subs for static
+        # expect 4 add / subs for static, 4 * 3 (size, index, math op) for dynamic
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=4, expected_ops_dynamic=4
+            self, fn, 1, expected_ops=4, expected_ops_dynamic=ifdynstaticdefault(4, 12)
         )
 
     def test_list_iadd_with_shape(self):
@@ -1971,10 +1989,10 @@ utils_device.CURRENT_DEVICE == None""".split(
             output += (a + a.shape[0], a - a.shape[0])
             return output
 
-        # expect 6 add / subs for static
+        # expect 6 add / subs for static, 6 * 3 (size, index, math op) for dynamic
 
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=6, expected_ops_dynamic=6
+            self, fn, 1, expected_ops=6, expected_ops_dynamic=ifdynstaticdefault(6, 18)
         )
 
     def test_list_iadd_side_effect(self):
