@@ -199,13 +199,18 @@ def _rewrite_node(gm):
 def _convert_input_to_fake(gm, args, kwargs):
     params_buffers = _get_params_buffers(gm)
     fake_inps: List[torch.Tensor] = []
+    fake_vals: List[torch.Tensor] = []
     for node in gm.graph.nodes:
         if node.op == "placeholder" and "val" in node.meta:
             fake_val = node.meta["val"]
             if fake_val is not None and isinstance(fake_val, torch.Tensor):
                 fake_inps.append(fake_val)
+        elif len(fake_inps) == 0 and "example_value" in node.meta:
+            fake_val = node.meta["example_value"]
+            if fake_val is not None and isinstance(fake_val, torch.Tensor):
+                fake_vals.append(fake_val)
 
-    if detected_fake_mode := detect_fake_mode(fake_inps):
+    if detected_fake_mode := detect_fake_mode(fake_inps + fake_vals):
         fake_mode = detected_fake_mode
     else:
         fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
