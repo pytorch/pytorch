@@ -567,7 +567,7 @@ class CommDebugModeExample:
     ) -> None:
         """
         Example code to demonstrate CommModeDebug's module operation level tracing using a distributed transformer model.
-        Prints a table of module opoeration level collective tracing information, excluding trivial operations and logs 
+        Prints a table of module opoeration level collective tracing information, excluding trivial operations and logs
         table to output.txt
         """
 
@@ -601,7 +601,7 @@ class CommDebugModeExample:
 
     def example_transformer_json_dump(self, is_seq_parallel: bool = False) -> None:
         """
-        Example code to demonstrate CommModeDebug's json dump using a transformer model, excluding the trivial 
+        Example code to demonstrate CommModeDebug's json dump using a transformer model, excluding the trivial
         operations. Sends the information to user-passed transformer_log.json file
         """
 
