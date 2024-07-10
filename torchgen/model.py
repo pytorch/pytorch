@@ -5,7 +5,7 @@ import itertools
 import re
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Callable, Iterator, Sequence
+from typing import Callable, Iterator, Optional, Sequence
 
 from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
 
@@ -262,7 +262,12 @@ for fk in FUNCTIONALITY_KEYS:
             )
 
 
-STRUCTURED_DISPATCH_KEYS = {DispatchKey.MPS, DispatchKey.CUDA, DispatchKey.CPU}
+STRUCTURED_DISPATCH_KEYS = {
+    DispatchKey.MPS,
+    DispatchKey.CUDA,
+    DispatchKey.CPU,
+    DispatchKey.XPU,
+}
 UFUNC_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
 # Set of supported dispatch keys
@@ -273,6 +278,7 @@ dispatch_keys = [
     DispatchKey.MkldnnCPU,
     DispatchKey.CUDA,
     DispatchKey.MPS,
+    DispatchKey.XPU,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -575,6 +581,7 @@ class NativeFunction:
         loc: Location,
         valid_tags: set[str],
         ignore_keys: set[DispatchKey] | None = None,
+        whitelist_keys: Optional[set[DispatchKey]] = None,
     ) -> tuple[NativeFunction, dict[DispatchKey, dict[OperatorName, BackendMetadata]]]:
         """
         Parse a NativeFunction from a dictionary as directly parsed
@@ -720,6 +727,8 @@ class NativeFunction:
                     num_dispatch_keys += 1
 
                     if ignore_keys and dispatch_key in ignore_keys:
+                        continue
+                    if whitelist_keys and (dispatch_key not in whitelist_keys):
                         continue
                     assert dispatch_key in dispatch_keys, (
                         f"Dispatch key {dispatch_key} of kernel {v} "
