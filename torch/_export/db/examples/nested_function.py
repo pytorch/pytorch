@@ -1,20 +1,11 @@
 # mypy: allow-untyped-defs
 import torch
 
-from torch._export.db.case import export_case
-
-
-@export_case(
-    example_inputs=(torch.randn(3, 2), torch.randn(2)),
-    tags={"python.closure"},
-)
 class NestedFunction(torch.nn.Module):
     """
     Nested functions are traced through. Side effects on global captures
     are not supported though.
     """
-    def __init__(self):
-        super().__init__()
 
     def forward(self, a, b):
         x = a + b
@@ -26,3 +17,7 @@ class NestedFunction(torch.nn.Module):
             return x * y + z
 
         return closure(x)
+
+example_args = (torch.randn(3, 2), torch.randn(2))
+tags = {"python.closure"}
+model = NestedFunction()

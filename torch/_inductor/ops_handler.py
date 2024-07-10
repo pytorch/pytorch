@@ -270,6 +270,18 @@ class OpsHandler(Protocol[T]):
         # TODO: Improve the description with some pseudocode
         ...
 
+    def sort(
+        self,
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[T, ...],
+        stable: bool,
+        descending: bool,
+    ) -> Tuple[T, ...]:
+        """
+        Sort values along the reduction dimension.
+        """
+        ...
+
     def bucketize(
         self,
         values: T,
@@ -743,7 +755,11 @@ class NoopHandler:
 
     @staticmethod
     def scan(dtypes, combine_fn, values) -> Tuple[None, ...]:
-        return tuple(None for i in range(len(values)))
+        return (None,) * len(values)
+
+    @staticmethod
+    def sort(dtypes, values, stable, descending) -> Tuple[None, ...]:
+        return (None,) * len(values)
 
     @staticmethod
     def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
@@ -779,6 +795,13 @@ class MockHandler:
     def scan(dtypes, combine_fn, values):
         return tuple(
             f"ops.scan({dtypes}, {combine_fn}, {values})[{i}]"
+            for i in range(len(values))
+        )
+
+    @staticmethod
+    def sort(dtypes, values, stable, descending):
+        return tuple(
+            f"ops.sort({dtypes}, {values}, stable={stable}, descending={descending})[{i}]"
             for i in range(len(values))
         )
 

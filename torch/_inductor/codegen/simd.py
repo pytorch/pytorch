@@ -311,7 +311,7 @@ class SIMDKernel(Kernel):
         mutations: Optional[Set[str]] = None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
-        disable_persistent_reduction=False,
+        override_persistent_reduction=None,
     ):
         if pid_cache is None:
             pid_cache = {}
@@ -329,8 +329,10 @@ class SIMDKernel(Kernel):
         self.last_usage: Set[str] = set()
         self.buf_accesses: DefaultDict[str, List[Dep]] = collections.defaultdict(list)
         self.persistent_reduction: bool = (
-            not disable_persistent_reduction
-        ) and self.should_use_persistent_reduction()
+            override_persistent_reduction
+            if override_persistent_reduction is not None
+            else self.should_use_persistent_reduction()
+        )
         self.no_x_dim = self.want_no_x_dim()
         self.code_hash = None
 
@@ -1206,7 +1208,7 @@ class SIMDScheduling(BaseScheduling):
             if not isinstance(node, scheduler.BaseSchedulerNode):
                 continue
 
-            buffer_names.update(node.get_names())
+            buffer_names.update(node.get_buffer_names())
             buffer_names.update(node.used_buffer_names())
 
         # Get buffers objects
@@ -1278,8 +1280,11 @@ class SIMDScheduling(BaseScheduling):
 
         mutations = set()
         for node in node_schedule:
-            if hasattr(node, "get_mutations"):
-                mutations.update(node.get_mutations())
+            if node in (DisableReduction, EnableReduction):
+                continue
+
+            for buf in node.get_outputs():
+                mutations.update(buf.get_mutations())
 
         index_dtype = self.select_index_dtype(node_schedule, numel, reduction_numel)
 
@@ -1304,12 +1309,29 @@ class SIMDScheduling(BaseScheduling):
         kernel_type: type = self.kernel_type
         if is_split_scan and issubclass(TritonSplitScanKernel, kernel_type):
             kernel_type = TritonSplitScanKernel
+
         kernel_args = tiled_groups
-        kernel_kwargs = {
-            "reduction_hint": reduction_hint_val,
-            "mutations": mutations,
-            "index_dtype": index_dtype,
-        }
+        kernel_kwargs = dict(
+            reduction_hint=reduction_hint_val,
+            mutations=mutations,
+            index_dtype=index_dtype,
+        )
+
+        def _node_has_sort(node):
+            if node in (EnableReduction, DisableReduction):
+                return False
+
+            sort_nodes = node._body.root_block.graph.find_nodes(
+                op="call_method", target="sort"
+            )
+            return bool(sort_nodes)
+
+        # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
+        # so taking the hit of non-coalesced loads is okay
+        has_sort = any(_node_has_sort(node) for node in node_schedule)
+        if has_sort:
+            kernel_kwargs["override_persistent_reduction"] = True
+
         kernel = kernel_type(
             *kernel_args,
             **kernel_kwargs,
@@ -1326,11 +1348,11 @@ class SIMDScheduling(BaseScheduling):
         kernel.kernel_name = kernel_name
         kernel.code_hash = code_hash(src_code)
 
-        if kernel.persistent_reduction and config.triton.multi_kernel:
+        if kernel.persistent_reduction and config.triton.multi_kernel and not has_sort:
             kernel2 = self.kernel_type(
                 *kernel_args,
                 **kernel_kwargs,
-                disable_persistent_reduction=True,
+                override_persistent_reduction=False,
             )
             self.codegen_node_schedule_with_kernel(node_schedule, kernel2)
             with V.set_kernel_handler(kernel2):

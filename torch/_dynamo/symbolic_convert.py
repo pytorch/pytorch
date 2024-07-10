@@ -1016,6 +1016,13 @@ class InstructionTranslatorBase(
         source = GlobalSource(name)
         self.push(VariableBuilder(self, source)(value))
 
+    @functools.cached_property
+    def nn_modules_globals_vt(self):
+        module_name = "torch.nn.modules.module"
+        module_source = self.import_source(module_name)
+        fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+        return VariableBuilder(self, module_source)(fglobals_value)
+
     def LOAD_GLOBAL(self, inst):
         if sys.version_info >= (3, 11) and sys.version_info < (3, 13) and inst.arg % 2:
             self.PUSH_NULL(inst)

@@ -190,6 +190,15 @@ struct TensorQueue : torch::CustomClassHolder {
     return queue_.size();
   }
 
+  bool is_empty() {
+    std::lock_guard<std::mutex> guard(mutex_);
+    return queue_.empty();
+  }
+
+  double float_size() {
+    return 1. * queue_.size();
+  }
+
   std::vector<at::Tensor> clone_queue() {
     std::lock_guard<std::mutex> guard(mutex_);
     std::vector<at::Tensor> ret;
@@ -371,6 +380,22 @@ struct ReLUClass : public torch::CustomClassHolder {
   }
 };
 
+struct FlattenWithTensorOp : public torch::CustomClassHolder {
+  explicit FlattenWithTensorOp(at::Tensor t) : t_(t) {}
+
+  at::Tensor get() {
+    return t_;
+  }
+
+  std::tuple<std::tuple<std::string, at::Tensor>> __obj_flatten__() {
+    return std::tuple(std::tuple("t", this->t_.sin()));
+  }
+
+ private:
+  at::Tensor t_;
+  ;
+};
+
 struct ContainsTensor : public torch::CustomClassHolder {
   explicit ContainsTensor(at::Tensor t) : t_(t) {}
 
@@ -437,6 +462,11 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
           [](std::vector<int64_t> state) { // __setstate__
             return c10::make_intrusive<Foo>(state[0], state[1]);
           });
+
+  m.class_<FlattenWithTensorOp>("_FlattenWithTensorOp")
+      .def(torch::init<at::Tensor>())
+      .def("get", &FlattenWithTensorOp::get)
+      .def("__obj_flatten__", &FlattenWithTensorOp::__obj_flatten__);
 
   m.def(
       "takes_foo(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> Tensor");
@@ -580,6 +610,8 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("push", &TensorQueue::push)
       .def("pop", &TensorQueue::pop)
       .def("top", &TensorQueue::top)
+      .def("is_empty", &TensorQueue::is_empty)
+      .def("float_size", &TensorQueue::float_size)
       .def("size", &TensorQueue::size)
       .def("clone_queue", &TensorQueue::clone_queue)
       .def("get_raw_queue", &TensorQueue::get_raw_queue)

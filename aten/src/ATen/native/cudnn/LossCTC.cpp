@@ -2,6 +2,7 @@
 #include <ATen/Config.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/Descriptors.h>
 #endif
@@ -62,7 +63,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
     int64_t BLANK,
     bool deterministic,
     bool zero_infinity) {
-  AT_ERROR("cudnn_ctc_loss: ATen not compiled with cuDNN >= 7 support");
+  AT_ERROR("cudnn_ctc_loss: ATen not compiled with cuDNN >= 8 support");
 }
 
 } // namespace native
@@ -80,6 +81,11 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
 namespace at {
 namespace native {
 
+namespace {
+// "cache" whether we've previously failed the target lengths check
+static bool tensor_failed_target_lengths_check = false;
+} // namespace
+
 bool _use_cudnn_ctc_loss(
     const Tensor& log_probs,
     const Tensor& targets,
@@ -91,9 +97,8 @@ bool _use_cudnn_ctc_loss(
   bool use_cudnn = ctx.userEnabledCuDNN() && (BLANK == 0) &&
       (targets.dim() == 1) && (log_probs.scalar_type() == at::kFloat) &&
       (targets.scalar_type() == at::kInt) &&
-      (log_probs.device().type() == at::kCUDA) &&
       (targets.device().type() == at::kCPU) && (targets.is_contiguous()) &&
-      (log_probs.dim() == 3);
+      (log_probs.device().type() == at::kCUDA) && (log_probs.dim() == 3);
 
   if (use_cudnn) {
     // we don't know that input_lengths and target_lengths have the same size
@@ -118,11 +123,42 @@ bool _use_cudnn_ctc_loss_tensor(
     const Tensor& input_lengths,
     const Tensor& target_lengths,
     int64_t BLANK) {
-  Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-  Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
-  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
-  return at::_use_cudnn_ctc_loss(log_probs, targets, il, tl, BLANK);
+  auto& ctx = at::globalContext();
+
+  bool use_cudnn = ctx.userEnabledCuDNN() && (BLANK == 0) &&
+      (targets.dim() == 1) && (log_probs.scalar_type() == at::kFloat) &&
+      (targets.scalar_type() == at::kInt) &&
+      (log_probs.device().type() == at::kCUDA) && (targets.is_contiguous()) &&
+      (log_probs.dim() == 3) && (input_lengths.scalar_type() == at::kInt) &&
+      (target_lengths.scalar_type() == at::kInt);
+
+  if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
+    Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+    IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+    for (const auto b : c10::irange(tl.size())) {
+      // target length < 256 is documented, but we see illegal memory accesses
+      // when target lengths > input lengths for CuDNN
+      Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+      Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+      IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
+      IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+      use_cudnn = use_cudnn && (tl[b] < 256) && (tl[b] <= il[b]);
+      if (!use_cudnn) {
+        tensor_failed_target_lengths_check = true;
+        break;
+      }
+    }
+  } else {
+    use_cudnn = use_cudnn && !tensor_failed_target_lengths_check;
+    if (tensor_failed_target_lengths_check) {
+      TORCH_WARN(
+          "cuDNN max target length restriction < 256 cannot be checked during graph capture,"
+          " but target length >= 256 was observed previously e.g., during warmup, so we"
+          " presume it is unsafe to dispatch to cuDNN ctc_loss.");
+    }
+  }
+
+  return use_cudnn;
 }
 
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
@@ -211,19 +247,90 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
 }
 
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
-    const Tensor& log_probs,
-    const Tensor& targets,
+    const Tensor& log_probs_t,
+    const Tensor& targets_t,
     const Tensor& input_lengths,
     const Tensor& target_lengths,
     int64_t BLANK,
     bool deterministic,
     bool zero_infinity) {
-  Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-  Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
-  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
-  return at::_cudnn_ctc_loss(
-      log_probs, targets, il, tl, BLANK, deterministic, zero_infinity);
+  Tensor targets_t_ = targets_t;
+  if (targets_t.device().type() == at::kCPU) {
+    targets_t_ = targets_t.to(Device(at::kCUDA));
+  }
+  const CheckedFrom c = "cudnn_ctc_loss";
+  const TensorArg log_probs{log_probs_t, "log_probs", 1};
+  const TensorArg targets{targets_t_, "targets", 2};
+  checkDim(c, log_probs, 3);
+  checkScalarType(c, log_probs, kFloat);
+  checkDim(c, targets, 1);
+  checkScalarType(c, targets, kInt);
+  checkContiguous(c, targets); // ?
+  checkBackend(c, {*log_probs}, Backend::CUDA);
+  checkBackend(c, {*targets}, Backend::CUDA);
+  const auto batch_size = log_probs->size(1);
+  int64_t input_lengths_size =
+      input_lengths.sizes().size() ? input_lengths.size(0) : 1;
+  int64_t target_lengths_size =
+      target_lengths.sizes().size() ? target_lengths.size(0) : 1;
+  TORCH_CHECK(
+      input_lengths_size == batch_size,
+      "input_lengths needs to have size to match batch_size");
+  TORCH_CHECK(
+      target_lengths_size == batch_size,
+      "target_lengths needs to have size to match batch_size");
+
+  TORCH_CHECK(BLANK == 0, "blank must be label 0 for cudnn_ctc_loss");
+  // checked in dispatch:
+  // assert other conditions for cudnnCTCLoss: all label lengths <= 256
+  // all input lengths = logprob.size(0)
+
+  const auto handle = getCudnnHandle();
+
+  const cudnnCTCLossAlgo_t algo =
+      (deterministic ? CUDNN_CTC_LOSS_ALGO_DETERMINISTIC
+                     : CUDNN_CTC_LOSS_ALGO_NON_DETERMINISTIC);
+
+  CTCLossDescriptor ctc_loss_desc;
+
+  ctc_loss_desc.set_v8_v9(
+      CUDNN_DATA_FLOAT,
+      CUDNN_LOSS_NORMALIZATION_SOFTMAX,
+      CUDNN_PROPAGATE_NAN,
+      255);
+  TensorDescriptor log_probs_desc{log_probs_t};
+  Tensor grad = at::empty_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  TensorDescriptor grad_desc{grad};
+
+  size_t workspace_size;
+  AT_CUDNN_CHECK(cudnnGetCTCLossWorkspaceSize_v8(
+      handle,
+      algo,
+      ctc_loss_desc.desc(),
+      log_probs_desc.desc(),
+      grad_desc.desc(),
+      &workspace_size));
+  Tensor workspace =
+      at::empty(workspace_size, log_probs->options().dtype(kByte));
+  Tensor costs = at::empty({log_probs->size(1)}, log_probs->options());
+
+  AT_CUDNN_CHECK(cudnnCTCLoss_v8(
+      handle,
+      algo,
+      ctc_loss_desc.desc(),
+      log_probs_desc.desc(),
+      log_probs_t.data_ptr(),
+      targets_t_.data_ptr<int>(),
+      target_lengths.data_ptr<int>(),
+      input_lengths.data_ptr<int>(),
+      costs.data_ptr(),
+      grad_desc.desc(),
+      grad.data_ptr(),
+      workspace_size,
+      workspace.data_ptr()
+
+          ));
+  return std::make_tuple(costs, grad);
 }
 
 } // namespace native
