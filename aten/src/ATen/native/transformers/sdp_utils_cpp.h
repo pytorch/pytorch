@@ -274,6 +274,17 @@ inline bool check_for_attn_mask(sdp_params const& params, bool debug) {
   return true;
 }
 
+// TODO(eqy): remove this once support is added
+inline bool check_for_attn_mask_cudnn(sdp_params const& params, bool debug) {
+  if (params.attn_mask.has_value()) {
+    if (debug) {
+      TORCH_WARN("cuDNN Attention does not support non-null attn_mask.");
+    }
+    return false;
+  }
+  return true;
+}
+
 inline bool check_attn_mask_shape(sdp_params const& params, bool debug) {
   auto attn_mask = params.attn_mask;
   if (!attn_mask.has_value()) {
@@ -314,7 +325,7 @@ inline bool check_tensor_shapes(sdp_params const& params, bool debug) {
         (query_dim == 4))) {
     if (debug) {
       TORCH_WARN(
-          "Both fused kernels requires query, key and value to be 4 dimensional, but got Query dim: ",
+          "All fused kernels requires query, key and value to be 4 dimensional, but got Query dim: ",
           query_dim,
           ", Key dim: ",
           params.key.dim(),
@@ -426,7 +437,7 @@ inline bool check_nonzero_sequence_lengths_dense(sdp_params const& params, bool 
   if (zero_seq_len_q || zero_seq_len_k) {
     if (debug) {
       TORCH_WARN(
-          "Both fused kernels do not support zero seq_len_q or seq_len_kv.");
+          "All fused kernels do not support zero seq_len_q or seq_len_kv.");
     }
     return false;
   }
@@ -461,7 +472,7 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
       }
       epilogue_message << " instead.";
       TORCH_WARN(
-          "Both fused kernels require the last dimension of the input to have stride 1. ",
+          "All fused kernels require the last dimension of the input to have stride 1. ",
           "Got Query.stride(-1): ",
           params.query.sym_stride(-1),
           ", Key.stride(-1): ",

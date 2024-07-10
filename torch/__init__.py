@@ -516,12 +516,15 @@ class SymInt:
     def __repr__(self):
         return str(self.node)
 
+    def _sympy_(self):
+        return self.node.expr
+
     def __hash__(self) -> builtins.int:
         if self.node.is_nested_int():
             return hash(self.node.nested_int())
         else:
-            # We could support constant SymInts as well, but not doing it for now
-            raise TypeError("unhashable type: non-nested SymInt")
+            # Force specialization
+            return hash(builtins.int(self))
 
 
 class SymFloat:
@@ -558,6 +561,9 @@ class SymFloat:
 
     def __bool__(self):
         return self.node.bool_()
+
+    def __float__(self):
+        return self.node.guard_float("", 0)
 
     # Symbolic power does NOT work with negative base, this is to avoid
     # potential complex outputs
@@ -621,6 +627,16 @@ class SymFloat:
     def __repr__(self):
         return self.node.str()
 
+    def _sympy_(self):
+        return self.node.expr
+
+    def __hash__(self):
+        if self.node.is_constant():
+            return hash(self.node.float_())
+        else:
+            # Force specialization
+            return hash(builtins.float(self))
+
 
 class SymBool:
     """
@@ -679,11 +695,15 @@ class SymBool:
     def __repr__(self):
         return str(self.node)
 
+    def _sympy_(self):
+        return self.node.expr
+
     def __hash__(self):
         if self.node.is_constant():
             return hash(self.node.bool_())
         else:
-            raise TypeError("unhashable type: SymBool")
+            # Force specialization
+            return hash(builtins.bool(self))
 
 
 def sym_not(a):
@@ -749,12 +769,33 @@ def sym_max(a, b):
         # max(1, 1.0) === max(1.0, 1) === 1.0
         return b.__sym_max__(a)
     # TODO: Probably can make bool work too, just lazy
-    assert isinstance(a, (builtins.int, builtins.float)), type(a)
-    assert isinstance(b, (builtins.int, builtins.float)), type(b)
-    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+
+    all_types, float_types = __all_and_float_types()
+
+    assert isinstance(a, all_types), type(a)
+    assert isinstance(b, all_types), type(b)
+    if isinstance(a, float_types) or isinstance(b, float_types):
         return builtins.float(builtins.max(a, b))
     else:
         return builtins.max(a, b)
+
+
+def __all_and_float_types() -> _Tuple[_Tuple[_Type, ...], _Tuple[_Type, ...]]:
+    try:
+        import numpy as np
+
+        all_types: _Tuple[_Type, ...] = (
+            np.integer,
+            np.floating,
+            builtins.int,
+            builtins.float,
+        )
+        float_types: _Tuple[_Type, ...] = (np.floating, builtins.float)
+    except ModuleNotFoundError:
+        all_types = (builtins.int, builtins.float)
+        float_types = (builtins.float,)
+
+    return all_types, float_types
 
 
 def sym_min(a, b):
@@ -765,9 +806,12 @@ def sym_min(a, b):
         return a.__sym_min__(b)
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
-    assert isinstance(a, (builtins.int, builtins.float)), type(a)
-    assert isinstance(b, (builtins.int, builtins.float)), type(b)
-    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+
+    all_types, float_types = __all_and_float_types()
+
+    assert isinstance(a, all_types), type(a)
+    assert isinstance(b, all_types), type(b)
+    if isinstance(a, float_types) or isinstance(b, float_types):
         return builtins.float(builtins.min(a, b))
     else:
         return builtins.min(a, b)
@@ -2215,8 +2259,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
-) -> _Callable[_InputT, _RetT]:
-    ...
+) -> _Callable[_InputT, _RetT]: ...
 
 
 @_overload
@@ -2229,8 +2272,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
-) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]:
-    ...
+) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
 def compile(
@@ -2529,3 +2571,50 @@ def _constrain_as_size(
 from torch import _logging
 
 _logging._init_logs()
+
+
+def _import_device_backends():
+    """
+    Leverage the Python plugin mechanism to load out-of-the-tree device extensions.
+    See this RFC: https://github.com/pytorch/pytorch/issues/122468
+    """
+    from importlib.metadata import entry_points
+
+    group_name = "torch.backends"
+    if sys.version_info < (3, 10):
+        backend_extensions = entry_points().get(group_name, ())
+    else:
+        backend_extensions = entry_points(group=group_name)
+
+    for backend_extension in backend_extensions:
+        try:
+            # Load the extension
+            entrypoint = backend_extension.load()
+            # Call the entrypoint
+            entrypoint()
+        except Exception as err:
+            raise RuntimeError(
+                f"Failed to load the backend extension: {backend_extension.name}. "
+                f"You can disable extension auto-loading with TORCH_DEVICE_BACKEND_AUTOLOAD=0."
+            ) from err
+
+
+def _is_device_backend_autoload_enabled() -> builtins.bool:
+    """
+    Whether autoloading out-of-the-tree device extensions is enabled.
+    The switch depends on the value of the environment variable
+    `TORCH_DEVICE_BACKEND_AUTOLOAD`.
+
+    Returns:
+        bool: Whether to enable autoloading the extensions. Enabled by default.
+
+    Examples:
+        >>> torch._is_device_backend_autoload_enabled()
+        True
+    """
+    # enabled by default
+    return os.getenv("TORCH_DEVICE_BACKEND_AUTOLOAD", "1") == "1"
+
+
+if _is_device_backend_autoload_enabled():
+    _import_device_backends()
