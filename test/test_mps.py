@@ -23,7 +23,7 @@ from torch.nn import Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, IS_CI,
-     NoTest, skipIfSlowGradcheckEnv, suppress_warnings)
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
@@ -335,13 +335,16 @@ def mps_ops_modifier(ops):
         'split_with_sizes_copy',
         'splitlist_args',
         'squeeze',
+        'squeeze_copy',
         'squeezemultiple',
         'sub',
         'svd',
         't',
+        't_copy',
         'tanh',
         'tensor_split',
         'transpose',
+        'transpose_copy',
         'T',
         'unbind',
         'unflatten',
@@ -350,9 +353,11 @@ def mps_ops_modifier(ops):
         'unsafe_chunk',
         'unsafe_split',
         'unsqueeze',
+        'unsqueeze_copy',
         'view_as',
         'view_as_real',
         'view',
+        'view_copy',
         'vsplit',
         'zero_',
         'zeros',
@@ -7836,7 +7841,7 @@ class TestMPS(TestCaseMPS):
         x.backward(torch.randn_like(x))
         torch.mps.synchronize()
 
-    @unittest.expectedFailure
+    @serialTest()
     def test_mps_allocator_module(self):
         # first garbage collect and empty the cached blocks
         gc.collect()
@@ -11829,7 +11834,13 @@ class TestConsistency(TestCaseMPS):
         self.assertEqual(device, "cpu")
 
         def get_samples():
-            return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
+            return op.sample_inputs(
+                device,
+                dtype,
+                requires_grad=(dtype.is_floating_point or dtype.is_complex),
+                # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
+                set_seed=False,
+            )
         cpu_samples = get_samples()
 
         for cpu_sample in cpu_samples:
@@ -11864,7 +11875,13 @@ class TestConsistency(TestCaseMPS):
         self.assertEqual(device, "cpu")
 
         def get_samples():
-            return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
+            return op.sample_inputs(
+                device,
+                dtype,
+                requires_grad=(dtype.is_floating_point or dtype.is_complex),
+                # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
+                set_seed=False,
+            )
         cpu_samples = get_samples()
 
         for cpu_sample in cpu_samples:
@@ -11940,7 +11957,8 @@ class TestErrorInputs(TestCase):
     def test_error_inputs(self, device, op):
         self.assertEqual(device, "mps:0")
 
-        mps_samples = op.error_inputs(device)
+        # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
+        mps_samples = op.error_inputs(device, set_seed=False)
 
         for mps_sample in mps_samples:
             mps_sample_input = mps_sample.sample_input
@@ -12015,7 +12033,12 @@ class TestCommon(TestCase):
         # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
         # get patched up and this workaround removed.
         broken_on_ref_inputs = op.name in ['clamp', 'where']
-        inputs = op.reference_inputs(device, dtype) if not broken_on_ref_inputs else op.sample_inputs(device, dtype)
+
+        # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
+        inputs = (
+            op.reference_inputs(device, dtype, set_seed=False) if not broken_on_ref_inputs
+            else op.sample_inputs(device, dtype, set_seed=False)
+        )
         for sample_input in inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
