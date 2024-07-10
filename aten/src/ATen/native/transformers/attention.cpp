@@ -521,7 +521,7 @@ inline void validate_sdpa_input(
 std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
   // Pass through
   if(!attn_mask.has_value()){
-    return c10::nullopt;
+    return std::nullopt;
   }
   // Convert boolean mask to additive mask; need to invert mask to indicate what
   // to mask *out*.
@@ -701,7 +701,7 @@ Tensor scaled_dot_product_attention(
           attn_mask,
           dropout_p,
           is_causal,
-          c10::nullopt, /*dropout_mask*/
+          std::nullopt, /*dropout_mask*/
           scale));
     default:
       TORCH_CHECK(
@@ -853,7 +853,7 @@ _scaled_dot_product_fused_attention_overrideable(
     const at::Tensor & query,
     const at::Tensor & key,
     const at::Tensor & value,
-    const c10::optional<at::Tensor> & attn_bias,
+    const std::optional<at::Tensor> & attn_bias,
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
