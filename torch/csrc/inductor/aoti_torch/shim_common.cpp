@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <iostream>
 #include <memory>
+#include <nlohmann/json.hpp>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -44,6 +45,7 @@
 #endif
 
 using namespace torch::aot_inductor;
+using json = nlohmann::json;
 
 namespace {
 static c10::Device c10_device(int32_t device_type, int32_t device_index) {
