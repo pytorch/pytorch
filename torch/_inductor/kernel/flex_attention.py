@@ -641,7 +641,7 @@ def flex_attention_backward_grid(
         triton.cdiv(num_queries, meta["BLOCK_M2"]) * (q_heads // kv_heads)
         + triton.cdiv(num_key_value, meta["BLOCK_N1"]),
         1,
-        batch_size * q_heads,
+        batch_size * kv_heads,
     )
 
 
