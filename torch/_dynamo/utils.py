@@ -2834,3 +2834,7 @@ def _disable_saved_tensors_hooks_during_tracing():
         yield
     finally:
         torch._C._autograd._saved_tensors_hooks_set_tracing(prior)
+
+
+def is_parameter_freezing():
+    return torch._inductor.config.freezing and not torch.is_grad_enabled()
