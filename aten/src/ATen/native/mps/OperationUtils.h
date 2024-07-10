@@ -8,7 +8,7 @@
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/TensorFactory.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
 #include <exception>
