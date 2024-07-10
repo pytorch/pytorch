@@ -66,6 +66,7 @@ from ..source import (
     is_constant_source,
     is_from_defaults,
     is_from_optimizer_source,
+    is_unspecialized_builtin_nnmodule_attr,
     LocalSource,
     NumpyTensorSource,
     OptimizerSource,
@@ -174,7 +175,11 @@ from .misc import (
     TorchVersionVariable,
     TypingVariable,
 )
-from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
+from .nn_module import (
+    FSDPManagedNNModuleVariable,
+    UnspecializedBuiltinNNModuleVariable,
+    UnspecializedNNModuleVariable,
+)
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
 
@@ -1068,9 +1073,10 @@ class VariableBuilder:
             return ConstantVariable.create(value=value)
 
         if (
-            type(value) is tuple
+            self.source
+            and is_unspecialized_builtin_nnmodule_attr(self.source)
+            and type(value) is tuple
             and all(ConstantVariable.is_literal(x) for x in value)
-            and len(value) <= 4  # an arbitrary heuristic to prevent over eager guarding
         ):
             # Heuristic to speedup up guards coming from conv2d attrs like dilation and padding.
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
@@ -1244,7 +1250,10 @@ class VariableBuilder:
                 # this will get cleaned up once compile ends
                 self.tx.output.nn_modules[self.name] = value
 
-            result = UnspecializedNNModuleVariable(value, source=self.source)
+            if value.__module__.startswith(("torch.nn.", "torch.ao.")):
+                result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
+            else:
+                result = UnspecializedNNModuleVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
