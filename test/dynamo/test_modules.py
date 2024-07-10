@@ -2648,6 +2648,51 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         expected = mod(x)
         self.assertEqual(actual, expected)
 
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    def test_mark_static_previously_seen_tensor(self):
+        # This test verifies that dynamo will mark
+        # the buffers/params of a module as static
+        # even if this param was previously seen
+        # (ex. as a different input)
+        num_compiles = 0
+
+        def debug_compiler(gm, _):
+            nonlocal num_compiles
+            num_compiles += 1
+
+            print(list(gm.graph.nodes))
+            input_nodes = [
+                n for n in gm.graph.nodes if n.op == "placeholder" and n.name == "l_b_"
+            ]
+
+            self.assertGreater(len(input_nodes), 0)
+            for input_node in input_nodes:
+                self.assertEqual(
+                    input_node.meta["tensor_dict"]["_dynamo_static_input_type"],
+                    "unguarded",
+                )
+
+            return gm
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, buf) -> None:
+                super().__init__()
+                self.register_buffer("buf", buf)
+
+            def forward(self, x):
+                return self.buf * x
+
+        @torch._dynamo.optimize(backend=debug_compiler)
+        def fn(x, b, mod):
+            z = b + 1
+            return z * mod(x)
+
+        buf = torch.ones(2, 2, device="cuda:0")
+        inp = torch.ones(2, device="cuda:0")
+        mod = TestModule(buf)
+        fn(inp, buf, mod)
+        self.assertEqual(num_compiles, 1)
+
     def test_no_guard_on_torch_nn_modules(self):
         # https://github.com/pytorch/pytorch/issues/110048
 
