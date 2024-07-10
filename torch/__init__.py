@@ -510,12 +510,6 @@ class SymInt:
     def _sympy_(self):
         return self.node.expr
 
-    def _get_int(self) -> builtins.int:
-        if self.node.is_nested_int():
-            return self.node.nested_int()
-        else:
-            return builtins.int(self)
-
     def __hash__(self) -> builtins.int:
         return hash(self._get_int())
 
@@ -524,10 +518,16 @@ class SymInt:
         return self._get_int(), 1
 
     def bit_length(self) -> "SymInt":
-        return sym_int(self._get_int().bit_length())
+        return SymInt(self.node.wrap_int(self._get_int().bit_length()))
 
     def conjugate(self) -> "SymInt":
         return self
+
+    def _get_int(self) -> builtins.int:
+        if self.node.is_nested_int():
+            return self.node.nested_int()
+        else:
+            return builtins.int(self)
 
 
 class SymFloat:
@@ -637,11 +637,11 @@ class SymFloat:
     def _sympy_(self):
         return self.node.expr
 
-    def _get_float(self) -> builtins.float:
-        return self.node.float_() if self.node.is_constant() else builtins.float(self)
-
     def __hash__(self):
         return hash(self._get_float())
+
+    def _get_float(self) -> builtins.float:
+        return self.node.float_() if self.node.is_constant() else builtins.float(self)
 
 
 class SymBool:

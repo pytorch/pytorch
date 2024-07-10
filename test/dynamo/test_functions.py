@@ -352,15 +352,16 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         ),
     )
     def test_number_method(self, method, num_type):
-        @torch.compile(backend="eager", fullgraph=True)
         def forward(t, m):
             return 2 * t if getattr(m, method)() else t
 
-        for i in 1, 2.5:
+        wrapped = torch.compile(backend="eager", fullgraph=True)(forward)
+
+        for i in 0, 1, 2.5:
             m = num_type(i)
             t = torch.tensor([1])
-            actual = forward(t, m)
-            expected = 1 + bool(getattr(m, method)())
+            actual = wrapped(t, m)
+            expected = forward(t, m)
             self.assertEqual(actual, expected)
 
     @make_test
