@@ -361,11 +361,13 @@ def _create_sparse_block_from_block_mask(
     if partial_blocks is not None:
         partial_bm = create_sparse_block_from_block_mask_inner(partial_blocks)
     else:
+        m = full_blocks.shape[-2]
+        n = full_blocks.shape[-1]
         partial_bm = (
-            torch.zeros([1, 1, 1], dtype=torch.int32, device=full_blocks.device),
-            torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=full_blocks.device),
-            torch.zeros([1, 1, 1], dtype=torch.int32, device=full_blocks.device),
-            torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=full_blocks.device),
+            torch.zeros([1, 1, m], dtype=torch.int32, device=full_blocks.device),
+            torch.zeros([1, 1, m, n], dtype=torch.int32, device=full_blocks.device),
+            torch.zeros([1, 1, m], dtype=torch.int32, device=full_blocks.device),
+            torch.zeros([1, 1, m, n], dtype=torch.int32, device=full_blocks.device),
         )
 
     return BlockMask(
