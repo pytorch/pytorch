@@ -14,7 +14,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 namespace c10 {
 
@@ -73,7 +73,7 @@ struct Type;
 struct SharedType;
 
 // Use this to customize how a Type is printed using `annotation_str()`. If
-// c10::nullopt is returned, `annotation_str()` falls through to its default
+// std::nullopt is returned, `annotation_str()` falls through to its default
 // implementation.
 using TypePrinter = std::function<std::optional<std::string>(const Type&)>;
 
