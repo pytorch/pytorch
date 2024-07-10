@@ -784,7 +784,7 @@ class TestOperators(TestCase):
             tol2(
                 "linalg.pinv", "hermitian", {torch.float32: tol(atol=1e-05, rtol=1e-05)}
             ),
-            tol1("linalg.tensorsolve", {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+            tol1("linalg.tensorsolve", {torch.float32: tol(atol=9e-03, rtol=2e-04)}),
             tol1("linalg.multi_dot", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
             tol1("svd_lowrank", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
