@@ -128,6 +128,8 @@ struct MHAParams {
   std::array<int, MAX_MHA_DIM> q_stride;
   std::array<int, MAX_MHA_DIM> k_stride;
   std::array<int, MAX_MHA_DIM> v_stride;
+  std::array<int, MAX_MHA_DIM> bias_dim;
+  std::array<int, MAX_MHA_DIM> bias_stride;
   int64_t b;
   int64_t h;
   int64_t s_q;
@@ -137,6 +139,8 @@ struct MHAParams {
   double dropout_probability;
   bool is_causal;
   bool return_softmaxstats;
+  // might be redundant if we take 0 dim/stride
+  // as signaling no-bias
   bool has_attn_bias;
 };
 
@@ -151,10 +155,10 @@ void setMHAParams(
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
     double dropout_probability,
     bool is_causal,
-    bool return_softmaxstats,
-    bool has_attn_bias) {
+    bool return_softmaxstats) {
   memset(&params, 0, sizeof(MHAParams));
   params.device_id = at::cuda::current_device();
   params.dataType = fe::DataType_t::HALF;
@@ -170,7 +174,7 @@ void setMHAParams(
   params.dropout_probability = dropout_probability;
   params.is_causal = is_causal;
   params.return_softmaxstats = return_softmaxstats;
-  params.has_attn_bias = has_attn_bias;
+  params.has_attn_bias = attn_bias.has_value();
   TORCH_INTERNAL_ASSERT(
       q.sizes().size() == MAX_MHA_DIM,
       "Q tensor has unexpected number of dims, please report a bug to PyTorch.");
@@ -195,6 +199,11 @@ void setMHAParams(
   std::copy(k.strides().begin(), k.strides().end(), params.k_stride.begin());
   std::copy(v.sizes().begin(), v.sizes().end(), params.v_dim.begin());
   std::copy(v.strides().begin(), v.strides().end(), params.v_stride.begin());
+  // uninit is OK as the struct is memset 0'd
+  if (params.has_attn_bias) {
+    std::copy(attn_bias.value().sizes().begin(), attn_bias.value().sizes().end(), params.bias_dim.begin());
+    std::copy(attn_bias.value().strides().begin(), attn_bias.value().strides().end(), params.bias_stride.begin());
+  }
 }
 
 struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
@@ -208,10 +217,10 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
       const Tensor& q,
       const Tensor& k,
       const Tensor& v,
+      const std::optional<Tensor>& attn_bias,
       double dropout_probability,
       bool is_causal,
-      bool return_softmaxstats,
-      bool has_attn_bias) {
+      bool return_softmaxstats) {
     setMHAParams(
         this->pod,
         b,
@@ -223,10 +232,10 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
         q,
         k,
         v,
+        attn_bias,
         dropout_probability,
         is_causal,
-        return_softmaxstats,
-	has_attn_bias);
+        return_softmaxstats);
   }
 };
 
@@ -367,12 +376,12 @@ auto build_graph_and_tensors(
   if (attn_bias.has_value()) {
     bias = mha_graph->tensor(fe::graph::Tensor_attributes()
                             .set_name("bias")
-  			  .set_dim(std::vector<int64_t>(
-  			      attn_bias.value().sizes().data(), attn_bias.value().sizes().data() + attn_bias.value().sizes().size()))
-  			  .set_stride(
-  			      std::vector<int64_t>(
-  				  attn_bias.value().strides().data(),
-  				  attn_bias.value().strides().data() + attn_bias.value().strides().size())));
+                            .set_dim(std::vector<int64_t>(
+                                attn_bias.value().sizes().data(), attn_bias.value().sizes().data() + attn_bias.value().sizes().size()))
+                            .set_stride(
+                                std::vector<int64_t>(
+                                    attn_bias.value().strides().data(),
+                                    attn_bias.value().strides().data() + attn_bias.value().strides().size())));
     scaled_dot_product_flash_attention_options.set_bias(bias.value());
   }
   auto seq_q = mha_graph->tensor(fe::graph::Tensor_attributes()
@@ -486,12 +495,12 @@ auto build_graph_and_tensors_backward(
   if (attn_bias.has_value()) {
     bias = mha_graph->tensor(fe::graph::Tensor_attributes()
                             .set_name("bias")
-  			  .set_dim(std::vector<int64_t>(
-  			      attn_bias.value().sizes().data(), attn_bias.value().sizes().data() + attn_bias.value().sizes().size()))
-  			  .set_stride(
-  			      std::vector<int64_t>(
-  				  attn_bias.value().strides().data(),
-  				  attn_bias.value().strides().data() + attn_bias.value().strides().size())));
+                            .set_dim(std::vector<int64_t>(
+                                attn_bias.value().sizes().data(), attn_bias.value().sizes().data() + attn_bias.value().sizes().size()))
+                            .set_stride(
+                                std::vector<int64_t>(
+                                    attn_bias.value().strides().data(),
+                                    attn_bias.value().strides().data() + attn_bias.value().strides().size())));
     sdpa_backward_options.set_bias(bias.value());
   }
   auto Seed = mha_graph->tensor(fe::graph::Tensor_attributes()
@@ -603,10 +612,10 @@ void run_cudnn_SDP_fprop(
       q,
       k,
       v,
+      attn_bias,
       dropout_probability,
       is_causal,
-      return_softmaxstats,
-      attn_bias.has_value());
+      return_softmaxstats); 
   auto graph_and_tensors_ptr = mhagraphcache.find(key);
   graph_and_tensors graph_and_tensors_values;
   if (graph_and_tensors_ptr) {
@@ -626,7 +635,7 @@ void run_cudnn_SDP_fprop(
         q,
         k,
         v,
-	attn_bias,
+        attn_bias,
         softmaxstats,
         o,
         dropoutseed,
@@ -719,11 +728,10 @@ void run_cudnn_SDP_bprop(
       q,
       k,
       v,
+      attn_bias,
       dropout_probability,
       is_causal,
-      true,
-      attn_bias.has_value()
-      );
+      true);
   auto graph_and_tensors_backward_ptr = mhagraphbackwardcache.find(key);
   graph_and_tensors_backward graph_and_tensors_backward_values;
   if (graph_and_tensors_backward_ptr) {
@@ -742,7 +750,7 @@ void run_cudnn_SDP_bprop(
         q,
         k,
         v,
-	attn_bias,
+        attn_bias,
         o,
         dO_,
         softmaxstats,
