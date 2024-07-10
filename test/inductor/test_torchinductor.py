@@ -11415,7 +11415,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             # (the -math.inf will become a scalar-tensor input to index_put_())
             # we are asserting that when inductor allocates this tensor,
             # it does not move the tensor constructor to cuda and keeps it on CPU.
-            self.assertFalse("empty_strided_cuda" in code)
+            self.assertFalse("empty_strided_cuda(()" in code)
 
         @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
