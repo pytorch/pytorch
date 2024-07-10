@@ -727,7 +727,7 @@ def functionalize_rng_ops(
     sym_node_start_idx = len(fw_outputs) - num_sym_nodes
     outputs = (
         fw_outputs[:sym_node_start_idx]
-        + fw_rng_state_outputs
+        + tuple(fw_rng_state_outputs)
         + fw_outputs[sym_node_start_idx:]
     )
     fw_module.graph.output(outputs)

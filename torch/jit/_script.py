@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, List, Set, Tuple, Union
 import torch
 import torch._jit_internal as _jit_internal
 from torch._classes import classes
-from torch._jit_internal import _qualified_name
+from torch._jit_internal import _get_model_id, _qualified_name
 from torch._utils_internal import log_torchscript_usage
 from torch.jit._builtins import _register_builtin
 from torch.jit._fuser import _graph_for, _script_method_graph_for
@@ -1421,21 +1421,22 @@ def script(
     """
     if not _enabled:
         return obj
-
-    global _TOPLEVEL
-    if _TOPLEVEL:
-        log_torchscript_usage("script")
-    prev = _TOPLEVEL
-    _TOPLEVEL = False
-
     try:
-        return _script_impl(
+        global _TOPLEVEL
+        prev = _TOPLEVEL
+        _TOPLEVEL = False
+        ret = _script_impl(
             obj=obj,
             optimize=optimize,
             _frames_up=_frames_up + 1,
             _rcb=_rcb,
             example_inputs=example_inputs,
         )
+
+        if prev:
+            log_torchscript_usage("script", model_id=_get_model_id(ret))
+
+        return ret
     finally:
         _TOPLEVEL = prev
 
