@@ -4935,6 +4935,26 @@ def forward(self, arg0_1):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
             aot_export_module(mod, [inp], trace_joint=False)
 
+    def test_aot_export_unbacked_arg(self):
+        class M(torch.nn.Module):
+            def forward(self):
+                full = torch.full((), 11)
+                i0 = full.item()
+                return (torch.full((i0,), 0),)
+
+        gm, _ = aot_export_module(
+            mod=M(), args=(), trace_joint=False, dynamic_shapes=True
+        )
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self):
+    full = torch.ops.aten.full.default([], 11, device = device(type='cpu'), pin_memory = False)
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(full);  full = None
+    full_1 = torch.ops.aten.full.default([_local_scalar_dense], 0, device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return (full_1,)""",  # noqa: B950
+        )
+
 
 class TestPartitioning(AOTTestCase):
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
