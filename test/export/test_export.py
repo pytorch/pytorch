@@ -3625,8 +3625,6 @@ def forward(self, x):
         ):
             torch.export.export(exported_v2.module(), (torch.randn(2, 2),))
 
-    # https://github.com/pytorch/pytorch/issues/129939
-    @testing.expectedFailureNonStrict
     def test_export_cond(self):
         class A(torch.nn.Module):
             def __init__(self):
@@ -4987,8 +4985,6 @@ graph():
         )
 
     # Guard validation upsets the guard
-    # https://github.com/pytorch/pytorch/issues/129939
-    @unittest.expectedFailure
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
             def __init__(self):
