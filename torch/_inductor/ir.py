@@ -250,7 +250,7 @@ def ir_node_to_tensor(x, guard_shape=True):
     device = x.get_device()
     size = convert_shape_to_symint(size)
     stride = convert_shape_to_symint(stride)
-    with V.fake_mode.shape_env.suppress_guards():
+    with V.graph.sizevars.shape_env.suppress_guards():
         t = torch.empty_strided(
             size=size, stride=stride, dtype=dtype, device=device
         ).zero_()
