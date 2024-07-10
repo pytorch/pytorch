@@ -2696,10 +2696,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     @torch._inductor.config.patch("freezing", True)
     @torch.no_grad()
     def test_mark_static_with_freezing(self):
-        # This test verifies that dynamo will mark
-        # the buffers/params of a module as static
-        # even if this param was previously seen
-        # (ex. as a different input)
+        # This test verifies that dynamo will
+        # add buffers/params as attributes of the
+        # graph w/ guards if freezing is enabled
         num_compiles = 0
 
         def debug_compiler(gm, _):
