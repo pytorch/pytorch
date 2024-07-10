@@ -119,6 +119,11 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   static bool _macos_14_0_plus = is_os_version_at_least(14, 0);
   static bool _macos_14_4_plus = is_os_version_at_least(14, 0);
 
+  static bool _macos_15_0_plus = []() {
+    NSProcessInfo* processInfo = [[NSProcessInfo alloc] init];
+    return [processInfo isOperatingSystemAtLeastVersion:{.majorVersion = 15, .minorVersion = 0, .patchVersion = 0}];
+  }();
+
   switch (version) {
     case MacOSVersion::MACOS_VER_13_0_PLUS:
       return _macos_13_0_plus;
@@ -132,6 +137,8 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
       return _macos_14_0_plus;
     case MacOSVersion::MACOS_VER_14_4_PLUS:
       return _macos_14_4_plus;
+    case MacOSVersion::MACOS_VER_15_0_PLUS:
+      return _macos_15_0_plus;
     default:
       return false;
   }
