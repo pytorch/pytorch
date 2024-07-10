@@ -236,6 +236,26 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([1, 0, 1, 1, 0, 1, 0]), torch.randn(4))
 
+    # https://github.com/pytorch/pytorch/issues/130290
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_nonzero_index_put(self, device):
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(
+            tensor: torch.Tensor,
+            xx: torch.Tensor,
+            yy: torch.Tensor,
+        ) -> torch.Tensor:
+            indices = torch.nonzero(xx == yy)
+            mapped_values = torch.zeros_like(tensor)
+            mapped_values[indices[:, 1]] = indices[:, 0]
+            return mapped_values
+
+        tensor = torch.tensor([1, 2, 3, 5, 6, 7], device=device)
+        mapping = torch.tensor([0, 3, 4, 5, 7], device=device)
+        xx, yy = torch.meshgrid(mapping, tensor, indexing="ij")
+        res = f(tensor, xx, yy)
+        self.assertEqual(res, torch.tensor([0, 0, 1, 3, 0, 4], device=device))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_nobreak(self, device):
         @torch.compile(fullgraph=True)
