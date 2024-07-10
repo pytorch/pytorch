@@ -8298,6 +8298,7 @@ class TestLogical(TestCaseMPS):
 
         [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8, torch.bool]]
 
+    @xfailIf(product_version < 15.0)
     def test_min_max_nan_propagation(self):
         def helper(dtype):
             cpu_x = torch.tensor([1.0, float("nan"), 3.0], device="cpu")
