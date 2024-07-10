@@ -76,7 +76,7 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
       SDPBackend::flash_attention,
       SDPBackend::efficient_attention,
       SDPBackend::math};
-  static const bool prefer_cudnn = check_prefer_cudnn_attention();
+  static const bool prefer_cudnn = true;//check_prefer_cudnn_attention();
   return prefer_cudnn ? cudnn_order : default_order;
 }
 
@@ -561,7 +561,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           check_cudnn_deterministic,
           // check_is_causal,
           check_dtypes_low_precision,
-          //check_for_attn_mask_cudnn,
+          check_attn_mask_shape,
           check_cudnn_hardware_support
           );
   for (auto& constraint : general_constraints) {

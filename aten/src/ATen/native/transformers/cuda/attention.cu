@@ -776,16 +776,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
       "Key and Value must have the same sequence length");
   auto attn_bias_ = attn_bias;
   if (attn_bias_.has_value()) {
-    if (attn_bias_.value().dtype() == at::kBool) {
-      TORCH_WARN_ONCE("cuDNN SDPA got bool attn_mask");
-      auto float_bias = at::zeros(attn_bias_.value().sizes(), attn_bias_.value().options().dtype(query.dtype()));
-      float_bias.masked_fill_(attn_bias_.value().logical_not(), -std::numeric_limits<float>::infinity());
-      attn_bias_ = float_bias;
-    }
-    if (attn_bias_.value().dim() == 2) {
-      attn_bias_ = attn_bias_.value().expand({batch_size, 1, attn_bias_.value().size(0), attn_bias_.value().size(1)});
+    const auto bias_dim = attn_bias_.value().dim();
+    if (bias_dim == 2) {
+      attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+    } else if (bias_dim == 3) {
+      attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
     } else {
-      TORCH_CHECK(false, "cuDNN SDPA expects either a 2D or 4D attn_bias");
+      attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_k});
+      TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
     }
   }
 
