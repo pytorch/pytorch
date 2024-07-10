@@ -2,17 +2,18 @@
 import collections
 import functools
 import warnings
-
 from typing import Any, Optional
 
 import torch
 from torch.types import _dtype
+
 
 try:
     import numpy as np
 
     HAS_NUMPY = True
 except ModuleNotFoundError:
+    HAS_NUMPY = False
     np = None  # type: ignore[assignment]
 
 __all__ = [
