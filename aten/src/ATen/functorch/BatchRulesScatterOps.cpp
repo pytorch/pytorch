@@ -538,7 +538,6 @@ Tensor &_index_put_impl__plumbing(Tensor &self, const List<optional<Tensor>> &in
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "_index_put_impl__plumbing");
   int64_t cur_level = maybe_layer->layerId();
-  std::cout << "aqui!!!" << std::endl;
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values, cur_level)) {
     return at::_index_put_impl_(self, indices, values, accumulate, unsafe);
   }
