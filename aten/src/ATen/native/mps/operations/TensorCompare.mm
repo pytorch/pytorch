@@ -459,9 +459,9 @@ static void where_kernel_mps(TensorIterator& iter) {
 }
 
 Tensor& nan_to_num_out_mps(const Tensor& self,
-                           c10::optional<double> nan,
-                           c10::optional<double> pos_inf,
-                           c10::optional<double> neg_inf,
+                           std::optional<double> nan,
+                           std::optional<double> pos_inf,
+                           std::optional<double> neg_inf,
                            Tensor& result) {
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "nan_to_num: dtype of out: ",
