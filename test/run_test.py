@@ -597,7 +597,7 @@ def run_test_retries(
             f"--cov-report=json:{REPO_ROOT}/test/test-reports/{stepcurrent_key}_{os.urandom(8).hex()}.json"
         ]
         ret_code, _ = retry_shell(
-            command + [sc_command] + print_items,
+            command + [sc_command] + print_items + cov_args,
             test_directory,
             stdout=output,
             stderr=output,
