@@ -1597,6 +1597,8 @@ class AotCodeCompiler:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> str:
+        _set_gpu_runtime_env()  # cpp_extension consults the env
+
         picked_vec_isa = pick_vec_isa()
         vec_isa_cmd_gen = CppBuilder(
             name="o",
@@ -2441,6 +2443,10 @@ def validate_new_cpp_commands():
     use_absolute_path = [True, False]
     aot_mode = [False, True]
 
+    # Try to pass it in fb_code.
+    if config.is_fbcode():
+        return
+
     for x in cuda:
         for y in use_mmap_weights:
             for z in compile_only:
@@ -2790,10 +2796,19 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                                 )
                             )
                     hl.compile_standalone_runtime(afile, hl.Target(target))
+
+                    name, output_dir = get_name_and_dir_from_output_file_path(sofile)
+                    halide_cmd_gen = CppBuilder(
+                        name=name,
+                        sources=[hookfile, afile],
+                        output_dir=output_dir,
+                        BuildOption=CppTorchCudaOptions(
+                            cuda=is_cuda,
+                        ),
+                    )
+
                     subprocess.check_call(
-                        shlex.split(
-                            cpp_compile_command([hookfile, afile], sofile, cuda=is_cuda)
-                        )
+                        shlex.split(halide_cmd_gen.get_command_line())
                     )
                     touch(donefile)
         assert os.path.exists(sofile)
