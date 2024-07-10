@@ -34,7 +34,9 @@ class AutoHeuristicTest(TestCase):
 
     def get_path_to_autoheuristic_log(self, name):
         device_name = AutoHeuristic.get_device_identifier()
-        path = cache_dir() + "/autoheuristic/" + device_name + "/" + name + ".txt"
+        dir_path = cache_dir() + "/autoheuristic/" + device_name
+        os.makedirs(dir_path, exist_ok=True)
+        path = dir_path + "/" + name + ".txt"
         return path
 
     def test_autoheuristic_pad_mm_default(self):
@@ -50,15 +52,17 @@ class AutoHeuristicTest(TestCase):
 
     @inductor_config.patch(autoheuristic_mode="COLLECT_DATA")
     def test_autoheuristic_pad_mm_collect_data(self):
+        path = self.get_path_to_autoheuristic_log("pad_mm")
+        inductor_config.autoheuristic_log_path = path
         # this test ensure that data is collected for pad_mm when autoheuristic_mode="COLLECT_DATA"
         self.run_mm()
         device_name = AutoHeuristic.get_device_identifier()
-        path = self.get_path_to_autoheuristic_log("pad_mm")
         self.assertTrue(os.path.exists(path))
         num_lines = self.count_lines_in_file(path)
 
         # 1 line for metadata, 1 line for header, 1 line per choice (orig, padded)
         self.assertEqual(num_lines, 4)
+        inductor_config.autoheuristic_log_path = "DEFAULT"
 
     @inductor_config.patch(autoheuristic_mode="COLLECT_DATA")
     def test_autoheuristic(self):
