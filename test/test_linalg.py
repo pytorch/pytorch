@@ -31,7 +31,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, SM90OrLater, tf32_on_and_off, _get_magma_version, \
-    _get_torch_cuda_version, CDNA2OrLater
+    _get_torch_cuda_version
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel
 from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.distributions.binomial import Binomial
@@ -6127,8 +6127,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.skipTest("requires SM80 or later")
 
         if TEST_WITH_ROCM:
-            if not CDNA2OrLater():
-                self.skipTest("_int4_mm is supported only for CDNA2 or later")
+            self.skipTest("_int4_mm not compiled for ROCM")
 
         q_group = 32
         inner_k_tiles = 2
@@ -6138,11 +6137,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         b_bf16 = torch.rand((k, n), dtype=torch.bfloat16, device=device)
 
         def convert_weight_to_int4pack(b):
-            b_uint8, b_scales_and_zeros = _group_quantize_tensor(
+            b_int32, b_scales_and_zeros = _group_quantize_tensor(
                 b, n_bit=4, q_group_size=q_group
             )
             b_int4pack = torch._convert_weight_to_int4pack(
-                b_uint8, inner_k_tiles
+                b_int32, inner_k_tiles
             )
 
             return b_int4pack, b_scales_and_zeros
@@ -6176,8 +6175,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.skipTest("requires SM80 or later")
 
         if TEST_WITH_ROCM:
-            if not CDNA2OrLater():
-                self.skipTest("_int4_mm is supported only for CDNA2 or later")
+            self.skipTest("_int4_mm not compiled for ROCM")
 
         q_group = 32
         inner_k_tiles = 2

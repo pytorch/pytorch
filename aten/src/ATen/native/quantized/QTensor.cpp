@@ -208,7 +208,7 @@ Tensor quantized_clone(
         self.options().memory_format(memory_format),
         self.q_scale(),
         self.q_zero_point(),
-        std::nullopt);
+        c10::nullopt);
   } else if (self.qscheme() == at::kPerChannelAffine) {
     dst = at::_empty_per_channel_affine_quantized(
         self.sizes(),
@@ -216,7 +216,7 @@ Tensor quantized_clone(
         self.q_per_channel_zero_points(),
         self.q_per_channel_axis(),
         self.options().memory_format(memory_format),
-        std::nullopt);
+        c10::nullopt);
   } else {
     TORCH_CHECK(false, "clone for quantized Tensor only works for \
       PerTensorAffine and PerChannelAffine qscheme right now");

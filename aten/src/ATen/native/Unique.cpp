@@ -182,7 +182,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
   // is to return a output size of ([1]), `flatten` here will do the job
   auto input_flattened = input.flatten();
 
-  auto [input_sorted, indices] = input_flattened.sort();
+  Tensor input_sorted, indices;
+  std::tie(input_sorted, indices) = input_flattened.sort();
 
   scalar_t* input_sorted_data = input_sorted.data_ptr<scalar_t>();
   int64_t* indices_data = indices.data_ptr<int64_t>();

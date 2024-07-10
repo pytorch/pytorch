@@ -3,7 +3,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #include <ATen/Generator.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 // TODO: No need to have this whole header, we can just put it all in
 // the cpp file
