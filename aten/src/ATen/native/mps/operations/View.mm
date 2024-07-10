@@ -785,7 +785,7 @@ static id<MTLComputePipelineState> getPipelineState(const std::string& kernel,
 Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
   Tensor output = dst;
   if (!dst.has_storage()) {
-    output = at::empty(src.sizes(), src.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+    output = at::empty(src.sizes(), src.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   }
 
   if (src.numel() == 0 || output.numel() == 0) {
@@ -903,7 +903,7 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
 Tensor as_strided_tensorimpl_mps(const Tensor& self,
                                  IntArrayRef size,
                                  IntArrayRef stride,
-                                 c10::optional<int64_t> storage_offset_) {
+                                 std::optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto result =
       detail::make_tensor<TensorImpl>(c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
