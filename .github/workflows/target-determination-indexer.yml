@@ -13,7 +13,6 @@ permissions:
 jobs:
   index:
     runs-on: linux.g5.4xlarge.nvidia.gpu # 1 GPU A10G 24GB each
-    environment: target-determinator-env
     steps:
       - name: Clone PyTorch
         uses: actions/checkout@v3
