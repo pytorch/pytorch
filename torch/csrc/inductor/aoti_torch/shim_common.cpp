@@ -45,7 +45,7 @@
 #endif
 
 using namespace torch::aot_inductor;
-using json = nlohmann::json;
+using json_n = nlohmann::json;
 
 namespace {
 static c10::Device c10_device(int32_t device_type, int32_t device_index) {
