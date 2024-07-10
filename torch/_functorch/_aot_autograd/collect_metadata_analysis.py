@@ -140,8 +140,6 @@ def run_functionalized_fw_and_collect_metadata(
 
     @wraps(f)
     def inner(*flat_args):
-        import torch.nested._internal.nested_tensor
-
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
 
@@ -162,10 +160,7 @@ def run_functionalized_fw_and_collect_metadata(
         with disable_above, mode:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
-
-            tmp_counter = torch.nested._internal.nested_tensor._tensor_id_counter
             flat_f_outs = f(*flat_f_args)
-            torch.nested._internal.nested_tensor._tensor_id_counter = tmp_counter
             # We didn't do any tracing, so we don't need to process the
             # unbacked symbols, they will just disappear into the ether.
             # Also, prevent memoization from applying.
