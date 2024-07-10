@@ -592,7 +592,7 @@ class TestCutlassBackend(TestCase):
         assert cutlass_kernels_count > 0
 
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(not SM80 or SM90OrLater, "need sm_80 exactly or sm90")
+    @unittest.skipIf(not SM80, "need sm_80 exactly")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,Triton,ATen"))
