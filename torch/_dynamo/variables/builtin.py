@@ -1033,9 +1033,32 @@ class BuiltinVariable(VariableTracker):
     call_float = _call_int_float
 
     def call_str(self, tx: "InstructionTranslator", arg):
-        # Handle `str` on a user defined function
+        # Handle `str` on a user defined function or object
         if isinstance(arg, (variables.UserFunctionVariable)):
             return variables.ConstantVariable.create(value=str(arg.fn))
+        elif isinstance(arg, (variables.UserDefinedObjectVariable)):
+            # Check if object has __str__ method
+            if hasattr(arg.value, "__str__"):
+                str_method = arg.value.__str__
+            elif hasattr(arg.value, "__repr__"):
+                # account for __repr__ functions when __str__ is absent
+                str_method = arg.value.__repr__
+            else:
+                unimplemented("user defined object has no __str__ or __repr__ method")
+
+            if type(arg.value).__str__ is object.__str__:
+                # Rely on the object str method
+                try:
+                    return variables.ConstantVariable.create(value=str_method())
+                except AttributeError:
+                    # Graph break
+                    return
+            else:
+                # Overrides for custom str method
+                # Pass method as function to call tx.inline_user_function_return
+                return tx.inline_user_function_return(
+                    variables.UserFunctionVariable(str_method.__func__), [arg], {}
+                )
 
     def _call_min_max(self, tx: "InstructionTranslator", *args):
         if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
