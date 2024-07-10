@@ -1935,9 +1935,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-        @torch._inductor.config.patch(
-            "triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch", 0
-        )
+        @torch._inductor.config.patch("triton.cudagraph_static_input_rerecord_limit", 0)
         def test_fallback_to_eager_if_recompiling_too_many_times(self):
             def fn(x, y):
                 return x * y
@@ -1965,9 +1963,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-        @torch._inductor.config.patch(
-            "triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch", 0
-        )
+        @torch._inductor.config.patch("triton.cudagraph_static_input_rerecord_limit", 0)
         def test_fallback_to_eager_if_recompiling_too_many_times_warn_only_once(self):
             def fn_eager(x, y):
                 return x * y
@@ -2017,9 +2013,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-        @torch._inductor.config.patch(
-            "triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch", 1
-        )
+        @torch._inductor.config.patch("triton.cudagraph_static_input_rerecord_limit", 1)
         def test_not_fallback_to_eager_if_have_not_recompiling_too_many_times(self):
             def fn(x, y):
                 return x * y

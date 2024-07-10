@@ -679,8 +679,8 @@ class triton:
 
     # Maximal number of allowed cudagraph re-record for a function and
     # a cudagraph node due to static input tensor address changes.
-    # i.e., allow num_recording <= cudagraph_max_rerecording_due_to_static_input_idx_mismatch
-    cudagraph_max_rerecording_due_to_static_input_idx_mismatch = 5
+    # i.e., allow num_recording <= cudagraph_static_input_rerecord_limit
+    cudagraph_static_input_rerecord_limit = 5
 
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False

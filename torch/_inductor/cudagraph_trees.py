@@ -1926,7 +1926,7 @@ class CUDAGraphTreeManager:
         if (
             self.non_cudagraph_managed_mutation_hint[node_id][function_id]
             or self.num_rerecord[node_id][function_id]
-            > torch._inductor.config.triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch
+            > torch._inductor.config.triton.cudagraph_static_input_rerecord_limit
         ):
             return self.ids_to_funcs[function_id].model(new_inputs)
 
@@ -1987,29 +1987,29 @@ class CUDAGraphTreeManager:
                 ]:
                     return self.ids_to_funcs[function_id].model(new_inputs)
 
-            # at this point, we necessarily will do a new recording
-            self.debug_fail_counter += 1
-
-            self.try_end_curr_execution()
-            if self.current_node is not None:
-                self.apply_checkpoint_execution_state_in_allocator()
-
             # re-record due to static input tensor address changes
             if recompile_due_to_static_input_idx_mismatch:
                 curr_node_id = self._get_node_id()
                 self.num_rerecord[curr_node_id][function_id] += 1
                 if (
                     self.num_rerecord[curr_node_id][function_id]
-                    > torch._inductor.config.triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch
+                    > torch._inductor.config.triton.cudagraph_static_input_rerecord_limit
                 ):
                     _id = curr_node_id.id if curr_node_id else None
                     log_cudagraph_skip_and_bump_counter(
                         f"skipping cudagraph due to function {function_id.id} exceeding max "
                         f"re-recording limit "
-                        f"(={torch._inductor.config.triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch}) "
+                        f"(={torch._inductor.config.triton.cudagraph_static_input_rerecord_limit}) "
                         f"on cudagraph node {_id} due to static input tensor address changes."
                     )
                     return self.ids_to_funcs[function_id].model(new_inputs)
+
+            # at this point, we necessarily will do a new recording
+            self.debug_fail_counter += 1
+
+            self.try_end_curr_execution()
+            if self.current_node is not None:
+                self.apply_checkpoint_execution_state_in_allocator()
 
         # now, we are in a recording state !
         return self.record_function(new_inputs, function_id)
@@ -2036,13 +2036,6 @@ class CUDAGraphTreeManager:
         self.current_node = None
 
     def record_function(self, new_inputs, function_id) -> List[Optional[Tensor]]:
-        curr_node_id = self._get_node_id()
-        if (
-            self.num_rerecord[curr_node_id][function_id]
-            > torch._inductor.config.triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch
-        ):
-            return self.ids_to_funcs[function_id].model(new_inputs)
-
         graph_id = self.new_graph_id()
         log.debug(
             "Recording function %d of graph recording id %d",
