@@ -4327,7 +4327,7 @@ graph():
         self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
 
     # TODO Retracing a module with constant attrs don't work.(T193692674)
-    @testing.expectedFailureTrainingIRToRunDecomp
+    @unittest.expectedFailure
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
