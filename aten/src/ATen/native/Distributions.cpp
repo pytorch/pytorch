@@ -4,7 +4,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <c10/util/Exception.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/DistributionsHelper.h>
