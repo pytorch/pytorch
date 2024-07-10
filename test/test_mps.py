@@ -335,13 +335,16 @@ def mps_ops_modifier(ops):
         'split_with_sizes_copy',
         'splitlist_args',
         'squeeze',
+        'squeeze_copy',
         'squeezemultiple',
         'sub',
         'svd',
         't',
+        't_copy',
         'tanh',
         'tensor_split',
         'transpose',
+        'transpose_copy',
         'T',
         'unbind',
         'unflatten',
@@ -350,9 +353,11 @@ def mps_ops_modifier(ops):
         'unsafe_chunk',
         'unsafe_split',
         'unsqueeze',
+        'unsqueeze_copy',
         'view_as',
         'view_as_real',
         'view',
+        'view_copy',
         'vsplit',
         'zero_',
         'zeros',
@@ -12027,7 +12032,7 @@ class TestCommon(TestCase):
         # does not support float64 Tensors.
         # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
         # get patched up and this workaround removed.
-        broken_on_ref_inputs = op.name in ['clamp', 'where']
+        broken_on_ref_inputs = op.name in ('where',)
 
         # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
         inputs = (
