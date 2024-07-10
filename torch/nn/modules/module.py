@@ -1453,6 +1453,7 @@ class Module:
             )
 
         self._is_full_backward_hook = True
+        self._has_local_forward_or_backward_hooks = True
 
         handle = RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
