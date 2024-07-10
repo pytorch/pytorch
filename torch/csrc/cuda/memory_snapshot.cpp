@@ -334,6 +334,7 @@ std::string _memory_snapshot_pickled() {
 
   for (const auto& traceInfo : snapshot.device_traces) {
     auto trace = new_list();
+    bool trace_contains_only_user_defined = true;
     for (const auto& te : traceInfo) {
       auto trace_entry = new_dict();
       trace_entry.insert(action_s, action_to_str(te.action_));
@@ -349,8 +350,17 @@ std::string _memory_snapshot_pickled() {
       }
       trace_entry.insert(time_us_s, te.time_.t_);
       trace.push_back(trace_entry);
+      // Skip device_traces with only user_defined frames
+      if (te.action_ != TraceEntry::USER_DEFINED) {
+        trace_contains_only_user_defined = false;
+      }
     }
-    traces.push_back(trace);
+    // Skip device_traces with only user_defined frames
+    if (trace_contains_only_user_defined) {
+      trace.push_back(new_list());
+    } else {
+      traces.push_back(trace);
+    }
   }
 
   auto allocator_settings = new_dict();
