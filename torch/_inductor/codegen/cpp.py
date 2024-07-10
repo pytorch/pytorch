@@ -3045,9 +3045,12 @@ class CppVecKernelChecker(CppVecKernel):
                 with RecordOptimizationContext(__name__) as node_ctx:
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
-                    # index_expr of float32 in Background_Matting
-                    assert dtype in [torch.int32, torch.int64, torch.float32]
-                    opt_ctx.dtype = dtype
+                    if dtype in [torch.int32, torch.int64, torch.float32]:
+                        # index_expr of float32 in several models like Background_Matting
+                        opt_ctx.dtype = dtype
+                    else:
+                        # index_expr of float64 in detectron2_fasterrcnn_r_50_dc5
+                        self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
                     tmp_var = self.cse.newvar()
                     return tmp_var
 
