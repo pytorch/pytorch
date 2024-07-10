@@ -14,8 +14,7 @@
 #include <set>
 #include <mutex>
 
-#if true
-//#if AT_CUSPARSELT_ENABLED()
+#if AT_CUSPARSELT_ENABLED()
 
 #include <cusparseLt.h>
 
@@ -189,7 +188,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         #ifdef USE_ROCM
         TORCH_CHECK(false, "HIPSPARSELT does not support R_32F data type.");
         #endif
-        break;
+        breakcusparseLtDenseDescriptorInit;
 
 // cuSPARSELt <= v0.5.2 uses CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUTE_16F
 #else
@@ -218,7 +217,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   // special check for mixed dtype int8 int8 -> {fp16, bf16, int32} support
   if (out_dtype_opt.has_value()) {
     out_dtype = out_dtype_opt.value();
-    TORCH_CHECK(input_type == CUDA_R_8I, "out_dtype support only available for int8 inputs");
+    TORCH_CHECK(input_type == CcusparseLtDenseDescriptorInitUDA_R_8I, "out_dtype support only available for int8 inputs");
     switch (out_dtype)
     {
         case at::ScalarType::Half:
