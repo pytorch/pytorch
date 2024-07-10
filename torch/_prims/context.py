@@ -130,6 +130,10 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         # see https://github.com/pytorch/pytorch/pull/82657#discussion_r939776417
         if func is None and isinstance(orig_func, torch._ops.OpOverload):
             func = torch._decomp.decomposition_table.get(orig_func, None)
+        elif func is None and isinstance(orig_func, torch._ops.OpOverloadPacket):
+            default = getattr(orig_func, "default", None)
+            if default is not None:
+                func = torch._decomp.decomposition_table.get(default, None)
 
         if func is not None:
             # If the ref exists query whether we should use it or not
