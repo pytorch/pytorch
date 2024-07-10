@@ -84,6 +84,7 @@ from .source import (
     GlobalStateSource,
     GlobalWeakRefSource,
     GradSource,
+    is_unspecialized_builtin_nnmodule_attr,
     LocalSource,
     NNModuleSource,
     NumpyTensorSource,
@@ -2072,6 +2073,22 @@ class DeletedGuardFn:
     pass
 
 
+def is_nn_module_hook(source: Source) -> bool:
+    # Note that we only skip guards on builtin nn modules like Conv2D etc. But still this is a soundness issue if one
+    # adds/removes a hook after the model is compiled.
+    return (
+        is_unspecialized_builtin_nnmodule_attr(source)
+        and isinstance(source, AttrSource)
+        and source.member
+        in (
+            "_backward_hooks",
+            "_backward_pre_hooks",
+            "_forward_hooks",
+            "_forward_pre_hooks",
+        )
+    )
+
+
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -2132,6 +2149,11 @@ class CheckFunctionManager:
             ):
                 continue
 
+            # This is unsafe if you add/remove a hook on unspecialized nn module variable
+            if config.skip_nnmodule_hook_guards and is_nn_module_hook(
+                guard.originating_source
+            ):
+                continue
             guard.create(builder)
 
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
