@@ -1355,19 +1355,19 @@ class GraphModule(torch.nn.Module):
 
         zeros_1: "i32[1, 1, 1, 1]" = torch.zeros([1, 1, 1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
 
-        new_empty: "f64[]" = l_args_0_.new_empty([], requires_grad = True)
-        new_empty_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        new_empty_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        new_empty_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        new_empty_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        child: "f64[]" = l_args_0_.new_empty([], requires_grad = True)
+        child_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        child_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        child_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        child_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         flex_attention_0 = self.flex_attention_0
         flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, flex_attention_0, (ones, zeros, ones_1, zeros_1, 8, 8), 0.5);  l_args_0_ = l_args_1_ = l_args_2_ = flex_attention_0 = ones = zeros = ones_1 = zeros_1 = None
         out: "f64[2, 2, 8, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, new_empty: "f64[]", new_empty_1: "i32[]", new_empty_2: "i32[]", new_empty_3: "i32[]", new_empty_4: "i32[]"):
-            mul: "f64[]" = new_empty * new_empty;  new_empty = None
+        def forward(self, child: "f64[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]", child_4: "i32[]"):
+            mul: "f64[]" = child * child;  child = None
             return mul
 """,  # noqa: B950
         )
