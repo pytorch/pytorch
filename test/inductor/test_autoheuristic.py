@@ -14,7 +14,7 @@ from torch._inductor.autoheuristic.autoheuristic import (
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_gpu_shared_memory
-from torch.testing._internal.inductor_utils import IS_A100, IS_H100, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA, IS_A100, IS_H100
 
 
 class AutoHeuristicTest(TestCase):

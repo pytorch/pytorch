@@ -29,9 +29,8 @@ from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import IS_A100, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA, IS_A100
 from torch.utils import _pytree as pytree
-
 
 
 class TestPatternMatcher(TestCase):
