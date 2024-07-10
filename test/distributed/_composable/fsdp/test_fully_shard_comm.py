@@ -247,7 +247,12 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = torch.cuda.Stream()
-        post_reduce_event, _ = foreach_reduce(
+        (
+            reduce_scatter_input,
+            reduce_scatter_event,
+            post_reduce_event,
+            _,
+        ) = foreach_reduce(
             fsdp_params,
             unsharded_grads,
             group,
