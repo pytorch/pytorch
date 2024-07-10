@@ -73,13 +73,18 @@ class _ComputationType(Enum):
             raise RuntimeError(f"Invalid computation type {action}")
 
 
-F = _ComputationType.FORWARD
-B = _ComputationType.BACKWARD
-W = _ComputationType.WEIGHT
+FORWARD = _ComputationType.FORWARD
+BACKWARD = _ComputationType.BACKWARD
+WEIGHT = _ComputationType.WEIGHT
 UNSHARD = _ComputationType.UNSHARD
 RESHARD = _ComputationType.RESHARD
 SEND = _ComputationType.SEND
 RECV = _ComputationType.RECV
+
+# Convenience shorthand for compute actions only since they are used in 'simple schedule format'
+F = FORWARD
+B = BACKWARD
+W = WEIGHT
 
 _action_regex = re.compile(r"(\d+)([F,B,W]{0,1})(\d*)(UNSHARD|RESHARD|SEND|RECV){0,1}")
 
@@ -801,7 +806,7 @@ TODO
 def _add_unshard_reshard(
     compute_actions: List[Optional[_Action]],
     max_active_stages: int = 3,
-) -> List[Optional[_Action]]:
+) -> List[_Action]:
     """
     Adds unshard/reshard actions to the schedule.
 
@@ -867,7 +872,7 @@ def _add_unshard_reshard(
 
 
 def _add_send_recv(
-    compute_actions: Dict[int, List[Optional[_Action]]],
+    compute_actions: Dict[int, List[_Action]],
     stage_to_rank: Callable[[int], int],
     num_stages: int,
 ) -> Dict[int, List[_Action]]:
@@ -890,8 +895,8 @@ def _add_send_recv(
         recv = _Action(recv_stage_idx, ctype, mb_idx, RECV)
         return send, recv
 
-    # go in order of ranks even if dict keys aren't ordered
     while compute_actions:
+        # go in order of ranks even if dict keys aren't ordered
         for rank in range(len(compute_actions)):
             assert len(compute_actions[rank]) > 0
             action = compute_actions[rank].pop(0)
@@ -908,6 +913,130 @@ def _add_send_recv(
                     comm_actions[stage_to_rank(recv.stage_index)].append(recv)
 
     return comm_actions
+
+
+class PipelineScheduleExecutor(PipelineScheduleMulti):
+    """
+    Provides a simple runtime that requires a 'schedule IR' including specified communication operations.
+
+    Can be instantiated directly by creating PipelineScheduleExecutor and calling load_csv, or can be
+    subclassed and the subclass can be responsible for creating a schedule IR.
+    """
+
+    def _from_simple_schedule(
+        self, compute_actions: Dict[int, List[Optional[_Action]]]
+    ):
+        """
+        Given an in-memory representation for a simple compute-only schedule, lower it to a complex schedule including
+        communication actions.  Stores the schedule in self, and must be called before running step_mo()
+        """
+        self.pipeline_order_with_comms = {}
+        for rank in compute_actions:
+            self.pipeline_order_with_comms[rank] = _add_unshard_reshard(
+                compute_actions[rank]
+            )
+
+        self.pipeline_order_with_comms = _add_send_recv(
+            self.pipeline_order_with_comms,
+            stage_to_rank=lambda s: self._stage_index_to_group_rank[s],
+            num_stages=self._num_stages,
+        )
+
+    def _load_csv(self, filename):
+        """Loads a csv in simple format and then lowers it to include comunication actions
+
+        TODO: support loading/dumping a complex CSV directly
+        """
+        super()._load_csv(filename)
+        self._from_simple_schedule(self.pipeline_order)
+
+    def _step_microbatches(
+        self,
+        arg_mbs: Optional[List] = None,
+        kwarg_mbs: Optional[List] = None,
+        target_mbs: Optional[List] = None,
+        losses: Optional[List] = None,
+    ):
+        """
+        Operate on the microbatches for looped schedules (multiple stages on each rank).
+
+        TODO: Does not use sorted_batch_isend_irecv(). As a result, this schedule does
+        not support models with skip connections.
+        """
+        arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
+
+        # Based on the plan in Step 1 created in __init__:
+        # 2. Perform communication based on the pipeline_order
+        stage_index_to_stage: Dict[int, _PipelineStageBase] = {
+            stage.stage_index: stage for stage in self._stages
+        }
+
+        assert (
+            self.pipeline_order_with_comms is not None
+        ), "Must call _from_simple_schedule() before calling _step_microbatches()"
+
+        # TODO restore the try/except handling for logging purposes
+
+        for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
+            comm_type = action.comm_type
+            comp_type = action.computation_type
+            mb_index = action.microbatch_index
+            stage = stage_index_to_stage[action.stage_index]
+
+            # TODO - its a bit unfortunate that there isn't one field that i can switch over here.
+            # I separated comm/compute in Action bc send still needs to know its sending fwd output vs bwd output
+            # perhaps, i should make SEND_F and SEND_B actions so they can be merged again?
+
+            # comms go first since absense of a comm_type implies a computation type- see todo above
+            if comm_type == SEND:
+                if comp_type == FORWARD:
+                    _batch_p2p(stage.get_fwd_send_ops(mb_index))
+                elif comp_type == BACKWARD:
+                    _batch_p2p(stage.get_bwd_send_ops(mb_index))
+                else:
+                    raise ValueError(
+                        f"SEND {action=} computation_type is missing or invalid "
+                    )
+            elif comm_type == RECV:
+                if comp_type == FORWARD:
+                    _batch_p2p(stage.get_fwd_recv_ops(mb_index))
+                elif comp_type == BACKWARD:
+                    _batch_p2p(stage.get_bwd_recv_ops(mb_index))
+                else:
+                    raise ValueError(
+                        f"RECV {action=} computation_type is missing or invalid "
+                    )
+            elif comm_type == UNSHARD:
+                # TODO
+                pass
+            elif comm_type == RESHARD:
+                # TODO
+                pass
+            elif comp_type == FORWARD:
+                assert mb_index is not None, f"{action=} missing mb_index"
+                output = stage.forward_one_chunk(
+                    mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
+                )
+                self._maybe_compute_loss(stage, output, target_mbs, mb_index)
+            elif comp_type == BACKWARD:
+                assert mb_index is not None, f"{action=} missing mb_index"
+                loss = self._maybe_get_loss(stage, mb_index)
+                stage.backward_one_chunk(
+                    mb_index, loss=loss, full_backward=self.use_full_backward
+                )
+            elif comp_type == WEIGHT:
+                assert mb_index is not None, f"{action=} missing mb_index"
+                if self.use_full_backward:
+                    raise ValueError(
+                        f"We detected a weight update in the pipeline schedule, but \
+                        {self.use_full_backward=}"
+                    )
+                stage.backward_weight_one_chunk(mb_index)
+            else:
+                raise ValueError(f"{action=} is unknown or unsupported")
+
+    # TODO
+    pass
 
 
 class PipelineScheduleMulti(_PipelineSchedule):
