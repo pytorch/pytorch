@@ -1163,6 +1163,19 @@ class VariableBuilder:
         else:
             return RangeVariable(items, source=self.source)
 
+    def mark_static_input(self, value: torch.Tensor, guard: bool):
+        from ..decorators import mark_static_address
+
+        mark_static_address(value, guard=guard)
+
+        # Check if we've seen this tensor before and update graph metadata if needed
+        # As long as this runs before AOT this is sound
+        if value in self.tx.output.side_effects:
+            var = self.tx.output.side_effects[value]
+            var.proxy.node.meta["tensor_dict"][
+                "_dynamo_static_input_type"
+            ] = value._dynamo_static_input_type
+
     def wrap_module(self, value: torch.nn.Module):
         from ..eval_frame import OptimizedModule
 
@@ -1216,23 +1229,22 @@ class VariableBuilder:
         elif mutation_guard.is_dynamic_nn_module(value, self.tx.export):
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            if (
-                torch._dynamo.config.inline_inbuilt_nn_modules
-                and torch._inductor.config.freezing
-                and not torch.is_grad_enabled()
-            ):
-                from ..decorators import mark_static_address
+            if torch._dynamo.config.inline_inbuilt_nn_modules:
+                freezing = (
+                    torch._inductor.config.freezing and not torch.is_grad_enabled()
+                )
 
                 for p in value.parameters():
-                    mark_static_address(p)
+                    self.mark_static_input(p, guard=freezing)
 
                 for b in value.buffers():
-                    mark_static_address(b)
+                    self.mark_static_input(b, guard=freezing)
 
-                # we need to add the module to tracing context
-                # in order to allow its params to get invalidated
-                # this will get cleaned up once compile ends
-                self.tx.output.nn_modules[self.name] = value
+                if freezing:
+                    # we need to add the module to tracing context
+                    # in order to allow its params to get invalidated
+                    # this will get cleaned up once compile ends
+                    self.tx.output.nn_modules[self.name] = value
 
             result = UnspecializedNNModuleVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
@@ -1305,9 +1317,7 @@ class VariableBuilder:
             and not is_static_input
             and isinstance(value, torch.nn.Parameter)
         ):
-            from ..decorators import mark_static_address
-
-            mark_static_address(value, guard=False)
+            self.mark_static_input(value, guard=False)
             is_static_input = True
 
         if (
