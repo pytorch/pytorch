@@ -981,17 +981,17 @@ void launch_tinygemm_kernel(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   cudaFuncAttributes funcAttr;
-  #if defined(USE_ROCM)
+#if defined(USE_ROCM)
   C10_CUDA_CHECK(cudaFuncGetAttributes(
       &funcAttr,
       (void *)func
   ));
-  #else
+#else
   C10_CUDA_CHECK(cudaFuncGetAttributes(
       &funcAttr,
       func
   ));
-  #endif
+#endif
 }
 
 // FIXME: parallelize better, smem staging etc?
