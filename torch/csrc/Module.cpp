@@ -1,8 +1,8 @@
 #include <ATen/DeviceAccelerator.h>
-#include <c10/util/Optional.h>
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
+#include <optional>
 
 #ifndef _MSC_VER
 #include <sys/socket.h>
@@ -741,6 +741,25 @@ PyObject* THPModule_userEnabledMathSDP(PyObject* _unused, PyObject* noargs) {
   else
     Py_RETURN_FALSE;
 }
+PyObject* THPModule_setSDPUseOverrideable(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_sdp_use_overrideable expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseOverrideable(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+PyObject* THPModule_userEnabledOverrideableSDP(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().userEnabledOverrideableSDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
 PyObject* THPModule_setSDPUseCuDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1346,6 +1365,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"_set_sdp_use_math", THPModule_setSDPUseMath, METH_O, nullptr},
+    {"_get_overrideable_sdp_enabled",
+     THPModule_userEnabledOverrideableSDP,
+     METH_NOARGS,
+     nullptr},
+    {"_set_sdp_use_overrideable",
+     THPModule_setSDPUseOverrideable,
+     METH_O,
+     nullptr},
     {"_get_cudnn_sdp_enabled",
      THPModule_userEnabledCuDNNSDP,
      METH_NOARGS,
@@ -1861,7 +1888,7 @@ Call this whenever a new thread is created in order to propagate values from
             transposed_,
             output_padding_,
             std::move(groups_),
-            c10::nullopt);
+            std::nullopt);
       },
       py::arg("input"),
       py::arg("weight"),
@@ -1886,7 +1913,7 @@ Call this whenever a new thread is created in order to propagate values from
          at::SymIntArrayRef output_padding_,
          c10::SymInt groups_,
          std::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
-        c10::OptionalArrayRef<c10::SymInt> ref = c10::nullopt;
+        c10::OptionalArrayRef<c10::SymInt> ref = std::nullopt;
         if (bias_sizes_opt) {
           ref = (*bias_sizes_opt);
         }
@@ -1947,7 +1974,8 @@ Call this whenever a new thread is created in order to propagate values from
       .value("MATH", sdp::SDPBackend::math)
       .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
       .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention)
-      .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention);
+      .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention)
+      .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
 
   py_module.def(
       "_can_use_flash_attention",
@@ -1963,6 +1991,15 @@ Call this whenever a new thread is created in order to propagate values from
       [](const sdp::sdp_params& params, bool debug) {
 #ifdef USE_CUDA
         return sdp::can_use_mem_efficient_attention(params, debug);
+#else
+        return false;
+#endif
+      });
+  py_module.def(
+      "_can_use_cudnn_attention",
+      [](const sdp::sdp_params& params, bool debug) {
+#ifdef USE_CUDA
+        return sdp::can_use_cudnn_attention(params, debug);
 #else
         return false;
 #endif
@@ -2075,7 +2112,7 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_get_accelerator",
-      [](std::optional<bool> check = c10::nullopt) {
+      [](std::optional<bool> check = std::nullopt) {
         return c10::Device(
             at::getAccelerator(check.value_or(false))
                 .value_or(c10::DeviceType::CPU),

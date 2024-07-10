@@ -8,6 +8,20 @@
 
 namespace at::native {
 
+enum class EmbeddingBagMode {
+  SUM = 0,
+  MEAN = 1,
+  MAX = 2,
+};
+
+[[maybe_unused]] static bool operator==(int64_t op1, EmbeddingBagMode op2) {
+  return op1 == static_cast<int64_t>(op2);
+}
+
+[[maybe_unused]] static bool operator!=(int64_t op1, EmbeddingBagMode op2) {
+  return !(op1 == op2);
+}
+
 void check_arguments(
     const Tensor& weight,
     const Tensor& indices,
@@ -115,7 +129,7 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
     Tensor& bag_size, Tensor* max_indices,
     const Tensor &weight, const Tensor &indices,
     const Tensor &offsets, const int64_t mode = 0,
-    const std::optional<Tensor>& per_sample_weights = c10::nullopt,
+    const std::optional<Tensor>& per_sample_weights = std::nullopt,
     bool include_last_offset = false,
     int64_t padding_idx = -1,
     _EmbeddingBagKernelCache* fbgemm_kernel_cache = nullptr);

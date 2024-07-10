@@ -1,7 +1,7 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 #include <ATen/mps/MPSProfiler.h>
-#include <Aten/native/mps/operations/FusedOptimizerOps.h>
+#include <ATen/native/mps/operations/FusedOptimizerOps.h>
 
 namespace at::native {
 namespace mps {
@@ -16,17 +16,150 @@ struct MetadataArguments { // the size of this struct must be less than 4 bytes
   uint threadgroup_to_chunk[kmaxThreadGroups];
 };
 
-template <int depth, uint32_t kThreadGroupSize>
-static void multi_tensor_apply_for_fused_adam(
+struct FusedAdamEncodingFunctor {
+  void operator()(
+      id<MTLComputeCommandEncoder>& computeEncoder,
+      id<MTLBuffer>& tensorArgumentBuffer,
+      const MetadataArguments& metadata_arguments,
+      const double lr,
+      const double beta1,
+      const double beta2,
+      const double weight_decay,
+      const double eps,
+      const bool maximize
+    ) const {
+
+    float lr_lv = lr;
+    float beta1_lv = beta1;
+    float beta2_lv = beta2;
+    float weight_decay_lv = weight_decay;
+    float eps_lv = eps;
+    uint8_t maximize_lv = maximize;
+
+    [computeEncoder setBuffer:tensorArgumentBuffer
+                                  offset:0
+                                  atIndex:0];
+    [computeEncoder setBytes:&metadata_arguments
+                                  length:sizeof(MetadataArguments)
+                                  atIndex:1];
+    [computeEncoder setBytes:&lr_lv length:sizeof(float) atIndex:2];
+    [computeEncoder setBytes:&beta1_lv length:sizeof(float) atIndex:3];
+    [computeEncoder setBytes:&beta2_lv length:sizeof(float) atIndex:4];
+    [computeEncoder setBytes:&weight_decay_lv length:sizeof(float) atIndex:5];
+    [computeEncoder setBytes:&eps_lv length:sizeof(float) atIndex:6];
+    [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
+  }
+
+  void operator()(
+      id<MTLComputeCommandEncoder>& computeEncoder,
+      id<MTLBuffer>& tensorArgumentBuffer,
+      const MetadataArguments& metadata_arguments,
+      const at::Tensor& lr,
+      const double beta1,
+      const double beta2,
+      const double weight_decay,
+      const double eps,
+      const bool maximize
+    ) const {
+    float beta1_lv = beta1;
+    float beta2_lv = beta2;
+    float weight_decay_lv = weight_decay;
+    float eps_lv = eps;
+    uint8_t maximize_lv = maximize;
+
+    [computeEncoder setBuffer:tensorArgumentBuffer
+                                  offset:0
+                                  atIndex:0];
+    [computeEncoder setBytes:&metadata_arguments
+                                  length:sizeof(MetadataArguments)
+                                  atIndex:1];
+    [computeEncoder setBuffer:getMTLBufferStorage(lr) offset:lr.storage_offset() * lr.element_size() atIndex:2];
+    [computeEncoder setBytes:&beta1_lv length:sizeof(float) atIndex:3];
+    [computeEncoder setBytes:&beta2_lv length:sizeof(float) atIndex:4];
+    [computeEncoder setBytes:&weight_decay_lv length:sizeof(float) atIndex:5];
+    [computeEncoder setBytes:&eps_lv length:sizeof(float) atIndex:6];
+    [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
+  }
+};
+
+struct FusedSgdEncodingFunctor {
+  void operator()(
+    id<MTLComputeCommandEncoder>& computeEncoder,
+      id<MTLBuffer>& tensorArgumentBuffer,
+      const MetadataArguments& metadata_arguments,
+      const double weight_decay,
+      const double momentum,
+      const double lr,
+      const double dampening,
+      const bool nesterov,
+      const bool maximize,
+      const bool is_first_step
+    ) const {
+      float weight_decay_lv = weight_decay;
+      float momentum_lv = momentum;
+      float lr_lv = lr;
+      float dampening_lv = dampening;
+      uint8_t nesterov_lv = nesterov;
+      uint8_t maximize_lv = maximize;
+      uint8_t is_first_step_lv = is_first_step;
+
+      [computeEncoder setBuffer:tensorArgumentBuffer
+                                  offset:0
+                                  atIndex:0];
+      [computeEncoder setBytes:&metadata_arguments
+                                  length:sizeof(MetadataArguments)
+                                  atIndex:1];
+      [computeEncoder setBytes:&weight_decay_lv length:sizeof(float) atIndex:2];
+      [computeEncoder setBytes:&momentum_lv length:sizeof(float) atIndex:3];
+      [computeEncoder setBytes:&lr_lv length:sizeof(float) atIndex:4];
+      [computeEncoder setBytes:&dampening_lv length:sizeof(float) atIndex:5];
+      [computeEncoder setBytes:&nesterov_lv length:sizeof(uint8_t) atIndex:6];
+      [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
+      [computeEncoder setBytes:&is_first_step_lv length:sizeof(uint8_t) atIndex:8];
+  }
+
+  void operator()(
+    id<MTLComputeCommandEncoder>& computeEncoder,
+      id<MTLBuffer>& tensorArgumentBuffer,
+      const MetadataArguments& metadata_arguments,
+      const double weight_decay,
+      const double momentum,
+      const at::Tensor& lr,
+      const double dampening,
+      const bool nesterov,
+      const bool maximize,
+      const bool is_first_step
+    ) const {
+      float weight_decay_lv = weight_decay;
+      float momentum_lv = momentum;
+      float dampening_lv = dampening;
+      uint8_t nesterov_lv = nesterov;
+      uint8_t maximize_lv = maximize;
+      uint8_t is_first_step_lv = is_first_step;
+
+      [computeEncoder setBuffer:tensorArgumentBuffer
+                                  offset:0
+                                  atIndex:0];
+      [computeEncoder setBytes:&metadata_arguments
+                                  length:sizeof(MetadataArguments)
+                                  atIndex:1];
+      [computeEncoder setBytes:&weight_decay_lv length:sizeof(float) atIndex:2];
+      [computeEncoder setBytes:&momentum_lv length:sizeof(float) atIndex:3];
+      [computeEncoder setBuffer:getMTLBufferStorage(lr) offset:lr.storage_offset() * lr.element_size() atIndex:4];
+      [computeEncoder setBytes:&dampening_lv length:sizeof(float) atIndex:5];
+      [computeEncoder setBytes:&nesterov_lv length:sizeof(uint8_t) atIndex:6];
+      [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
+      [computeEncoder setBytes:&is_first_step_lv length:sizeof(uint8_t) atIndex:8];
+  }
+};
+
+template <int depth, uint32_t kThreadGroupSize, typename encoder_func_t, typename... ArgTypes>
+static void multi_tensor_apply_for_fused_optimizer(
     const std::string& kernel_name,
     std::vector<std::vector<at::Tensor>>& tensor_lists,
     at::TensorList state_steps,
-    const double lr,
-    const double beta1,
-    const double beta2,
-    const double weight_decay,
-    const double eps,
-    const bool maximize
+    encoder_func_t encode,
+    ArgTypes... args
     ) {
   const auto num_tensors = tensor_lists[0].size();
 
@@ -44,13 +177,6 @@ static void multi_tensor_apply_for_fused_adam(
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
-
-  float lr_lv = lr;
-  float beta1_lv = beta1;
-  float beta2_lv = beta2;
-  float weight_decay_lv = weight_decay;
-  float eps_lv = eps;
-  uint8_t maximize_lv = maximize;
 
   // Remove comment for debugging
   /*
@@ -93,10 +219,12 @@ static void multi_tensor_apply_for_fused_adam(
                                      atIndex:d * kmaxTensors + tensor_loc];
             [computeEncoder useResource:getMTLBufferStorage(tensor_lists[d][tensor_index]) usage:MTLResourceUsageRead | MTLResourceUsageWrite];
         }
-        [tensorArgumentEncoder setBuffer:getMTLBufferStorage(state_steps[tensor_index])
-                           offset:state_steps[tensor_index].storage_offset() * state_steps[tensor_index].element_size()
-                          atIndex:depth * kmaxTensors + tensor_loc];
-        [computeEncoder useResource:getMTLBufferStorage(state_steps[tensor_index]) usage:MTLResourceUsageRead];
+        if (state_steps.size() > 0){
+          [tensorArgumentEncoder setBuffer:getMTLBufferStorage(state_steps[tensor_index])
+                             offset:state_steps[tensor_index].storage_offset() * state_steps[tensor_index].element_size()
+                            atIndex:depth * kmaxTensors + tensor_loc];
+          [computeEncoder useResource:getMTLBufferStorage(state_steps[tensor_index]) usage:MTLResourceUsageRead];
+        }
         metadata_arguments.numels[tensor_loc] = tensor_lists[0][tensor_index].numel();
 
         tensor_loc++;
@@ -116,18 +244,7 @@ static void multi_tensor_apply_for_fused_adam(
             const auto blocks_full = threadgroup_loc == kmaxThreadGroups;
 
             if (tensor_full || blocks_full){
-                [computeEncoder setBuffer:tensorArgumentBuffer
-                                offset:0
-                                atIndex:0];
-                [computeEncoder setBytes:&metadata_arguments
-                                length:sizeof(MetadataArguments)
-                                atIndex:1];
-                [computeEncoder  setBytes:&lr_lv length:sizeof(float) atIndex:2];
-                [computeEncoder  setBytes:&beta1_lv length:sizeof(float) atIndex:3];
-                [computeEncoder  setBytes:&beta2_lv length:sizeof(float) atIndex:4];
-                [computeEncoder  setBytes:&weight_decay_lv length:sizeof(float) atIndex:5];
-                [computeEncoder  setBytes:&eps_lv length:sizeof(float) atIndex:6];
-                [computeEncoder  setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
+                encode(computeEncoder, tensorArgumentBuffer, metadata_arguments, args...);
                 MTLSize gridSize = MTLSizeMake(threadgroup_loc, 1, 1);
                 uint32_t maxThreadsPerGroup = [fusedOptimizerPSO maxTotalThreadsPerThreadgroup];
                 MTLSize threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, kThreadGroupSize), 1, 1);
@@ -153,11 +270,12 @@ static void multi_tensor_apply_for_fused_adam(
                                               atIndex:d * kmaxTensors + 0];
                       [computeEncoder useResource:getMTLBufferStorage(tensor_lists[d][tensor_index]) usage:MTLResourceUsageWrite | MTLResourceUsageRead];
                   }
-                  [tensorArgumentEncoder setBuffer:getMTLBufferStorage(state_steps[tensor_index])
-                                    offset:state_steps[tensor_index].storage_offset() * state_steps[tensor_index].element_size()
-                                    atIndex:depth * kmaxTensors + 0];
-                  [computeEncoder useResource:getMTLBufferStorage(state_steps[tensor_index]) usage:MTLResourceUsageRead];
-
+                  if (state_steps.size() > 0){
+                    [tensorArgumentEncoder setBuffer:getMTLBufferStorage(state_steps[tensor_index])
+                                      offset:state_steps[tensor_index].storage_offset() * state_steps[tensor_index].element_size()
+                                      atIndex:depth * kmaxTensors + 0];
+                    [computeEncoder useResource:getMTLBufferStorage(state_steps[tensor_index]) usage:MTLResourceUsageRead];
+                  }
                   tensor_loc = 1;
                 }
             }
@@ -165,15 +283,7 @@ static void multi_tensor_apply_for_fused_adam(
       }
 
       if (threadgroup_loc != 0) {
-
-        [computeEncoder setBuffer:tensorArgumentBuffer offset:0 atIndex:0];
-        [computeEncoder setBytes:&metadata_arguments length:sizeof(MetadataArguments) atIndex:1];
-        [computeEncoder setBytes:&lr_lv length:sizeof(float) atIndex:2];
-        [computeEncoder setBytes:&beta1_lv length:sizeof(float) atIndex:3];
-        [computeEncoder setBytes:&beta2_lv length:sizeof(float) atIndex:4];
-        [computeEncoder setBytes:&weight_decay_lv length:sizeof(float) atIndex:5];
-        [computeEncoder setBytes:&eps_lv length:sizeof(float) atIndex:6];
-        [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
+        encode(computeEncoder, tensorArgumentBuffer, metadata_arguments, args...);
         MTLSize gridSize = MTLSizeMake(threadgroup_loc, 1, 1);
         uint32_t maxThreadsPerGroup = [fusedOptimizerPSO maxTotalThreadsPerThreadgroup];
         MTLSize threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, kThreadGroupSize), 1, 1);
