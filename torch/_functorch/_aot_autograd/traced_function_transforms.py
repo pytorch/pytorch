@@ -704,11 +704,18 @@ def aot_dispatch_subclass(
     )
 
     if is_joint_structure:
-        primals_unwrapped = args_unwrapped[0]
+        primals_unwrapped, new_ind_to_old_ind = args_unwrapped[0]
         fn_to_trace = joint_fn
     else:
-        primals_unwrapped = args_unwrapped
+        primals_unwrapped, new_ind_to_old_ind = args_unwrapped
         fn_to_trace = fw_fn
+
+    # remap static indices after subclass desugaring
+    static_indices = set(meta.static_input_indices)
+    remapped_static_indices = []
+    for new_ind, old_ind in enumerate(new_ind_to_old_ind):
+        if old_ind in static_indices:
+            remapped_static_indices.append(new_ind)
 
     # Note: [Partitioner handling for Subclasses, Part 1]
     # The way the partitioner works is that:
@@ -729,7 +736,7 @@ def aot_dispatch_subclass(
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
     meta_updated = run_functionalized_fw_and_collect_metadata(
         metadata_fn,
-        static_input_indices=meta.static_input_indices,
+        static_input_indices=remapped_static_indices,
         keep_input_mutations=meta.keep_input_mutations,
         is_train=meta.is_train,
     )(*primals_unwrapped)
