@@ -20,19 +20,17 @@ concurrency:
 permissions: read-all
 
 jobs:
-  # Often fails due to conda availability issues
-  # See https://github.com/pytorch/pytorch/issues/129717
-  # llm-td:
-  #  name: before-test
-  #  uses: ./.github/workflows/llm_td_retrieval.yml
-  #  permissions:
-  #    id-token: write
-  #    contents: read
+  llm-td:
+    name: before-test
+    uses: ./.github/workflows/llm_td_retrieval.yml
+    permissions:
+      id-token: write
+      contents: read
 
   target-determination:
     name: before-test
     uses: ./.github/workflows/target_determination.yml
-    # needs: llm-td
+    needs: llm-td
     permissions:
       id-token: write
       contents: read
@@ -385,15 +383,17 @@ jobs:
     if: github.event_name == 'pull_request'
     name: win-vs2019-cpu-py3
     uses: ./.github/workflows/_win-build.yml
+    needs: get-label-type
     with:
       build-environment: win-vs2019-cpu-py3
       cuda-version: cpu
       sync-tag: win-cpu-build
+      runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 2, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 3, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
         ]}
 
   linux-focal-cpu-py3_10-gcc9-bazel-test:
