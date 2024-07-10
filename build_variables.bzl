@@ -691,6 +691,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
     "torch/csrc/monitor/instrumentation.cpp",
+    "torch/csrc/monitor/stats.cpp",
 ]
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources

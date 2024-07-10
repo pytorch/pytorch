@@ -10,14 +10,12 @@
 
 namespace torch {
 namespace monitor {
-namespace detail {
-class WaitCounterImpl;
-}
 
 // A handle to a wait counter.
 class WaitCounterHandle {
  public:
   explicit WaitCounterHandle(std::string_view key);
+  ~WaitCounterHandle();
 
   // Starts a waiter
   void start(
@@ -29,8 +27,11 @@ class WaitCounterHandle {
       std::chrono::steady_clock::time_point now =
           std::chrono::steady_clock::now());
 
+  struct State;
+
  private:
-  detail::WaitCounterImpl& impl_;
+  const std::string key_;
+  std::shared_ptr<State> state_;
 };
 } // namespace monitor
 } // namespace torch
