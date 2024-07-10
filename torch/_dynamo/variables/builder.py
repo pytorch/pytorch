@@ -47,6 +47,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef
+
 from .. import config, mutation_guard, replay_record, trace_rules
 
 from ..device_interface import get_registered_device_interfaces
@@ -1411,6 +1412,9 @@ class VariableBuilder:
         if is_duplicate_tensor:
             return self.tx.output.input_source_to_var[source]
 
+        if get_static_address_type(value) == "guarded":
+            self.install_guards(GuardBuilder.ID_MATCH)
+
         # By this point, we should have deduplicated all tensors
         self.assert_not_wrapped_by_this_graph(value)
 
@@ -1471,9 +1475,11 @@ class VariableBuilder:
         self.install_guards(
             functools.partial(
                 guard_type,
-                value=value
-                if isinstance(source, NumpyTensorSource)
-                else TensorWeakRef(value),
+                value=(
+                    value
+                    if isinstance(source, NumpyTensorSource)
+                    else TensorWeakRef(value)
+                ),
             )
         )
 
