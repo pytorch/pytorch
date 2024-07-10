@@ -2210,7 +2210,8 @@ def _make_copy_from_view(fn):
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
     aten_fn = getattr(aten, fn.__name__)
-    fn = out_wrapper(annotations=dict(fn.__annotations__))(aten_fn)
+    annotations = fn.__annotations__
+    fn = out_wrapper()(aten_fn)
 
     @wraps(fn)
     def _fn(*args, out=None, **kwargs):
@@ -2225,7 +2226,8 @@ def _make_copy_from_view(fn):
 
     copy_name = f"{fn.__name__}_copy"
     _fn.__name__ = copy_name
-    _fn = register_decomposition(getattr(aten, copy_name))(_fn)
+    _fn.__annotations__.update(annotations)
+    register_decomposition(getattr(aten, copy_name))(_fn)
     return _fn
 
 
@@ -6325,25 +6327,10 @@ permute_copy = _make_copy_from_view(permute)
 squeeze_copy = _make_copy_from_view(squeeze)
 t_copy = _make_copy_from_view(t)
 transpose_copy = _make_copy_from_view(transpose)
+unbind_copy = _make_copy_from_view(unbind)
 unfold_copy = _make_copy_from_view(unfold)
 unsqueeze_copy = _make_copy_from_view(unsqueeze)
 view_copy = _make_copy_from_view(view)
-
-
-@register_decomposition(aten.unbind_copy)
-def unbind_copy(
-    t: TensorLikeType, dim: int = 0, out: Optional[TensorSequenceType] = None
-) -> TensorSequenceType:
-    result = unbind(t, dim)
-    if out is None:
-        return tuple(i.clone(memory_format=torch.contiguous_format) for i in result)
-    torch._check(
-        len(out) == len(result),
-        f"len(out) ({len(out)}) != len(result) ({len(result)})",
-    )
-    for o, r in zip(out, result):
-        o.copy_(r)
-    return out
 
 
 # xref: isStorage in torch/csrc/DynamicTypes.cpp

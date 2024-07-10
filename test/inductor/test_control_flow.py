@@ -222,6 +222,42 @@ class CondTests(TestCase):
         )
 
     @requires_gpu
+    def test_cond_control_flow_with_precomputed_size(self):
+        class TestModel(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.conv2d = torch.nn.Conv2d(
+                    512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
+                )
+                self.threshold = 20
+
+            def forward(self, x: torch.Tensor, index) -> torch.Tensor:
+                def true_fn(x: torch.Tensor):
+                    return self.conv2d(x)
+
+                def false_fn(x: torch.Tensor):
+                    return self.conv2d(x)
+
+                return torch.cond(
+                    index < self.threshold and index >= 0, true_fn, false_fn, (x,)
+                )
+
+        main_model = TestModel().cuda()
+        x1 = torch.rand(2, 512, 128, 72).cuda()
+        x2 = torch.rand(2, 512, 96, 96).cuda()
+
+        opt_model = torch.compile(main_model)
+        out1 = main_model(x1, 1)
+        opt_out1 = opt_model(x1, 1)
+        self.assertTrue(torch.allclose(out1, opt_out1, atol=1e-5))
+
+        out2 = main_model(x2, 30)
+        opt_out2 = opt_model(x2, 30)
+        self.assertTrue(torch.allclose(out2, opt_out2, atol=1e-5))
+
+    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_nested_control_flow(self, device, dynamic):
