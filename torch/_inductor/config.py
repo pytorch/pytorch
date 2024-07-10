@@ -655,6 +655,11 @@ class cpp:
         == "1"
     )
 
+    # Pass additional flags to the compiler, separated by ";"
+    additional_compiler_flags = os.environ.get(
+        "TORCHINDUCTOR_ADDITIONAL_COMPILER_FLAGS", ""
+    ).split(";")
+
 
 # config specific to codegen/triton.py
 class triton:
