@@ -312,7 +312,8 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // location
   pushString(tensor.device().str());
   // size
-  pushInt(tensor.storage().nbytes() / tensor.element_size());
+  pushInt(
+      static_cast<int64_t>(tensor.storage().nbytes() / tensor.element_size()));
 
   push<PickleOpCode>(PickleOpCode::TUPLE);
   push<PickleOpCode>(PickleOpCode::BINPERSID);
@@ -370,10 +371,10 @@ void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
   pushGlobal("torch._utils", "_rebuild_sparse_tensor");
   push<PickleOpCode>(PickleOpCode::MARK);
   // layout
-  auto layout = static_cast<int>(tensor.layout());
-  pushInt(layout);
+  auto layout = tensor.layout();
+  pushInt(static_cast<int>(layout));
   switch (layout) {
-    case static_cast<int>(c10::Layout::Sparse):
+    case c10::Layout::Sparse:
       // size
       push<PickleOpCode>(PickleOpCode::MARK);
       for (auto size : tensor.sizes()) {
@@ -387,7 +388,7 @@ void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
       // values
       pushTensor(tensor._values());
       break;
-    case static_cast<int>(c10::Layout::SparseCsr):
+    case c10::Layout::SparseCsr:
       push<PickleOpCode>(PickleOpCode::MARK);
       for (auto size : tensor.sizes()) {
         pushInt(size);
@@ -403,7 +404,7 @@ void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
       TORCH_CHECK(
           false,
           "Unsupported sparse tensor layout type in serialization ",
-          static_cast<c10::Layout>(layout));
+          layout);
       break;
   }
   // backward_hooks
@@ -540,8 +541,7 @@ void Pickler::pushSpecializedList(
 
 static inline double swapDouble(double value) {
   const char* bytes = reinterpret_cast<const char*>(&value);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double flipped;
+  double flipped = 0;
   char* out_bytes = reinterpret_cast<char*>(&flipped);
   for (const auto i : c10::irange(sizeof(double))) {
     out_bytes[i] = bytes[sizeof(double) - i - 1];
@@ -583,11 +583,11 @@ void Pickler::pushLong(const std::string& data) {
 void Pickler::pushTensorReference(const IValue& ivalue) {
   pushGlobal("torch.jit._pickle", "build_tensor_from_id");
   tensor_table_->push_back(ivalue.toTensor());
-  int64_t tensor_id = tensor_table_->size() - 1;
+  auto tensor_id = tensor_table_->size() - 1;
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
   // so wrap in a tuple
   push<PickleOpCode>(PickleOpCode::MARK);
-  pushIValue(tensor_id);
+  pushIValue(static_cast<int64_t>(tensor_id));
   push<PickleOpCode>(PickleOpCode::TUPLE);
 
   push<PickleOpCode>(PickleOpCode::REDUCE);

@@ -9,18 +9,13 @@ import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
-from torch._export import capture_pre_autograd_graph
 from torch._inductor import config, metrics
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.ao.quantization.quantize_pt2e import (
-    convert_pt2e,
-    prepare_pt2e,
-    prepare_qat_pt2e,
-)
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_quantization import (
+    _generate_qdq_quantized_model,
     skipIfNoDynamoSupport,
     skipIfNoONEDNN,
     skipIfNoONEDNNBF16,
@@ -130,28 +125,6 @@ class TestPatternMatcherBase(TestCase):
 
         return tuple(clone(x) for x in inputs)
 
-    def _generate_qdq_quantized_model(
-        self, mod, inputs, is_qat=False, is_dynamic=False, quantizer=None
-    ):
-        maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
-        with maybe_no_grad:
-            export_model = capture_pre_autograd_graph(
-                mod,
-                inputs,
-            )
-            quantizer = (
-                quantizer if quantizer else get_default_quantizer(is_qat, is_dynamic)
-            )
-            prepare_model = (
-                prepare_qat_pt2e(export_model, quantizer)
-                if is_qat
-                else prepare_pt2e(export_model, quantizer)
-            )
-            prepare_model(*inputs)
-            convert_model = convert_pt2e(prepare_model)
-            torch.ao.quantization.move_exported_model_to_eval(convert_model)
-            return convert_model
-
     def _test_common(
         self,
         mod,
@@ -190,7 +163,7 @@ class TestPatternMatcherBase(TestCase):
             maybe_autocast = contextlib.nullcontext()
 
         if check_quantization:
-            convert_model = self._generate_qdq_quantized_model(
+            convert_model = _generate_qdq_quantized_model(
                 mod, inputs, is_qat, is_dynamic, quantizer
             )
             with torch.no_grad(), maybe_autocast:
@@ -239,7 +212,7 @@ class TestPatternMatcherBase(TestCase):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
             if check_quantization:
-                mod = self._generate_qdq_quantized_model(mod, inputs)
+                mod = _generate_qdq_quantized_model(mod, inputs)
             expected = mod(*inputs)
             actual, (source_code,) = run_and_get_code(
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
@@ -455,10 +428,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1 kernel for "to_lowp", 2 kernels for unary ops
             self.assertEqual(metrics.generated_kernel_count, 3)
 
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_conv_transpose2d_unary(self):
+    def _test_conv_transpose_unary_base(self, dim=4):
+        assert dim == 4 or dim == 5
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -466,13 +438,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 **kwargs,
             ):
                 super().__init__()
-                self.conv_transpose2d = torch.nn.ConvTranspose2d(
-                    3, 16, 3, stride=2, padding=1
-                )
+                if dim == 4:
+                    self.conv_transpose = torch.nn.ConvTranspose2d(
+                        3, 16, 3, stride=2, padding=1
+                    )
+                else:
+                    self.conv_transpose = torch.nn.ConvTranspose3d(
+                        3, 16, 3, stride=2, padding=1
+                    )
                 self.unary_fn = unary_fn
 
             def forward(self, x):
-                x = self.conv_transpose2d(x)
+                x = self.conv_transpose(x)
                 return self.unary_fn(x)
 
         dtypes = [
@@ -483,15 +460,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
         if torch.ops.mkldnn._is_mkldnn_fp16_supported():
             dtypes.append(torch.float16)
 
+        cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         options = itertools.product(
             unary_list,
-            [torch.contiguous_format, torch.channels_last],
+            [torch.contiguous_format, cl_format],
             dtypes,
         )
 
         for unary_fn, memory_format, dtype in options:
             metrics.reset()
-            x_shape = (1, 3, 28, 28)
+            if dim == 4:
+                x_shape = (1, 3, 28, 28)
+            else:
+                x_shape = (1, 3, 17, 28, 28)
             mod = M(unary_fn).eval()
 
             v = torch.randn(x_shape, dtype=torch.float32).to(
@@ -508,6 +489,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(mod, (v,), 2, match_nodes, check_autocast=dtype)
             generated_kernel_count = cal_conv_generated_kernel_number(mod, v, dtype)
             self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_conv_transpose2d_unary_cpu(self):
+        self._test_conv_transpose_unary_base(dim=4)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_conv_transpose3d_unary_cpu(self):
+        self._test_conv_transpose_unary_base(dim=5)
 
     def _test_conv_binary_base(self, dim=4):
         assert dim == 4 or dim == 5
@@ -1816,7 +1809,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                         mod,
                         (v,),
                         [
-                            "torch.ops.onednn.qlinear_pointwise.default",
+                            "torch.ops.onednn.qlinear_pointwise.tensor",
                             "torch.ops.onednn.qlinear_pointwise.binary",
                         ],
                         [],
