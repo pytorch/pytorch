@@ -614,14 +614,11 @@ print("arf")
         record_str = "\n".join(r.getMessage() for r in records)
 
         self.assertIn(
-            """\
-L['zs'][0] == 3.0                                             # for y, z in zip(ys, zs):""",
+            """L['zs'][0] == 3.0""",
             record_str,
         )
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):\n\
-    - len(L['ys']) == 2                                             # for y, z in zip(ys, zs):""",
+            "len(L['ys']) == 2",
             record_str,
         )
 

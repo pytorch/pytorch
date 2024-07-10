@@ -145,15 +145,15 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
 
       [computeEncoder setComputePipelineState:indexSelectPSO];
       [computeEncoder setBuffer:indexAB offset:0 atIndex:0];
-      [computeEncoder setBytes:index_size.data() length:sizeof(index_size[0]) * index_size.size() atIndex:1];
-      [computeEncoder setBytes:index_stride.data() length:sizeof(index_stride[0]) * index_stride.size() atIndex:2];
+      mtl_setBytes(computeEncoder, index_size, 1);
+      mtl_setBytes(computeEncoder, index_stride, 2);
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
       mtl_setBuffer(computeEncoder, inputTensor, 4);
       mtl_setBuffer(computeEncoder, outputTensor, 5);
-      [computeEncoder setBytes:&num_indices length:sizeof(uint32_t) atIndex:6];
+      mtl_setBytes(computeEncoder, num_indices, 6);
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       if (serial_index_put) {
-        [computeEncoder setBytes:&numIters length:sizeof(numIters) atIndex:7];
+        mtl_setBytes(computeEncoder, numIters, 7);
         gridSize = MTLSizeMake(1, 1, 1);
         numThreads = 1;
       }

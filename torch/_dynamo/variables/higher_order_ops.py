@@ -2,6 +2,7 @@
 
 import contextlib
 import functools
+import inspect
 import itertools
 import logging
 import types
@@ -144,6 +145,7 @@ def validate_args_and_maybe_create_graph_inputs(
     tx,
     set_subgraph_inputs,
     description,
+    sub_args_names=None,
 ):
     from . import AutogradFunctionContextVariable
     from .builder import wrap_fx_proxy_cls
@@ -167,18 +169,31 @@ def validate_args_and_maybe_create_graph_inputs(
             ListVariable(flat_inputs), tree_spec
         ).unpack_var_sequence(tx)
     else:
+        if sub_args_names is not None:
+            # Can be greater if user passes some args as kwargs
+            assert len(sub_args_names) >= len(sub_args)
         args = []
-        for a in sub_args:
+        for idx, a in enumerate(sub_args):
             assert isinstance(a, VariableTracker)
             if set_subgraph_inputs == "automatic":
                 args.append(a)
                 continue
             elif set_subgraph_inputs == "semi_automatic":
                 if isinstance(a, AutogradFunctionContextVariable):
-                    tracer.create_graph_input(a.as_proxy().node.name)
+                    arg_name = (
+                        a.as_proxy().node.name
+                        if sub_args_names is None
+                        else sub_args_names[idx]
+                    )
+                    tracer.create_graph_input(arg_name)
                 elif a.maybe_fx_node() is not None:
                     node = a.maybe_fx_node()
-                    new_proxy = tracer.create_graph_input(node.name)
+                    arg_name = (
+                        a.as_proxy().node.name
+                        if sub_args_names is None
+                        else sub_args_names[idx]
+                    )
+                    new_proxy = tracer.create_graph_input(arg_name)
                     example_value = (
                         node.meta["example_value"]
                         if "example_value" in node.meta
@@ -198,17 +213,28 @@ def validate_args_and_maybe_create_graph_inputs(
                 # Currently, this new input is added to make the calls
                 # happy, which expect a fixed number of arguments. In
                 # future, we can clean this up.
-                tracer.create_graph_input("const")
+                arg_name = (
+                    "const_unused"
+                    if sub_args_names is None
+                    else f"const_unused_{sub_args_names[idx]}"
+                )
+                tracer.create_graph_input(arg_name)
                 new_arg = a
             # Weird special case, we probably want to delete it or fold it
             # into the next case (of `a` being placeable into a graph)
             elif isinstance(a, AutogradFunctionContextVariable):
-                tracer.create_graph_input(a.as_proxy().node.name)
+                arg_name = (
+                    a.as_proxy().node.name
+                    if sub_args_names is None
+                    else sub_args_names[idx]
+                )
+                tracer.create_graph_input(arg_name)
                 new_arg = a
             # If `a` can be put into a graph
             elif a.maybe_fx_node() is not None:
                 node = a.maybe_fx_node()
-                new_proxy = tracer.create_graph_input(node.name)
+                arg_name = node.name if sub_args_names is None else sub_args_names[idx]
+                new_proxy = tracer.create_graph_input(arg_name)
                 example_value = (
                     node.meta["example_value"] if "example_value" in node.meta else None
                 )
@@ -380,8 +406,17 @@ def speculate_subgraph(
         )
 
         with tx.output.subtracer(source_target, tracer) as subtracer:
+            sub_args_names = maybe_positional_arg_names(f)
+            # User mismatch in the number of args. Will eventually lead to an error.
+            if sub_args_names is not None and len(sub_args_names) < len(sub_args):
+                sub_args_names = None
             args = validate_args_and_maybe_create_graph_inputs(
-                sub_args, subtracer, tx, set_subgraph_inputs, description
+                sub_args,
+                subtracer,
+                tx,
+                set_subgraph_inputs,
+                description,
+                sub_args_names,
             )
 
             validate_args_and_maybe_create_graph_inputs(
@@ -542,7 +577,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "flex_attention":
-            return TemplatedAttentionHigherOrderVariable(value, source, **kwargs)
+            return FlexAttentionHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
             "wrap_activation_checkpoint",
             "tag_activation_checkpoint",
@@ -1479,16 +1514,16 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
         return fn.call_function(tx, args, kwargs)
 
 
-class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
+class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @staticmethod
     def normalize_to_args(args, kwargs):
-        # input signature is (query, key, value, score_mod, *other_buffers)
-        # Flatten args and kwargs into lists
-        flat_args = pytree.tree_flatten(args)[0]
+        # input signature is (query, key, value, score_mod, block_mask, *other_buffers),
+        # block_mask is a tuple, and we don't want to flatten it.
+        # only flatten kwargs into lists
         flat_kwargs = pytree.tree_flatten(kwargs)[0]
 
         # Combine the flattened lists
-        all_args = flat_args + flat_kwargs
+        all_args = args + flat_kwargs
         return all_args
 
     def create_wrapped_node(
@@ -1563,12 +1598,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             key,
             value,
             score_mod,
-            sparse_kv_num_blocks,
-            sparse_kv_indices,
-            sparse_q_num_blocks,
-            sparse_q_indices,
-            SPARSE_KV_BLOCK_SIZE,
-            SPARSE_Q_BLOCK_SIZE,
+            block_mask,
         ) = self.normalize_to_args(args, kwargs)
 
         p_args = self.create_wrapped_node(tx, query, score_mod)
@@ -1576,12 +1606,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             query,
             key,
             value,
-            sparse_kv_num_blocks,
-            sparse_kv_indices,
-            sparse_q_num_blocks,
-            sparse_q_indices,
-            SPARSE_KV_BLOCK_SIZE,
-            SPARSE_Q_BLOCK_SIZE,
+            block_mask,
         ]
 
         # Store the invocation as a call
@@ -1599,8 +1624,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         example_value = (out_meta, lse_meta)
 
         # Compose the ordered HOO args from two parts:
-        # - inp_args: [query, key, value, sparse_kv_num_blocks, sparse_kv_indices,
-        #   sparse_q_num_blocks, sparse_q_indices, SPARSE_KV_BLOCK_SIZE, SPARSE_Q_BLOCK_SIZE]
+        # - inp_args: [query, key, value, block_mask]
         # - p_args: [score_mod, *other_buffers]
         return wrap_fx_proxy(
             tx=tx,
@@ -1885,3 +1909,30 @@ class AutogradFunctionApplyVariable(VariableTracker):
             ),
             example_value=example_value,
         )
+
+
+def maybe_positional_arg_names(func):
+    result = []
+    if not hasattr(func, "get_function"):
+        return None
+    try:
+        fn = func.get_function()
+    except (Unsupported, NotImplementedError):
+        return None
+    try:
+        sig = inspect.signature(func.get_function())
+    except ValueError:
+        return None
+    for name, param in sig.parameters.items():
+        if param.kind is inspect.Parameter.VAR_POSITIONAL:
+            return None
+        if (
+            param.kind is inspect.Parameter.POSITIONAL_ONLY
+            or param.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+        ):
+            if name == "self":
+                # FX graphs can't have a placeholder named self
+                result.append("self_")
+            else:
+                result.append(name)
+    return result
