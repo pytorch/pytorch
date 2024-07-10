@@ -249,9 +249,9 @@ Tensor& addmv_out_sparse_compressed_cuda(
           at::native::scalar_tensor(
               beta,
               self.scalar_type(),
-              std::nullopt /* layout */,
+              c10::nullopt /* layout */,
               at::kCPU,
-              std::nullopt /* pin_memory */));
+              c10::nullopt /* pin_memory */));
     }
   }
 

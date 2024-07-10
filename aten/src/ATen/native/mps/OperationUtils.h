@@ -367,9 +367,7 @@ private:
   std::unordered_map<std::string, std::pair<id<MTLComputePipelineState>, id<MTLFunction>>> cplMap;
 };
 
-template<typename encoder_t,
-         typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> || std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
-static inline void mtl_setBuffer(encoder_t encoder, const Tensor& t, unsigned idx) {
+static inline void mtl_setBuffer(id<MTLComputeCommandEncoder> encoder, const Tensor& t, unsigned idx) {
   [encoder setBuffer:getMTLBufferStorage(t)
               offset:t.storage_offset() * t.element_size()
              atIndex:idx];

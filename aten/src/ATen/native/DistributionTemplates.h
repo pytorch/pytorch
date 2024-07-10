@@ -10,9 +10,9 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
-#include <cmath>
+#include <c10/util/Optional.h>
 #include <limits>
-#include <optional>
+#include <cmath>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

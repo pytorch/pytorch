@@ -202,7 +202,7 @@ Tensor _adaptive_avg_pool(const Tensor& input,
         input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        std::nullopt);
+        c10::nullopt);
 
     qadaptive_avg_pool3d_ndhwc_stub(
         input.device().type(),
@@ -292,7 +292,7 @@ Tensor qnnpack_adaptive_avg_pool2d(
       padding,
       ceil_mode,
       count_include_pad,
-      std::nullopt);
+      c10::nullopt);
 }
 
 bool enable_qnnpack_for_ada_avgpool(
