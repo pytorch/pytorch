@@ -586,6 +586,22 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
             f(x, out)
 
+    def test_auto_functionalize_self_as_mutate_arg(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("foo(Tensor(a!) self) -> None")
+
+            def foo_impl(self: torch.Tensor) -> None:
+                self.sin_()
+
+            x = torch.randn(3)
+            lib.impl("foo", foo_impl, "CompositeExplicitAutograd")
+
+            @torch.compile(backend="inductor", fullgraph=True)
+            def f(x):
+                torch.ops.mylib.foo(x)
+
+            f(x)
+
     def test_user_defined_setattr1(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(obj):
@@ -2861,7 +2877,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             def forward(self, inputs):
                 return torch.outer(**inputs)
 
-        compile_fn = torch.compile(CustomModel(), fullgraph=True)
+        compile_fn = torch.compile(CustomModel(), backend="eager", fullgraph=True)
 
         shapes = [(2, 1), (6, 1), (4, 1)]
         for shape in shapes:
@@ -2874,6 +2890,26 @@ utils_device.CURRENT_DEVICE == None""".split(
             opt_res = res.clone()  # cuz this is out and we mutate it
             res = CustomModel()(args)
             self.assertEqual(res, opt_res)
+
+    def test_out_variants_with_resizing_on_graph_inputs_with_dynamic1(self):
+        mv_op = torch.mv
+
+        def mv_out_op(a, b, c):
+            torch.mv(b, c, out=a)
+            return a
+
+        def fn(op, *args):
+            return op(*args)
+
+        opt_fn = torch.compile(fn, backend="eager")
+
+        ref = fn(mv_op, torch.ones(3, 3), torch.ones(3))
+        res = opt_fn(mv_op, torch.ones(3, 3), torch.ones(3))
+        self.assertEqual(ref, res)
+
+        ref = fn(mv_out_op, torch.empty(0), torch.ones(3, 3), torch.ones(3))
+        res = opt_fn(mv_out_op, torch.empty(0), torch.ones(3, 3), torch.ones(3))
+        self.assertEqual(ref, res)
 
     def test_dict_mutation_side_effect(self):
         def fn(d):
@@ -6099,6 +6135,34 @@ utils_device.CURRENT_DEVICE == None""".split(
             self.assertFalse(True)
         except TypeError as e:
             self.assertIn("__bool__ should return bool, returned float", str(e))
+
+    def test_unpack_tensor_shape_mismatch(self):
+        @torch.compile(backend="eager")
+        def f1(x):
+            a, b = x
+            return torch.sin(a + b)
+
+        x = torch.tensor(2.0)
+        with self.assertRaisesRegex(AssertionError, "Can't unpack scalar tensors"):
+            f1(x)
+
+        x = torch.tensor([2.0])
+        with self.assertRaisesRegex(
+            AssertionError, "Can't unpack a tensor of 1 rows into a tuple of 2 elements"
+        ):
+            f1(x)
+
+        @torch.compile(backend="eager")
+        def f2(x):
+            (a,) = x
+            return torch.sin(a + 1)
+
+        x = torch.tensor(2.0)
+        with self.assertRaisesRegex(AssertionError, "Can't unpack scalar tensors"):
+            f2(x)
+
+        x = torch.tensor([2.0])
+        self.assertTrue(same(f2(x), torch.sin(x[0] + 1)))
 
     def test_if_cond_user_defined_object3(self):
         # obj.__bool__ is not existed, but obj.__len__ exists
@@ -10592,6 +10656,37 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_descriptor(self):
+        class lazy_property:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+
+            def __get__(self, instance, obj_type=None):
+                value = self.wrapped(instance)
+                setattr(instance, self.wrapped.__name__, value)
+                return value
+
+        class UserDefined:
+            def __init__(self):
+                self.a = 3
+
+            @lazy_property
+            def length(self):
+                return 3
+
+            def run(self, x):
+                return x * self.length
+
+        obj = UserDefined()
+
+        def fn(x):
+            return obj.run(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_assert_size_stride(self):
         x = torch.randn(2, 3, 4)
