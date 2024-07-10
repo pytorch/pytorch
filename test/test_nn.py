@@ -7078,9 +7078,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             res = arg_class(*arg_4)
 
     def test_pickle_module_no_weights_only_warning(self):
-        with warnings.catch_warnings(record=True) as warns:
+        with warnings.catch_warnings(record=True) as w:
             pickle.loads(pickle.dumps(torch.nn.Linear(10, 10)))
-            self.assertEqual(len(warns), 0)
+        self.assertEqual(len(w), 0)
 
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
