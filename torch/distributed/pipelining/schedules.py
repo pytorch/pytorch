@@ -870,7 +870,7 @@ def _add_send_recv(
     compute_actions: Dict[int, List[Optional[_Action]]],
     stage_to_rank: Callable[[int], int],
     num_stages: int,
-) -> Dict[int, List[Optional[_Action]]]:
+) -> Dict[int, List[_Action]]:
     comm_actions: Dict[int, List[_Action]] = {rank: [] for rank in compute_actions}
 
     def _has_comms(action: _Action) -> bool:
@@ -881,35 +881,33 @@ def _add_send_recv(
         return False
 
     def _get_comms(action: _Action) -> Tuple[_Action, _Action]:
-        send = recv = None
+        assert _has_comms(action), f"{action} is not a valid comm action"
         stage_idx = action.stage_index
-        ctype =  action.computation_type
+        ctype = action.computation_type
         mb_idx = action.microbatch_index
-        if ctype == F and stage_idx != num_stages - 1:
-            send = _Action(stage_idx, ctype, mb_idx, SEND)
-            recv = _Action(stage_idx + 1, ctype, mb_idx, RECV)
-        elif action.computation_type == B and action.stage_index != 0:
-            send = _Action(stage_idx, ctype, mb_idx, SEND)
-            recv = _Action(stage_idx - 1, ctype, mb_idx, RECV)
+        send = _Action(stage_idx, ctype, mb_idx, SEND)
+        recv_stage_idx = stage_idx + 1 if ctype == F else stage_idx - 1
+        recv = _Action(recv_stage_idx, ctype, mb_idx, RECV)
         return send, recv
 
     # go in order of ranks even if dict keys aren't ordered
-    for rank in range(len(compute_actions)):
-        rank = str(rank)  # todo, why is rank a str throughout this code..
-        assert len(compute_actions[rank]) > 0
-        action = compute_actions[rank].pop(0)
-        if len(compute_actions[rank]) == 0:
-            del compute_actions[rank]
+    while compute_actions:
+        for rank in range(len(compute_actions)):
+            assert len(compute_actions[rank]) > 0
+            action = compute_actions[rank].pop(0)
+            if len(compute_actions[rank]) == 0:
+                del compute_actions[rank]
 
-        comm_actions[rank].append(action)
-        if _has_comms(action):
-            send, recv = _get_comms(action)
-            # TODO we can avoid send/recv if the 2 stages are on the same rank.  should we avoid that in the runtime or here?
-            comm_actions[rank].append(send)
-            comm_actions[stage_to_rank(recv.stage_index)].append(recv)
-            
-        
-    return compute_actions
+            if action is not None:
+                comm_actions[rank].append(action)
+                if _has_comms(action):
+                    send, recv = _get_comms(action)
+                    # TODO we can avoid send/recv if the 2 stages are on the same rank.
+                    # should we avoid that in the runtime or here?
+                    comm_actions[rank].append(send)
+                    comm_actions[stage_to_rank(recv.stage_index)].append(recv)
+
+    return comm_actions
 
 
 class PipelineScheduleMulti(_PipelineSchedule):
