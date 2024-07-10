@@ -28,7 +28,6 @@ namespace at::native {
 thread_local cusparseLtHandle_t handle;
 thread_local bool handle_initialized = false;
 
-// Look-up table for HIPSPARSELT data types
 #ifdef USE_ROCM
 std::mutex g_hipSparseLtSupportCacheMutex;
 static std::unordered_map<int, bool> g_hipSparseLtSupportCache;
@@ -58,7 +57,10 @@ static bool g_hipSparseLtSupportCache(int idx) {
 
 at::Tensor _cslt_compress(const Tensor& sparse_input)
 {
-    if (!handle_initialized){TORCH_CHECK
+    if (!handle_initialized){
+        TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
+        handle_initialized = true;
+    }
     // create sparse descriptor, dtype
     cusparseLtMatDescriptor_t sparse_input_descriptor;
     cudaDataType type;
@@ -68,7 +70,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         sparse_input.scalar_type()
     )
     {
-        case at::ScalarType::CharTORCH_CHECK:
+        case at::ScalarType::Char:
             type = CUDA_R_8I;
             compression_factor = 10;
             break;
@@ -188,7 +190,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         #ifdef USE_ROCM
         TORCH_CHECK(false, "HIPSPARSELT does not support R_32F data type.");
         #endif
-        breakcusparseLtDenseDescriptorInit;
+        break;
 
 // cuSPARSELt <= v0.5.2 uses CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUTE_16F
 #else
@@ -217,7 +219,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   // special check for mixed dtype int8 int8 -> {fp16, bf16, int32} support
   if (out_dtype_opt.has_value()) {
     out_dtype = out_dtype_opt.value();
-    TORCH_CHECK(input_type == CcusparseLtDenseDescriptorInitUDA_R_8I, "out_dtype support only available for int8 inputs");
+    TORCH_CHECK(input_type == CUDA_R_8I, "out_dtype support only available for int8 inputs");
     switch (out_dtype)
     {
         case at::ScalarType::Half:
@@ -283,8 +285,7 @@ at::Tensor res_out = (transpose_result) ? at::empty({n, m}, res_tensor_options)
       (transpose_result) ? m: n,
       16,
       output_type,
-      (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW
-      ));
+      (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
 
   // initialize matmul
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescriptorInit(
