@@ -184,7 +184,7 @@ bool OptimizeCat(const std::shared_ptr<Graph>& graph) {
 
 void annotateInputShapes(
     const std::shared_ptr<Graph>& graph,
-    const std::vector<c10::optional<at::Tensor>>& example_inputs) {
+    const std::vector<std::optional<at::Tensor>>& example_inputs) {
   TORCH_INTERNAL_ASSERT(
       graph->inputs().size() == example_inputs.size(),
       buildErrorMessage("Given inputs do not match the fuser graph inputs."));
@@ -304,8 +304,8 @@ bool isGraphCompilable(const std::shared_ptr<Graph>& graph) {
 
 static void fixupTypeInfoForValue(
     Value* v,
-    c10::optional<at::ScalarType> scalar_type,
-    c10::optional<at::Device> device) {
+    std::optional<at::ScalarType> scalar_type,
+    std::optional<at::Device> device) {
   Node* n = v->node();
   auto const& t = v->type();
   if (t->kind() != TypeKind::TensorType) {
@@ -339,8 +339,8 @@ static void fixupTypeInfoForValue(
   v->setType(new_tt);
 }
 
-static c10::optional<at::ScalarType> inferScalarType(Node* n) {
-  c10::optional<at::ScalarType> scalar_type;
+static std::optional<at::ScalarType> inferScalarType(Node* n) {
+  std::optional<at::ScalarType> scalar_type;
   for (auto v : n->inputs()) {
     auto const& t = v->type();
     if (t->kind() == TypeKind::TensorType) {
@@ -358,8 +358,8 @@ static c10::optional<at::ScalarType> inferScalarType(Node* n) {
   return scalar_type;
 }
 
-static c10::optional<at::Device> inferDevice(Node* n) {
-  c10::optional<at::Device> device;
+static std::optional<at::Device> inferDevice(Node* n) {
+  std::optional<at::Device> device;
   for (auto v : n->inputs()) {
     auto const& t = v->type();
     if (t->kind() == TypeKind::TensorType) {
@@ -394,8 +394,8 @@ void fixupMissingShapeInfo(const std::shared_ptr<Graph>& graph) {
   }
 
   for (auto n : graph->nodes()) {
-    c10::optional<at::ScalarType> scalar_type = inferScalarType(n);
-    c10::optional<at::Device> device = inferDevice(n);
+    std::optional<at::ScalarType> scalar_type = inferScalarType(n);
+    std::optional<at::Device> device = inferDevice(n);
 
     for (auto v : n->outputs()) {
       fixupTypeInfoForValue(v, scalar_type, device);

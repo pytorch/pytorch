@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
@@ -535,14 +536,6 @@ def is_complex_value(x: _C.Value) -> bool:
 
 
 @_beartype.beartype
-def is_caffe2_aten_fallback() -> bool:
-    return (
-        GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-        and _C_onnx._CAFFE2_ATEN_FALLBACK
-    )
-
-
-@_beartype.beartype
 def _get_tensor_rank(x: _C.Value) -> Optional[int]:
     if not _is_tensor(x) or x.type() is None:
         return None
@@ -591,9 +584,7 @@ def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
 @_beartype.beartype
 def _unimplemented(op: str, msg: str, value: Optional[_C.Value] = None) -> None:
     # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
-    if _C_onnx._CAFFE2_ATEN_FALLBACK:
-        warnings.warn(f"ONNX export failed on {op} because {msg} not supported")
-    elif GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
+    if GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
         _onnx_unsupported(f"{op}, {msg}", value)
 
 
@@ -672,6 +663,36 @@ def _try_get_scalar_type(*args) -> Optional[_type_utils.JitScalarType]:
         if scalar_type != _type_utils.JitScalarType.UNDEFINED:
             return scalar_type
     return None
+
+
+@_beartype.beartype
+def _type_promote_from_values(*args) -> _type_utils.JitScalarType:
+    undef = _type_utils.JitScalarType.UNDEFINED
+    jit_types = [_try_get_scalar_type(arg) for arg in args]
+    if len(jit_types) == 0:
+        return undef
+    if len(jit_types) == 1:
+        return jit_types[0]
+    new_dtype = jit_types[0].dtype()
+    for t in jit_types:
+        new_dtype = torch.promote_types(new_dtype, t.dtype())
+    return _type_utils.JitScalarType.from_dtype(new_dtype)
+
+
+@_beartype.beartype
+def _maybe_cast_to_type(
+    g: jit_utils.GraphContext, value, jit_type: _type_utils.JitScalarType
+):
+    if (
+        _type_utils.JitScalarType.from_value(value, _type_utils.JitScalarType.UNDEFINED)
+        != jit_type
+    ):
+        return g.op(
+            "Cast",
+            value,
+            to_i=jit_type.onnx_type(),
+        )
+    return value
 
 
 @_beartype.beartype

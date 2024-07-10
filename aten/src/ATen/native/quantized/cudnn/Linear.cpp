@@ -98,8 +98,8 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   auto weight_scale = orig_weight.q_scale();
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
   at::Tensor requantize_multiplier_tensor = cudnn_utils::getRequantMultiplierTensor(requantize_multiplier, quantized_output.dim());
-  c10::optional<at::Tensor> bias_multiplier_tensor;
-  c10::optional<at::Tensor> broadcasted_bias;
+  std::optional<at::Tensor> bias_multiplier_tensor;
+  std::optional<at::Tensor> broadcasted_bias;
   if (bias_.has_value()) {
     // the input bias is a 1-D tensor whose size is the same as the size of the last dimension of quantized_output
     // we need to add trailing dimensions in order to properly broadcast bias, otherwise broadcast_to will fail.
@@ -183,12 +183,12 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
       .build();
   // std::cout << "operator:" << linear_op.describe() << std::endl;
 
-  c10::optional<cudnn_frontend::Operation> bias_mult_op;
-  c10::optional<cudnn_frontend::Operation> sum_linear_bias_op;
+  std::optional<cudnn_frontend::Operation> bias_mult_op;
+  std::optional<cudnn_frontend::Operation> sum_linear_bias_op;
   if (bias_.has_value()) {
     // we can't directly assign bias_mult_op because operator= is deleted for cudnn_frontend::Operation;
     // alternatively, I think we can use std::unique_ptr and dynamically allocate these builder ops
-    // but here, we chose to do it statically. c10::optional<T>::emplace() enables this approach
+    // but here, we chose to do it statically. std::optional<T>::emplace() enables this approach
 
     // bias_mult_op computes bias_fp32 / (act_scale * w_scale) or bias_fp32 * (1 / (act_scale * w_scale))
     // where bias_multiplier = (1 / (act_scale * w_scale))
@@ -222,7 +222,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   // relu_op computes relu(act_int8 * w_int8 + [bias_fp32/(act_scale * w_scale)]
   // or relu(act_int8 * w_int8) if bias is not present.
   // output is a fp32 tensor
-  c10::optional<cudnn_frontend::Operation> relu_op;
+  std::optional<cudnn_frontend::Operation> relu_op;
   std::shared_ptr<cudnn_frontend::OpaqueBackendPointer> tensor2requant_ptr = bias_.has_value() ? sum_linear_bias_op.value().getOutputTensor() : linear_op.getOutputTensor();
   if (kReluFused) {
     // we use inplace operation here where the output is assigned to the input

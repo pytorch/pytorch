@@ -4,6 +4,7 @@ Specify the file path in the first argument. The results will be dump to model_o
 """
 
 import sys
+
 import yaml
 
 root_operators = {}
@@ -18,17 +19,25 @@ with open(sys.argv[1]) as input_yaml_file:
             root_operators[op] = 1 + (root_operators[op] if op in root_operators else 0)
         for op in info["traced_operators"]:
             # aggregate occurance per op
-            traced_operators[op] = 1 + (traced_operators[op] if op in traced_operators else 0)
+            traced_operators[op] = 1 + (
+                traced_operators[op] if op in traced_operators else 0
+            )
         # merge dtypes for each kernel
         for kernal, dtypes in info["kernel_metadata"].items():
-            new_dtypes = dtypes + (kernel_metadata[kernal] if kernal in kernel_metadata else [])
+            new_dtypes = dtypes + (
+                kernel_metadata[kernal] if kernal in kernel_metadata else []
+            )
             kernel_metadata[kernal] = list(set(new_dtypes))
 
 
 # Only test these built-in ops. No custom ops or non-CPU ops.
 namespaces = ["aten", "prepacked", "prim", "quantized"]
-root_operators = {x: root_operators[x] for x in root_operators if x.split("::")[0] in namespaces}
-traced_operators = {x: traced_operators[x] for x in traced_operators if x.split("::")[0] in namespaces}
+root_operators = {
+    x: root_operators[x] for x in root_operators if x.split("::")[0] in namespaces
+}
+traced_operators = {
+    x: traced_operators[x] for x in traced_operators if x.split("::")[0] in namespaces
+}
 
 out_path = "test/mobile/model_test/model_ops.yaml"
 with open(out_path, "w") as f:

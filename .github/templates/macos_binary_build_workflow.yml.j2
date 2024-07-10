@@ -48,7 +48,7 @@ env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
-  SKIP_ALL_TESTS: 1
+  SKIP_ALL_TESTS: 0
 {%- if cross_compile_arm64 %}
   CROSS_COMPILE_ARM64: 1
 {% endif %}

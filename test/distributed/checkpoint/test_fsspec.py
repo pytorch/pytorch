@@ -11,6 +11,7 @@ import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
 from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_dict
+from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
@@ -175,6 +176,32 @@ class TestFSSpecWithDist(ShardedTensorTestBase):
         self.assertEqual(
             opt_at(optim, 0)["exp_avg_sq"], opt_at(optim_2, 0)["exp_avg_sq"]
         )
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    @with_temp_dir
+    def test_overwrite(self):
+        t1, t2 = torch.randn(10), torch.randn(10)
+
+        dcp.save(
+            {"random": t1}, storage_writer=FsspecWriter(self.temp_dir, overwrite=False)
+        )
+        dcp.save(
+            {"random": t2}, storage_writer=FsspecWriter(self.temp_dir, overwrite=True)
+        )
+
+        sd = {"random": torch.zeros(10)}
+        dcp.load(sd, checkpoint_id=self.temp_dir)
+        self.assertTrue(torch.allclose(sd["random"], t2))
+
+        with self.assertRaisesRegex(
+            CheckpointException, ".*Checkpoint already exists.*"
+        ):
+            dcp.save(
+                {"random": t2},
+                storage_writer=FsspecWriter(self.temp_dir, overwrite=False),
+            )
 
 
 if __name__ == "__main__":

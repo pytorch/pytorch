@@ -8,8 +8,7 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 namespace {
 // Intentionally leaked
@@ -18,10 +17,12 @@ std::array<PyObject*, static_cast<int>(at::MemoryFormat::NumOptions)>
 } // anonymous namespace
 
 PyObject* getTHPMemoryFormat(at::MemoryFormat memory_format) {
-  return py::reinterpret_borrow<py::object>(
-             memory_format_registry[static_cast<size_t>(memory_format)])
-      .release()
-      .ptr();
+  auto py_memory_format =
+      memory_format_registry[static_cast<int>(memory_format)];
+  if (!py_memory_format) {
+    throw std::invalid_argument("unsupported memory_format");
+  }
+  return py_memory_format;
 }
 
 void initializeMemoryFormats() {
@@ -48,5 +49,4 @@ void initializeMemoryFormats() {
   add_memory_format(at::MemoryFormat::ChannelsLast3d, "channels_last_3d");
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

@@ -1614,7 +1614,7 @@ static void loadFunctions() {
   loadModule(compilation_unit);
 }
 
-c10::optional<GradientPair> gradientInfoForSchema(
+std::optional<GradientPair> gradientInfoForSchema(
     const FunctionSchema& schema) {
   std::lock_guard<std::mutex> guard(lock);
   if (schema_to_graphs.empty()) {

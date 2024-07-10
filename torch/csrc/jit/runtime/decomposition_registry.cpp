@@ -107,7 +107,7 @@ void RunDecompositions(std::shared_ptr<Graph> g) {
   }
 }
 
-c10::optional<std::shared_ptr<Graph>> GetDecomposition(
+std::optional<std::shared_ptr<Graph>> GetDecomposition(
     const FunctionSchema& schema) {
   loadDecompositionFunctions();
   GRAPH_DEBUG("Trying to find schema: ", schema);
@@ -120,7 +120,7 @@ c10::optional<std::shared_ptr<Graph>> GetDecomposition(
   return c10::nullopt;
 }
 
-c10::optional<GraphFunction*> GetDecompositionFunction(
+std::optional<GraphFunction*> GetDecompositionFunction(
     const FunctionSchema& schema) {
   loadDecompositionFunctions();
   auto cache_it = schema_to_function.find(&schema);
@@ -153,8 +153,8 @@ void RegisterDecomposition(
     ConstantPropagationImmutableTypes(g);
   }
 
-  std::unique_ptr<GraphFunction> new_func(new GraphFunction(
-      schema.name(), g, nullptr, ExecutorExecutionMode::SIMPLE));
+  auto new_func = std::make_unique<GraphFunction>(
+      schema.name(), g, nullptr, ExecutorExecutionMode::SIMPLE);
   user_registered_funcs.emplace(&schema, std::move(new_func));
   schema_to_function[&schema] = user_registered_funcs[&schema].get();
   schema_to_decomposition[&schema] = g;

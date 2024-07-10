@@ -6,7 +6,9 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
+#include <iostream>
 #include <sstream>
+#include <string>
 #include <vector>
 
 /*
@@ -82,6 +84,82 @@ static void check(bool result) {
     check(nullptr);
 }
 
+// snapshot of python verbose logging toggle
+static PyObject* python_verbose_logger = nullptr;
+struct VerboseLogger {
+  static std::optional<VerboseLogger> maybe_create() {
+    if (python_verbose_logger == nullptr) {
+      return std::nullopt;
+    }
+    return VerboseLogger();
+  }
+
+  void verbose_log_fn(std::string_view msg) const {
+    TORCH_CHECK(python_verbose_logger != nullptr);
+    check(PyObject_CallFunction(python_verbose_logger, "s", msg.data()));
+  }
+
+  void log_node_check(
+      const Node& fn,
+      size_t size_inputs_num,
+      std::unordered_set<CacheKey> cached_keys,
+      const CacheKey& key,
+      size_t node_idx) {
+    std::string node_name =
+        fn.name() + " (NodeCall " + std::to_string(node_idx) + ")";
+
+    cumulative_sizes_per_node[size_inputs_num] = node_name;
+
+    if (!logged_node_miss && cached_keys.find(key) == cached_keys.end()) {
+      _log_node_miss(typeid(fn), cached_keys, key, node_name);
+      logged_node_miss = true;
+    }
+  }
+
+  void _log_node_miss(
+      const std::type_info& node_type,
+      std::unordered_set<CacheKey> cached_keys,
+      const CacheKey& key,
+      const std::string& node_name) const {
+    std::ostringstream oss;
+    oss << "Cache miss due to new autograd node: " << node_name
+        << " with key size " << std::to_string(key.key_size)
+        << ", previous key sizes=[";
+
+    for (auto it = cached_keys.begin(); it != cached_keys.end(); it++) {
+      if (it->node_type != node_type) {
+        continue;
+      }
+      oss << it->key_size;
+      if (std::next(it) != cached_keys.end()) {
+        oss << ",";
+      }
+    }
+    oss << "]";
+    verbose_log_fn(oss.str());
+  }
+
+  void log_dynamic_shapes_check(size_t size_idx) const {
+    if (cumulative_sizes_per_node.empty()) {
+      return;
+    }
+
+    auto it = cumulative_sizes_per_node.lower_bound(size_idx);
+    TORCH_CHECK(it != cumulative_sizes_per_node.end());
+    size_t start_idx =
+        it == cumulative_sizes_per_node.begin() ? 0 : std::prev(it)->first;
+    verbose_log_fn(
+        "Cache miss due to changed shapes: marking size idx " +
+        std::to_string(size_idx - start_idx) + " of " + it->second +
+        " as dynamic");
+  }
+
+  // track which size index belongs to which node
+  std::map<size_t, std::string> cumulative_sizes_per_node;
+  // only log cache miss due to node key once
+  bool logged_node_miss = false;
+};
+
 struct CacheNode {
   // A node in the shadow graph, we follow next edges until we reach the end of
   // the graph
@@ -90,9 +168,11 @@ struct CacheNode {
     return &_root;
   }
 
-  CacheNode* lookup(const CacheKey& key) {
+  CacheNode* lookup(const CacheKey& key, bool create = true) {
     auto it = next.find(key);
     if (it == next.end()) {
+      if (!create)
+        return nullptr;
       // caller's key is in temporary memory, must copy it
       CacheKeyBuffer buffer(key.key, key.key_size);
       CacheKey key_with_storage(key.node_type, buffer.get(), key.key_size);
@@ -106,6 +186,7 @@ struct CacheNode {
     next.clear();
     key_storage.clear();
     expected_sizes.clear();
+    runtime_wrapper = nullptr;
     compiled_fn = nullptr;
   }
 
@@ -113,10 +194,12 @@ struct CacheNode {
     return next.empty() && !compiled_fn;
   }
 
-  CacheNode() : compiled_fn(nullptr) {}
+  CacheNode() : runtime_wrapper(nullptr), compiled_fn(nullptr) {}
   ~CacheNode() {
     if (!Py_IsInitialized()) {
-      compiled_fn.release(); // leak on shutdown
+      // leak on shutdown
+      runtime_wrapper.release();
+      compiled_fn.release();
     }
   }
   CacheNode(CacheNode&&) = delete;
@@ -124,7 +207,9 @@ struct CacheNode {
   CacheNode& operator=(const CacheNode&) = delete;
   CacheNode& operator=(CacheNode&&) = delete;
 
-  bool check_dynamic_sizes(AutogradCompilerCall& call) {
+  bool check_dynamic_sizes(
+      AutogradCompilerCall& call,
+      const std::optional<VerboseLogger>& vlogger) {
     /*
     We start off by assuming everything is static, then we mark things
     as dynamic when we see them change.  This function:
@@ -145,12 +230,19 @@ struct CacheNode {
     TORCH_INTERNAL_ASSERT(expected_sizes.size() == call.all_size_inputs.size());
     for (const auto i : c10::irange(len)) {
       auto& expected = expected_sizes[i];
-      if (expected.dyn_type == SizeInput::DYNAMIC ||
-          expected.value != data[i].value) {
-        cache_hit = cache_hit && expected.dyn_type == SizeInput::DYNAMIC;
-        if (expected.value != data[i].value) {
-          expected = SizeInput(SizeInput::DYNAMIC, data[i].value);
+      bool was_dynamic = expected.dyn_type == SizeInput::DYNAMIC;
+      bool changed_value = expected.value != data[i].value;
+      if (changed_value) {
+        if (!was_dynamic) {
+          cache_hit = false;
+          if (vlogger.has_value()) {
+            vlogger->log_dynamic_shapes_check(i);
+          }
         }
+        expected = SizeInput(SizeInput::DYNAMIC, data[i].value);
+      }
+
+      if (changed_value || was_dynamic) {
         if (call.dyn_size_inputs.empty()) {
           call.dyn_size_inputs.reserve(len);
         }
@@ -161,12 +253,13 @@ struct CacheNode {
     if (!cache_hit) {
       // we missed cache because static size inputs didn't match; force
       // recompilation with the varying size input as dynamic
+      runtime_wrapper = nullptr;
       compiled_fn = nullptr;
     }
     return cache_hit;
   }
 
-  PyObject* wrap_dynamic_inputs() {
+  PyObject* wrap_dynamic_inputs() const {
     size_t dynamic_count = 0;
     size_t idx = 0;
     for (const auto& i : expected_sizes) {
@@ -184,11 +277,12 @@ struct CacheNode {
     return pyinput;
   }
 
-  std::vector<c10::optional<SymInt>> unwrap_dynamic_inputs(PyObject* pyresult) {
+  std::vector<std::optional<SymInt>> unwrap_dynamic_inputs(
+      PyObject* pyresult) const {
     TORCH_INTERNAL_ASSERT(PyList_CheckExact(pyresult));
     size_t idx = 0;
     size_t result_len = PyList_GET_SIZE(pyresult);
-    std::vector<c10::optional<SymInt>> result;
+    std::vector<std::optional<SymInt>> result;
     result.reserve(expected_sizes.size());
     for (const auto& i : expected_sizes) {
       if (i.dyn_type == SizeInput::DYNAMIC) {
@@ -208,6 +302,7 @@ struct CacheNode {
   std::vector<CacheKeyBuffer> key_storage;
   std::vector<SizeInput> expected_sizes;
 
+  THPObjectPtr runtime_wrapper;
   THPObjectPtr compiled_fn;
 };
 
@@ -237,11 +332,28 @@ static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
+static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
+  PyObject* logger = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &logger)) {
+    Py_RETURN_FALSE;
+  }
+
+  if (logger == Py_None) {
+    python_verbose_logger = nullptr;
+  } else {
+    python_verbose_logger = logger;
+  }
+  Py_RETURN_TRUE;
+  END_HANDLE_TH_ERRORS;
+}
+
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef _methods[] = {
     {"set_autograd_compiler", set_autograd_compiler, METH_VARARGS, nullptr},
     {"clear_cache", clear_cache, METH_NOARGS, nullptr},
     {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
+    {"set_verbose_logger", set_verbose_logger, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -323,6 +435,8 @@ CacheNode* _compiled_autograd_impl(
   calls.reserve(
       check_exec_info ? graph_task.exec_info_.size() : dependencies.size() + 1);
 
+  int i = 0;
+  std::optional<VerboseLogger> vlogger = VerboseLogger::maybe_create();
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
@@ -336,7 +450,20 @@ CacheNode* _compiled_autograd_impl(
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
       }
-      cache = cache->lookup(node_args.key());
+      CacheKey key = node_args.key();
+      if (vlogger.has_value()) {
+        std::unordered_set<CacheKey> cached_keys;
+        for (const auto& [k, _] : cache->next) {
+          cached_keys.emplace(k);
+        }
+        vlogger->log_node_check(
+            *fn,
+            compiler_call.all_size_inputs.size(),
+            std::move(cached_keys),
+            key,
+            i);
+      }
+      cache = cache->lookup(key);
     }
 
     for (const auto& edge : fn->next_edges()) {
@@ -359,19 +486,21 @@ CacheNode* _compiled_autograd_impl(
         worklist.emplace_back(edge.function);
       }
     }
+    i++;
   }
 
   // TODO(jansel): some dynamic sizes seem to be ints not symints
-  if (!cache->check_dynamic_sizes(compiler_call)) {
+  if (!cache->check_dynamic_sizes(compiler_call, vlogger)) {
     // cache miss, need to capture FX graph
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
+
     TraceState state = call_begin_capture(
         py_compiler, *cache, compiler_call, output_edges.size());
     InputBuffers input_buffers;
 
-    for (NodeCall* call_ptr : calls) {
-      NodeCall& call = *call_ptr;
+    for (size_t i = 0; i < calls.size(); i++) {
+      NodeCall& call = *calls[i];
       // TODO(jansel): consider adding some of this stuff:
       // guard(local_graph_task); NodeGuard ndguard(task.fn_); const auto
       // opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
@@ -417,6 +546,16 @@ CacheNode* _compiled_autograd_impl(
         inputs = THPVariable_UnpackList(pyinputs);
       }
 
+      if (python_verbose_logger != nullptr) {
+        std::string _node_name = call.node->name();
+        THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
+        TORCH_INTERNAL_ASSERT(node_name != nullptr);
+        THPObjectPtr set_node_origin(
+            PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
+        check(PyObject_CallFunction(
+            set_node_origin, "OI", node_name.get(), i, nullptr));
+      }
+
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
 
@@ -457,12 +596,22 @@ CacheNode* _compiled_autograd_impl(
       }
     }
 
-    cache->compiled_fn = check(call_end_capture(py_compiler, state.outputs));
+    PyObject* res = check(call_end_capture(py_compiler, state.outputs));
+    TORCH_CHECK(PyTuple_Check(res), "Expected end_capture to return tuple");
+    TORCH_CHECK(
+        PyTuple_Size(res) == 2,
+        "Expected end_capture to return tuple of size 2");
+    cache->runtime_wrapper = Py_NewRef(PyTuple_GetItem(res, 0));
+    TORCH_CHECK(
+        PyCallable_Check(cache->runtime_wrapper),
+        "Expected end_capture to return runtime_wrapper");
+    cache->compiled_fn = Py_NewRef(PyTuple_GetItem(res, 1));
+    TORCH_CHECK(
+        PyCallable_Check(cache->compiled_fn),
+        "Expected end_capture to return compiled_fn");
     state.debug_asserts();
   } // End cache miss region
 
-  // TODO(jansel): we should release all the variables and then use a
-  //               boxed calling convention so activation memory can be freed
   // TODO(jansel): clear grads we will overwrite below
   if (!graph_task.keep_graph_) {
     for (auto& call : calls) {
@@ -481,9 +630,6 @@ variable_list compiled_autograd(
     GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges) {
-  TORCH_CHECK(
-      output_edges.empty() || !accumulate_grad,
-      "specifying inputs= with .backward() not yet implemented for compiled autograd")
   TORCH_CHECK(
       c10::impl::TorchDispatchModeTLS::stack_len() == 0,
       "TorchDispatchMode not yet implemented for compiled autograd")
@@ -505,7 +651,12 @@ variable_list compiled_autograd(
       &hooks);
 
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
-      cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
+      cache->runtime_wrapper.get(),
+      cache->compiled_fn.get(),
+      inputs.get(),
+      sizes.get(),
+      hooks.get(),
+      NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
   return outputs;

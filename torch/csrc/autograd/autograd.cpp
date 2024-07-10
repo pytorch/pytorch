@@ -126,7 +126,9 @@ static variable_list run_backward(
       }
       TORCH_CHECK(
           input.requires_grad(),
-          "One of the differentiated Tensors does not require grad");
+          "element ",
+          i,
+          " of the input tensors does not require grad");
       if (!grad_fn) {
         // See NOTE [ Autograd Unreachable Input ] for details
         output_edges.emplace_back(std::make_shared<Identity>(), 0);
@@ -149,7 +151,9 @@ static variable_list run_backward(
     for (const auto i : c10::irange(num_inputs)) {
       TORCH_CHECK(
           grad_inputs[i].defined(),
-          "One of the "
+          "element ",
+          i,
+          "of the "
           "differentiated Tensors appears to not have been used "
           "in the graph. Set allow_unused=True if this is the "
           "desired behavior.");
@@ -161,7 +165,7 @@ static variable_list run_backward(
 void backward(
     const variable_list& tensors,
     const variable_list& grad_tensors,
-    c10::optional<bool> retain_graph,
+    std::optional<bool> retain_graph,
     bool create_graph,
     const variable_list& inputs) {
   variable_list gradients = _make_grads(tensors, grad_tensors);
@@ -182,7 +186,7 @@ variable_list grad(
     const variable_list& outputs,
     const variable_list& inputs,
     const variable_list& grad_outputs,
-    c10::optional<bool> retain_graph,
+    std::optional<bool> retain_graph,
     bool create_graph,
     bool allow_unused) {
   variable_list gradients = _make_grads(outputs, grad_outputs);

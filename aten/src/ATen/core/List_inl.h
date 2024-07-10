@@ -168,8 +168,8 @@ list_element_to_const_ref(const IValue& element) {
 }
 
 template<>
-inline typename ListElementConstReferenceTraits<c10::optional<std::string>>::const_reference
-list_element_to_const_ref<c10::optional<std::string>>(const IValue& element) {
+inline typename ListElementConstReferenceTraits<std::optional<std::string>>::const_reference
+list_element_to_const_ref<std::optional<std::string>>(const IValue& element) {
   return element.toOptionalStringRef();
 }
 
@@ -350,11 +350,4 @@ void List<T>::unsafeSetElementType(TypePtr t) {
   impl_->elementType = std::move(t);
 }
 
-namespace impl {
-
-inline const IValue* ptr_to_first_element(const GenericList& list) {
-  return &list.impl_->list[0];
-}
-
-}
 }

@@ -47,12 +47,14 @@ ncclResult_t to_nccl_result(torch::cuda::nccl::ncclResult var) {
       return ncclResult_t::ncclInvalidArgument;
     case torch::cuda::nccl::ncclResult::InvalidUsage:
       return ncclResult_t::ncclInvalidUsage;
-    case torch::cuda::nccl::ncclResult::NumResults:
-      return ncclResult_t::ncclNumResults;
+    case torch::cuda::nccl::ncclResult::RemoteError:
+      return ncclResult_t::ncclRemoteError;
 #ifdef NCCL_HAS_COMM_NONBLOCKING
     case torch::cuda::nccl::ncclResult::InProgress:
       return ncclResult_t::ncclInProgress;
 #endif
+    case torch::cuda::nccl::ncclResult::NumResults:
+      return ncclResult_t::ncclNumResults;
     default:
       throw std::runtime_error("Unconvertible NCCL type");
   }
@@ -72,12 +74,14 @@ torch::cuda::nccl::ncclResult from_nccl_result(ncclResult_t var) {
       return torch::cuda::nccl::ncclResult::InvalidArgument;
     case ncclInvalidUsage:
       return torch::cuda::nccl::ncclResult::InvalidUsage;
-    case ncclNumResults:
-      return torch::cuda::nccl::ncclResult::NumResults;
+    case ncclRemoteError:
+      return torch::cuda::nccl::ncclResult::RemoteError;
 #ifdef NCCL_HAS_COMM_NONBLOCKING
     case ncclInProgress:
       return torch::cuda::nccl::ncclResult::InProgress;
 #endif
+    case ncclNumResults:
+      return torch::cuda::nccl::ncclResult::NumResults;
     default:
       throw std::runtime_error("Unconvertible NCCL type");
   }
@@ -818,10 +822,10 @@ void all2all_single_equal_split(
   auto type = to_nccl_data_type(input);
   size_t count = input.numel() / size;
   size_t rankdiff = input.nbytes() / size;
-  const auto* sendbuff = reinterpret_cast<char*>(input.data_ptr());
+  const auto* sendbuff = reinterpret_cast<const char*>(input.const_data_ptr());
   auto* recvbuff = reinterpret_cast<char*>(output.data_ptr());
   auto comm = to_nccl_comm(_comm);
-#if defined(USE_ROCM) && ROCM_VERSION >= 50000
+#if defined(USE_ROCM)
   NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
 #else
   NCCL_CHECK(ncclCommCount(comm, &numranks));
@@ -1040,7 +1044,7 @@ void gather(
 
   size_t count = inputs.numel();
   auto type = to_nccl_data_type(inputs);
-  const auto* sendbuff = reinterpret_cast<char*>(inputs.data_ptr());
+  const auto* sendbuff = reinterpret_cast<const char*>(inputs.const_data_ptr());
 
   NCCL_CHECK(ncclGroupStart());
 
@@ -1097,7 +1101,8 @@ void scatter(
       if (r != root) {
         size_t send_count = inputs[r].numel();
         auto send_type = to_nccl_data_type(inputs[r]);
-        const auto* sendbuff = reinterpret_cast<char*>(inputs[r].data_ptr());
+        const auto* sendbuff =
+            reinterpret_cast<const char*>(inputs[r].const_data_ptr());
         NCCL_CHECK(ncclSend(sendbuff, send_count, send_type, r, comm, stream));
       } else {
         // on its own rank, simply copy it to the output

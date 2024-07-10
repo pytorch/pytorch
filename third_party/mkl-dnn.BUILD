@@ -63,9 +63,9 @@ template_rule(
     out = "include/oneapi/dnnl/dnnl_version.h",
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "3",
-        "@DNNL_VERSION_MINOR@": "3",
+        "@DNNL_VERSION_MINOR@": "4",
         "@DNNL_VERSION_PATCH@": "2",
-        "@DNNL_VERSION_HASH@": "2dc95a2ad0841e29db8b22fbccaf3e5da7992b01",
+        "@DNNL_VERSION_HASH@": "1137e04ec0b5251ca2b4400a4fd3c667ce843d67",
     },
 )
 
@@ -130,10 +130,7 @@ cc_library(
     ],
     deps = [
         "@mkl",
-    ] + select({
-        "@pytorch//tools/config:thread_sanitizer": [],
-        "//conditions:default": ["@tbb"],
-    }),
+    ],
     defines = [
         "DNNL_ENABLE_MAX_CPU_ISA",
         "DNNL_ENABLE_CONCURRENT_EXEC",

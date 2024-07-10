@@ -3016,7 +3016,7 @@ def marginrankingloss_reference(input1, input2, target, margin=0, reduction='mea
     return output
 
 
-# this directly follows Graves et al's paper, in contrast to the production implementation, it does not use log-space
+# this directly follows Graves et al.'s paper, in contrast to the production implementation, it does not use log-space
 def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0, reduction='mean'):
     input_lengths = torch.as_tensor(input_lengths, dtype=torch.long)
     target_lengths = torch.as_tensor(target_lengths, dtype=torch.long)
@@ -3333,8 +3333,7 @@ class TestBase:
                 if name in {'constructor_args', 'extra_args'}:
                     kwargs[name] = tuple()
                 else:
-                    raise ValueError("{}: Specify {} by a value, a function to generate it, or it's size!"
-                                     .format(self.get_name(), name))
+                    raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or it's size!")
         self._extra_kwargs = kwargs
         self._arg_cache = {}
 

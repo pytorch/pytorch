@@ -56,7 +56,6 @@ class TestBatchMM(JitTestCase):
         actual = test_batch_mm_scripted(*tensors)
         self.assertEqual(expected, actual, atol=1e-9, rtol=1e-9)
 
-
     def test_batch_mm_permitted_mutation(self):
         def test_batch_mm(
             T1: torch.Tensor,

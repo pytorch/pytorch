@@ -128,7 +128,7 @@ bool isDifferentiable(Graph& g) {
 // will be cleaned up later using EliminateDeadCode(block). TupleUnPack node in
 // backward graph will be removed in eliminateDeadcode(ReverseDetails) defined
 // in this file.
-static c10::optional<std::vector<Value*>> build_script_grad(
+static std::optional<std::vector<Value*>> build_script_grad(
     Node* node,
     const ArrayRef<Value*>& grads) {
   auto graph = node->owningGraph();
@@ -352,7 +352,7 @@ bool outputRequiresGrad(Value* output) {
   if (output->type()->castRaw<TensorType>() == nullptr) {
     return output->requires_grad();
   }
-  c10::optional<bool> requiresGrad =
+  std::optional<bool> requiresGrad =
       output->type()->expectRef<TensorType>().requiresGrad();
   if (requiresGrad.has_value()) {
     return *requiresGrad;

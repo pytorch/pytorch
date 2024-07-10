@@ -1,9 +1,10 @@
+from benchmark_helper import time_with_torch_timer
+
 import torch
 
 import torch._dynamo
 import torch._dynamo.config
 import torch._inductor.config as config
-from benchmark_helper import time_with_torch_timer
 
 
 @torch._dynamo.optimize("inductor", nopython=True)

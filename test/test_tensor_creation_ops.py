@@ -17,7 +17,8 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict, slowTest,
     set_default_dtype, set_default_tensor_type,
-    TEST_SCIPY, IS_MACOS, IS_PPC, IS_JETSON, IS_WINDOWS, parametrize, skipIfTorchDynamo)
+    TEST_SCIPY, IS_MACOS, IS_PPC, IS_JETSON, IS_WINDOWS, parametrize, skipIfTorchDynamo,
+    xfailIfTorchDynamo)
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
@@ -945,7 +946,7 @@ class TestTensorCreation(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half))
     def test_vstack_row_stack(self, device, dtype):
-        ops = ((torch.vstack, np.vstack), (torch.row_stack, np.row_stack))
+        ops = ((torch.vstack, np.vstack), (torch.row_stack, np.vstack))
         for torch_op, np_op in ops:
             self._test_special_stacks(0, 2, torch_op, np_op, device, dtype)
             for i in range(5):
@@ -1582,6 +1583,8 @@ class TestTensorCreation(TestCase):
         self.assertEqual(t.max(), True)
         self.assertTrue(0.4 < (t.eq(True)).to(torch.int).sum().item() / size < 0.6)
 
+    # https://github.com/pytorch/pytorch/issues/126834
+    @xfailIfTorchDynamo
     def test_random_from_to_bool(self, device):
         size = 2000
 
@@ -1661,7 +1664,9 @@ class TestTensorCreation(TestCase):
 
     # NB: uint64 is broken because its max value is not representable in
     # int64_t, but this is what random expects
-    @dtypes(*all_types_and(torch.bfloat16, torch.half, torch.uint16, torch.uint32))
+    # https://github.com/pytorch/pytorch/issues/126834
+    @xfailIfTorchDynamo
+    @dtypes(*all_types_and(torch.bfloat16, torch.half, torch .uint16, torch.uint32))
     def test_random_from_to(self, device, dtype):
         size = 2000
         alpha = 0.1
@@ -1750,6 +1755,8 @@ class TestTensorCreation(TestCase):
                         lambda: t.random_(from_, to_)
                     )
 
+    # https://github.com/pytorch/pytorch/issues/126834
+    @xfailIfTorchDynamo
     @dtypes(*all_types_and(torch.bfloat16, torch.half, torch.uint16, torch.uint32))
     def test_random_to(self, device, dtype):
         size = 2000
@@ -3170,18 +3177,19 @@ class TestTensorCreation(TestCase):
         dtype = torch.float64
         t = torch.randn(2, 5, dtype=dtype, device=device)
         with tempfile.NamedTemporaryFile() as f:
+            expected_filename = f.name if shared else None
             t.numpy().tofile(f)
             t_mapped = torch.from_file(f.name, shared=shared, size=t.numel(), dtype=dtype)
-            self.assertTrue(t_mapped.storage().filename == f.name)
+            self.assertTrue(t_mapped.untyped_storage().filename == expected_filename)
             self.assertEqual(torch.flatten(t), t_mapped)
 
             s = torch.UntypedStorage.from_file(f.name, shared, t.numel() * dtype.itemsize)
-            self.assertTrue(s.filename == f.name)
+            self.assertTrue(s.filename == expected_filename)
 
     @onlyCPU
     def test_storage_filename(self, device):
         t = torch.randn(2, 5, device=device)
-        self.assertIsNone(t.storage().filename)
+        self.assertIsNone(t.untyped_storage().filename)
 
 
 # Class for testing random tensor creation ops, like torch.randint
@@ -3350,6 +3358,8 @@ class TestRandomTensorCreation(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
                 torch.normal(input, std)
 
+    # https://github.com/pytorch/pytorch/issues/126834
+    @xfailIfTorchDynamo
     @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_from_to(self, device, dtype):
@@ -3822,7 +3832,7 @@ def to_memview(tensor):
 
 class TestAsArray(TestCase):
     def _check(self, original, cvt=lambda t: t, is_alias=True, same_dtype=True, same_device=True, **kwargs):
-        """Check the output of 'asarray', given its input and assertion informations.
+        """Check the output of 'asarray', given its input and assertion information.
 
         Besides calling 'asarray' itself, this function does 4 different checks:
             1. Whether the result is aliased or not, depending on 'is_alias'

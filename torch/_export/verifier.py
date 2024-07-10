@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import inspect
 import math
 import operator
@@ -65,6 +66,17 @@ def _check_val(node: torch.fx.Node) -> None:
         raise SpecViolationError(f"Node.meta {node.name} has invalid val field {val}")
 
 
+def _check_torch_fn(node: torch.fx.Node) -> None:
+    torch_fn = node.meta.get("torch_fn")
+    if torch_fn is None:
+        raise SpecViolationError(f"Unable to find torch_fn metadata for node {node.name}")
+    if (
+        not isinstance(torch_fn, tuple) and
+        isinstance(torch_fn[0], str) and
+        isinstance(torch_fn[1], str)
+    ):
+        raise SpecViolationError(f"Node.meta {node.name} has invalid torch_fn field {torch_fn}")
+
 class _VerifierMeta(type):
     _registry: Dict[str, Type['Verifier']] = {}
 
@@ -122,7 +134,8 @@ class Verifier(metaclass=_VerifierMeta):
         ]
 
     def allowed_op_types(self) -> Tuple[Type[Any], ...]:
-        return (OpOverload, HigherOrderOperator)
+        from torch._export.serde.serialize import allowed_registered_op_types  # Avoid circular import.
+        return (OpOverload, HigherOrderOperator, *allowed_registered_op_types())
 
     def allowed_getattr_types(self) -> Tuple[Type[Any], ...]:
         return (torch.fx.GraphModule,)
@@ -163,6 +176,7 @@ class Verifier(metaclass=_VerifierMeta):
             _allowed_torch_functions = (
                 torch.autograd.grad_mode.set_grad_enabled,
                 torch.sym_int,
+                torch.sym_float,
                 torch.sym_ite,
                 torch.sym_max,
                 torch.sym_min,
@@ -171,8 +185,7 @@ class Verifier(metaclass=_VerifierMeta):
                 # TODO (tmanlaibaatar)
                 # Predispatch export is able to contain autograd ops.
                 # These will be modeled as HOO later
-                torch._C._set_grad_enabled
-
+                torch._C._set_grad_enabled,
             )
 
             if not isinstance(op, _allowed_op_types()):
@@ -185,7 +198,8 @@ class Verifier(metaclass=_VerifierMeta):
 
             if isinstance(op, OpOverload):
                 # All ops functional
-                if not is_functional(op):
+                # TODO (tmanlaibaatar) more proper way is needed here
+                if self.dialect != "TRAINING" and not is_functional(op):
                     raise SpecViolationError(
                         f"operator '{op}' is not functional"
                     )
@@ -250,6 +264,10 @@ class Verifier(metaclass=_VerifierMeta):
                 #     _check_flattened_outputs()
 
         self.check_additional(gm)
+
+
+class TrainingIRVerifier(Verifier):
+    dialect = "TRAINING"
 
 
 def _verify_exported_program_signature(exported_program) -> None:

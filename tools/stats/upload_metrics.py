@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 import datetime
 import inspect
 import os
 import time
 import uuid
-
 from decimal import Decimal
-from typing import Any, Dict
+from typing import Any
 from warnings import warn
+
 
 # boto3 is an optional dependency. If it's not installed,
 # we'll just not emit the metrics.
@@ -19,6 +21,12 @@ try:
     EMIT_METRICS = True
 except ImportError as e:
     print(f"Unable to import boto3. Will not be emitting metrics.... Reason: {e}")
+
+# Sometimes our runner machines are located in one AWS account while the metrics table may be in
+# another, so we need to specify the table's ARN explicitly.
+TORCHCI_METRICS_TABLE_ARN = (
+    "arn:aws:dynamodb:us-east-1:308535385114:table/torchci-metrics"
+)
 
 
 class EnvVarMetric:
@@ -59,7 +67,7 @@ class EnvVarMetric:
         return value
 
 
-global_metrics: Dict[str, Any] = {}
+global_metrics: dict[str, Any] = {}
 
 
 def add_global_metric(metric_name: str, metric_value: Any) -> None:
@@ -73,7 +81,7 @@ def add_global_metric(metric_name: str, metric_value: Any) -> None:
 
 def emit_metric(
     metric_name: str,
-    metrics: Dict[str, Any],
+    metrics: dict[str, Any],
 ) -> None:
     """
     Upload a metric to DynamoDB (and from there, Rockset).
@@ -153,7 +161,7 @@ def emit_metric(
     if EMIT_METRICS:
         try:
             session = boto3.Session(region_name="us-east-1")
-            session.resource("dynamodb").Table("torchci-metrics").put_item(
+            session.resource("dynamodb").Table(TORCHCI_METRICS_TABLE_ARN).put_item(
                 Item={
                     **reserved_metrics,
                     **metrics,
@@ -168,7 +176,7 @@ def emit_metric(
         print(f"Not emitting metrics for {metric_name}. Boto wasn't imported.")
 
 
-def _convert_float_values_to_decimals(data: Dict[str, Any]) -> Dict[str, Any]:
+def _convert_float_values_to_decimals(data: dict[str, Any]) -> dict[str, Any]:
     # Attempt to recurse
     def _helper(o: Any) -> Any:
         if isinstance(o, float):

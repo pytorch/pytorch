@@ -348,7 +348,7 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
 
     for (const auto& td : data_pickle.tensorData()) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
-      std::string fname = prefix + c10::to_string(i++);
+      std::string fname = prefix + std::to_string(i++);
       writer.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
     }
     std::string fname = archive_name + ".pkl";

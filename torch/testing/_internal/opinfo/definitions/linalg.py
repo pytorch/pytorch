@@ -2389,8 +2389,6 @@ python_ref_db: List[OpInfo] = [
         supports_out=True,
         op_db=op_db,
         skips=(
-            # no _refs support for Tensor.__getitem__
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
             # TODO: is this really needed?
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_python_ref_errors"

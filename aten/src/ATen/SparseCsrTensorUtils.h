@@ -285,6 +285,21 @@ inline std::pair<Tensor, Tensor> getCompressedPlainIndices(Tensor const& self) {
       });
 }
 
+inline ScalarType getIndexDtype(Tensor const& self) {
+  switch (self.layout()) {
+    case kSparseCsr:
+    case kSparseBsr:
+      return self.crow_indices().scalar_type();
+    case kSparseCsc:
+    case kSparseBsc:
+      return self.ccol_indices().scalar_type();
+    case kSparse:
+      return self._indices().scalar_type();
+    default:
+      return ScalarType::Long;
+  }
+}
+
 inline Layout flip_compressed_layout(Layout layout) {
   switch (layout) {
     case kSparseCsr:

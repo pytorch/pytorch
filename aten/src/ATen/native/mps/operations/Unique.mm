@@ -36,8 +36,8 @@ static std::string getUniqueKey(const ScalarType& dtype,
                                 const bool consecutive,
                                 c10::optional<int64_t> dimOpt) {
   return "_unique2_mps:" + getMPSTypeString(dtype) + "[" + getArrayRefString(base_shape) + "]:[" +
-      (dimOpt.has_value() ? to_string(dimOpt.value()) : "None") + "]:[" + to_string(return_inverse) + "]:[" +
-      to_string(return_counts) + "]:[" + to_string(consecutive) + "]";
+      (dimOpt.has_value() ? std::to_string(dimOpt.value()) : "None") + "]:[" + std::to_string(return_inverse) + "]:[" +
+      std::to_string(return_counts) + "]:[" + std::to_string(consecutive) + "]";
 }
 
 // dim arg not supported when non consecutive, ie sorted
@@ -279,7 +279,7 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
 }
 
 static std::tuple<Tensor, Tensor, Tensor> castToMPS(std::tuple<Tensor, Tensor, Tensor> out) {
-  return std::make_tuple(get<0>(out).to("mps"), get<1>(out).to("mps"), get<2>(out).to("mps"));
+  return std::make_tuple(std::get<0>(out).to("mps"), std::get<1>(out).to("mps"), std::get<2>(out).to("mps"));
 }
 
 std::tuple<Tensor, Tensor, Tensor> unique_consecutive_mps(const Tensor& self,

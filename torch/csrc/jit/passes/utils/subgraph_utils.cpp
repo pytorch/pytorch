@@ -18,9 +18,9 @@ bool hasSubgraph(Node* n) {
   return n->hasAttribute(attr::Subgraph);
 }
 
-std::vector<c10::optional<const Use>> gatherLastUses(
+std::vector<std::optional<const Use>> gatherLastUses(
     at::ArrayRef<Value*> values) {
-  return fmap(values, [&](Value* v) -> c10::optional<const Use> {
+  return fmap(values, [&](Value* v) -> std::optional<const Use> {
     return firstOrLastUse(v, /*find_first*/ false);
   });
 }
@@ -38,7 +38,7 @@ struct ValueMapper {
   ValueMapper(
       Node* to_merge,
       AliasDb& db,
-      c10::optional<Node*> existing_subgraph) {
+      std::optional<Node*> existing_subgraph) {
     last_uses_ = gatherLastUses(to_merge->outputs());
     if (existing_subgraph) {
       existing_last_uses_ = gatherLastUses((*existing_subgraph)->outputs());
@@ -91,14 +91,14 @@ struct ValueMapper {
     placeholder_node_->destroy();
   }
 
-  std::vector<c10::optional<const Use>> last_uses_;
-  std::vector<c10::optional<const Use>> existing_last_uses_;
+  std::vector<std::optional<const Use>> last_uses_;
+  std::vector<std::optional<const Use>> existing_last_uses_;
   Node* placeholder_node_;
 };
 
 Node* executeSubgraphMergeAndUpdateAliasing(
     Node* to_merge,
-    c10::optional<Node*> existing,
+    std::optional<Node*> existing,
     AliasDb& db,
     const std::function<Node*(void)>& merge_fn) {
   // When we merge a node into a subgraph, the new subgraph outputs
@@ -606,7 +606,7 @@ static std::string truncateStrWithHash(const std::string& s, size_t maxlen) {
   if (s.size() <= maxlen) {
     return s;
   }
-  std::string hash_str = c10::to_string(c10::hash<std::string>{}(s));
+  std::string hash_str = std::to_string(c10::hash<std::string>{}(s));
   // If hash-string plus '_' can fit into maxlen, then truncate the original
   // string correspondingly so that the final string with the hash included fits
   // into maxlen. If that's not possible, at least truncate the original string

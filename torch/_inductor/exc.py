@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import os
@@ -45,7 +46,7 @@ class MissingOperatorWithDecomp(OperatorIssue):
 
                 There is a decomposition available for {target} in
                 torch._decomp.get_decompositions().  Please add this operator to the
-                `decompositions` list in torch._inductor.decompositions
+                `decompositions` list in torch._inductor.decomposition
                 """
             )
         )
@@ -56,6 +57,10 @@ class LoweringException(OperatorIssue):
         super().__init__(
             f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
         )
+
+
+class SubgraphLoweringException(RuntimeError):
+    pass
 
 
 class InvalidCxxCompiler(RuntimeError):

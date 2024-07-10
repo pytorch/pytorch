@@ -96,8 +96,21 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
-  pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
-  retry pip install -q numpy protobuf typing-extensions
+  if [[ "\$BUILD_ENVIRONMENT" != *s390x* ]]; then
+    if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+      pkg_no_python="$(ls -1 /final_pkgs/torch_no_python* | sort |tail -1)"
+      pkg_torch="$(ls -1 /final_pkgs/torch-* | sort |tail -1)"
+      # todo: after folder is populated use the pypi_pkg channel instead
+      pip install "\$pkg_no_python" "\$pkg_torch" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}_pypi_pkg"
+      retry pip install -q numpy protobuf typing-extensions
+    else
+      pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
+      retry pip install -q numpy protobuf typing-extensions
+    fi
+  else
+    pip install "\$pkg"
+    retry pip install -q numpy protobuf typing-extensions
+  fi
 fi
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   pkg="\$(ls /final_pkgs/*-latest.zip)"

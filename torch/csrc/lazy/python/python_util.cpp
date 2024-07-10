@@ -11,7 +11,7 @@
 namespace torch {
 namespace lazy {
 
-c10::optional<SourceLocation> GetPythonFrameTop() {
+std::optional<SourceLocation> GetPythonFrameTop() {
   if (!Py_IsInitialized()) {
     return c10::nullopt;
   }

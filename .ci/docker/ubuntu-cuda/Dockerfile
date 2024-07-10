@@ -56,7 +56,7 @@ RUN if [ -n "${DB}" ]; then bash ./install_db.sh; fi
 RUN rm install_db.sh
 ENV INSTALLED_DB ${DB}
 
-# (optional) Install vision packages like OpenCV and ffmpeg
+# (optional) Install vision packages like OpenCV
 ARG VISION
 COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
@@ -103,6 +103,14 @@ COPY triton_version.txt triton_version.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
 
+ARG HALIDE
+# Build and install halide
+COPY ./common/install_halide.sh install_halide.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/halide.txt halide.txt
+RUN if [ -n "${HALIDE}" ]; then bash ./install_halide.sh; fi
+RUN rm install_halide.sh common_utils.sh halide.txt
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
@@ -139,7 +147,7 @@ COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 ARG CUDNN_VERSION
 ARG CUDA_VERSION
 COPY ./common/install_cudnn.sh install_cudnn.sh
-RUN if [ "${CUDNN_VERSION}" -eq 8 ]; then bash install_cudnn.sh; fi
+RUN if [ -n "${CUDNN_VERSION}" ]; then bash install_cudnn.sh; fi
 RUN rm install_cudnn.sh
 
 # Install CUSPARSELT
@@ -152,6 +160,7 @@ RUN rm install_cusparselt.sh
 RUN if [ -h /usr/local/cuda-11.6/cuda-11.6 ]; then rm /usr/local/cuda-11.6/cuda-11.6; fi
 RUN if [ -h /usr/local/cuda-11.7/cuda-11.7 ]; then rm /usr/local/cuda-11.7/cuda-11.7; fi
 RUN if [ -h /usr/local/cuda-12.1/cuda-12.1 ]; then rm /usr/local/cuda-12.1/cuda-12.1; fi
+RUN if [ -h /usr/local/cuda-12.4/cuda-12.4 ]; then rm /usr/local/cuda-12.4/cuda-12.4; fi
 
 USER jenkins
 CMD ["bash"]

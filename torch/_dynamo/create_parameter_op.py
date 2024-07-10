@@ -1,6 +1,8 @@
+# mypy: allow-untyped-defs
+import threading
+from contextlib import contextmanager
+
 import torch
-from torch._prims import _make_prim, RETURN_TYPE
-from torch._prims_common import clone_preserve_strides
 
 doc = """
 This is used when dynamo traces torch.nn.Parameter, which normally would not trace properly
@@ -11,23 +13,12 @@ to flow into the parameter as if it were an input to the graph (which is the onl
 allowed to compute gradients on).
 """.strip()
 
-_bind_nn_parameter = _make_prim(
-    schema="_bind_nn_parameter(Tensor self, Tensor placeholder) -> Tensor",
-    return_type=RETURN_TYPE.NEW,
-    meta=lambda self, placeholder: torch.nn.Parameter(
-        clone_preserve_strides(self), placeholder.requires_grad
-    ),
-    impl_aten=lambda self, placeholder: placeholder.set_(self),
-    doc=doc,
-)
-torch.fx.node.has_side_effect(_bind_nn_parameter)
-
 
 class TracableCreateParameter(torch.autograd.Function):
     @staticmethod
     def forward(ctx, tensor, placeholder):
         assert not tensor.requires_grad
-        return _bind_nn_parameter(tensor, placeholder)
+        return placeholder.set_(tensor)
 
     @staticmethod
     def backward(ctx, grad):
@@ -36,7 +27,8 @@ class TracableCreateParameter(torch.autograd.Function):
 
 def tracable_create_parameter(tensor, placeholder):
     with torch.set_grad_enabled(placeholder.requires_grad):
-        return TracableCreateParameter.apply(tensor, placeholder)
+        out = TracableCreateParameter.apply(tensor, placeholder)
+    return out
 
 
 def new_parameter_placeholder(size, dtype, device, requires_grad):
@@ -48,3 +40,20 @@ def new_parameter_placeholder(size, dtype, device, requires_grad):
     # Allocating a zero tensor would causes assert failures in autograd.
     result.untyped_storage().resize_(0)
     return result
+
+
+_TLS = threading.local()
+
+
+@contextmanager
+def do_not_convert_to_tracable_parameter():
+    old_flag = getattr(_TLS, "convert_tracable_parameter", True)
+    _TLS.convert_tracable_parameter = False
+    try:
+        yield False
+    finally:
+        _TLS.convert_tracable_parameter = old_flag
+
+
+def can_convert_to_tracable_parameter():
+    return getattr(_TLS, "convert_tracable_parameter", True)

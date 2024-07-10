@@ -21,7 +21,7 @@ TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
  IntArrayRef padding,
  bool ceil_mode,
  bool count_include_pad,
- c10::optional<int64_t> divisor_override) {
+ std::optional<int64_t> divisor_override) {
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
     "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
@@ -101,7 +101,7 @@ TORCH_META_FUNC(avg_pool2d_backward) (
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override
+  std::optional<int64_t> divisor_override
 ) {
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
@@ -159,7 +159,7 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cpu)
  int64_t padW,
  bool ceil_mode,
  bool count_include_pad,
- c10::optional<int64_t> divisor_override,
+ std::optional<int64_t> divisor_override,
  const Tensor& output) {
   avg_pool2d_kernel(
       kCPU,
@@ -183,7 +183,7 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cpu) (
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override,
+  std::optional<int64_t> divisor_override,
   const Tensor& gradInput
 ) {
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
