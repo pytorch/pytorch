@@ -1637,7 +1637,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             lse_meta = query_meta.new_empty(logsumexp_shape, dtype=torch.float32)
         example_value = (out_meta, lse_meta)
 
-        block_mask = tuple(inp_args[-2] + (mask_fn_node,))
+        _, _, _, inp_arg_block_mask, inp_arg_scale = inp_args
+        block_mask = tuple(inp_arg_block_mask + (mask_fn_node,))
         # Compose the ordered HOO args from two parts:
         # - inp_args: [query, key, value, block_mask, scale]
         # - p_args: [score_mod, *other_buffers]
@@ -1648,8 +1649,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 self.value,
                 args=inp_args[:3]
                 + (score_mod_node,)
-                + (block_mask,)
-                + (inp_args[4],)
+                + (block_mask, inp_arg_scale)
                 + (
                     score_mod_lifted_args,
                     mask_fn_lifted_args,

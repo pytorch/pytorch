@@ -600,7 +600,7 @@ def flex_attention(*args, **kwargs):
         ]
     ]
     subgraph_buffer = build_subgraph_buffer(
-        placeholder_inps + [score_mod_other_buffers], subgraph
+        placeholder_inps + list(score_mod_other_buffers), subgraph
     )
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -612,7 +612,7 @@ def flex_attention(*args, **kwargs):
         ]
     ]
     mask_graph_buffer = build_subgraph_buffer(
-        mask_graph_placeholder_inps + [mask_fn_other_buffers], mask_graph
+        mask_graph_placeholder_inps + list(mask_fn_other_buffers), mask_graph
     )
     layout = FixedLayout(
         query.get_device(),
@@ -873,7 +873,6 @@ flex_attention_backward_template = TritonTemplate(
         offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
 
         q = tl.load(Q + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
-        dq = tl.zeros([BLOCK_M2, BLOCK_DMODEL], dtype=tl.float32)
         do = tl.load(DO + offs_m2[:, None] * stride_dom + offs_k[None, :] * stride_dod)
 
         Di = tl.load(DELTA + offs_m2)
@@ -1347,14 +1346,14 @@ def flex_attention_backward(*args, **kwargs):
         ]
     ]
     fw_subgraph_buffer = build_subgraph_buffer(
-        fwd_placeholder_inps + score_mod_other_buffers, fw_graph
+        fwd_placeholder_inps + list(score_mod_other_buffers), fw_graph
     )
 
     joint_placeholder_inps = fwd_placeholder_inps + [
         create_placeholder("grad_score_mod", dtype, device)
     ]
     joint_subgraph_buffer, *_ = build_subgraph_buffer(
-        joint_placeholder_inps + score_mod_other_buffers, joint_graph
+        joint_placeholder_inps + list(score_mod_other_buffers), joint_graph
     )
 
     mask_graph_placeholder_inps = [
@@ -1367,7 +1366,7 @@ def flex_attention_backward(*args, **kwargs):
         ]
     ]
     mask_graph_buffer = build_subgraph_buffer(
-        mask_graph_placeholder_inps + mask_fn_other_buffers, mask_graph
+        mask_graph_placeholder_inps + list(mask_fn_other_buffers), mask_graph
     )
 
     layout_k = FixedLayout(
