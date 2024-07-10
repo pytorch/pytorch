@@ -23,6 +23,7 @@ from typing import (
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch._utils import _get_device_module
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._state_dict_utils import (
     _broadcast_state_dict,
@@ -557,6 +558,8 @@ def _load_model_state_dict(
                     device = value.device
                 else:
                     assert device == value.device
+        if device == torch.device("meta"):
+            device = dist.distributed_c10d._get_pg_default_device()
         assert device is not None
         _broadcast_state_dict(
             state_dict, local_state_dict, device=device, strict=info.strict
