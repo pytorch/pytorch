@@ -2117,6 +2117,7 @@ def get_dynamic_dim(
     marked_weak_dynamic,
     static_shapes,
     marked_static,
+    is_stride,
 ):
     from torch.fx.experimental.symbolic_shapes import is_nested_int
 
@@ -2133,6 +2134,8 @@ def get_dynamic_dim(
         # case
         return DimDynamic.DYNAMIC
     elif static_shapes or config.assume_static_by_default or marked_static:
+        if is_stride:
+            return DimDynamic.INFER_STRIDE
         return DimDynamic.STATIC
     else:
         return DimDynamic.DUCK
@@ -2212,7 +2215,7 @@ def _automatic_dynamic(
                 for s in e.size()
             ],
             dynamic_strides=[
-                DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
+                DimDynamic.INFER_STRIDE if isinstance(s, SymInt) else DimDynamic.STATIC
                 for s in e.stride()
             ],
             constraint_sizes=[None] * e.dim(),
@@ -2248,6 +2251,8 @@ def _automatic_dynamic(
                 # If there is already an entry, and the dim matches, for every size/stride in the frame state which
                 # disagrees with the current static size/stride, replace it with None.
                 # E.g., {"x": [2, 3]} -> {"x": [2, # None]}
+
+                has_size_changed = False
                 for i, dim in enumerate(frame_state_entry.size):
                     if dim is not None and e.size()[i] != dim:
                         log.debug(
@@ -2257,18 +2262,33 @@ def _automatic_dynamic(
                             e.size(i),
                             dim,
                         )
+                        has_size_changed = True
                         frame_state_entry.size[i] = None
-                # Update stride to None if required
-                for i, dim in enumerate(frame_state_entry.stride):
-                    if dim is not None and e.stride()[i] != dim:
-                        log.debug(
-                            "automatic dynamic %s stride(%s) %s != %s",
-                            name,
-                            i,
-                            e.stride(i),
-                            dim,
-                        )
-                        frame_state_entry.stride[i] = None
+
+                # We want to trigger dynamism for stride changes as well. But we have to be careful here, as stride can
+                # change due to various reasons. If stride changes just because size changes, we don't want to insert
+                # new symbols for it. If there is no connection between strides and sizes (e.g. if user, outside of
+                # torch.compile scope, is using views to create tensors of different shape and strides), then we do want
+                # track dynamism. This can complicate the logic.
+
+                # To simplify, we think of 2 cases
+                # 1) size changes and stride changes - In this case, we assume that stride changes just because of size
+                # change and rely on INFER_STRIDE to insert symbols for stride. This can cause a few more recompilations
+                # if user intentionally changes strides and strides in arbitrary fashion.
+                # 2) size stays same but stride changes - Here, we instruct symbolic shape to conside the stride to be
+                # DYNAMIC and dont rely on INFER_STRIDE.
+
+                if not has_size_changed:
+                    for i, dim in enumerate(frame_state_entry.stride):
+                        if dim is not None and e.stride()[i] != dim:
+                            log.debug(
+                                "automatic dynamic %s stride(%s) %s != %s",
+                                name,
+                                i,
+                                e.stride(i),
+                                dim,
+                            )
+                            frame_state_entry.stride[i] = None
 
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
@@ -2391,6 +2411,7 @@ def _automatic_dynamic(
             marked_weak_dynamic,
             static_shapes,
             marked_static,
+            is_stride=False,
         )
         dynamic_stride = get_dynamic_dim(
             e.stride()[i],
@@ -2400,6 +2421,7 @@ def _automatic_dynamic(
             marked_weak_dynamic,
             static_shapes,
             marked_static,
+            is_stride=True,
         )
         dynamic_sizes.append(dynamic_size)
         dynamic_strides.append(dynamic_stride)

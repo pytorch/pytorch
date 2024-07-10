@@ -1019,6 +1019,8 @@ class DimDynamic(Enum):
     STATIC = 2
     # Treat the dimension as a size-like unbacked
     SIZE_LIKE_UNBACKED = 3
+    # Infer the stride
+    INFER_STRIDE = 4
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -3214,7 +3216,8 @@ class ShapeEnv:
                 key=_nested_int_aware_sort,
             )
             for _, i in val_list:
-                if stride[i] is None and ex_stride[i] in candidates:
+                # Only set stride with candidates if it is marked INFER_STRIDE
+                if stride[i] is None and dynamic_strides[i] is DimDynamic.INFER_STRIDE and ex_stride[i] in candidates:
                     stride[i] = candidates[ex_stride[i]]
                     candidates[ex_size[i] * ex_stride[i]] = size[i] * stride[i]
 
@@ -3518,6 +3521,8 @@ class ShapeEnv:
             # if it was requested
             duck = self.duck_shape
         elif dynamic_dim is DimDynamic.DYNAMIC:
+            duck = False
+        elif dynamic_dim is DimDynamic.INFER_STRIDE:
             duck = False
         else:
             raise AssertionError(f"unhandled dynamic_dim {dynamic_dim}")
