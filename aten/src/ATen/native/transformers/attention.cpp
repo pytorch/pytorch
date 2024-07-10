@@ -777,7 +777,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
 
 
     // MQA/GQA handling
-    auto [key_expanded, value_expanded] = pre_process_group_query_attention_input(query_, key, value, enable_gqa);
+    auto [key_expanded, value_expanded] = pre_process_group_query_attention_input(query, key, value, enable_gqa);
     auto attn = at::matmul(query, key_expanded.transpose(-2, -1) * scaling_factor);
     if (attn_mask.has_value()) {
       if (at::areAnyTensorSubclassLike({attn, *attn_mask})) {
