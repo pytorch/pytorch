@@ -93,7 +93,7 @@ struct IntegerValueRefiner {
         auto other_output = other_if_block->outputs().at(i);
         auto other_const_value = other_output->type()->cast<IntType>()
             ? constant_as<int64_t>(other_output)
-            : c10::nullopt;
+            : std::nullopt;
         if (!other_const_value ||
             block_output->node()->kind() == prim::Constant) {
           continue;
@@ -211,7 +211,7 @@ struct IntegerValueRefiner {
         return maybe_refinement->second;
       }
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   std::shared_ptr<Graph> graph_;

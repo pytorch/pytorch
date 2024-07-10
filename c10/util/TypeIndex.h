@@ -110,7 +110,7 @@ inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() 
       __FUNCSIG__);
 #else
   return extract(
-      "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<",
+      "class c10::basic_string_view<char,struct std::char_traits<char> > __cdecl c10::util::detail::fully_qualified_type_name_impl<",
       ">(void)",
       __FUNCSIG__);
 #endif

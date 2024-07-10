@@ -795,9 +795,7 @@ Tensor view_nested(const Tensor& self, IntArrayRef proposed_shape) {
   // reshaping underlying tensor dimensions does not change offset
   // determine reshaped size and stride
   const Tensor& sizemat = self_ptr->get_nested_sizes();
-  bool viewable;
-  Tensor sizemat_reshaped, stridemat_reshaped;
-  std::tie(viewable, sizemat_reshaped, stridemat_reshaped) = NestedTensor_compute_size_stride(
+  auto [viewable, sizemat_reshaped, stridemat_reshaped] = NestedTensor_compute_size_stride(
       sizes, strides, proposed_shape, sizemat.options());
   TORCH_CHECK(
       viewable,
@@ -888,9 +886,7 @@ Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   // reshaping underlying tensor dimensions does not change offset
   // determine reshaped size and stride
   const Tensor& sizemat = self_ptr->get_nested_sizes();
-  bool viewable{false};
-  Tensor sizemat_reshaped, stridemat_reshaped;
-  std::tie(viewable, sizemat_reshaped, stridemat_reshaped) = NestedTensor_compute_size_stride(
+  auto [viewable, sizemat_reshaped, stridemat_reshaped] = NestedTensor_compute_size_stride(
       sizes, strides, proposed_shape, sizemat.options());
   if (viewable) {
     return self.view(proposed_shape);

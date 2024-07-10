@@ -1403,8 +1403,7 @@ Tensor zeros_like(
     auto res = at::native::sparse_compressed_tensor_with_dims(
       nnz, dense_dim, self.sizes(), blocksize, index_dtype,
       typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
-    Tensor compressed_indices, plain_indices;
-    std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(res);
+    auto [compressed_indices, plain_indices] = at::sparse_csr::getCompressedPlainIndices(res);
     compressed_indices.zero_();
     return res;
   }

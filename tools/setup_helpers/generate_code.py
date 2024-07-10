@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 import os
-import pathlib
 import sys
+from pathlib import Path
 from typing import Any, cast
 
 import yaml
@@ -19,7 +19,7 @@ TAGS_PATH = "aten/src/ATen/native/tags.yaml"
 
 
 def generate_code(
-    gen_dir: pathlib.Path,
+    gen_dir: Path,
     native_functions_path: str | None = None,
     tags_path: str | None = None,
     install_dir: str | None = None,
@@ -41,7 +41,7 @@ def generate_code(
     autograd_gen_dir = os.path.join(install_dir, "autograd", "generated")
     for d in (autograd_gen_dir, python_install_dir):
         os.makedirs(d, exist_ok=True)
-    autograd_dir = os.fspath(pathlib.Path(__file__).parent.parent / "autograd")
+    autograd_dir = os.fspath(Path(__file__).parent.parent / "autograd")
 
     if subset == "pybindings" or not subset:
         gen_autograd_python(
@@ -133,8 +133,8 @@ def main() -> None:
     parser.add_argument("--tags-path")
     parser.add_argument(
         "--gen-dir",
-        type=pathlib.Path,
-        default=pathlib.Path("."),
+        type=Path,
+        default=Path("."),
         help="Root directory where to install files. Defaults to the current working directory.",
     )
     parser.add_argument(
