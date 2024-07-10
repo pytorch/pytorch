@@ -651,8 +651,6 @@ class Node(_NodeBase):
         if self.op == "call_function":
             schema = getattr(self.target, "_schema", None)
             schema_mutable = False
-            print(self.args)
-            print(self.kwargs)
             if schema is not None and schema.is_mutable:
                 for (idx, arg) in enumerate(schema.arguments):
                     if arg.alias_info is not None and arg.alias_info.is_write:  # `arg` is mutable
