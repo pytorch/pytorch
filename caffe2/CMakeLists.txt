@@ -927,6 +927,7 @@ elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
+  target_link_libraries(torch_cuda PRIVATE flash_attention_cuda)
 
   if(USE_CUSPARSELT)
       target_link_libraries(torch_cuda PRIVATE torch::cusparselt)
@@ -1509,6 +1510,9 @@ if(USE_CUDA)
       torch_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
   target_link_libraries(
       torch_cuda PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
+
+  target_include_directories(
+      flash_attention_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
 
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically

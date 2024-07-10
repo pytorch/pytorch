@@ -175,9 +175,13 @@ file(GLOB mem_eff_attention_cuda_cu "native/transformers/cuda/mem_eff_attention/
 file(GLOB mem_eff_attention_cuda_kernels_cu "native/transformers/cuda/mem_eff_attention/kernels/*.cu")
 file(GLOB mem_eff_attention_cuda_cpp "native/transformers/cuda/mem_eff_attention/*.cpp")
 
+# flash_attn for cuda requires excessive memory, so restrict parallelism in ninja builds
+add_library(flash_attention_cuda OBJECT)
+set_property(GLOBAL PROPERTY JOB_POOLS flash_attention_pool=3)
+set_property(TARGET flash_attention_cuda PROPERTY JOB_POOL_COMPILE flash_attention_pool)
+
 if(USE_FLASH_ATTENTION)
-  list(APPEND native_transformers_cuda_cu ${flash_attention_cuda_cu})
-  list(APPEND native_transformers_cuda_cu ${flash_attention_cuda_kernels_cu})
+  target_sources(flash_attention_cuda PRIVATE ${flash_attention_cuda_cu} ${flash_attention_cuda_kernels_cu})
   list(APPEND native_transformers_cuda_cpp ${flash_attention_cuda_cpp})
   list(APPEND FLASH_ATTENTION_CUDA_SOURCES ${flash_attention_cuda_cu} ${flash_attention_cuda_kernels_cu})
   list(APPEND ATen_ATTENTION_KERNEL_SRCS ${flash_attention_cuda_kernels_cu})
