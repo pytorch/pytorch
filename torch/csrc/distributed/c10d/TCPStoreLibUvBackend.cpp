@@ -184,7 +184,7 @@ class UvTcpServer : public UvTcpSocket {
  public:
   typedef std::function<void(int)> OnConnectCallback;
   explicit UvTcpServer(uv_loop_t* loop)
-      : UvTcpSocket(loop), onConnectCb(missingOnConnect) {}
+      : UvTcpSocket(loop), onConnectCb_(missingOnConnect) {}
 
   static c10::intrusive_ptr<UvTcpServer> makeWithSocket(
       uv_loop_t* loop,
@@ -215,7 +215,7 @@ class UvTcpServer : public UvTcpSocket {
   }
 
   void setOnConnectCallback(OnConnectCallback&& callback) {
-    onConnectCb = std::move(callback);
+    onConnectCb_ = std::move(callback);
   }
 
   static c10::intrusive_ptr<UvTcpServer> makeWithPort(
@@ -282,7 +282,7 @@ class UvTcpServer : public UvTcpSocket {
   }
 
   uint16_t port() const {
-    return portNum;
+    return portNum_;
   }
 
   void accept(const c10::intrusive_ptr<UvTcpSocket>& socket) {
@@ -300,8 +300,8 @@ class UvTcpServer : public UvTcpSocket {
   }
 
  private:
-  OnConnectCallback onConnectCb;
-  uint16_t portNum{};
+  OnConnectCallback onConnectCb_;
+  uint16_t portNum_{};
 
   c10::intrusive_ptr<UvTcpServer> iptr() {
     return c10::intrusive_ptr<UvTcpServer>::reclaim_copy(this);
@@ -326,9 +326,9 @@ class UvTcpServer : public UvTcpSocket {
     }
 
     if (addr_s.ss_family == AF_INET) {
-      portNum = ntohs(reinterpret_cast<sockaddr_in*>(&addr_s)->sin_port);
+      portNum_ = ntohs(reinterpret_cast<sockaddr_in*>(&addr_s)->sin_port);
     } else {
-      portNum = ntohs(reinterpret_cast<sockaddr_in6*>(&addr_s)->sin6_port);
+      portNum_ = ntohs(reinterpret_cast<sockaddr_in6*>(&addr_s)->sin6_port);
     }
   }
 
@@ -337,7 +337,7 @@ class UvTcpServer : public UvTcpSocket {
   }
 
   static void on_new_connection(uv_stream_t* server, int status) {
-    borrow(server)->onConnectCb(status);
+    borrow(server)->onConnectCb_(status);
   }
 };
 
@@ -621,10 +621,10 @@ class LibUVStoreDaemon : public BackgroundThread {
   void stop() override;
 
  private:
-  uv_loop_t loop{};
+  uv_loop_t loop_{};
   c10::intrusive_ptr<UvTcpServer> tcpServer_;
 
-  uv_async_t exit_handle{};
+  uv_async_t exit_handle_{};
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
   // From key -> the list of UvClient waiting on the key
   std::unordered_map<std::string, std::vector<c10::intrusive_ptr<UvHandle>>>
@@ -1011,7 +1011,7 @@ class UvClient : public UvTcpSocket {
 };
 
 void LibUVStoreDaemon::onConnect(int status) {
-  auto client = UvClient::make(&loop, this);
+  auto client = UvClient::make(&loop_, this);
   registerClient(client);
   try {
     tcpServer_->accept(client);
@@ -1024,22 +1024,22 @@ void LibUVStoreDaemon::onConnect(int status) {
 
 void LibUVStoreDaemon::onExitRequest() {
   C10D_DEBUG("Store exit requested\n");
-  uv_close((uv_handle_t*)&exit_handle, nullptr);
-  uv_stop(&loop);
+  uv_close((uv_handle_t*)&exit_handle_, nullptr);
+  uv_stop(&loop_);
 }
 
 void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
   if (opts.masterListenFd.has_value()) {
-    tcpServer_ = UvTcpServer::makeWithSocket(&loop, *opts.masterListenFd);
+    tcpServer_ = UvTcpServer::makeWithSocket(&loop_, *opts.masterListenFd);
   } else {
     try {
       tcpServer_ =
-          UvTcpServer::makeWithPort(&loop, opts.port, /*useIpv6=*/true);
+          UvTcpServer::makeWithPort(&loop_, opts.port, /*useIpv6=*/true);
     } catch (std::exception& ex) {
       C10D_INFO(
           "Failed to bind to ipv6 address, trying ipv4. Error: {}", ex.what());
       tcpServer_ =
-          UvTcpServer::makeWithPort(&loop, opts.port, /*useIpv6=*/false);
+          UvTcpServer::makeWithPort(&loop_, opts.port, /*useIpv6=*/false);
     }
   }
   tcpServer_->setOnConnectCallback(
@@ -1057,19 +1057,19 @@ void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
 }
 
 LibUVStoreDaemon::LibUVStoreDaemon(int port) : port_(port) {
-  TORCH_CHECK(uv_loop_init(&loop) == 0, "Failed to init uv loop");
+  TORCH_CHECK(uv_loop_init(&loop_) == 0, "Failed to init uv loop");
   TORCH_CHECK(
-      uv_async_init(&loop, &exit_handle, LibUVStoreDaemon::on_exit_request) ==
+      uv_async_init(&loop_, &exit_handle_, LibUVStoreDaemon::on_exit_request) ==
           0,
       "Failed to init uv async event");
-  uv_handle_set_data((uv_handle_t*)&exit_handle, this);
+  uv_handle_set_data((uv_handle_t*)&exit_handle_, this);
 }
 
 LibUVStoreDaemon::~LibUVStoreDaemon() {
   if (!is_running()) {
-    uv_close((uv_handle_t*)&exit_handle, nullptr);
-    uv_run(&loop, UV_RUN_NOWAIT);
-    TORCH_CHECK(uv_loop_close(&loop) == 0, "loop cleanup didn't work");
+    uv_close((uv_handle_t*)&exit_handle_, nullptr);
+    uv_run(&loop_, UV_RUN_NOWAIT);
+    TORCH_CHECK(uv_loop_close(&loop_) == 0, "loop cleanup didn't work");
   } else {
     // the daemon thread cleanup libuv
     dispose();
@@ -1092,7 +1092,7 @@ void LibUVStoreDaemon::run() {
   c10::setThreadName("pt_tcpstore_uv");
 
   C10D_DEBUG("Uv main loop running");
-  int res = uv_run(&loop, UV_RUN_DEFAULT);
+  int res = uv_run(&loop_, UV_RUN_DEFAULT);
   if (res) {
     C10D_DEBUG("UV main loop done: res:{}", res);
   }
@@ -1101,7 +1101,7 @@ void LibUVStoreDaemon::run() {
 
   if (debug_enabled) {
     C10D_DEBUG("Walking live handles prior to closing clients");
-    uv_walk(&loop, LibUVStoreDaemon::print_active_handles, nullptr);
+    uv_walk(&loop_, LibUVStoreDaemon::print_active_handles, nullptr);
   }
 
   for (const auto& client : clients_) {
@@ -1111,11 +1111,11 @@ void LibUVStoreDaemon::run() {
 
   if (debug_enabled) {
     C10D_DEBUG("Walking live handles after closing clients");
-    uv_walk(&loop, LibUVStoreDaemon::print_active_handles, nullptr);
+    uv_walk(&loop_, LibUVStoreDaemon::print_active_handles, nullptr);
   }
 
   while (true) {
-    res = uv_loop_close(&loop);
+    res = uv_loop_close(&loop_);
     if (res == 0) {
       break;
     }
@@ -1124,7 +1124,7 @@ void LibUVStoreDaemon::run() {
         res,
         uv_err_name(res),
         uv_strerror(res));
-    res = uv_run(&loop, UV_RUN_NOWAIT);
+    res = uv_run(&loop_, UV_RUN_NOWAIT);
     if (res != 0) {
       std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
@@ -1133,7 +1133,7 @@ void LibUVStoreDaemon::run() {
 }
 
 void LibUVStoreDaemon::stop() {
-  int res = uv_async_send(&exit_handle);
+  int res = uv_async_send(&exit_handle_);
   if (res) {
     C10D_WARNING(
         "uv_async_send failed with:{} errn:{} desc:{}\n",
