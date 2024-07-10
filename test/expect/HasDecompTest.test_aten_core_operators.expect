@@ -459,6 +459,8 @@ aten::sinh
 aten::sinh.out
 aten::sinh_
 aten::slice.Tensor
+aten::slice_scatter
+aten::slice_scatter.out
 aten::special_bessel_j0
 aten::special_bessel_j0.out
 aten::special_bessel_j1
@@ -522,5 +524,9 @@ aten::var.correction_out
 aten::var_mean.correction
 aten::var_mean.correction_out
 aten::view
+aten::view_copy
+aten::view_copy.dtype
+aten::view_copy.dtype_out
+aten::view_copy.out
 aten::where.self
 aten::where.self_out

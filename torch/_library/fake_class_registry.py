@@ -103,19 +103,28 @@ def tracing_with_real(x: torch.ScriptObject) -> bool:
     if not hasattr(x, "tracing_mode"):
         return False
 
-    assert x.tracing_mode() in ["real", "fake"], f"tracing_mode can be either real or fake but got {x.tracing_mode()}"
-    return  x.tracing_mode() == "real"
+    assert x.tracing_mode() in [
+        "real",
+        "fake",
+    ], f"tracing_mode can be either real or fake but got {x.tracing_mode()}"
+    return x.tracing_mode() == "real"
 
 
 def to_fake_obj(
     fake_mode, x: torch.ScriptObject
 ) -> Union[FakeScriptObject, torch.ScriptObject]:
     import torch.utils._pytree as pytree
+    from torch.utils._python_dispatch import _disable_current_modes
 
     if tracing_with_real(x):
         return x
 
-    flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
+    # x.__obj_flatten__() could be calling some tensor operations inside but we don't
+    # want to call these ops in surrounding dispatch modes when executing it.
+    # Otherwise, for example, the fake tensor modes will error out when the tensors inside
+    # script obeject execute some operations like clone if allow_non_fake_input flag is set.
+    with _disable_current_modes():
+        flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
 
     _check_valid_flat_script_obj(flat_x)
 

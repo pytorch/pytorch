@@ -23,7 +23,7 @@ from torch.nn import Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, IS_CI,
-     NoTest, skipIfSlowGradcheckEnv, suppress_warnings)
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
@@ -277,6 +277,7 @@ def mps_ops_modifier(ops):
         'exp',
         'expand',
         'expand_as',
+        'expand_copy',
         'flatten',
         'fill',
         'full',
@@ -317,6 +318,7 @@ def mps_ops_modifier(ops):
         'ones',
         'outer',
         'permute',
+        'permute_copy',
         'positive',
         'randn',
         'ravel',
@@ -335,24 +337,30 @@ def mps_ops_modifier(ops):
         'split_with_sizes_copy',
         'splitlist_args',
         'squeeze',
+        'squeeze_copy',
         'squeezemultiple',
         'sub',
         'svd',
         't',
+        't_copy',
         'tanh',
         'tensor_split',
         'transpose',
+        'transpose_copy',
         'T',
         'unbind',
+        'unbind_copy',
         'unflatten',
         'unfold',
         'unfold_copy',
         'unsafe_chunk',
         'unsafe_split',
         'unsqueeze',
+        'unsqueeze_copy',
         'view_as',
         'view_as_real',
         'view',
+        'view_copy',
         'vsplit',
         'zero_',
         'zeros',
@@ -1590,6 +1598,13 @@ class TestMPS(TestCaseMPS):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
             a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
+
+    def test_conv_raises_error(self, device='mps', dtype=torch.float):
+        conv = nn.Conv1d(1, 65537, 3, padding=1).to('mps')
+
+        x = torch.ones([1, 1, 3])
+        with self.assertRaises(NotImplementedError):
+            y = conv(x.to("mps"))
 
     def test_triu_inf(self, device="mps", dtype=torch.float):
         for diag in [-1, 0, 1]:
@@ -7829,7 +7844,7 @@ class TestMPS(TestCaseMPS):
         x.backward(torch.randn_like(x))
         torch.mps.synchronize()
 
-    @unittest.expectedFailure
+    @serialTest()
     def test_mps_allocator_module(self):
         # first garbage collect and empty the cached blocks
         gc.collect()
@@ -9153,10 +9168,11 @@ class TestLinalgMPS(TestCaseMPS):
                     raise e
 
     @parametrize("m", [1, 32, 64])
-    @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
-    def test__int4_mm(self, m, k, n):
-        q_group = 32
+    @parametrize("q_group", [32, 64, 128, 256])
+    @parametrize("num_groups", [1, 2])
+    def test__int4_mm(self, m, n, q_group, num_groups):
+        k = q_group * num_groups
         inner_k_tiles = 2
 
         torch.manual_seed(1)
@@ -11821,7 +11837,13 @@ class TestConsistency(TestCaseMPS):
         self.assertEqual(device, "cpu")
 
         def get_samples():
-            return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
+            return op.sample_inputs(
+                device,
+                dtype,
+                requires_grad=(dtype.is_floating_point or dtype.is_complex),
+                # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
+                set_seed=False,
+            )
         cpu_samples = get_samples()
 
         for cpu_sample in cpu_samples:
@@ -11856,7 +11878,13 @@ class TestConsistency(TestCaseMPS):
         self.assertEqual(device, "cpu")
 
         def get_samples():
-            return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
+            return op.sample_inputs(
+                device,
+                dtype,
+                requires_grad=(dtype.is_floating_point or dtype.is_complex),
+                # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
+                set_seed=False,
+            )
         cpu_samples = get_samples()
 
         for cpu_sample in cpu_samples:
@@ -11932,7 +11960,8 @@ class TestErrorInputs(TestCase):
     def test_error_inputs(self, device, op):
         self.assertEqual(device, "mps:0")
 
-        mps_samples = op.error_inputs(device)
+        # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
+        mps_samples = op.error_inputs(device, set_seed=False)
 
         for mps_sample in mps_samples:
             mps_sample_input = mps_sample.sample_input
@@ -12006,8 +12035,13 @@ class TestCommon(TestCase):
         # does not support float64 Tensors.
         # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
         # get patched up and this workaround removed.
-        broken_on_ref_inputs = op.name in ['clamp', 'where']
-        inputs = op.reference_inputs(device, dtype) if not broken_on_ref_inputs else op.sample_inputs(device, dtype)
+        broken_on_ref_inputs = op.name in ('where',)
+
+        # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
+        inputs = (
+            op.reference_inputs(device, dtype, set_seed=False) if not broken_on_ref_inputs
+            else op.sample_inputs(device, dtype, set_seed=False)
+        )
         for sample_input in inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 

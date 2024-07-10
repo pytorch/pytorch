@@ -696,7 +696,7 @@ class FileSystemReader(StorageReader):
     @property
     def checkpoint_id(self) -> Union[str, os.PathLike]:
         """
-        return the checkpoint_id that will be used to save the checkpoint.
+        return the checkpoint_id that will be used to load the checkpoint.
         """
         return self.path
 
