@@ -1554,14 +1554,15 @@ class GuardManager {
  public:
   GuardManager() = delete;
   GuardManager(RootGuardManager* root, std::string source)
-      : _root(root), _source(std::move(source)) {}
+      : _root(root), _source(std::move(source)), _is_dict(false) {}
 
   GuardManager(
       RootGuardManager* root,
       std::string source,
       py::handle example_value)
-      : _root(root), _source(std::move(source)) {
-    _is_dict = py::isinstance<py::dict>(example_value);
+      : _root(root),
+        _source(std::move(source)),
+        _is_dict(py::isinstance<py::dict>(example_value)) {
     if (_is_dict) {
       _dict_tag = get_dict_version_unchecked(example_value.ptr());
     }
