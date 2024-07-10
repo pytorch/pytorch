@@ -70,7 +70,7 @@ std::string CudaPrinter::dtypeToCppString(const Dtype& dtype) {
     case ScalarType::Half:
       return "half";
     case ScalarType::BFloat16:
-      return fuser::cuda::bfloat16_type_string;
+      return "__nv_bfloat16";
     case ScalarType::Char:
       return "char";
     case ScalarType::Byte:

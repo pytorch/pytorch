@@ -50,8 +50,6 @@ from torch._dynamo.source import (
     TensorPropertySource,
 )
 from torch._guards import (
-    CompileContext,
-    CompileId,
     DuplicateInputs,
     Guard,
     GuardBuilderBase,
@@ -2158,7 +2156,6 @@ class CheckFunctionManager:
                     reasons = get_guard_fail_reason_helper(
                         self.guard_manager,  # type: ignore[arg-type]
                         output_graph.local_scope,
-                        CompileContext.current_compile_id(),
                     )
                     raise AssertionError(f"Guard check failed: {reasons}")
 
@@ -2326,10 +2323,9 @@ class CheckFunctionManager:
                 add_code_part(code, gcl.guard, config.enable_cpp_guard_manager)
 
         # OK, all done generating guards
-        if structured_guard_fns:
-            torch._logging.trace_structured(
-                "dynamo_guards", payload_fn=lambda: [f() for f in structured_guard_fns]
-            )
+        torch._logging.trace_structured(
+            "dynamo_guards", payload_fn=lambda: [f() for f in structured_guard_fns]
+        )
 
         global_state = convert_frame.initial_global_state
         if global_state is None:
@@ -2499,7 +2495,6 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
 def get_guard_fail_reason_helper(
     guard_fn: GuardFn,
     f_locals: Dict[str, object],
-    compile_id: CompileId,
 ) -> str:
     """
     Return the reason why `guard_fn` failed.
@@ -2564,7 +2559,7 @@ def get_guard_fail_reason_helper(
                 if not is_recompiles_verbose_enabled():
                     break
 
-    reason_str = f"{compile_id}: " + "; ".join(reasons)
+    reason_str = "\n".join(reasons)
     return reason_str
 
 
@@ -2572,9 +2567,8 @@ def get_guard_fail_reason(
     guard_fn: GuardFn,
     code: types.CodeType,
     f_locals: Dict[str, object],
-    compile_id: CompileId,
 ) -> str:
-    reason_str = get_guard_fail_reason_helper(guard_fn, f_locals, compile_id)
+    reason_str = get_guard_fail_reason_helper(guard_fn, f_locals)
     guard_failures[orig_code_map[code]].append(reason_str)
 
     try:
@@ -2601,10 +2595,7 @@ def get_and_maybe_log_recompilation_reason(
     reasons = []
     while cache_entry is not None:
         reason = get_guard_fail_reason(
-            cache_entry.check_fn,
-            cache_entry.code,
-            frame.f_locals,
-            cache_entry.compile_id,
+            cache_entry.check_fn, cache_entry.code, frame.f_locals
         )
         if reason:
             reasons.append(reason)
@@ -2637,15 +2628,6 @@ def get_and_maybe_log_recompilation_reason(
                 recompiles_log.debug(message)
         if config.error_on_recompile:
             raise exc.RecompileError(message)
-
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "recompile_reasons",
-            "encoding": "json",
-        },
-        payload_fn=lambda: reasons,
-    )
 
     return reasons
 
