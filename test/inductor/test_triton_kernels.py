@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 # flake8: noqa: E731
 # Skip do not assign a lambda expression, use a def
+import functools
 from unittest.mock import patch
 
 import torch
@@ -9,6 +10,7 @@ import torch._dynamo.testing
 import torch._inductor.test_case
 
 from torch._higher_order_ops.triton_kernel_wrap import (
+    capture_triton,
     generate_ttir,
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
@@ -710,6 +712,70 @@ def forward(self, x_1, output_1):
         )
         output2 = torch.zeros_like(t1, requires_grad=grad)
         self.assertEqual(compiled_func(t1, t2, output2), torch_result)
+
+    @requires_gpu
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_triton_kernel_tracing(self, dynamic):
+        def call_triton_add(
+            x: torch.Tensor,
+            y: torch.Tensor,
+            grid_type: int,
+            num=1,
+            positional=False,
+            autotuned=False,
+        ):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid_fn(meta):
+                return (triton.cdiv(num, meta["BLOCK_SIZE"]),)
+
+            if grid_type == 0:
+                grid = (x.numel(),)
+            elif grid_type == 1:
+                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            elif grid_type == 2:
+                grid = grid_fn
+            else:
+                grid = [x.numel()]
+
+            if autotuned:
+                capture_triton(add_kernel_autotuned)[grid](x, y, output, n_elements)
+            else:
+                if positional:
+                    capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+                else:
+                    capture_triton(add_kernel)[grid](
+                        x, y, output, n_elements, BLOCK_SIZE=16
+                    )
+
+            return output
+
+        t0 = torch.rand(5, device=GPU_TYPE, requires_grad=True)
+        t1 = torch.rand(5, device=GPU_TYPE, requires_grad=True)
+        t2 = torch.rand(5, device=GPU_TYPE, requires_grad=True)
+        t3 = torch.rand(5, device=GPU_TYPE, requires_grad=True)
+        torch_add = t2 + t3
+
+        tests = [
+            functools.partial(call_triton_add, grid_type=0),
+            functools.partial(call_triton_add, grid_type=1),
+            functools.partial(call_triton_add, grid_type=1, num=1, positional=True),
+            functools.partial(call_triton_add, grid_type=2, num=200),
+            functools.partial(call_triton_add, grid_type=3),
+            functools.partial(call_triton_add, grid_type=0, autotuned=True),
+            functools.partial(call_triton_add, grid_type=1, num=1, autotuned=True),
+            functools.partial(call_triton_add, grid_type=2, num=200, autotuned=True),
+            functools.partial(call_triton_add, grid_type=3, autotuned=True),
+        ]
+        from functorch import make_fx
+
+        tracing_mode = "symbolic" if dynamic else "fake"
+
+        for test in tests:
+            gm = make_fx(test, tracing_mode=tracing_mode)(t0, t1)
+            result = test(t2, t3)
+            self.assertEqual(result, torch_add)
 
     @requires_gpu
     @common_utils.parametrize("grad", [False, True])
