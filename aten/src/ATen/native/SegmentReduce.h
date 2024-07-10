@@ -3,7 +3,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/ReductionType.h>
 #include <c10/core/Scalar.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 namespace at {
 class Tensor;

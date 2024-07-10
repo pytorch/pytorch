@@ -6,7 +6,7 @@
 
 #include <ATen/TensorGeometry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 #include <cstdint>
 #include <memory>

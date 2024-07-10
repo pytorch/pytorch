@@ -15,6 +15,7 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/WrapDimUtils.h>
+#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
