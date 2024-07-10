@@ -56,7 +56,14 @@ c10d_collective_ops = {
     c10d_ops.reduce_scatter_tensor_coalesced_,
 }
 
-trivial_ops = {"aten.detach.default", "aten.t.default", "aten.view.default"}
+trivial_ops = {
+    "aten.detach.default",
+    "aten.t.default",
+    "aten.view.default",
+    "aten._to_copy.default",
+    "aten.as_strided.default",
+    "aten.transpose.int",
+}
 
 
 class CommModeModuleTracker(ModuleTracker):
@@ -447,11 +454,16 @@ class CommDebugMode(TorchDispatchMode):
         self.advanced_module_tracker.__exit__()
         super().__exit__(*args)
 
-    def log_comm_debug_tracing_table_to_file(self, noise_level):
+    def log_comm_debug_tracing_table_to_file(
+        self, file_name="comm_mode_log.txt", noise_level=3
+    ):
+        """
+        Alternative to console CommDebugMode output, writes to file specified by the user
+        """
         ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
         table = ansi_escape.sub("", self.generate_comm_debug_tracing_table(noise_level))
 
-        with open("output.txt", "w") as log_file:
+        with open(file_name, "w") as log_file:
             log_file.write(table)
 
     def print_paramater_info(self):
