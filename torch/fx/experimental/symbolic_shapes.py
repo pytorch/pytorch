@@ -4431,6 +4431,7 @@ class ShapeEnv:
         return tuple(equiv.items())
 
     @_lru_cache
+    @record_shapeenv_event()
     def _maybe_evaluate_static(
         self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False,
         expect_rational=True, size_oblivious: bool = False, axioms: Optional[Tuple[sympy.Expr]] = None,
