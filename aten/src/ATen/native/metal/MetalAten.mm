@@ -74,7 +74,7 @@ static Tensor empty(
     optional<Layout> layout,
     optional<Device> device,
     optional<bool> pin_memory,
-    c10::optional<MemoryFormat> memory_format) {
+    std::optional<MemoryFormat> memory_format) {
   auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
   TORCH_CHECK(
       !pin_memory.has_value(),

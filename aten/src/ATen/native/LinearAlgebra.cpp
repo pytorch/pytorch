@@ -708,7 +708,7 @@ Tensor& linalg_matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
 }
 
 Tensor linalg_matrix_power(const Tensor& self, int64_t n) {
-  return linalg_matrix_power_impl(self, n, c10::nullopt);
+  return linalg_matrix_power_impl(self, n, std::nullopt);
 }
 
 Tensor& matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
@@ -1092,7 +1092,7 @@ Tensor multi_dot_impl(TensorList _tensors, std::optional<Tensor> _out) {
 } // namespace
 
 Tensor linalg_multi_dot(TensorList tensors) {
-  return multi_dot_impl(tensors, c10::nullopt);
+  return multi_dot_impl(tensors, std::nullopt);
 }
 
 Tensor& linalg_multi_dot_out(TensorList tensors, Tensor& result) {
