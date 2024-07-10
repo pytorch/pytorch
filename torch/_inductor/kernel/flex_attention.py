@@ -32,7 +32,7 @@ class SubgraphType(Enum):
     JOINT_BWD = auto()  # The bwd pass of the joint
 
 
-def flex_attention_grid(batch_size, num_heads, num_queries, d_model, meta):
+def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta):
     """How is this kernel parallelized?
     We create a grid of (batch_size * num_heads, ceil_div(n_queries, query_block_size), 1)
     Each block is responsible for iterating over blocks of keys and values calculating
@@ -40,7 +40,7 @@ def flex_attention_grid(batch_size, num_heads, num_queries, d_model, meta):
     """
     import triton
 
-    return (triton.cdiv(num_queries, meta["BLOCK_M"]), batch_size * num_heads, 1)
+    return (triton.cdiv(num_queries, meta["BLOCK_M"]), batch_size * q_heads, 1)
 
 
 def create_placeholder(
@@ -214,24 +214,23 @@ flex_attention_template = TritonTemplate(
     stride_vk = {{stride("V", 3)}}
 
     Z = {{size("Q", 0)}}
-    H = {{size("Q", 1)}}
+    HQ = {{size("Q", 1)}}
     Q_LEN = {{size("Q", 2)}}
     KV_LEN = {{size("K", 2)}}
-    Q_LEN_PER_HQ = Q_LEN // GQA_SHARED_HEADS
-    NUM_Q_BLOCKS_PER_HQ = Q_LEN_PER_HQ // BLOCK_M
+    NUM_Q_BLOCKS = Q_LEN // BLOCK_M
 
     qk_scale = 1.0
     MATMUL_PRECISION = Q.dtype.element_ty
 
     start_m = tl.program_id(0)
-    off_z = tl.program_id(1) // H
-    off_h = tl.program_id(1) % H
-    off_hq = start_m // NUM_Q_BLOCKS_PER_HQ + off_h * GQA_SHARED_HEADS
-    start_mq = start_m % NUM_Q_BLOCKS_PER_HQ
+    off_z = tl.program_id(1) // HQ
+    off_hq = tl.program_id(1) % HQ
+    off_hkv = off_hq // GQA_SHARED_HEADS
+    off_t = off_hq % GQA_SHARED_HEADS
 
-    q_offset = off_z * stride_qz + off_h * stride_qh
-    k_offset = off_z * stride_kz + off_h * stride_kh
-    v_offset = off_z * stride_vz + off_h * stride_vh
+    q_offset = off_z * stride_qz + off_hq * stride_qh
+    k_offset = off_z * stride_kz + off_hkv * stride_kh
+    v_offset = off_z * stride_vz + off_hkv * stride_vh
 
     SPARSE_Z = {{size("SPARSE_KV_NUM_BLKS", 0)}}
     SPARSE_HQ = {{size("SPARSE_KV_NUM_BLKS", 1)}}
@@ -242,13 +241,13 @@ flex_attention_template = TritonTemplate(
     SPARSE_Q_MULTIPLE: tl.constexpr = (SPARSE_Q_BLOCK_SIZE // BLOCK_M)
     SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
 
-    SPARSE_Q_BLOCK_CNT: tl.constexpr = Q_LEN_PER_HQ // SPARSE_Q_BLOCK_SIZE
+    SPARSE_Q_BLOCK_CNT: tl.constexpr = Q_LEN // SPARSE_Q_BLOCK_SIZE
     SPARSE_KV_BLOCK_CNT: tl.constexpr = KV_LEN // SPARSE_KV_BLOCK_SIZE
 
     # SPARSE_KV_IDX and SPARSE_KV_NUM_BLKS are always contiguous.
     sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_hq
-    sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + start_mq // SPARSE_Q_MULTIPLE
-    sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (start_mq // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
+    sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + start_m // SPARSE_Q_MULTIPLE
+    sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (start_m // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
     kv_indices = SPARSE_KV_IDX + sparse_kv_idx_offset
     kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
     sparse_kv_num_blocks = tl.load(SPARSE_KV_NUM_BLKS + sparse_kv_num_blks_offset)
@@ -280,7 +279,6 @@ flex_attention_template = TritonTemplate(
     # initialize offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = kv_start + tl.arange(0, BLOCK_N)
-    offs_mq = start_mq * BLOCK_M + tl.arange(0, BLOCK_M)
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
@@ -301,15 +299,14 @@ flex_attention_template = TritonTemplate(
         # -- compute qk ---
         qk = tl.dot(q, k)
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-        m = offs_mq[:, None]
+        m = offs_m[:, None]
         n = offs_n[None, :]
-        hq = off_hq
         {{ modification(
             subgraph_number=0,
             output_name="post_mod_scores",
             score="qk",
             b="off_z",
-            h="hq",
+            h="off_hq",
             m="m",
             n="n",
             out="qk"
@@ -358,14 +355,14 @@ flex_attention_template = TritonTemplate(
 
     # Store output and logsumexp
     acc = acc / l_i[:, None]
-    idx_z = tl.program_id(1) // H
-    idx_h = tl.program_id(1) % H
+    idx_z = tl.program_id(1) // HQ
+    idx_hq = tl.program_id(1) % HQ
     idx_m = offs_m[:, None]
     idx_d = tl.arange(0, BLOCK_DMODEL)[None, :]
 
     mask = idx_m < Q_LEN
     # TODO generalize and add proper mask support
-    {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "acc", "mask")}}
+    {{store_output(("idx_z", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
 
     # TODO dont want to write this if we dont require grad
     if OUTPUT_LOGSUMEXP:
@@ -525,8 +522,14 @@ def flex_attention(*args, **kwargs):
     subgraph_buffer = build_subgraph_buffer(
         args, placeholder_inps, subgraph, graph_type=SubgraphType.FWD
     )
+    layout = FixedLayout(
+        query.get_device(),
+        query.get_dtype(),
+        query.get_size(),
+        query.get_stride(),
+    )
     # see NOTE:[TritonTemplates with multiple outputs]
-    logsumexp_shape = query.get_size()[:-1]  # [B, Hkv, Hq//Hkv, Mq]
+    logsumexp_shape = query.get_size()[:-1]  # [B, Hq, Mq]
     logsumexp = empty_strided(
         logsumexp_shape,
         None,
@@ -534,18 +537,8 @@ def flex_attention(*args, **kwargs):
         device=query.get_device(),
     )
 
-    # Reshape GQA dimension: [B, Hq, Mq, D] -> [B, Hkv, Mq * G, D], G=Hq//Hkv
+    # Determine GQA broadcast factor. 
     gqa_shared_heads = query.get_size()[1] // key.get_size()[1]
-    og_q_shape = query.get_size()
-    flattened_q_shape = [
-        query.get_size()[0],
-        key.get_size()[1],
-        gqa_shared_heads * query.get_size()[-2],
-        query.get_size()[-1],
-    ]
-
-    query = lowerings[aten.reshape](query, flattened_q_shape)
-    logsumexp = lowerings[aten.reshape](logsumexp, flattened_q_shape[:-1])
 
     layout = FixedLayout(
         query.get_device(),
@@ -619,20 +612,14 @@ def flex_attention(*args, **kwargs):
         4: create_num_blocks_fake_generator(sparse_kv_indices),  # sparse_kv_num_blocks
         5: create_indices_fake,  # sparse_kv_indices
     }
-    out = autotune_select_algorithm(
-        "flex_attention",
-        choices,
-        inputs_for_autotuning,
-        layout,
-        input_gen_fns=input_gen_fns,
-    )
-
-    # Reshape GQA dimension: [B, Hkv, Mq * G, D] -> [B, Hq, Mq, D], G=Hq//Hkv
-    logsumexp = lowerings[aten.view](logsumexp, og_q_shape[:-1])
-    out = lowerings[aten.view](out, og_q_shape)
-
     return (
-        out,
+        autotune_select_algorithm(
+            "flex_attention",
+            choices,
+            inputs_for_autotuning,
+            layout,
+            input_gen_fns=input_gen_fns,
+        ),
         logsumexp,
     )
 
@@ -641,20 +628,20 @@ def flex_attention(*args, **kwargs):
 
 
 def flex_attention_backward_grid(
-    batch_size, num_heads, num_queries, d_model, num_key_value, meta
+    batch_size, q_heads, num_queries, d_model, kv_heads, num_key_value, meta
 ):
     """How is this kernel parallelized?
-    Currently this is only parallelizing over batch * num_heads, but we can, and want to
+    Currently this is only parallelizing over batch* kv_heads, but we can, and want to
     parallelize over ceil_div(num_key_value, key_value_block_size). To do this will either require
     atomic updates to some grad values or to have a two pass kernel design.
     """
     import triton
 
     return (
-        triton.cdiv(num_queries, meta["BLOCK_M2"])
+        triton.cdiv(num_queries, meta["BLOCK_M2"]) * (q_heads // kv_heads)
         + triton.cdiv(num_key_value, meta["BLOCK_N1"]),
         1,
-        batch_size * num_heads,
+        batch_size*q_heads,
     )
 
 
@@ -690,7 +677,7 @@ flex_attention_backward_template = TritonTemplate(
 
     # Define Q Strides
     stride_qz = {{stride("Q", 0)}}
-    stride_qh = {{stride("Q", 1)}}
+    stride_qhq = {{stride("Q", 1)}}
     stride_qm = {{stride("Q", 2)}}
     stride_qd = {{stride("Q", 3)}}
     # Define K Strides
@@ -705,91 +692,96 @@ flex_attention_backward_template = TritonTemplate(
     stride_vd = {{stride("V", 3)}}
 
     stride_doz = {{stride("DO", 0)}}
-    stride_doh = {{stride("DO", 1)}}
+    stride_dohq = {{stride("DO", 1)}}
     stride_dom = {{stride("DO", 2)}}
     stride_dod = {{stride("DO", 3)}}
 
-    stride_dqz, stride_dqh, stride_dqm, stride_dqd = {{stride("DQ")}}
+    stride_dqz, stride_dqhq, stride_dqm, stride_dqd = {{stride("DQ")}}
     stride_dvz, stride_dvh, stride_dvm, stride_dvd = {{stride("DV")}}
 
     Z = {{size("Q", 0)}}
-    H = {{size("Q", 1)}}
+    HQ = {{size("Q", 1)}}
+    HKV = {{size("K", 1)}}
     Q_LEN = {{size("Q", 2)}}
     KV_LEN = {{size("K", 2)}}
-    Q_LEN_PER_HQ = Q_LEN // GQA_SHARED_HEADS
 
     MATMUL_PRECISION = Q.dtype.element_ty
 
     pid = tl.program_id(0)
     NUM_KV_BLOCKS = KV_LEN // BLOCK_N1
+    NUM_Q_BLOCKS = Q_LEN // BLOCK_M2
 
     off_hz = tl.program_id(2)
-    off_z = off_hz // H # batch idx
-    off_h = off_hz % H # head idx
+    off_z = off_hz // HKV # batch idx
+    off_hkv = off_hz % HKV # kv head idx
 
     SM_Z = {{size("SPARSE_KV_NUM_BLKS", 0)}}
     SM_HQ = {{size("SPARSE_KV_NUM_BLKS", 1)}}
 
     sparse_idx_z = off_z % SM_Z
 
-    off_chz = (off_hz * Q_LEN).to(tl.int64)
-    q_adj = (stride_qh * (off_hz % H) + stride_qz * (off_hz // H)).to(tl.int64)
-    k_adj = (stride_kh * (off_hz % H) + stride_kz * (off_hz // H)).to(tl.int64)
-    v_adj = (stride_vh * (off_hz % H) + stride_vz * (off_hz // H)).to(tl.int64)
-    do_adj = (stride_doh * (off_hz % H) + stride_doz * (off_hz // H)).to(tl.int64)
+    k_adj = (stride_kh * off_hkv + stride_kz * off_z).to(tl.int64)
+    v_adj = (stride_vh * off_hkv + stride_vz * off_z).to(tl.int64)
+    dv_adj = (stride_dvh * off_hkv + stride_dvz * off_z).to(tl.int64)
 
-    dq_adj = (stride_dqh * (off_hz % H) + stride_dqz * (off_hz // H)).to(tl.int64)
-    dv_adj = (stride_dvh * (off_hz % H) + stride_dvz * (off_hz // H)).to(tl.int64)
-
-    # offset pointers for batch/head
-    Q += q_adj
+    # offset K, V, DV pointers for batch/kv-head
     K += k_adj
     V += v_adj
-    DO += do_adj
-    # TODO: This does not work if DQ is not the same layout as Q (for example,
-    # if Q is broadcasted)
-    DQ += dq_adj
     DV += dv_adj
-    LSE += off_chz
-    DELTA += off_chz
 
     offs_k = tl.arange(0, BLOCK_DMODEL)
 
     if pid >= NUM_KV_BLOCKS:
         # THIS BLOCK DOES DQ
         off_pid = pid - NUM_KV_BLOCKS
+        off_hq2 = off_pid // NUM_Q_BLOCKS
+        start_m2 = off_pid % NUM_Q_BLOCKS
+
+        if (off_hz == 0):
+            tl.device_print("off_hq2", off_hq2)
+            tl.device_print("start_m2", start_m2)
+
+        # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads. 
+        q_adj2 = (stride_qhq * off_hq2 + stride_qz * off_z).to(tl.int64)
+        do_adj2 = (stride_dohq * off_hq2 + stride_doz * off_z).to(tl.int64)
+        dq_adj2 = (stride_dqhq * off_hq2 + stride_dqz * off_z).to(tl.int64)
+        off_chz2 = ((off_z * HQ + off_hq2) * Q_LEN).to(tl.int64)
+
+        Q2 = Q + q_adj2
+        DO2 = DO + do_adj2
+        # TODO: This does not work if DQ is not the same layout as Q (for example,
+        # if Q is broadcasted)
+        DQ2 = DQ + dq_adj2
+        LSE2 = LSE + off_chz2
+        DELTA2 = DELTA + off_chz2
+
 
         SPARSE_Q_MULTIPLE = (SPARSE_Q_BLOCK_SIZE // BLOCK_M2)
         SPARSE_KV_MULTIPLE = (SPARSE_KV_BLOCK_SIZE // BLOCK_N2)
 
-        SPARSE_Q_BLOCK_CNT = Q_LEN_PER_HQ // SPARSE_Q_BLOCK_SIZE
+        SPARSE_Q_BLOCK_CNT = Q_LEN // SPARSE_Q_BLOCK_SIZE
         SPARSE_KV_BLOCK_CNT = KV_LEN // SPARSE_KV_BLOCK_SIZE
 
-        NUM_Q_BLOCKS_PER_HQ2 = Q_LEN_PER_HQ // BLOCK_M2
-
-        off_hq2 = off_pid // NUM_Q_BLOCKS_PER_HQ2  + off_h * GQA_SHARED_HEADS
-        start_mq2 = off_pid % NUM_Q_BLOCKS_PER_HQ2
         sparse_idx_hq2 = off_hq2 % SM_HQ
 
         # SPARSE_KV_IDX and SPARSE_KV_NUM_BLKS are always contiguous.
         sparse_hz_offset = sparse_idx_z * SM_HQ + sparse_idx_hq2
-        sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + start_mq2 // SPARSE_Q_MULTIPLE
-        sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (start_mq2 // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
+        sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + start_m2 // SPARSE_Q_MULTIPLE
+        sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (start_m2 // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
         kv_indices = SPARSE_KV_IDX + sparse_kv_idx_offset
         kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
         sparse_kv_num_blocks = tl.load(SPARSE_KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
-        start_m2 = off_pid * BLOCK_M2
 
-        offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
-        offs_mq2 = start_mq2 * BLOCK_M2 + tl.arange(0, BLOCK_M2)
 
-        q = tl.load(Q + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
+        offs_m2 = start_m2 * BLOCK_M2 + tl.arange(0, BLOCK_M2)
+
+        q = tl.load(Q2 + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
         dq = tl.zeros([BLOCK_M2, BLOCK_DMODEL], dtype=tl.float32)
-        do = tl.load(DO + offs_m2[:, None] * stride_dom + offs_k[None, :] * stride_dod)
+        do = tl.load(DO2 + offs_m2[:, None] * stride_dom + offs_k[None, :] * stride_dod)
 
-        Di = tl.load(DELTA + offs_m2)
-        lse = tl.load(LSE + offs_m2)
+        Di = tl.load(DELTA2 + offs_m2)
+        lse = tl.load(LSE2 + offs_m2)
         lse = lse[:, None]
 
         start_n2 = kv_start
@@ -808,15 +800,14 @@ flex_attention_backward_template = TritonTemplate(
             qk = tl.dot(q, kT)
             # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
             pre_mod_scores = qk
-            m = offs_mq2[:, None]
+            m = offs_m2[:, None]
             n = offs_n2[None, :]
-            hq = off_hq2
             {{ modification(
                 subgraph_number=0,
                 output_name="post_mod_scores",
                 score="qk",
                 b="off_z",
-                h="hq",
+                h="off_hq2",
                 m="m",
                 n="n",
                 out="qk"
@@ -834,7 +825,7 @@ flex_attention_backward_template = TritonTemplate(
                 output_name = "grad_scores",
                 score="pre_mod_scores",
                 b="off_z",
-                h="hq",
+                h="off_hq2",
                 m="m",
                 n="n",
                 grad_score_mod="ds"
@@ -859,7 +850,7 @@ flex_attention_backward_template = TritonTemplate(
             curr_n += offset
 
         # Write back dQ.
-        dq_ptrs = DQ + offs_m2[:, None] * stride_dqm + offs_k[None, :] * stride_dqd
+        dq_ptrs = DQ2 + offs_m2[:, None] * stride_dqm + offs_k[None, :] * stride_dqd
         tl.store(dq_ptrs, dq)
     else:
         # THIS BLOCK DOES DK & DV
@@ -867,7 +858,7 @@ flex_attention_backward_template = TritonTemplate(
         SPARSE_Q_MULTIPLE = (SPARSE_Q_BLOCK_SIZE // BLOCK_M1)
         SPARSE_KV_MULTIPLE = (SPARSE_KV_BLOCK_SIZE // BLOCK_N1)
 
-        SPARSE_Q_BLOCK_CNT = Q_LEN_PER_HQ // SPARSE_Q_BLOCK_SIZE
+        SPARSE_Q_BLOCK_CNT = Q_LEN // SPARSE_Q_BLOCK_SIZE
         SPARSE_KV_BLOCK_CNT = KV_LEN // SPARSE_KV_BLOCK_SIZE
 
         start_n1 = pid * BLOCK_N1
@@ -884,7 +875,21 @@ flex_attention_backward_template = TritonTemplate(
         tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
 
         for off_g in range(0, GQA_SHARED_HEADS):
-            off_hq1 = off_h * GQA_SHARED_HEADS + off_g
+            off_hq1 = off_hkv * GQA_SHARED_HEADS + off_g
+
+            # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads. 
+            q_adj1 = (stride_qhq * off_hq1 + stride_qz * off_z).to(tl.int64)
+            do_adj1 = (stride_dohq * off_hq1 + stride_doz * off_z).to(tl.int64)
+            dq_adj1 = (stride_dqhq * off_hq1 + stride_dqz * off_z).to(tl.int64)
+            off_chz1 = ((off_z * HQ + off_hq1) * Q_LEN).to(tl.int64)
+
+            Q1 = Q + q_adj1
+            DO1 = DO + do_adj1
+            # TODO: This does not work if DQ is not the same layout as Q (for example,
+            # if Q is broadcasted)
+            LSE1 = LSE + off_chz1
+            DELTA1 = DELTA + off_chz1
+
             sparse_idx_hq1 = off_hq1 % SM_HQ
 
             # SPARSE_Q_IDX and SPARSE_Q_NUM_BLKS are always contiguous.
@@ -895,11 +900,11 @@ flex_attention_backward_template = TritonTemplate(
             q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
             sparse_q_num_blocks = tl.load(SPARSE_Q_NUM_BLKS + sparse_q_num_blks_offset)
 
-            start_m1 = q_start + off_g * Q_LEN_PER_HQ
+            start_m1 = q_start
             offs_m1 = start_m1 + tl.arange(0, BLOCK_M1)
 
-            qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
-            do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_k[None, :] * stride_dod
+            qT_ptrs = Q1 + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
+            do_ptrs = DO1 + offs_m1[:, None] * stride_dom + offs_k[None, :] * stride_dod
 
             curr_m = start_m1
             hi = sparse_q_num_blocks * SPARSE_Q_MULTIPLE
@@ -907,20 +912,18 @@ flex_attention_backward_template = TritonTemplate(
                 qT = tl.load(qT_ptrs)
                 # Load LSE before computing qk to reduce pipeline stall.
                 offs_m1 = curr_m + tl.arange(0, BLOCK_M1)
-                offs_mq1 = offs_m1 - off_g * Q_LEN_PER_HQ
-                lse = tl.load(LSE + offs_m1)
+                lse = tl.load(LSE1 + offs_m1)
                 qkT = tl.dot(k, qT)
                 # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-                m = offs_mq1[None, :]
+                m = offs_m1[None, :]
                 n = offs_n1[:, None]
-                hq = off_hq1
                 pre_mod_scores = qkT
                 {{ modification(
                     subgraph_number=0,
                     output_name="post_mod_scores",
                     score="qkT",
                     b="off_z",
-                    h="hq",
+                    h="off_hq",
                     m="m",
                     n="n",
                     out="qkT"
@@ -933,7 +936,7 @@ flex_attention_backward_template = TritonTemplate(
                 # Compute dV.
                 ppT = pT
                 dv += tl.dot(ppT.to(MATMUL_PRECISION), do)
-                Di = tl.load(DELTA + offs_m1)
+                Di = tl.load(DELTA1 + offs_m1)
                 # Compute dP and dS.
                 dpT = tl.dot(v, tl.trans(do))
                 dsT = pT * (dpT - Di[None, :])
@@ -943,7 +946,7 @@ flex_attention_backward_template = TritonTemplate(
                     output_name = "grad_scores",
                     score="pre_mod_scores",
                     b="off_z",
-                    h="hq",
+                    h="off_hq",
                     m="m",
                     n="n",
                     grad_score_mod="dsT"
@@ -972,7 +975,7 @@ flex_attention_backward_template = TritonTemplate(
         index_k = offs_k[None, :]
 
         mask = index_n <= KV_LEN
-        {{store_output(("off_z", "off_h", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
+        {{store_output(("off_z", "off_hkv", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
  """,
 )
 
@@ -1045,20 +1048,8 @@ def flex_attention_backward(*args, **kwargs):
         key.get_stride(),
     )
 
-    # Reshape GQA dimension: [B, Hq, Mq, D] -> [B, Hkv, Mq * G, D], G=Hq//Hkv
+    # Determine GQA factor
     gqa_shared_heads = query.get_size()[1] // key.get_size()[1]
-    og_q_shape = query.get_size()
-    flattened_q_shape = [
-        query.get_size()[0],
-        key.get_size()[1],
-        gqa_shared_heads * query.get_size()[-2],
-        query.get_size()[-1],
-    ]
-
-    query = lowerings[aten.reshape](query, flattened_q_shape)
-    logsumexp = lowerings[aten.reshape](logsumexp, flattened_q_shape[:-1])
-    out = lowerings[aten.reshape](out, flattened_q_shape)
-    grad_out = lowerings[aten.reshape](grad_out, flattened_q_shape)
 
     # Create delta which will is needed for the bwd's kernel
     mul_delta = lowerings[aten.mul](out, grad_out)
@@ -1112,7 +1103,7 @@ def flex_attention_backward(*args, **kwargs):
             layout=layout_k,  # We use store_output only for grad_key
             subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer],
             mutated_inputs=[grad_query, grad_value],
-            call_sizes=query.get_size() + [key.get_size()[2]],
+            call_sizes=query.get_size() + key.get_size()[1:3],
             num_stages=num_stages,
             num_warps=num_warps,
             BLOCK_M1=BLOCK1,
@@ -1154,10 +1145,6 @@ def flex_attention_backward(*args, **kwargs):
         layout_k,
         input_gen_fns=input_gen_fns,
     )
-
-    # Reshape GQA dimension: [B, Hkv, Mq * G, D] -> [B, Hq, Mq, D], G=Hq//Hkv
-    grad_query = lowerings[aten.view](grad_query, og_q_shape)
-
     return (
         grad_query,
         grad_key,
