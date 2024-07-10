@@ -645,12 +645,17 @@ class Node(_NodeBase):
         if self.op in {"placeholder", "output"}:
             return True
 
-        # Check if an impure function.
+        # Check if an impure function based on schema.
+        # A call_function is impure if it has at least one mutable argument that has more
+        # than 1 users (all arguments have `self` as a user).
         if self.op == "call_function":
             schema = getattr(self.target, "_schema", None)
             schema_mutable = False
-            if schema is not None:
-                schema_mutable = schema.is_mutable
+            if schema is not None and schema.is_mutable:
+                for (idx, arg) in enumerate(schema.arguments):
+                    if arg.alias_info is not None and arg.alias_info.is_write:  # arg is mutable
+                        if len(self.args[idx].users) > 1:  # has other users except self
+                            schema_mutable = True
             return schema_mutable or self.target in _side_effectful_functions
 
         # Check if an impure module.
