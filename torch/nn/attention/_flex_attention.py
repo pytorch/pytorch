@@ -317,6 +317,9 @@ def _convert_mask_to_block_mask(
     else:
         full_blocks = mask_block_sum > 0
         partial_blocks = None
+    full_blocks = full_blocks.to(dtype=torch.int8)
+    if partial_blocks is not None:
+        partial_blocks = partial_blocks.to(dtype=torch.int8)
     return full_blocks, partial_blocks
 
 
@@ -361,6 +364,7 @@ def _create_sparse_block_from_block_mask(
     if partial_blocks is not None:
         partial_bm = create_sparse_block_from_block_mask_inner(partial_blocks)
     else:
+        # Triton kernel would skip computation for these blocks.
         partial_bm = (
             torch.zeros([1, 1, 1], dtype=torch.int32, device=full_blocks.device),
             torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=full_blocks.device),
@@ -470,8 +474,10 @@ def _create_mask_from_mask_fn(
 
 # Done as a workaround around torch.compile not compiling what we want in the
 # presence of the torchfunctionmdoe
-def _create_block_mask_inner(fn, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE):
-    if len(inspect.signature(fn).parameters) == len(get_args(_score_mod_signature)[0]):
+def _create_block_mask_inner(
+    fn, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE, is_score_mod
+):
+    if is_score_mod:
         # fn is a score_mod function
         mask_fn = None
         mask_tensor = _create_mask_from_score_mod(
@@ -481,17 +487,14 @@ def _create_block_mask_inner(fn, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
         # fn is a mask function, we can use the partial mask optimization.
         mask_fn = fn
         mask_tensor = _create_mask_from_mask_fn(fn, B, H, M, N, device, _compiled=True)
-    # mask = _create_mask_from_score_mod(score_mod, B, H, M, N, device, _compiled=True)
     full_block_mask, partial_block_mask = _convert_mask_to_block_mask(
         mask_tensor,
         KV_BLOCK_SIZE=KV_BLOCK_SIZE,
         Q_BLOCK_SIZE=Q_BLOCK_SIZE,
         mask_fn=mask_fn,
     )
-    if partial_block_mask is not None:
-        partial_block_mask = partial_block_mask.to(dtype=torch.int8)
     return _create_sparse_block_from_block_mask(
-        (full_block_mask.to(dtype=torch.int8), partial_block_mask), mask_fn
+        (full_block_mask, partial_block_mask), mask_fn
     )
 
 
@@ -522,12 +525,17 @@ def create_block_mask(
         block_mask (tuple): A tuple of (kv_num_blocks, kv_indices, q_num_blocks, q_indices,
                             KV_BLOCK_SIZE, Q_BLOCK_SIZE) which represents the block mask.
     """
+    is_score_mod = len(inspect.signature(fn).parameters) == len(
+        get_args(_score_mod_signature)[0]
+    )
     inner_func = _create_block_mask_inner
     # This is kind of a temporary hack to workaround some issues
     if _compiled:
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
     with TransformGetItemToIndex():
-        block_mask = inner_func(fn, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE)
+        block_mask = inner_func(
+            fn, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE, is_score_mod
+        )
     return block_mask
 
 
