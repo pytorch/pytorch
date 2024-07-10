@@ -4805,7 +4805,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         idx = torch.tensor([1, 3])
         v = torch.tensor(1, dtype=t.dtype, device="cpu")
 
-        # expected = torch.index_put_(t.clone(), (idx,), v)
         expected = torch.tensor([[0, 1, 0, 1, 0]], dtype=t.dtype)
         self.assertEqual(expected, vmap(f, in_dims=(0, None, None))(t, (idx,), v))
 
