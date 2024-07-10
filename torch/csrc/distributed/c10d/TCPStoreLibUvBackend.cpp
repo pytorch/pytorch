@@ -100,7 +100,6 @@ class UvTcpSocket : public UvHandle {
   }
 
   static void alloc_buffer(
-
       uv_handle_t* handle,
       size_t suggested_size,
       uv_buf_t* buf) {
@@ -623,7 +622,7 @@ class LibUVStoreDaemon : public BackgroundThread {
 
  private:
   uv_loop_t loop{};
-  c10::intrusive_ptr<UvTcpServer> tcpServer;
+  c10::intrusive_ptr<UvTcpServer> tcpServer_;
 
   uv_async_t exit_handle{};
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
@@ -1015,7 +1014,7 @@ void LibUVStoreDaemon::onConnect(int status) {
   auto client = UvClient::make(&loop, this);
   registerClient(client);
   try {
-    tcpServer->accept(client);
+    tcpServer_->accept(client);
     client->startRead();
   } catch (std::exception& e) {
     C10D_WARNING("Failed to accept client due to {}", e.what());
@@ -1031,21 +1030,22 @@ void LibUVStoreDaemon::onExitRequest() {
 
 void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
   if (opts.masterListenFd.has_value()) {
-    tcpServer = UvTcpServer::makeWithSocket(&loop, *opts.masterListenFd);
+    tcpServer_ = UvTcpServer::makeWithSocket(&loop, *opts.masterListenFd);
   } else {
     try {
-      tcpServer = UvTcpServer::makeWithPort(&loop, opts.port, /*useIpv6=*/true);
+      tcpServer_ =
+          UvTcpServer::makeWithPort(&loop, opts.port, /*useIpv6=*/true);
     } catch (std::exception& ex) {
       C10D_INFO(
           "Failed to bind to ipv6 address, trying ipv4. Error: {}", ex.what());
-      tcpServer =
+      tcpServer_ =
           UvTcpServer::makeWithPort(&loop, opts.port, /*useIpv6=*/false);
     }
   }
-  tcpServer->setOnConnectCallback(
+  tcpServer_->setOnConnectCallback(
       [this](auto status) { this->onConnect(status); });
 
-  port_ = tcpServer->port();
+  port_ = tcpServer_->port();
   TORCH_CHECK(
       port_ == opts.port || opts.port == 0, // zero means use any port
       "listen fd ",
@@ -1107,7 +1107,7 @@ void LibUVStoreDaemon::run() {
   for (const auto& client : clients_) {
     client->close();
   }
-  tcpServer->close();
+  tcpServer_->close();
 
   if (debug_enabled) {
     C10D_DEBUG("Walking live handles after closing clients");
