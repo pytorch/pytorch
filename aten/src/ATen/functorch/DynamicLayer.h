@@ -8,7 +8,7 @@
 #include <ATen/functorch/Macros.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/core/function_schema.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <ATen/functorch/Interpreter.h>
 #include <ATen/functorch/VmapInterpreter.h>
