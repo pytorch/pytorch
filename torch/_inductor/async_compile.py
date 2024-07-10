@@ -63,8 +63,8 @@ def pre_fork_setup():
         from triton.compiler.compiler import triton_key
 
         triton_key()
-    except ModuleNotFoundError:
-        # Might not be installed.
+    except ImportError:
+        # Triton might not be installed or might be an old version.
         pass
 
 
