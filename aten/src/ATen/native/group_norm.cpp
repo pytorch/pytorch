@@ -61,8 +61,8 @@ void check_group_norm_inputs(
 
 std::tuple<Tensor, Tensor, Tensor> native_group_norm(
     const Tensor& X,
-    const c10::optional<Tensor>& gamma_opt /* optional */,
-    const c10::optional<Tensor>& beta_opt /* optional */,
+    const std::optional<Tensor>& gamma_opt /* optional */,
+    const std::optional<Tensor>& beta_opt /* optional */,
     int64_t N,
     int64_t C,
     int64_t HxW,
@@ -107,7 +107,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
     const Tensor& X,
     const Tensor& mean,
     const Tensor& rstd,
-    const c10::optional<Tensor>& gamma_opt,
+    const std::optional<Tensor>& gamma_opt,
     int64_t N,
     int64_t C,
     int64_t HxW,
@@ -177,8 +177,8 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
 Tensor group_norm(
     const Tensor& input,
     int64_t num_groups,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /* optional */,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enabled, deprecated */) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -213,8 +213,8 @@ DEFINE_DISPATCH(GroupNormBackwardKernel);
 // Ported from pytorch/xla repo
 std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
     const Tensor& input,
-    const c10::optional<Tensor>& weight_opt,
-    const c10::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& bias_opt,
     int64_t N,
     int64_t C,
     int64_t HxW,

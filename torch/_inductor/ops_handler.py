@@ -1,13 +1,23 @@
+# mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Generic, Literal, Optional, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    Literal,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
+from typing_extensions import Protocol
 from unittest.mock import patch
 
 import sympy
-from typing_extensions import Protocol
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx.graph import inplace_methods, magic_methods
 from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sympy_str
 
 T = TypeVar("T")
@@ -99,7 +109,8 @@ class OpsHandler(Protocol[T]):
         evaluates to true.  For example, you would use this if you needed to
         perform an indirect load that may not be valid on some elements;
         without masking, invalid accesses can cause IMAs.  When mask is true,
-        the result is the result of body; otherwise it is other.
+        the result is the result of body; otherwise it is other. Here, `other`
+        needs to be a constant.
 
         Contrast this with ops.where, which can multiplex between two values
         that have been unconditionally computed.
@@ -129,10 +140,48 @@ class OpsHandler(Protocol[T]):
         """
         ...
 
+    def trunc_to_int(self, x: T, dtype: torch.dtype) -> T:
+        """
+        Convert x to dtype with truncation semantics (similar to how the int
+        constructor works in Python).  In Inductor codegen, this just decays
+        to trunc and then to_dtype, but this composite operation helps
+        roundtrips for Sympy evaluation.
+
+        dtype is taken as an explicit parameter because the desired output
+        dtype is typically the index dtype, which may vary between int32 and
+        int64 depending on if we've shown that all the indexing operations can
+        be done in int32.
+        """
+        ...
+
+    def ceil_to_int(self, x: T, dtype: torch.dtype) -> T:
+        """
+        Convert x to dtype with ceiling semantics.  See also trunc_to_int.
+        """
+        ...
+
+    def floor_to_int(self, x: T, dtype: torch.dtype) -> T:
+        """
+        Convert x to dtype with ceiling semantics.  See also trunc_to_int.
+        """
+        ...
+
+    def round_to_int(self, x: T, dtype: torch.dtype) -> T:
+        """
+        Convert x to dtype with round-to-even semantics.  See also trunc_to_int.
+        """
+        ...
+
     def to_dtype_bitcast(self, x: T, dtype: torch.dtype, src_dtype: torch.dtype) -> T:
         """
         Reinterpret cast x to dtype (reinterpreting the bits in memory as another dtype.)
         src_dtype must be the original type of x.
+        """
+        ...
+
+    def identity(self, x: T) -> T:
+        """
+        Returns x as is.  This is used to trigger CSE.
         """
         ...
 
@@ -214,12 +263,23 @@ class OpsHandler(Protocol[T]):
         dtypes: Tuple[torch.dtype, ...],
         combine_fn: Callable[[Tuple[T, ...], Tuple[T, ...]], Tuple[T, ...]],
         values: Tuple[T, ...],
-        inits: Tuple[int, ...],
     ) -> Tuple[T, ...]:
         """
         Perform an associative scan on 'value'.
         """
         # TODO: Improve the description with some pseudocode
+        ...
+
+    def sort(
+        self,
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[T, ...],
+        stable: bool,
+        descending: bool,
+    ) -> Tuple[T, ...]:
+        """
+        Sort values along the reduction dimension.
+        """
         ...
 
     def bucketize(
@@ -318,6 +378,9 @@ class OpsHandler(Protocol[T]):
     def log10(self, x0: T) -> T:
         ...
 
+    def log2(self, x0: T) -> T:
+        ...
+
     def nextafter(self, x0: T, x1: T) -> T:
         ...
 
@@ -381,24 +444,23 @@ class OpsHandler(Protocol[T]):
     def isnan(self, x0: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
+    # This rounds half to even to break ties
     def round(self, x0: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
     def floor(self, x0: T) -> T:
         ...
 
     def sign(self, x0: T) -> T:
         ...
 
-    def to_int(self, x0: T) -> T:
-        ...
-
+    # NB: this returns a float, like the torch operation
     def trunc(self, x0: T) -> T:
         ...
 
-    def truncdiv(self, x0: T, x1: T) -> T:
-        ...
-
+    # NB: this returns a float, like the torch operation
     def ceil(self, x0: T) -> T:
         ...
 
@@ -435,18 +497,7 @@ class OpsHandler(Protocol[T]):
     def mul(self, x0: T, x1: T) -> T:
         ...
 
-    def floordiv(self, x0: T, x1: T) -> T:
-        ...
-
-    def truediv(self, x0: T, x1: T) -> T:
-        ...
-
-    def div(self, x0: T, x1: T) -> T:
-        ...
-
-    def mod(self, x0: T, x1: T) -> T:
-        ...
-
+    # NB: this returns a float, like the torch operation
     def pow(self, x0: T, x1: T) -> T:
         ...
 
@@ -457,6 +508,196 @@ class OpsHandler(Protocol[T]):
         ...
 
     def xor(self, x0: T, x1: T) -> T:
+        ...
+
+    # These are metaprogrammed by MockHandler._init_cls
+    def lshift(self, x0: T, x1: T) -> T:
+        ...
+
+    def rshift(self, x0: T, x1: T) -> T:
+        ...
+
+    def getitem(self, x0: T, x1: T) -> T:
+        # TODO: this is probably just illegal lol
+        ...
+
+    def matmul(self, x0: T, x1: T) -> T:
+        # TODO: this is probably just illegal lol
+        ...
+
+    def invert(self, x0: T) -> T:
+        ...
+
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # These are "special" operators.  These only exist if the target
+    # language actually supports the operator.  Keep this in sync with
+    # pointwise_overrides_data.
+
+    def airy_ai(self, x: T) -> T:
+        ...
+
+    def bessel_j0(self, x: T) -> T:
+        ...
+
+    def bessel_j1(self, x: T) -> T:
+        ...
+
+    def bessel_y0(self, x: T) -> T:
+        ...
+
+    def bessel_y1(self, x: T) -> T:
+        ...
+
+    def digamma(self, x: T) -> T:
+        ...
+
+    def erfcx(self, x: T) -> T:
+        ...
+
+    def fma(self, x: T, y: T, z: T) -> T:
+        ...
+
+    def igamma(self, x: T, y: T) -> T:
+        ...
+
+    def igammac(self, x: T, y: T) -> T:
+        ...
+
+    def gammainc(self, x: T, y: T) -> T:
+        ...
+
+    def gammaincc(self, x: T, y: T) -> T:
+        ...
+
+    def i0(self, x: T) -> T:
+        ...
+
+    def i0e(self, x: T) -> T:
+        ...
+
+    def i1(self, x: T) -> T:
+        ...
+
+    def i1e(self, x: T) -> T:
+        ...
+
+    def log_ndtr(self, x: T) -> T:
+        ...
+
+    def modified_bessel_i0(self, x: T) -> T:
+        ...
+
+    def modified_bessel_i1(self, x: T) -> T:
+        ...
+
+    def modified_bessel_k0(self, x: T) -> T:
+        ...
+
+    def modified_bessel_k1(self, x: T) -> T:
+        ...
+
+    def ndtr(self, x: T) -> T:
+        ...
+
+    def ndtri(self, x: T) -> T:
+        ...
+
+    def polygamma(self, x: T, y: T) -> T:
+        ...
+
+    def scaled_modified_bessel_k0(self, x: T) -> T:
+        ...
+
+    def scaled_modified_bessel_k1(self, x: T) -> T:
+        ...
+
+    def spherical_bessel_j0(self, x: T) -> T:
+        ...
+
+    def zeta(self, x: T, y: T) -> T:
+        ...
+
+    def chebyshev_polynomial_t(self, x: T, y: T) -> T:
+        ...
+
+    def chebyshev_polynomial_u(self, x: T, y: T) -> T:
+        ...
+
+    def chebyshev_polynomial_v(self, x: T, y: T) -> T:
+        ...
+
+    def chebyshev_polynomial_w(self, x: T, y: T) -> T:
+        ...
+
+    def legendre_polynomial_p(self, x: T, y: T) -> T:
+        ...
+
+    def shifted_chebyshev_polynomial_t(self, x: T, y: T) -> T:
+        ...
+
+    def shifted_chebyshev_polynomial_u(self, x: T, y: T) -> T:
+        ...
+
+    def shifted_chebyshev_polynomial_v(self, x: T, y: T) -> T:
+        ...
+
+    def shifted_chebyshev_polynomial_w(self, x: T, y: T) -> T:
+        ...
+
+    def hermite_polynomial_h(self, x: T, y: T) -> T:
+        ...
+
+    def hermite_polynomial_he(self, x: T, y: T) -> T:
+        ...
+
+    def laguerre_polynomial_l(self, x: T, y: T) -> T:
+        ...
+
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # These operators are a bit special, because they are conventionally
+    # natively supported in both Python and C, but the semantics differ so
+    # care must be taken
+
+    def truncdiv(self, x0: T, x1: T) -> T:
+        """C-style trunc division between integers only.  Computes the true
+        division of two numbers and rounds the result to zero.
+        """
+        ...
+
+    def floordiv(self, x0: T, x1: T) -> T:
+        """Python-style floor division between integers only.  Computes the
+        true division of two numbers and floors the result.  If you want
+        floor division for floats, do regular truediv and floor the result.
+        """
+        ...
+
+    def truediv(self, x0: T, x1: T) -> T:
+        """True division between floats.  Integer inputs are NOT valid.  To
+        do Python-style (int, int) -> float division, use int_truediv"""
+        ...
+
+    def int_truediv(self, x0: T, x1: T) -> T:
+        """True division between integers.  This is NOT the same as promoting
+        to float and doing integer division, there is a bespoke algorithm for
+        doing the division in higher precision than the above.
+        """
+        ...
+
+    def div(self, x0: T, x1: T) -> T:
+        """TODO: to be removed.  This renders as / no matter what the backend is
+        which is incoherent."""
+        ...
+
+    def mod(self, x0: T, x1: T) -> T:
+        """C-style modulus, take sign from LHS (x0)."""
+        ...
+
+    def remainder(self, x0: T, x1: T) -> T:
+        """Python-style modulus, take sign from RHS (x1)."""
+        ...
+
+    def round_decimal(self, x0: T, x1: T) -> T:
+        """Python-style round with decimal argument"""
         ...
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -494,6 +735,42 @@ class OpsHandler(Protocol[T]):
         ...
 
 
+class NoopHandler:
+    def __getattr__(self, name):
+        if name == "name":
+            return "NoopHandler"
+
+        def inner(*args, **kwargs):
+            return None
+
+        return inner
+
+    @staticmethod
+    def masked(mask, body, other) -> None:
+        return None
+
+    @staticmethod
+    def frexp(x) -> Tuple[None, None]:
+        return (None, None)
+
+    @staticmethod
+    def scan(dtypes, combine_fn, values) -> Tuple[None, ...]:
+        return (None,) * len(values)
+
+    @staticmethod
+    def sort(dtypes, values, stable, descending) -> Tuple[None, ...]:
+        return (None,) * len(values)
+
+    @staticmethod
+    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
+        return sympy.Integer(0)
+
+
+# Use mypy to check protocol implemented correctly
+def _typecheck_NoopHandler(h: NoopHandler) -> OpsHandler[None]:
+    return h
+
+
 class MockHandler:
     def __getattr__(self, name):
         if name == "name":
@@ -515,9 +792,16 @@ class MockHandler:
         return (f"ops.frexp({x})[0]", f"ops.frexp({x})[1]")
 
     @staticmethod
-    def scan(dtypes, combine_fn, values, inits):
+    def scan(dtypes, combine_fn, values):
         return tuple(
-            f"ops.scan({dtypes}, {combine_fn}, {values}, {inits})[{i}]"
+            f"ops.scan({dtypes}, {combine_fn}, {values})[{i}]"
+            for i in range(len(values))
+        )
+
+    @staticmethod
+    def sort(dtypes, values, stable, descending):
+        return tuple(
+            f"ops.sort({dtypes}, {values}, stable={stable}, descending={descending})[{i}]"
             for i in range(len(values))
         )
 
@@ -534,9 +818,27 @@ class MockHandler:
 
             return inner
 
-        for name, format_string in itertools.chain(
-            magic_methods.items(), inplace_methods.items()
-        ):
+        for name, format_string in {
+            "add": "{} + {}",
+            "sub": "{} - {}",
+            "mul": "{} * {}",
+            "floordiv": "{} // {}",
+            "truediv": "{} / {}",
+            "mod": "{} % {}",  # careful, depending on target semantics varies
+            "pow": "{} ** {}",
+            "lshift": "{} << {}",
+            "rshift": "{} >> {}",
+            "and_": "{} & {}",
+            "or_": "{} | {}",
+            "xor": "{} ^ {}",
+            "eq": "{} == {}",
+            "ne": "{} != {}",
+            "lt": "{} < {}",
+            "gt": "{} > {}",
+            "le": "{} <= {}",
+            "ge": "{} >= {}",
+            "neg": "-{}",
+        }.items():
             setattr(cls, name, make_handler(format_string))
 
 
@@ -663,4 +965,57 @@ class OpCounterCSE:
 
 
 def _typecheck_OpCounterCSE(h: OpCounterCSE) -> OpsHandler[str]:
+    return h
+
+
+class ExtractConstantsHandler(NoopHandler):
+    def __init__(self, device):
+        self.device = device
+
+    def constant(self, value: Any, dtype: torch.dtype) -> "torch._inductor.ir.Constant":
+        from torch._inductor import ir
+
+        return ir.Constant(value=value, dtype=dtype, device=self.device)
+
+
+def _typecheck_ExtractConstantsHandler(h: ExtractConstantsHandler) -> OpsHandler[Any]:
+    return h
+
+
+class SimpleCSEHandler(WrapperHandler[T]):
+    """Wraps the underlying handler with a CSE pass
+
+    NOTE: Compared to codegen level CSE this is simplified as it
+    doesn't support stores which require load cache invalidation.
+    """
+
+    def __init__(self, inner: OpsHandler[T]):
+        super().__init__(inner)
+        self.cse_cache: Dict[str, Union[T, Tuple[T, ...]]] = {}
+        self.mock = MockHandler()
+
+    def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:
+        return super().indirect_indexing(*args, **kwargs)  # type: ignore[misc]
+
+    def store(self, *args, **kwargs) -> T:
+        raise NotImplementedError("store not implemented")
+
+    def store_reduction(self, *args, **kwargs) -> T:
+        raise NotImplementedError("store not implemented")
+
+    def __getattr__(self, name) -> Callable[..., Any]:
+        def inner(*args, **kwargs):
+            key = getattr(self.mock, name)(*args, **kwargs)
+            val = self.cse_cache.get(key)
+            if val is not None:
+                return val
+
+            val = getattr(self._inner, name)(*args, **kwargs)
+            self.cse_cache[key] = val
+            return val
+
+        return inner
+
+
+def _typecheck_SimpleCSEHandler(h: SimpleCSEHandler[Any]) -> OpsHandler[Any]:
     return h

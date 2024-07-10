@@ -380,7 +380,7 @@ std::shared_ptr<Module> Module::shared_from_this_checked() const {
   std::shared_ptr<const Module> ptr;
   try {
     ptr = shared_from_this();
-  } catch (const std::bad_weak_ptr& e) {
+  } catch (const std::bad_weak_ptr&) {
     AT_ERROR(
         "It looks like you attempted to retrieve your top-level module "
         "as a shared_ptr, but it is not stored in a shared_ptr. "

@@ -75,7 +75,7 @@ class TORCH_API Tensor {
 TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    c10::optional<std::vector<ExprHandle>> strides,
+    std::optional<std::vector<ExprHandle>> strides,
     const std::function<ExprHandle(const VarHandle&)>& body_func);
 TORCH_API Tensor Compute(
     const std::string& func_name,
@@ -84,7 +84,7 @@ TORCH_API Tensor Compute(
 TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    c10::optional<std::vector<ExprHandle>> strides,
+    std::optional<std::vector<ExprHandle>> strides,
     const std::function<ExprHandle(const VarHandle&, const VarHandle&)>&
         body_func);
 TORCH_API Tensor Compute(
@@ -95,7 +95,7 @@ TORCH_API Tensor Compute(
 TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    c10::optional<std::vector<ExprHandle>> strides,
+    std::optional<std::vector<ExprHandle>> strides,
     const std::function<
         ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>&
         body_func);
@@ -108,7 +108,7 @@ TORCH_API Tensor Compute(
 TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    c10::optional<std::vector<ExprHandle>> strides,
+    std::optional<std::vector<ExprHandle>> strides,
     const std::function<ExprHandle(
         const VarHandle&,
         const VarHandle&,
@@ -125,7 +125,7 @@ TORCH_API Tensor Compute(
 TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    c10::optional<std::vector<ExprHandle>> strides,
+    std::optional<std::vector<ExprHandle>> strides,
     const std::function<ExprHandle(const std::vector<VarHandle>&)>& body_func);
 TORCH_API Tensor Compute(
     const std::string& func_name,
@@ -148,7 +148,7 @@ template <typename InitFunc, typename BodyFunc>
 Tensor Reduce(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    c10::optional<std::vector<ExprHandle>> strides,
+    std::optional<std::vector<ExprHandle>> strides,
     const Reducer& reducer,
     const InitFunc& init_func,
     const BodyFunc& body_func,
@@ -217,7 +217,7 @@ template <typename BodyFunc>
 Tensor Reduce(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    c10::optional<std::vector<ExprHandle>> strides,
+    std::optional<std::vector<ExprHandle>> strides,
     const Reducer& reducer,
     const BodyFunc& body_func,
     const std::vector<ExprHandle>& reduce_dims) {
@@ -246,7 +246,7 @@ template <typename BodyFunc>
 Tensor Reduce(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    c10::optional<std::vector<ExprHandle>> strides,
+    std::optional<std::vector<ExprHandle>> strides,
     const Reducer& reducer,
     const BodyFunc&& body_func,
     const std::vector<ExprHandle>& reduce_dims) {
@@ -265,7 +265,7 @@ Tensor Reduce(
 TORCH_API Tensor Reduce(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
-    c10::optional<std::vector<ExprHandle>> strides,
+    std::optional<std::vector<ExprHandle>> strides,
     const Reducer& reducer,
     const BufHandle& buffer,
     const std::vector<ExprHandle>& reduce_dims);
@@ -281,7 +281,7 @@ TORCH_API Tensor Reduce(
 TORCH_API Tensor Reduce(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    c10::optional<std::vector<ExprHandle>> strides,
+    std::optional<std::vector<ExprHandle>> strides,
     const Reducer& reducer,
     Tensor tensor,
     const std::vector<ExprHandle>& reduce_dims);

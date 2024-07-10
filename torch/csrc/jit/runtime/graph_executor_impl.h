@@ -78,7 +78,7 @@ struct GraphExecutorImplBase {
 
   virtual const ExecutionPlan& getPlanFor(
       Stack& stack,
-      c10::optional<size_t> remaining_bailout_depth = c10::nullopt) = 0;
+      std::optional<size_t> remaining_bailout_depth = c10::nullopt) = 0;
   virtual GraphExecutorState getDebugState() = 0;
   virtual ~GraphExecutorImplBase() = default;
 

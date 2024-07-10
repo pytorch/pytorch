@@ -5,6 +5,7 @@ import sys
 
 import numpy as np
 import tabulate
+
 import torch
 
 import torch._inductor
@@ -12,6 +13,8 @@ from torch._dynamo.backends.cudagraphs import cudagraphs_inner
 from torch._dynamo.testing import same
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import timed
+
+aten = torch.ops.aten
 
 try:
     import test.test_torchinductor as tti
@@ -87,6 +90,10 @@ class MicroBenchmarks:
     def sum(a, b):
         return ((a + b).sum(),)
 
+    @staticmethod
+    def view(x):
+        return (aten.alias(x),)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -142,7 +149,7 @@ def main():
     torch._inductor.config.triton.autotune_pointwise = True
 
     rows = []
-    for model in (MicroBenchmarks.sum,):
+    for model in (MicroBenchmarks.sum, MicroBenchmarks.view):
         nargs = len(inspect.signature(model).parameters)
         for device in args.devices:
             for n in args.size:

@@ -27,7 +27,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
     kSpatialDim>::
     prepack(
         at::Tensor weight,
-        c10::optional<at::Tensor> bias,
+        std::optional<at::Tensor> bias,
         torch::List<int64_t> stride,
         torch::List<int64_t> padding,
         torch::List<int64_t> output_padding,
@@ -116,7 +116,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<2>> PackedConvWeightCudnn<
     2>::
     prepack(
         at::Tensor weight,
-        c10::optional<at::Tensor> bias_in,
+        std::optional<at::Tensor> bias_in,
         torch::List<int64_t> stride,
         torch::List<int64_t> padding,
         torch::List<int64_t> output_padding,
@@ -133,7 +133,7 @@ class QConvPackWeightInt8Cudnn final {
  public:
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> run_conv(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
@@ -150,7 +150,7 @@ class QConvPackWeightInt8Cudnn final {
  private:
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> _run(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -167,7 +167,7 @@ class QConv1dPackWeightInt8Cudnn final {
  public:
   static c10::intrusive_ptr<ConvPackedParamsBase<2>> run_conv(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
@@ -180,7 +180,7 @@ class QConv1dPackWeightInt8Cudnn final {
  private:
   static c10::intrusive_ptr<ConvPackedParamsBase<2>> _run(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,

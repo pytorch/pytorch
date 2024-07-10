@@ -1,15 +1,17 @@
+# mypy: allow-untyped-defs
 import math
 import traceback
-
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, cast, List, Optional, Tuple
+from typing import Any, cast, List, Optional
 
 import torch
+import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.contract import _get_registry
-from torch.distributed._tensor import DeviceMesh, DTensor, Placement
+from torch.distributed._tensor import DeviceMesh, DTensor
+from torch.distributed._tensor.placement_types import DTensorSpec
 
 
 @dataclass
@@ -32,9 +34,7 @@ class FSDPMeshInfo(DataParallelMeshInfo):
         if self.shard_mesh_dim is None:
             raise AssertionError("Expects non-None shard_mesh_dim")
         self.shard_mesh_size: int = self.mesh.size(self.shard_mesh_dim)
-        self.shard_process_group = cast(
-            dist.ProcessGroup, self.mesh.get_group(self.shard_mesh_dim)
-        )
+        self.shard_process_group = self.mesh.get_group(self.shard_mesh_dim)
         self.shard_mesh_rank: int = self.shard_process_group.rank()
 
 
@@ -45,9 +45,7 @@ class DDPMeshInfo(DataParallelMeshInfo):
         if self.replicate_mesh_dim is None:
             raise AssertionError("Expects non-None replicate_mesh_dim")
         self.replicate_mesh_size: int = self.mesh.size(self.replicate_mesh_dim)
-        self.replicate_process_group = cast(
-            dist.ProcessGroup, self.mesh.get_group(self.replicate_mesh_dim)
-        )
+        self.replicate_process_group = self.mesh.get_group(self.replicate_mesh_dim)
         self.replicate_mesh_rank: int = self.replicate_process_group.rank()
 
 
@@ -111,26 +109,29 @@ def _get_dim0_chunked_size(
 
 def _from_local_no_grad(
     local_tensor: torch.Tensor,
-    device_mesh: DeviceMesh,
-    placements: Tuple[Placement, ...],
-    global_size: torch.Size,
-    global_stride: Tuple[int, ...],
+    sharding_spec: DTensorSpec,
 ) -> DTensor:
     """
-    This method is similar to ``DTensor.from_local()`` except it avoids some
-    CPU overhead by avoiding default args and not being differentiable.
+    This method is similar to ``DTensor.from_local()`` except that in eager mode
+    it avoids some CPU overhead by avoiding default args and not being differentiable.
     """
-    return DTensor(
-        # Use the local tensor directly instead of constructing a new tensor
-        # variable, e.g. with `view_as()`, since this is not differentiable
-        local_tensor,
-        device_mesh,
-        placements,
-        shape=global_size,
-        dtype=local_tensor.dtype,
-        requires_grad=local_tensor.requires_grad,
-        stride=global_stride,
-    )
+
+    if not ca.compiled_autograd_enabled:
+        return DTensor(
+            # Use the local tensor directly instead of constructing a new tensor
+            # variable, e.g. with `view_as()`, since this is not differentiable
+            local_tensor,
+            sharding_spec,
+            requires_grad=local_tensor.requires_grad,
+        )
+    else:
+        return DTensor.from_local(
+            local_tensor,
+            sharding_spec.mesh,
+            sharding_spec.placements,
+            shape=sharding_spec.shape,
+            stride=sharding_spec.stride,
+        )
 
 
 def _to_dtype_if_needed(

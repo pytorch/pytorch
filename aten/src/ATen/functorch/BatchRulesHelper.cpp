@@ -118,11 +118,9 @@ Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x) {
     // NOTE: 0 % 0 leads to FPE
     TORCH_INTERNAL_ASSERT(shape[src] % size1 == 0);
   }
-  int64_t size2;
   // split any size out of `0`-sized dim
-  if (shape[src] == 0) {
-    size2 = 0;
-  } else {
+  int64_t size2 = 0;
+  if (shape[src] != 0) {
     size2 = shape[src] / size1;
   }
   shape[src] = size1;
@@ -130,7 +128,7 @@ Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x) {
   return at::reshape(x, shape);
 }
 
-Tensor reshape_dim_outof_symint(int64_t src, c10::SymInt size1, const Tensor& x) {
+Tensor reshape_dim_outof_symint(int64_t src, const c10::SymInt& size1, const Tensor& x) {
   src = maybe_wrap_dim(src, x.dim());
   c10::SymDimVector shape(x.sym_sizes().begin(), x.sym_sizes().end());
   if (shape[src] != 0) {

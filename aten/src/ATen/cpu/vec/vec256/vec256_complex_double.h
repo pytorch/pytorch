@@ -8,7 +8,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
+#define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
 
@@ -16,7 +17,7 @@ namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
 
 template <> class Vectorized<c10::complex<double>> {
 private:
@@ -145,7 +146,7 @@ public:
     auto abs = abs_();
     auto zero = _mm256_setzero_pd();
     auto mask = _mm256_cmp_pd(abs, zero, _CMP_EQ_OQ);
-    auto div = values / abs;
+    auto div = _mm256_div_pd(values, abs);
     return _mm256_blendv_pd(div, zero, mask);
   }
   __m256d real_() const {

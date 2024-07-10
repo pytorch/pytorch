@@ -237,7 +237,7 @@ class DTensorAPITest(DTensorTestBase):
             assert isinstance(outputs, DTensor)
             return outputs.to_local()
 
-        with self.assertWarnsRegex(UserWarning, "Deprecating"):
+        with self.assertWarnsRegex(FutureWarning, "Deprecating"):
             replica_module = distribute_module(
                 module_to_replicate,
                 device_mesh,
@@ -249,6 +249,44 @@ class DTensorAPITest(DTensorTestBase):
         local_out = replica_module(input_tensor)
         self.assertIsInstance(local_out, torch.Tensor)
         self.assertNotIsInstance(local_out, DTensor)
+
+    @with_comms
+    def test_distribute_module_casting(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        # check DTensor casting
+        dt = DTensor.from_local(torch.rand(10), device_mesh, [Replicate()])
+        dt = dt.to(torch.bfloat16)
+        self.assertEqual(dt.dtype, torch.bfloat16)
+        self.assertEqual(dt._local_tensor.dtype, torch.bfloat16)
+
+        # check distribute_tensor casting
+        dt = distribute_tensor(torch.rand(10), device_mesh, [Replicate()])
+        dt = dt.to(torch.bfloat16)
+        self.assertEqual(dt.dtype, torch.bfloat16)
+        self.assertEqual(dt._local_tensor.dtype, torch.bfloat16)
+
+        # check distribute_module casting
+        model = MyModel(10, 10, device=self.device_type)
+        replica_model = distribute_module(
+            model,
+            device_mesh,
+        )
+        replica_model = replica_model.to(torch.bfloat16)
+        self.assertEqual(replica_model.seq[0].weight.dtype, torch.bfloat16)
+        self.assertEqual(
+            replica_model.seq[0].weight._local_tensor.dtype, torch.bfloat16
+        )
+
+        # check autocast
+        dt = distribute_tensor(torch.rand(10), device_mesh, [Replicate()])
+        replica_model = distribute_module(
+            model,
+            device_mesh,
+        )
+        with torch.autocast(device_type=self.device_type, dtype=torch.bfloat16):
+            output = replica_model(dt)
+        self.assertEqual(output.dtype, torch.bfloat16)
 
     @with_comms
     def test_distribute_module_meta(self):

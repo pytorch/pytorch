@@ -99,7 +99,7 @@ static bool canBeInferredWithMetaTensor(Node* n) {
   return true;
 }
 
-c10::optional<Tensor> inferWithMetaTensor(Node* n) {
+std::optional<Tensor> inferWithMetaTensor(Node* n) {
   GRAPH_DEBUG("inferWithMetaTensor", getHeader(n));
   if (!canBeInferredWithMetaTensor(n)) {
     return c10::nullopt;

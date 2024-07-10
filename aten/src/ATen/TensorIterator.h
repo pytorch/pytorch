@@ -147,7 +147,7 @@ struct TORCH_API OperandInfo {
   /// promotion target_dtype value can become different from tensor's dtype
   /// also, during type promotion target_dtype and device can be set for an
   /// undefined tensor so that tensor can be properly constructed later.
-  c10::optional<Device> device = c10::nullopt;
+  std::optional<Device> device = c10::nullopt;
   ScalarType target_dtype = ScalarType::Undefined;
   // Caches dtype of the tensor, because scalar_type is an expensive operation
   // If dtype of the tensor is changed (e.g. as a result of type promotion or in
@@ -971,9 +971,9 @@ class TORCH_API TensorIteratorConfig final {
   int num_outputs_ = 0;
   int num_inputs_ = 0;
 
-  c10::optional<DimVector> static_shape_ = c10::nullopt;
-  c10::optional<ScalarType> static_dtype_ = c10::nullopt;
-  c10::optional<Device> static_device_ = c10::nullopt;
+  std::optional<DimVector> static_shape_ = c10::nullopt;
+  std::optional<ScalarType> static_dtype_ = c10::nullopt;
+  std::optional<Device> static_device_ = c10::nullopt;
   bool check_mem_overlap_ = true;
   bool allow_cpu_scalars_ = false;
   bool is_reduction_ = false;

@@ -7,77 +7,142 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from unittest import mock
+import datetime
+from multiprocessing.pool import ThreadPool
+from typing import List
+
+import torch.distributed as dist
 
 import torch.distributed.elastic.utils.store as store_util
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
+class MockStore:
+    def __init__(self):
+        self.ops = []
+
+    def set_timeout(self, timeout: float) -> None:
+        self.ops.append(("set_timeout", timeout))
+
+    @property
+    def timeout(self) -> datetime.timedelta:
+        self.ops.append(("timeout",))
+
+        return datetime.timedelta(seconds=1234)
+
+    def set(self, key: str, value: str) -> None:
+        self.ops.append(("set", key, value))
+
+    def get(self, key: str) -> str:
+        self.ops.append(("get", key))
+        return "value"
+
+    def multi_get(self, keys: List[str]) -> List[str]:
+        self.ops.append(("multi_get", keys))
+        return ["value"] * len(keys)
+
+    def add(self, key: str, val: int) -> int:
+        self.ops.append(("add", key, val))
+        return 3
+
+
 class StoreUtilTest(TestCase):
     def test_get_all_rank_0(self):
-        store = mock.MagicMock()
         world_size = 3
-        store_util.get_all(store, 0, "test/store", world_size)
-        # omit empty kwargs, get only key
-        actual_set_call_args = [
-            call_args[0][0] for call_args in store.set.call_args_list
-        ]
-        self.assertListEqual(["test/store0.FIN"], actual_set_call_args)
 
-        actual_get_call_args = [call_args[0] for call_args in store.get.call_args_list]
-        expected_get_call_args = [
-            ("test/store0",),
-            ("test/store1",),
-            ("test/store2",),
-            ("test/store0.FIN",),
-            ("test/store1.FIN",),
-            ("test/store2.FIN",),
-        ]
-        self.assertListEqual(expected_get_call_args, actual_get_call_args)
+        store = MockStore()
+
+        store_util.get_all(store, 0, "test/store", world_size)
+
+        self.assertListEqual(
+            store.ops,
+            [
+                ("multi_get", ["test/store0", "test/store1", "test/store2"]),
+                ("add", "test/store/finished/num_members", 1),
+                ("set", "test/store/finished/last_member", "<val_ignored>"),
+                ("get", "test/store/finished/last_member"),
+            ],
+        )
 
     def test_get_all_rank_n(self):
-        store = mock.MagicMock()
+        store = MockStore()
         world_size = 3
         store_util.get_all(store, 1, "test/store", world_size)
-        # omit empty kwargs, get only key
-        actual_set_call_args = [
-            call_args[0][0] for call_args in store.set.call_args_list
-        ]
-        self.assertListEqual(["test/store1.FIN"], actual_set_call_args)
 
-        actual_get_call_args = [call_args[0] for call_args in store.get.call_args_list]
-        expected_get_call_args = [
-            ("test/store0",),
-            ("test/store1",),
-            ("test/store2",),
-        ]
-        self.assertListEqual(expected_get_call_args, actual_get_call_args)
+        self.assertListEqual(
+            store.ops,
+            [
+                ("multi_get", ["test/store0", "test/store1", "test/store2"]),
+                ("add", "test/store/finished/num_members", 1),
+                ("set", "test/store/finished/last_member", "<val_ignored>"),
+            ],
+        )
 
     def test_synchronize(self):
-        store_mock = mock.MagicMock()
-        data = b"data0"
-        store_util.synchronize(store_mock, data, 0, 3, key_prefix="torchelastic/test")
-        actual_set_call_args = store_mock.set.call_args_list
-        # omit empty kwargs
-        actual_set_call_args = [call_args[0] for call_args in actual_set_call_args]
-        expected_set_call_args = [
-            ("torchelastic/test0", b"data0"),
-            ("torchelastic/test0.FIN", b"FIN"),
-        ]
-        self.assertListEqual(expected_set_call_args, actual_set_call_args)
+        store = MockStore()
 
-        expected_get_call_args = [
-            ("torchelastic/test0",),
-            ("torchelastic/test1",),
-            ("torchelastic/test2",),
-            ("torchelastic/test0.FIN",),
-            ("torchelastic/test1.FIN",),
-            ("torchelastic/test2.FIN",),
-        ]
-        actual_get_call_args = store_mock.get.call_args_list
-        actual_get_call_args = [call_args[0] for call_args in actual_get_call_args]
-        self.assertListEqual(expected_get_call_args, actual_get_call_args)
+        data = b"data0"
+        store_util.synchronize(store, data, 0, 3, key_prefix="test/store")
+
+        self.assertListEqual(
+            store.ops,
+            [
+                ("timeout",),
+                ("set_timeout", datetime.timedelta(seconds=300)),
+                ("set", "test/store0", data),
+                ("multi_get", ["test/store0", "test/store1", "test/store2"]),
+                ("add", "test/store/finished/num_members", 1),
+                ("set", "test/store/finished/last_member", "<val_ignored>"),
+                ("get", "test/store/finished/last_member"),
+                ("set_timeout", datetime.timedelta(seconds=1234)),
+            ],
+        )
+
+    def test_synchronize_hash_store(self) -> None:
+        N = 4
+
+        store = dist.HashStore()
+
+        def f(i: int):
+            return store_util.synchronize(
+                store, f"data{i}", i, N, key_prefix="test/store"
+            )
+
+        with ThreadPool(N) as pool:
+            out = pool.map(f, range(N))
+
+        self.assertListEqual(out, [[f"data{i}".encode() for i in range(N)]] * N)
+
+    def test_barrier(self):
+        store = MockStore()
+
+        store_util.barrier(store, 3, key_prefix="test/store")
+
+        self.assertListEqual(
+            store.ops,
+            [
+                ("timeout",),
+                ("set_timeout", datetime.timedelta(seconds=300)),
+                ("add", "test/store/num_members", 1),
+                ("set", "test/store/last_member", "<val_ignored>"),
+                ("get", "test/store/last_member"),
+                ("set_timeout", datetime.timedelta(seconds=1234)),
+            ],
+        )
+
+    def test_barrier_hash_store(self) -> None:
+        N = 4
+
+        store = dist.HashStore()
+
+        def f(i: int):
+            store_util.barrier(store, N, key_prefix="test/store")
+
+        with ThreadPool(N) as pool:
+            out = pool.map(f, range(N))
+
+        self.assertEqual(out, [None] * N)
 
 
 class UtilTest(TestCase):

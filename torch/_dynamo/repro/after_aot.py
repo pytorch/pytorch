@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import argparse
 import copy
 import functools
@@ -138,7 +139,15 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     raise NotImplementedError(
                         "Accuracy minification is supported for inductor only"
                     )
-                if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
+                failed = not same_two_models(
+                    gm,
+                    inner_compiled_fn,
+                    real_inputs,
+                    only_fwd=True,
+                    ignore_non_fp=config.repro_ignore_non_fp,
+                )
+
+                if failed:
                     log.warning(
                         "Accuracy failed for the AOT Autograd graph %s", graph_name
                     )
@@ -257,6 +266,14 @@ def save_graph_repro(
     tracing_mode=None,
     check_str=None,
 ):
+    if any(
+        isinstance(arg, torch.fx.experimental._backward_state.BackwardState)
+        for arg in args
+    ):
+        fd.write(
+            "Repro is not generated due to existence of BackwardState in graph input"
+        )
+        return
     fd.write(
         generate_compiler_repro_string(
             gm,
@@ -702,7 +719,13 @@ def repro_run(options, mod, load_args):
     if options.accuracy != "":
         # We don't really respect --accuracy vs --strict-accuracy here, it
         # seems counterintuitive
-        if not same_two_models(mod, compiled, args, only_fwd=True):
+        if not same_two_models(
+            mod,
+            compiled,
+            args,
+            only_fwd=True,
+            ignore_non_fp=config.repro_ignore_non_fp,
+        ):
             raise AccuracyError("Bad accuracy detected")
     else:
         need_sync = False

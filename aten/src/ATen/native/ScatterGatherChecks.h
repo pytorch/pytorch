@@ -15,7 +15,7 @@ static void scatter_gather_dtype_check(
   const std::string& method_name,
   const Tensor& self,
   const Tensor& index,
-  const c10::optional<Tensor>& src_opt = c10::nullopt
+  const std::optional<Tensor>& src_opt = c10::nullopt
 ) {
   if (index.numel() != 0) {
     TORCH_CHECK(
@@ -66,7 +66,7 @@ static C10_UNUSED void gather_shape_check(const Tensor& self, int64_t dim,
 //  3. index.dim() == self.dim() == src.dim()
 static C10_UNUSED void scatter_shape_check(
   const Tensor& self, int64_t dim, const Tensor& index,
-  const c10::optional<Tensor>& src_opt = c10::nullopt
+  const std::optional<Tensor>& src_opt = c10::nullopt
 ) {
   if (index.numel() == 0) return;
   TORCH_CHECK(

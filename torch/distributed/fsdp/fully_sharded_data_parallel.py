@@ -36,6 +36,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_param_to_fqns,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
+    HandleTrainingState,
     TrainingState,
 )
 from torch.distributed.fsdp._dynamo_utils import _annotate_modules_for_dynamo
@@ -63,6 +64,8 @@ from torch.distributed.fsdp._runtime_utils import (
     _pre_forward,
     _pre_forward_unshard,
     _root_pre_forward,
+    _unshard,
+    _wait_for_computation_stream,
 )
 from torch.distributed.fsdp._wrap_utils import _auto_wrap
 from torch.distributed.fsdp.api import (
@@ -82,8 +85,8 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.utils import _p_assert
-from ._flat_param import FlatParameter
 
+from ._flat_param import FlatParameter, FlatParamHandle
 from ._optim_utils import (
     _flatten_optim_state_dict,
     _get_param_id_to_param_from_optim_input,
@@ -100,7 +103,7 @@ from ._unshard_param_utils import (
     _register_flat_param,
     _register_orig_params,
     _unshard_params,
-    _unshard_params_recurse,
+    _unshard_params_for_summon,
 )
 from .wrap import CustomPolicy, ModuleWrapPolicy
 
@@ -130,7 +133,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     .. _`Xu et al.`: https://arxiv.org/abs/2004.13336
     .. _DeepSpeed: https://www.deepspeed.ai/
 
-    For advanced notes please refer to :ref:`fsdp_notes`.
+    To understand FSDP internals, refer to the
+    :ref:`fsdp_notes`.
 
     Example::
 
@@ -145,111 +149,91 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         >>> loss.backward()
         >>> optim.step()
 
-    .. warning::
-        The optimizer must be initialized *after* the module has been wrapped
-        with FSDP since FSDP will shard and transform the module's parameters
-        in a way that may not preserve the original parameter variables. Thus,
-        the previously initialized optimizer may have stale references to the
-        parameters.
+    Using FSDP involves wrapping your module and then initializing your
+    optimizer after. This is required since FSDP changes the parameter
+    variables.
 
-    .. warning::
-        If the destination CUDA device has ID ``dev_id``, either (1)
-        ``module`` should already be placed on that device, (2) the device
-        should be set using ``torch.cuda.set_device(dev_id)``, or (3)
-        ``dev_id`` should be passed into the ``device_id`` constructor
-        argument. This FSDP instance's compute device will be that destination
-        device. For (1) and (3), the FSDP initialization always occurs on GPU.
-        For (2), the FSDP initialization happens on ``module`` 's current
-        device, which may be CPU.
+    When setting up FSDP, you need to consider the destination CUDA
+    device. If the device has an ID (``dev_id``), you have three options:
 
-    .. warning::
-        FSDP currently does not support gradient accumulation outside
-        ``no_sync()`` when using CPU offloading. Trying to do so yields
-        incorrect results since FSDP will use the newly-reduced gradient
-        instead of accumulating with any existing gradient.
+    * Place the module on that device
+    * Set the device using ``torch.cuda.set_device(dev_id)``
+    * Pass ``dev_id`` into the ``device_id`` constructor argument.
 
-    .. warning::
-        Changing the original parameter variable names after construction will
-        lead to undefined behavior.
+    This ensures that the FSDP instance's compute device is the
+    destination device. For option 1 and 3, the FSDP initialization
+    always occurs on GPU. For option 2, the FSDP initialization
+    happens on module's current device, which may be a CPU.
 
-    .. warning::
-        Passing in the ``sync_module_states=True`` flag requires ``module`` to
-        be on GPU or to use the ``device_id`` argument to specify a CUDA device
-        that FSDP will move ``module`` to in the FSDP constructor. This is
-        because ``sync_module_states=True`` requires GPU communication.
+    If you're using the ``sync_module_states=True`` flag, you need to
+    ensure that the module is on a GPU or use the ``device_id``
+    argument to specify a CUDA device that FSDP will move the module
+    to in the FSDP constructor. This is necessary because
+    ``sync_module_states=True`` requires GPU communication.
 
-    .. warning::
-        As of PyTorch 1.12, FSDP only offers limited support for shared parameters
-        (for example, setting one ``Linear`` layer's weight to another's). In
-        particular, modules that share parameters must be wrapped as part of the
-        same FSDP unit. If enhanced shared parameter support is needed for your
-        use case, please ping https://github.com/pytorch/pytorch/issues/77724
+    FSDP also takes care of moving input tensors to the forward method
+    to the GPU compute device, so you don't need to manually move them
+    from CPU.
 
-    .. warning::
-        FSDP has some constraints on freezing parameters (i.e. setting
-        ``param.requires_grad=False``). For ``use_orig_params=False``, each
-        FSDP instance must manage parameters that are all frozen or all
-        non-frozen. For ``use_orig_params=True``, FSDP supports mixing frozen
-        and non-frozen, but we recommend not doing so since then the gradient
-        memory usage will be higher than expected (namely, equivalent to not
-        freezing those parameters). This means that ideally, frozen parameters
-        should be isolated into their own ``nn.Module`` s and wrapped
-        separately with FSDP.
+    For ``use_orig_params=True``,
+    ``ShardingStrategy.SHARD_GRAD_OP`` exposes the unsharded
+    parameters, not the sharded parameters after forward, unlike
+    ``ShardingStrategy.FULL_SHARD``. If you want
+    to inspect the gradients, you can use the ``summon_full_params``
+    method with ``with_grads=True``.
 
-    .. note::
-        Attempting to run the forward pass of a submodule that is contained in an
-        FSDP instance is not supported and will result in errors. This is because the
-        submodule's parameters will be sharded, but it itself is not an FSDP instance,
-        so its forward pass will not all-gather the full parameters appropriately.
-        This could potentially happen when attempting to run only the encoder of a
-        encoder-decoder model, and the encoder is not wrapped in its own FSDP instance. To
-        resolve this, please wrap the submodule in its own FSDP unit.
+    With ``limit_all_gathers=True``, you may see a gap in the FSDP
+    pre-forward where the CPU thread is not issuing any kernels. This is
+    intentional and shows the rate limiter in effect. Synchronizing the CPU
+    thread in that way prevents over-allocating memory for subsequent
+    all-gathers, and it should not actually delay GPU kernel execution.
 
-    .. note::
-        FSDP moves input tensors to the ``forward`` method to the GPU compute
-        device, so the user does not need to manually move them from CPU.
+    FSDP replaces managed modules' parameters with ``torch.Tensor``
+    views during forward and backward computation for autograd-related
+    reasons. If your module's forward relies on saved references to
+    the parameters instead of reacquiring the references each
+    iteration, then it will not see FSDP's newly created views,
+    and autograd will not work correctly.
 
-    .. warning::
-        The user should not modify the parameters between forward and backward
-        without using the :meth:`summon_full_params` context since the
-        modifications may not persist. Moreover, for ``use_orig_params=False``,
-        accessing the original parameters between forward and backward may
-        raise an illegal memory access.
+    Finally, when using ``sharding_strategy=ShardingStrategy.HYBRID_SHARD``
+    with the sharding process group being intra-node and the
+    replication process group being inter-node, setting
+    ``NCCL_CROSS_NIC=1`` can help improve the all-reduce times over
+    the replication process group for some cluster setups.
 
-    .. warning::
-        For ``use_orig_params=True``, ``ShardingStrategy.SHARD_GRAD_OP``
-        exposes the unsharded parameters, not the sharded parameters, after
-        forward since it does not free the unsharded ones, unlike
-        ``ShardingStrategy.FULL_SHARD``. One caveat is that, since gradients
-        are always sharded or ``None``, ``ShardingStrategy.SHARD_GRAD_OP`` will
-        not expose the sharded gradients with the unsharded parameters after
-        forward. If you want to inspect the gradients, try
-        :meth:`summon_full_params` with ``with_grads=True``.
+    **Limitations**
 
-    .. warning::
-        FSDP replaces managed modules' parameters with ``torch.Tensor`` views
-        during forward and backward computation for autograd-related reasons.
-        If your module's forward relies on saved references to the parameters
-        instead of reacquiring the references each iteration, then it will not
-        see FSDP's newly created views, and autograd will not work correctly.
+    There are several limitations to be aware of when using FSDP:
 
-    .. note::
-        With ``limit_all_gathers=True``, you may see a gap in the FSDP
-        pre-forward where the CPU thread is not issuing any kernels. This is
-        intentional and shows the rate limiter in effect. Synchronizing the CPU
-        thread in that way prevents over-allocating memory for subsequent
-        all-gathers, and it should not actually delay GPU kernel execution.
+    * FSDP currently does not support gradient accumulation outside
+      ``no_sync()`` when using CPU offloading. This is because FSDP
+      uses the newly-reduced gradient instead of accumulating with any
+      existing gradient, which can lead to incorrect results.
 
-    .. note::
-        When using ``sharding_strategy=ShardingStrategy.HYBRID_SHARD`` with the
-        sharding process group being intra-node and the replication process
-        group being inter-node, setting ``NCCL_CROSS_NIC=1`` can help improve
-        the all-reduce times over the replication process group for some
-        cluster setups.
+    * FSDP does not support running the forward pass of a submodule
+      that is contained in an FSDP instance. This is because the
+      submodule's parameters will be sharded, but the submodule itself
+      is not an FSDP instance, so its forward pass will not all-gather
+      the full parameters appropriately.
 
-    .. warning::
-        FSDP does not work with double backwards due to how it registers
-        backward hooks.
+    * FSDP does not work with double backwards due to the way it
+      registers backward hooks.
+
+    * FSDP has some constraints when freezing parameters.
+      For ``use_orig_params=False``, each FSDP instance must manage
+      parameters that are all frozen or all non-frozen. For
+      ``use_orig_params=True``, FSDP supports mixing frozen and
+      non-frozen parameters, but it's recommended to avoid doing so to
+      prevent higher than expected gradient memory usage.
+
+    * As of PyTorch 1.12, FSDP offers limited support for shared
+      parameters. If enhanced shared parameter support is needed for
+      your use case, please post in
+      `this issue <https://github.com/pytorch/pytorch/issues/77724>`__.
+
+    * You should avoid modifying the parameters between forward and
+      backward without using the ``summon_full_params`` context, as
+      the modifications may not persist.
 
     Args:
         module (nn.Module):
@@ -414,6 +398,14 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             ``ignored_modules`` soon. For backward compatibility, we keep both
             ``ignored_states`` and `ignored_modules``, but FSDP only allows one
             of them to be specified as not ``None``.
+        device_mesh (Optional[DeviceMesh]): DeviceMesh can be used as an altenative to
+            process_group. When device_mesh is passed, FSDP will use the underlying process
+            groups for all-gather and reduce-scatter collective communications. Therefore,
+            these two args need to be mutually exclusive. For hybrid sharding strategies such as
+            ``ShardingStrategy.HYBRID_SHARD``, users can pass in a 2D DeviceMesh instead
+            of a tuple of process groups. For 2D FSDP + TP, users are required to pass in
+            device_mesh instead of process_group. For more DeviceMesh info, please visit:
+            https://pytorch.org/tutorials/recipes/distributed_device_mesh.html
     """
 
     def __init__(
@@ -441,6 +433,12 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
+        if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
+            warnings.warn(
+                "FSDP will not all-gather parameters for containers that do "
+                f"not implement forward: {module}",
+                stacklevel=2,
+            )
         _init_ignored_module_states(self, module, ignored_modules, ignored_states)
         _init_device_handle(self, module, self._ignored_params, device_id)
 
@@ -600,14 +598,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         """
         uninitialized = self._is_root is None
         self._assert_state(TrainingState.IDLE)
-        # Use `_unshard_params_recurse()` with `recurse=False` instead of
+        # Use `_unshard_params_for_summon()` with `recurse=False` instead of
         # `_unshard_fsdp_state_params()` directly to perform lazy
         # initialization, which is needed to initialize `FlatParameter`
         # parameter attributes as required by the unshard logic
-        with _unshard_params_recurse(
+        with _unshard_params_for_summon(
             self,
             self,
-            recurse=False,
             writeback=True,
             rank0_only=False,
             offload_to_cpu=False,
@@ -615,9 +612,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         ):
             ret = super().apply(fn)
 
-        # Reset lazy init called in `_unshard_params_recurse()` since `apply()`
-        # may have been called on FSDP instance that is not truly a root, in
-        # which case it will be incorrectly marked as one.
+        # Reset lazy init called in `_unshard_params_for_summon()` since
+        # `apply()` may have been called on FSDP instance that is not truly a
+        # root, in which case it will be incorrectly marked as one.
         if uninitialized and self._is_root:
             for module in traversal_utils._get_fsdp_states(self):
                 module._reset_lazy_init()
@@ -689,6 +686,15 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             A StateDictSettings that include the previous state_dict type and
             configuration for the module.
         """
+        warnings.warn(
+            "FSDP.state_dict_type() and FSDP.set_state_dict_type() are being "
+            "deprecated. Please use APIs, get_state_dict() and set_state_dict(), "
+            "which can support different parallelisms, FSDP1, FSDP2, DDP. "
+            "API doc: https://pytorch.org/docs/stable/distributed.checkpoint.html"
+            "#torch.distributed.checkpoint.state_dict.get_state_dict ."
+            "Tutorial: https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html .",
+            FutureWarning,
+        )
         _state_dict_type_to_config = {
             StateDictType.FULL_STATE_DICT: FullStateDictConfig,
             StateDictType.LOCAL_STATE_DICT: LocalStateDictConfig,
@@ -1083,21 +1089,21 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Returns:
             Total norm of the parameters (viewed as a single vector).
 
-        .. note:: If every FSDP instance uses ``NO_SHARD``, meaning that no
-            gradients are sharded across ranks, then you may directly use
-            :func:`torch.nn.utils.clip_grad_norm_`.
+        If every FSDP instance uses ``NO_SHARD``, meaning that no
+        gradients are sharded across ranks, then you may directly use
+        :func:`torch.nn.utils.clip_grad_norm_`.
 
-        .. note:: If at least some FSDP instance uses a sharded strategy (i.e.
-            one other than ``NO_SHARD``), then you should use this method
-            instead of :func:`torch.nn.utils.clip_grad_norm_` since this method
-            handles the fact that gradients are sharded across ranks.
+        If at least some FSDP instance uses a sharded strategy (i.e.
+        one other than ``NO_SHARD``), then you should use this method
+        instead of :func:`torch.nn.utils.clip_grad_norm_` since this method
+        handles the fact that gradients are sharded across ranks.
 
-        .. note:: The total norm returned will have the "largest" dtype across
-            all parameters/gradients as defined by PyTorch's type promotion
-            semantics. For example, if *all* parameters/gradients use a low
-            precision dtype, then the returned norm's dtype will be that low
-            precision dtype, but if there exists at least one parameter/
-            gradient using FP32, then the returned norm's dtype will be FP32.
+        The total norm returned will have the "largest" dtype across
+        all parameters/gradients as defined by PyTorch's type promotion
+        semantics. For example, if *all* parameters/gradients use a low
+        precision dtype, then the returned norm's dtype will be that low
+        precision dtype, but if there exists at least one parameter/
+        gradient using FP32, then the returned norm's dtype will be FP32.
 
         .. warning:: This needs to be called on all ranks since it uses
             collective communications.
@@ -1201,11 +1207,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         return total_norm.to(total_norm_dtype)
 
     @staticmethod
-    def _warn_optim_input(optim_input):
+    def _warn_optim_input(optim_input, *, stacklevel: int = 1):
         if optim_input is not None:
             warnings.warn(
-                "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. You may remove it "
-                "from your code without changing its functionality."
+                "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. "
+                "You may remove it from your code without changing its functionality.",
+                FutureWarning,
+                stacklevel=stacklevel + 1,
             )
 
     @staticmethod
@@ -1220,11 +1228,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         return False
 
     @staticmethod
-    def _warn_legacy_optim_state_dict(curr: str, new: str):
+    def _warn_legacy_optim_state_dict(curr: str, new: str, *, stacklevel: int = 1):
         warnings.warn(
             f"``FullyShardedDataParallel.{curr}``is being deprecated and is "
             f"replaced by ``FullyShardedDataParallel.{new}``. "
-            f"``FullyShardedDataParallel.{curr}`` may be removed after PyTorch 2.2."
+            f"``FullyShardedDataParallel.{curr}`` may be removed after PyTorch 2.2.",
+            FutureWarning,
+            stacklevel=stacklevel + 1,
         )
 
     @staticmethod
@@ -1242,6 +1252,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         full_state_dict: bool = True,
         group: Optional[dist.ProcessGroup] = None,
         cpu_offload: bool = True,
+        *,
+        _stacklevel: int = 1,
     ) -> Dict[str, Any]:
         """Transform the state-dict of an optimizer corresponding to a sharded model.
 
@@ -1250,7 +1262,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         FSDP internal information and internal sharding from the optim_state_dict.
         """
         if full_state_dict:
-            FullyShardedDataParallel._warn_optim_input(optim_input)
+            FullyShardedDataParallel._warn_optim_input(
+                optim_input, stacklevel=_stacklevel + 1
+            )
             using_optim_input = FullyShardedDataParallel._is_using_optim_input(
                 optim_input,
                 optim,
@@ -1361,19 +1375,19 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         and ``"param_groups"``. The flattened parameters in ``FSDP`` modules
         contained in ``model`` are mapped back to their unflattened parameters.
 
-        .. warning:: This needs to be called on all ranks since it uses
-            collective communications. However, if ``rank0_only=True``, then
-            the state dict is only populated on rank 0, and all other ranks
-            return an empty :class:`dict`.
+        This needs to be called on all ranks since it uses
+        collective communications. However, if ``rank0_only=True``, then
+        the state dict is only populated on rank 0, and all other ranks
+        return an empty :class:`dict`.
 
-        .. warning:: Unlike ``torch.optim.Optimizer.state_dict()``, this method
-            uses full parameter names as keys instead of parameter IDs.
+        Unlike ``torch.optim.Optimizer.state_dict()``, this method
+        uses full parameter names as keys instead of parameter IDs.
 
-        .. note:: Like in :meth:`torch.optim.Optimizer.state_dict`, the tensors
-            contained in the optimizer state dict are not cloned, so there may
-            be aliasing surprises. For best practices, consider saving the
-            returned optimizer state dict immediately, e.g. using
-            ``torch.save()``.
+        Like in :meth:`torch.optim.Optimizer.state_dict`, the tensors
+        contained in the optimizer state dict are not cloned, so there may
+        be aliasing surprises. For best practices, consider saving the
+        returned optimizer state dict immediately, e.g. using
+        ``torch.save()``.
 
         Args:
             model (torch.nn.Module): Root module (which may or may not be a
@@ -1401,7 +1415,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             then nonzero ranks return an empty :class:`dict`.
         """
         FullyShardedDataParallel._warn_legacy_optim_state_dict(
-            "full_optim_state_dict", "optim_state_dict"
+            "full_optim_state_dict",
+            "optim_state_dict",
+            stacklevel=2,
         )
         return FullyShardedDataParallel._optim_state_dict_impl(
             model=model,
@@ -1411,6 +1427,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             rank0_only=rank0_only,
             group=group,
             full_state_dict=True,
+            _stacklevel=2,
         )
 
     @staticmethod
@@ -1432,7 +1449,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             cannot be directly used by the regular ``optim.load_state_dict``.
         """
         FullyShardedDataParallel._warn_legacy_optim_state_dict(
-            "sharded_optim_state_dict", "optim_state_dict"
+            "sharded_optim_state_dict",
+            "optim_state_dict",
+            stacklevel=2,
         )
         return FullyShardedDataParallel._optim_state_dict_impl(
             model=model,
@@ -1442,6 +1461,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             rank0_only=False,
             full_state_dict=False,
             group=group,
+            _stacklevel=2,
         )
 
     @staticmethod
@@ -1510,7 +1530,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             restricted to only include this rank's part of the optimizer state.
         """
         FullyShardedDataParallel._warn_legacy_optim_state_dict(
-            "shard_full_optim_state_dict", "optim_state_dict_to_load"
+            "shard_full_optim_state_dict",
+            "optim_state_dict_to_load",
+            stacklevel=2,
         )
         return FullyShardedDataParallel._optim_state_dict_to_load_impl(
             optim_state_dict=full_optim_state_dict,
@@ -1547,7 +1569,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             Refer to :meth:`shard_full_optim_state_dict`.
         """
         FullyShardedDataParallel._warn_legacy_optim_state_dict(
-            "flatten_sharded_optim_state_dict", "optim_state_dict_to_load"
+            "flatten_sharded_optim_state_dict",
+            "optim_state_dict_to_load",
+            stacklevel=2,
         )
         return FullyShardedDataParallel._optim_state_dict_to_load_impl(
             optim_state_dict=sharded_optim_state_dict,
@@ -1627,7 +1651,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             restricted to only include this rank's part of the optimizer state.
         """
         FullyShardedDataParallel._warn_legacy_optim_state_dict(
-            "scatter_full_optim_state_dict", "optim_state_dict_to_load"
+            "scatter_full_optim_state_dict",
+            "optim_state_dict_to_load",
+            stacklevel=2,
         )
         return FullyShardedDataParallel._optim_state_dict_to_load_impl(
             optim_state_dict=full_optim_state_dict,
@@ -1858,6 +1884,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             cpu_offload=getattr(
                 state_dict_settings.optim_state_dict_config, "offload_to_cpu", True
             ),
+            _stacklevel=2,
         )
 
     @staticmethod
@@ -2006,6 +2033,62 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 )
             fsdp_state._comm_hook = hook
             fsdp_state._comm_hook_state = state
+
+    def _unshard(self, async_op: bool = False):
+        class UnshardHandle:
+            def __init__(
+                self,
+                flat_param_handle: Optional[FlatParamHandle],
+                unshard_event: torch.cuda.Event,
+            ):
+                self._flat_param_handle = flat_param_handle
+                self._unshard_event = unshard_event
+
+            def wait(self):
+                if self._flat_param_handle is not None:
+                    current_stream = (
+                        self._flat_param_handle._device_handle.current_stream()
+                    )
+                    current_stream.wait_event(self._unshard_event)
+                    self._flat_param_handle = None
+
+        if self._handle:
+            with self._use_training_state(
+                TrainingState.FORWARD_BACKWARD, HandleTrainingState.FORWARD
+            ):
+                _unshard(
+                    self, self._handle, self._unshard_stream, self._pre_unshard_stream
+                )
+                self._unshard_event = self._unshard_stream.record_event()
+            self._handle._prefetched = True
+        unshard_handle = UnshardHandle(self._handle, self._unshard_stream)
+        if async_op:
+            return unshard_handle
+        unshard_handle.wait()
+        return None
+
+    def _wait_unshard_streams_on_current_stream(self):
+        _wait_for_computation_stream(
+            self._device_handle.current_stream(),
+            self._unshard_stream,
+            self._pre_unshard_stream,
+        )
+
+    @contextlib.contextmanager
+    def _use_training_state(
+        self, training_state: TrainingState, handle_training_state: HandleTrainingState
+    ):
+        prev_training_state = self.training_state
+        self.training_state = training_state
+        if self._handle:
+            prev_handle_training_state = self._handle._training_state
+            self._handle._training_state = handle_training_state
+        try:
+            yield
+        finally:
+            self.training_state = prev_training_state
+            if self._handle:
+                self._handle._training_state = prev_handle_training_state
 
 
 def _get_grad_norm(

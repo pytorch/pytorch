@@ -67,7 +67,7 @@ struct TORCH_API SugaredValue
   virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
       GraphFunction& m,
-      const c10::optional<size_t>& size_hint = {}) {
+      const std::optional<size_t>& size_hint = {}) {
     throw ErrorReport(loc) << kind() << " cannot be used as a tuple";
   }
 
@@ -121,7 +121,7 @@ struct TORCH_API SugaredValue
   // function, then we emit an unrolled loop over the variable. This allows us
   // to support containers of Heterogenous types, like Module Containers &
   // Tuples
-  virtual c10::optional<int64_t> staticLen() {
+  virtual std::optional<int64_t> staticLen() {
     return c10::nullopt;
   }
 
@@ -169,7 +169,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
       GraphFunction& m,
-      const c10::optional<size_t>& size_hint = {}) override;
+      const std::optional<size_t>& size_hint = {}) override;
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
       GraphFunction& m,
@@ -213,14 +213,14 @@ struct TORCH_API SimpleValue : public SugaredValue {
 };
 
 struct TORCH_API BuiltinFunction : public SugaredValue {
-  BuiltinFunction(Symbol symbol, c10::optional<NamedValue> self)
+  BuiltinFunction(Symbol symbol, std::optional<NamedValue> self)
       : symbol(symbol), self(std::move(self)) {}
 
   // The symbol of the function (e.g. `aten::relu`).
   Symbol symbol;
 
   // if this is method, then this is the self argument.
-  c10::optional<NamedValue> self;
+  std::optional<NamedValue> self;
   std::string kind() const override {
     return "builtin";
   }
@@ -236,7 +236,7 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
   // not clear if it is a valid builtin
   static std::shared_ptr<BuiltinFunction> tryCreate(
       Symbol symbol,
-      c10::optional<NamedValue> self);
+      std::optional<NamedValue> self);
 };
 
 struct TORCH_API SugaredTupleValue : public SugaredValue {
@@ -246,7 +246,7 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
       GraphFunction& m,
-      const c10::optional<size_t>& size_hint = {}) override {
+      const std::optional<size_t>& size_hint = {}) override {
     return tup_;
   };
 
@@ -297,7 +297,7 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
   // Because this is used to contain SugaredValues of Heterogenous types,
   // we define staticLen() so that when this is iterated over it is emitted
   // as an unrolled loop.
-  c10::optional<int64_t> staticLen() override {
+  std::optional<int64_t> staticLen() override {
     return static_cast<int64_t>(tup_.size());
   }
 
@@ -305,7 +305,7 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
 };
 
 struct TORCH_API BuiltinModule : public SugaredValue {
-  BuiltinModule(std::string name, c10::optional<int64_t> version = at::nullopt)
+  BuiltinModule(std::string name, std::optional<int64_t> version = at::nullopt)
       : name(std::move(name)), version(version) {}
 
   std::string kind() const override {
@@ -330,7 +330,7 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   std::string name;
   // when we add operator versioning, emit this op as it exising at 'version'
   // if not set, use the latest version
-  c10::optional<int64_t> version;
+  std::optional<int64_t> version;
 };
 
 // Represents a class, analagous to `int` or `dict`. Instances of classes,
@@ -638,7 +638,7 @@ struct TORCH_API RangeValue : SugaredValue {
       const SourceRange& loc,
       GraphFunction& m,
       std::vector<Value*> input,
-      c10::optional<int64_t> static_len = c10::nullopt);
+      std::optional<int64_t> static_len = c10::nullopt);
 
   std::string kind() const override {
     return "range";
@@ -654,7 +654,7 @@ struct TORCH_API RangeValue : SugaredValue {
 
   // When Range is instantiated via enumerate(iterable_with_static_len),
   // then it takes the static length of the iterable
-  c10::optional<int64_t> staticLen() override {
+  std::optional<int64_t> staticLen() override {
     return static_len_;
   }
 
@@ -667,7 +667,7 @@ struct TORCH_API RangeValue : SugaredValue {
   // derivation nodes to simplify the graph and enable more possible
   // optimizations
   bool has_only_end_{};
-  c10::optional<int64_t> static_len_;
+  std::optional<int64_t> static_len_;
 };
 
 // Specialized Tree structure to matched against for special handling
@@ -712,7 +712,7 @@ struct TORCH_API IterableTree : SugaredValue {
 
   // If this iterable contains a ModuleList or Tuple, then it will have a
   // static length, and we will emit it as an unrolled for loop.
-  c10::optional<int64_t> staticLen() override {
+  std::optional<int64_t> staticLen() override {
     return unroll_length_;
   }
 
@@ -730,7 +730,7 @@ struct TORCH_API IterableTree : SugaredValue {
       TypePtr type_hint = nullptr) override;
 
  private:
-  c10::optional<int64_t> unroll_length_ = c10::nullopt;
+  std::optional<int64_t> unroll_length_ = c10::nullopt;
   std::vector<SugaredValuePtr> children_;
 };
 

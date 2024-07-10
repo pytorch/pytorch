@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 import warnings
 from functools import total_ordering
@@ -128,9 +129,8 @@ def _dispatch_kl(type_p, type_q):
     right_fun = _KL_REGISTRY[right_p, right_q]
     if left_fun is not right_fun:
         warnings.warn(
-            "Ambiguous kl_divergence({}, {}). Please register_kl({}, {})".format(
-                type_p.__name__, type_q.__name__, left_p.__name__, right_q.__name__
-            ),
+            f"Ambiguous kl_divergence({type_p.__name__}, {type_q.__name__}). "
+            f"Please register_kl({left_p.__name__}, {right_q.__name__})",
             RuntimeWarning,
         )
     return left_fun

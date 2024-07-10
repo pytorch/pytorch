@@ -16,7 +16,7 @@ void parseOperators(
         "There should be either two parts (name and overload name), ",
         "or three parts (name, overload name and number of specified args) ",
         "for an operator");
-    c10::optional<int> num_args;
+    std::optional<int> num_args;
     if (op_item.size() > 2) {
       num_args = op_item[2].toInt();
     }

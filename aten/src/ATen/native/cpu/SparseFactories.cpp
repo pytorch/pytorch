@@ -29,7 +29,7 @@ void _spdiags_kernel_cpu(
       "spdiags_cpu",
       [&] {
         auto* const values_write_ptr = values.data_ptr<scalar_t>();
-        const auto* const diagonals_ptr = diagonals.data_ptr<scalar_t>();
+        const auto* const diagonals_ptr = diagonals.const_data_ptr<scalar_t>();
 
         cpu_kernel(
             iter,

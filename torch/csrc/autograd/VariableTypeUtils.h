@@ -166,7 +166,7 @@ struct Flatten : IterArgs<Flatten> {
   void operator()(const at::Tensor& x) {
     out.emplace_back(x);
   }
-  void operator()(const c10::optional<at::Tensor>& x) {
+  void operator()(const std::optional<at::Tensor>& x) {
     if (x.has_value())
       out.emplace_back(x.value());
   }
@@ -233,8 +233,8 @@ inline at::Tensor as_view(
   }
 
   // If they cannot be shared, create the required view infos
-  c10::optional<ViewInfo> new_bw_info;
-  c10::optional<ViewInfo> new_fw_info;
+  std::optional<ViewInfo> new_bw_info;
+  std::optional<ViewInfo> new_fw_info;
 
   if (is_bw_differentiable) {
     auto bw_view_func = view_func ? view_func->clone_and_set() : nullptr;
@@ -298,7 +298,7 @@ inline void check_no_requires_grad(
 }
 
 inline void check_no_requires_grad(
-    const c10::optional<at::Tensor>& tensor,
+    const std::optional<at::Tensor>& tensor,
     const char* name,
     const char* fn_name = "") {
   if (tensor.has_value()) {
@@ -320,14 +320,14 @@ inline void check_no_requires_grad(
 }
 
 inline void check_no_requires_grad(
-    const c10::List<c10::optional<at::Tensor>>& tensors,
+    const c10::List<std::optional<at::Tensor>>& tensors,
     const char* name,
     const char* fn_name = "") {
   // GradMode check is expensive, so check it only once for TensorLists
   if (!GradMode::is_enabled()) {
     return;
   }
-  for (c10::optional<at::Tensor> tensor : tensors) {
+  for (std::optional<at::Tensor> tensor : tensors) {
     if (tensor.has_value()) {
       check_no_requires_grad(*tensor, name, fn_name, /*check_grad_mode*/ false);
     }
@@ -345,11 +345,11 @@ inline std::vector<SavedVariable> make_saved_variable_list(
 
 // Assumed that saved tensor lists are never inplace outputs
 inline std::vector<SavedVariable> make_saved_variable_list(
-    const c10::List<c10::optional<at::Tensor>>& tensors,
+    const c10::List<std::optional<at::Tensor>>& tensors,
     const bool is_output = false) {
   return fmap(
       tensors,
-      [&is_output](const c10::optional<at::Tensor>& tensor) -> SavedVariable {
+      [&is_output](const std::optional<at::Tensor>& tensor) -> SavedVariable {
         if (tensor.has_value()) {
           return SavedVariable{*tensor, is_output /* is output */};
         } else {
@@ -426,11 +426,8 @@ Return run_jit_decomposition_with_args_for_jvp(
       name,
       " that does not support it because it has not been implemented yet.\nPlease file an issue "
       "to PyTorch at https://github.com/pytorch/pytorch/issues/new?template=feature-request.yml "
-      "so that we can prioritize its implementation.\n"
-      "Note that forward AD support for some operators require PyTorch to be built with "
-      "TorchScript and for JIT to be enabled. "
-      "If the environment var PYTORCH_JIT=0 is set or if the library is not built with TorchScript, "
-      "some operators may no longer be used with forward AD.");
+      "so that we can prioritize its implementation or submit a PR adding the implementation to "
+      "derivatives.yaml");
 
   return c10::KernelFunction::makeFromBoxedKernel(
              c10::BoxedKernel::makeFromFunctor(

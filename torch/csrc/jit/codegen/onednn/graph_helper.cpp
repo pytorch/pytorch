@@ -22,7 +22,7 @@ static void fixConvOptionalBias(Node* node) {
   }
 }
 
-static c10::optional<size_t> getDimensions(Value* v) {
+static std::optional<size_t> getDimensions(Value* v) {
   if (v->type()->isSubtypeOf(TensorType::get())) {
     return v->type()->cast<TensorType>()->sizes().size();
   } else {
@@ -405,8 +405,7 @@ LlgaGraphHelper::LlgaGraphHelper(
     dnnl::graph::partition::policy policy) {
   auto deviceType = inferDevice(graph);
   auto engineKind = getLlgaEngineKind(deviceType);
-  dnnl_graph_ =
-      std::unique_ptr<dnnl::graph::graph>(new dnnl::graph::graph(engineKind));
+  dnnl_graph_ = std::make_unique<dnnl::graph::graph>(engineKind);
   aliasDb_ = std::make_unique<torch::jit::AliasDb>(graph);
   GRAPH_DEBUG("Constructing LLGA graph");
   // TODO: select nodes in top-level block for now

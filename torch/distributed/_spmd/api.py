@@ -1,11 +1,10 @@
+# mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from contextlib import contextmanager, nullcontext
 from copy import copy
 from dataclasses import dataclass
 from functools import partial, wraps
 from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Union
-
-from functorch import make_fx
 
 import torch
 import torch.distributed as dist
@@ -14,10 +13,9 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives
 import torch.nn as nn
 import torch.utils._pytree as pytree
-
+from functorch import make_fx
 from torch import fx
 from torch._decomp.decompositions import native_layer_norm_backward
-
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._spmd.data_parallel import gradients_tagging
 from torch.distributed._spmd.parallel_mode import (
@@ -294,8 +292,8 @@ SPMD_DECOMP_TABLE = {
 
 
 DEDUP_TARGETS: Set[torch._ops.OpOverload] = {
-    torch.ops.c10d_functional.all_reduce.default,
-    torch.ops.c10d_functional.wait_tensor.default,
+    torch.ops._c10d_functional.all_reduce.default,
+    torch.ops._c10d_functional.wait_tensor.default,
 }
 
 

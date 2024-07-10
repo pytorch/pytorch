@@ -25,8 +25,8 @@ struct TORCH_API constant_not_supported_error : public std::runtime_error {
 TORCH_API Value* insertConstant(
     Graph& g,
     const IValue& val,
-    c10::optional<SourceRange> loc = c10::nullopt,
-    c10::optional<ScopePtr> scope = c10::nullopt);
+    std::optional<SourceRange> loc = c10::nullopt,
+    std::optional<ScopePtr> scope = c10::nullopt);
 
 // note: prefer g.insertConsant(val, loc) which does exactly the same thing
 // this function is only declared/defined here because its implementation is
@@ -34,11 +34,11 @@ TORCH_API Value* insertConstant(
 // constants.cpp.
 //
 // returns a c10::nullopt if the IValue kind cannot be inserted as a constant
-TORCH_API c10::optional<Value*> tryInsertConstant(
+TORCH_API std::optional<Value*> tryInsertConstant(
     Graph& g,
     const IValue& val,
-    c10::optional<SourceRange> loc = c10::nullopt,
-    c10::optional<ScopePtr> scope = c10::nullopt);
+    std::optional<SourceRange> loc = c10::nullopt,
+    std::optional<ScopePtr> scope = c10::nullopt);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Helper for retrieving constants
@@ -46,12 +46,12 @@ TORCH_API c10::optional<Value*> tryInsertConstant(
 
 // attempt to convert a (possibly constant) Value* into an interpreter value
 // (IValue). returns c10::nullopt if the Value* was not constant
-TORCH_API c10::optional<IValue> toIValue(const Value* v);
+TORCH_API std::optional<IValue> toIValue(const Value* v);
 
 // if a value is a constant then try to turn into type T using the
 // same rules as the interpreter
 template <typename T>
-c10::optional<T> constant_as(const Value* v) {
+std::optional<T> constant_as(const Value* v) {
   if (auto ivalue = toIValue(v)) {
     return ivalue->to<T>();
   }

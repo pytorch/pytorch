@@ -1,14 +1,27 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 import os
 import sys
 import tempfile
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import torch
+from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
+
 
 log = logging.getLogger(__name__)
 
+if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
+    import shutil
+
+    if not shutil.which("strobeclient"):
+        log.info(
+            "TORCH_COMPILE_STROBELIGHT is true, but seems like you are not on a FB machine."
+        )
+    else:
+        log.info("Strobelight profiler is enabled via environment variable")
+        StrobelightCompileTimeProfiler.enable()
 
 # this arbitrary-looking assortment of functionality is provided here
 # to have a central place for overrideable behavior. The motivating
@@ -52,14 +65,30 @@ def resolve_library_path(path: str) -> str:
 def throw_abstract_impl_not_imported_error(opname, module, context):
     if module in sys.modules:
         raise NotImplementedError(
-            f"{opname}: We could not find the abstract impl for this operator. "
+            f"{opname}: We could not find the fake impl for this operator. "
         )
     else:
         raise NotImplementedError(
-            f"{opname}: We could not find the abstract impl for this operator. "
+            f"{opname}: We could not find the fake impl for this operator. "
             f"The operator specified that you may need to import the '{module}' "
-            f"Python module to load the abstract impl. {context}"
+            f"Python module to load the fake impl. {context}"
         )
+
+
+# NB!  This treats "skip" kwarg specially!!
+def compile_time_strobelight_meta(phase_name):
+    def compile_time_strobelight_meta_inner(function):
+        @functools.wraps(function)
+        def wrapper_function(*args, **kwargs):
+            if "skip" in kwargs:
+                kwargs["skip"] = kwargs["skip"] + 1
+            return StrobelightCompileTimeProfiler.profile_compile_time(
+                function, phase_name, *args, **kwargs
+            )
+
+        return wrapper_function
+
+    return compile_time_strobelight_meta_inner
 
 
 # Meta only, see
@@ -97,6 +126,20 @@ def log_export_usage(**kwargs):
 
 def log_torchscript_usage(api: str):
     _ = api
+    return
+
+
+def check_if_torch_exportable():
+    return False
+
+
+def log_torch_jit_trace_exportability(
+    api: str,
+    type_of_export: str,
+    export_outcome: str,
+    result: str,
+):
+    _, _, _, _ = api, type_of_export, export_outcome, result
     return
 
 
@@ -139,9 +182,29 @@ def justknobs_getval_int(name: str) -> int:
 
 @functools.lru_cache(None)
 def max_clock_rate():
-    from triton.testing import nvsmi
+    if not torch.version.hip:
+        from triton.testing import nvsmi
 
-    return nvsmi(["clocks.max.sm"])[0]
+        return nvsmi(["clocks.max.sm"])[0]
+    else:
+        # Manually set max-clock speeds on ROCm until equivalent nvmsi
+        # functionality in triton.testing or via pyamdsmi enablement. Required
+        # for test_snode_runtime unit tests.
+        gcn_arch = str(torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0])
+        if "gfx94" in gcn_arch:
+            return 1700
+        elif "gfx90a" in gcn_arch:
+            return 1700
+        elif "gfx908" in gcn_arch:
+            return 1502
+        elif "gfx11" in gcn_arch:
+            return 1700
+        elif "gfx103" in gcn_arch:
+            return 1967
+        elif "gfx101" in gcn_arch:
+            return 1144
+        else:
+            return 1100
 
 
 TEST_MASTER_ADDR = "127.0.0.1"
@@ -152,3 +215,13 @@ USE_GLOBAL_DEPS = True
 # USE_RTLD_GLOBAL_WITH_LIBTORCH controls whether __init__.py tries to load
 # _C.so with RTLD_GLOBAL during the call to dlopen.
 USE_RTLD_GLOBAL_WITH_LIBTORCH = False
+# If an op was defined in C++ and extended from Python using the
+# torch.library.register_fake, returns if we require that there be a
+# m.set_python_module("mylib.ops") call from C++ that associates
+# the C++ op with a python module.
+REQUIRES_SET_PYTHON_MODULE = False
+
+
+def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
+    print("Uploading profile stats (fb-only otherwise no-op)")
+    return None

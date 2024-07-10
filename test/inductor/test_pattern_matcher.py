@@ -1,25 +1,23 @@
 # Owner(s): ["module: inductor"]
 import copy
+import os
 import unittest
 
 import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
+import torch._inductor.fx_passes.post_grad
+import torch.nn.functional as F
 from torch._dynamo.utils import count_calls, counters
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
 
-from torch._inductor.fx_passes.serialized_patterns.central_index import (
-    get_serialized_pattern,
-)
 from torch._inductor.pattern_matcher import (
-    _TargetExpr,
     Arg,
     CallFunction,
     gen_pattern,
     KeywordArg,
     Match,
-    PatternExpr,
     PatternMatcherPass,
     PatternPrettyPrinter,
     register_graph_pattern,
@@ -30,8 +28,16 @@ from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
+from torch.testing._internal.common_utils import IS_LINUX, LazyVal, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.utils import _pytree as pytree
+
+# NVIDIA A100-SXM4-40GB
+is_a100_linux = LazyVal(
+    lambda: IS_LINUX
+    and torch.cuda.is_available()
+    and "A100" in torch.cuda.get_device_name(0)
+)
 
 
 class TestPatternMatcher(TestCase):
@@ -42,15 +48,22 @@ class TestPatternMatcher(TestCase):
         expected_matches,
         expected_nodes,
         additional_check=lambda code: None,
+        reference_in_float=False,
     ):
         counters.clear()
         torch.manual_seed(42)
-        expected = fn(*args)
+        if reference_in_float:
+            ref_inputs = pytree.tree_map_only(
+                torch.Tensor, lambda x: x.to(torch.float32), args
+            )
+        else:
+            ref_inputs = args
+        expected = fn(*ref_inputs)
         torch.manual_seed(42)
         actual, codes = run_and_get_code(torch.compile(fn), *args)
         if len(codes) == 1:
             codes = codes[0]
-        torch.testing.assert_close(actual, expected)
+        torch.testing.assert_close(actual, expected, check_dtype=not reference_in_float)
 
         self.assertEqual(
             counters["inductor"]["pattern_matcher_count"], expected_matches
@@ -169,17 +182,25 @@ class TestPatternMatcher(TestCase):
         inductor_config.force_fuse_int_mm_with_mul = False
         self._test_fused_int_mm_mul_impl(fn1, args2, False)
 
-    def _test_mixed_impl(self, fn, args, mixed_mm_expected, fallback_mixed_mm_expected):
+    def _test_mixed_impl(
+        self,
+        fn,
+        args,
+        mixed_mm_expected,
+        fallback_mixed_mm_expected,
+        rtol=None,
+        atol=None,
+    ):
         torch._dynamo.reset()
         counters.clear()
         ref = fn(*args)
         test, (code,) = run_and_get_code(torch.compile(fn), *args)
-        torch.testing.assert_close(ref, test)
+        torch.testing.assert_close(ref, test, rtol=rtol, atol=atol)
         self.assertEqual("mixed_mm" in code, mixed_mm_expected)
         self.assertEqual("fallback_mixed_mm" in code, fallback_mixed_mm_expected)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_mixed_mm=True)
+    @inductor_config.patch(mixed_mm_choice="triton")
     def test_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -207,19 +228,24 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_mixed_mm=True)
+    @inductor_config.patch(mixed_mm_choice="triton")
     def test_mixed_mm_bad_cases(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
+        # when b is transposed and not contiguous, we skip triton and use fallback
         args_list = [
             (
                 torch.randn(8, 8, device="cuda", dtype=torch.float16),
-                torch.randint(-128, 127, (2, 8), dtype=torch.int8, device="cuda").t(),
+                torch.randint(-128, 127, (4, 8), dtype=torch.int8, device="cuda").t()[
+                    :, ::2
+                ],
             ),
             (
                 torch.randn(8, 8, device="cuda", dtype=torch.bfloat16),
-                torch.randint(0, 255, (2, 8), dtype=torch.uint8, device="cuda").t(),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda").t()[
+                    :, ::2
+                ],
             ),
         ]
 
@@ -227,7 +253,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, True)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_mixed_mm=True, max_autotune_gemm=True)
+    @inductor_config.patch(mixed_mm_choice="triton", max_autotune_gemm=True)
     def test_mixed_mm_epi_works(self):
         def fn(a, b, c, d):
             return torch.mm(a, b.to(a.dtype)) * c + d
@@ -257,6 +283,100 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(not is_a100_linux, "heuristic only run on Linux A100")
+    @inductor_config.patch(mixed_mm_choice="heuristic")
+    def test_mixed_mm_heuristic_no(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        # examples that should not be selected by heuristic
+        mat1_dtype = torch.float16
+        args_list = [
+            (
+                torch.randn(1, 4097, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4097, 4096), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(1, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4096, 4097), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 8, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 2048, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (2048, 2048), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 2048, dtype=mat1_dtype, device="cuda"),
+                torch.randint(
+                    -128, 127, (2048, 2048), dtype=torch.int8, device="cuda"
+                ).t(),
+            ),
+            (
+                torch.randn(8, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda")[
+                    :, ::2
+                ],
+            ),
+            (
+                torch.randn(1, 4096, dtype=torch.float32, device="cuda"),
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+            ),
+        ]
+
+        for args in args_list:
+            self._test_mixed_impl(fn, args, True, True)
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(not is_a100_linux, "heuristic only run on Linux A100")
+    @inductor_config.patch(mixed_mm_choice="heuristic")
+    def test_mixed_mm_heuristic_yes(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        mat1_dtype = torch.float16
+        # examples that should be selected by heuristic
+        args_list = [
+            (
+                torch.randn(1, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(4, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(
+                    -128, 127, (4096, 4096), dtype=torch.int8, device="cuda"
+                ).t(),
+            ),
+            (
+                torch.randn(16, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(
+                    -128, 127, (8192, 4096), dtype=torch.int8, device="cuda"
+                ).t(),
+            ),
+            (
+                torch.randn(32, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4096, 8192), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(64, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+            ),
+        ]
+
+        for args in args_list:
+            self._test_mixed_impl(fn, args, True, False, rtol=0.01, atol=0.04)
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
     def test_mixed_mm_gating(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -266,20 +386,40 @@ class TestPatternMatcher(TestCase):
             torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
         )
         # will ignore the mixed_mm code (including fallback)
-        with inductor_config.patch({"force_mixed_mm": False, "use_mixed_mm": False}):
+        with inductor_config.patch(
+            {"mixed_mm_choice": "default", "use_mixed_mm": False}
+        ):
             self._test_mixed_impl(fn, args, False, False)
 
         # will use fallback_mixed_mm kernel due to no gemm_autotune
-        with inductor_config.patch({"force_mixed_mm": False, "use_mixed_mm": True}):
+        with inductor_config.patch(
+            {"mixed_mm_choice": "default", "use_mixed_mm": True}
+        ):
             self._test_mixed_impl(fn, args, True, True)
 
         # will use mixed_mm kernel
-        with inductor_config.patch({"force_mixed_mm": True, "use_mixed_mm": False}):
+        with inductor_config.patch(
+            {"mixed_mm_choice": "triton", "use_mixed_mm": False}
+        ):
             self._test_mixed_impl(fn, args, True, False)
 
         # shows that use_mixed_mm doesn't do anything if foce_mixed_mm is set
-        with inductor_config.patch({"force_mixed_mm": True, "use_mixed_mm": True}):
+        with inductor_config.patch({"mixed_mm_choice": "triton", "use_mixed_mm": True}):
             self._test_mixed_impl(fn, args, True, False)
+
+        # will use fallback_mixed_mm kernel
+        with inductor_config.patch({"mixed_mm_choice": "aten", "use_mixed_mm": False}):
+            self._test_mixed_impl(fn, args, True, True)
+
+        # will use fallback_mixed_mm kernel
+        with inductor_config.patch({"mixed_mm_choice": "aten", "use_mixed_mm": True}):
+            self._test_mixed_impl(fn, args, True, True)
+
+        # will use fallback_mixed_mm kernel because fallback is the only choice
+        with inductor_config.patch(
+            {"mixed_mm_choice": "aten", "use_mixed_mm": True, "max_autotune_gemm": True}
+        ):
+            self._test_mixed_impl(fn, args, True, True)
 
     @inductor_config.patch(use_mixed_mm=True)
     def test_mixed_mm_cpu(self):
@@ -304,7 +444,15 @@ class TestPatternMatcher(TestCase):
                 .sub(8),
             )
 
-        args_list = [
+        def check_uint4x2_mixed_mm(args, expect_mixed_mm):
+            torch._dynamo.reset()
+            counters.clear()
+            ref = fn(*args)
+            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(ref, test)
+            self.assertEqual("uint4x2_mixed_mm" in code, expect_mixed_mm)
+
+        args_expect_mixed_mm = [
             (
                 torch.randn(8, 8, device="cuda"),
                 torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda"),
@@ -316,6 +464,13 @@ class TestPatternMatcher(TestCase):
                 .contiguous()
                 .t(),
             ),
+        ]
+
+        for args in args_expect_mixed_mm:
+            check_uint4x2_mixed_mm(args, True)
+
+        # mixed mm is only enabled when casting from a lower-bitwidth dtype to a higher one
+        args_expect_no_mixed_mm = [
             (
                 torch.randn(8, 8, device="cuda"),
                 torch.randint(0, 255, (4, 8), dtype=torch.int32, device="cuda"),
@@ -326,13 +481,8 @@ class TestPatternMatcher(TestCase):
             ),
         ]
 
-        for args in args_list:
-            torch._dynamo.reset()
-            counters.clear()
-            ref = fn(*args)
-            test, (code,) = run_and_get_code(torch.compile(fn), *args)
-            torch.testing.assert_close(ref, test)
-            self.assertTrue("uint4x2_mixed_mm" in code)
+        for args in args_expect_no_mixed_mm:
+            check_uint4x2_mixed_mm(args, False)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(use_mixed_mm=True)
@@ -398,6 +548,7 @@ class TestPatternMatcher(TestCase):
             torch.testing.assert_close(ref, test)
             self.assertFalse("uint4x2_mixed_mm" in code)
 
+    @inductor_config.patch(mixed_mm_choice="default")
     @inductor_config.patch(use_mixed_mm=False)
     def test_uint4x2_mixed_mm_gating_works(self):
         def fn(a, b):
@@ -524,7 +675,7 @@ class TestPatternMatcher(TestCase):
             torch.randn(16, 16, device="cuda"),
             torch.randn(16, 16, device="cuda"),
         ]
-        self.common(fn, args, 2, 5)
+        self.common(fn, args, 1, 4)
 
     def test_cat_addmm(self):
         def fn(a, b, c):
@@ -542,7 +693,7 @@ class TestPatternMatcher(TestCase):
             torch.randn(16, 16, device="cuda"),
             torch.randn(16, 16, device="cuda"),
         ]
-        self.common(fn, args, 2, 5)
+        self.common(fn, args, 1, 4)
 
     def test_cat_slice_cat_cuda(self):
         def fn(a, b):
@@ -843,7 +994,9 @@ class TestPatternMatcher(TestCase):
 
     def test_match_with_mutation(self):
         counter = 0
-        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+        test_pass = PatternMatcherPass(
+            prevent_match_across_mutations=True, pass_name="test"
+        )
 
         @register_graph_pattern(
             CallFunction(
@@ -896,7 +1049,14 @@ class TestPatternMatcher(TestCase):
         ]
 
         with unittest.mock.patch(
-            "torch._inductor.fx_passes.pre_grad.pattern_matcher_passes", [test_pass]
+            "torch._inductor.fx_passes.pre_grad.config.pre_grad_fusion_options",
+            {"test": {}},
+        ), unittest.mock.patch(
+            "torch._inductor.fx_passes.pre_grad.PRE_GRAD_FUSIONS",
+            [],
+        ), unittest.mock.patch(
+            "torch._inductor.fx_passes.pre_grad.PRE_GRAD_PATTERNS",
+            {"test": test_pass},
         ):
             for fn in (fn0, fn1, fn2, fn3, fn4, fn5):
                 counter = 0
@@ -947,65 +1107,49 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
-    def test_fuse_attention_roundtrip_pattern(self):
-        # are we losing anything in serialization
-        from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
+    def test_serialized_patterns_up_to_date(self):
+        import torch.utils._pytree as pytree
+        from torch._inductor.fx_passes import joint_graph
+        from torch._inductor.pattern_matcher import _known_precompiled_patterns
 
-        global_vals = {
-            "aten": torch.ops.aten,
-            "prims": torch.ops.prims,
-            "torch": torch,
-        }
+        # Ensure the patterns are loaded
+        os.environ.pop("PYTORCH_GEN_PATTERNS", None)
+        joint_graph.lazy_init()
 
-        for name in dir(torch._inductor.pattern_matcher):
-            attr = getattr(torch._inductor.pattern_matcher, name)
-            if isinstance(attr, type) and issubclass(attr, (PatternExpr, _TargetExpr)):
-                global_vals[name] = attr
+        with torch._subclasses.FakeTensorMode() as mode:
+            for (
+                search_fn,
+                example_inputs,
+                trace_fn,
+                scalar_workaround,
+                search_fn_pattern,
+            ) in _known_precompiled_patterns:
+                # Because the example_inputs were saved as fake tensors in a
+                # different FakeTensorMode we need to update them to our
+                # FakeTensorMode().
+                def remap_fake_tensor(x):
+                    if isinstance(x, torch.Tensor):
+                        return torch._subclasses.FakeTensor.from_tensor(x, mode)
+                    return x
 
-        with torch._subclasses.FakeTensorMode():
-            for _, kwargs in _get_sfdp_patterns():
-                gen_kwargs = {
-                    key: kwargs[key]
-                    for key in (
-                        "search_fn",
-                        "example_inputs",
-                        "trace_fn",
-                        "scalar_workaround",
-                    )
-                }
-                pattern = gen_pattern(**gen_kwargs)
+                example_inputs = pytree.tree_map(remap_fake_tensor, example_inputs)
+
+                pattern = gen_pattern(
+                    search_fn, example_inputs, trace_fn, scalar_workaround
+                )
                 pattern_pp = PatternPrettyPrinter.run(pattern)
-                env = global_vals.copy()
-                exec(pattern_pp, env)
-                pattern_2 = env["output"]
-                self.assertEqual(pattern_pp, PatternPrettyPrinter.run(pattern_2))
-
-    def test_fuse_attention_all_patterns_serialized(self):
-        from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
-
-        with torch._subclasses.FakeTensorMode():
-            for key, kwargs in _get_sfdp_patterns():
-                gen_kwargs = {
-                    key: kwargs[key]
-                    for key in (
-                        "search_fn",
-                        "example_inputs",
-                        "trace_fn",
-                        "scalar_workaround",
-                    )
-                }
-                pattern = gen_pattern(**gen_kwargs)
-                pattern_pp = PatternPrettyPrinter.run(pattern)
-
-                search_fn_pattern = get_serialized_pattern(key)
-                if search_fn_pattern is None:
-                    continue
 
                 self.assertEqual(
                     pattern_pp,
                     PatternPrettyPrinter.run(search_fn_pattern),
-                    msg=f"Found mismatched pattern {key}. Run gen_attention_patterns.py",
+                    msg=f"Found mismatched pattern {search_fn.__name__}. Run torchgen/fuse/gen_patterns.py",
                 )
+
+                # Since we've already checked that the serialized patterns match
+                # lets verify the serializer by ensuring the generated patterns
+                # also match (since search_fn_pattern is the serialized version
+                # of search_fn).
+                self.assertTrue(pattern.pattern_eq(search_fn_pattern))
 
     def test_match_equivalent_function_invocations1(self):
         counter = 0
@@ -1180,6 +1324,46 @@ class TestPatternMatcher(TestCase):
         c.append(a)
         stable_topological_sort(graph)
         self.assertEqual(list(graph.nodes), [b, a, c])
+
+    def test_scaled_softmax(self):
+        def mul_softmax(a, b):
+            return F.softmax(a * b, dim=0)
+
+        def div_softmax(x, inv_scale):
+            return F.softmax(x / inv_scale, dim=0)
+
+        x = torch.randn(10, 10)
+        scale = 1e6
+        inv_scale = 1 / scale
+        self.common(mul_softmax, (x, scale), 1, 3)
+        self.common(mul_softmax, (scale, x), 1, 3)
+        self.common(div_softmax, (x, inv_scale), 1, 3)
+
+        scale = torch.randn(10) * 1e6
+        inv_scale = 1 / scale
+        self.common(mul_softmax, (x, scale), 1, 3)
+        self.common(mul_softmax, (scale, x), 1, 3)
+        self.common(div_softmax, (x, inv_scale), 1, 3)
+
+        scale = torch.randn(1, 10) * 1e6
+        inv_scale = 1 / scale
+        self.common(mul_softmax, (x, scale), 1, 3)
+        self.common(mul_softmax, (scale, x), 1, 3)
+        self.common(div_softmax, (x, inv_scale), 1, 3)
+
+        # Test matching with type promotion
+        x = torch.randn(10, 10, dtype=torch.bfloat16)
+        scale = torch.randn(10, dtype=torch.bfloat16) * 1e6
+        inv_scale = 1 / scale
+        self.common(mul_softmax, (x, scale), 1, 4, reference_in_float=True)
+        self.common(mul_softmax, (scale, x), 1, 4, reference_in_float=True)
+        self.common(div_softmax, (x, inv_scale), 1, 4, reference_in_float=True)
+
+        # No match if scale changes in softmax dim
+        scale = torch.randn(10, 10)
+        self.common(mul_softmax, (x, scale), 0, 0)
+        self.common(mul_softmax, (scale, x), 0, 0)
+        self.common(div_softmax, (x, scale), 0, 0)
 
 
 if __name__ == "__main__":

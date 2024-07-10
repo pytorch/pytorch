@@ -121,7 +121,7 @@ class DynamicType : public SharedType {
    * A implementation detail to support NamedTuple.
    */
   struct LabeledDynamicType {
-    c10::optional<std::string> label;
+    std::optional<std::string> label;
     DynamicTypePtr ty;
     explicit LabeledDynamicType(DynamicTypePtr t) : ty(std::move(t)) {}
 
@@ -163,7 +163,7 @@ class DynamicType : public SharedType {
   Tag tag() const {
     return tag_;
   }
-  const c10::optional<std::string>& name() const {
+  const std::optional<std::string>& name() const {
     return name_;
   }
   const Arguments& arguments() const {
@@ -200,7 +200,7 @@ class DynamicType : public SharedType {
   }
 
   Tag tag_;
-  c10::optional<std::string> name_;
+  std::optional<std::string> name_;
   union {
     Arguments arguments_;
     ClassTypePtr class_;

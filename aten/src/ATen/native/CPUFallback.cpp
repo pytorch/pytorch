@@ -48,7 +48,7 @@ static std::vector<at::Tensor> to_cpu(const at::TensorList& tensors) {
   return cpu_tensors;
 }
 
-static c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args, std::vector<c10::List<at::Tensor>> tlist_args) {
+static std::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args, std::vector<c10::List<at::Tensor>> tlist_args) {
   // Decide what device to move the output tensor(s) to.
   // The current convention is that we use the first tensor arg to pick the device
   // Barring that, we take the first tensor from a TensorList arg.
@@ -89,7 +89,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   std::vector<c10::List<at::Tensor>> tensorlist_args;
   std::vector<int> tensorlist_args_indices;
 
-  c10::optional<c10::Device> tgt_device = c10::nullopt;
+  std::optional<c10::Device> tgt_device = c10::nullopt;
   // save converted cpu tensor for TensorList
   std::vector<c10::IValue> tensorlist_cpu_args;
 

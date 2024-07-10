@@ -32,7 +32,6 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
-#include <c10/util/string_utils.h>
 
 namespace torch::jit {
 constexpr inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
@@ -879,6 +878,6 @@ struct OperatorGeneratorArgs {
 
 TORCH_API at::Generator make_generator_for_device(
     c10::Device device,
-    c10::optional<int64_t> seed = c10::nullopt);
+    std::optional<int64_t> seed = c10::nullopt);
 
 } // namespace torch::jit

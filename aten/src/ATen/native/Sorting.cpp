@@ -71,7 +71,7 @@ TORCH_META_FUNC(topk)
 }
 
 TORCH_META_FUNC2(sort, stable)
-(const Tensor& self, c10::optional<bool> stable, int64_t dim, bool descending) {
+(const Tensor& self, std::optional<bool> stable, int64_t dim, bool descending) {
   maybe_wrap_dim(dim, self.dim());
 
   // See issue: https://github.com/pytorch/pytorch/issues/65863
@@ -939,7 +939,7 @@ Tensor nanmedian_cpu(const Tensor& self) {
 
 TORCH_IMPL_FUNC(sort_stable_out)
 (const Tensor& self,
- c10::optional<bool> stable,
+ std::optional<bool> stable,
  int64_t dim,
  bool descending,
  const Tensor& values,
@@ -984,8 +984,14 @@ Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
   return std::get<1>(at::sort(self, dim, descending));
 }
 
-Tensor argsort_stable(const Tensor & self, bool stable, int64_t dim, bool descending) {
+Tensor argsort(const Tensor & self, bool stable, int64_t dim, bool descending) {
   return std::get<1>(at::sort(self, stable, dim, descending));
+}
+
+Tensor& argsort_out(const Tensor & self, bool stable, int64_t dim, bool descending, Tensor& out) {
+  auto values = at::empty({0}, self.options());
+  at::sort_outf(self, stable, dim, descending, values, out);
+  return out;
 }
 
 

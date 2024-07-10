@@ -63,7 +63,7 @@ Tensor& random_mps_impl(Tensor& self,
 
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self, mean_opt.value_or(Tensor()), std_opt.value_or(Tensor())}) + ":" +
-        to_string(val1) + ":" + to_string(val2);
+        std::to_string(val1) + ":" + std::to_string(val2);
     auto cachedGraph = LookUpOrCreateCachedGraph<RandomCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->stateTensor =
           mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @(at::mps::detail::PHILOX_STATE_N) ]);
@@ -469,7 +469,7 @@ static Tensor& multinomial_with_replacement_mps_kernel(const Tensor& self,
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "multinomial_with_replacement:" + getTensorsStringKey({self}) + ":" + to_string(n_sample);
+    string key = "multinomial_with_replacement:" + getTensorsStringKey({self}) + ":" + std::to_string(n_sample);
     auto cachedGraph = LookUpOrCreateCachedGraph<RandomCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSShape* prob_shape = getMPSShape(self_v);
       newCachedGraph->stateTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @7 ]);

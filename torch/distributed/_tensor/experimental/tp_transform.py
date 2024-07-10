@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import operator
 from typing import Any, cast, Dict, List, Optional, Sequence, Tuple
@@ -5,20 +6,20 @@ from typing import Any, cast, Dict, List, Optional, Sequence, Tuple
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
-from torch.distributed._tensor.op_schema import (
+from torch.distributed._tensor._op_schema import (
     DTensorSpec,
     OpSchema,
     OutputSharding,
     OutputSpecType,
     PlacementStrategy,
 )
+from torch.distributed._tensor._redistribute import redistribute_local_tensor
 from torch.distributed._tensor.placement_types import (
     Placement,
     Replicate,
     Shard,
     TensorMeta,
 )
-from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.distributed.tensor.parallel.style import ColwiseParallel, ParallelStyle
 from torch.export import ExportedProgram
 from torch.export.exported_program import ExportGraphSignature
@@ -236,8 +237,8 @@ def _mark_sharding(
                     )
                 placement_strategies[node] = PlacementStrategy(
                     output_specs=_get_output_spec_from_output_sharding(output_sharding),
-                    input_specs=output_sharding.schema_suggestions[0].args_spec
-                    if output_sharding.schema_suggestions is not None
+                    input_specs=output_sharding.redistribute_schema.args_spec
+                    if output_sharding.redistribute_schema is not None
                     else _get_input_node_specs(node, placement_strategies),
                 )
                 node.meta["sharding"] = placement_strategies[node]
@@ -345,8 +346,7 @@ def _generate_default_output_sharding(
         output_spec=pytree.tree_map_only(
             FakeTensor, create_output_spec, node.meta["val"]
         ),
-        schema_suggestions=[new_op_schema],
-        failed_reason=f"{node.op} does not have sharding strategy registered",
+        redistribute_schema=new_op_schema,
         needs_redistribute=True,
     )
 

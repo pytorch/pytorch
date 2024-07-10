@@ -49,7 +49,7 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
 const Tensor& resize_cuda_(
     const Tensor& self,
     IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   if (self.has_names()) {
     return resize_named_tensor_(self, size, optional_memory_format);
   }
