@@ -1319,7 +1319,6 @@ class VariableBuilder:
             and isinstance(value, torch.nn.Parameter)
         ):
             self.mark_static_input(value, guard=False)
-            is_static_input = True
 
         if (
             source.guard_source().is_nn_module()
@@ -1895,7 +1894,6 @@ def wrap_fx_proxy_cls(
     proxy,
     example_value=None,
     subclass_type=None,
-    is_static_input=False,
     **options,
 ):
     from ..symbolic_convert import InstructionTranslatorBase
