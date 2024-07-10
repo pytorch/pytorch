@@ -304,7 +304,7 @@ inline std::optional<Tensor> cached_cast(
   if (arg.has_value()) {
     return cached_cast(to_type, *arg, device_type);
   } else {
-    return std::nullopt;
+    return c10::nullopt;
   }
 }
 

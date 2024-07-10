@@ -16783,17 +16783,6 @@ op_db: List[OpInfo] = [
            skips=(
                # Resized a non-empty tensor but did not warn about it
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # FIXME:
-               # Expected 2114 but got 1123.
-               # Absolute difference: 991 (up to 0.001 allowed)
-               # Relative difference: 0.46877956480605487 (up to 0.001 allowed)
-               DecorateInfo(
-                   unittest.skip("Skipped!"),
-                   "TestCommon",
-                   "test_compare_cpu",
-                   dtypes=(torch.float32,),
-                   device_type="cuda",
-               ),
            ),
            sample_inputs_func=sample_inputs_mode,),
     make_mvlgamma_opinfo(variant_test_name='mvlgamma_p_1',
@@ -18337,11 +18326,7 @@ op_db: List[OpInfo] = [
            supports_scripting=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs__unsafe_masked_index,
-           skips=(
-               DecorateInfo(slowTest, 'TestDecomp', 'test_quick_core_backward',
-                            dtypes=(torch.float64,), active_if=IS_WINDOWS),
-           ),),
+           sample_inputs_func=sample_inputs__unsafe_masked_index),
     OpInfo('_unsafe_masked_index_put_accumulate',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
@@ -18355,11 +18340,7 @@ op_db: List[OpInfo] = [
                    'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'
                ),
            ),
-           sample_inputs_func=sample_inputs__unsafe_masked_index_put_accumulate,
-           skips=(
-               DecorateInfo(slowTest, 'TestDecomp', 'test_quick_core_backward', device_type='cpu',
-                            dtypes=(torch.float64,), active_if=IS_WINDOWS),
-           ),),
+           sample_inputs_func=sample_inputs__unsafe_masked_index_put_accumulate),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
@@ -20660,11 +20641,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sampler_2d,
         supports_gradgrad=False,
-        gradcheck_nondet_tol=1e-15,
-        skips=(
-            DecorateInfo(slowTest, 'TestDecomp', 'test_comprehensive', dtypes=(torch.float32, torch.float64),
-                         active_if=IS_WINDOWS),
-        ),),
+        gradcheck_nondet_tol=1e-15),
     OpInfo(
         "argwhere",
         ref=np.argwhere,

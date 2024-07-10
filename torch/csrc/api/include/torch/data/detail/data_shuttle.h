@@ -4,7 +4,7 @@
 #include <torch/types.h>
 
 #include <c10/util/Exception.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 #include <chrono>
 #include <utility>

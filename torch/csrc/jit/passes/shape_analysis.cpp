@@ -548,7 +548,7 @@ class ShapePropagator : public PropertyPropBase {
       list_type = input_base_type->cast<ListType>();
     }
 
-    std::optional<at::ScalarType> default_type =
+    at::optional<at::ScalarType> default_type =
         tryScalarTypeFromJitType(*input_base_type);
     if (auto grad_index = node->schema().argumentIndexWithName("dtype")) {
       auto inp = toIValue(node->inputs().at(*grad_index));
@@ -1195,7 +1195,7 @@ class ShapePropagator : public PropertyPropBase {
     static const register_formula_for reduce_ops_with_opt_dtype{
         {"aten::mean(Tensor self, *, int? dtype) -> Tensor"},
         [](Node* node) -> type_vec_t {
-          std::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
+          at::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
           if (auto type = node->input(0)->type()->cast<TensorType>()) {
             auto ret = type->withDim(0);
             if (maybe_dtype_option && !maybe_dtype_option->isNone()) {
@@ -1223,7 +1223,7 @@ class ShapePropagator : public PropertyPropBase {
             [](Node* node) -> type_vec_t {
               if (auto type = node->input(0)->type()->cast<TensorType>()) {
                 type = type->withDim(0);
-                std::optional<IValue> maybe_dtype_option =
+                at::optional<IValue> maybe_dtype_option =
                     node->get(attr::dtype);
                 if (maybe_dtype_option && !maybe_dtype_option->isNone()) {
                   return {
@@ -1348,7 +1348,7 @@ class ShapePropagator : public PropertyPropBase {
         },
         [](Node* node) -> type_vec_t {
           auto maybe_keepdim = node->get<bool>(attr::keepdim);
-          std::optional<IValue> opt_dtype = node->get(attr::dtype);
+          at::optional<IValue> opt_dtype = node->get(attr::dtype);
           return reduce_op_handler(
               node,
               /*num_reduce_dim=*/*maybe_keepdim ? 0 : 1,
@@ -1370,7 +1370,7 @@ class ShapePropagator : public PropertyPropBase {
          "aten::cumsum(Tensor self, int dim, *, int? dtype) -> Tensor",
          "aten::log_softmax(Tensor self, int dim, int? dtype) -> Tensor"},
         [](Node* node) -> type_vec_t {
-          std::optional<IValue> opt_dtype = node->get(attr::dtype);
+          at::optional<IValue> opt_dtype = node->get(attr::dtype);
           return reduce_op_handler(
               node,
               /*num_reduce_dim=*/0,
@@ -1389,7 +1389,7 @@ class ShapePropagator : public PropertyPropBase {
     static const register_formula_for register_softmax{
         {"aten::softmax(Tensor self, int dim, int? dtype) -> Tensor"},
         [](Node* node) -> type_vec_t {
-          std::optional<IValue> opt_dtype = node->get(attr::dtype);
+          at::optional<IValue> opt_dtype = node->get(attr::dtype);
           return reduce_op_handler(
               node,
               /*num_reduced_dim=*/0,
@@ -1399,18 +1399,18 @@ class ShapePropagator : public PropertyPropBase {
 
     static const auto factory_with_ndim =
         [](Node* node, int dim, at::ScalarType default_dtype) -> type_vec_t {
-      std::optional<IValue> maybe_layout_option = node->get(attr::layout);
+      at::optional<IValue> maybe_layout_option = node->get(attr::layout);
       if (!maybe_layout_option)
         return {};
 
-      std::optional<IValue> maybe_device_option = node->get(attr::device);
+      at::optional<IValue> maybe_device_option = node->get(attr::device);
       if (!maybe_device_option)
         return {};
       auto device =
           (maybe_device_option->isNone() ? at::kCPU
                                          : maybe_device_option->toDevice());
 
-      std::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
+      at::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
       if (!maybe_dtype_option)
         return {};
       auto dtype =
@@ -1427,11 +1427,11 @@ class ShapePropagator : public PropertyPropBase {
       auto in_type = tt->scalarType();
       auto in_dev = tt->device();
 
-      std::optional<IValue> maybe_layout_option = node->get(attr::layout);
+      at::optional<IValue> maybe_layout_option = node->get(attr::layout);
       if (!maybe_layout_option)
         return {};
 
-      std::optional<IValue> maybe_device_option = node->get(attr::device);
+      at::optional<IValue> maybe_device_option = node->get(attr::device);
       if (!maybe_device_option)
         return {};
 
@@ -1439,7 +1439,7 @@ class ShapePropagator : public PropertyPropBase {
         in_dev = maybe_device_option->toDevice();
       }
 
-      std::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
+      at::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
       if (!maybe_dtype_option)
         return {};
 

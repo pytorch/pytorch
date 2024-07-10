@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/frontend/tree.h>
 
 namespace torch {
