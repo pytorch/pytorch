@@ -937,9 +937,7 @@ Tensor& intersection_binary_op_sparse_dense_out(
   // Otherwise nnz gets larger, and both indices and values need an update.
   const auto d_batch_shape = d.sizes().slice(0, d_start_dim_intersec);
   const auto d_batch_len = static_cast<int64_t>(d_batch_shape.size());
-  int64_t batch_count = 1;
-  int64_t max_batch_dim = 0;
-  std::tie(batch_count, max_batch_dim) = [d_batch_shape]() -> std::tuple<int64_t, int64_t> {
+  auto [batch_count, max_batch_dim] = [d_batch_shape]() {
     int64_t batch_count = 1;
     int64_t max_batch_dim = 0;
     for (const auto& b : d_batch_shape) {
