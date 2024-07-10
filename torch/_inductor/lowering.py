@@ -4034,7 +4034,7 @@ def max_pool2d_with_indices_backward(
 
                 index_actual = indices_loader(grad_index)
                 grad_part = grad_loader(grad_index)
-                check = ops.eq(index_actual, index_test)
+                check = ops.eq(index_actual, ops.to_dtype(index_test, indices.dtype))
 
                 if gradient is None:
                     # don't need mask for 0, 0

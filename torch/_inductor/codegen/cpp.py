@@ -1113,21 +1113,6 @@ class CppVecOverrides(CppOverrides):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
         assert x.dtype is not None
-        if (
-            x.dtype in [torch.int32, torch.int64]
-            and y.dtype in [torch.int32, torch.int64]
-            and x.dtype != y.dtype
-        ):
-            x = (
-                f"at::vec::convert<int64_t,2,int32_t,1>({x})"
-                if x.dtype == torch.int32
-                else x
-            )
-            y = (
-                f"at::vec::convert<int64_t,2,int32_t,1>({y})"
-                if y.dtype == torch.int32
-                else y
-            )
         return f"{V.kernel._get_mask_type(x.dtype)}({x} == {y})"
 
     @staticmethod
@@ -3058,60 +3043,11 @@ class CppVecKernelChecker(CppVecKernel):
             @staticmethod
             def index_expr(expr, dtype):
                 assert len(self.ranges) == len(self.itervars)
-
-                def can_use_int32():
-                    free_symbols = list(expr.free_symbols)
-                    sizes = {
-                        k: v
-                        for k, v in zip(self.itervars, self.ranges)
-                        if k in free_symbols
-                    }
-                    # Trivial case: Range empty
-                    if any(v == 0 for v in sizes.values()):
-                        return True
-
-                    vars_ranges = {
-                        k: ValueRanges(0, v - 1)
-                        for k, v in sizes.items()
-                        if not isinstance(v, sympy.Expr) or v.is_number
-                    }
-                    if not vars_ranges or len(vars_ranges) != len(free_symbols):
-                        i32_iinfo = torch.iinfo(torch.int32)
-                        return (
-                            expr.is_number
-                            and expr <= i32_iinfo.max
-                            and expr >= i32_iinfo.min
-                        )
-                    expr_ranges = bound_sympy(expr, vars_ranges)
-                    if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):  # type: ignore[arg-type]
-                        return False
-                    # If something takes the values 0..7, we will compare in the loop
-                    # x < 8. As such, for the loop not to overflow in the last iteration, we want
-                    # to check that expr_ranges.upper + 1 is representable as well
-                    return range_expressable_in_32_bits(
-                        ValueRanges(
-                            int(expr_ranges.lower), int(expr_ranges.upper) + 1  # type: ignore[arg-type]
-                        )
-                    )
-
                 with RecordOptimizationContext(__name__) as node_ctx:
-                    assert len(self.ranges) == len(self.itervars)
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
-                    support_ops = list(BIN_CMP_OPS)
-                    support_ops.append("randn")
-                    if (
-                        dtype in [torch.int32, torch.int64]
-                        and can_use_int32()
-                        and all(
-                            user.target in support_ops
-                            for user in node_ctx.current_node.users
-                        )
-                    ):
-                        opt_ctx.dtype = torch.int32
-                    else:
-                        self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
-
+                    assert dtype in [torch.int32, torch.int64]
+                    opt_ctx.dtype = dtype
                     tmp_var = self.cse.newvar()
                     return tmp_var
 
