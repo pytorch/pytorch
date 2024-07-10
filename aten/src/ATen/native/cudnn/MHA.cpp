@@ -44,6 +44,7 @@ void run_cudnn_SDP_bprop(
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
     const Tensor& o,
     const Tensor& dO,
     const Tensor& softmaxstats,
@@ -201,8 +202,12 @@ void setMHAParams(
   std::copy(v.strides().begin(), v.strides().end(), params.v_stride.begin());
   // uninit is OK as the struct is memset 0'd
   if (params.has_attn_bias) {
-    std::copy(attn_bias.value().sizes().begin(), attn_bias.value().sizes().end(), params.bias_dim.begin());
-    std::copy(attn_bias.value().strides().begin(), attn_bias.value().strides().end(), params.bias_stride.begin());
+    std::copy(attn_bias.value().sizes().begin(),
+              attn_bias.value().sizes().end(),
+              params.bias_dim.begin());
+    std::copy(attn_bias.value().strides().begin(),
+              attn_bias.value().strides().end(),
+              params.bias_stride.begin());
   }
 }
 
@@ -375,13 +380,14 @@ auto build_graph_and_tensors(
   std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
   if (attn_bias.has_value()) {
     bias = mha_graph->tensor(fe::graph::Tensor_attributes()
-                            .set_name("bias")
-                            .set_dim(std::vector<int64_t>(
-                                attn_bias.value().sizes().data(), attn_bias.value().sizes().data() + attn_bias.value().sizes().size()))
-                            .set_stride(
-                                std::vector<int64_t>(
-                                    attn_bias.value().strides().data(),
-                                    attn_bias.value().strides().data() + attn_bias.value().strides().size())));
+                                 .set_name("bias")
+                                 .set_dim(std::vector<int64_t>(
+                                     attn_bias.value().sizes().data(), attn_bias.value().sizes().data() + attn_bias.value().sizes().size()))
+                                 .set_stride(
+                                     std::vector<int64_t>(
+                                         attn_bias.value().strides().data(),
+                                         attn_bias.value().strides().data() +
+                                             attn_bias.value().strides().size())));
     scaled_dot_product_flash_attention_options.set_bias(bias.value());
   }
   auto seq_q = mha_graph->tensor(fe::graph::Tensor_attributes()
@@ -494,13 +500,15 @@ auto build_graph_and_tensors_backward(
   std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
   if (attn_bias.has_value()) {
     bias = mha_graph->tensor(fe::graph::Tensor_attributes()
-                            .set_name("bias")
-                            .set_dim(std::vector<int64_t>(
-                                attn_bias.value().sizes().data(), attn_bias.value().sizes().data() + attn_bias.value().sizes().size()))
-                            .set_stride(
-                                std::vector<int64_t>(
-                                    attn_bias.value().strides().data(),
-                                    attn_bias.value().strides().data() + attn_bias.value().strides().size())));
+                                 .set_name("bias")
+                                 .set_dim(std::vector<int64_t>(
+                                     attn_bias.value().sizes().data(),
+                                     attn_bias.value().sizes().data() +
+                                         attn_bias.value().sizes().size()))
+                                 .set_stride(std::vector<int64_t>(
+                                     attn_bias.value().strides().data(),
+                                     attn_bias.value().strides().data() +
+                                         attn_bias.value().strides().size())));
     sdpa_backward_options.set_bias(bias.value());
   }
   auto Seed = mha_graph->tensor(fe::graph::Tensor_attributes()
@@ -762,8 +770,20 @@ void run_cudnn_SDP_bprop(
         handle);
   }
   auto
-      [mha_graph, Q, K, V, bias, attn_scale, Seed, Offset, O, Do, Stats, Dq, Dk, Dv] =
-          graph_and_tensors_backward_values;
+      [mha_graph,
+       Q,
+       K,
+       V,
+       bias,
+       attn_scale,
+       Seed,
+       Offset,
+       O,
+       Do,
+       Stats,
+       Dq,
+       Dk,
+       Dv] = graph_and_tensors_backward_values;
   std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*>
       variant_pack = {// inputs
                       {Q, q.data_ptr()},
