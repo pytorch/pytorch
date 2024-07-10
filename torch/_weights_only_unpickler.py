@@ -210,8 +210,8 @@ class Unpickler:
                 else:
                     raise RuntimeError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
-                        "Please use `torch.serialization.add_safe_globals` to allowlist this global "
-                        "if you trust this class/function."
+                        f"Please use `torch.serialization.add_safe_globals([{name}])` to allowlist "
+                        "this global if you trust this class/function."
                     )
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()
