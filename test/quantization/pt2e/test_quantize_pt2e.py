@@ -1243,41 +1243,36 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_list,
         )
 
-        # Assumption: topologically sorted graph, single user for each quantize_per_tensor node
-        # Assumption is good enough for the simple model used for testing at present
-        def verify_quant_dequant_iotypes(m, activation_dtype, activation_quant_dtype):
-            quant_node = None
+        def verify_quant_dequant_iotypes_new(m):
             for node in m.graph.nodes:
                 if (
                     node.op == "call_function"
-                    and node.target.__name__ == "quantize_per_tensor.default"
-                ):
-                    q_in_dtype = torch.float32
-                    if "val" in node.args[0].meta:
-                        q_in_dtype = node.args[0].meta["val"].dtype
-                    q_out_dtype = node.args[5]
-                    assert (
-                        q_in_dtype == activation_dtype
-                        and q_out_dtype == activation_quant_dtype
-                    ), "quantize_per_tensor io dtype check failed!"
-                    quant_node = node
-                elif (
-                    quant_node
-                    and node.op == "call_function"
                     and node.target.__name__ == "dequantize_per_tensor.default"
-                    and node.args[0] == quant_node
                 ):
-                    dq_in_dtype = node.args[5]
-                    dq_out_dtype = torch.float32
-                    if "out_dtype" in node.kwargs:
-                        dq_out_dtype = node.kwargs["out_dtype"]
-                    assert (
-                        dq_in_dtype == activation_quant_dtype
-                        and dq_out_dtype == activation_dtype
-                    ), "dequantize_per_tensor io dtype check failed!"
-                    quant_node = None
+                    # Check dequantize node
+                    dequant_node = node
+                    dequant_in_dtype = dequant_node.args[5]
+                    dequant_out_dtype = torch.float32
+                    if "out_dtype" in dequant_node.kwargs:
+                        dequant_out_dtype = dequant_node.kwargs["out_dtype"]
 
-        verify_quant_dequant_iotypes(m, dtype, quant_dtype)
+                    # Check preceding quantize node
+                    # Depending on fold_quantize flag, quantize node may be absent
+                    quant_node = node.args[0]
+                    if (
+                        quant_node.op == "call_function"
+                        and quant_node.target.__name__ == "quantize_per_tensor.default"
+                    ):
+                        quant_in_dtype = torch.float32
+                        if "val" in quant_node.args[0].meta:
+                            quant_in_dtype = quant_node.args[0].meta["val"].dtype
+                        quant_out_dtype = quant_node.args[5]
+                        assert (
+                            quant_in_dtype == dequant_out_dtype
+                            and quant_out_dtype == dequant_in_dtype
+                        ), "quant dequant io dtype check failed!"
+
+        verify_quant_dequant_iotypes_new(m)
 
     def test_input_edge_sanity_check(self):
         class M(torch.nn.Module):
