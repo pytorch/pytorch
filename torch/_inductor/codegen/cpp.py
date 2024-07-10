@@ -25,7 +25,6 @@ from ..._dynamo.utils import counters
 
 from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
-from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
@@ -558,10 +557,13 @@ class CppCSEVariable(CSEVariable):
         # TODO(jgong5): A more accurate way of deciding the dtype of the variables is to
         # propagate the dtypes here inside `update_on_args`.
         if (
-            hasattr(V.interpreter, "current_node")
+            getattr(V.interpreter, "current_node", None) is not None
             and get_current_node_opt_ctx() is not None
         ):
-            self.dtype = get_current_node_opt_ctx().dtype
+            if name == "index_expr":
+                self.dtype = args[1]
+            else:
+                self.dtype = get_current_node_opt_ctx().dtype
 
         if name in BIN_CMP_OPS:
             self.dtype = torch.bool
@@ -852,9 +854,6 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None, opt_ctx
-        dtype = opt_ctx.dtype
         if dtype in DTYPE_LOWP_FP:
             # Since load promotes all half-precision inputs to float, constants
             # must be promoted as well
@@ -863,10 +862,6 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None
-        dtype = opt_ctx.dtype
-
         idx_str = cexpr(V.kernel.rename_indexing(expr))
         var = V.kernel.cse.generate(
             V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
@@ -1001,15 +996,10 @@ class CppVecOverrides(CppOverrides):
                     vec_dtype = vectors[0].dtype
                     for arg in args:
                         if isinstance(arg, (int, sympy.Expr)):
-                            arg_dtype = torch.int64
-                            opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-                            assert opt_ctx
-                            if opt_ctx.dtype is not None:
-                                arg_dtype = opt_ctx.dtype
                             if isinstance(arg, sympy.Expr) and not arg.is_number:
-                                arg = ops.index_expr(arg, arg_dtype)
+                                arg = ops.index_expr(arg, torch.int64)
                             else:
-                                arg = ops.constant(arg, arg_dtype)
+                                arg = ops.constant(arg, torch.int64)
                             arg = arg.value if isinstance(arg, OpsValue) else arg
                         if isinstance(arg, CppCSEVariable) and not arg.is_vec:
                             assert isinstance(V.kernel, CppVecKernel)
@@ -1026,6 +1016,20 @@ class CppVecOverrides(CppOverrides):
                         else:
                             new_args.append(arg)
                 if vectors:
+
+                    def promote_int32_to_int64(arg):
+                        if isinstance(arg, CppCSEVariable) and arg.dtype == torch.int32:
+                            arg = ops.to_dtype(arg, torch.int64)
+                            arg = arg.value if isinstance(arg, OpsValue) else arg
+                            arg.dtype = torch.int64
+                        return arg
+
+                    if any(
+                        arg.dtype == torch.int64
+                        for arg in new_args
+                        if isinstance(arg, CppCSEVariable)
+                    ):
+                        new_args = list(map(promote_int32_to_int64, new_args))
                     return func(*new_args, **kwargs)
                 else:
                     # fallback to scalar ops
@@ -1109,21 +1113,6 @@ class CppVecOverrides(CppOverrides):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
         assert x.dtype is not None
-        if (
-            x.dtype in [torch.int32, torch.int64]
-            and y.dtype in [torch.int32, torch.int64]
-            and x.dtype != y.dtype
-        ):
-            x = (
-                f"at::vec::convert<int64_t,2,int32_t,1>({x})"
-                if x.dtype == torch.int32
-                else x
-            )
-            y = (
-                f"at::vec::convert<int64_t,2,int32_t,1>({y})"
-                if y.dtype == torch.int32
-                else y
-            )
         return f"{V.kernel._get_mask_type(x.dtype)}({x} == {y})"
 
     @staticmethod
@@ -1440,20 +1429,15 @@ class CppVecOverrides(CppOverrides):
             torch.int32,
             torch.int64,
         ], f"{__name__} does not support {dtype}"
-        node: torch.fx.Node = V.interpreter.current_node
-        assert node and isinstance(node, torch.fx.Node)
-        opt_ctx_x = get_opt_ctx(node.args[1])
-        assert opt_ctx_x
-        assert opt_ctx_x.dtype is not None
-        assert isinstance(V.kernel, CppVecKernel)
-        src_dtype = opt_ctx_x.dtype
+        assert isinstance(x, CppCSEVariable)
+        src_dtype = x.dtype
         src_cpp_type = DTYPE_TO_CPP[src_dtype]
         src_num_vectors = V.kernel._get_num_vectors(src_dtype)
         dst_cpp_type = DTYPE_TO_CPP[dtype]
         dst_num_vectors = V.kernel._get_num_vectors(dtype)
         if src_dtype != torch.bool and dtype == torch.bool:
             return f"{V.kernel._get_mask_type(src_dtype)}::from<{src_cpp_type},{src_num_vectors}>({x})"
-        if opt_ctx_x.dtype == torch.bool and dtype != torch.bool:
+        if src_dtype == torch.bool and dtype != torch.bool:
             return f"{x}.to<{dst_cpp_type},{dst_num_vectors}>()"
         if src_dtype != dtype:
             if src_num_vectors == dst_num_vectors == 1:
@@ -1547,9 +1531,6 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None
-        dtype = opt_ctx.dtype
         assert isinstance(V.kernel, CppVecKernel)
         index = V.kernel.rename_indexing(expr)
         tiling_var = V.kernel.itervars[V.kernel.tiling_idx]
@@ -2217,8 +2198,6 @@ class CppVecKernel(CppKernel):
            vector lanes for 8-bit data types.
         2. `torch.bool` and `torch.uint8` could mean masks and we load them as float mask vectors.
         """
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx is not None
         cpp_type = DTYPE_TO_CPP[dtype]
         num_vectors = self._get_num_vectors(dtype)
         load_mask_str = None
@@ -2295,8 +2274,6 @@ class CppVecKernel(CppKernel):
             assert isinstance(csevar, CppCSEVariable)
             return csevar
 
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx is not None
         code = BracesBuffer()
         code.writeline("[&]")
         with code.indent():
@@ -2369,7 +2346,6 @@ class CppVecKernel(CppKernel):
             return csevar
 
     def load(self, name: str, index: sympy.Expr):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.input(name)
         index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
@@ -2430,7 +2406,6 @@ class CppVecKernel(CppKernel):
         if not value.is_vec:
             # this happens when we store a scalar into a vectorized buffer like "fill"
             value = self.broadcast(value)
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
         self.cache_high_prec_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
@@ -2762,7 +2737,6 @@ class CppTile2DKernel(CppVecKernel):
         return tile_var
 
     def load(self, name: str, index: sympy.Expr):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.input(name)
         index = self.rename_indexing(index)
 
@@ -2786,7 +2760,6 @@ class CppTile2DKernel(CppVecKernel):
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
 
         inner = self.inner_itervar()
@@ -2994,21 +2967,6 @@ class CppVecKernelChecker(CppVecKernel):
                 with RecordOptimizationContext(__name__) as node_ctx:
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
-                    # VecKernel override dtype for constant
-                    # Vectorization only support int32/fp32 now
-                    # So if dtype = int64/fp64, we will cast it to int32/fp32 if possible
-                    i32_iinfo = torch.iinfo(torch.int32)
-                    if (
-                        dtype == torch.int64
-                        and val <= i32_iinfo.max
-                        and val >= i32_iinfo.min
-                        and all(
-                            user.target in BIN_CMP_OPS
-                            for user in node_ctx.current_node.users
-                        )
-                    ):
-                        opt_ctx.dtype = torch.int32
-
                     f32_iinfo = torch.finfo(torch.float32)
                     if dtype == torch.double:
                         if (
@@ -3024,61 +2982,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def index_expr(expr, dtype):
-                assert len(self.ranges) == len(self.itervars)
-
-                def can_use_int32():
-                    free_symbols = list(expr.free_symbols)
-                    sizes = {
-                        k: v
-                        for k, v in zip(self.itervars, self.ranges)
-                        if k in free_symbols
-                    }
-                    # Trivial case: Range empty
-                    if any(v == 0 for v in sizes.values()):
-                        return True
-
-                    vars_ranges = {
-                        k: ValueRanges(0, v - 1)
-                        for k, v in sizes.items()
-                        if not isinstance(v, sympy.Expr) or v.is_number
-                    }
-                    if not vars_ranges or len(vars_ranges) != len(free_symbols):
-                        i32_iinfo = torch.iinfo(torch.int32)
-                        return (
-                            expr.is_number
-                            and expr <= i32_iinfo.max
-                            and expr >= i32_iinfo.min
-                        )
-                    expr_ranges = bound_sympy(expr, vars_ranges)
-                    if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):  # type: ignore[arg-type]
-                        return False
-                    # If something takes the values 0..7, we will compare in the loop
-                    # x < 8. As such, for the loop not to overflow in the last iteration, we want
-                    # to check that expr_ranges.upper + 1 is representable as well
-                    return range_expressable_in_32_bits(
-                        ValueRanges(
-                            int(expr_ranges.lower), int(expr_ranges.upper) + 1  # type: ignore[arg-type]
-                        )
-                    )
-
-                with RecordOptimizationContext(__name__) as node_ctx:
-                    assert len(self.ranges) == len(self.itervars)
-                    opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
-                    assert opt_ctx
-                    if (
-                        dtype in [torch.int32, torch.int64]
-                        and can_use_int32()
-                        and all(
-                            user.target in BIN_CMP_OPS
-                            for user in node_ctx.current_node.users
-                        )
-                    ):
-                        opt_ctx.dtype = torch.int32
-                    else:
-                        self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
-
-                    tmp_var = self.cse.newvar()
-                    return tmp_var
+                return self.cse.newvar()
 
             @staticmethod
             def indirect_indexing(index_var, size, check=True):
