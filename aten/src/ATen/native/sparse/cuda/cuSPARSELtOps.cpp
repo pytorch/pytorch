@@ -28,7 +28,6 @@ namespace at::native {
 thread_local cusparseLtHandle_t handle;
 thread_local bool handle_initialized = false;
 
-// Look-up table for HIPSPARSELT data types
 #ifdef USE_ROCM
 std::mutex g_hipSparseLtSupportCacheMutex;
 static std::unordered_map<int, bool> g_hipSparseLtSupportCache;
@@ -58,7 +57,10 @@ static bool g_hipSparseLtSupportCache(int idx) {
 
 at::Tensor _cslt_compress(const Tensor& sparse_input)
 {
-    if (!handle_initialized){TORCH_CHECK
+    if (!handle_initialized){
+        TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
+        handle_initialized = true;
+    }
     // create sparse descriptor, dtype
     cusparseLtMatDescriptor_t sparse_input_descriptor;
     cudaDataType type;
@@ -68,7 +70,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         sparse_input.scalar_type()
     )
     {
-        case at::ScalarType::CharTORCH_CHECK:
+        case at::ScalarType::Char:
             type = CUDA_R_8I;
             compression_factor = 10;
             break;
@@ -336,8 +338,7 @@ at::Tensor res_out = (transpose_result) ? at::empty({n, m}, res_tensor_options)
       (transpose_result) ? m: n,
       16,
       output_type,
-      (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW
-      ));
+      (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
 
   // For float8, need fp16 C_descriptor, can't use FP8 for this matrix
   cusparseLtMatDescriptor_t C_descriptor;
