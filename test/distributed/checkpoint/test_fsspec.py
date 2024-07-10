@@ -70,7 +70,7 @@ class TestFSSpecNoDist(TestCase):
         with tempfile.TemporaryDirectory() as path:
             state_dict_to_save = MyTestModule().state_dict()
 
-            dcp.save_state_dict(
+            dcp.save(
                 state_dict=state_dict_to_save,
                 storage_writer=FsspecWriter(path),
                 no_dist=True,
@@ -85,7 +85,7 @@ class TestFSSpecNoDist(TestCase):
                 self.assertNotEqual(p1, p2)
 
             # Load from file without any resharding
-            dcp.load_state_dict(
+            dcp.load(
                 state_dict=state_dict_to_load_to,
                 storage_reader=FsspecReader(path),
                 no_dist=True,
@@ -121,7 +121,7 @@ class TestFSSpecWithDist(ShardedTensorTestBase):
                 "optim": FSDP.optim_state_dict(model, optim),
             }
 
-            dcp.save_state_dict(
+            dcp.save(
                 state_dict=state_dict,
                 storage_writer=FsspecWriter(CHECKPOINT_DIR),
                 planner=dcp.DefaultSavePlanner(),
@@ -143,7 +143,7 @@ class TestFSSpecWithDist(ShardedTensorTestBase):
                 "model": model_2.state_dict(),
             }
 
-            dcp.load_state_dict(
+            dcp.load(
                 state_dict=state_dict,
                 storage_reader=FsspecReader(CHECKPOINT_DIR),
                 planner=dcp.DefaultLoadPlanner(),
