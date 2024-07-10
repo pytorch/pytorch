@@ -3045,7 +3045,8 @@ class CppVecKernelChecker(CppVecKernel):
                 with RecordOptimizationContext(__name__) as node_ctx:
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
-                    assert dtype in [torch.int32, torch.int64]
+                    # index_expr of float32 in Background_Matting
+                    assert dtype in [torch.int32, torch.int64, torch.float32]
                     opt_ctx.dtype = dtype
                     tmp_var = self.cse.newvar()
                     return tmp_var
