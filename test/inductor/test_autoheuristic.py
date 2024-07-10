@@ -14,16 +14,7 @@ from torch._inductor.autoheuristic.autoheuristic import (
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_gpu_shared_memory
-from torch.testing._internal.common_utils import LazyVal
-from torch.testing._internal.inductor_utils import HAS_CUDA
-
-is_A100 = LazyVal(
-    lambda: torch.cuda.is_available() and get_gpu_shared_memory() == 166912
-)
-
-is_H100 = LazyVal(
-    lambda: torch.cuda.is_available() and get_gpu_shared_memory() == 232448
-)
+from torch.testing._internal.inductor_utils import IS_A100, IS_H100, HAS_CUDA
 
 
 class AutoHeuristicTest(TestCase):
@@ -120,14 +111,14 @@ class AutoHeuristicTest(TestCase):
             self.assertEqual("5,b,2", lines[3].rstrip())
             self.assertEqual("5,c,3", lines[4].rstrip())
 
-    @unittest.skipIf(not is_A100, "heuristic only run on A100")
+    @unittest.skipIf(not IS_A100, "heuristic only run on A100")
     @inductor_config.patch(autoheuristic_mode="USE_HEURISTIC")
     def test_autoheuristic_a100(self):
         # Make sure heuristic does not break anything
         # TODO (AlnisM): Find a way to check whether heuristic is used
         self.run_mm()
 
-    @unittest.skipIf(not is_H100, "heuristic only run on H100")
+    @unittest.skipIf(not IS_H100, "heuristic only run on H100")
     @inductor_config.patch(autoheuristic_mode="USE_HEURISTIC")
     def test_autoheuristic_h100(self):
         # Make sure heuristic does not break anything
