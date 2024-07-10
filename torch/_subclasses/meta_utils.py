@@ -327,6 +327,7 @@ class MetaTensorDescriber:
             is_parameter=isinstance(t, torch.nn.Parameter),
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
+            nested_int=torch.nested._internal.nested_tensor._tensor_symint_registry.get(t, None),
             is_functional=is_functional,
             layout=layout,
             device=t.device,
@@ -451,6 +452,8 @@ class MetaTensorDesc:
     is_gradtrackingtensor: bool = False
     is_view: bool = False
     is_nested: bool = False
+    # associated nested int for NJT metadata
+    nested_int: Optional[int] = None
     is_traceable_wrapper_subclass: bool = False
     is_functional: bool = False
     is_conj: bool = False
@@ -801,13 +804,16 @@ class MetaConverter:
                 # We are hitting plain meta_desc tensor so actually
                 # create a tensor here.
                 if t.attrs is None:
-                    r = callback(
-                        lambda: empty_create(
-                            t,
-                            source,
-                            symbolic_context,
+                    # NB: prefer using a cached memo entry if one exists
+                    r = self.get_tensor_memo(t)
+                    if r is None:
+                        r = callback(
+                            lambda: empty_create(
+                                t,
+                                source,
+                                symbolic_context,
+                            )
                         )
-                    )
                     if self.copy_data:
                         with torch.no_grad(), no_dispatch():
                             r.real_tensor = torch.empty_strided(
@@ -818,6 +824,7 @@ class MetaConverter:
                             )
                             assert t.data is not None
                             _safe_copy(r.real_tensor, t.data)
+                    r.nested_int = t.nested_int
                     return r
 
                 inner_tensors = {}
@@ -1559,6 +1566,8 @@ class MetaConverter:
 
             if t.is_parameter:
                 r._is_param = True
+
+            r.nested_int = t.nested_int
 
             self.set_tensor_memo(t, r)
 

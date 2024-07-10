@@ -286,6 +286,25 @@ class TensorPropertySource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class NestedIntSource(ChainedSource):
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        # This is wrong, when is this used?
+        return [
+            *self.base.reconstruct(codegen),
+            codegen.create_load_attr(self.prop),
+        ]
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"torch.nested._internal.nested_tensor.get_nested_symint({self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
 class NegateSource(ChainedSource):
     def __post_init__(self):
         assert self.base is not None
