@@ -1,17 +1,8 @@
 # mypy: allow-untyped-defs
 import torch
 
-from torch._export.db.case import export_case
 from functorch.experimental.control_flow import cond
 
-
-@export_case(
-    example_inputs=(torch.randn(6),),
-    tags={
-        "torch.cond",
-        "torch.dynamic-shape",
-    },
-)
 class CondBranchNonlocalVariables(torch.nn.Module):
     """
     The branch functions (`true_fn` and `false_fn`) passed to cond() must follow these rules:
@@ -43,9 +34,6 @@ class CondBranchNonlocalVariables(torch.nn.Module):
     NOTE: If the `pred` is test on a dim with batch size < 2, it will be specialized.
     """
 
-    def __init__(self):
-        super().__init__()
-
     def forward(self, x):
         my_tensor_var = x + 100
         my_primitive_var = 3.14
@@ -62,3 +50,10 @@ class CondBranchNonlocalVariables(torch.nn.Module):
             false_fn,
             [x, my_tensor_var, torch.tensor(my_primitive_var)],
         )
+
+example_args = (torch.randn(6),)
+tags = {
+    "torch.cond",
+    "torch.dynamic-shape",
+}
+model = CondBranchNonlocalVariables()
