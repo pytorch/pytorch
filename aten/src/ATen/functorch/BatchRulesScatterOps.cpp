@@ -377,7 +377,7 @@ namespace {
   // /aten/src/ATen/native/TensorAdvancedIndexing.cpp#L379-L405
   VmapDimVector get_indexed_shape(Tensor self, const torch::List<std::optional<at::Tensor>> &orig)
   {
-    at::native::checkIndexTensorTypes(orig);
+    at::native::checkIndexTensorTypes(orig, /*allow_int*/ true);
     // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
     auto indices = at::native::expandTensors(self, orig);
     // next broadcast all index tensors together
