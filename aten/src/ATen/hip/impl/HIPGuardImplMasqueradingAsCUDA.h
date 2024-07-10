@@ -330,7 +330,7 @@ struct OptionalHIPStreamGuardMasqueradingAsCUDA {
     if (r.has_value()) {
       return make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
     } else {
-      return nullopt;
+      return std::nullopt;
     }
   }
 
@@ -339,7 +339,7 @@ struct OptionalHIPStreamGuardMasqueradingAsCUDA {
     if (r.has_value()) {
       return make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
     } else {
-      return nullopt;
+      return std::nullopt;
     }
   }
 

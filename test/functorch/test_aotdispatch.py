@@ -947,6 +947,40 @@ def forward(self, primals_1):
         self.assertTrue(torch.allclose(x_nested_compile.grad, x_nested.grad))
         self.assertTrue(torch.allclose(custom_aa_compile.grad, custom_aa.grad))
 
+    @skipIfTorchDynamo("This test suite already uses dynamo")
+    def test_composite_impl_compile(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, a):
+                return self.linear(a)
+
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        fw_graph = self.verify_aot_autograd(Foo(), inp, test_mutation=True)
+        inp = [torch.ones(3, 3, requires_grad=False)]
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, primals_1, primals_2, primals_3):
+    t = torch.ops.aten.t.default(primals_1);  primals_1 = None
+    addmm = torch.ops.aten.addmm.default(primals_2, primals_3, t);  primals_2 = None
+    return [addmm, primals_3, t]""",
+        )
+
+        with torch.inference_mode():
+            fw_graph = self.verify_aot_autograd(Foo(), inp, test_mutation=True)
+            inp = [torch.ones(3, 3, requires_grad=False)]
+            self.assertExpectedInline(
+                fw_graph.code.strip(),
+                """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    addmm = torch.ops.aten.addmm.default(arg1_1, arg2_1, t);  arg1_1 = arg2_1 = t = None
+    return (addmm,)""",
+            )
+
     def test_outputs_are_aliased(self):
         # Tensor, None, int
         def f(a):
@@ -6236,35 +6270,10 @@ class MockFXGraphCache:
 # cache miss instead of cache hitting). They will be fixed in the PRs above this.
 FAILING_CACHE_TESTS = (
     # BypassAOTAutogradCache: unsupported nodes
-    "test_backward_mutation_data",
-    "test_backward_mutation_metadata",
-    "test_custom_autograd",
-    "test_inner_grad",
-    "test_input_mutation_set__nop",
-    "test_nonidempotent_amp",  # einsum
-    # Pickle error: OutputAliasInfo/functional tensor
-    "test_input_aliased_with_mutation_output_alias",
-    "test_input_data_and_metadata_mutation",
-    "test_input_mutation_aliases_and_output_alias",
-    "test_input_mutation_alias_everything",
-    "test_input_mutation_and_output_view",
-    "test_input_mutation_output_view_multiple",
+    "test_backward_mutation_data",  # Custom Autograd Function
+    "test_backward_mutation_metadata",  # Custom Autograd Function
+    "test_custom_autograd",  # Custom Autograd Function
     "test_input_output_aliase_custom_autograd_function",
-    "test_input_output_view_metadata_mutate_multiple",
-    "test_input_output_view_mutate_multiple",
-    "test_input_output_view_simple",
-    "test_output_aliases_intermediate_and_returned",
-    "test_output_aliases_intermediate_and_returned_different_grad",
-    "test_output_aliases_intermediate_and_returned_flipped",
-    "test_output_aliases_intermediate_multiple",
-    "test_output_aliases_intermediate_multiple_mixed",
-    "test_output_aliases_intermediate_returned_multiple_times",
-    "test_output_aliases_multiple_inputs_get_correct_one",
-    "test_output_all_alias_types",
-    "test_some_outputs_dont_require_grad_view",
-    "test_view_and_inplace_view",
-    "test_view_detach",
-    "test_some_output_requires_grad_input_doesnt",
 )
 
 
@@ -6302,7 +6311,11 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         )
 
     @torch._functorch.config.patch(
-        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+        {
+            "enable_autograd_cache": True,
+            "strict_autograd_cache": True,
+            "view_replay_for_aliased_outputs": False,
+        }
     )
     @torch._inductor.config.patch("fx_graph_cache", True)
     def verify_aot_autograd(
