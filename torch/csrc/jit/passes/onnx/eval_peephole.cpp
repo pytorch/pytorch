@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/torch.h>
 
+#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <algorithm>
 

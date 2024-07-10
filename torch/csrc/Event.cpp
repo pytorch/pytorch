@@ -87,7 +87,7 @@ static void THPEvent_dealloc(THPEvent* self) {
 
 static PyObject* THPEvent_get_device(THPEvent* self, void* unused) {
   HANDLE_TH_ERRORS
-  std::optional<at::Device> device = self->event.device();
+  at::optional<at::Device> device = self->event.device();
   if (!device) {
     Py_RETURN_NONE;
   }

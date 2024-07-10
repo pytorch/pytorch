@@ -48,9 +48,9 @@ Tensor& addmm_out(
       at::native::scalar_tensor(
         beta,
         self.scalar_type(),
-        std::nullopt,
+        c10::nullopt,
         at::kCPU,
-        std::nullopt
+        c10::nullopt
       )
     );
   }

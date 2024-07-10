@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
@@ -7,7 +8,6 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 
 #include <atomic>
-#include <optional>
 
 namespace torch {
 namespace distributed {
