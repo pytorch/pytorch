@@ -1452,6 +1452,7 @@ def _checkpoint_without_reentrant_generator(
         *args: Arguments to pass in to the given ``function``.
         **kwargs: Keyword arguments to pass into the given ``function``.
     """
+    import torch.nested._internal.nested_tensor
     unpack_error_cb = None
 
     if _checkpoint_debug_enabled if _checkpoint_debug_enabled is not None else debug:
@@ -1494,8 +1495,12 @@ def _checkpoint_without_reentrant_generator(
             had_device_in_fwd = True
             fwd_devices, fwd_device_states = get_device_states(*args)
 
+    forward_nt_counter = torch.nested._internal.nested_tensor._tensor_id_counter
+
     def recompute_fn(*inputs):
         kwargs, *args = inputs
+
+        torch.nested._internal.nested_tensor._tensor_id_counter = forward_nt_counter
         # This will be called later during recomputation. This wrapping enables
         # the necessary global state to be captured.
         rng_devices = []
