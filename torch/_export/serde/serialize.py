@@ -1859,8 +1859,6 @@ class GraphModuleDeserializer(metaclass=Final):
     def sync_fx_node(self, name: str, fx_node: torch.fx.Node):
         if name in self.serialized_name_to_node:
             raise SerializeError(f"Node {name} has already been deserialized before.")
-        # overwrite name
-        fx_node.name = name
         self.serialized_name_to_node[name] = fx_node
         assert "val" not in fx_node.meta
         fx_node.meta["val"] = self.serialized_name_to_meta[name]
@@ -2709,7 +2707,12 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
     sorted_ins = sorted(
         enumerate(zip(graph.inputs, signature.input_specs)), key=rank_input
     )
-    sorted_inputs, input_specs = zip(*(i for idx, i in sorted_ins))  # type: ignore[assignment]
+
+    if len(sorted_ins) > 0:
+        sorted_inputs, input_specs = zip(*(i for idx, i in sorted_ins))  # type: ignore[assignment]
+    else:
+        sorted_inputs = ()
+        input_specs = ()
 
     sorted_outs = sorted(
         enumerate(zip(graph.outputs, signature.output_specs)), key=rank_output

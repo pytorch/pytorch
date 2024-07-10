@@ -100,7 +100,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
 
   // default generator is always registered
   auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
-      c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
+      std::nullopt, cuda::detail::getDefaultCUDAGenerator());
   gen->register_graph(this);
 
   for (auto& [generator_state, wholegraph_increments] :

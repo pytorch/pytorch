@@ -21,7 +21,7 @@ class TORCH_API Function : public torch::jit::Function {
   Function(
       c10::QualifiedName name,
       Code code,
-      at::optional<c10::FunctionSchema> schema);
+      std::optional<c10::FunctionSchema> schema);
   void run(Stack& stack) override;
   at::IValue operator()(Stack& stack);
   void ensure_defined() override {}
@@ -72,7 +72,7 @@ class TORCH_API Function : public torch::jit::Function {
  private:
   c10::QualifiedName name_;
   Code code_;
-  at::optional<c10::FunctionSchema> schema_; // (byte-code version 4+)
+  std::optional<c10::FunctionSchema> schema_; // (byte-code version 4+)
 };
 
 std::optional<std::function<void(Stack&)>> makeOperatorFunction(
