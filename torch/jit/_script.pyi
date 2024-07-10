@@ -1,18 +1,6 @@
 # mypy: allow-untyped-defs
 # mypy: disable-error-code="type-arg"
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    overload,
-    Tuple,
-    Type,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, NamedTuple, overload, TypeVar
 from typing_extensions import Never, TypeAlias
 
 from _typeshed import Incomplete
@@ -36,6 +24,7 @@ from torch.jit._recursive import (
     ScriptMethodStub as ScriptMethodStub,
     wrap_cpp_module as wrap_cpp_module,
 )
+from torch.jit._serialization import validate_map_location as validate_map_location
 from torch.jit._state import (
     _enabled as _enabled,
     _set_jit_function_cache as _set_jit_function_cache,
@@ -59,8 +48,6 @@ from torch.package import (
     PackageImporter as PackageImporter,
 )
 from torch.utils import set_module as set_module
-
-from ._serialization import validate_map_location as validate_map_location
 
 ScriptFunction = torch._C.ScriptFunction
 
@@ -116,7 +103,8 @@ class ConstMap:
     def __getattr__(self, attr): ...
 
 def unpackage_script_module(
-    importer: PackageImporter, script_module_id: str
+    importer: PackageImporter,
+    script_module_id: str,
 ) -> torch.nn.Module: ...
 
 _magic_methods: Incomplete
@@ -126,7 +114,7 @@ class RecursiveScriptClass:
     _props: Incomplete
     def __init__(self, cpp_class) -> None: ...
     def __getattr__(self, attr): ...
-    def __setattr__(self, attr, value): ...
+    def __setattr__(self, attr, value) -> None: ...
     def forward_magic_method(self, method_name, *args, **kwargs): ...
     def __getstate__(self) -> None: ...
     def __iadd__(self, other): ...
@@ -138,7 +126,7 @@ class ScriptModule(Module, metaclass=ScriptMeta):
     def __init__(self) -> None: ...
     forward: Callable[..., Any]
     def __getattr__(self, attr): ...
-    def __setattr__(self, attr, value): ...
+    def __setattr__(self, attr, value) -> None: ...
     def define(self, src): ...
     def _replicate_for_data_parallel(self): ...
     def __reduce_package__(self, exporter: PackageExporter): ...
@@ -146,7 +134,7 @@ class ScriptModule(Module, metaclass=ScriptMeta):
     @property
     def code(self) -> str: ...
     @property
-    def code_with_constants(self) -> Tuple[str, ConstMap]: ...
+    def code_with_constants(self) -> tuple[str, ConstMap]: ...
     @property
     def graph(self) -> torch.Graph: ...
     @property
@@ -177,7 +165,7 @@ class RecursiveScriptModule(ScriptModule):
     def graph_for(self, *args, **kwargs): ...
     def define(self, src) -> None: ...
     def __getattr__(self, attr): ...
-    def __setattr__(self, attr, value): ...
+    def __setattr__(self, attr, value) -> None: ...
     def __copy__(self): ...
     def __deepcopy__(self, memo): ...
     def forward_magic_method(self, method_name, *args, **kwargs): ...
@@ -200,59 +188,59 @@ def create_script_dict(obj): ...
 def create_script_list(obj, type_hint: Incomplete | None = ...): ...
 @overload
 def script(
-    obj: Type[Module],
-    optimize: Optional[bool] = None,
+    obj: type[Module],
+    optimize: bool | None = None,
     _frames_up: int = 0,
-    _rcb: Optional[ResolutionCallback] = None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+    _rcb: ResolutionCallback | None = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> Never: ...
 @overload
 def script(  # type: ignore[misc]
-    obj: Dict,
-    optimize: Optional[bool] = None,
+    obj: dict,
+    optimize: bool | None = None,
     _frames_up: int = 0,
-    _rcb: Optional[ResolutionCallback] = None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+    _rcb: ResolutionCallback | None = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> torch.ScriptDict: ...
 @overload
 def script(  # type: ignore[misc]
-    obj: List,
-    optimize: Optional[bool] = None,
+    obj: list,
+    optimize: bool | None = None,
     _frames_up: int = 0,
-    _rcb: Optional[ResolutionCallback] = None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+    _rcb: ResolutionCallback | None = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> torch.ScriptList: ...
 @overload
 def script(  # type: ignore[misc]
     obj: Module,
-    optimize: Optional[bool] = None,
+    optimize: bool | None = None,
     _frames_up: int = 0,
-    _rcb: Optional[ResolutionCallback] = None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+    _rcb: ResolutionCallback | None = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> RecursiveScriptModule: ...
 @overload
 def script(  # type: ignore[misc]
     obj: _ClassVar,
-    optimize: Optional[bool] = None,
+    optimize: bool | None = None,
     _frames_up: int = 0,
-    _rcb: Optional[ResolutionCallback] = None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+    _rcb: ResolutionCallback | None = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> _ClassVar: ...
 @overload
 def script(  # type: ignore[misc]
     obj: Callable,
-    optimize: Optional[bool] = None,
+    optimize: bool | None = None,
     _frames_up: int = 0,
-    _rcb: Optional[ResolutionCallback] = None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+    _rcb: ResolutionCallback | None = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> ScriptFunction: ...
 @overload
 def script(
     obj: Any,
-    optimize: Optional[bool] = None,
+    optimize: bool | None = None,
     _frames_up: int = 0,
-    _rcb: Optional[ResolutionCallback] = None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+    _rcb: ResolutionCallback | None = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> RecursiveScriptClass: ...
 @overload
 def script(
@@ -260,7 +248,7 @@ def script(
     optimize: Incomplete | None = ...,
     _frames_up: int = ...,
     _rcb: Incomplete | None = ...,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = ...,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = ...,
 ): ...
 def _check_overload_defaults(impl_defaults, overload_defaults, loc) -> None: ...
 def _compile_function_with_overload(overload_fn, qual_name, impl_fn): ...
@@ -279,7 +267,10 @@ class _ScriptProfileColumn:
     offset: Incomplete
     rows: Incomplete
     def __init__(
-        self, header: str, alignment: int = ..., offset: int = ...
+        self,
+        header: str,
+        alignment: int = ...,
+        offset: int = ...,
     ) -> None: ...
     def add_row(self, lineno: int, value: Any): ...
     def materialize(self): ...
@@ -288,7 +279,9 @@ class _ScriptProfileTable:
     cols: Incomplete
     source_range: Incomplete
     def __init__(
-        self, cols: List[_ScriptProfileColumn], source_range: List[int]
+        self,
+        cols: list[_ScriptProfileColumn],
+        source_range: list[int],
     ) -> None: ...
     def dump_string(self): ...
 

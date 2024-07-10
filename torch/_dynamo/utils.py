@@ -102,6 +102,8 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 
 
+unpatched_nn_module_getattr = torch.nn.Module.__getattr__
+
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
 optimus_scuba_log: Dict[str, Any] = {}
 troubleshooting_url = (
@@ -576,6 +578,17 @@ def is_function(value):
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
+        ),
+    )
+
+
+def is_wrapper_or_member_descriptor(value):
+    return isinstance(
+        value,
+        (
+            types.MethodWrapperType,
+            types.WrapperDescriptorType,
+            types.MemberDescriptorType,
         ),
     )
 
