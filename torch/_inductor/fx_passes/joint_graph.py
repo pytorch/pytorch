@@ -224,6 +224,10 @@ class UniformValueConstantFolder(ConstantFolder):
             aten.permute,
         ]
 
+        self.indexing_op_packets = {
+            aten.slice,
+        }
+
     def _support_dynamic_shape(self):
         return True
 
@@ -245,12 +249,12 @@ class UniformValueConstantFolder(ConstantFolder):
     def _deduce_value(self, node: torch.fx.Node):
         # deduce value for full-like nodes
         # 1. for constructors, substitute value is a tensor of size [1]
-        # 2. for view ops, substitute value is the same as the input
+        # 2. for view ops/indexing, substitute value is the same as the input
         # 3. for pointwise ops, run node to get the substitute value
         # 4. deal with some special ops
         # otherwise, stop deduce value and return unknown value
 
-        # TODO: cat, indexing
+        # TODO: cat, more indexing
         # TODO - do on cpu to avoid syncs
 
         # single-elem attrs
@@ -268,13 +272,14 @@ class UniformValueConstantFolder(ConstantFolder):
             and node.target == aten.full.default
             and len(node.args) == 2
         ):
-            new_args = [[1], node.args[1]]
+            args, kwargs = self.fetch_args_kwargs_from_env(node)
+            new_args = [[1], args[1]]
             return aten.full.default(*new_args, **node.kwargs)
 
         # view ops, return input tensor, the first argument
-        if (
-            hasattr(node.target, "overloadpacket")
-            and node.target.overloadpacket in self.view_op_packets
+        if hasattr(node.target, "overloadpacket") and (
+            node.target.overloadpacket in self.view_op_packets
+            or node.target.overloadpacket in self.indexing_op_packets
         ):
             assert isinstance(node.args[0], torch.fx.Node)
             return self.env[node.args[0]]

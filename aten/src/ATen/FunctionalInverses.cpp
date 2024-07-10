@@ -321,35 +321,13 @@ Tensor FunctionalInverses::_nested_get_values_inverse(const Tensor& base, const 
   auto max_seqlen = at::_nested_get_max_seqlen(base);
   auto nt = at::_nested_view_from_jagged(
       mutated_view, offsets, dummy, lengths, ragged_idx,
-      (min_seqlen.defined() ? c10::optional<Tensor>(min_seqlen) : c10::nullopt),
-      (max_seqlen.defined() ? c10::optional<Tensor>(max_seqlen) : c10::nullopt));
+      (min_seqlen.defined() ? c10::optional<Tensor>(min_seqlen) : std::nullopt),
+      (max_seqlen.defined() ? c10::optional<Tensor>(max_seqlen) : std::nullopt));
 
   if (inverse_return_mode != InverseReturnMode::NeverView) {
     return nt;
   } else {
     return nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
-  }
-}
-
-Tensor FunctionalInverses::_nested_strided_to_jagged_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode) {
-  // Mutated view is a jagged NT
-  auto cpp_nt = at::_nested_jagged_to_strided(mutated_view);
-
-  if (inverse_return_mode != InverseReturnMode::NeverView) {
-    return cpp_nt;
-  } else {
-    return cpp_nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
-  }
-}
-
-Tensor FunctionalInverses::_nested_jagged_to_strided_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode) {
-  // Mutated view is a strided NT
-  auto python_nt = at::_nested_strided_to_jagged(mutated_view);
-
-  if (inverse_return_mode != InverseReturnMode::NeverView) {
-    return python_nt;
-  } else {
-    return python_nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
   }
 }
 
