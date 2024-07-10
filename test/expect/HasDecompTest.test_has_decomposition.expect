@@ -1295,16 +1295,8 @@ aten::split_copy.Tensor_out
 aten::squeeze_
 aten::squeeze_.dim
 aten::squeeze_.dims
-aten::squeeze_copy
-aten::squeeze_copy.dim
-aten::squeeze_copy.dim_out
-aten::squeeze_copy.dims
-aten::squeeze_copy.dims_out
-aten::squeeze_copy.out
 aten::sspaddmm.out
 aten::t_
-aten::t_copy
-aten::t_copy.out
 aten::to_mkldnn
 aten::to_mkldnn.out
 aten::to_padded_tensor
@@ -1312,8 +1304,6 @@ aten::to_padded_tensor.out
 aten::topk
 aten::topk.values
 aten::transpose_
-aten::transpose_copy.int
-aten::transpose_copy.int_out
 aten::triangular_solve
 aten::triangular_solve.X
 aten::unbind_copy.int
@@ -1327,8 +1317,6 @@ aten::unique_dim_consecutive.out
 aten::unsafe_split.Tensor_out
 aten::unsafe_split_with_sizes.out
 aten::unsqueeze_
-aten::unsqueeze_copy
-aten::unsqueeze_copy.out
 aten::upsample_bicubic2d_backward
 aten::upsample_bicubic2d_backward.grad_input
 aten::upsample_bilinear2d_backward
@@ -1353,10 +1341,6 @@ aten::view_as_complex_copy.out
 aten::view_as_real
 aten::view_as_real_copy
 aten::view_as_real_copy.out
-aten::view_copy
-aten::view_copy.dtype
-aten::view_copy.dtype_out
-aten::view_copy.out
 aten::zeros.names
 aten::zeros.names_out
 aten::zeros.out
