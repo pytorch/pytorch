@@ -20,12 +20,11 @@ from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+from torch.utils._sympy.value_ranges import ValueRanges
 from ..._dynamo.utils import counters
 
 from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
-from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
