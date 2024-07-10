@@ -1,7 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import MutableSet, Set as AbstractSet
-from typing import Any, cast, Iterable, Iterator, List, Optional, Tuple, Type, TypeVar
+from typing import (
+    Any,
+    cast,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+)
 
 T = TypeVar("T")
 T_co = TypeVar("T_co", covariant=True)
@@ -19,12 +30,17 @@ class OrderedSet(MutableSet[T]):
     def __init__(self, iterable: Optional[Iterable[T]] = None):
         self._dict: dict[T, None] = {}
         if iterable is not None:
-            self._dict = {k: None for k in iterable}
+            self._dict = dict.fromkeys(iterable, None)
+
+    @staticmethod
+    def from_dict(dict_inp: Dict[T, None]) -> OrderedSet[T]:
+        s: OrderedSet[T] = OrderedSet()
+        s._dict = dict_inp
+        return s
 
     #
     # Required overriden abstract methods
     #
-
     def __contains__(self, elem: object) -> bool:
         return elem in self._dict
 
@@ -66,12 +82,11 @@ class OrderedSet(MutableSet[T]):
         return self._dict.popitem()[0]
 
     def copy(self) -> OrderedSet[T]:
-        return self.__class__(self)
+        return OrderedSet.from_dict(self._dict.copy())
 
     def difference(self, *others: Iterable[T]) -> OrderedSet[T]:
-        res = self if len(others) else self.copy()
-        for other in others:
-            res = res - other  # type: ignore[operator, arg-type]
+        res = self.copy()
+        res.difference_update(*others)
         return res
 
     def difference_update(self, *others: Iterable[T]) -> None:
@@ -108,21 +123,41 @@ class OrderedSet(MutableSet[T]):
     def union(self, *others: Iterable[T]) -> OrderedSet[T]:
         res = self.copy()
         for other in others:
-            if other is not self:
-                res |= other  # type: ignore[operator, arg-type]
+            if other is self:
+                continue
+            res |= other  # type: ignore[operator, arg-type]
         return res
 
     # Specify here for correct type inference, otherwise would
     # return AbstractSet[T]
-    # Specify here for correct type inference, otherwise would
-    # return AbstractSet[T]
     def __sub__(self, other: AbstractSet[T_co]) -> OrderedSet[T]:
-        return cast(OrderedSet[T], super().__sub__(other))
+        res = self.copy()
+        res -= other
+        return res
+
+    def __ior__(self, other: Iterable[T]) -> OrderedSet[T]:  # type: ignore[misc, override]   # noqa: PYI034
+        if isinstance(other, OrderedSet):
+            self._dict.update(other._dict)
+            return self
+        return super().__ior__(other)  # type: ignore[arg-type]
+
+    def __eq__(self, other: AbstractSet[T]) -> bool:  # type: ignore[misc, override]
+        if isinstance(other, OrderedSet):
+            return self._dict == other._dict
+        return super().__eq__(other)  # type: ignore[arg-type]
+
+    def __ne__(self, other: AbstractSet[T]) -> bool:  # type: ignore[misc, override]
+        if isinstance(other, OrderedSet):
+            return self._dict != other._dict
+        return super().__ne__(other)  # type: ignore[arg-type]
 
     def __or__(self, other: AbstractSet[T_co]) -> OrderedSet[T]:
         return cast(OrderedSet[T], super().__or__(other))
 
     def __and__(self, other: AbstractSet[T_co]) -> OrderedSet[T]:
+        # MutableSet impl will iterate over other, iter over smaller of two sets
+        if isinstance(other, OrderedSet) and len(self) < len(other):
+            return other & self
         return cast(OrderedSet[T], super().__and__(other))
 
     def __xor__(self, other: AbstractSet[T_co]) -> OrderedSet[T]:
@@ -135,7 +170,7 @@ class OrderedSet(MutableSet[T]):
         return list(self._dict.keys())
 
     def __setstate__(self, state: List[T]) -> None:
-        self._dict = {k: None for k in state}
+        self._dict = dict.fromkeys(state, None)
 
     def __reduce__(self) -> Tuple[Type[OrderedSet[T]], Tuple[List[T]]]:
         return (OrderedSet, (list(self),))
