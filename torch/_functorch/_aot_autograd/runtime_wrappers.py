@@ -638,7 +638,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
 
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
-            unwrapped_args = unwrap_tensor_subclasses(
+            unwrapped_args, _ = unwrap_tensor_subclasses(
                 args, is_joint_structure=self.trace_joint
             )
             args.clear()
@@ -1828,7 +1828,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         unwrap_tensor_subclasses(
                             tangents,
                             is_joint_structure=False,
-                        )
+                        )[0]
                     )
                     assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
@@ -1842,7 +1842,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         else t
                         for i, t in enumerate(all_args)
                     ]
-                    all_args = unwrap_tensor_subclasses(
+                    all_args, _ = unwrap_tensor_subclasses(
                         all_args, is_joint_structure=False
                     )
                     tangents_start_idx = len(all_args) - len_tangents - len(rng_args)

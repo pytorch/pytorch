@@ -109,25 +109,41 @@ def create_subclass_meta(
 def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
     def concat_inner_tensors_from_subclasses(xs):
         xs_inner = []
-        for x in xs:
+        index_remap = []
+        for i, x in enumerate(xs):
+            num_indices = 1
             if is_traceable_wrapper_subclass(x):
-                xs_inner.extend(get_plain_tensors(x))
+                tensors = get_plain_tensors(x)
+                num_indices = len(tensors)
+                xs_inner.extend(tensors)
             else:
                 xs_inner.append(x)
-        return xs_inner
+
+            index_remap.extend([i] * num_indices)
+
+        return xs_inner, index_remap
 
     if is_joint_structure:
         assert isinstance(wrapped_args, tuple) and len(wrapped_args) == 2
         assert isinstance(wrapped_args[0], (tuple, list)) and isinstance(
             wrapped_args[1], (tuple, list)
         )
-        unwrapped_args_fw = concat_inner_tensors_from_subclasses(wrapped_args[0])
-        unwrapped_args_tangents = concat_inner_tensors_from_subclasses(wrapped_args[1])
-        unwrapped_args = (unwrapped_args_fw, unwrapped_args_tangents)
+        unwrapped_args_fw, index_remap_0 = concat_inner_tensors_from_subclasses(
+            wrapped_args[0]
+        )
+        unwrapped_args_tangents, index_remap_1 = concat_inner_tensors_from_subclasses(
+            wrapped_args[1]
+        )
+        unwrapped_args = (
+            (unwrapped_args_fw, index_remap_0),
+            (unwrapped_args_tangents, index_remap_1),
+        )
     else:
         assert isinstance(wrapped_args, (list, tuple))
-        unwrapped_args_fw = concat_inner_tensors_from_subclasses(wrapped_args)
-        unwrapped_args = unwrapped_args_fw
+        unwrapped_args_fw, index_remap = concat_inner_tensors_from_subclasses(
+            wrapped_args
+        )
+        unwrapped_args = unwrapped_args_fw, index_remap
     return unwrapped_args
 
 
