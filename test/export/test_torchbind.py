@@ -980,7 +980,7 @@ def forward(self, tq, x):
 def forward(self, token, tq, x):
     with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.queue_push.default, tq, x);  token = x = None
     getitem = with_effects[0];  with_effects = None
-    return (getitem, tq)""",
+    return (getitem, tq)""",  # noqa: B950
         )
         self.assertExpectedInline(
             str(ep.graph_module.graph).strip(),
