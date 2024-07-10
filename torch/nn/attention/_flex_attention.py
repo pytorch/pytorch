@@ -473,7 +473,7 @@ def _create_mask_from_mask_fn(
 def _create_block_mask_inner(fn, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE):
     if len(inspect.signature(fn).parameters) == len(get_args(_score_mod_signature)[0]):
         # fn is a score_mod function
-        mask_fn = _no_mask
+        mask_fn = None
         mask_tensor = _create_mask_from_score_mod(
             fn, B, H, M, N, device, _compiled=True
         )
@@ -483,7 +483,10 @@ def _create_block_mask_inner(fn, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
         mask_tensor = _create_mask_from_mask_fn(fn, B, H, M, N, device, _compiled=True)
     # mask = _create_mask_from_score_mod(score_mod, B, H, M, N, device, _compiled=True)
     full_block_mask, partial_block_mask = _convert_mask_to_block_mask(
-        mask_tensor, KV_BLOCK_SIZE=KV_BLOCK_SIZE, Q_BLOCK_SIZE=Q_BLOCK_SIZE
+        mask_tensor,
+        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
+        Q_BLOCK_SIZE=Q_BLOCK_SIZE,
+        mask_fn=mask_fn,
     )
     if partial_block_mask is not None:
         partial_block_mask = partial_block_mask.to(dtype=torch.int8)
