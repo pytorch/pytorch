@@ -81,6 +81,7 @@ class SymNode:
         self._expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
+
         # What's the difference between hint and constant?
         #
         # - A constant is known to be invariant across invocations of the model;
@@ -107,18 +108,30 @@ class SymNode:
         # unbacked symint that a hint was now possible, but as we added more
         # potential refinements to unbacked symints this got harder to keep
         # in sync, so we've deleted it for now.)
-        if hint is not None:
-            assert type(hint) is pytype or type(hint) is _to_symtype(pytype), (
-                "Cannot create SymNode of type "
-                f"{pytype} with incompatible hint of type {type(hint)}"
-            )
-        else:
+
+        def compute_hint():
             # This occasionally gets exercised by, e.g.,
             # convert_shape_to_symint.  It's just a nicety so you don't HAVE
             # to have a correct hint on hand when making a SymNode.
             hint = self.shape_env._maybe_evaluate_static(self.expr, compute_hint=True)
             if hint is not None:
                 hint = self.pytype(hint) if not isinstance(hint, SymTypes) else hint
+            return hint
+
+        if hint is not None:
+            assert type(hint) is pytype or type(hint) is _to_symtype(pytype), (
+                "Cannot create SymNode of type "
+                f"{pytype} with incompatible hint of type {type(hint)}"
+            )
+            if self.shape_env._translation_validation_enabled:
+                # This is technically not TV, but this assert is expensive so
+                # let's only do it when we're already doing expensive things
+                computed_hint = compute_hint()
+                assert (
+                    hint == computed_hint
+                ), f"{hint} != {computed_hint} (for {self.expr})"
+        else:
+            hint = compute_hint()
         self._hint = hint
         self.constant: Optional[Union[int, float, bool]] = constant
 
