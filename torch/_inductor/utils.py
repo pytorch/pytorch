@@ -739,7 +739,7 @@ def clear_inductor_caches():
 
 
 @contextlib.contextmanager
-def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
+def fresh_inductor_cache(cache_entries=None):
     """
     Contextmanager that provides a clean tmp cachedir for inductor.
 
@@ -748,7 +748,7 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
     """
     clear_inductor_caches()
 
-    inductor_cache_dir = tempfile.mkdtemp(dir=dir)
+    inductor_cache_dir = tempfile.mkdtemp()
     try:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
@@ -768,8 +768,7 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
                                 if ".lock" not in f
                             }
                         )
-        if delete:
-            shutil.rmtree(inductor_cache_dir)
+        shutil.rmtree(inductor_cache_dir)
     except Exception:
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
@@ -1013,15 +1012,11 @@ def _use_autotune_backend(backend: str) -> bool:
 
 
 def use_triton_template(layout, *, enable_int32=False):
-    from .codegen.common import BackendFeature, has_backend_feature
-
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
-    return (
-        _use_template_for_cuda(layout, layout_dtypes)
-        and _use_autotune_backend("TRITON")
-        and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
+    return _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
+        "TRITON"
     )
 
 
@@ -1146,7 +1141,6 @@ def _use_template_for_cpu(layout):
 def use_cpp_packed_gemm_template(layout, mat1, mat2):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
-    from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
     from .kernel.mm_common import mm_args
 
     if not _use_template_for_cpu(layout) or not _use_autotune_backend("CPP"):
@@ -1155,26 +1149,20 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     if not config.cpp.weight_prepack:
         return False
 
-    int8_gemm = mat1.get_dtype() == torch.uint8
-    layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
-    m, n, k, layout, mat1, mat2 = mm_args(
-        mat1, mat2, out_dtype=layout.dtype if int8_gemm else None
-    )
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half]
+    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2)
     # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
         return False
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
-
-    output_dtype, _ = get_gemm_template_output_and_compute_dtype(mat1.get_dtype())
     micro_gemm = create_micro_gemm(
         "micro_gemm",
         m,
         n,
         k,
-        input_dtype=mat1.get_dtype(),
-        input2_dtype=mat2.get_dtype(),
-        output_dtype=output_dtype,
+        input_dtype=layout.dtype,
+        output_dtype=torch.float,
         num_threads=parallel_num_threads(),
     )
     # TODO(jgong5): support n % n_block_size != 0

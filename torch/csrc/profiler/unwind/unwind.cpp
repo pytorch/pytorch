@@ -232,7 +232,7 @@ struct UnwindCache {
   const LibraryInfo& libraryFor(uint64_t addr) {
     auto* r = findLibraryFor(addr);
     if (!r) {
-      for ([[maybe_unused]] const auto& l : libraries_with_no_unwind_) {
+      for (const auto& l : libraries_with_no_unwind_) {
         TORCH_WARN("Did not find a PT_GNU_EH_FRAME segment for ", l);
       }
       libraries_with_no_unwind_.clear();

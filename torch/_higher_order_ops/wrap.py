@@ -3,8 +3,6 @@ import inspect
 import itertools
 import logging
 
-from torch._logging import warning_once
-
 from torch._ops import HigherOrderOperator
 from torch.utils.checkpoint import checkpoint, CheckpointPolicy
 
@@ -172,12 +170,11 @@ class TagActivationCheckpoint(HigherOrderOperator):
         from torch.fx import Interpreter
 
         if "_checkpoint_context_fn" in gmod.meta:
-            warning_once(
-                log,
+            log.warning(
                 """
 Detected that context_fn is passed to torch.utils.checkpoint under torch.compile.
 Please make sure the checkpointed region does not contain in-place ops (e.g. torch.relu_).
-""",
+"""
             )
             # use_reentrant is set to False because this op is going to be traced.
             # And we ensure that AOT Autograd traces through the non reentrant

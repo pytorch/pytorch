@@ -106,7 +106,7 @@ doctr_det_predictor,pass,5
 
 
 
-doctr_reco_predictor,pass,4
+doctr_reco_predictor,fail_accuracy,4
 
 
 

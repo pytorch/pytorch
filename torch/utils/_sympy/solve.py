@@ -95,9 +95,10 @@ def try_solve(
 
 
 def _try_isolate_lhs(
-    e: sympy.Basic, thing: sympy.Basic, floordiv_inequality: bool
+    expr: sympy.Basic, thing: sympy.Basic, floordiv_inequality: bool
 ) -> sympy.Basic:
-    op = type(e)
+    e = expr
+    op = type(expr)
 
     if isinstance(e, sympy.Rel):
         # Move any constants in the left-hand side to the right-hand side.
@@ -106,7 +107,7 @@ def _try_isolate_lhs(
             if isinstance(e.lhs, sympy.Add)
             else 0
         )
-        e = op(e.lhs - lhs_not_thing, e.rhs - lhs_not_thing)  # type: ignore[attr-defined]
+        e = op(expr.lhs - lhs_not_thing, expr.rhs - lhs_not_thing)  # type: ignore[attr-defined]
 
     # Divide both sides by the factors that don't contain thing.
     if isinstance(e, sympy.Rel) and isinstance(e.lhs, sympy.Mul):
@@ -145,7 +146,7 @@ def _try_isolate_lhs(
     ):
         # a // b == expr
         # => a >= (b * expr) and a < (b * (expr + 1))
-        if isinstance(e, sympy.Eq):
+        if isinstance(expr, sympy.Eq):
             numerator, denominator = e.lhs.args
             return sympy.And(
                 sympy.Ge(numerator, (e.rhs * denominator)),  # type: ignore[arg-type]
@@ -153,7 +154,7 @@ def _try_isolate_lhs(
             )
         # a // b != expr
         # => a < (b * expr) or a >= (b * (expr + 1))
-        if isinstance(e, sympy.Ne):
+        if isinstance(expr, sympy.Ne):
             numerator, denominator = e.lhs.args
             return sympy.Or(
                 sympy.Lt(numerator, (e.rhs * denominator)),  # type: ignore[arg-type]
@@ -163,13 +164,13 @@ def _try_isolate_lhs(
         # Note: we only have this information for constants.
         # a // b > expr  => a >= b * (expr + 1)
         # a // b >= expr => a >= b * expr
-        if isinstance(e, (sympy.Gt, sympy.Ge)):
-            quotient = e.rhs if isinstance(e, sympy.Ge) else (e.rhs + 1)  # type: ignore[arg-type]
+        if isinstance(expr, (sympy.Gt, sympy.Ge)):
+            quotient = e.rhs if isinstance(expr, sympy.Ge) else (e.rhs + 1)  # type: ignore[arg-type]
             return sympy.Ge(e.lhs.args[0], (quotient * e.lhs.args[1]))  # type: ignore[arg-type]
         # a // b < expr  => a < b * expr
         # a // b <= expr => a < b * (expr + 1)
-        if isinstance(e, (sympy.Lt, sympy.Le)):
-            quotient = e.rhs if isinstance(e, sympy.Lt) else (e.rhs + 1)  # type: ignore[arg-type]
+        if isinstance(expr, (sympy.Lt, sympy.Le)):
+            quotient = e.rhs if isinstance(expr, sympy.Lt) else (e.rhs + 1)  # type: ignore[arg-type]
             return sympy.Lt(e.lhs.args[0], (quotient * e.lhs.args[1]))  # type: ignore[arg-type]
 
     return e

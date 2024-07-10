@@ -36,24 +36,33 @@ jobs:
           ref: v0.0.2
           path: llm-target-determinator
 
-      - name: Setup miniconda
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+      - name: Setup Conda
+        uses: conda-incubator/setup-miniconda@v2.1.1
         with:
-          python-version: "3.9"
+          miniconda-version: "py39_4.12.0"
+          python-version: 3.9
 
-      - name: Install requirements
+      - name: Install Requirements
         shell: bash -l {0}
         run: |
           set -euxo pipefail
-          ${CONDA_RUN} pip install -r llm-target-determinator/requirements.txt
-          cd "${GITHUB_WORKSPACE}/codellama"
-          ${CONDA_RUN} pip install -e .
+          conda create \
+            --yes \
+            --quiet \
+            --name "tdenv" \
+            "python=3.9"
+          conda activate tdenv
+          cd "${GITHUB_WORKSPACE}/llm-target-determinator"
+          pip install -r requirements.txt
+          cd ../codellama
+          pip install -e .
 
       - name: Fetch CodeLlama Checkpoint
         shell: bash -l {0}
         run: |
           set -euxo pipefail
-          cd "${GITHUB_WORKSPACE}/codellama"
+          conda activate tdenv
+          cd codellama/
           mkdir "CodeLlama-7b-Python"
           aws s3 cp "s3://target-determinator-assets/CodeLlama-7b-Python" "CodeLlama-7b-Python" --recursive --no-progress
 
@@ -66,7 +75,7 @@ jobs:
           shell: bash
           command: |
             set -euxo pipefail
-            ${CONDA_RUN} python -m pip install awscli==1.29.40
+            python3 -m pip install awscli==1.29.40
             cd "${GITHUB_WORKSPACE}"/llm-target-determinator/assets
             aws s3 cp "s3://target-determinator-assets/indexes/latest" . --recursive
 
@@ -79,8 +88,9 @@ jobs:
         shell: bash -l {0}
         run: |
           set -euxo pipefail
+          conda activate tdenv
           cd "${GITHUB_WORKSPACE}"/llm-target-determinator
-          ${CONDA_RUN} torchrun \
+          torchrun \
             --standalone \
             --nnodes=1 \
             --nproc-per-node=1 \

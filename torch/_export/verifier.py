@@ -198,8 +198,7 @@ class Verifier(metaclass=_VerifierMeta):
 
             if isinstance(op, OpOverload):
                 # All ops functional
-                # TODO (tmanlaibaatar) more proper way is needed here
-                if self.dialect != "TRAINING" and not is_functional(op):
+                if not is_functional(op):
                     raise SpecViolationError(
                         f"operator '{op}' is not functional"
                     )
@@ -264,10 +263,6 @@ class Verifier(metaclass=_VerifierMeta):
                 #     _check_flattened_outputs()
 
         self.check_additional(gm)
-
-
-class TrainingIRVerifier(Verifier):
-    dialect = "TRAINING"
 
 
 def _verify_exported_program_signature(exported_program) -> None:

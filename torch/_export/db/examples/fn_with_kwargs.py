@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
 import torch
 
+from torch._export.db.case import ExportArgs
+
 class FnWithKwargs(torch.nn.Module):
     """
     Keyword arguments are not supported at the moment.
@@ -16,15 +18,12 @@ class FnWithKwargs(torch.nn.Module):
         out = out * mykwargs["input0"] * mykwargs["input1"]
         return out
 
-example_args = (
+example_inputs = ExportArgs(
     torch.randn(4),
     (torch.randn(4), torch.randn(4)),
-    *[torch.randn(4), torch.randn(4)]
+    *[torch.randn(4), torch.randn(4)],
+    mykw0=torch.randn(4),
+    input0=torch.randn(4), input1=torch.randn(4)
 )
-example_kwargs = {
-    "mykw0": torch.randn(4),
-    "input0": torch.randn(4),
-    "input1": torch.randn(4),
-}
 tags = {"python.data-structure"}
 model = FnWithKwargs()

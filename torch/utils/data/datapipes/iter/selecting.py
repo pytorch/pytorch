@@ -2,24 +2,23 @@
 from typing import Callable, Iterator, Tuple, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
-from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.datapipe import IterDataPipe
+from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.utils.common import (
     _check_unpickable_fn,
     StreamWrapper,
-    validate_input_col,
+    validate_input_col
 )
 
 
-__all__ = ["FilterIterDataPipe"]
+__all__ = ["FilterIterDataPipe", ]
+
+T = TypeVar('T')
+T_co = TypeVar('T_co', covariant=True)
 
 
-_T = TypeVar("_T")
-_T_co = TypeVar("_T_co", covariant=True)
-
-
-@functional_datapipe("filter")
-class FilterIterDataPipe(IterDataPipe[_T_co]):
+@functional_datapipe('filter')
+class FilterIterDataPipe(IterDataPipe[T_co]):
     r"""
     Filters out elements from the source datapipe according to input ``filter_fn`` (functional name: ``filter``).
 
@@ -43,12 +42,12 @@ class FilterIterDataPipe(IterDataPipe[_T_co]):
         [0, 2, 4]
     """
 
-    datapipe: IterDataPipe[_T_co]
+    datapipe: IterDataPipe[T_co]
     filter_fn: Callable
 
     def __init__(
         self,
-        datapipe: IterDataPipe[_T_co],
+        datapipe: IterDataPipe[T_co],
         filter_fn: Callable,
         input_col=None,
     ) -> None:
@@ -70,7 +69,7 @@ class FilterIterDataPipe(IterDataPipe[_T_co]):
         else:
             return self.filter_fn(data[self.input_col])
 
-    def __iter__(self) -> Iterator[_T_co]:
+    def __iter__(self) -> Iterator[T_co]:
         for data in self.datapipe:
             condition, filtered = self._returnIfTrue(data)
             if condition:
@@ -78,7 +77,7 @@ class FilterIterDataPipe(IterDataPipe[_T_co]):
             else:
                 StreamWrapper.close_streams(data)
 
-    def _returnIfTrue(self, data: _T) -> Tuple[bool, _T]:
+    def _returnIfTrue(self, data: T) -> Tuple[bool, T]:
         condition = self._apply_filter_fn(data)
 
         if df_wrapper.is_column(condition):
@@ -93,9 +92,6 @@ class FilterIterDataPipe(IterDataPipe[_T_co]):
                 return False, None  # type: ignore[return-value]
 
         if not isinstance(condition, bool):
-            raise ValueError(
-                "Boolean output is required for `filter_fn` of FilterIterDataPipe, got",
-                type(condition),
-            )
+            raise ValueError("Boolean output is required for `filter_fn` of FilterIterDataPipe, got", type(condition))
 
         return condition, data

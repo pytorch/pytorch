@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 import re
-from typing import Mapping, Sequence
+from typing import Mapping, Match, Optional, Sequence
 
 
 # match $identifier or ${identifier} and replace with value in env
@@ -22,7 +20,7 @@ class CodeTemplate:
     filename: str
 
     @staticmethod
-    def from_file(filename: str) -> CodeTemplate:
+    def from_file(filename: str) -> "CodeTemplate":
         with open(filename) as f:
             return CodeTemplate(f.read(), filename)
 
@@ -31,7 +29,7 @@ class CodeTemplate:
         self.filename = filename
 
     def substitute(
-        self, env: Mapping[str, object] | None = None, **kwargs: object
+        self, env: Optional[Mapping[str, object]] = None, **kwargs: object
     ) -> str:
         if env is None:
             env = {}
@@ -45,7 +43,7 @@ class CodeTemplate:
                 [indent + l + "\n" for e in v for l in str(e).splitlines()]
             ).rstrip()
 
-        def replace(match: re.Match[str]) -> str:
+        def replace(match: Match[str]) -> str:
             indent = match.group(1)
             key = match.group(2)
             comma_before = ""

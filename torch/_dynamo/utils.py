@@ -582,17 +582,6 @@ def is_function(value):
     )
 
 
-def is_wrapper_or_member_descriptor(value):
-    return isinstance(
-        value,
-        (
-            types.MethodWrapperType,
-            types.WrapperDescriptorType,
-            types.MemberDescriptorType,
-        ),
-    )
-
-
 def unwrap_if_wrapper(fn):
     return unwrap_with_attr_name_if_wrapper(fn)[0]
 

@@ -218,12 +218,6 @@ class TimmRunner(BenchmarkRunner):
             "convit_base",
         }
 
-    @property
-    def inline_inbuilt_nn_modules_models(self):
-        return {
-            "lcnet_050",
-        }
-
     @download_retry_decorator
     def _download_model(self, model_name):
         model = create_model(
@@ -318,8 +312,8 @@ class TimmRunner(BenchmarkRunner):
             if index < start or index >= end:
                 continue
             if (
-                not re.search("|".join(args.filter), model_name, re.IGNORECASE)
-                or re.search("|".join(args.exclude), model_name, re.IGNORECASE)
+                not re.search("|".join(args.filter), model_name, re.I)
+                or re.search("|".join(args.exclude), model_name, re.I)
                 or model_name in args.exclude_exact
                 or model_name in self.skip_models
             ):

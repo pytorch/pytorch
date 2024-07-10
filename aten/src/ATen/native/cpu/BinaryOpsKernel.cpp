@@ -248,12 +248,8 @@ inline Vectorized<scalar_t> div_floor_floating_vec(
     const Vectorized<scalar_t>& a,
     const Vectorized<scalar_t>& b) {
   using vec_t = Vectorized<scalar_t>;
-  const auto basic_div = a / b;
-  vec_t inf(std::numeric_limits<scalar_t>::infinity());
   auto mod = a.fmod(b);
-  // Fixup for a case that isn't properly handled by Sleef_fmod
-  auto floor = vec_t::blendv(a - mod, a, (basic_div.abs() == inf) & (a.abs() != inf));
-  auto div = floor / b;
+  auto div = (a - mod) / b;
   const auto zero = vec_t(0);
   auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
   const auto one = vec_t(1);
@@ -261,6 +257,7 @@ inline Vectorized<scalar_t> div_floor_floating_vec(
   auto floordiv = div.floor();
   mask = (div - floordiv) > vec_t(0.5);
   floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
+  const auto basic_div = a / b;
   floordiv = vec_t::blendv(floordiv, zero.copysign(basic_div), div == zero);
   floordiv = vec_t::blendv(floordiv, basic_div, b == zero);
   return floordiv;

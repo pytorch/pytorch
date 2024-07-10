@@ -25,7 +25,10 @@ jobs:
 
   upload-test-stats:
     needs: get_workflow_conclusion
-    if: github.repository_owner == 'pytorch'
+    if:
+      github.repository_owner == 'pytorch' &&
+      (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure' ||
+      needs.get_workflow_conclusion.outputs.conclusion == 'success' || needs.get_workflow_conclusion.outputs.conclusion == 'failure')
     runs-on: ubuntu-22.04
     environment: upload-stats
     name: Upload test stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}

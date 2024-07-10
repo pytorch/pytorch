@@ -222,8 +222,6 @@ function checkout_install_torchbench() {
     # to install and test other models
     python install.py --continue_on_fail
   fi
-  echo "Print all dependencies after TorchBench is installed"
-  python -mpip freeze
   popd
 }
 

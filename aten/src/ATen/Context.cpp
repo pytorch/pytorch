@@ -153,13 +153,6 @@ void Context::setSDPUseCuDNN(bool e) {
   enabled_cudnnSDP = e;
 }
 
-void Context::setSDPUseOverrideable(bool e) {
-  enabled_overrideable = e;
-}
-
-bool Context::userEnabledOverrideableSDP() const {
-  return enabled_overrideable;
-}
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";

@@ -1,10 +1,8 @@
-from __future__ import annotations
-
 import json
 import subprocess
 import sys
 from enum import Enum
-from typing import NamedTuple
+from typing import NamedTuple, Optional, Tuple
 
 
 LINTER_CODE = "LINTRUNNER_VERSION"
@@ -18,18 +16,18 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str | None
-    line: int | None
-    char: int | None
+    path: Optional[str]
+    line: Optional[int]
+    char: Optional[int]
     code: str
     severity: LintSeverity
     name: str
-    original: str | None
-    replacement: str | None
-    description: str | None
+    original: Optional[str]
+    replacement: Optional[str]
+    description: Optional[str]
 
 
-def toVersionString(version_tuple: tuple[int, int, int]) -> str:
+def toVersionString(version_tuple: Tuple[int, int, int]) -> str:
     return ".".join(str(x) for x in version_tuple)
 
 

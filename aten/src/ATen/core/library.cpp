@@ -27,7 +27,6 @@ namespace {
 #endif
   }
 
-#ifndef STRIP_ERROR_MESSAGES
   const char* toString(Library::Kind kind) {
     switch (kind) {
       case Library::DEF:
@@ -39,7 +38,6 @@ namespace {
     }
     return "(unknown)";
   }
-#endif
 
   constexpr auto CatchAll = c10::DispatchKey::CatchAll;
 } // anonymous namespace

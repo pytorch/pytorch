@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 import concurrent.futures
 import json
@@ -13,7 +11,7 @@ import time
 from enum import Enum
 from pathlib import Path
 from sysconfig import get_paths as gp
-from typing import Any, NamedTuple
+from typing import Any, List, NamedTuple, Optional, Pattern
 
 
 # PyTorch directory root
@@ -51,15 +49,15 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str | None
-    line: int | None
-    char: int | None
+    path: Optional[str]
+    line: Optional[int]
+    char: Optional[int]
     code: str
     severity: LintSeverity
     name: str
-    original: str | None
-    replacement: str | None
-    description: str | None
+    original: Optional[str]
+    replacement: Optional[str]
+    description: Optional[str]
 
 
 def as_posix(name: str) -> str:
@@ -67,7 +65,7 @@ def as_posix(name: str) -> str:
 
 
 # c10/core/DispatchKey.cpp:281:26: error: 'k' used after it was moved [bugprone-use-after-move]
-RESULTS_RE: re.Pattern[str] = re.compile(
+RESULTS_RE: Pattern[str] = re.compile(
     r"""(?mx)
     ^
     (?P<file>.*?):
@@ -82,8 +80,8 @@ RESULTS_RE: re.Pattern[str] = re.compile(
 
 
 def run_command(
-    args: list[str],
-) -> subprocess.CompletedProcess[bytes]:
+    args: List[str],
+) -> "subprocess.CompletedProcess[bytes]":
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
@@ -105,7 +103,7 @@ severities = {
 }
 
 
-def clang_search_dirs() -> list[str]:
+def clang_search_dirs() -> List[str]:
     # Compilers are ordered based on fallback preference
     # We pick the first one that is available on the system
     compilers = ["clang", "gcc", "cpp", "cc"]
@@ -154,7 +152,7 @@ def check_file(
     filename: str,
     binary: str,
     build_dir: Path,
-) -> list[LintMessage]:
+) -> List[LintMessage]:
     try:
         proc = run_command(
             [binary, f"-p={build_dir}", *include_args, filename],

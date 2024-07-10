@@ -13,6 +13,7 @@
 #include <torch/custom_class.h>
 #include <functional>
 #include <memory>
+#include <regex>
 #include <string>
 #include <vector>
 

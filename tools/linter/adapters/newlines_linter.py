@@ -1,16 +1,13 @@
 """
 NEWLINE: Checks files to make sure there are no trailing newlines.
 """
-
-from __future__ import annotations
-
 import argparse
 import json
 import logging
 import sys
-from enum import Enum
-from typing import NamedTuple
 
+from enum import Enum
+from typing import List, NamedTuple, Optional
 
 NEWLINE = 10  # ASCII "\n"
 CARRIAGE_RETURN = 13  # ASCII "\r"
@@ -25,18 +22,18 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str | None
-    line: int | None
-    char: int | None
+    path: Optional[str]
+    line: Optional[int]
+    char: Optional[int]
     code: str
     severity: LintSeverity
     name: str
-    original: str | None
-    replacement: str | None
-    description: str | None
+    original: Optional[str]
+    replacement: Optional[str]
+    description: Optional[str]
 
 
-def check_file(filename: str) -> LintMessage | None:
+def check_file(filename: str) -> Optional[LintMessage]:
     logging.debug("Checking file %s", filename)
 
     with open(filename, "rb") as f:
@@ -88,7 +85,7 @@ def check_file(filename: str) -> LintMessage | None:
             description="Trailing newline found. Run `lintrunner --take NEWLINE -a` to apply changes.",
         )
     has_changes = False
-    original_lines: list[bytes] | None = None
+    original_lines: Optional[List[bytes]] = None
     for idx, line in enumerate(lines):
         if len(line) >= 2 and line[-1] == NEWLINE and line[-2] == CARRIAGE_RETURN:
             if not has_changes:

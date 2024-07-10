@@ -1,1 +1,3 @@
-from torch.utils.data.datapipes import dataframe as dataframe, iter as iter, map as map
+from . import iter
+from . import map
+from . import dataframe

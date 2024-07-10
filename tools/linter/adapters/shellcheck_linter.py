@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 import json
 import logging
@@ -8,7 +6,7 @@ import subprocess
 import sys
 import time
 from enum import Enum
-from typing import NamedTuple
+from typing import List, NamedTuple, Optional
 
 
 LINTER_CODE = "SHELLCHECK"
@@ -22,20 +20,20 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str | None
-    line: int | None
-    char: int | None
+    path: Optional[str]
+    line: Optional[int]
+    char: Optional[int]
     code: str
     severity: LintSeverity
     name: str
-    original: str | None
-    replacement: str | None
-    description: str | None
+    original: Optional[str]
+    replacement: Optional[str]
+    description: Optional[str]
 
 
 def run_command(
-    args: list[str],
-) -> subprocess.CompletedProcess[bytes]:
+    args: List[str],
+) -> "subprocess.CompletedProcess[bytes]":
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
@@ -49,8 +47,8 @@ def run_command(
 
 
 def check_files(
-    files: list[str],
-) -> list[LintMessage]:
+    files: List[str],
+) -> List[LintMessage]:
     try:
         proc = run_command(
             ["shellcheck", "--external-sources", "--format=json1"] + files

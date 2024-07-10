@@ -8,13 +8,10 @@ has valid ownership information in a comment header. Valid means:
   - Each owner label actually exists in PyTorch
   - Each owner label starts with "module: " or "oncall: " or is in ACCEPTABLE_OWNER_LABELS
 """
-
-from __future__ import annotations
-
 import argparse
 import json
 from enum import Enum
-from typing import Any, NamedTuple
+from typing import Any, List, NamedTuple, Optional
 from urllib.request import urlopen
 
 
@@ -29,15 +26,15 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str | None
-    line: int | None
-    char: int | None
+    path: Optional[str]
+    line: Optional[int]
+    char: Optional[int]
     code: str
     severity: LintSeverity
     name: str
-    original: str | None
-    replacement: str | None
-    description: str | None
+    original: Optional[str]
+    replacement: Optional[str]
+    description: Optional[str]
 
 
 # Team/owner labels usually start with "module: " or "oncall: ", but the following are acceptable exceptions
@@ -61,8 +58,8 @@ GLOB_EXCEPTIONS = ["**/test/run_test.py"]
 
 
 def check_labels(
-    labels: list[str], filename: str, line_number: int
-) -> list[LintMessage]:
+    labels: List[str], filename: str, line_number: int
+) -> List[LintMessage]:
     lint_messages = []
     for label in labels:
         if label not in PYTORCH_LABELS:
@@ -107,7 +104,7 @@ def check_labels(
     return lint_messages
 
 
-def check_file(filename: str) -> list[LintMessage]:
+def check_file(filename: str) -> List[LintMessage]:
     lint_messages = []
     has_ownership_info = False
 

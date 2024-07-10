@@ -6,18 +6,14 @@ calls run_tests to ensure that the test will be run in OSS CI.
 
 Takes ~2 minuters to run without the multiprocessing, probably overkill.
 """
-
-from __future__ import annotations
-
 import argparse
 import json
 import multiprocessing as mp
 from enum import Enum
-from typing import NamedTuple
+from typing import List, NamedTuple, Optional
 
 import libcst as cst
 import libcst.matchers as m
-
 
 LINTER_CODE = "TEST_HAS_MAIN"
 
@@ -66,18 +62,18 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str | None
-    line: int | None
-    char: int | None
+    path: Optional[str]
+    line: Optional[int]
+    char: Optional[int]
     code: str
     severity: LintSeverity
     name: str
-    original: str | None
-    replacement: str | None
-    description: str | None
+    original: Optional[str]
+    replacement: Optional[str]
+    description: Optional[str]
 
 
-def check_file(filename: str) -> list[LintMessage]:
+def check_file(filename: str) -> List[LintMessage]:
     lint_messages = []
 
     with open(filename) as f:

@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-
-from __future__ import annotations
-
 import argparse
 import json
 import sys
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 import yaml
 from gen_op_registration_allowlist import (
@@ -19,7 +16,6 @@ from torchgen.selective_build.operator import (
     SelectiveBuildOperator,
 )
 from torchgen.selective_build.selector import merge_kernel_metadata
-
 
 # Generate YAML file containing the operators used for a specific PyTorch model.
 # ------------------------------------------------------------------------------
@@ -88,17 +84,17 @@ from torchgen.selective_build.selector import merge_kernel_metadata
 #
 
 
-def canonical_opnames(opnames: list[str]) -> list[str]:
+def canonical_opnames(opnames: List[str]) -> List[str]:
     return [canonical_name(opname) for opname in opnames]
 
 
 def make_filter_from_options(
     model_name: str,
-    model_versions: list[str],
-    model_assets: list[str] | None,
-    model_backends: list[str] | None,
+    model_versions: List[str],
+    model_assets: Optional[List[str]],
+    model_backends: Optional[List[str]],
 ):
-    def is_model_included(model_info) -> bool:
+    def is_model_included(model_info):
         model = model_info["model"]
         if model["name"] != model_name:
             return False
@@ -113,7 +109,7 @@ def make_filter_from_options(
 
 
 # Returns if a the specified rule is a new or old style pt_operator_library
-def is_new_style_rule(model_name: str, model_versions: list[str] | None):
+def is_new_style_rule(model_name: str, model_versions: Optional[List[str]]):
     return model_name is not None and model_versions is not None
 
 
@@ -121,13 +117,13 @@ def is_new_style_rule(model_name: str, model_versions: list[str] | None):
 # appear in at least one model yaml. Throws if verification is failed,
 # returns None on success
 def verify_all_specified_present(
-    model_assets: list[str] | None,
-    model_versions: list[str],
-    selected_models_yaml: list[dict[str, Any]],
+    model_assets: Optional[List[str]],
+    model_versions: List[str],
+    selected_models_yaml: List[Dict[str, Any]],
     rule_name: str,
     model_name: str,
     new_style_rule: bool,
-) -> None:
+):
     def find_missing_items(model_items, key, selected_models_yaml):
         missing_items = []
         if not new_style_rule or not model_items:
@@ -183,10 +179,10 @@ def verify_all_specified_present(
 # Uses the selected models configs and then combines them into one dictionary,
 # formats them as a string, and places the string into output as a top level debug_info
 def create_debug_info_from_selected_models(
-    output: dict[str, object],
-    selected_models: list[dict],
+    output: Dict[str, object],
+    selected_models: List[dict],
     new_style_rule: bool,
-) -> None:
+):
     model_dict = {
         "asset_info": {},  # maps asset name -> dict of asset metadata like hashes
         "is_new_style_rule": new_style_rule,
@@ -205,7 +201,7 @@ def create_debug_info_from_selected_models(
     output["debug_info"] = [json.dumps(model_dict)]
 
 
-def fill_output(output: dict[str, object], options: object) -> None:
+def fill_output(output: Dict[str, object], options: object):
     """Populate the output dict with the information required to serialize
     the YAML file used for selective build.
     """
@@ -462,7 +458,7 @@ def fill_output(output: dict[str, object], options: object) -> None:
     # END TRACING BASED BUILD OPS
 
     # Merge dictionaries together to remove op duplication
-    operators: dict[str, SelectiveBuildOperator] = {}
+    operators: Dict[str, SelectiveBuildOperator] = {}
     for ops_dict in bucketed_ops:
         operators = merge_operator_dicts(operators, ops_dict)
 

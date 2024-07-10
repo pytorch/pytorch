@@ -1,22 +1,17 @@
-from __future__ import annotations
-
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Dict, List, Optional, Set, Tuple
 
 import yaml
 
+from torchgen.model import NativeFunction
 from torchgen.selective_build.operator import (
     merge_debug_info,
     merge_operator_dicts,
     SelectiveBuildOperator,
     strip_operator_overload_name,
 )
-
-
-if TYPE_CHECKING:
-    from torchgen.model import NativeFunction
 
 
 # A SelectiveBuilder holds information extracted from the selective build
@@ -33,10 +28,10 @@ class SelectiveBuilder:
     include_all_operators: bool
 
     # Debug Information at the selective/custom build level.
-    _debug_info: tuple[str, ...] | None
+    _debug_info: Optional[Tuple[str, ...]]
 
     # A dictionary of operator -> operator metadata.
-    operators: dict[str, SelectiveBuildOperator]
+    operators: Dict[str, SelectiveBuildOperator]
 
     # A dictionary of selected kernel tags and dtypes. Typically a
     # PyTorch Operator Kernel (function) may have many code paths
@@ -44,22 +39,22 @@ class SelectiveBuilder:
     # one per kernel function, but there could be many per kernel
     # function. The tag isn't a kernel function name, but some fragment
     # of the kernel function implementation itself.
-    kernel_metadata: dict[str, list[str]]
+    kernel_metadata: Dict[str, List[str]]
 
     # ExecuTorch only. A dictionary of kernel tag -> list of (list of input
     # dtypes for tensor-like input args).
     # This is from selective.yaml
-    et_kernel_metadata: dict[str, list[str]]
+    et_kernel_metadata: Dict[str, List[str]]
 
     # A set of all the custom torch bind classes used by the selected models
     # Stored as a set internally to remove duplicates proactively, but written
     # as a list to yamls
-    custom_classes: set[str]
+    custom_classes: Set[str]
 
     # A set of all the build features used by the selected models
     # Stored as a set internally to remove duplicates proactively, but written
     # as a list to yamls
-    build_features: set[str]
+    build_features: Set[str]
 
     # If true, then fragments for all dtypes for all kernel functions
     # are included as well as all custom classes. This is typically set when any one of the
@@ -68,11 +63,11 @@ class SelectiveBuilder:
     include_all_non_op_selectives: bool
 
     @staticmethod
-    def get_nop_selector() -> SelectiveBuilder:
+    def get_nop_selector() -> "SelectiveBuilder":
         return SelectiveBuilder.from_yaml_dict({"include_all_operators": True})
 
     @staticmethod
-    def from_yaml_dict(data: dict[str, object]) -> SelectiveBuilder:
+    def from_yaml_dict(data: Dict[str, object]) -> "SelectiveBuilder":
         valid_top_level_keys = {
             "include_all_non_op_selectives",
             "include_all_operators",
@@ -140,20 +135,20 @@ class SelectiveBuilder:
         )
 
     @staticmethod
-    def from_yaml_str(config_contents: str) -> SelectiveBuilder:
+    def from_yaml_str(config_contents: str) -> "SelectiveBuilder":
         contents = yaml.safe_load(config_contents)
         return SelectiveBuilder.from_yaml_dict(contents)
 
     @staticmethod
-    def from_yaml_path(config_path: str) -> SelectiveBuilder:
+    def from_yaml_path(config_path: str) -> "SelectiveBuilder":
         with open(config_path) as f:
             contents = yaml.safe_load(f)
             return SelectiveBuilder.from_yaml_dict(contents)
 
     @staticmethod
     def from_legacy_op_registration_allow_list(
-        allow_list: set[str], is_root_operator: bool, is_used_for_training: bool
-    ) -> SelectiveBuilder:
+        allow_list: Set[str], is_root_operator: bool, is_used_for_training: bool
+    ) -> "SelectiveBuilder":
         operators = {}
         for op in allow_list:
             operators[op] = {
@@ -236,7 +231,7 @@ class SelectiveBuilder:
             and dtype in self.kernel_metadata[kernel_tag]
         )
 
-    def et_get_selected_kernels(self, op_name: str, kernel_key: list[str]) -> list[str]:
+    def et_get_selected_kernels(self, op_name: str, kernel_key: List[str]) -> List[str]:
         """
         Return a list of kernel keys that cover the used ops
         """
@@ -266,8 +261,8 @@ class SelectiveBuilder:
 
         return list(result_set)
 
-    def to_dict(self) -> dict[str, object]:
-        ret: dict[str, object] = {
+    def to_dict(self) -> Dict[str, object]:
+        ret: Dict[str, object] = {
             "include_all_non_op_selectives": self.include_all_non_op_selectives,
             "include_all_operators": self.include_all_operators,
         }
@@ -293,10 +288,10 @@ class SelectiveBuilder:
 
 
 def merge_kernel_metadata(
-    lhs: dict[str, list[str]],
-    rhs: dict[str, list[str]],
-) -> dict[str, list[str]]:
-    kernel_metadata: dict[str, list[str]] = {}
+    lhs: Dict[str, List[str]],
+    rhs: Dict[str, List[str]],
+) -> Dict[str, List[str]]:
+    kernel_metadata: Dict[str, List[str]] = {}
     for tag_name, dtypes in list(lhs.items()) + list(rhs.items()):
         dtypes_copy = set(dtypes)
         if tag_name in kernel_metadata:
@@ -308,10 +303,10 @@ def merge_kernel_metadata(
 
 
 def merge_et_kernel_metadata(
-    lhs: dict[str, list[str]],
-    rhs: dict[str, list[str]],
-) -> dict[str, list[str]]:
-    merge_et_kernel_metadata: dict[str, set[str]] = defaultdict(set)
+    lhs: Dict[str, List[str]],
+    rhs: Dict[str, List[str]],
+) -> Dict[str, List[str]]:
+    merge_et_kernel_metadata: Dict[str, Set[str]] = defaultdict(set)
     for op in list(lhs.keys()) + list(rhs.keys()):
         merge_et_kernel_metadata[op].update(lhs.get(op, []))
         merge_et_kernel_metadata[op].update(rhs.get(op, []))

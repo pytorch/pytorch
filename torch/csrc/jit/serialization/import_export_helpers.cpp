@@ -10,10 +10,11 @@
 
 namespace torch::jit {
 
+static const std::string kExportSuffix = "py";
+
 std::string qualifierToArchivePath(
     const std::string& qualifier,
     const std::string& export_prefix) {
-  static const std::string kExportSuffix = "py";
   std::string path = qualifier;
   std::replace_if(
       path.begin(), path.end(), [](char c) { return c == '.'; }, '/');

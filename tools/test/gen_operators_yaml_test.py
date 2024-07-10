@@ -5,6 +5,7 @@ import argparse
 import json
 import unittest
 from collections import defaultdict
+
 from unittest.mock import Mock, patch
 
 from gen_operators_yaml import (
@@ -42,10 +43,10 @@ def _mock_load_op_dep_graph():
 
 
 class GenOperatorsYAMLTest(unittest.TestCase):
-    def setUp(self) -> None:
+    def setUp(self):
         pass
 
-    def test_filter_creation(self) -> None:
+    def test_filter_creation(self):
         filter_func = make_filter_from_options(
             model_name="abc",
             model_versions=["100", "101"],
@@ -98,7 +99,7 @@ class GenOperatorsYAMLTest(unittest.TestCase):
             len(filtered_configs) == 2
         ), f"Expected 2 elements in filtered_configs, but got {len(filtered_configs)}"
 
-    def test_verification_success(self) -> None:
+    def test_verification_success(self):
         filter_func = make_filter_from_options(
             model_name="abc",
             model_versions=["100", "101"],
@@ -141,7 +142,7 @@ class GenOperatorsYAMLTest(unittest.TestCase):
                 "expected verify_all_specified_present to succeed instead it raised an exception"
             )
 
-    def test_verification_fail(self) -> None:
+    def test_verification_fail(self):
         config = [
             {
                 "model": {
@@ -228,7 +229,7 @@ class GenOperatorsYAMLTest(unittest.TestCase):
     )
     def test_fill_output_with_arguments_not_include_all_overloads(
         self, mock_parse_options: Mock, mock_load_op_dep_graph: Mock
-    ) -> None:
+    ):
         parser = argparse.ArgumentParser(description="Generate used operators YAML")
         options = get_parser_options(parser)
 

@@ -64,18 +64,21 @@ Possible improvements:
       (they probably don't work at all right now).
 """
 
-import argparse
-import io
-import json
+import sys
 import os
+import io
+import pathlib
+import re
+import argparse
+import zipfile
+import json
 import pickle
 import pprint
-import re
-import sys
 import urllib.parse
-import zipfile
-from pathlib import Path
-from typing import Dict
+
+from typing import (
+    Dict,
+)
 
 import torch.utils.show_pickle
 
@@ -198,7 +201,7 @@ def get_model_info(
         file_size = path_or_file.stat().st_size  # type: ignore[attr-defined]
     elif isinstance(path_or_file, str):
         default_title = path_or_file
-        file_size = Path(path_or_file).stat().st_size
+        file_size = pathlib.Path(path_or_file).stat().st_size
     else:
         default_title = "buffer"
         path_or_file.seek(0, io.SEEK_END)

@@ -1,8 +1,7 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import Callable, Sequence, TYPE_CHECKING
+from typing import Callable, List, Sequence, Tuple
 
+from torchgen.api.types import Binding, CType, NamedCType
 from torchgen.model import (
     Argument,
     BaseTy,
@@ -12,10 +11,6 @@ from torchgen.model import (
     OptionalType,
     Type,
 )
-
-
-if TYPE_CHECKING:
-    from torchgen.api.types import Binding, CType, NamedCType
 
 
 connector = "\n\t"
@@ -57,7 +52,7 @@ class Unboxing:
     # Convert all the arguments in a NativeFunction to C++ code
     def convert_arguments(
         self, args: Sequence[Binding]
-    ) -> tuple[list[Binding], list[str]]:
+    ) -> Tuple[List[Binding], List[str]]:
         code_list = [f"EValue& {args[i].name} = *stack[{i}];" for i in range(len(args))]
         binding_list = []
         for arg in args:
@@ -77,7 +72,7 @@ class Unboxing:
 
     def argumenttype_evalue_convert(
         self, t: Type, arg_name: str, *, mutable: bool = False
-    ) -> tuple[str, CType, list[str], list[str]]:
+    ) -> Tuple[str, CType, List[str], List[str]]:
         """
         Takes in the type, name and mutability corresponding to an argument, and generates a tuple of:
         (1) the C++ code necessary to unbox the argument
@@ -112,14 +107,14 @@ class Unboxing:
 
     def _gen_code_base_type(
         self, arg_name: str, out_name: str, ctype: CType
-    ) -> tuple[list[str], list[str]]:
+    ) -> Tuple[List[str], List[str]]:
         return [
             f"{ctype.cpp_type()} {out_name} = {arg_name}.to<{ctype.cpp_type(strip_ref=True)}>();"
         ], []
 
     def _gen_code_optional_type(
         self, arg_name: str, out_name: str, t: OptionalType, ctype: CType
-    ) -> tuple[list[str], list[str]]:
+    ) -> Tuple[List[str], List[str]]:
         in_name = f"{arg_name}_opt_in"
         res_name, base_type, res_code, decl = self.argumenttype_evalue_convert(
             t.elem, in_name
@@ -135,7 +130,7 @@ class Unboxing:
 
     def _gen_code_list_type(
         self, arg_name: str, out_name: str, t: ListType, ctype: CType
-    ) -> tuple[list[str], list[str]]:
+    ) -> Tuple[List[str], List[str]]:
         in_name = f"{arg_name}_list_in"
         elem_name = f"{arg_name}_elem"
         code = []

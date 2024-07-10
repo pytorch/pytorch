@@ -12,10 +12,8 @@ if we want to generate code for another C++ library.
 Add new types to `types.py` if these types are ATen/c10 related.
 Add new types to `types_base.py` if they are basic and not attached to ATen/c10.
 """
-
-from __future__ import annotations
-
 from dataclasses import dataclass
+from typing import Dict
 
 from torchgen.api.types.types_base import (
     BaseCppType,
@@ -85,7 +83,7 @@ symIntArrayRefT = BaseCppType("c10", "SymIntArrayRef")
 scalar_t = BaseCppType("", "scalar_t")
 opmath_t = BaseCppType("", "opmath_t")
 
-ScalarTypeToCppMapping: dict[ScalarType, BaseCppType] = {
+ScalarTypeToCppMapping: Dict[ScalarType, BaseCppType] = {
     ScalarType.Byte: byteT,
     ScalarType.Char: charT,
     ScalarType.Short: shortT,
@@ -104,7 +102,7 @@ ScalarTypeToCppMapping: dict[ScalarType, BaseCppType] = {
     ScalarType.Float8_e4m3fnuz: float8_e4m3fnuzT,
 }
 
-BaseTypeToCppMapping: dict[BaseTy, BaseCppType] = {
+BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.int: longT,
     BaseTy.float: doubleT,
     BaseTy.bool: boolT,
@@ -130,7 +128,7 @@ BaseTypeToCppMapping: dict[BaseTy, BaseCppType] = {
 
 @dataclass(frozen=True)
 class OptionalCType(CType):
-    elem: CType
+    elem: "CType"
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
@@ -139,13 +137,13 @@ class OptionalCType(CType):
     def cpp_type_registration_declarations(self) -> str:
         return f"::std::optional<{self.elem.cpp_type_registration_declarations()}>"
 
-    def remove_const_ref(self) -> CType:
+    def remove_const_ref(self) -> "CType":
         return OptionalCType(self.elem.remove_const_ref())
 
 
 @dataclass(frozen=True)
 class ListCType(CType):
-    elem: CType
+    elem: "CType"
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
@@ -154,13 +152,13 @@ class ListCType(CType):
     def cpp_type_registration_declarations(self) -> str:
         return f"c10::List<{self.elem.cpp_type_registration_declarations()}>"
 
-    def remove_const_ref(self) -> CType:
+    def remove_const_ref(self) -> "CType":
         return ListCType(self.elem.remove_const_ref())
 
 
 @dataclass(frozen=True)
 class ArrayRefCType(CType):
-    elem: CType
+    elem: "CType"
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
@@ -169,7 +167,7 @@ class ArrayRefCType(CType):
     def cpp_type_registration_declarations(self) -> str:
         return f"ArrayRef<{self.elem.cpp_type_registration_declarations()}>"
 
-    def remove_const_ref(self) -> CType:
+    def remove_const_ref(self) -> "CType":
         return ArrayRefCType(self.elem.remove_const_ref())
 
 
@@ -187,5 +185,5 @@ class VectorizedCType(CType):
     def cpp_type_registration_declarations(self) -> str:
         raise NotImplementedError
 
-    def remove_const_ref(self) -> CType:
+    def remove_const_ref(self) -> "CType":
         return self

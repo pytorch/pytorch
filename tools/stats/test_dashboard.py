@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import os
 import re
@@ -8,7 +6,7 @@ from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, cast
+from typing import Any, cast, Dict, List
 
 import requests
 
@@ -19,7 +17,6 @@ from tools.stats.upload_stats_lib import (
     unzip,
     upload_workflow_stats_to_s3,
 )
-
 
 REGEX_JOB_INFO = r"(.*) \/ .*test \(([^,]*), .*\)"
 
@@ -59,7 +56,7 @@ def get_test_config(job_name: str) -> str:
 
 def get_td_exclusions(
     workflow_run_id: int, workflow_run_attempt: int
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
         os.chdir(temp_dir)
@@ -71,7 +68,7 @@ def get_td_exclusions(
         for path in s3_paths:
             unzip(path)
 
-        grouped_tests: dict[str, Any] = defaultdict(lambda: defaultdict(set))
+        grouped_tests: Dict[str, Any] = defaultdict(lambda: defaultdict(set))
         for td_exclusions in Path(".").glob("**/td_exclusions*.json"):
             with open(td_exclusions) as f:
                 exclusions = json.load(f)
@@ -88,9 +85,9 @@ def get_td_exclusions(
         return grouped_tests
 
 
-def group_test_cases(test_cases: list[dict[str, Any]]) -> dict[str, Any]:
+def group_test_cases(test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
     start = time.time()
-    grouped_tests: dict[str, Any] = defaultdict(
+    grouped_tests: Dict[str, Any] = defaultdict(
         lambda: defaultdict(
             lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
         )
@@ -115,8 +112,8 @@ def group_test_cases(test_cases: list[dict[str, Any]]) -> dict[str, Any]:
     return grouped_tests
 
 
-def get_reruns(grouped_tests: dict[str, Any]) -> dict[str, Any]:
-    reruns: dict[str, Any] = defaultdict(
+def get_reruns(grouped_tests: Dict[str, Any]) -> Dict[str, Any]:
+    reruns: Dict[str, Any] = defaultdict(
         lambda: defaultdict(
             lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
         )
@@ -139,8 +136,8 @@ def get_reruns(grouped_tests: dict[str, Any]) -> dict[str, Any]:
     return reruns
 
 
-def get_invoking_file_summary(grouped_tests: dict[str, Any]) -> dict[str, Any]:
-    invoking_file_summary: dict[str, Any] = defaultdict(
+def get_invoking_file_summary(grouped_tests: Dict[str, Any]) -> Dict[str, Any]:
+    invoking_file_summary: Dict[str, Any] = defaultdict(
         lambda: defaultdict(lambda: defaultdict(lambda: {"count": 0, "time": 0.0}))
     )
     for build_name, build in grouped_tests.items():
@@ -160,7 +157,7 @@ def get_invoking_file_summary(grouped_tests: dict[str, Any]) -> dict[str, Any]:
 
 
 def upload_additional_info(
-    workflow_run_id: int, workflow_run_attempt: int, test_cases: list[dict[str, Any]]
+    workflow_run_id: int, workflow_run_attempt: int, test_cases: List[Dict[str, Any]]
 ) -> None:
     grouped_tests = group_test_cases(test_cases)
     reruns = get_reruns(grouped_tests)

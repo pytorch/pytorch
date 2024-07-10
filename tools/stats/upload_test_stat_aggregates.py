@@ -1,19 +1,17 @@
-from __future__ import annotations
-
 import argparse
 import ast
 import datetime
 import json
 import os
 import re
-from typing import Any
+from typing import Any, List, Union
 
 import rockset  # type: ignore[import]
 
 from tools.stats.upload_stats_lib import upload_to_s3
 
 
-def get_oncall_from_testfile(testfile: str) -> list[str] | None:
+def get_oncall_from_testfile(testfile: str) -> Union[List[str], None]:
     path = f"test/{testfile}"
     if not path.endswith(".py"):
         path += ".py"

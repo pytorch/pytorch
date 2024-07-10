@@ -11,12 +11,8 @@ SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent
 
 
-def read_triton_pin(device: str = "cuda") -> str:
-    triton_file = "triton.txt"
-    if device == "rocm":
-        triton_file = "triton-rocm.txt"
-    elif device == "xpu":
-        triton_file = "triton-xpu.txt"
+def read_triton_pin(rocm_hash: bool = False) -> str:
+    triton_file = "triton.txt" if not rocm_hash else "triton-rocm.txt"
     with open(REPO_DIR / ".ci" / "docker" / "ci_commit_pins" / triton_file) as f:
         return f.read().strip()
 
@@ -53,7 +49,7 @@ def build_triton(
     version: str,
     commit_hash: str,
     build_conda: bool = False,
-    device: str = "cuda",
+    build_rocm: bool = False,
     py_version: Optional[str] = None,
     release: bool = False,
 ) -> Path:
@@ -73,14 +69,11 @@ def build_triton(
         triton_basedir = Path(tmpdir) / "triton"
         triton_pythondir = triton_basedir / "python"
         triton_repo = "https://github.com/openai/triton"
-        if device == "rocm":
+        if build_rocm:
             triton_pkg_name = "pytorch-triton-rocm"
-        elif device == "xpu":
-            triton_pkg_name = "pytorch-triton-xpu"
-            triton_repo = "https://github.com/intel/intel-xpu-backend-for-triton"
         else:
             triton_pkg_name = "pytorch-triton"
-        check_call(["git", "clone", triton_repo, "triton"], cwd=tmpdir)
+        check_call(["git", "clone", triton_repo], cwd=tmpdir)
         if release:
             ver, rev, patch = version.split(".")
             check_call(
@@ -147,7 +140,7 @@ def build_triton(
             expected_version=None,
         )
 
-        if device == "rocm":
+        if build_rocm:
             check_call(
                 [f"{SCRIPT_DIR}/amd/package_triton_wheel.sh"],
                 cwd=triton_basedir,
@@ -162,7 +155,7 @@ def build_triton(
         whl_path = next(iter((triton_pythondir / "dist").glob("*.whl")))
         shutil.copy(whl_path, Path.cwd())
 
-        if device == "rocm":
+        if build_rocm:
             check_call(
                 [f"{SCRIPT_DIR}/amd/patch_triton_wheel.sh", Path.cwd()],
                 cwd=triton_basedir,
@@ -177,19 +170,17 @@ def main() -> None:
     parser = ArgumentParser("Build Triton binaries")
     parser.add_argument("--release", action="store_true")
     parser.add_argument("--build-conda", action="store_true")
-    parser.add_argument(
-        "--device", type=str, default="cuda", choices=["cuda", "rocm", "xpu"]
-    )
+    parser.add_argument("--build-rocm", action="store_true")
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
     parser.add_argument("--triton-version", type=str, default=read_triton_version())
     args = parser.parse_args()
 
     build_triton(
-        device=args.device,
+        build_rocm=args.build_rocm,
         commit_hash=args.commit_hash
         if args.commit_hash
-        else read_triton_pin(args.device),
+        else read_triton_pin(args.build_rocm),
         version=args.triton_version,
         build_conda=args.build_conda,
         py_version=args.py_version,

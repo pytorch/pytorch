@@ -14,7 +14,7 @@ def setup_baseline():
 
 def torchao_optimize_ctx(quantization: str):
     import torchao
-    from torchao.quantization.quant_api import (
+    from torchao.quantization import (
         change_linear_weights_to_int4_woqtensors,
         change_linear_weights_to_int8_dqtensors,
         change_linear_weights_to_int8_woqtensors,

@@ -5,16 +5,15 @@ from pathlib import Path
 
 import torch
 import torch._dynamo as torchdynamo
-
-from torch._export.db.case import ExportCase
+from torch._export.db.case import ExportCase, normalize_inputs
 from torch._export.db.examples import all_examples
 from torch.export import export
 
 
 PWD = Path(__file__).absolute().parent
-ROOT = Path(__file__).absolute().parent.parent.parent.parent
-SOURCE = ROOT / Path("source")
-EXPORTDB_SOURCE = SOURCE / Path("generated") / Path("exportdb")
+ROOT = Path(__file__).absolute().parents[3]
+SOURCE = ROOT / "source"
+EXPORTDB_SOURCE = SOURCE / "generated" / "exportdb"
 
 
 def generate_example_rst(example_case: ExportCase):
@@ -41,13 +40,8 @@ def generate_example_rst(example_case: ExportCase):
         2,
     }, f"more than one @export_rewrite_case decorator in {source_code}"
 
-    more_arguments = ""
-    if example_case.example_kwargs:
-        more_arguments += ", example_kwargs"
-    if example_case.dynamic_shapes:
-        more_arguments += ", dynamic_shapes=dynamic_shapes"
-
     # Generate contents of the .rst file
+    # TODO(zhxchen17) Update template when we switch to example_args and example_kwargs.
     title = f"{example_case.name}"
     doc_contents = f"""{title}
 {'^' * (len(title))}
@@ -64,8 +58,6 @@ Original source code:
 
     {splitted_source_code[0]}
 
-    torch.export.export(model, example_args{more_arguments})
-
 Result:
 
 .. code-block::
@@ -74,10 +66,11 @@ Result:
 
     # Get resulting graph from dynamo trace
     try:
+        inputs = normalize_inputs(example_case.example_inputs)
         exported_program = export(
             model,
-            example_case.example_args,
-            example_case.example_kwargs,
+            inputs.args,
+            inputs.kwargs,
             dynamic_shapes=example_case.dynamic_shapes,
         )
         graph_output = str(exported_program)

@@ -55,6 +55,7 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
 
   Tensor norm = at::linalg_vector_norm(self, p.toDouble(), reduce_dims, /*keepdim=*/true);
   auto factor = at::empty(norm.sizes(), self.options());
+  auto maxnorm_f = maxnorm.to<float>();
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   id<MTLBuffer> normBuffer = getMTLBufferStorage(norm);
@@ -73,7 +74,7 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
       [computeEncoder setComputePipelineState:renormPSO];
       mtl_setBuffer(computeEncoder, norm, 0);
       mtl_setBuffer(computeEncoder, factor, 1);
-      mtl_setBytes(computeEncoder, maxnorm.to<float>(), 2);
+      [computeEncoder setBytes:&maxnorm_f length:sizeof(float) atIndex:2];
       mtl_dispatch1DJob(computeEncoder, renormPSO, norm.numel());
 
       getMPSProfiler().endProfileKernel(renormPSO);

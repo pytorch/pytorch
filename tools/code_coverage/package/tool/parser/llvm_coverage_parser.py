@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from typing import Any
+from typing import Any, Dict, List, Set, Tuple
 
 from .coverage_record import CoverageRecord
 from .llvm_coverage_segment import LlvmCoverageSegment, parse_segments
@@ -14,7 +12,7 @@ class LlvmCoverageParser:
 
     """
 
-    def __init__(self, llvm_coverage: dict[str, Any]) -> None:
+    def __init__(self, llvm_coverage: Dict[str, Any]) -> None:
         self._llvm_coverage = llvm_coverage
 
     @staticmethod
@@ -30,13 +28,13 @@ class LlvmCoverageParser:
 
     @staticmethod
     def _collect_coverage(
-        segments: list[LlvmCoverageSegment],
-    ) -> tuple[list[int], list[int]]:
+        segments: List[LlvmCoverageSegment],
+    ) -> Tuple[List[int], List[int]]:
         """
         Stateful parsing of coverage segments.
         """
-        covered_lines: set[int] = set()
-        uncovered_lines: set[int] = set()
+        covered_lines: Set[int] = set()
+        uncovered_lines: Set[int] = set()
         prev_segment = LlvmCoverageSegment(1, 0, 0, 0, 0, None)
         for segment in segments:
             covered_range, uncovered_range = segment.get_coverage(prev_segment)
@@ -47,10 +45,10 @@ class LlvmCoverageParser:
         uncovered_lines.difference_update(covered_lines)
         return sorted(covered_lines), sorted(uncovered_lines)
 
-    def parse(self, repo_name: str) -> list[CoverageRecord]:
+    def parse(self, repo_name: str) -> List[CoverageRecord]:
         # The JSON format is described in the LLVM source code
         # https://github.com/llvm-mirror/llvm/blob/master/tools/llvm-cov/CoverageExporterJson.cpp
-        records: list[CoverageRecord] = []
+        records: List[CoverageRecord] = []
         for export_unit in self._llvm_coverage["data"]:
             for file_info in export_unit["files"]:
                 filepath = file_info["filename"]
