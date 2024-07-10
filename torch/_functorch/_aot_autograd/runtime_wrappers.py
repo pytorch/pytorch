@@ -1828,7 +1828,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         unwrap_tensor_subclasses(
                             tangents,
                             is_joint_structure=False,
-                        )[0]
+                        )
                     )
                     assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
