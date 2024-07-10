@@ -245,13 +245,13 @@ static void clamp_scalar_out_mps(const Tensor& input_t,
         (has_max ? ("_max:" + std::to_string(max_scalar)) : "") + "_scalar:" + getTensorsStringKey({input_t});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       if (has_min)
-        newCachedGraph->minTensor =
-            [mpsGraph constantWithScalar:min_scalar
-                                   shape:(mps::getMPSShape(input_t))dataType:(mps::getMPSScalarType(result_type))];
+        newCachedGraph->minTensor = [mpsGraph constantWithScalar:min_scalar
+                                                           shape:mps::getMPSShape(input_t)
+                                                        dataType:mps::getMPSScalarType(result_type)];
       if (has_max)
-        newCachedGraph->maxTensor =
-            [mpsGraph constantWithScalar:max_scalar
-                                   shape:(mps::getMPSShape(input_t))dataType:(mps::getMPSScalarType(result_type))];
+        newCachedGraph->maxTensor = [mpsGraph constantWithScalar:max_scalar
+                                                           shape:mps::getMPSShape(input_t)
+                                                        dataType:mps::getMPSScalarType(result_type)];
 
       clamp_mps_graph(newCachedGraph, input_t, result_type, result_type, result_type);
     });
