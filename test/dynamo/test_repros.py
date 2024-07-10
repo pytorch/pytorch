@@ -771,9 +771,7 @@ def _get_min_chunk_len(config):
         return config.lsh_attn_chunk_length
     elif len(attn_types_set) == 1 and attn_types[0] == "local":
         return config.local_attn_chunk_length
-    elif len(attn_types_set) == 2 and attn_types_set == set(  # noqa: C405
-        ["lsh", "local"]
-    ):
+    elif len(attn_types_set) == 2 and attn_types_set == {"lsh", "local"}:
         return min(config.lsh_attn_chunk_length, config.local_attn_chunk_length)
     else:
         raise NotImplementedError(
@@ -5298,6 +5296,17 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         m()
         # the second call causes a failure
         m()
+
+    # https://github.com/pytorch/pytorch/issues/121621
+    def test_tensor_random(self):
+        def random_op(tensor, params):
+            res = tensor.random_(**params)
+            return res
+
+        random_op = torch.compile(random_op)
+        params = {"from": -10, "to": 10}
+        tensor = torch.randn([2, 3])
+        res = random_op(tensor, params)
 
 
 instantiate_parametrized_tests(ReproTests)

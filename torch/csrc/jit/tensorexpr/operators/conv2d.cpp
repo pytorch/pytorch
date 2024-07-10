@@ -51,7 +51,7 @@ Tensor conv2d_depthwise_static(
   Tensor conv = Reduce(
       "conv2d_depthwise",
       {N, K, OH, OW},
-      c10::nullopt, // TODO
+      std::nullopt, // TODO
       Sum(),
       [&](const std::vector<VarHandle>& v) { return init_func(v); },
       [&](const std::vector<VarHandle>& v) {
@@ -123,7 +123,7 @@ Tensor conv2d_depthwise_dynamic(
   return Reduce(
       "conv2d_depthwise",
       {N, K, OH, OW},
-      c10::nullopt, // TODO
+      std::nullopt, // TODO
       Sum(),
       [&](const std::vector<VarHandle>& v) { return init_func(v); },
       [&](const std::vector<VarHandle>& v) {
