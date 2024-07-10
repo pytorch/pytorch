@@ -8,7 +8,7 @@ from typing import Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch.onnx import _type_utils as jit_type_utils
-from torch.onnx._internal import _beartype
+
 
 if TYPE_CHECKING:
     import onnx
@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-@_beartype.beartype
 def _create_tensor_proto_with_external_data(
     tensor: torch.Tensor,
     name: str,
@@ -114,7 +113,6 @@ def _convert_safetensors_to_torch_format(safetensors_file):
 
 
 # TODO: generalize to allow more checkpoints formats (torch or gguf)
-@_beartype.beartype
 def save_model_with_external_data(
     basepath: str,
     model_location: str,

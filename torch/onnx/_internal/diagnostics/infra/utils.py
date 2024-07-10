@@ -6,11 +6,9 @@ import inspect
 import traceback
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
-from torch.onnx._internal import _beartype
 from torch.onnx._internal.diagnostics.infra import _infra, formatter
 
 
-@_beartype.beartype
 def python_frame(frame: traceback.FrameSummary) -> _infra.StackFrame:
     """Returns a StackFrame for the given traceback.FrameSummary."""
     snippet = frame.line
@@ -26,7 +24,6 @@ def python_frame(frame: traceback.FrameSummary) -> _infra.StackFrame:
     )
 
 
-@_beartype.beartype
 def python_call_stack(frames_to_skip: int = 0, frames_to_log: int = 16) -> _infra.Stack:
     """Returns the current Python call stack."""
     if frames_to_skip < 0:
@@ -54,7 +51,6 @@ def _function_source_info(fn: Callable) -> Tuple[Sequence[str], int, Optional[st
     return source_lines, lineno, inspect.getsourcefile(fn)
 
 
-@_beartype.beartype
 def function_location(fn: Callable) -> _infra.Location:
     """Returns a Location for the given function."""
     source_lines, lineno, uri = _function_source_info(fn)
@@ -67,7 +63,6 @@ def function_location(fn: Callable) -> _infra.Location:
     )
 
 
-@_beartype.beartype
 def function_state(
     fn: Callable, args: Tuple[Any, ...], kwargs: Dict[str, Any]
 ) -> Mapping[str, Any]:

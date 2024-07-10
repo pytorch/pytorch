@@ -22,7 +22,7 @@ from typing import (
 import torch
 import torch._ops
 import torch.fx
-from torch.onnx._internal import _beartype
+
 from torch.onnx._internal.fx import (
     diagnostics,
     registration,
@@ -41,7 +41,6 @@ from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
 )
 
 
-@_beartype.beartype
 def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
     fn: Callable,
     self,
@@ -58,7 +57,6 @@ def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
     return f"FX Node: {node.target}. \n" f"{all_function_overload_names}"
 
 
-@_beartype.beartype
 def _find_operator_overloads_in_onnx_registry_disagnostic_message_formatter(
     fn: Callable,
     self,
@@ -109,7 +107,6 @@ class OnnxFunctionDispatcher:
         self.onnx_registry = onnx_registry
         self.diagnostic_context = diagnostic_context
 
-    @_beartype.beartype
     def dispatch(
         self,
         node: torch.fx.Node,
@@ -148,7 +145,6 @@ class OnnxFunctionDispatcher:
             diagnostic_context,
         )
 
-    @_beartype.beartype
     def _filter_or_keep_complex(
         self,
         node,
@@ -196,7 +192,6 @@ class OnnxFunctionDispatcher:
                 raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
         return default_and_custom_functions
 
-    @_beartype.beartype
     @diagnostics.diagnose_call(
         diagnostics.rules.find_opschema_matched_symbolic_function,
         diagnostic_message_formatter=_find_opschema_matched_symbolic_function_disagnostic_message_formatter,
@@ -284,7 +279,6 @@ class OnnxFunctionDispatcher:
         )
         return symbolic_function_list[0].onnx_function
 
-    @_beartype.beartype
     def _get_aten_name(
         self, node: torch.fx.Node, diagnostic_context: diagnostics.DiagnosticContext
     ) -> registration.OpName:
@@ -350,7 +344,6 @@ class OnnxFunctionDispatcher:
         diagnostic_context.log(diagnostic)
         raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
 
-    @_beartype.beartype
     @diagnostics.diagnose_call(
         diagnostics.rules.find_operator_overloads_in_onnx_registry,
         diagnostic_message_formatter=_find_operator_overloads_in_onnx_registry_disagnostic_message_formatter,
@@ -552,7 +545,6 @@ class _OnnxSchemaChecker:
         """
         return self._matching_score
 
-    @_beartype.beartype
     def perfect_match_inputs(
         self,
         diagnostic: diagnostics.Diagnostic,
@@ -687,7 +679,6 @@ class _OnnxSchemaChecker:
             diagnostic.info("match score: %d", self.match_score)
             return is_perfect_match
 
-    @_beartype.beartype
     def _match_onnx_attribute_type(
         self,
         attribute_name: str,
@@ -713,7 +704,6 @@ class _OnnxSchemaChecker:
             return False
         return True
 
-    @_beartype.beartype
     def _record_matching_score(
         self,
         inputs: Sequence[
@@ -768,7 +758,7 @@ class _OnnxSchemaChecker:
 
     # NOTE: Referenced from onnxscript internal function.
     # Importing this function makes the code less robust, as it is not a public API.
-    @_beartype.beartype
+
     def _separate_input_attributes_from_arguments(
         self,
         param_schemas: Sequence["onnxscript.values.ParamSchema"],
@@ -851,7 +841,6 @@ class _OnnxSchemaChecker:
         return onnx_inputs, onnx_attributes
 
 
-@_beartype.beartype
 def _is_arg_with_complex_dtype(arg: fx_type_utils.Argument) -> bool:
     """Check if the node has complex dtype recursively."""
     if (
@@ -867,7 +856,6 @@ def _is_arg_with_complex_dtype(arg: fx_type_utils.Argument) -> bool:
     return False
 
 
-@_beartype.beartype
 def _find_onnx_data_type(
     torch_input: Optional[
         Union[fx_type_utils.TensorLike, str, int, float, bool, list, tuple, complex]

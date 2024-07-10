@@ -19,7 +19,6 @@ from typing import (
 import torch
 import torch.export as torch_export
 
-from torch.onnx._internal import _beartype
 from torch.utils import _pytree as pytree
 
 # TODO(bowbao): Add diagnostics for IO adapters.
@@ -55,7 +54,6 @@ class InputAdapter:
     def __init__(self, steps: Optional[List[InputAdaptStep]] = None):
         self._steps = steps or []
 
-    @_beartype.beartype
     def append_step(self, step: InputAdaptStep) -> None:
         """Appends a step to the input adapt steps.
 
@@ -64,7 +62,6 @@ class InputAdapter:
         """
         self._steps.append(step)
 
-    @_beartype.beartype
     def apply(
         self,
         *model_args,
@@ -119,7 +116,6 @@ class OutputAdapter:
     def __init__(self, steps: Optional[List[OutputAdaptStep]] = None):
         self._steps = steps or []
 
-    @_beartype.beartype
     def append_step(self, step: OutputAdaptStep) -> None:
         """Appends a step to the output format steps.
 
@@ -128,7 +124,6 @@ class OutputAdapter:
         """
         self._steps.append(step)
 
-    @_beartype.beartype
     def apply(
         self,
         model_outputs: Any,
