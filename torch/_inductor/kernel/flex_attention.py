@@ -537,7 +537,7 @@ def flex_attention(*args, **kwargs):
         device=query.get_device(),
     )
 
-    # Determine GQA broadcast factor. 
+    # Determine GQA broadcast factor.
     gqa_shared_heads = query.get_size()[1] // key.get_size()[1]
 
     layout = FixedLayout(
@@ -641,7 +641,7 @@ def flex_attention_backward_grid(
         triton.cdiv(num_queries, meta["BLOCK_M2"]) * (q_heads // kv_heads)
         + triton.cdiv(num_key_value, meta["BLOCK_N1"]),
         1,
-        batch_size*q_heads,
+        batch_size * q_heads,
     )
 
 
@@ -734,14 +734,10 @@ flex_attention_backward_template = TritonTemplate(
     if pid >= NUM_KV_BLOCKS:
         # THIS BLOCK DOES DQ
         off_pid = pid - NUM_KV_BLOCKS
-        off_hq2 = off_pid // NUM_Q_BLOCKS
+        off_hq2 = off_pid // NUM_Q_BLOCKS + off_hkv * GQA_SHARED_HEADS
         start_m2 = off_pid % NUM_Q_BLOCKS
 
-        if (off_hz == 0):
-            tl.device_print("off_hq2", off_hq2)
-            tl.device_print("start_m2", start_m2)
-
-        # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads. 
+        # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads.
         q_adj2 = (stride_qhq * off_hq2 + stride_qz * off_z).to(tl.int64)
         do_adj2 = (stride_dohq * off_hq2 + stride_doz * off_z).to(tl.int64)
         dq_adj2 = (stride_dqhq * off_hq2 + stride_dqz * off_z).to(tl.int64)
@@ -877,7 +873,7 @@ flex_attention_backward_template = TritonTemplate(
         for off_g in range(0, GQA_SHARED_HEADS):
             off_hq1 = off_hkv * GQA_SHARED_HEADS + off_g
 
-            # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads. 
+            # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads.
             q_adj1 = (stride_qhq * off_hq1 + stride_qz * off_z).to(tl.int64)
             do_adj1 = (stride_dohq * off_hq1 + stride_doz * off_z).to(tl.int64)
             dq_adj1 = (stride_dqhq * off_hq1 + stride_dqz * off_z).to(tl.int64)
