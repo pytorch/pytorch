@@ -300,9 +300,9 @@ def get_lifted_tensor_constant(
 
 def sequential_split(gm: torch.fx.GraphModule, node_call_back) -> torch.fx.GraphModule:
     """
-    Splits the graph module into multiple submodules based on the node_call_back.
-    The node_call_back should return True if the node is a delimiter. Delimiter will be
-    the first node in the next submodule.
+    sequential_split creates a new graph module that splits the input graph module into multiple submodules
+    based on the node_call_back. It doesn't mutate the input graph module. The node_call_back should return
+    True if the node is a delimiter.  Delimiter will be the first node in the next submodule.
     """
     from torch.fx.passes.split_module import split_module
 
@@ -402,8 +402,16 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
             new_output = output[0].args[0]
 
             if isinstance(new_output, torch.fx.Node):
+                # Clear the users of the output node and set
+                # the users to be the users of original call_module node.
+                new_output.users.clear()
                 node_replace_(call_mod_node, new_output, delete_old=True)
             elif isinstance(new_output, (list, tuple)):
+                # Clear the users of the output node and set
+                # the users to be the users of original call_module node.
+                for node in new_output:
+                    node.users.clear()
+
                 # Inline the get_item calls for the output node.
                 get_item_users = nodes_filter(
                     list(call_mod_node.users.keys()),

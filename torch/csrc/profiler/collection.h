@@ -91,7 +91,7 @@ using op_input_t = std::variant<
     TensorMetadata,
     std::vector<TensorMetadata>,
     c10::IValue,
-    c10::nullopt_t>;
+    std::nullopt_t>;
 
 // ============================================================================
 // == ExtraFields =============================================================
