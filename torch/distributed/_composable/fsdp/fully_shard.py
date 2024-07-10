@@ -61,6 +61,8 @@ def fully_shard(
     gather parameters and later free parameters/reduce gradients.
 
     Args:
+        module (Union[nn.Module, List[nn.Module]): The module or modules to
+            shard with FSDP and group together for communication.
         mesh (Optional[DeviceMesh]): This data parallel mesh defines the
             sharding and device. If 1D, then parameters are fully sharded
             across the 1D mesh (FSDP). If 2D, then parameters are sharded

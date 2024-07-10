@@ -79,6 +79,7 @@ class FSDPState(_State):
         self._training_state: TrainingState = TrainingState.IDLE
         self._states_to_forward_prefetch: List[FSDPState] = []
         self._states_to_backward_prefetch: List[FSDPState] = []
+        self._modules_to_run_forward: Set[nn.Module] = set()
 
     # Define a separate init since `__init__` is called in the contract
     def init(
@@ -101,7 +102,10 @@ class FSDPState(_State):
             )
         else:
             hook_handle = _register_group_forward_hooks(
-                modules, self._pre_forward, self._post_forward
+                modules,
+                self._pre_forward,
+                self._post_forward,
+                self._modules_to_run_forward,
             )
             self._pre_forward_hook_handle = hook_handle
             self._post_forward_hook_handle = hook_handle
@@ -289,6 +293,9 @@ class FSDPState(_State):
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _finalize_backward(self) -> None:
+        # Clear in case a module was not used in forward, in which case we
+        # want the next forward after this backward to run forward again
+        self._modules_to_run_forward.clear()
         if self._fsdp_param_group:
             self._fsdp_param_group.finalize_backward()
 
@@ -324,6 +331,7 @@ def _register_group_forward_hooks(
     modules: Sequence[nn.Module],
     pre_hook: Callable,
     post_hook: Callable,
+    modules_to_run: Set[nn.Module],
 ):
     """
     Registers group forward pre and post-hooks. The pre-hook runs upon the
@@ -331,7 +339,6 @@ def _register_group_forward_hooks(
     one module does not run forward, then the post-hook does not run.
     """
     modules_set = set(modules)
-    modules_to_run: Set[nn.Module] = set()
 
     @functools.wraps(pre_hook)
     def wrapped_pre_hook(*args: Any, **kwargs: Any):

@@ -849,6 +849,67 @@ class TestFullyShardPrefetch(FSDPTest):
                 optim.step()
                 optim.zero_grad()
 
+    @skip_if_lt_x_gpu(2)
+    def test_fully_shard_multi_module_unused_module(self):
+        class ModuleWithUnusedLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unused_lin = nn.Linear(1, 1)
+                self.lin = nn.Linear(16, 16)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return nn.functional.relu(self.lin(x))
+
+        model = nn.Sequential(
+            ModuleWithUnusedLinear(), ModuleWithUnusedLinear(), nn.Linear(16, 16)
+        )
+        fully_shard([model[0].unused_lin, model[0].lin], reshard_after_forward=True)
+        fully_shard([model[1].unused_lin, model[1].lin], reshard_after_forward=True)
+        fully_shard(model)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        events: List[EventType] = []
+        unshard_with_record = self._get_unshard_with_record(
+            FSDPParamGroup.unshard, events
+        )
+        post_backward_with_record = self._get_post_backward_with_record(
+            FSDPParamGroup.post_backward, events
+        )
+        inp = torch.randn((2, 16), device="cuda")
+        with patch_unshard(unshard_with_record), patch_post_backward(
+            post_backward_with_record
+        ):
+            for iter_idx in range(3):
+                loss = model(inp)
+                expected_events = [
+                    ("unshard", "", TrainingState.FORWARD),
+                    ("unshard", "0.unused_lin, 0.lin", TrainingState.FORWARD),
+                    ("unshard", "1.unused_lin, 1.lin", TrainingState.FORWARD),
+                ]
+                self.assertEqual(events, expected_events)
+                events.clear()
+                loss.sum().backward()
+                expected_events = [
+                    # Since both `model[0]` and `model[1]` have unused modules
+                    # that never ran forward, they do not reshard after forward
+                    # despite setting it to `True`. Check that there are no
+                    # unshards in backward.
+                    (
+                        "post_backward",
+                        "1.unused_lin, 1.lin",
+                        TrainingState.POST_BACKWARD,
+                    ),
+                    (
+                        "post_backward",
+                        "0.unused_lin, 0.lin",
+                        TrainingState.POST_BACKWARD,
+                    ),
+                    ("post_backward", "", TrainingState.POST_BACKWARD),
+                ]
+                events.clear()
+                optim.step()
+                optim.zero_grad()
+
     def _init_transformer(
         self,
         n_layers: int,
