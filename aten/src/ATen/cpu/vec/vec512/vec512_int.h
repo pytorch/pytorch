@@ -250,7 +250,8 @@ public:
       return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
     } else {
       __mmask16 mask = (1ULL << count) - 1;
-      return _mm512_maskz_loadu_epi32(mask, ptr);
+      auto ones = _mm512_set1_epi32(1);
+      return _mm512_mask_loadu_epi32(ones, mask, ptr);
     }
   }
   void store(void* ptr, int count = size()) const {
@@ -477,7 +478,8 @@ public:
       return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
     } else {
       __mmask32 mask = (1ULL << count) - 1;
-      return _mm512_maskz_loadu_epi16(mask, ptr);
+      auto ones = _mm512_set1_epi16(1);
+      return _mm512_mask_loadu_epi16(ones, mask, ptr);
     }
   }
   void store(void* ptr, int count = size()) const {
@@ -758,7 +760,8 @@ public:
       return loadu_one_fourth(ptr);
     } else {
       __mmask64 mask = (1ULL << count) - 1;
-      return _mm512_maskz_loadu_epi8(mask, ptr);
+      auto ones = _mm512_set1_epi8(1);
+      return _mm512_mask_loadu_epi8(ones, mask, ptr);
     }
   }
   void store(void* ptr, int count = size()) const {
