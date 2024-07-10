@@ -165,9 +165,7 @@ sycl::event deconvolution(
   bool is_channels_last_suggested = use_channels_last_for_conv(src, weight, /*is_transposed=*/true);
 
   // create usr_md for tensors, and md for conv primitive
-  dnnl::memory::desc src_md, weight_md, dst_md;
-
-  std::tie(src_md, weight_md, dst_md) =
+  auto [src_md, weight_md, dst_md] =
       deconv_get_plain_md(src, weight, dst, groups, is_channels_last_suggested);
 
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
@@ -255,8 +253,7 @@ sycl::event deconvolution_backward_data(
   bool is_channels_last_suggested =
       use_channels_last_for_conv(diff_dst, weight, /*is_transposed=*/true);
   // create memory desc
-  dnnl::memory::desc src_md, weight_md, dst_md;
-  std::tie(src_md, weight_md, dst_md) =
+  auto [src_md, weight_md, dst_md] =
       deconv_get_plain_md(
           diff_src, weight, diff_dst, groups, is_channels_last_suggested);
 
@@ -350,8 +347,7 @@ sycl::event deconvolution_backward_weights(
       use_channels_last_for_conv(src, diff_dst, /*is_transposed=*/true);
 
   // create memory desc
-  dnnl::memory::desc src_md, weight_md, dst_md;
-  std::tie(src_md, weight_md, dst_md) = deconv_get_plain_md(
+  auto [src_md, weight_md, dst_md] = deconv_get_plain_md(
           src, diff_weight, diff_dst, groups, is_channels_last_suggested);
 
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
