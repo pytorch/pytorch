@@ -39,7 +39,7 @@ class TestGenerateNumericDebugHandle(TestCase):
     def test_simple(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = torch.export.export(m, example_inputs)
         generate_numeric_debug_handle(m)
         unique_ids = set()
         count = 0
@@ -85,7 +85,7 @@ class TestGenerateNumericDebugHandle(TestCase):
     def test_copy_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = torch.export.export(m, example_inputs)
         generate_numeric_debug_handle(m)
 
         debug_handle_map_ref = _extract_debug_handles(m)
@@ -98,7 +98,7 @@ class TestGenerateNumericDebugHandle(TestCase):
     def test_deepcopy_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = torch.export.export(m, example_inputs)
         generate_numeric_debug_handle(m)
 
         debug_handle_map_ref = _extract_debug_handles(m)
