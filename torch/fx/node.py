@@ -651,11 +651,14 @@ class Node(_NodeBase):
         if self.op == "call_function":
             schema = getattr(self.target, "_schema", None)
             schema_mutable = False
-            inputs = [*self.args, *(self.kwargs.values())]
             if schema is not None and schema.is_mutable:
                 for (idx, arg) in enumerate(schema.arguments):
-                    if arg.alias_info is not None and arg.alias_info.is_write:  # arg is mutable
-                        if len(inputs[idx].users) > 1:  # has other users except self
+                    if arg.alias_info is not None and arg.alias_info.is_write:  # `arg` is mutable
+                        if arg.kwarg_only:
+                            # a kwarg has other users except self
+                            if arg.name in self.kwargs and len(self.kwargs[arg.name].users) > 1:
+                                schema_mutable = True
+                        elif len(self.args[idx].users) > 1:  # an argument has other users except self
                             schema_mutable = True
             return schema_mutable or self.target in _side_effectful_functions
 

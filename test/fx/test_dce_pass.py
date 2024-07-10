@@ -232,9 +232,10 @@ class TestDCE(TestCase):
 
         class TestModule(torch.nn.Module):
             def forward(self, a: torch.Tensor) -> torch.Tensor:
-                torch._ops.ops.aten.abs.out(a, out=a)
+                b = a + 1
+                torch._ops.ops.aten.add.out(b, b, out=a, alpha=2)
                 return a
 
-        # %abs_out node should not be removed because it has side effects.
+        # %add_out node should not be removed because it has side effects.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False)
 >>>>>>> cdc58f9f53 (add kwargs)
