@@ -2013,13 +2013,13 @@ class Argument:
         name: str
         default: str | None
         assert " " in arg, f"illegal argument '{arg}'"
-        type_and_annot, name_and_default = arg.rsplit(" ", 1)
-        if "=" in name_and_default:
-            assert (
-                name_and_default.count("=") == 1
-            ), f"illegal argument with default value: '{name_and_default}'"
-            name, default = name_and_default.split("=")
+        if "=" in arg:
+            assert arg.count("=") == 1, f"illegal argument with default value: '{arg}'"
+            type_and_annot_and_name, default = arg.split("=")
+            type_and_annot, name = type_and_annot_and_name.rsplit(" ", 1)
+            name_and_default = f"{name}={default}"
         else:
+            type_and_annot, name_and_default = arg.rsplit(" ", 1)
             name = name_and_default
             default = None
         # TODO: deduplicate annotation matching with Return

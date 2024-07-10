@@ -848,7 +848,7 @@ if(NOT Python_EXECUTABLE)
 endif()
 
 if(BUILD_PYTHON)
-  set(PYTHON_COMPONENTS Development)
+  set(PYTHON_COMPONENTS Development.Module)
   if(USE_NUMPY)
     list(APPEND PYTHON_COMPONENTS NumPy)
   endif()
@@ -868,7 +868,7 @@ endif()
 
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
-  if(Python_Development_FOUND)
+  if(Python_Development.Module_FOUND)
     if(USE_NUMPY)
       if(NOT Python_NumPy_FOUND)
         message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
@@ -1300,10 +1300,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
       caffe2_interface_library(onnx onnx_library)
     endif()
     list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
-    # TODO: Delete this line once https://github.com/pytorch/pytorch/pull/55889 lands
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      target_compile_options(onnx PRIVATE -Wno-deprecated-declarations)
-    endif()
   else()
     add_library(onnx SHARED IMPORTED)
     find_library(ONNX_LIBRARY onnx)
@@ -1362,9 +1358,7 @@ if(NOT INTERN_BUILD_MOBILE)
 
   # use cub in a safe manner, see:
   # https://github.com/pytorch/pytorch/pull/55292
-  if(NOT ${CUDA_VERSION} LESS 11.5)
-    string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
-  endif()
+  string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
 
   message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
   string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
@@ -1432,11 +1426,6 @@ if(NOT INTERN_BUILD_MOBILE)
   if(CORTEXA9_FOUND)
     message(STATUS "Cortex-A9 Found with compiler flag : -mcpu=cortex-a9")
     add_compile_options(-mcpu=cortex-a9)
-  endif()
-
-  if(WIN32 AND NOT CYGWIN)
-    set(BLAS_INSTALL_LIBRARIES "OFF"
-      CACHE BOOL "Copy the required BLAS DLLs into the TH install dirs")
   endif()
 
   find_package(LAPACK)
@@ -1662,7 +1651,7 @@ if(USE_KINETO)
     set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO" " -DTMP_USE_TSC_AS_TIMESTAMP")
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
   if(LIBKINETO_NOCUPTI)
     string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOCUPTI")
   endif()
