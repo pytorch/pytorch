@@ -3602,7 +3602,7 @@ def forward(self, x):
             torch.export.export(exported_v2.module(), (torch.randn(2, 2),))
 
     # https://github.com/pytorch/pytorch/issues/129939
-    @testing.expectedFailureNonStrict
+    @unittest.expectedFailure
     def test_export_cond_symbool_pred(self):
         class A(torch.nn.Module):
             def __init__(self):
