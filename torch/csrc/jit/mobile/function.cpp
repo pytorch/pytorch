@@ -18,7 +18,7 @@ Function::Function(c10::QualifiedName name) : name_(std::move(name)) {}
 Function::Function(
     c10::QualifiedName name,
     Code code,
-    std::optional<c10::FunctionSchema> schema)
+    at::optional<c10::FunctionSchema> schema)
     : name_(std::move(name)),
       code_(std::move(code)),
       schema_(std::move(schema)) {}
