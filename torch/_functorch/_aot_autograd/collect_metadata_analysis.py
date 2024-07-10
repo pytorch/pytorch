@@ -634,9 +634,8 @@ from a multi-output view call"
                 )
             if isinstance(t, Tensor):
                 out = t.view(t.shape)
-                if parent_cls is  torch.nested._internal.nested_tensor.NestedTensor and (attr == "_offsets" or attr == "_lengths"):
-                    from torch.nested._internal.nested_tensor import _tensor_symint_registry
-                    _tensor_symint_registry[out] = _tensor_symint_registry[t]
+                if parent_cls is torch.nested._internal.nested_tensor.NestedTensor and (attr == "_offsets" or attr == "_lengths"):
+                    out.set_nested_int(t.nested_int())
                 return out
             return t
 

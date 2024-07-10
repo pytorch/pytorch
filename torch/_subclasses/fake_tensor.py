@@ -553,6 +553,9 @@ class FakeTensor(torch.Tensor):
     item_memo = UnbackedMemoDescriptor()
     unique_memo = UnbackedMemoDescriptor()
 
+    _nested_int_memo: Optional[torch.SymInt]
+    _nested_int_memo_vc: Optional[int]
+
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
     _mode_key = torch._C._TorchDispatchModeKey.FAKE
@@ -638,6 +641,8 @@ class FakeTensor(torch.Tensor):
         self.nonzero_memo = None
         self.item_memo = None
         self.unique_memo = None
+        self._nested_int_memo = None  # type: ignore[attr-defined]
+        self._nested_int_memo_vc = None  # type: ignore[attr-defined]
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
@@ -800,6 +805,45 @@ class FakeTensor(torch.Tensor):
 
         return common_device, has_scalar_only_inputs
 
+    def nested_int(self, *, coeff=1):
+        import torch.nested._internal.nested_tensor
+
+        # Version counter based tracking isn't 100% sound but it's close
+        # enough
+        if self._nested_int_memo_vc != self._version:
+            self._nested_int_memo = None
+            self._nested_int_memo_vc = self._version
+
+        if self._nested_int_memo is None:
+            shape_env = self.fake_mode.shape_env
+
+            hint = torch._C._get_nested_int(self.fake_mode.nt_tensor_id_counter, coeff)
+            self.fake_mode.incr_nt_tensor_id_counter()
+
+            if self.source is None:
+                # Source can be None in two cases:
+                # (1) tensor._base is _dummy_instance OR
+                # (2) tensor is an intermediate
+                src = torch._dynamo.source.EphemeralSource("intermediate_offsets")
+            else:
+                src = torch._dynamo.source.NestedIntSource(self.source)
+
+            self._nested_int_memo = shape_env.create_symintnode(
+                sym=shape_env.create_symbol(
+                    val=hint,
+                    source=src,
+                ),
+                hint=hint,
+                source=src,
+            )
+        return self._nested_int_memo
+
+    def set_nested_int(self, val):
+        self._nested_int_memo = val
+        self._nested_int_memo_vc = self._version
+
+    __torch_function__ = torch._C._disabled_torch_function_impl
+
     # We must handle tolist in a special way for FakeTensors here in the case
     # where tolist is called from torch dispatch for tensor subclasses.
     # Ordinarily, if a program calls .tolist compiling still works because there is
@@ -948,6 +992,13 @@ class FakeTensorMode(TorchDispatchMode):
     epoch: int = 0
     in_kernel_invocation: bool = False
 
+    # This is the fake version of the tensor_id_counter used for nested ints.
+    # We have a fake version so that during tracing, we avoid mutating eager
+    # state. Upon entering FakeMode  If we trace multiple times, make
+    # sure the counter is properly reset.
+    nt_tensor_id_counter: int = -1
+    nt_tensor_id_initial_count: int = -1
+
     def __init__(
         self,
         *,
@@ -1079,6 +1130,8 @@ class FakeTensorMode(TorchDispatchMode):
 
     # No-op if FakeTensorMode is already in use
     def __enter__(self):
+        import torch.nested._internal.nested_tensor
+
         prev_only_lift_cpu_tensors = None
         if self.avoid_device_init:
             # See NOTE: [torch.tensor, lift_fresh, and device movement]
@@ -1094,6 +1147,9 @@ class FakeTensorMode(TorchDispatchMode):
             # no-op (still need to re-set the fake mode though since we unset it)
             torch._C._set_dispatch_mode(self)
             self.enter_stack.append((False, None, prev_only_lift_cpu_tensors))
+
+        self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
+        self.nt_tensor_id_initial_count = torch.nested._internal.nested_tensor._tensor_id_counter
         return self
 
     def __exit__(self, a, b, c):
@@ -1109,6 +1165,7 @@ class FakeTensorMode(TorchDispatchMode):
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
             if maybe_prev_only_lift_cpu_tensors is not None:
                 torch._C._set_only_lift_cpu_tensors(maybe_prev_only_lift_cpu_tensors)
+            self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
 
     @classmethod
     def cache_info(cls) -> DispatchCacheInfo:
@@ -1908,6 +1965,10 @@ class FakeTensorMode(TorchDispatchMode):
         return func in self._cpp_meta_supports_symint
 
     lift_fns = ordered_set(aten.lift_fresh.default, aten.lift_fresh_copy.default)
+
+    def incr_nt_tensor_id_counter(self):
+        assert self.enter_stack, "should only called while FakeTensorMode is active"
+        self.nt_tensor_id_counter += 1
 
     def may_turn_const(self, t):
         return (

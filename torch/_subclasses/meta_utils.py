@@ -825,6 +825,12 @@ class MetaConverter:
                 attr: transform(attr, inner_t) for attr, inner_t in t.attrs.items()
             }
 
+            if t.is_nested:
+                offsets = transformed_tensors_dict["_offsets"]
+                lengths = transformed_tensors_dict.get("_lengths", None)
+                ragged_source = offsets if lengths is None else lengths
+                ragged_source.set_nested_int(outer_size[t.ctx["ragged_idx"]])
+
             sub = t.type.__tensor_unflatten__(
                 transformed_tensors_dict, t.ctx, outer_size, outer_stride
             )

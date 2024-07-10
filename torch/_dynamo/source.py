@@ -291,11 +291,7 @@ class NestedIntSource(ChainedSource):
         assert self.base is not None
 
     def reconstruct(self, codegen):
-        # This is wrong, when is this used?
-        return [
-            *self.base.reconstruct(codegen),
-            codegen.create_load_attr(self.prop),
-        ]
+        self.base.reconstruct(codegen)
 
     def guard_source(self):
         return self.base.guard_source()
