@@ -183,7 +183,7 @@ jobs:
       build-environment: win-vs2019-cpu-py3
       cuda-version: cpu
       sync-tag: win-cpu-build
-      runner: "${{ windows.4xlarge.nonephemeral"
+      runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
