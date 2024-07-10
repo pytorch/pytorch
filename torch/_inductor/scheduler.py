@@ -24,6 +24,7 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
+    Set,
 )
 
 import sympy
@@ -2222,7 +2223,8 @@ class Scheduler:
         caused indirectly by other fusions.
         """
 
-        visited: OrderedSet[FusedSchedulerNode] = OrderedSet()
+        # since we are just returning boolean here, use slightly faster, unordered set
+        visited: Set[FusedSchedulerNode] = set()
 
         def found_path(node: BaseSchedulerNode) -> bool:
             # only fused nodes can introduce new ancestors.
@@ -2247,8 +2249,14 @@ class Scheduler:
                     )
             return False
 
-        combined_names = node1.get_operation_names() | node2.get_operation_names()
-        combined_ancestors = (node1.ancestors | node2.ancestors) - combined_names
+        # as above - use slightly faster, unordered set
+        combined_names = (
+            node1.get_operation_names()._dict.keys()
+            | node2.get_operation_names()._dict.keys()
+        )
+        combined_ancestors = (
+            node1.ancestors._dict.keys() | node2.ancestors._dict.keys()
+        ) - combined_names
         cycle = any(found_path(self.name_to_fused_node[n]) for n in combined_ancestors)
         if cycle:
             WhyNoFuse(node1, node2)("will create cycle")
