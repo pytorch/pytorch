@@ -3657,8 +3657,8 @@ def forward(self, x):
             ep.graph_module.code.strip(),
             """\
 def forward(self, b_a_buffer, x):
-    sym_size_int = torch.ops.aten.sym_size.int(x, 0)
-    gt = sym_size_int > 4;  sym_size_int = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(x, 0)
+    gt = sym_size_int_1 > 4;  sym_size_int_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x, b_a_buffer]);  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
