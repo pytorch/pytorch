@@ -502,6 +502,7 @@ class PowByNatural(sympy.Function):
 # base is assumed to be nonnegative, thereby prevent complex numbers from
 # occuring
 class FloatPow(sympy.Function):
+    is_integer = False
     is_real = True
 
     @classmethod
@@ -522,6 +523,7 @@ class FloatPow(sympy.Function):
 # In particular, sympy division is willing to simplify x/x == 1
 # where 1 is an integer, but this must be a float if x was float.
 class FloatTrueDiv(sympy.Function):
+    is_integer = False
     is_real = True
 
     @classmethod
@@ -545,6 +547,7 @@ class FloatTrueDiv(sympy.Function):
 # so just have a different operator
 # NB: Right now, Inductor codegen doesn't implement this correctly lol
 class IntTrueDiv(sympy.Function):
+    is_integer = False
     is_real = True
 
     @classmethod
@@ -630,6 +633,7 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
 
 # NB: this is inconsistent with math.trunc in Python
 class TruncToFloat(sympy.Function):
+    is_integer = False
     is_real = True
 
     @classmethod
@@ -688,6 +692,7 @@ class RoundToInt(sympy.Function):
 
 # NB: Like Round, this only ever returns floats.  ndigits cannot be None
 class RoundDecimal(sympy.Function):
+    is_integer = False
     is_real = True
 
     @classmethod
@@ -699,6 +704,7 @@ class RoundDecimal(sympy.Function):
 
 
 class ToFloat(sympy.Function):
+    is_integer = False
     is_real = True
 
     @classmethod

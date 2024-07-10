@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-
 import copy
 import dataclasses
 import io
@@ -26,7 +25,6 @@ from typing import (
 )
 
 import numpy as np
-
 import onnxruntime
 import pytest
 import pytorch_test_common
@@ -40,6 +38,7 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
 
+
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
 _InputArgsType = Optional[
@@ -48,8 +47,7 @@ _InputArgsType = Optional[
 _OutputsType = Sequence[_NumericType]
 
 onnx_model_dir = os.path.join(
-    os.path.dirname(os.path.realpath(__file__)),
-    os.pardir,
+    os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
     "repos",
     "onnx",
     "onnx",
@@ -57,11 +55,7 @@ onnx_model_dir = os.path.join(
     "test",
     "data",
 )
-
-
 pytorch_converted_dir = os.path.join(onnx_model_dir, "pytorch-converted")
-
-
 pytorch_operator_dir = os.path.join(onnx_model_dir, "pytorch-operator")
 
 

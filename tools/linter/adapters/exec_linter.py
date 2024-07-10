@@ -1,17 +1,14 @@
 """
 EXEC: Ensure that source files are not executable.
 """
-
-from __future__ import annotations
-
 import argparse
 import json
 import logging
 import os
 import sys
-from enum import Enum
-from typing import NamedTuple
 
+from enum import Enum
+from typing import NamedTuple, Optional
 
 LINTER_CODE = "EXEC"
 
@@ -24,18 +21,18 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str | None
-    line: int | None
-    char: int | None
+    path: Optional[str]
+    line: Optional[int]
+    char: Optional[int]
     code: str
     severity: LintSeverity
     name: str
-    original: str | None
-    replacement: str | None
-    description: str | None
+    original: Optional[str]
+    replacement: Optional[str]
+    description: Optional[str]
 
 
-def check_file(filename: str) -> LintMessage | None:
+def check_file(filename: str) -> Optional[LintMessage]:
     is_executable = os.access(filename, os.X_OK)
     if is_executable:
         return LintMessage(

@@ -1268,8 +1268,6 @@ def get_default_op_list() -> OpTypes:
         aten.addmm,
         aten._scaled_dot_product_flash_attention,
         aten._scaled_dot_product_efficient_attention,
-        aten._flash_attention_forward,
-        aten._efficient_attention_forward,
         aten.upsample_bilinear2d,
     ]  # noqa: E501,B950
 
@@ -1632,7 +1630,7 @@ def choose_saved_values_set(
         for i, txt in enumerate(x_values):
             plt.annotate(
                 f"{txt:.2f}",
-                (txt, y_values[i]),
+                (x_values[i], y_values[i]),
                 textcoords="offset points",
                 xytext=(0, 10),
                 ha="center",

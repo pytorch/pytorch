@@ -170,6 +170,7 @@ def export(
         raise ValueError(
             f"Expected `mod` to be an instance of `torch.nn.Module`, got {type(mod)}."
         )
+
     return _export(
         mod,
         args,

@@ -176,10 +176,7 @@ static __global__ void oneShotAllReduceKernel(
     bf16x8 vals[kWorldSize];
 #pragma unroll kWorldSize
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      // Make sure the values in `vals` are order by rank so that the reduction
-      // results are consistent across ranks.
-      int srcRank = (ii + kWorldSize - rank) % kWorldSize;
-      streamLoad128(vals[srcRank], &srcs[ii][i]);
+      streamLoad128(vals[ii], &srcs[ii][i]);
     }
 
     bf16x8 sums;

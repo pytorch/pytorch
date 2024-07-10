@@ -29,7 +29,6 @@ const char* get_env_var(
   return value ? value : def_value;
 }
 
-#ifndef C10_MOBILE
 size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
   try {
     if (auto* value = std::getenv(var_name)) {
@@ -44,7 +43,6 @@ size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
   }
   return def_value;
 }
-#endif
 
 } // namespace
 

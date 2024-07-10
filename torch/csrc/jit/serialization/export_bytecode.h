@@ -1,5 +1,8 @@
 #pragma once
 
+#include <tuple>
+#include <unordered_map>
+
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>

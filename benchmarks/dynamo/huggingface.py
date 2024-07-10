@@ -189,9 +189,6 @@ REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
     "GPT2ForSequenceClassification",
     "RobertaForQuestionAnswering",
 }
-REQUIRE_HIGHER_TOLERANCE_INFERENCE_CPU_ONLY = {
-    "LayoutLMForSequenceClassification",
-}
 
 
 SKIP_FOR_CPU = {
@@ -568,11 +565,6 @@ class HuggingfaceRunner(BenchmarkRunner):
                 return 1e-2, cosine
         else:
             if name in REQUIRE_HIGHER_TOLERANCE_INFERENCE:
-                return 4e-3, cosine
-            if (
-                current_device == "cpu"
-                and name in REQUIRE_HIGHER_TOLERANCE_INFERENCE_CPU_ONLY
-            ):
                 return 4e-3, cosine
         return 1e-3, cosine
 

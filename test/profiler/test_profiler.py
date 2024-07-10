@@ -1,5 +1,18 @@
 # Owner(s): ["oncall: profiler"]
 
+# if tqdm is not shutdown properly, it will leave the monitor thread alive.
+# This causes an issue in the multithreading test because we check all events
+# in that test with their tids. The events that correspond to these lingering
+# threads all have TID of (uint64_t)(-1) which is invalid.
+# The work around is turnning off monitoring thread when tqdm is loaded.
+# Since these are unit tests, it is safe to turn off monitor thread.
+try:
+    import tqdm
+
+    tqdm.tqdm.monitor_interval = 0
+except ImportError:
+    pass
+
 import collections
 import gc
 import json
@@ -24,7 +37,6 @@ import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
-from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
 from torch.autograd.profiler import KinetoStepTracker, profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
@@ -50,7 +62,9 @@ from torch.profiler._pattern_matcher import (
     report_all_anti_patterns,
     SynchronizedDataLoaderPattern,
 )
+
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
+
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -70,27 +84,15 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-
-# if tqdm is not shutdown properly, it will leave the monitor thread alive.
-# This causes an issue in the multithreading test because we check all events
-# in that test with their tids. The events that correspond to these lingering
-# threads all have TID of (uint64_t)(-1) which is invalid.
-# The work around is turnning off monitoring thread when tqdm is loaded.
-# Since these are unit tests, it is safe to turn off monitor thread.
-try:
-    import tqdm
-
-    tqdm.tqdm.monitor_interval = 0
-except ImportError:
-    pass
-
 try:
     import psutil
 
     HAS_PSUTIL = True
-except ModuleNotFoundError:
+except ImportError:
     HAS_PSUTIL = False
-    psutil = None
+
+
+from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")

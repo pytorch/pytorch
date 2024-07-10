@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from typing import Any
+from typing import Any, Dict, List, Set
 
 from .coverage_record import CoverageRecord
 
@@ -12,7 +10,7 @@ class GcovCoverageParser:
     of CoverageRecord(s).
     """
 
-    def __init__(self, llvm_coverage: dict[str, Any]) -> None:
+    def __init__(self, llvm_coverage: Dict[str, Any]) -> None:
         self._llvm_coverage = llvm_coverage
 
     @staticmethod
@@ -26,17 +24,17 @@ class GcovCoverageParser:
             return True
         return False
 
-    def parse(self) -> list[CoverageRecord]:
+    def parse(self) -> List[CoverageRecord]:
         # The JSON format is described in the gcov source code
         # https://gcc.gnu.org/onlinedocs/gcc/Invoking-Gcov.html
-        records: list[CoverageRecord] = []
+        records: List[CoverageRecord] = []
         for file_info in self._llvm_coverage["files"]:
             filepath = file_info["file"]
             if self._skip_coverage(filepath):
                 continue
             # parse json file
-            covered_lines: set[int] = set()
-            uncovered_lines: set[int] = set()
+            covered_lines: Set[int] = set()
+            uncovered_lines: Set[int] = set()
             for line in file_info["lines"]:
                 line_number = line["line_number"]
                 count = line["count"]

@@ -99,8 +99,7 @@ class BroadcastingTorchSaveReader(StorageReader):
 
             #  Broadcast the tensor from the coordinator rank
             if self.is_coordinator:
-                pg_device = dist.distributed_c10d._get_pg_default_device()
-                tensor = torch_state_dict[req.storage_index.fqn].to(pg_device)
+                tensor = torch_state_dict[req.storage_index.fqn].cuda()
             else:
                 tensor = torch.empty_like(planner.state_dict[req.storage_index.fqn])
 

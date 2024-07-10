@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 from typing import Any, Optional
 
-
 _pandas: Any = None
 _WITH_PANDAS: Optional[bool] = None
 
@@ -9,7 +8,6 @@ _WITH_PANDAS: Optional[bool] = None
 def _try_import_pandas() -> bool:
     try:
         import pandas  # type: ignore[import]
-
         global _pandas
         _pandas = pandas
         return True
@@ -29,7 +27,7 @@ class PandasWrapper:
     @classmethod
     def create_dataframe(cls, data, columns):
         if not _with_pandas():
-            raise RuntimeError("DataFrames prototype requires pandas to function")
+            raise Exception("DataFrames prototype requires pandas to function")  # noqa: TRY002
         return _pandas.DataFrame(data, columns=columns)  # type: ignore[union-attr]
 
     @classmethod
@@ -47,31 +45,31 @@ class PandasWrapper:
     @classmethod
     def iterate(cls, data):
         if not _with_pandas():
-            raise RuntimeError("DataFrames prototype requires pandas to function")
+            raise Exception("DataFrames prototype requires pandas to function")  # noqa: TRY002
         yield from data.itertuples(index=False)
 
     @classmethod
     def concat(cls, buffer):
         if not _with_pandas():
-            raise RuntimeError("DataFrames prototype requires pandas to function")
+            raise Exception("DataFrames prototype requires pandas to function")  # noqa: TRY002
         return _pandas.concat(buffer)  # type: ignore[union-attr]
 
     @classmethod
     def get_item(cls, data, idx):
         if not _with_pandas():
-            raise RuntimeError("DataFrames prototype requires pandas to function")
-        return data[idx : idx + 1]
+            raise Exception("DataFrames prototype requires pandas to function")  # noqa: TRY002
+        return data[idx: idx + 1]
 
     @classmethod
     def get_len(cls, df):
         if not _with_pandas():
-            raise RuntimeError("DataFrames prototype requires pandas to function")
+            raise Exception("DataFrames prototype requires pandas to function")  # noqa: TRY002
         return len(df.index)
 
     @classmethod
     def get_columns(cls, df):
         if not _with_pandas():
-            raise RuntimeError("DataFrames prototype requires pandas to function")
+            raise Exception("DataFrames prototype requires pandas to function")  # noqa: TRY002
         return list(df.columns.values.tolist())
 
 

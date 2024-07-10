@@ -43,8 +43,8 @@ from torch._inductor.cudagraph_utils import (
     get_placeholders,
     log_cudagraph_skip_and_bump_counter,
 )
+
 from torch._inductor.debug import save_args_for_compile_fx_inner
-from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
@@ -420,19 +420,13 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
         return config.get_config_copy()
 
 
-def with_fresh_cache_if_config(fn):
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        if config.force_disable_caches:
-            # Don't delete the cache dir because it has to survive beyond the
-            # compile_fx call. Let's put the temp dirs under the default cache
-            # dir so they're easier to locate.
-            with fresh_inductor_cache(dir=cache_dir(), delete=False):
-                return fn(*args, **kwargs)
-        else:
-            return fn(*args, **kwargs)
-
-    return wrapper
+@functools.wraps
+def with_fresh_cache_if_config(f):
+    if config.force_disable_caches:
+        with fresh_inductor_cache():
+            return f
+    else:
+        return f
 
 
 @DebugContext.wrap

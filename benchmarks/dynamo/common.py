@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import abc
+
 import argparse
 import collections
 import contextlib
@@ -13,6 +14,7 @@ import importlib
 import itertools
 import logging
 import os
+import pathlib
 import shutil
 import signal
 import subprocess
@@ -20,7 +22,7 @@ import sys
 import time
 import weakref
 from contextlib import contextmanager
-from pathlib import Path
+
 from typing import (
     Any,
     Callable,
@@ -58,7 +60,6 @@ from torch._dynamo.testing import (
     same,
 )
 
-
 try:
     from torch._dynamo.utils import (
         clone_inputs,
@@ -79,7 +80,6 @@ from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map, tree_map_only
-
 
 try:
     import torch_xla
@@ -920,7 +920,7 @@ def speedup_experiment_onnx(
         2. Running ORT with OnnxModel.
 
     Writes to ./{output_filename}, which should be
-        `Path(self.output_dir) / f"{self.compiler}_{suite}_{self.dtype}_{self.mode}_{self.device}_{self.testing}.csv".
+        `pathlib.Path(self.output_dir) / f"{self.compiler}_{suite}_{self.dtype}_{self.mode}_{self.device}_{self.testing}.csv".
 
     TODO(bowbao): Record export time and export peak memory usage.
     """
@@ -1347,8 +1347,8 @@ class OnnxModel(abc.ABC):
     @classmethod
     def _generate_onnx_model_directory(
         cls, output_directory: str, compiler_name: str, model_name: str
-    ) -> Path:
-        model_path = Path(
+    ) -> pathlib.Path:
+        model_path = pathlib.Path(
             output_directory,
             ".onnx_models",
             model_name,
@@ -1547,12 +1547,7 @@ class OnnxModelFromTorchScript(OnnxModel):
         if self.use_experimental_patch:
             import torch_onnx
 
-            torch_onnx.patch_torch(
-                error_report=True,
-                profile=True,
-                dump_exported_program=False,
-                artifacts_dir=os.path.dirname(output_path),
-            )
+            torch_onnx.patch_torch(error_report=True, profile=True)
         else:
             # make sure the patch is not in effect
             try:
@@ -2394,6 +2389,7 @@ class BenchmarkRunner:
         from diffusers.models.transformer_2d import Transformer2DModel
         from torchbenchmark.models.nanogpt.model import Block
         from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+
         from transformers.models.t5.modeling_t5 import T5Block
         from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
 
@@ -2505,10 +2501,6 @@ class BenchmarkRunner:
             return accuracy_status
 
         if name in self.skip_accuracy_checks_large_models_dashboard:
-            return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
-
-        # Skip all accuracy check for the torchao backend
-        if self.args.backend == "torchao":
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
         with self.pick_grad(name, self.args.training):

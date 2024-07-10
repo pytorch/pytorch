@@ -3,7 +3,6 @@ import unittest
 
 from tools.gen_vulkan_spv import DEFAULT_ENV, SPVGenerator
 
-
 ####################
 # Data for testing #
 ####################

@@ -22,7 +22,6 @@ from typing import Any
 
 from coverage import CoverageData, CoveragePlugin  # type: ignore[import]
 
-
 # All coverage stats resulting from this plug-in will be in a separate .coverage file that should be merged later with
 # `coverage combine`. The convention seems to be .coverage.dotted.suffix based on the following link:
 # https://coverage.readthedocs.io/en/coverage-5.5/cmd.html#combining-data-files-coverage-combine

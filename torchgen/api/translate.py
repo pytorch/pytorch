@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from typing import NoReturn, Sequence
+from typing import Dict, List, NoReturn, Sequence, Union
 
 from torchgen.api.types import (
     ArrayRefCType,
@@ -97,13 +95,13 @@ class UnsatError(RuntimeError):
 # something more complicated, e.g., tracking the set of bindings in a context,
 # you may find using these smaller types more convenient.
 def translate(
-    bindings: Sequence[Expr | Binding],
-    goals: Sequence[NamedCType | Binding],
+    bindings: Sequence[Union[Expr, Binding]],
+    goals: Sequence[Union[NamedCType, Binding]],
     *,
     method: bool = False,
     allow_expensive_conversions: bool = False,
-) -> list[Expr]:
-    binding_exprs: list[Expr] = []
+) -> List[Expr]:
+    binding_exprs: List[Expr] = []
     for b in bindings:
         if isinstance(b, Binding):
             binding_exprs.append(
@@ -115,7 +113,7 @@ def translate(
         else:
             binding_exprs.append(b)
 
-    goal_ctypes: list[NamedCType] = []
+    goal_ctypes: List[NamedCType] = []
     for g in goals:
         if isinstance(g, Binding):
             goal_ctypes.append(g.nctype)
@@ -123,7 +121,7 @@ def translate(
             goal_ctypes.append(g)
 
     # Add all the bindings to the context
-    ctx: dict[NamedCType, str] = {}
+    ctx: Dict[NamedCType, str] = {}
     for b in binding_exprs:
         ctx[b.type] = b.expr
 

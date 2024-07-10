@@ -177,7 +177,7 @@ C10_HOST_DEVICE To convert(From f) {
 }
 
 // Define separately to avoid being inlined and prevent code-size bloat
-[[noreturn]] C10_API void report_overflow(const char* name);
+C10_API void report_overflow(const char* name);
 
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {

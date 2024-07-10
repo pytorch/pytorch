@@ -4,7 +4,7 @@ import re
 import string
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from types import ModuleType
 
 import torch
@@ -42,23 +42,23 @@ class SupportLevel(Enum):
     NOT_SUPPORTED_YET = 0
 
 
-ArgsType = Tuple[Any, ...]
+class ExportArgs:
+    __slots__ = ("args", "kwargs")
+
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
 
 
-def check_inputs_type(args, kwargs):
-    if not isinstance(args, tuple):
+InputsType = Union[Tuple[Any, ...], ExportArgs]
+
+
+def check_inputs_type(x):
+    if not isinstance(x, (ExportArgs, tuple)):
         raise ValueError(
-            f"Expecting args type to be a tuple, got: {type(args)}"
+            f"Expecting inputs type to be either a tuple, or ExportArgs, got: {type(x)}"
         )
-    if not isinstance(kwargs, dict):
-        raise ValueError(
-            f"Expecting kwargs type to be a dict, got: {type(kwargs)}"
-        )
-    for key in kwargs:
-        if not isinstance(key, str):
-            raise ValueError(
-                f"Expecting kwargs keys to be a string, got: {type(key)}"
-            )
+
 
 def _validate_tag(tag: str):
     parts = tag.split(".")
@@ -75,21 +75,20 @@ def _validate_tag(tag: str):
 
 @dataclass(frozen=True)
 class ExportCase:
-    example_args: ArgsType
+    example_inputs: InputsType
     description: str  # A description of the use case.
     model: torch.nn.Module
     name: str
-    example_kwargs: Dict[str, Any] = field(default_factory=dict)
-    extra_args: Optional[ArgsType] = None  # For testing graph generalization.
+    extra_inputs: Optional[InputsType] = None  # For testing graph generalization.
     # Tags associated with the use case. (e.g dynamic-shape, escape-hatch)
     tags: Set[str] = field(default_factory=set)
     support_level: SupportLevel = SupportLevel.SUPPORTED
     dynamic_shapes: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
-        check_inputs_type(self.example_args, self.example_kwargs)
-        if self.extra_args is not None:
-            check_inputs_type(self.extra_args, {})
+        check_inputs_type(self.example_inputs)
+        if self.extra_inputs is not None:
+            check_inputs_type(self.extra_inputs)
 
         for tag in self.tags:
             _validate_tag(tag)
@@ -166,9 +165,17 @@ def export_rewrite_case(**kwargs):
         if key not in _EXAMPLE_REWRITE_CASES:
             _EXAMPLE_REWRITE_CASES[key] = []
 
-        configs["example_args"] = parent.example_args
+        configs["example_inputs"] = parent.example_inputs
         case = _make_export_case(m, to_snake_case(m.__name__), configs)
         _EXAMPLE_REWRITE_CASES[key].append(case)
         return case
 
     return wrapper
+
+
+def normalize_inputs(x: InputsType) -> ExportArgs:
+    if isinstance(x, tuple):
+        return ExportArgs(*x)
+
+    assert isinstance(x, ExportArgs)
+    return x

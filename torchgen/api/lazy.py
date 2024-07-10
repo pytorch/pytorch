@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from typing import Any
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from torchgen.api.types import (
     BaseCppType,
@@ -36,7 +34,7 @@ from torchgen.model import (
 )
 
 
-_valueT: BaseCppType | None = None
+_valueT: Optional[BaseCppType] = None
 
 
 # A ValueT is an IR type which represents the computation of a Tensor.  In other
@@ -68,8 +66,8 @@ tensorListValueT = BaseCppType("torch::lazy", "Value")
 
 
 def process_ir_type(
-    typ: Type, properties: LazyIrProperties, *, symint: bool
-) -> BaseCType | VectorCType | OptionalCType | ListCType:
+    typ: Type, properties: "LazyIrProperties", *, symint: bool
+) -> Union[BaseCType, VectorCType, OptionalCType, ListCType]:
     """
     This function takes a type from NativeFunctions and converts it for use with
     lazy tensor codegen.
@@ -149,7 +147,7 @@ def process_ir_type(
 #
 # Invariant: passed typ should be an *owning* CType (e.g., we will report
 # that ArrayRef<Value> is NOT a value type)
-def isValueType(typ: CType, properties: LazyIrProperties | None = None) -> bool:
+def isValueType(typ: CType, properties: "Optional[LazyIrProperties]" = None) -> bool:
     """
     Given a type, determine if it is a Value-like type.  This is equivalent to
     being Tensor-like, but assumes the type has already been transformed.
@@ -204,7 +202,7 @@ def isGeneratorType(typ: Type) -> bool:
 class LazyArgument:
     name: str
     orig_type: Type
-    lazy_type_: CType | None
+    lazy_type_: Optional[CType]
     is_wrapped_scalar: bool
     is_generator: bool
     # TODO: this is lies, it is false for symint list
@@ -216,9 +214,7 @@ class LazyArgument:
     # true if this argument is or contains a lazy IR value
     is_lazy_value: bool
 
-    def __init__(
-        self, arg: Argument, properties: LazyIrProperties, *, symint: bool
-    ) -> None:
+    def __init__(self, arg: Argument, properties: "LazyIrProperties", *, symint: bool):
         self.name = arg.name
         self.orig_type = arg.type
         self.symint = symint
@@ -252,7 +248,7 @@ class LazyIrProperties:
     attributes. The mutual exclusivity is automatically handled.
     """
 
-    Properties: tuple[tuple[str, ...], ...] = (
+    Properties: Tuple[Tuple[str, ...], ...] = (
         (
             "ShapePrecompute",  # Assume shape has been precomputed
             "ShapeCompute",  # Need to compute the shape on construction
@@ -275,8 +271,8 @@ class LazyIrProperties:
         ),
     )
 
-    def __init__(self, *default_properties: str) -> None:
-        properties: dict[tuple[str, ...], str | None] = dict.fromkeys(
+    def __init__(self, *default_properties: str):
+        properties: Dict[Tuple[str, ...], Optional[str]] = dict.fromkeys(
             LazyIrProperties.Properties
         )
         self.__dict__["properties"] = properties
@@ -309,17 +305,17 @@ class LazyIrProperties:
 # TODO: This is not idiomatic with how other torchgen APIs transform on schema.
 class LazyIrSchema:
     # The name of the operator this function schema describes.
-    name: OperatorName
+    name: "OperatorName"
 
-    positional_args: tuple[LazyArgument, ...]
-    keyword_args: tuple[LazyArgument, ...]
+    positional_args: Tuple[LazyArgument, ...]
+    keyword_args: Tuple[LazyArgument, ...]
 
     # TODO: Need to handle collisions with argument names at some point
-    returns: tuple[Return, ...]
+    returns: Tuple["Return", ...]
 
     # if this schema has a Generator arg, list its orig ctype/name but don't
     # build a LazyArgument since lazy IR doesn't support it
-    generator_arg: NamedCType | None = None
+    generator_arg: Optional[NamedCType] = None
 
     # original function schema
     func: FunctionSchema
@@ -333,21 +329,21 @@ class LazyIrSchema:
         "Lower",
         "CanBeReused",
     )
-    opkind: str | None = None
+    opkind: Optional[str] = None
 
     def __init__(
         self,
         func: FunctionSchema,
-        properties: LazyIrProperties | None = None,
+        properties: Optional[LazyIrProperties] = None,
         *,
         symint: bool,
-    ) -> None:
+    ):
         if properties:
             self.properties = properties
 
         self.func = func
         self.symint = symint
-        positional_args: list[LazyArgument] = []
+        positional_args: List[LazyArgument] = []
         for arg_field in ["pre_self_positional", "self_arg", "post_self_positional"]:
             if arg_field == "self_arg" and func.arguments.self_arg is not None:
                 arg = func.arguments.self_arg.argument
@@ -361,7 +357,7 @@ class LazyIrSchema:
                 )
         self.positional_args = tuple(positional_args)
 
-        keyword_args: list[LazyArgument] = []
+        keyword_args: List[LazyArgument] = []
         for arg_field in [
             "pre_tensor_options_kwarg_only",
             "tensor_options",
@@ -415,13 +411,13 @@ class LazyIrSchema:
         values: bool = True,
         scalars: bool = True,
         generator: bool = True,
-    ) -> list[LazyArgument]:
+    ) -> List[LazyArgument]:
         # This function maintains the sorted order of arguments but provides different filtered views.
         # Some parts of the code care about kwargs vs args (TS lowerings),
         # other parts care about whether they need to wrap the arg in a lazy value or leave it alone.
         # Generators are special cased, as they are needed for fallback/shape-inference but not supported
         # in TS lowerings and therefore also omitted from lazy IR.
-        args: list[LazyArgument] = []
+        args: List[LazyArgument] = []
         if positional:
             args.extend(self.positional_args)
         if keyword:
@@ -443,25 +439,25 @@ class LazyIrSchema:
         return []
 
     @property
-    def positional_values(self) -> list[LazyArgument]:
+    def positional_values(self) -> List[LazyArgument]:
         return self.filtered_args(
             positional=True, keyword=False, values=True, scalars=False
         )
 
     @property
-    def positional_scalars(self) -> list[LazyArgument]:
+    def positional_scalars(self) -> List[LazyArgument]:
         return self.filtered_args(
             positional=True, keyword=False, values=False, scalars=True
         )
 
     @property
-    def keyword_values(self) -> list[LazyArgument]:
+    def keyword_values(self) -> List[LazyArgument]:
         return self.filtered_args(
             positional=False, keyword=True, values=True, scalars=False
         )
 
     @property
-    def keyword_scalars(self) -> list[LazyArgument]:
+    def keyword_scalars(self) -> List[LazyArgument]:
         return self.filtered_args(
             positional=False, keyword=True, values=False, scalars=True
         )

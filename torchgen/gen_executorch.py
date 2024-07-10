@@ -1,11 +1,9 @@
-from __future__ import annotations
-
 import argparse
 import os
+import pathlib
 from collections import defaultdict
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable, Sequence, TextIO, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Sequence, TextIO, Tuple, Union
 
 import yaml
 
@@ -47,6 +45,7 @@ from torchgen.model import (
     OperatorName,
     Variant,
 )
+from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import (
     context,
     FileManager,
@@ -56,11 +55,7 @@ from torchgen.utils import (
 )
 
 
-if TYPE_CHECKING:
-    from torchgen.selective_build.selector import SelectiveBuilder
-
-
-def _sig_decl_wrapper(sig: CppSignature | ExecutorchCppSignature) -> str:
+def _sig_decl_wrapper(sig: Union[CppSignature, ExecutorchCppSignature]) -> str:
     """
     A wrapper function to basically get `sig.decl(include_context=True)`.
     For ATen kernel, the codegen has no idea about ET contextArg, so we
@@ -77,9 +72,9 @@ def _sig_decl_wrapper(sig: CppSignature | ExecutorchCppSignature) -> str:
 
 
 def static_dispatch(
-    sig: CppSignature | ExecutorchCppSignature,
+    sig: Union[CppSignature, ExecutorchCppSignature],
     f: NativeFunction,
-    backend_indices: list[BackendIndex],
+    backend_indices: List[BackendIndex],
 ) -> str:
     """
     For a given `NativeFunction`, find out the corresponding native function and dispatch to it. If zero or more than one
@@ -118,7 +113,7 @@ TORCH_API inline {_sig_decl_wrapper(sig)} {{
 # and the scaffolding to call into the dispatcher from these functions.
 @dataclass(frozen=True)
 class ComputeFunction:
-    static_dispatch_backend_indices: list[BackendIndex]
+    static_dispatch_backend_indices: List[BackendIndex]
 
     selector: SelectiveBuilder
 
@@ -127,7 +122,7 @@ class ComputeFunction:
     is_custom_op: Callable[[NativeFunction], bool]
 
     @method_with_native_function
-    def __call__(self, f: NativeFunction) -> str | None:
+    def __call__(self, f: NativeFunction) -> Optional[str]:
         is_method_variant = False
         if not self.selector.is_root_operator(f"{f.namespace}::{f.func.name}"):
             return None
@@ -141,7 +136,7 @@ class ComputeFunction:
                 f"Can't handle native function {f.func} with the following variant specification {f.variants}."
             )
 
-        sig: CppSignature | ExecutorchCppSignature = (
+        sig: Union[CppSignature, ExecutorchCppSignature] = (
             CppSignatureGroup.from_native_function(
                 f, method=False, fallback_binding=f.manual_cpp_binding
             ).most_faithful_signature()
@@ -184,10 +179,10 @@ class ComputeCodegenUnboxedKernels:
     @method_with_nested_native_function
     def __call__(
         self,
-        unbox_kernel_entry: tuple[NativeFunction, tuple[ETKernelKey, BackendMetadata]],
+        unbox_kernel_entry: Tuple[NativeFunction, Tuple[ETKernelKey, BackendMetadata]],
     ) -> str:
         f: NativeFunction = unbox_kernel_entry[0]
-        kernel_key: ETKernelKey | list[ETKernelKey] = unbox_kernel_entry[1][0]
+        kernel_key: Union[ETKernelKey, List[ETKernelKey]] = unbox_kernel_entry[1][0]
         kernel_meta: BackendMetadata = unbox_kernel_entry[1][1]
 
         op_name = f"{f.namespace}::{f.func.name}"
@@ -201,7 +196,7 @@ class ComputeCodegenUnboxedKernels:
         )
         if not used_kernel_keys:
             return ""
-        sig: CppSignature | ExecutorchCppSignature
+        sig: Union[CppSignature, ExecutorchCppSignature]
         argument_type_gen: Callable[..., NamedCType]
         return_type_gen: Callable[..., CType]
         if self.use_aten_lib:
@@ -295,11 +290,11 @@ def gen_unboxing(
 ) -> None:
     # Iterable type for write_sharded is a Tuple of (native_function, (kernel_key, metadata))
     def key_func(
-        item: tuple[NativeFunction, tuple[ETKernelKey, BackendMetadata]]
+        item: Tuple[NativeFunction, Tuple[ETKernelKey, BackendMetadata]]
     ) -> str:
         return item[0].root_name + ":" + item[1][0].to_native_string()
 
-    items: list[tuple[NativeFunction, tuple[ETKernelKey, BackendMetadata]]] = [
+    items: List[Tuple[NativeFunction, Tuple[ETKernelKey, BackendMetadata]]] = [
         (native_function, (kernel_key, metadata))
         for native_function in native_functions
         for kernel_key, metadata in kernel_index.get_kernels(native_function).items()
@@ -330,8 +325,8 @@ def gen_unboxing(
 
 @with_native_function_and_index  # type: ignore[arg-type]
 def compute_native_function_declaration(
-    g: NativeFunctionsGroup | NativeFunction, kernel_index: ETKernelIndex
-) -> list[str]:
+    g: Union[NativeFunctionsGroup, NativeFunction], kernel_index: ETKernelIndex
+) -> List[str]:
     assert isinstance(g, NativeFunction)
     sig = ExecutorchCppSignature.from_native_function(f=g)
     metadata_list = kernel_index.get_kernels(g).values()
@@ -357,7 +352,7 @@ def gen_functions_declarations(
     kernel_index: ETKernelIndex,
     selector: SelectiveBuilder,
     use_aten_lib: bool,
-    custom_ops_native_functions: Sequence[NativeFunction] | None = None,
+    custom_ops_native_functions: Optional[Sequence[NativeFunction]] = None,
 ) -> str:
     """
     Generates namespace separated C++ function API inline declaration/definitions.
@@ -411,13 +406,13 @@ def get_ns_grouped_kernels(
     kernel_index: ETKernelIndex,
     native_function_decl_gen: Callable[
         [
-            NativeFunctionsGroup | NativeFunction,
+            Union[NativeFunctionsGroup, NativeFunction],
             ETKernelIndex,
         ],
-        list[str],
+        List[str],
     ],
-) -> dict[str, list[str]]:
-    ns_grouped_kernels: dict[str, list[str]] = defaultdict(list)
+) -> Dict[str, List[str]]:
+    ns_grouped_kernels: Dict[str, List[str]] = defaultdict(list)
     for f in native_functions:
         native_function_namespaces = set()
         op_kernels = kernel_index.get_kernels(f)
@@ -600,7 +595,7 @@ def gen_custom_ops(
 def translate_native_yaml(
     tags_yaml_path: str,
     aten_yaml_path: str,
-    native_yaml_path: str | None,
+    native_yaml_path: Optional[str],
     use_aten_lib: bool,
     out_file: TextIO,
 ) -> None:
@@ -651,15 +646,15 @@ def translate_native_yaml(
         skip_native_fns_gen=False,
     )
 
-    func_to_scoped_name: dict[FunctionSchema, str] = {
+    func_to_scoped_name: Dict[FunctionSchema, str] = {
         f.func: f"{f.namespace}::{f.func.name}" for f in native_functions
     }
-    op_to_scoped_name: dict[OperatorName, str] = {
+    op_to_scoped_name: Dict[OperatorName, str] = {
         func.name: name for func, name in func_to_scoped_name.items()
     }
 
     schema_dict = {name: str(func) for func, name in func_to_scoped_name.items()}
-    kernel_persist_dict: dict[str, dict[str, Any]] = {
+    kernel_persist_dict: Dict[str, Dict[str, Any]] = {
         op_to_scoped_name[op]: v for op, v in persisted_fields.items()
     }
 
@@ -697,13 +692,13 @@ def translate_native_yaml(
 
 
 def parse_yaml(
-    path: str | None,
+    path: Optional[str],
     tags_yaml_path: str,
     function_filter: Callable[[NativeFunction], bool],
     skip_native_fns_gen: bool = False,
-) -> tuple[
-    list[NativeFunction],
-    dict[DispatchKey, dict[OperatorName, BackendMetadata]] | ETKernelIndex,
+) -> Tuple[
+    List[NativeFunction],
+    Union[Dict[DispatchKey, Dict[OperatorName, BackendMetadata]], ETKernelIndex],
 ]:
     if path and os.path.exists(path) and os.stat(path).st_size > 0:
         with open(path) as f:
@@ -740,8 +735,8 @@ def parse_yaml(
 
         # (2) Return BackendIndices if kernel index is absent
         def map_index(
-            m: dict[OperatorName, BackendMetadata]
-        ) -> dict[OperatorName, BackendMetadata]:
+            m: Dict[OperatorName, BackendMetadata]
+        ) -> Dict[OperatorName, BackendMetadata]:
             return {op: m[op] for op in m if op in op_names}
 
         backend_indices = {
@@ -756,11 +751,11 @@ def parse_yaml(
 def parse_yaml_files(
     tags_yaml_path: str,
     aten_yaml_path: str,
-    native_yaml_path: str | None,
-    custom_ops_yaml_path: str | None,
+    native_yaml_path: Optional[str],
+    custom_ops_yaml_path: Optional[str],
     selector: SelectiveBuilder,
     use_aten_lib: bool,
-) -> tuple[ETParsedYaml, ETParsedYaml | None]:
+) -> Tuple[ETParsedYaml, Optional[ETParsedYaml]]:
     """Parses functions.yaml and custom_ops.yaml files.
 
     Args:
@@ -983,7 +978,7 @@ def main() -> None:
             )
 
     if options.output_dependencies:
-        depfile_path = Path(options.output_dependencies).resolve()
+        depfile_path = pathlib.Path(options.output_dependencies).resolve()
         depfile_name = depfile_path.name
         depfile_stem = depfile_path.stem
 

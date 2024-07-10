@@ -2,16 +2,14 @@
 #
 # Each autograd function is represented by `DifferentiabilityInfo` containing
 # a list of `Derivative`. See `torchgen.api.autograd` for the data models.
-
-from __future__ import annotations
-
 import re
 from collections import defaultdict
-from typing import Any, Counter, Dict, Sequence, Set, Tuple
+from typing import Any, Counter, Dict, List, Match, Optional, Sequence, Set, Tuple
 
 import yaml
 
 from torchgen.api import cpp
+
 from torchgen.api.autograd import (
     Derivative,
     DifferentiabilityInfo,
@@ -52,10 +50,9 @@ from torchgen.model import (
 from torchgen.utils import concatMap, IDENT_REGEX, split_name_params
 from torchgen.yaml_utils import YamlLoader
 
-
 DerivativeRet = Tuple[Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]], Set[str]]
 
-_GLOBAL_LOAD_DERIVATIVE_CACHE: dict[tuple[str, str], DerivativeRet] = {}
+_GLOBAL_LOAD_DERIVATIVE_CACHE: Dict[Tuple[str, str], DerivativeRet] = {}
 
 _VALID_AUTOGRAD_KEYS = set(AUTOGRAD_KEYS)
 
@@ -65,11 +62,11 @@ _VALID_AUTOGRAD_KEYS = set(AUTOGRAD_KEYS)
 # we generate them here instead of duplicating them in the yaml.
 # See Note [Codegen'd {view}_copy Operators]
 def add_view_copy_derivatives(
-    infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]],
-    view_groups: list[NativeFunctionsViewGroup],
+    infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
+    view_groups: List[NativeFunctionsViewGroup],
 ) -> None:
     # Get the map from each view op's name to its corresponding view group
-    view_name_to_group: dict[OperatorName, NativeFunctionsViewGroup] = {
+    view_name_to_group: Dict[OperatorName, NativeFunctionsViewGroup] = {
         g.view.func.name: g for g in view_groups
     }
 
@@ -128,10 +125,10 @@ def load_derivatives(
         # function schema is the complete declaration including mutability annotation / default value and etc.
         # signature is the canonical schema for a group of functions (in-place/out/functional variants)
         # that are semantically related.
-        functions_by_signature: dict[
-            FunctionSchema, list[NativeFunction]
+        functions_by_signature: Dict[
+            FunctionSchema, List[NativeFunction]
         ] = defaultdict(list)
-        functions_by_schema: dict[str, NativeFunction] = {}
+        functions_by_schema: Dict[str, NativeFunction] = {}
         for function in native_functions:
             functions_by_signature[function.func.signature()].append(function)
             assert str(function.func) not in functions_by_schema
@@ -144,8 +141,8 @@ def load_derivatives(
         # infos is a dict that maps FunctionSchema -> a dict of per dispatch key DifferentiabilityInfos
         # this is useful because in tools/autograd/gen_autograd.py:match_differentiability_info
         # we ultimately need to categorize the DifferentiabilityInfos by FunctionSchema
-        infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]] = {}
-        used_dispatch_keys: set[str] = set()
+        infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]] = {}
+        used_dispatch_keys: Set[str] = set()
         for defn_dict in definitions:
             # Ensure that the old derivatives.yaml schema with no dispatch key can be loaded.
             if "dispatch" not in defn_dict:
@@ -188,11 +185,11 @@ def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
 def create_derivative(
     f: NativeFunction,
     formula: str,
-    var_names: tuple[str, ...],
+    var_names: Tuple[str, ...],
     available_named_gradients: Sequence[str],
 ) -> Derivative:
     original_formula = formula
-    arguments: list[NamedCType] = [
+    arguments: List[NamedCType] = [
         a.nctype.remove_const_ref() for a in cpp_arguments(f)
     ]
 
@@ -233,10 +230,10 @@ def create_derivative(
 
 
 def create_forward_derivative(
-    f: NativeFunction, formula: str, names: tuple[str, ...]
+    f: NativeFunction, formula: str, names: Tuple[str, ...]
 ) -> ForwardDerivative:
     var_names = names
-    var_types: tuple[Type, ...] | None = None
+    var_types: Optional[Tuple[Type, ...]] = None
     for r in f.func.returns:
         if r.name in var_names:
             if var_types is None:
@@ -272,12 +269,12 @@ def create_forward_derivative(
 def postprocess_forward_derivatives(
     f: NativeFunction,
     defn_name: str,
-    all_arg_names: list[str],
-    derivatives: list[Derivative],
-    forward_derivatives: list[ForwardDerivative],
+    all_arg_names: List[str],
+    derivatives: List[Derivative],
+    forward_derivatives: List[ForwardDerivative],
     args_with_derivatives: Sequence[Binding],
-) -> list[ForwardDerivative]:
-    def find_required_inputs(formula: str, postfix: str) -> tuple[str, ...]:
+) -> List[ForwardDerivative]:
+    def find_required_inputs(formula: str, postfix: str) -> Tuple[str, ...]:
         is_foreach = f.func.name.name.base.startswith("_foreach_")
         required_inputs = set()
         for arg in args_with_derivatives:
@@ -303,7 +300,7 @@ def postprocess_forward_derivatives(
 
         return tuple(required_inputs)
 
-    updated_derivatives: list[ForwardDerivative] = []
+    updated_derivatives: List[ForwardDerivative] = []
 
     for defn in forward_derivatives:
         formula = defn.formula
@@ -433,7 +430,7 @@ def postprocess_forward_derivatives(
 
 
 def is_forward_derivative_definition(
-    all_arg_names: list[str], names: tuple[str, ...]
+    all_arg_names: List[str], names: Tuple[str, ...]
 ) -> bool:
     for name in names:
         if name not in all_arg_names:
@@ -444,12 +441,12 @@ def is_forward_derivative_definition(
 
 
 def create_differentiability_info(
-    defn_dict: dict[Any, Any],
-    functions_by_signature: dict[FunctionSchema, list[NativeFunction]],
-    functions_by_schema: dict[str, NativeFunction],
+    defn_dict: Dict[Any, Any],
+    functions_by_signature: Dict[FunctionSchema, List[NativeFunction]],
+    functions_by_schema: Dict[str, NativeFunction],
     op_counter: Counter[str],
-    used_dispatch_keys: set[str],
-) -> tuple[FunctionSchema, dict[str, DifferentiabilityInfo]]:
+    used_dispatch_keys: Set[str],
+) -> Tuple[FunctionSchema, Dict[str, DifferentiabilityInfo]]:
     """Processes a single entry `defn` in derivatives.yaml"""
 
     def canonical_function(
@@ -466,7 +463,7 @@ def create_differentiability_info(
         assert name + "_" == cpp.name(functions[0].func)
         return functions[0]
 
-    def split_names(raw_names: str) -> tuple[str, ...]:
+    def split_names(raw_names: str) -> Tuple[str, ...]:
         """Given "foo, bar", return ["foo", "bar"]."""
         return tuple(x.strip() for x in raw_names.split(","))
 
@@ -480,7 +477,7 @@ def create_differentiability_info(
         uses_grad = False  # true if any derivative uses "grad"
         num_grads_uses = 0  # count of uses of "grads" or "grads[INDEX]"
         uses_named_grads = False  # true if any derivative uses "grad_{name}"
-        used_grads_indices: list[int] = []  # which indices of grads are used
+        used_grads_indices: List[int] = []  # which indices of grads are used
         for d in derivatives:
             formula = d.formula
             uses_grad = uses_grad or bool(
@@ -524,7 +521,7 @@ def create_differentiability_info(
     @with_native_function
     def set_up_derivatives(
         f: NativeFunction,
-    ) -> tuple[
+    ) -> Tuple[
         Sequence[Derivative],
         Sequence[ForwardDerivative],
         Sequence[Binding],
@@ -532,10 +529,10 @@ def create_differentiability_info(
         Sequence[str],
     ]:
         # Set up the derivative information
-        derivatives: list[Derivative] = []
-        forward_derivatives: list[ForwardDerivative] = []
-        non_differentiable_arg_names: list[str] = []
-        args_with_derivatives_set: set[str] = set()
+        derivatives: List[Derivative] = []
+        forward_derivatives: List[ForwardDerivative] = []
+        non_differentiable_arg_names: List[str] = []
+        args_with_derivatives_set: Set[str] = set()
 
         all_arg_names = [a.name for a in cpp_arguments(f)]
         all_ret_names = [
@@ -702,7 +699,7 @@ def create_differentiability_info(
             available_named_gradients,
         ) = set_up_derivatives(canonical)
 
-        used_named_gradients: set[str] = set()
+        used_named_gradients: Set[str] = set()
         for d in derivatives:
             used_named_gradients |= d.named_gradients
 
@@ -741,7 +738,7 @@ def create_differentiability_info(
 GRAD_INDEX_REGEX = r"(?:^|\W)grads\[(\d+)\]"
 
 
-def used_gradient_indices(formula: str) -> list[int]:
+def used_gradient_indices(formula: str) -> List[int]:
     """Determine a list of gradient indices (the i in grads[i]) that
     are used by the formula.
 
@@ -753,9 +750,9 @@ def used_gradient_indices(formula: str) -> list[int]:
 
 def saved_variables(
     formula: str,
-    nctypes: list[NamedCType],
-    var_names: tuple[str, ...],
-) -> tuple[str, tuple[SavedAttribute, ...]]:
+    nctypes: List[NamedCType],
+    var_names: Tuple[str, ...],
+) -> Tuple[str, Tuple[SavedAttribute, ...]]:
     def stride_expr(name: str) -> str:
         assert var_names == (name,), (
             'Replacement for ".strides()" is currently only supported for single derivatives of the same tensor '
@@ -763,7 +760,7 @@ def saved_variables(
         )
         return f'strides_or_error({name}, "{name}")'
 
-    REPLACEMENTS: list[tuple[str, dict[str, Any]]] = [
+    REPLACEMENTS: List[Tuple[str, Dict[str, Any]]] = [
         # replace self.sym_sizes() with self_sym_sizes
         (
             r"{}.sym_sizes\(\)",
@@ -917,7 +914,7 @@ def saved_variables(
     ]
 
     # find which arguments need to be saved
-    saved: list[SavedAttribute] = []
+    saved: List[SavedAttribute] = []
 
     if ".sizes()" in formula or "->sizes()" in formula:
         raise RuntimeError(
@@ -944,7 +941,7 @@ def saved_variables(
         # when the autograd Function is created to avoid saving variables
         for regex, info in REPLACEMENTS:
 
-            def repl(m: re.Match[str]) -> str:
+            def repl(m: Match[str]) -> str:
                 suffix: str = (
                     info["suffix"](m) if callable(info["suffix"]) else info["suffix"]
                 )
@@ -1002,8 +999,8 @@ def _create_op_prefix(name: str) -> str:
 
 
 def dedup_vars(vars: Sequence[SavedAttribute]) -> Sequence[SavedAttribute]:
-    seen: set[str] = set()
-    saved: list[SavedAttribute] = []
+    seen: Set[str] = set()
+    saved: List[SavedAttribute] = []
     for var in vars:
         name = (
             var.nctype.name.name

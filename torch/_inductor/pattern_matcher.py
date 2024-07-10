@@ -202,7 +202,7 @@ class Match:
 
     def erase_nodes(self, graph: torch.fx.Graph) -> None:
         for n in reversed(self.nodes):
-            if not n._erased and not n.users:
+            if not n._erased:
                 graph.erase_node(n)
 
     def output_nodes(self) -> List[Optional[torch.fx.Node]]:

@@ -38,11 +38,6 @@ _DEQUANTIZE_OPS = [
     torch.ops.quantized_decomposed.dequantize_per_channel.default,
 ]
 
-_CHOOSE_QPARAMS_OPS = [
-    torch.ops.quantized_decomposed.choose_qparams.tensor,
-    torch.ops.quantized_decomposed.choose_qparams_symmetric.tensor,
-]
-
 
 def _add_metadata(to_node: torch.fx.Node, from_node: torch.fx.Node) -> None:
     from_meta = from_node.meta
@@ -64,7 +59,10 @@ def _find_choose_qparams_node(node: torch.fx.Node) -> Optional[torch.fx.Node]:
         n = queue.popleft()
         if n.op == "output":
             continue
-        if n.op == "call_function" and n.target in _CHOOSE_QPARAMS_OPS:
+        if (
+            n.op == "call_function"
+            and n.target == torch.ops.quantized_decomposed.choose_qparams.tensor
+        ):
             return n
         for k in n.users.keys():
             queue.append(k)

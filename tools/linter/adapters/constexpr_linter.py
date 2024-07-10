@@ -2,15 +2,13 @@
 CONSTEXPR: Ensures users don't use vanilla constexpr since it causes issues
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import logging
 import sys
-from enum import Enum
-from typing import NamedTuple
 
+from enum import Enum
+from typing import NamedTuple, Optional
 
 CONSTEXPR = "constexpr char"
 CONSTEXPR_MACRO = "CONSTEXPR_EXCEPT_WIN_CUDA char"
@@ -23,18 +21,18 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str | None
-    line: int | None
-    char: int | None
+    path: Optional[str]
+    line: Optional[int]
+    char: Optional[int]
     code: str
     severity: LintSeverity
     name: str
-    original: str | None
-    replacement: str | None
-    description: str | None
+    original: Optional[str]
+    replacement: Optional[str]
+    description: Optional[str]
 
 
-def check_file(filename: str) -> LintMessage | None:
+def check_file(filename: str) -> Optional[LintMessage]:
     logging.debug("Checking file %s", filename)
 
     with open(filename) as f:

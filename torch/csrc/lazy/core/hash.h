@@ -11,7 +11,6 @@
 #include <cstring>
 #include <set>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace torch {
@@ -153,10 +152,6 @@ static inline hash_t Hash(const std::string& value) {
 }
 
 static inline hash_t Hash(const c10::string_view& value) {
-  return DataHash(value.data(), value.size());
-}
-
-static inline hash_t Hash(const std::string_view& value) {
   return DataHash(value.data(), value.size());
 }
 
