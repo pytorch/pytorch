@@ -25,7 +25,7 @@ static optional<int64_t> compute_stat_bdim(
   if (input_bdim.has_value() && !is_empty_tensor(stat)) {
     return 0;
   }
-  return nullopt;
+  return std::nullopt;
 }
 
 static Tensor padRight(const Tensor& tensor, optional<int64_t> has_bdim, int64_t logical_rank) {

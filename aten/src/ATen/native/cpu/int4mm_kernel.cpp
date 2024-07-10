@@ -17,6 +17,7 @@
 #define RESTRICT __restrict__
 #endif
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 namespace at::native {
 
 namespace {
@@ -765,3 +766,4 @@ ALSO_REGISTER_AVX512_DISPATCH(weight_to_int4pack_stub, &weight_to_int4pack_kerne
 ALSO_REGISTER_AVX512_DISPATCH(int4pack_mm_stub, &int4pack_mm_kernel);
 
 } // at::native
+C10_DIAGNOSTIC_POP()
