@@ -43,7 +43,7 @@ class GraphContext:
     block: _C.Block
     opset: int
     original_node: _C.Node
-    params_dict: Dict[str, "_C.IValue"]
+    params_dict: Dict[str, _C.IValue]
     env: Dict[_C.Value, _C.Value]
     values_in_env: Set[_C.Value]
     new_nodes: List[_C.Node] = dataclasses.field(default_factory=list)

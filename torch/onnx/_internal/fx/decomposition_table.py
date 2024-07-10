@@ -12,8 +12,6 @@ import torch.fx
 from torch.onnx._internal.fx import registration
 
 
-# NOTE: OnnxRegistry annotation: beartype is a runtime type checker for python3,
-# so it doesn't work with TYPE_CHECKING
 def _create_onnx_supports_op_overload_table(
     registry,
 ) -> Set[Union[torch._ops.OperatorBase, Callable]]:

@@ -1,8 +1,6 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import inspect
-
 from typing import (
     Any,
     Callable,
@@ -13,6 +11,7 @@ from typing import (
     runtime_checkable,
     Sequence,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -20,6 +19,9 @@ import torch
 import torch.export as torch_export
 
 from torch.utils import _pytree as pytree
+
+if TYPE_CHECKING:
+    import inspect
 
 # TODO(bowbao): Add diagnostics for IO adapters.
 
@@ -69,7 +71,7 @@ class InputAdapter:
             Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
         ] = None,
         **model_kwargs,
-    ) -> Sequence[Union[int, float, bool, str, "torch.Tensor", torch.dtype, None]]:
+    ) -> Sequence[Union[int, float, bool, str, torch.Tensor, torch.dtype, None]]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
         Args:
@@ -130,7 +132,7 @@ class OutputAdapter:
         model: Optional[
             Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
         ] = None,
-    ) -> Sequence[Union["torch.Tensor", int, float, bool, str]]:
+    ) -> Sequence[Union[torch.Tensor, int, float, bool, str]]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
         Args:
@@ -258,7 +260,7 @@ class MergeKwargsIntoArgsInputStep(InputAdaptStep):
 class LiftParametersAndBuffersIntoArgsInputStep(InputAdaptStep):
     """Append parameters and buffers to model's positional argument list."""
 
-    def __init__(self, inputs: Tuple["torch.Tensor", ...]) -> None:
+    def __init__(self, inputs: Tuple[torch.Tensor, ...]) -> None:
         self.inputs = inputs
 
     def apply(

@@ -31,14 +31,11 @@ from torch.onnx._internal.fx import (
 
 if TYPE_CHECKING:
     import onnxscript  # type: ignore[import]
+    from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
+        graph_building as onnxscript_graph_building,
+    )
 
     from torch.onnx import OnnxRegistry
-
-
-# For beartype
-from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
-    graph_building as onnxscript_graph_building,
-)
 
 
 def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
@@ -95,7 +92,7 @@ class OnnxFunctionDispatcher:
 
     def __init__(
         self,
-        onnx_registry: "OnnxRegistry",
+        onnx_registry: OnnxRegistry,
         diagnostic_context: diagnostics.DiagnosticContext,
     ):
         """Initialize the ONNX Function dispatcher.
@@ -117,7 +114,7 @@ class OnnxFunctionDispatcher:
         ],
         onnx_kwargs: Dict[str, fx_type_utils.Argument],
         diagnostic_context: diagnostics.DiagnosticContext,
-    ) -> Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]:
+    ) -> Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction]:
         """Dispatches an ONNX function based on the given FX node, arguments, and keyword arguments.
         Args:
             node: The TorchFX node to dispatch the function for.
@@ -761,7 +758,7 @@ class _OnnxSchemaChecker:
 
     def _separate_input_attributes_from_arguments(
         self,
-        param_schemas: Sequence["onnxscript.values.ParamSchema"],
+        param_schemas: Sequence[onnxscript.values.ParamSchema],
         args: Sequence[
             Optional[
                 Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]

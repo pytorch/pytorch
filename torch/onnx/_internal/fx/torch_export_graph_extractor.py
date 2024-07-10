@@ -10,11 +10,11 @@ from typing import Any, Callable, Mapping, Optional, Sequence, TYPE_CHECKING, Un
 
 import torch._dynamo
 import torch.fx
-import torch.onnx
 from torch.onnx._internal import exporter, io_adapter
 from torch.onnx._internal.diagnostics import infra
 
 if TYPE_CHECKING:
+    import torch.onnx
     from torch.export.exported_program import ExportedProgram
 
 
@@ -35,7 +35,7 @@ class TorchExport(exporter.FXGraphExtractor):
     def generate_fx(
         self,
         options: exporter.ResolvedExportOptions,
-        model: "ExportedProgram",  # type: ignore[override]
+        model: ExportedProgram,  # type: ignore[override]
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> torch.fx.GraphModule:

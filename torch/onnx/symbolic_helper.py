@@ -28,7 +28,9 @@ from torch import _C
 from torch.onnx import _constants, _type_utils, errors, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import jit_utils
-from torch.types import Number
+
+if typing.TYPE_CHECKING:
+    from torch.types import Number
 
 
 # ---------------------------------------------------------------------------------

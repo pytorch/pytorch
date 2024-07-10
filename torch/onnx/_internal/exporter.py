@@ -7,7 +7,6 @@ import abc
 
 import contextlib
 import dataclasses
-import io
 import logging
 import os
 
@@ -38,7 +37,6 @@ import torch
 import torch._ops
 import torch.export as torch_export
 import torch.utils._pytree as pytree
-from torch._subclasses import fake_tensor
 
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal.diagnostics import infra
@@ -53,12 +51,16 @@ from torch.onnx._internal.fx import (
 # 'import torch.onnx' continues to work without having 'onnx' installed. We fully
 # 'import onnx' inside of dynamo_export (by way of _assert_dependencies).
 if TYPE_CHECKING:
+    import io
+
     import onnx
     import onnxruntime  # type: ignore[import]
     import onnxscript  # type: ignore[import]
     from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
         registration as torchlib_registry,
     )
+
+    from torch._subclasses import fake_tensor
 
     from torch.onnx._internal.fx import diagnostics
 
@@ -184,7 +186,7 @@ class OnnxRegistry:
 
     def register_op(
         self,
-        function: Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"],
+        function: Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction],
         namespace: str,
         op_name: str,
         overload: Optional[str] = None,
@@ -343,7 +345,7 @@ class ResolvedExportOptions(ExportOptions):
 
     def __init__(
         self,
-        options: Union[ExportOptions, "ResolvedExportOptions"],
+        options: Union[ExportOptions, ResolvedExportOptions],
         model: Optional[Union[torch.nn.Module, Callable, torch_export.ExportedProgram]] = None,  # type: ignore[name-defined]
     ):
         from torch.onnx._internal.fx import (  # TODO: Prevent circular dep
@@ -594,7 +596,7 @@ class ONNXRuntimeOptions:
         execution_provider_options: ONNX Runtime execution provider options.
     """
 
-    session_options: Optional[Sequence["onnxruntime.SessionOptions"]] = None
+    session_options: Optional[Sequence[onnxruntime.SessionOptions]] = None
     """ONNX Runtime session options."""
 
     execution_providers: Optional[
@@ -608,7 +610,7 @@ class ONNXRuntimeOptions:
     def __init__(
         self,
         *,
-        session_options: Optional[Sequence["onnxruntime.SessionOptions"]] = None,
+        session_options: Optional[Sequence[onnxruntime.SessionOptions]] = None,
         execution_providers: Optional[
             Sequence[Union[str, Tuple[str, Dict[Any, Any]]]]
         ] = None,

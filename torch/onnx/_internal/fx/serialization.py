@@ -21,7 +21,7 @@ def _create_tensor_proto_with_external_data(
     name: str,
     location: str,
     basepath: str,
-    dtype_override: Optional["onnx.TypeProto"] = None,  # type: ignore[name-defined]
+    dtype_override: Optional[onnx.TypeProto] = None,  # type: ignore[name-defined]
 ) -> onnx.TensorProto:  # type: ignore[name-defined]
     """Create a TensorProto with external data from a PyTorch tensor.
     The external data is saved to os.path.join(basepath, location).
