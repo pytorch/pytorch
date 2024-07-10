@@ -8298,6 +8298,29 @@ class TestLogical(TestCaseMPS):
 
         [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8, torch.bool]]
 
+    def test_min_max_nan_propagation(self):
+        def helper(dtype):
+            cpu_x = torch.tensor([1.0, float("nan"), 3.0], device="cpu")
+            mps_x = cpu_x.detach().clone().to('mps')
+
+            cpu_max = torch.max(cpu_x)
+            mps_max = torch.max(mps_x).to('cpu')
+
+            cpu_amax = torch.amax(cpu_x)
+            mps_amax = torch.amax(mps_x).to('cpu')
+
+            cpu_min = torch.min(cpu_x)
+            mps_min = torch.min(mps_x).to('cpu')
+
+            cpu_amin = torch.amin(cpu_x)
+            mps_amin = torch.amin(mps_x).to('cpu')
+
+            self.assertEqual(cpu_max, mps_max)
+            self.assertEqual(cpu_amax, mps_amax)
+            self.assertEqual(cpu_min, mps_min)
+            self.assertEqual(cpu_amin, mps_amin)
+        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.bfloat16]]
+
     def test_isin(self):
         def helper(dtype):
             shapes = [([2, 5], [3, 5, 2]), ([10, 3, 5], [20, 1, 3]),
