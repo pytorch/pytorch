@@ -997,8 +997,8 @@ class _ModuleStackTracer(PythonKeyTracer):
                     self_.attr_proxy_map[attr_val] = AttrProxy(attr_val, self_.proxy_paths[self] + "." + name)
                 else:
                     # NOTE [caching AttrProxy]. Caching ensures a 1-1 mapping between AttrProxy and the actual attr_val.
-                    # 1. We reset the proxy_mapping to solve the diamond shape reference problem: we want to record the path as A.B.D
-                    # instead of A.C.D (the purpose of _ModuleStackTracer).
+                    # 1. We reset the proxy_mapping to solve the diamond shape reference problem: we want to record the
+                    # path as A.B.D instead of A.C.D (the purpose of _ModuleStackTracer).
                     # 2. Instead of creating a new AttrProxy, we just reset the proxy_mapping of existing one. This is to avoid
                     # dynamo creating multiple guards for the same attr_val but different AttrProxy when exporting
                     # a model that calls torch.compile (e.g when a model uses torch.cond.)
