@@ -106,7 +106,9 @@ def create_subclass_meta(
 # a list of tensors that we would then need to concat together.
 # Instead, we specialize the logic for the inference vs. joint graph case.
 # NOTE: this function is hot, since we unwrap tensor subclass inputs at runtime
-def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
+def unwrap_tensor_subclasses(
+    wrapped_args, *, is_joint_structure: bool, return_indices: bool = False
+):
     def concat_inner_tensors_from_subclasses(xs):
         xs_inner = []
         index_remap = []
@@ -134,16 +136,23 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
         unwrapped_args_tangents, index_remap_1 = concat_inner_tensors_from_subclasses(
             wrapped_args[1]
         )
-        unwrapped_args = (
-            (unwrapped_args_fw, index_remap_0),
-            (unwrapped_args_tangents, index_remap_1),
-        )
+        if return_indices:
+            unwrapped_args = (
+                (unwrapped_args_fw, index_remap_0),
+                (unwrapped_args_tangents, index_remap_1),
+            )
+        else:
+            unwrapped_args = (unwrapped_args_fw, unwrapped_args_tangents)
     else:
         assert isinstance(wrapped_args, (list, tuple))
         unwrapped_args_fw, index_remap = concat_inner_tensors_from_subclasses(
             wrapped_args
         )
-        unwrapped_args = unwrapped_args_fw, index_remap
+        if return_indices:
+            unwrapped_args = unwrapped_args_fw, index_remap
+        else:
+            unwrapped_args = unwrapped_args_fw
+
     return unwrapped_args
 
 
