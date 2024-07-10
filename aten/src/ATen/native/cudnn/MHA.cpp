@@ -615,7 +615,7 @@ void run_cudnn_SDP_fprop(
       attn_bias,
       dropout_probability,
       is_causal,
-      return_softmaxstats); 
+      return_softmaxstats);
   auto graph_and_tensors_ptr = mhagraphcache.find(key);
   graph_and_tensors graph_and_tensors_values;
   if (graph_and_tensors_ptr) {
