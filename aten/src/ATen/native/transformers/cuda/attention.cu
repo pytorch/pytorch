@@ -20,7 +20,7 @@
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/PersistentSoftmax.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -583,7 +583,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
       chunks[2] = (chunks[2].view({x_size_0, -1, num_head, dim_per_head}))
                       .transpose(1, 2);
       auto y = at::scaled_dot_product_attention(
-          chunks[0], chunks[1], chunks[2], mask, 0.0, false, c10::nullopt);
+          chunks[0], chunks[1], chunks[2], mask, 0.0, false, std::nullopt);
 
       auto past_sdp = y.transpose(1, 2).reshape({x_size_0, -1, embed_dim});
       return std::make_tuple(
@@ -719,16 +719,16 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
               q_t,
               k_t,
               v_t,
-              c10::nullopt,
-              c10::nullopt,
+              std::nullopt,
+              std::nullopt,
               max_seqlen_batch_q,
               max_seqlen_batch_k,
               dropout_p,
               is_causal,
               return_debug_mask,
               scale,
-              c10::nullopt,
-              c10::nullopt);
+              std::nullopt,
+              std::nullopt);
   // Reshape output to convert nnz to batch_size and seq_len
   Tensor attention = output.transpose(1,2);
 
@@ -757,7 +757,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_cudnn");
   // TODO(eqy): debug mask support
@@ -790,7 +790,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   if (use_dropout) {
     // Device
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-        c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+        std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
 
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
@@ -854,10 +854,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
       k_t,
       v_t,
       attn_bias,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
       dropout_p,
       static_cast<int64_t>(custom_mask_type),
       compute_log_sumexp,
@@ -901,7 +901,7 @@ _flash_attention_forward(
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).as_float_unchecked();
-  std::optional<Tensor> out = c10::nullopt;
+  std::optional<Tensor> out = std::nullopt;
 
   std::optional<Tensor> seqused_k = _seqused_k;
   std::optional<Tensor> alibi_slopes = _alibi_slopes;
@@ -946,7 +946,7 @@ _flash_attention_forward(
             non_null_window_left,
             non_null_window_right,
             return_debug_mask,
-            c10::nullopt /*gen_*/);
+            std::nullopt /*gen_*/);
   } else {
     std::tie(
         output,
@@ -969,7 +969,7 @@ _flash_attention_forward(
             non_null_window_left,
             non_null_window_right,
             return_debug_mask, /*return_softmax (this is used for testing)*/
-            c10::nullopt);
+            std::nullopt);
   }
   debug_attn_mask =
       return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
@@ -1086,7 +1086,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   auto device = in_capture_stream ? at::kCUDA : at::kCPU;
   if (use_dropout) {
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-        c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+        std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
 
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
