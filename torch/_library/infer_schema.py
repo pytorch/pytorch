@@ -4,9 +4,12 @@ import typing
 from typing import List, Optional, Sequence, Union  # noqa: F401
 
 import torch  # noqa: F401
+
+from torch.utils._exposed_in import exposed_in
 from .. import device, dtype, Tensor, types
 
 
+@exposed_in("torch.library")
 def infer_schema(
     prototype_function: typing.Callable, mutates_args=(), op_name: Optional[str] = None
 ) -> str:
