@@ -528,7 +528,8 @@ class TestPasses(TestCase):
         ep = export(mod, (x,))
 
         with self.assertRaisesRegex(
-            RuntimeError, r"Runtime assertion failed for expression u[\d+] \<\= 5"
+            RuntimeError,
+            r"Invalid value range for 6 between \[2, 5\]",
         ):
             ep.module()(torch.tensor([6]))
 
@@ -555,21 +556,18 @@ class TestPasses(TestCase):
         num_assert = count_call_function(
             ep.graph, torch.ops.aten._assert_scalar.default
         )
+
         self.assertEqual(num_assert, 2)
-        num_constrain_range = count_call_function(
-            ep.graph, torch.ops.aten.sym_constrain_range.default
-        )
-        self.assertEqual(num_constrain_range, 0)
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression u[\d+] \>\= 3",
+            r"Invalid value range for",
         ):
             ep.module()(torch.tensor([1, 1, 0, 0, 0]))
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression u[\d+] \<\= 5",
+            r"Invalid value range for",
         ):
             ep.module()(torch.ones(6))
 
@@ -577,8 +575,6 @@ class TestPasses(TestCase):
         self.assertEqual(mod(new_inp), ep.module()(new_inp))
 
     @unittest.skipIf(IS_WINDOWS, "Windows not supported")
-    @unittest.expectedFailure
-    # TODO(pianpwk): add back runtime asserts to subgraphs
     def test_runtime_assert_inline_constraints_for_cond(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
