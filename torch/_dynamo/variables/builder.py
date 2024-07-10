@@ -1418,7 +1418,6 @@ class VariableBuilder:
             example_value=value,
             subclass_type=subclass_type,
             source=source,
-            is_static_input=is_static_input,
             **options,
         )
 
@@ -1819,14 +1818,13 @@ def _dataclasses_fields_lambda(obj):
 
 
 def wrap_fx_proxy(
-    tx, proxy, example_value=None, subclass_type=None, is_static_input=False, **options
+    tx, proxy, example_value=None, subclass_type=None, **options
 ) -> VariableTracker:
     kwargs = {
         "tx": tx,
         "proxy": proxy,
         "example_value": example_value,
         "subclass_type": subclass_type,
-        "is_static_input": is_static_input,
         **options,
     }
     if subclass_type is None:
@@ -1969,7 +1967,6 @@ def wrap_fx_proxy_cls(
         # tensor, the stored example value will update too!)
         example_value = _clone_input(example_value)
         set_example_value(proxy.node, example_value)
-        proxy.node.meta["is_static_input"] = is_static_input
         specialized_props = target_cls.specialize(example_value)
         # TODO: not sure about this fake mode test
         if (
