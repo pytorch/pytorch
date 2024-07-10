@@ -49,7 +49,6 @@ class PyProcessGroup : public ProcessGroup {
     // Python, it is necessary to keep the corresponding py::object alive in
     // addition to ensure that the user-defined methods can be executed.
     void ref_py_object() {
-
       py_obj_ = py::cast(this);
     }
 
