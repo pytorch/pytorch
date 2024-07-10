@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # ruff: noqa: TCH004
 from dataclasses import dataclass
-from typing import cast, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass

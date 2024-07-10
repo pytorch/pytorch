@@ -59,12 +59,14 @@ class TORCH_API Context {
     }
   }
   const AcceleratorHooksInterface& getAcceleratorHooksInterface(
-      std::optional<c10::DeviceType> opt_device_type = c10::nullopt) {
+      std::optional<c10::DeviceType> opt_device_type = std::nullopt) {
     c10::DeviceType device_type = opt_device_type.has_value()
         ? opt_device_type.value()
         : at::getAccelerator(true).value();
     if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks();
+    } else if (device_type == at::kXPU) {
+      return at::detail::getXPUHooks();
     } else if (device_type == at::kMPS) {
       return at::detail::getMPSHooks();
     } else if (device_type == at::kPrivateUse1) {
@@ -222,7 +224,7 @@ class TORCH_API Context {
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend);
 
-  at::BlasBackend blasPreferredBackend() const;
+  at::BlasBackend blasPreferredBackend();
   void setBlasPreferredBackend(at::BlasBackend);
 
   // Note [Enabling Deterministic Operations]
@@ -370,7 +372,7 @@ class TORCH_API Context {
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
-  bool enabled_cudnnSDP = false;
+  bool enabled_cudnnSDP = true;
   bool enabled_overrideable = true;
 #ifdef USE_ROCM
   bool benchmark_cudnn = true;
@@ -405,7 +407,7 @@ class TORCH_API Context {
   bool release_original_weights = false;
 #endif
   bool display_vmap_fallback_warnings_ = false;
-  std::optional<at::QEngine> quantized_engine = c10::nullopt;
+  std::optional<at::QEngine> quantized_engine = std::nullopt;
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;
 
