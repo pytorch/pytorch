@@ -9442,7 +9442,7 @@ Args:
 Keyword args:
     {out}
     {dtype} If `dtype` is not given, infer the data type from the other input
-        arguments. If any of `start`, `end`, or `stop` are floating-point, the
+        arguments. If any of `start`, `end`, or `step` are floating-point, the
         `dtype` is inferred to be the default dtype, see
         :meth:`~torch.get_default_dtype`. Otherwise, the `dtype` is inferred to
         be `torch.int64`.
