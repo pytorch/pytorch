@@ -2232,7 +2232,7 @@ class TestImports(TestCase):
                            "torch.testing._internal.distributed.",  # just fails
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal.fx",  # depends on onnx-script
-                           "torch._inductor.triton_helpers",  # depends on triton
+                           "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801

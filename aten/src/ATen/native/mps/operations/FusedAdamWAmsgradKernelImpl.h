@@ -17,8 +17,25 @@ void _fused_adamw_amsgrad_mps_impl_(
     const double weight_decay,
     const double eps,
     const bool maximize,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf
+);
+
+void _fused_adamw_amsgrad_mps_impl_(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList exp_avgs,
+    at::TensorList exp_avg_sqs,
+    at::TensorList max_exp_avg_sqs,
+    at::TensorList state_steps,
+    const at::Tensor& lr,
+    const double beta1,
+    const double beta2,
+    const double weight_decay,
+    const double eps,
+    const bool maximize,
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf
 );
 } //namespace mps
 }// namespace at::native
