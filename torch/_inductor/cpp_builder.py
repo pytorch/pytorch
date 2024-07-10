@@ -839,7 +839,7 @@ class CppTorchOptions(CppOptions):
 
     def __init__(
         self,
-        vec_isa: VecISA,
+        vec_isa: VecISA = invalid_vec_isa,
         include_pytorch: bool = False,
         warning_all: bool = True,
         aot_mode: bool = False,
@@ -925,15 +925,12 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     libraries_dirs: List[str] = []
     libraries: List[str] = []
     passthough_args: List[str] = []
-    """
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
         os.environ["CUDA_HOME"] = build_paths.cuda()
-    """
-    from torch._inductor.codecache import _set_gpu_runtime_env, cpp_prefix_path
 
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
@@ -961,6 +958,8 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
 
     if aot_mode:
         if config.is_fbcode():
+            from torch._inductor.codecache import cpp_prefix_path
+
             cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
             include_dirs += cpp_prefix_include_dir
 
@@ -998,7 +997,7 @@ class CppTorchCudaOptions(CppTorchOptions):
 
     def __init__(
         self,
-        vec_isa: VecISA,
+        vec_isa: VecISA = invalid_vec_isa,
         include_pytorch: bool = False,
         cuda: bool = True,
         aot_mode: bool = False,
