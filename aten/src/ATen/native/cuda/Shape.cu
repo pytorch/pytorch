@@ -11,6 +11,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/util/Optional.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

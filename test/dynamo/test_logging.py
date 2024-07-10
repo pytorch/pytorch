@@ -614,11 +614,14 @@ print("arf")
         record_str = "\n".join(r.getMessage() for r in records)
 
         self.assertIn(
-            """L['zs'][0] == 3.0""",
+            """\
+L['zs'][0] == 3.0                                             # for y, z in zip(ys, zs):""",
             record_str,
         )
         self.assertIn(
-            "len(L['ys']) == 2",
+            """\
+    triggered by the following guard failure(s):\n\
+    - len(L['ys']) == 2                                             # for y, z in zip(ys, zs):""",
             record_str,
         )
 
@@ -684,6 +687,7 @@ exclusions = {
     "recompiles_verbose",
     "graph_breaks",
     "graph",
+    "graph_code",
     "graph_sizes",
     "ddp_graphs",
     "perf_hints",
