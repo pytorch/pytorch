@@ -1294,6 +1294,7 @@ class CppWrapperCpu(WrapperCodeGen):
         src_is_tensor,
         reduce,
         kwargs,
+        node_name=None
     ):
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
@@ -1334,7 +1335,7 @@ class CppWrapperCpu(WrapperCodeGen):
         line += ");"
         self.writeline(line)
 
-    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate, node_name=None):
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
 
@@ -1730,7 +1731,7 @@ class CppWrapperCpu(WrapperCodeGen):
             args = [data.get_name(), size, stride, offset]
             return f"reinterpret_tensor({', '.join(args)})"
 
-    def codegen_device_copy(self, src, dst):
+    def codegen_device_copy(self, src, dst, node_name=None):
         if config.abi_compatible:
             # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,
             # while stack-allocation results in ArrayRefTensor
@@ -2034,6 +2035,7 @@ class CppWrapperCpu(WrapperCodeGen):
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
+        node_name=None,
     ):
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
