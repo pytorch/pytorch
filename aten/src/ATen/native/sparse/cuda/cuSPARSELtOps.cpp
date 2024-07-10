@@ -12,8 +12,10 @@
 #include <cstdint>
 #include <unordered_map>
 #include <set>
+#include <mutex>
 
-#if AT_CUSPARSELT_ENABLED()
+#if true
+//#if AT_CUSPARSELT_ENABLED()
 
 #include <cusparseLt.h>
 
@@ -29,33 +31,35 @@ thread_local bool handle_initialized = false;
 
 // Look-up table for HIPSPARSELT data types
 #ifdef USE_ROCM
-const static std::unordered_map<hipDataType, hipsparseLtDatatype_t> sparseLtDataTypes = {
-    {HIP_R_8I, HIPSPARSELT_R_8I},
-    {HIP_R_16F, HIPSPARSELT_R_16F},
-    {HIP_R_16BF, HIPSPARSELT_R_16BF},
-};
-
-static std::unordered_map<int, bool> cache;
+std::mutex g_hipSparseLtSupportCacheMutex;
+static std::unordered_map<int, bool> g_hipSparseLtSupportCache;
 const static std::set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
-static bool isHipSparseLtSupported(int idx) {
-    if (cache.find(idx) != cache.end()) {
-        return cache[idx];
+static bool g_hipSparseLtSupportCache(int idx) {
+    {
+        std::lock_guard<std::mutex> lock(g_hipSparseLtSupportCacheMutex);
+        if (g_hipSparseLtSupportCache.find(idx) != g_hipSparseLtSupportCache.end()) {
+            return g_hipSparseLtSupportCache[idx];
+        }
     }
-    std::unique_ptr<hipDeviceProp_t> prop(at::cuda::getDeviceProperties(idx));
-    std::string arch{prop->gcnArchName};
-    bool result = (supported_archs.find(arch) != supported_archs.end()) && (ROCM_VERSION >= 61000);
-    cache[idx] = result;
-    return result;
+    try {
+        std::unique_ptr<hipDeviceProp_t> prop(at::cuda::getDeviceProperties(idx));
+        std::string arch{prop->gcnArchName};
+        bool result = (supported_archs.find(arch) != supported_archs.end()) && (ROCM_VERSION >= 61000);
+        {
+            std::lock_guard<std::mutex> lock(g_hipSparseLtSupportCacheMutex);
+            g_hipSparseLtSupportCache[idx] = result;
+        }
+        return result;
+    } catch (const std::exception& e) {
+        return false;
+    }
 }
 #endif
 
 
 at::Tensor _cslt_compress(const Tensor& sparse_input)
 {
-    if (!handle_initialized){
-        TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
-        handle_initialized = true;
-    }
+    if (!handle_initialized){TORCH_CHECK
     // create sparse descriptor, dtype
     cusparseLtMatDescriptor_t sparse_input_descriptor;
     cudaDataType type;
@@ -65,7 +69,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         sparse_input.scalar_type()
     )
     {
-        case at::ScalarType::Char:
+        case at::ScalarType::CharTORCH_CHECK:
             type = CUDA_R_8I;
             compression_factor = 10;
             break;
@@ -93,22 +97,10 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         &sparse_input_descriptor,
         sparse_input.size(0),
         sparse_input.size(1),
-    #ifdef USE_ROCM
-        sparse_input.size(0),
-    #else
         sparse_input.size(1),
-    #endif
         16,
-    #ifdef USE_ROCM
-        sparseLtDataTypes.at(type),
-    #else
         type,
-    #endif
-    #ifdef USE_ROCM
-        CUSPARSE_ORDER_COL,
-    #else
         CUSPARSE_ORDER_ROW,
-    #endif
         CUSPARSELT_SPARSITY_50_PERCENT));
 
     // compress input
@@ -255,22 +247,10 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       &sparse_input_descriptor,
       m,
       k,
-#ifdef USE_ROCM
-      m,
-#else
       k,
-#endif
       16,
-#ifdef USE_ROCM
-      sparseLtDataTypes.at(input_type),
-#else
       input_type,
-#endif
-#ifdef USE_ROCM
-      CUSPARSE_ORDER_COL,
-#else
       CUSPARSE_ORDER_ROW,
-#endif
       CUSPARSELT_SPARSITY_50_PERCENT));
 
   // initialize dense input descriptor
@@ -280,22 +260,10 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       &dense_input_descriptor,
       (dense_B.is_contiguous()) ? k : n,
       (dense_B.is_contiguous()) ? n : k,
-#ifdef USE_ROCM
-      (dense_B.is_contiguous()) ? k : n,
-#else
       (dense_B.is_contiguous()) ? n : k,
-#endif
       16,
-#ifdef USE_ROCM
-      sparseLtDataTypes.at(input_type),
-#else
       input_type,
-#endif
-#ifdef USE_ROCM
-      CUSPARSE_ORDER_COL
-#else
       CUSPARSE_ORDER_ROW
-#endif
       ));
 
   // create result tensor
@@ -313,22 +281,10 @@ at::Tensor res_out = (transpose_result) ? at::empty({n, m}, res_tensor_options)
       &res_descriptor,
       m,
       n,
-#ifdef USE_ROCM
-      m,
-#else
       (transpose_result) ? m: n,
-#endif
       16,
-#ifdef USE_ROCM
-      sparseLtDataTypes.at(output_type),
-#else
       output_type,
-#endif
-#ifdef USE_ROCM
-      CUSPARSE_ORDER_COL
-#else
       (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW
-#endif
       ));
 
   // initialize matmul
