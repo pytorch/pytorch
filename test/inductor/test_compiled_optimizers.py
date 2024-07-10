@@ -153,10 +153,16 @@ KERNEL_COUNT_OVERRIDES = {
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 9,
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_cuda": 3,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": 6,
-    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_foreach_cuda": 3,
+    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_foreach_cuda": 7,
     "test_sgd_tensor_lr_cpu": 2,
     "test_sgd_tensor_lr_cuda": 2,
     "test_sgd_tensor_lr_foreach_cuda": 2,
+    "test_rprop_tensor_lr_capturable_foreach_cuda": 6,
+    "test_rprop_capturable_foreach_cuda": 6,
+    "test_rprop_etas_foreach_cuda": 6,
+    "test_rprop_foreach_cuda": 6,
+    "test_rprop_maximize_foreach_cuda": 6,
+    "test_rprop_step_sizes_foreach_cuda": 6,
 }
 
 # also tracks currently supported optimizers
@@ -580,7 +586,7 @@ class CompiledOptimizerTests(TestCase):
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
     test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
     test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
-    test_rprop_recompile = make_recompile_test(Rprop, lr=0.01)
+    test_rprop_recompile = make_recompile_test(Rprop, lr=0.01, kernel_count=6)
     test_rmsprop_recompile = make_recompile_test(RMSprop, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, lr=0.01)
     test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01)

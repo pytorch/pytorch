@@ -3428,8 +3428,7 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
+            RuntimeError, "Unmatched number of outputs from cond"
         ):
             torch._dynamo.export(
                 f_mismatch_return_length,
