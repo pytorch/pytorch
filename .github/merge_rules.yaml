@@ -387,7 +387,7 @@
   - torch/_inductor/codegen/cpp_template.py
   - torch/_inductor/codegen/cpp_gemm_template.py
   - test/inductor/test_mkldnn_pattern_matcher.py
-  - test/inductor/test_cpu_repo.py
+  - test/inductor/test_cpu_repro.py
   - test/inductor/test_cpu_cpp_wrapper.py
   - test/inductor/test_cpu_select_algorithm.py
   - aten/src/ATen/cpu/**
