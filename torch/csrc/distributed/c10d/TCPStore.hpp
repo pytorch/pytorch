@@ -28,12 +28,12 @@ namespace detail {
 //
 // Code structure:
 // ├── TCPStore client side API and server setup code:
-// │   TCPStore.hpp/TCPStore..cpp
+// │   TCPStore.hpp/TCPStore..cpp
 // ├── TCPStoreBackend server side API implementation code:
-// │   TCPStoreBackend.hpp/TCPStoreBackend.cpp
+// │   TCPStoreBackend.hpp/TCPStoreBackend.cpp
 // |   (actual class:`TCPStoreMasterDaemon`)
 // ├── LibUVTCPStoreBackend
-// │   TCPStoreLibUvBackend.cpp
+// │   TCPStoreLibUvBackend.cpp
 // |   (actual class: `LibUVStoreDaemon`)
 
 class TCPServer;
