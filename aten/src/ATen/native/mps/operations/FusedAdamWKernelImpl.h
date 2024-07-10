@@ -16,8 +16,8 @@ void _fused_adamw_mps_impl_(
     const double weight_decay,
     const double eps,
     const bool maximize,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf
 );
 
 void _fused_adamw_mps_impl_(
@@ -32,8 +32,8 @@ void _fused_adamw_mps_impl_(
     const double weight_decay,
     const double eps,
     const bool maximize,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf
 );
 
 } //namespace mps

@@ -262,9 +262,15 @@ static PyObject* get_type_of_overloaded_arg(PyObject* obj_or_type) {
 static py::object maybe_get_registered_torch_dispatch_rule(
     PyObject* torch_api_function,
     const py::object& torch_dispatch_object) {
-  static auto find_torch_dispatch_rule =
-      py::module_::import("torch._library.simple_registry")
-          .attr("find_torch_dispatch_rule");
+  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object>
+      storage;
+  py::object find_torch_dispatch_rule =
+      storage
+          .call_once_and_store_result([]() -> py::object {
+            return py::module_::import("torch._library.simple_registry")
+                .attr("find_torch_dispatch_rule");
+          })
+          .get_stored();
   auto result = find_torch_dispatch_rule(
       py::reinterpret_borrow<py::object>(torch_api_function),
       torch_dispatch_object.get_type());
@@ -362,8 +368,8 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
     const char* torch_function_name_str) {
   // Disable mode on the inside; this makes for a more user-friendly
   // experience if you try to, e.g., print your tensors.
-  at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
-  at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
+  std::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
+  std::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
   py::object mode_obj;
   // NB: We only really need keep the mode_obj live if the function call
   // fails for error reporting, but whatever, Python refcounts are cheap

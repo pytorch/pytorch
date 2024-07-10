@@ -500,7 +500,7 @@ inline std::string torch_tensor_device_name(const at::Tensor& ten) {
 }
 
 inline std::string torch_tensor_device_name(
-    const c10::optional<at::Tensor>& ten) {
+    const std::optional<at::Tensor>& ten) {
   if (ten.has_value()) {
     return torch_tensor_device_name(ten.value());
   } else {
@@ -513,7 +513,7 @@ inline bool torch_tensor_on_cuda_gpu_check(const at::Tensor& ten) {
 }
 
 inline bool torch_tensor_on_cuda_gpu_check(
-    const c10::optional<at::Tensor>& ten) {
+    const std::optional<at::Tensor>& ten) {
   return !ten.has_value() || torch_tensor_on_cuda_gpu_check(ten.value());
 }
 
@@ -1497,7 +1497,7 @@ at::Tensor _fbgemm_jagged_to_padded_dense_forward(
 Tensor _fbgemm_dense_to_jagged_forward_symint(
     const Tensor& dense,
     TensorList offsets,
-    c10::optional<at::SymInt> total_L) {
+    std::optional<at::SymInt> total_L) {
   // D is the embedding dimension
   auto D = dense.size(-1);
 
