@@ -571,24 +571,9 @@ def aot_dispatch_autograd(
             if num_symints_saved_for_bw > 0:
                 context = torch._C._DisableAutocast if disable_amp else nullcontext
                 with context():
-                    try:
-                        compiled_bw_func = aot_config.bw_compiler(
-                            bw_module, placeholder_list
-                        )
-                    except Exception as e:
-                        exc = e
-                        trace_structured(
-                            "artifact",
-                            metadata_fn=lambda: {
-                                "name": "eager_compile_backwards_failure",
-                                "encoding": "string",
-                            },
-                            payload_fn=lambda: "\n".join(traceback.format_exception(exc)),
-                        )
-                        log.warning(
-                            "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
-                            exc_info=True,
-                        )
+                    compiled_bw_func = aot_config.bw_compiler(
+                        bw_module, placeholder_list
+                    )
             # Compiled autograd will run the bw_module in the backward pass,
             # so recompilation need happen anyway if the backward pass is ever
             # called.
