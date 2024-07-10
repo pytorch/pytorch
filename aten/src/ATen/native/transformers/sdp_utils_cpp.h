@@ -360,13 +360,7 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
   const auto v_num_heads = params.value.sym_size(-3);
   const bool same_kv_heads = k_num_heads == v_num_heads;
 
-  auto q_batch_size = params.query.sym_size(0);
-  auto k_batch_size = params.key.sym_size(0);
-  auto v_batch_size = params.value.sym_size(0);
-  bool same_batch_size =
-      q_batch_size == k_batch_size && q_batch_size == v_batch_size;
-
-  if (!(same_kv_heads && same_batch_size)){
+  if (!(same_kv_heads)){
     if (debug) {
       TORCH_WARN(
           "Both fused kernels require key and value to have the same num_heads and batch_size but got: ",
@@ -418,14 +412,29 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
   bool same_num_heads =
       q_num_heads == k_num_heads && q_num_heads == v_num_heads;
 
+  if (!same_batch_size){
+    if(debug) {
+      TORCH_WARN(
+          "For dense inputs, both fused kernels require query, key and value to have the same batch_size. ",
+          "Query.sizes(): ",
+          params.query.sizes(),
+          ", Key.sizes(): ",
+          params.key.sizes(),
+          ", Value.sizes(): ",
+          params.value.sizes(),
+          " instead. To broadcast dense inputs, try using unsqueeze and expand_to before passing them into the kernel.");
+    }
+    return false;
+  }
+
   if(params.enable_gqa && supports_gqa){
     return check_grouped_query_attention(params, debug);
   }
 
-  if (!(same_batch_size && same_num_heads)){
+  if (!same_num_heads){
     if (debug) {
       TORCH_WARN(
-          "For dense inputs (not nested tensor), both fused kernels require query, key and value to have the same batch_size and num_heads. ",
+          "For dense input, both fused kernels require query, key and value to have the same num_heads. ",
           "Query.sizes(): ",
           params.query.sizes(),
           ", Key sizes(): ",
