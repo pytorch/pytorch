@@ -270,7 +270,10 @@ class TestFullyShardCompile(FSDPTest):
             torch.manual_seed(self.rank)
             fsdp_config = {}
             mesh = init_device_mesh("cuda", (self.world_size,))
-            model_args = ModelArgs(vocab_size=vocab_size)
+            model_args = ModelArgs(
+                vocab_size=vocab_size,
+                n_layers=3,
+            )
             model = Transformer(model_args)
             for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)

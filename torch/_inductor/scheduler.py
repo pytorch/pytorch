@@ -1947,12 +1947,16 @@ class Scheduler:
         """
         seen: Set[BaseSchedulerNode] = set()
         result: List[BaseSchedulerNode] = []
+        op_names = set([name for n in nodes for name in n.get_operation_names()])
 
         def visit(n: BaseSchedulerNode) -> None:
             if n not in seen:
                 seen.add(n)
-                for dep in sorted(n.unmet_dependencies, key=lambda d: d.name):
-                    op = self.name_to_buf[dep.name].defining_op
+                for buf_dep in sorted(n.unmet_dependencies, key=lambda d: d.name):
+                    op = self.name_to_buf[buf_dep.name].defining_op
+                    # We only care about doing toposort within `nodes`
+                    if op.get_name() not in op_names:
+                        continue
                     visit(self.name_to_fused_node[op.get_name()])
                 result.append(n)
 
