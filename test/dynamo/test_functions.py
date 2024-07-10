@@ -3091,12 +3091,12 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(ValueError, "zip()"):
             opt_fn(x, ys[:1], zs)
 
-
     def test_str_handler_for_user_defined_object(self):
         """
         Confirms handler behaviour for `str` is the same between eager and dynamo.
         Compares a user defined object with custom `__str__` method and without.
         """
+
         class CustomStr:
             def __str__(self):
                 return "ok"
@@ -3119,15 +3119,18 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             return x, str(a)
 
         eager_default_str = foo_default_str(torch.ones(4))
-        dynamo_default_str = torch.compile(foo_default_str, fullgraph=True)(torch.ones(4))
+        dynamo_default_str = torch.compile(foo_default_str, fullgraph=True)(
+            torch.ones(4)
+        )
 
         # Check that the tensor output from eager and dynamo modes are the same
         self.assertEqual(eager_default_str[0], dynamo_default_str[0])
 
         # Check that the class name (without memory address) is the same in both modes
-        eager_class_name = eager_default_str[1].split(' object at')[0]
-        dynamo_class_name = dynamo_default_str[1].split(' object at')[0]
+        eager_class_name = eager_default_str[1].split(" object at")[0]
+        dynamo_class_name = dynamo_default_str[1].split(" object at")[0]
         self.assertEqual(eager_class_name, dynamo_class_name)
+
 
 instantiate_parametrized_tests(FunctionTests)
 
