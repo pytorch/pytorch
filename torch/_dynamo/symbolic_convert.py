@@ -1497,8 +1497,15 @@ class InstructionTranslatorBase(
             argsvars = self.pop()
         else:
             unimplemented("CALL_FUNCTION_EX")
+
+        if sys.version_info >= (3, 13):
+            # 3.13 swapped null and callable
+            null = self.pop()
+            assert isinstance(null, NullVariable)
+            
         fn = self.pop()
-        if sys.version_info >= (3, 11):
+
+        if sys.version_info >= (3, 11) and sys.version_info < (3, 13):
             null = self.pop()
             assert isinstance(null, NullVariable)
 
@@ -2231,6 +2238,10 @@ class InstructionTranslatorBase(
     def LOAD_FAST_LOAD_FAST(self, inst):
         self._load_fast(inst.argval[0])
         self._load_fast(inst.argval[1])
+
+    def STORE_FAST_STORE_FAST(self, inst):
+        self._store_fast(inst.argval[0])
+        self._store_fast(inst.argval[1])
 
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
