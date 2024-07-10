@@ -242,7 +242,7 @@ else:
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
             self._parent_mesh: Optional[DeviceMesh] = None
-            self._thread_id = threading.get_ident()
+            # self._thread_id = threading.get_ident()
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
@@ -387,7 +387,7 @@ else:
                         self.device_type,
                         self.mesh_dim_names,
                         self._parent_mesh,
-                        self._thread_id,
+                        # self._thread_id,
                     )
                 )
             return self._hash
@@ -404,7 +404,7 @@ else:
                     and self.device_type == other.device_type
                     and self.mesh_dim_names == other.mesh_dim_names
                     and self._parent_mesh == other._parent_mesh
-                    and self._thread_id == other._thread_id
+                    # and self._thread_id == other._thread_id
                 )
 
         def __getitem__(
