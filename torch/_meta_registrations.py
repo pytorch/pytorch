@@ -5364,8 +5364,8 @@ def meta_scaled_mm(
     def is_row_major(stride):
         return stride[0] > stride[1] and stride[1] == 1
 
-    def is_col_major(shape, stride):
-        return stride[0] == 1 and stride[1] == shape[0]
+    def is_col_major(stride):
+        return stride[0] == 1 and stride[1] > 1
 
     def is_fp8_type(dtype):
         return dtype in (
@@ -5384,7 +5384,7 @@ def meta_scaled_mm(
         lambda: "self must be row_major",
     )
     torch._check(
-        is_col_major(mat2.shape, mat2.stride()),
+        is_col_major(mat2.stride()),
         lambda: "mat2 must be col_major",
     )
     torch._check(
@@ -5576,11 +5576,6 @@ def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=
         _safe_copy_out(copy_from=i, copy_to=indices)  # type: ignore[arg-type]
         return values, indices
     return v, i
-
-
-@register_meta(aten.argsort.stable)
-def meta_argsort(self, *, stable, dim=-1, descending=False):
-    return meta_sort(self, stable=stable, dim=dim, descending=descending)[1]
 
 
 def rnn_cell_checkSizes(
@@ -6052,6 +6047,49 @@ def _check_for_unsupported_isin_dtype(dtype):
         dtype not in [torch.bool, torch.bfloat16, torch.complex128, torch.complex64],
         lambda: f"Unsupported input type encountered for isin(): {dtype}",
     )
+
+
+@register_meta(aten._embedding_bag_backward)
+def meta_embedding_bag_backward(
+    grad,
+    indices,
+    offsets,
+    offset2bag,
+    bag_size,
+    maximum_indices,
+    num_weights,
+    scale_grad_by_freq,
+    mode,
+    sparse,
+    per_sample_weights,
+    padding_idx=-1,
+):
+    if sparse:
+        return aten._embedding_bag_sparse_backward(
+            grad,
+            indices,
+            offsets,
+            offset2bag,
+            bag_size,
+            num_weights,
+            scale_grad_by_freq,
+            mode,
+            per_sample_weights,
+            padding_idx,
+        )
+    else:
+        return meta_embedding_bag_dense_backward(
+            grad,
+            indices,
+            offset2bag,
+            bag_size,
+            maximum_indices,
+            num_weights,
+            scale_grad_by_freq,
+            mode,
+            per_sample_weights,
+            padding_idx,
+        )
 
 
 @register_meta(aten._embedding_bag_dense_backward)

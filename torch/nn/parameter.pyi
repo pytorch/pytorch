@@ -1,41 +1,29 @@
 # mypy: allow-untyped-defs
-import builtins
-from typing import Optional, Tuple
+from typing_extensions import TypeGuard
 
-import torch
-from torch import Tensor
+from torch import device, dtype, Tensor
 
 class Parameter(Tensor):
-    def __init__(
-        self,
-        data: Tensor = ...,
-        requires_grad: builtins.bool = ...,
-    ): ...
+    def __init__(self, data: Tensor = ..., requires_grad: bool = ...) -> None: ...
 
-def is_lazy(param: Tensor): ...
+def is_lazy(
+    param: Tensor,
+) -> TypeGuard[UninitializedParameter | UninitializedBuffer]: ...
 
 class UninitializedParameter(Tensor):
-    def __init__(
-        self,
-        data: Tensor = ...,
-        requires_grad: builtins.bool = ...,
-    ): ...
+    def __init__(self, data: Tensor = ..., requires_grad: bool = ...) -> None: ...
     def materialize(
         self,
-        shape: Tuple[int, ...],
-        device: Optional[torch.device] = None,
-        dtype: Optional[torch.dtype] = None,
-    ): ...
+        shape: tuple[int, ...],
+        device: device | None = None,
+        dtype: dtype | None = None,
+    ) -> None: ...
 
 class UninitializedBuffer(Tensor):
-    def __init__(
-        self,
-        data: Tensor = ...,
-        requires_grad: builtins.bool = ...,
-    ): ...
+    def __init__(self, data: Tensor = ..., requires_grad: bool = ...) -> None: ...
     def materialize(
         self,
-        shape: Tuple[int, ...],
-        device: Optional[torch.device] = None,
-        dtype: Optional[torch.dtype] = None,
-    ): ...
+        shape: tuple[int, ...],
+        device: device | None = None,
+        dtype: dtype | None = None,
+    ) -> None: ...
