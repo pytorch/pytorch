@@ -20,7 +20,7 @@ from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+from torch.utils._sympy.value_ranges import ValueRanges
 from ..._dynamo.utils import counters
 
 from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
@@ -1240,11 +1240,7 @@ class CppVecOverrides(CppOverrides):
         assert (
             a.dtype == b.dtype
         ), "remainder vec implementation expect the same inputs' dtype."
-        if is_float_dtype(a.dtype):
-            return f"{a} - ({a} / {b}).floor() * {b}"
-        else:
-            assert is_integer_dtype(a.dtype)
-            return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
+        return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
 
     @staticmethod
     def tan(a):
@@ -1349,15 +1345,22 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def floordiv(a, b):
-        # a and b are integer type
-        _t = f"decltype({a})"
-        if V.kernel._get_raw_num_vectors(b.dtype) < 1:
-            # Doing blend to set the remaining bits of b to non-zero
-            b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
-        quot = f"{a} / {b}"
-        has_rem = f"({a} % {b} != {_t}(0))"
-        is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
-        return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
+        if is_float_dtype(a.dtype):
+            assert (
+                a.dtype == b.dtype
+            ), "div_floor_floating_vec implementation expect the same inputs' dtype."
+            return f"at::vec::div_floor_floating_vec({a}, {b})"
+        else:
+            assert all(is_integer_dtype(item.dtype) for item in [a, b])
+            # a and b are integer type
+            _t = f"decltype({a})"
+            if V.kernel._get_raw_num_vectors(b.dtype) < 1:
+                # Doing blend to set the remaining bits of b to non-zero
+                b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
+            quot = f"{a} / {b}"
+            has_rem = f"({a} % {b} != {_t}(0))"
+            is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
+            return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
 
     @staticmethod
     def truncdiv(a, b):
