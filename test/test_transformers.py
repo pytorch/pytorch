@@ -1514,7 +1514,6 @@ class TestSDPAFailureModes(NNTestCase):
 
     @onlyCPU
     @skipIfRocm  # Nested Tensor
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     def test_invalid_sdpa_kernel_grouped_query_attention_cpu(self, device):
         rand_query = torch.rand(8, 8, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
         rand_key = torch.rand(8, 4, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
