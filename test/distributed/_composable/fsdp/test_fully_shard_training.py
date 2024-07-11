@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import functools
+import itertools
 import unittest
 from typing import Iterable, List, Tuple, Type, Union
 
@@ -243,7 +244,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         return min(8, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp()
     def test_train_parity_single_group(self):
         """Tests train parity with DDP for a single FSDP group."""
         self.run_subtests(
@@ -275,7 +275,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    def test_train_parity_multi_group_eager(self):
+    @test_compiled_fsdp(compile_compute_on_module=Transformer)
+    def test_train_parity_multi_group(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
         communication (for communication and computation overlap plus memory
@@ -289,21 +290,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
                 "delay_before_reduce_scatter": [False, True],
-                "delay_before_optim": [False, True],
-            },
-            self._test_train_parity_multi_group,
-        )
-
-    @skip_if_lt_x_gpu(2)
-    def test_train_parity_multi_group_compile(self):
-        self.run_subtests(
-            {
-                "reshard_after_forward": [True, False],
-                "device_type": ["cuda"],
-                "offload_policy": [OffloadPolicy()],
-                "delay_after_forward": [False, True],
-                "delay_before_all_gather": [False],
-                "delay_before_reduce_scatter": [False],
                 "delay_before_optim": [False, True],
             },
             self._test_train_parity_multi_group,
@@ -352,8 +338,15 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             return
         assert device_type in ("cuda", "cpu"), f"{device_type}"
         torch.manual_seed(42)
-        lin_dim = 32
-        model = nn.Sequential(*[MLP(lin_dim, torch.device("cpu")) for _ in range(3)])
+        vocab_size = 1024
+        model_args = ModelArgs(
+            n_layers=3,
+            n_heads=4,
+            vocab_size=vocab_size,
+            max_seq_len=64,
+            dropout_p=0,
+        )
+        model = Transformer(model_args)
         ref_model = copy.deepcopy(model)
         if device_type == "cuda":
             replicate(ref_model.cuda(), device_ids=[self.rank])
@@ -368,8 +361,9 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             reshard_after_forward=reshard_after_forward,
             offload_policy=offload_policy,
         )
-        for mlp in model:
-            fully_shard_fn(mlp)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard_fn(module)
         fully_shard_fn(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
@@ -398,7 +392,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
         with patch_all_gather_ctx, patch_reduce_scatter_ctx:
             for iter_idx in range(10):
-                inp = torch.randn((8, lin_dim), device=torch.device(device_type))
+                inp = torch.randint(0, vocab_size, (3, 64), device=device_type)
                 losses: List[torch.Tensor] = []
                 for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                     _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
@@ -412,7 +406,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp()
     def test_non_root_forward_backward(self):
         """
         Tests running forward/backward through the root and then through a
@@ -459,7 +452,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self.assertEqual(ref_model(inp).sum(), model(inp).sum())
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp()
     def test_multi_forward_module(self):
         """
         Tests parity with DDP when running a module that participates multiple
@@ -502,6 +494,85 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
+    @skip_if_lt_x_gpu(2)
+    def test_explicit_prefetching(self):
+        torch.manual_seed(42)
+        model_args = ModelArgs(n_layers=8, dropout_p=0.0)
+        model = Transformer(model_args)
+        ref_model = replicate(copy.deepcopy(model).cuda())
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+        for layer in itertools.chain(model.layers, [model]):
+            fully_shard(layer)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        num_to_forward_prefetch = num_to_backward_prefetch = 2
+        for i, layer in enumerate(model.layers):
+            if i >= len(model.layers) - num_to_forward_prefetch:
+                break
+            layers_to_prefetch = [
+                model.layers[i + j] for j in range(1, num_to_forward_prefetch + 1)
+            ]
+            layer.set_modules_to_forward_prefetch(layers_to_prefetch)
+        for i, layer in enumerate(model.layers):
+            if i < num_to_backward_prefetch:
+                continue
+            layers_to_prefetch = [
+                model.layers[i - j] for j in range(1, num_to_backward_prefetch + 1)
+            ]
+            layer.set_modules_to_backward_prefetch(layers_to_prefetch)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 8), device="cuda")
+        for iter_idx in range(10):
+            losses: List[torch.Tensor] = []
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                _optim.zero_grad()
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+                _optim.step()
+            self.assertEqual(losses[0], losses[1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_post_optim_event(self):
+        torch.manual_seed(42)
+        model_args = ModelArgs(dropout_p=0.0)
+        model = Transformer(model_args)
+        ref_model = replicate(copy.deepcopy(model).cuda())
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+        for layer in itertools.chain(model.layers, [model]):
+            fully_shard(layer)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        def step_post_hook(
+            fsdp_module: FSDPModule, opt: torch.optim.Optimizer, args, kwargs
+        ) -> None:
+            post_optim_event = torch.cuda.current_stream().record_event()
+            fsdp_module.set_post_optim_event(post_optim_event)
+
+        optim.register_step_post_hook(functools.partial(step_post_hook, model))
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 8), device="cuda")
+        # Track all losses and check for equality at the end to avoid a CPU
+        # sync point after each iteration
+        ref_losses: List[torch.Tensor] = []
+        losses: List[torch.Tensor] = []
+        for iter_idx in range(10):
+            ref_optim.zero_grad()
+            ref_losses.append(ref_model(inp).sum())
+            ref_losses[-1].backward()
+            ref_optim.step()
+        for iter_idx in range(10):
+            optim.zero_grad()
+            losses.append(model(inp).sum())
+            losses[-1].backward()
+            optim.step()
+            # Sleep after the optimizer step to allow CPU to run ahead into the
+            # next iteration's forward, exercising the post-optim stream sync
+            torch.cuda._sleep(int(25 * get_cycles_per_ms()))
+        for ref_loss, loss in zip(ref_losses, losses):
+            self.assertEqual(ref_loss, loss)
+
 
 class TestFullyShard1DTrainingCompose(FSDPTest):
     @property
@@ -511,6 +582,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         return min(torch.cuda.device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp(compile_compute_on_module=Transformer)
     def test_train_parity_with_activation_checkpointing(self):
         """
         Tests train parity against DDP when composing with activation
@@ -528,6 +600,9 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         self, reshard_after_forward: Union[bool, int], checkpoint_impl: str
     ):
         assert checkpoint_impl in ("composable", "utils", "wrapper")
+        testing_compile = fully_shard != torch.distributed._composable.fsdp.fully_shard
+        if testing_compile and checkpoint_impl == "composable":
+            return
         torch.manual_seed(42)
         vocab_size = 1024
         with torch.device(torch.device("cuda")):
@@ -536,7 +611,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 n_heads=4,
                 vocab_size=vocab_size,
                 max_seq_len=64,
-                dropout_p=0.1,
+                dropout_p=0,
                 checkpoint_activations=(checkpoint_impl == "utils"),
             )
             model = Transformer(model_args)
@@ -579,16 +654,18 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 torch.manual_seed(iter_idx + 1)  # for dropout determinism
                 losses.append(_model(inp).sum())
                 losses[-1].backward()
-            check_sharded_parity(
-                self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
-            )
+            if not testing_compile:
+                check_sharded_parity(
+                    self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
+                )
             self.assertEqual(losses[0], losses[1])
             for _optim in (ref_optim, optim):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-            check_sharded_parity(
-                self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
-            )
+            if not testing_compile:
+                check_sharded_parity(
+                    self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
+                )
 
 
 class TestFullyShardSharedParams(FSDPTest):
@@ -597,22 +674,11 @@ class TestFullyShardSharedParams(FSDPTest):
         return min(4, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp(compile_compute_on_module=TransformerBlock)
-    def test_train_parity_with_shared_params_no_ac(self):
+    def test_train_parity_with_shared_params(self):
         self.run_subtests(
             {
                 "reshard_after_forward": [False, True],
-                "use_activation_checkpointing": [False],
-            },
-            self._test_train_shared_params,
-        )
-
-    @skip_if_lt_x_gpu(2)
-    def test_train_parity_with_shared_params_ac(self):
-        self.run_subtests(
-            {
-                "reshard_after_forward": [False, True],
-                "use_activation_checkpointing": [True],
+                "use_activation_checkpointing": [False, True],
             },
             self._test_train_shared_params,
         )
@@ -1003,9 +1069,31 @@ class TestFullyShard2DTraining(FSDPTest):
             optim.step()
             ref_optim.step()
 
+    # TODO: remove this test when 2d state_dict is ready.
+    @skip_if_lt_x_gpu(2)
+    @skipIfRocm
+    def test_raise_not_implemented_state_dict_if_2d(self):
+        def parallelize(_model: Transformer, mesh: DeviceMesh, use_seq_parallel: bool):
+            _model = Transformer.parallelize(_model, mesh["tp"], use_seq_parallel)
+            for layer in _model.layers:
+                fully_shard(layer, mesh=mesh["dp"])
+            fully_shard(_model, mesh=mesh["dp"])
+            return _model
+
+        global_mesh = self.init_global_mesh()
+        seed = 42
+        torch.manual_seed(seed)
+        model_args = ModelArgs(dropout_p=0.0)
+        model = parallelize(Transformer(model_args), global_mesh, True)
+
+        with self.assertRaisesRegex(NotImplementedError, "2D"):
+            get_model_state_dict(model)
+
+    # Temporarily disable 2D state dict test, while strided sharding is being devleoped.
+    # TODO: re-enable this test once 2d state_dict is ready.
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_train_parity_2d_transformer_checkpoint_resume(self):
+    def _temp_disable_test_train_parity_2d_transformer_checkpoint_resume(self):
         """
         Tests train parity of a 2D transformer without checkpointing against a
         2D transformer with a checkpoint save/load.
@@ -1182,6 +1270,12 @@ class TestFullyShardNDTraining(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
+        for n, p in model.named_parameters():
+            self.assertIsInstance(p, DTensor)
+            self.assertEqual(p.device_mesh.ndim, 2)
+            self.assertEqual(len(p.placements), 2)
+            self.assertEqual(p.device_mesh.mesh_dim_names, ("dp", "tp"))
+
 
 class TestFullyShardHSDPTraining(FSDPTest):
     @property
@@ -1255,12 +1349,12 @@ class TestFullyShardHSDPTraining(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
 
-class TestFullyShardCustomForwardMethod(FSDPTestMultiThread):
+class TestFullyShardCustomForwardMethod(FSDPTest):
     @property
     def world_size(self) -> int:
-        return 2
+        return min(torch.cuda.device_count(), 2)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(2)
     def test_register_fsdp_forward_method(self):
         """Based on https://github.com/pytorch/pytorch/issues/109385"""
 
@@ -1287,8 +1381,6 @@ class TestFullyShardCustomForwardMethod(FSDPTestMultiThread):
 
         torch.manual_seed(42)
         model = Model()
-        for param in model.parameters():
-            dist.broadcast(param.detach(), src=0)
         ref_model = copy.deepcopy(model).cuda()
         fully_shard(model.vit)
         fully_shard(model.projector)

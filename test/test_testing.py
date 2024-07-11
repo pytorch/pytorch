@@ -2232,7 +2232,7 @@ class TestImports(TestCase):
                            "torch.testing._internal.distributed.",  # just fails
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal.fx",  # depends on onnx-script
-                           "torch._inductor.triton_helpers",  # depends on triton
+                           "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
@@ -2245,7 +2245,6 @@ class TestImports(TestCase):
             else:
                 ignored_modules.append("torch.distributed.nn.api.")
                 ignored_modules.append("torch.distributed.optim.")
-                ignored_modules.append("torch.distributed.pipeline.")
                 ignored_modules.append("torch.distributed.rpc.")
             ignored_modules.append("torch.testing._internal.dist_utils")
             # And these both end up with transitive dependencies on distributed

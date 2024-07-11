@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import operator
 import torch
 from torch.ao.quantization.backend_config import (

@@ -73,13 +73,13 @@ std::unordered_set<std::string> RegisterPrePackParams(
         WithInsertPoint ins(n->next());
         Value* packed_param_value = n->output(0);
         TORCH_CHECK(n->outputs().size() == 1, "Prepack ops have single output");
-        auto attr_name = attr_name_base + c10::to_string(uid++);
+        auto attr_name = attr_name_base + std::to_string(uid++);
         TORCH_CHECK(
             packed_param_value->uses().size() == 1,
             "Packed param must be used by exactly one op.");
         auto use = packed_param_value->uses()[0];
         while (m.hasattr(attr_name)) {
-          attr_name = attr_name_base + "_" + c10::to_string(uid++);
+          attr_name = attr_name_base + "_" + std::to_string(uid++);
         }
         // Now register attribute for this packed param but dont set it to any
         // value. No value because we dont know what the value is at this point.

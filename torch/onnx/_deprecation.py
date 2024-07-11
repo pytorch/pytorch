@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Utility for deprecating functions."""
 
 import functools

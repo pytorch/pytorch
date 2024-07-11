@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Owner(s): ["module: typing"]
 
 import doctest
@@ -35,16 +36,21 @@ def get_all_examples():
     """
     blocklist = {
         "_np",
+        "_InputT",
     }
     allexamples = ""
 
     example_file_lines = [
-        "import torch",
-        "import torch.nn.functional as F",
+        "# mypy: allow-untyped-defs",
+        "",
         "import math",
-        "import numpy",
         "import io",
         "import itertools",
+        "",
+        "import numpy",
+        "",
+        "import torch",
+        "import torch.nn.functional as F",
         "",
         # for requires_grad_ example
         # NB: We are parsing this file as Python 2, so we must use
@@ -60,7 +66,7 @@ def get_all_examples():
         if docstr and fname not in blocklist:
             e = get_examples_from_docstring(docstr)
             if e:
-                example_file_lines.append(f"\n\ndef example_torch_{fname}():")
+                example_file_lines.append(f"\n\ndef example_torch_{fname}() -> None:")
                 example_file_lines += e
 
     for fname in dir(torch.Tensor):
@@ -69,7 +75,9 @@ def get_all_examples():
         if docstr and fname not in blocklist:
             e = get_examples_from_docstring(docstr)
             if e:
-                example_file_lines.append(f"\n\ndef example_torch_tensor_{fname}():")
+                example_file_lines.append(
+                    f"\n\ndef example_torch_tensor_{fname}() -> None:"
+                )
                 example_file_lines += e
 
     return "\n".join(example_file_lines)
@@ -82,8 +90,7 @@ class TestTypeHints(TestCase):
         Run documentation examples through mypy.
         """
         fn = Path(__file__).resolve().parent / "generated_type_hints_smoketest.py"
-        with open(fn, "w") as f:
-            print(get_all_examples(), file=f)
+        fn.write_text(get_all_examples())
 
         # OK, so here's the deal.  mypy treats installed packages
         # and local modules differently: if a package is installed,

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from collections import defaultdict
 from dataclasses import dataclass
 from time import perf_counter_ns
@@ -117,7 +118,7 @@ class profile:
 
         use_device (str, optional): Enables timing of device events.
             Adds approximately 4us of overhead to each tensor operation when use cuda.
-            The valid devices options are 'cuda', 'xpu' and 'privateuseone'.
+            The valid devices options are 'cuda', 'xpu', 'mtia' and 'privateuseone'.
 
         record_shapes (bool, optional): If shapes recording is set, information
             about input dimensions will be collected. This allows one to see which
@@ -204,7 +205,6 @@ class profile:
         with_modules=False,
         use_kineto=False,
         use_cpu=True,
-        use_mtia=False,
         experimental_config=None,
     ):
         self.enabled: bool = enabled
@@ -230,7 +230,6 @@ class profile:
         self.with_stack = with_stack
         self.with_modules = with_modules
         self.use_cpu = use_cpu
-        self.use_mtia = use_mtia
         if experimental_config is None:
             experimental_config = _ExperimentalConfig()
         self.experimental_config = experimental_config
@@ -245,7 +244,7 @@ class profile:
             ), "Device-only events supported only with Kineto (use_kineto=True)"
 
         if self.use_device is not None:
-            VALID_DEVICE_OPTIONS = ["cuda", "xpu"]
+            VALID_DEVICE_OPTIONS = ["cuda", "xpu", "mtia"]
             if _get_privateuse1_backend_name() != "privateuseone":
                 VALID_DEVICE_OPTIONS.append(_get_privateuse1_backend_name())
             if self.use_device not in VALID_DEVICE_OPTIONS:
@@ -264,8 +263,6 @@ class profile:
         self.kineto_activities = set()
         if self.use_cpu:
             self.kineto_activities.add(ProfilerActivity.CPU)
-        if self.use_mtia:
-            self.kineto_activities.add(ProfilerActivity.MTIA)
 
         self.profiler_kind = ProfilerState.KINETO
         if self.use_device == "cuda":
@@ -279,6 +276,11 @@ class profile:
                 use_kineto and ProfilerActivity.XPU in _supported_activities()
             ), "Legacy XPU profiling is not supported. Requires use_kineto=True on XPU devices."
             self.kineto_activities.add(ProfilerActivity.XPU)
+        elif self.use_device == "mtia":
+            assert (
+                use_kineto and ProfilerActivity.MTIA in _supported_activities()
+            ), "Legacy MTIA profiling is not supported. Requires use_kineto=True on MTIA devices."
+            self.kineto_activities.add(ProfilerActivity.MTIA)
         elif self.use_device is not None and self.use_device != "privateuseone":
             if (
                 not use_kineto
@@ -501,8 +503,8 @@ class profile:
             if _filter_name(kineto_event.name()):
                 continue
             rel_start_ns = kineto_event.start_ns() - trace_start_ns
-            rel_end_ns = rel_start_ns + kineto_event.duration_ns()
-            abs_end_ns = kineto_event.start_ns() + kineto_event.duration_ns()
+            rel_end_ns = kineto_event.end_ns() - trace_start_ns
+            abs_end_ns = kineto_event.end_ns()
 
             cpu_memory_usage = 0
             device_memory_usage = 0

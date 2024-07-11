@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import inspect
 from collections import defaultdict
@@ -444,8 +445,6 @@ def _fakify_script_objects(
     fake_to_real = {}
 
     def _maybe_fakify_obj(obj):
-        if not torch._library.fake_class_registry.has_fake_class(obj._type().qualified_name()):  # type: ignore[attr-defined]
-            return obj
         fake_obj = torch._library.fake_class_registry.to_fake_obj(fake_mode, obj)
         fake_to_real[fake_obj] = obj
         return fake_obj

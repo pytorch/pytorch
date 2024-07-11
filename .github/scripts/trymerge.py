@@ -81,9 +81,10 @@ JobNameToStateDict = Dict[str, JobCheckState]
 
 
 class WorkflowCheckState:
-    def __init__(self, name: str, url: str, status: Optional[str]):
+    def __init__(self, name: str, url: str, run_id: int, status: Optional[str]):
         self.name: str = name
         self.url: str = url
+        self.run_id: int = run_id
         self.status: Optional[str] = status
         self.jobs: JobNameToStateDict = {}
 
@@ -122,6 +123,7 @@ fragment PRCheckSuites on CheckSuiteConnection {
       workflowRun {
         workflow {
           name
+          databaseId
         }
         databaseId
         url
@@ -512,7 +514,7 @@ def add_workflow_conclusions(
     workflows: Dict[str, WorkflowCheckState] = {}
 
     # for the jobs that don't have a workflow
-    no_workflow_obj: WorkflowCheckState = WorkflowCheckState("", "", None)
+    no_workflow_obj: WorkflowCheckState = WorkflowCheckState("", "", 0, None)
 
     def add_conclusions(edges: Any) -> None:
         for edge_idx, edge in enumerate(edges):
@@ -523,18 +525,30 @@ def add_workflow_conclusions(
             workflow_obj: WorkflowCheckState = no_workflow_obj
 
             if workflow_run is not None:
+                # This is the usual workflow run ID we see on GitHub
+                workflow_run_id = workflow_run["databaseId"]
+                # While this is the metadata name and ID of the workflow itself
                 workflow_name = workflow_run["workflow"]["name"]
+                workflow_id = workflow_run["workflow"]["databaseId"]
+
                 workflow_conclusion = node["conclusion"]
                 # Do not override existing status with cancelled
                 if workflow_conclusion == "CANCELLED" and workflow_name in workflows:
                     continue
-                if workflow_name not in workflows:
-                    workflows[workflow_name] = WorkflowCheckState(
+
+                # Only keep the latest workflow run for each workflow, heuristically,
+                # it's the run with largest run ID
+                if (
+                    workflow_id not in workflows
+                    or workflows[workflow_id].run_id < workflow_run_id
+                ):
+                    workflows[workflow_id] = WorkflowCheckState(
                         name=workflow_name,
                         status=workflow_conclusion,
                         url=workflow_run["url"],
+                        run_id=workflow_run_id,
                     )
-                workflow_obj = workflows[workflow_name]
+                workflow_obj = workflows[workflow_id]
 
             while checkruns is not None:
                 for checkrun_node in checkruns["nodes"]:
@@ -572,12 +586,12 @@ def add_workflow_conclusions(
     # the jobs in but don't put the workflow in.  We care more about the jobs in
     # the workflow that ran than the container workflow.
     res: JobNameToStateDict = {}
-    for workflow_name, workflow in workflows.items():
+    for workflow in workflows.values():
         if len(workflow.jobs) > 0:
             for job_name, job in workflow.jobs.items():
                 res[job_name] = job
         else:
-            res[workflow_name] = JobCheckState(
+            res[workflow.name] = JobCheckState(
                 workflow.name,
                 workflow.url,
                 workflow.status,
@@ -1163,7 +1177,6 @@ class GitHubPR:
             # Finally, upload the record to Rockset. The list of pending and failed
             # checks are at the time of the merge
             save_merge_record(
-                collection=ROCKSET_MERGES_COLLECTION,
                 comment_id=comment_id,
                 pr_num=self.pr_num,
                 owner=self.org,
@@ -1179,10 +1192,8 @@ class GitHubPR:
                 merge_base_sha=self.get_merge_base(),
                 merge_commit_sha=merge_commit_sha,
                 is_failed=False,
-                dry_run=dry_run,
                 skip_mandatory_checks=skip_mandatory_checks,
                 ignore_current=bool(ignore_current_checks),
-                workspace=ROCKSET_MERGES_WORKSPACE,
             )
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
@@ -1489,7 +1500,6 @@ def checks_to_markdown_bullets(
 
 @retries_decorator()
 def save_merge_record(
-    collection: str,
     comment_id: int,
     pr_num: int,
     owner: str,
@@ -1505,59 +1515,44 @@ def save_merge_record(
     merge_base_sha: str,
     merge_commit_sha: str = "",
     is_failed: bool = False,
-    dry_run: bool = False,
     skip_mandatory_checks: bool = False,
     ignore_current: bool = False,
     error: str = "",
-    workspace: str = "commons",
 ) -> None:
     """
-    This saves the merge records into Rockset, so we can query them (for fun and profit)
+    This saves the merge records as a json, which can later be uploaded to s3
     """
-    if dry_run:
-        # Decide not to save the record to Rockset if dry-run is set to not pollute
-        # the collection
-        return
 
-    try:
-        import rockset  # type: ignore[import]
+    # Prepare the record to be written into Rockset
+    data = [
+        {
+            "comment_id": comment_id,
+            "pr_num": pr_num,
+            "owner": owner,
+            "project": project,
+            "author": author,
+            "pending_checks": pending_checks,
+            "failed_checks": failed_checks,
+            "ignore_current_checks": ignore_current_checks,
+            "broken_trunk_checks": broken_trunk_checks,
+            "flaky_checks": flaky_checks,
+            "unstable_checks": unstable_checks,
+            "last_commit_sha": last_commit_sha,
+            "merge_base_sha": merge_base_sha,
+            "merge_commit_sha": merge_commit_sha,
+            "is_failed": is_failed,
+            "skip_mandatory_checks": skip_mandatory_checks,
+            "ignore_current": ignore_current,
+            "error": error,
+            # This is a unique identifier for the record for deduping purposes
+            # in rockset.  Any unique string would work
+            "_id": f"{project}-{pr_num}-{comment_id}-{os.environ.get('GITHUB_RUN_ID')}",
+        }
+    ]
+    repo_root = Path(__file__).resolve().parent.parent.parent
 
-        # Prepare the record to be written into Rockset
-        data = [
-            {
-                "comment_id": comment_id,
-                "pr_num": pr_num,
-                "owner": owner,
-                "project": project,
-                "author": author,
-                "pending_checks": pending_checks,
-                "failed_checks": failed_checks,
-                "ignore_current_checks": ignore_current_checks,
-                "broken_trunk_checks": broken_trunk_checks,
-                "flaky_checks": flaky_checks,
-                "unstable_checks": unstable_checks,
-                "last_commit_sha": last_commit_sha,
-                "merge_base_sha": merge_base_sha,
-                "merge_commit_sha": merge_commit_sha,
-                "is_failed": is_failed,
-                "skip_mandatory_checks": skip_mandatory_checks,
-                "ignore_current": ignore_current,
-                "error": error,
-            }
-        ]
-
-        client = rockset.RocksetClient(
-            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-        )
-        client.Documents.add_documents(
-            collection=collection,
-            data=data,
-            workspace=workspace,
-        )
-
-    except ModuleNotFoundError:
-        print("Rockset is missing, no record will be saved")
-        return
+    with open(repo_root / "merge_record.json", "w") as f:
+        json.dump(data, f)
 
 
 @retries_decorator(rc=[])
@@ -2027,10 +2022,8 @@ def categorize_checks(
     pending_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
     failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
 
-    # ok_failed_checks is used with ok_failed_checks_threshold while ignorable_failed_checks
-    # is used to keep track of all ignorable failures when saving the merge record on Rockset
-    ok_failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
-    ignorable_failed_checks: Dict[str, List[Any]] = defaultdict(list)
+    # failed_checks_categorization is used to keep track of all ignorable failures when saving the merge record on Rockset
+    failed_checks_categorization: Dict[str, List[Any]] = defaultdict(list)
 
     # If required_checks is not set or empty, consider all names are relevant
     relevant_checknames = [
@@ -2058,36 +2051,38 @@ def categorize_checks(
             continue
         elif not is_passing_status(check_runs[checkname].status):
             target = (
-                ignorable_failed_checks[classification]
+                failed_checks_categorization[classification]
                 if classification
                 in ("IGNORE_CURRENT_CHECK", "BROKEN_TRUNK", "FLAKY", "UNSTABLE")
                 else failed_checks
             )
             target.append((checkname, url, job_id))
 
-            if classification in ("BROKEN_TRUNK", "FLAKY", "UNSTABLE"):
-                ok_failed_checks.append((checkname, url, job_id))
+    flaky_or_broken_trunk = (
+        failed_checks_categorization["BROKEN_TRUNK"]
+        + failed_checks_categorization["FLAKY"]
+    )
 
-    if ok_failed_checks:
+    if flaky_or_broken_trunk:
         warn(
-            f"The following {len(ok_failed_checks)} checks failed but were likely due flakiness or broken trunk: "
-            + ", ".join([x[0] for x in ok_failed_checks])
+            f"The following {len(flaky_or_broken_trunk)} checks failed but were likely due flakiness or broken trunk: "
+            + ", ".join([x[0] for x in flaky_or_broken_trunk])
             + (
                 f" but this is greater than the threshold of {ok_failed_checks_threshold} so merge will fail"
                 if ok_failed_checks_threshold is not None
-                and len(ok_failed_checks) > ok_failed_checks_threshold
+                and len(flaky_or_broken_trunk) > ok_failed_checks_threshold
                 else ""
             )
         )
 
     if (
         ok_failed_checks_threshold is not None
-        and len(ok_failed_checks) > ok_failed_checks_threshold
+        and len(flaky_or_broken_trunk) > ok_failed_checks_threshold
     ):
-        failed_checks = failed_checks + ok_failed_checks
+        failed_checks = failed_checks + flaky_or_broken_trunk
 
-    # The list of ignorable_failed_checks is returned so that it can be saved into the Rockset merge record
-    return (pending_checks, failed_checks, ignorable_failed_checks)
+    # The list of failed_checks_categorization is returned so that it can be saved into the Rockset merge record
+    return (pending_checks, failed_checks, failed_checks_categorization)
 
 
 def merge(
@@ -2330,6 +2325,15 @@ def main() -> None:
             dry_run=args.dry_run,
         )
         return
+    if not pr.is_ghstack_pr() and pr.base_ref() != pr.default_branch():
+        gh_post_pr_comment(
+            org,
+            project,
+            args.pr_num,
+            f"PR targets {pr.base_ref()} rather than {pr.default_branch()}, refusing merge request",
+            dry_run=args.dry_run,
+        )
+        return
 
     if args.check_mergeability:
         if pr.is_ghstack_pr():
@@ -2365,7 +2369,6 @@ def main() -> None:
             # list of pending and failed checks here, but they are not really
             # needed at the moment
             save_merge_record(
-                collection=ROCKSET_MERGES_COLLECTION,
                 comment_id=args.comment_id,
                 pr_num=args.pr_num,
                 owner=org,
@@ -2380,11 +2383,9 @@ def main() -> None:
                 last_commit_sha=pr.last_commit().get("oid", ""),
                 merge_base_sha=pr.get_merge_base(),
                 is_failed=True,
-                dry_run=args.dry_run,
                 skip_mandatory_checks=args.force,
                 ignore_current=args.ignore_current,
                 error=str(e),
-                workspace=ROCKSET_MERGES_WORKSPACE,
             )
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
