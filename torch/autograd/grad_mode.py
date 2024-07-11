@@ -2,12 +2,12 @@
 from typing import Any
 
 import torch
+
 from torch.utils._contextlib import (
     _DecoratorContextManager,
     _NoParamDecoratorContextManager,
     F,
 )
-
 
 __all__ = [
     "no_grad",
@@ -73,9 +73,9 @@ class no_grad(_NoParamDecoratorContextManager):
     """
 
     def __init__(self) -> None:
-        from torch import _jit_internal
+        from torch._jit_internal import is_scripting
 
-        if not _jit_internal.is_scripting():
+        if not is_scripting():
             super().__init__()
         self.prev = False
 
