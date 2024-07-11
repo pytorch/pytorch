@@ -77,7 +77,7 @@ std::unordered_map<const FunctionSchema*, BoundedShapeGraphs>
 // CompilationUnit that holds all these Functions and keeps them alive.
 auto compilation_unit = std::make_shared<CompilationUnit>();
 
-const std::optional<const FunctionSchema*> getInplaceVariant(
+const at::optional<const FunctionSchema*> getInplaceVariant(
     const FunctionSchema& base_schema) {
   auto& inplace_variants =
       getAllOperatorsFor(c10::Symbol::fromQualString(base_schema.name() + "_"));
@@ -102,7 +102,7 @@ const std::optional<const FunctionSchema*> getInplaceVariant(
 
     return schema;
   }
-  return std::nullopt;
+  return at::nullopt;
 }
 
 TypePtr mapTensorToListOfInts(TypePtr type) {

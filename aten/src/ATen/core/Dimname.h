@@ -2,7 +2,7 @@
 
 #include <ATen/core/symbol.h>
 #include <c10/util/ArrayRef.h>
-#include <optional>
+#include <c10/util/Optional.h>
 #include <ostream>
 
 namespace at {

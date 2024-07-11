@@ -14,7 +14,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 namespace c10 {
 
@@ -73,7 +73,7 @@ struct Type;
 struct SharedType;
 
 // Use this to customize how a Type is printed using `annotation_str()`. If
-// std::nullopt is returned, `annotation_str()` falls through to its default
+// c10::nullopt is returned, `annotation_str()` falls through to its default
 // implementation.
 using TypePrinter = std::function<std::optional<std::string>(const Type&)>;
 
@@ -455,7 +455,7 @@ struct TORCH_API Type {
   // this method.
   std::string annotation_str(const TypePrinter& printer) const {
     if (printer) {
-      // the printer can return std::nullopt to fall through to the default impl
+      // the printer can return nullopt to fall through to the default impl
       if (auto renamed = printer(*this)) {
         return *renamed;
       }
