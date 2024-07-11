@@ -120,7 +120,7 @@ test_Hq_Hkv = [
     (16, 1),
     (8, 2),
     (16, 16),
-    (32, 1),
+    (20, 1),
 ]
 
 (Hq, Hkv) = (16, 8)
@@ -273,6 +273,43 @@ class TestFlexAttention(InductorTestCase):
             v_ref,
             v,
         )
+
+    @supported_platform
+    @expectedFailure
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_bw_decoding_fails(self, dtype):
+        make_kv = functools.partial(
+            torch.randn,
+            (2, 2, 128, 4),
+            dtype=dtype,
+            device="cuda",
+            requires_grad=True,
+        )
+        make_q = functools.partial(
+            torch.randn,
+            (2, 2, 8, 4),
+            dtype=dtype,
+            device="cuda",
+            requires_grad=True,
+        )
+        q, k, v, backward_grad = make_q(), make_kv(), make_kv(), make_q()
+
+        block_mask = _create_empty_block_mask(q, k, v)
+
+        @torch.compile
+        def sdpa_hop(q, k, v, score_mod, block_mask):
+            return flex_attention_hop(
+                q,
+                k,
+                v,
+                score_mod,
+                block_mask.as_tuple(),
+                1.0,
+            )
+
+        output = sdpa_hop(q, k, v, _identity, block_mask)
+
+        output.backward(grad=backward_grad)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -705,6 +742,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
+                1.0,
             )
 
         @torch.compile(backend="aot_eager")
@@ -713,20 +751,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             Besides dropping LSE it also ensures that the hop is compiled with aot-eager
             backend. We need to replicate this.
             """
-            return flex_attention_hop(
-                q,
-                k,
-                v,
-                score_mod,
-                block_mask,
-            )
+            return flex_attention_hop(q, k, v, score_mod, block_mask.as_tuple(), 1.0)
 
         ref_out, ref_lse = eager_sdpa_hop(
             q.to(torch.float64),
             k.to(torch.float64),
             v.to(torch.float64),
             score_mod,
-            block_mask.as_tuple(),
+            block_mask,
         )
         compiled_out, compiled_lse = sdpa_hop(q, k, v, score_mod, block_mask)
         # Comparing LSE for the ref and the compiled version
@@ -776,6 +808,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
+                scale=1.0,
             )
             lse_2 = lse * 2
             return lse_2
@@ -804,6 +837,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
+                1.0,
             )
             lse_2 = lse * 2
             return out, lse_2
