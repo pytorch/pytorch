@@ -409,7 +409,13 @@ class PyCodegen:
             output.append(self.create_load_const(code))
             if sys.version_info < (3, 11):
                 output.append(self.create_load_const(fn_name))
-            output.append(create_instruction("MAKE_FUNCTION", arg=0x08))
+            if sys.version_info >= (3, 13):
+                output.extend([
+                    create_instruction("MAKE_FUNCTION"),
+                    create_instruction("SET_FUNCTION_ATTRIBUTE", arg=0x08),
+                ])
+            else:
+                output.append(create_instruction("MAKE_FUNCTION", arg=0x08))
 
         if push_null and sys.version_info >= (3, 11):
             self.add_push_null(gen_fn)

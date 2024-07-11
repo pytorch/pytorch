@@ -941,7 +941,14 @@ class InstructionTranslatorBase(
     def popn(self, n: int) -> List[VariableTracker]:
         return [*reversed([self.pop() for _ in range(n)])]
 
+    def _load_closure(self, name):
+        self.push(ClosureVariable(name=name))
+
     def _load_fast(self, name):
+        if name in self.cell_and_freevars():
+            self._load_closure(name)
+            return
+
         if self.exec_recorder and name in self.f_locals:
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
@@ -988,7 +995,7 @@ class InstructionTranslatorBase(
     STORE_DEREF = STORE_FAST
 
     def LOAD_CLOSURE(self, inst):
-        self.push(ClosureVariable(name=inst.argval))
+        self._load_closure(inst.argval)
 
     def _load_const(self, inst):
         i = inst.arg
@@ -1796,14 +1803,16 @@ class InstructionTranslatorBase(
         annotations = None
         kwdefaults = None
 
-        if flags & 0x08:
-            closure = self.pop()
-        if flags & 0x04:
-            annotations = self.pop()
-        if flags & 0x02:
-            kwdefaults = self.pop()
-        if flags & 0x01:
-            defaults = self.pop()
+        if sys.version_info < (3, 13):
+            # in 3.13, this is handled in SET_FUNCTION_ATTRIBUTE
+            if flags & 0x08:
+                closure = self.pop()
+            if flags & 0x04:
+                annotations = self.pop()
+            if flags & 0x02:
+                kwdefaults = self.pop()
+            if flags & 0x01:
+                defaults = self.pop()
 
         self.push(
             NestedUserFunctionVariable(
@@ -2269,6 +2278,24 @@ class InstructionTranslatorBase(
             self.push(ConstantVariable(bool(value.as_python_constant())))
         else:
             self.push(BuiltinVariable(bool).call_function(self, [value], {}))
+
+    def SET_FUNCTION_ATTRIBUTE(self, inst):
+        flags = inst.arg
+        fn = self.pop()
+        assert isinstance(fn, NestedUserFunctionVariable)
+        attr = self.pop()
+
+        if flags & 0x08:
+            fn.closure = attr
+            fn.closure_scope = self
+        elif flags & 0x04:
+            fn.annotations = attr
+        elif flags & 0x02:
+            fn.kwdefaults = attr
+        elif flags & 0x01:
+            fn.defaults = attr
+
+        self.push(fn)
 
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
@@ -3004,12 +3031,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 super().LOAD_DEREF(inst)
 
-    def LOAD_CLOSURE(self, inst):
-        assert inst.argval in self.cell_and_freevars()
-        if inst.argval in self.closure_cells:
-            self.push(self.closure_cells[inst.argval])
+    def _load_closure(self, name):
+        assert name in self.cell_and_freevars()
+        if name in self.closure_cells:
+            self.push(self.closure_cells[name])
         else:
-            self.push(InlinedClosureVariable(name=inst.argval))
+            self.push(InlinedClosureVariable(name=name))
 
     def check_replace_is_safe(self, oldvar):
         if not is_side_effect_safe(oldvar.mutable_local):
