@@ -2,7 +2,7 @@
 
 import torch
 
-import torch.distributed.checkpoint as dcp
+import torch.distributed.checkpoint as DCP
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_dict
@@ -60,7 +60,7 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
     @parametrize("pass_planner", [True, False])
     def test_load_sharded_optimizer_state_dict(self, pass_planner) -> None:
         CHECKPOINT_DIR = self.temp_dir
-        planner = dcp.DefaultLoadPlanner() if pass_planner else None
+        planner = DCP.DefaultLoadPlanner() if pass_planner else None
 
         model = self._create_model()
         model = FSDP(model)
@@ -80,9 +80,9 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
             "model": model.state_dict(),
             "optim": optim_osd,
         }
-        dcp.save(
+        DCP.save_state_dict(
             state_dict=state_dict,
-            storage_writer=dcp.FileSystemWriter(CHECKPOINT_DIR),
+            storage_writer=DCP.FileSystemWriter(CHECKPOINT_DIR),
         )
 
         # now load the model and ensure the values are the same
@@ -101,16 +101,16 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
             "model": model_2.state_dict(),
             # cannot load the optimizer together with the model
         }
-        dcp.load(
+        DCP.load_state_dict(
             state_dict=state_dict,
-            storage_reader=dcp.FileSystemReader(CHECKPOINT_DIR),
+            storage_reader=DCP.FileSystemReader(CHECKPOINT_DIR),
         )
         model_2.load_state_dict(state_dict["model"])
 
         optim_state = load_sharded_optimizer_state_dict(
             model_state_dict=state_dict["model"],
             optimizer_key="optim",
-            storage_reader=dcp.FileSystemReader(CHECKPOINT_DIR),
+            storage_reader=DCP.FileSystemReader(CHECKPOINT_DIR),
             planner=planner,
         )
         flattened_osd = FSDP.optim_state_dict_to_load(
