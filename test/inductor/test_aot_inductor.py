@@ -3002,7 +3002,7 @@ class AOTInductorTestsTemplate:
     @common_utils.parametrize("max_autotune", [False, True])
     def test_misc_1(self, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
-            raise unittest.Skip("max_autotune not supported on macos")
+            raise unittest.SkipTest("max_autotune not supported on macos")
 
         class Model(nn.Module):
             def __init__(self):
