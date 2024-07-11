@@ -657,7 +657,7 @@ class Node(_NodeBase):
                         # a kwarg or arg has other users except self
                         if arg.name in self.kwargs and len(self.kwargs[arg.name].users) > 1:
                             schema_mutable = True
-                        elif not arg.kwarg_only and len(self.args[idx].users) > 1:
+                        elif not arg.kwarg_only and idx < len(self.args) and len(self.args[idx].users) > 1:
                             schema_mutable = True
             return schema_mutable or self.target in _side_effectful_functions
 
