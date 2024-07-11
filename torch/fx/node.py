@@ -645,17 +645,14 @@ class Node(_NodeBase):
         if self.op in {"placeholder", "output"}:
             return True
 
+
+        def arg_is_view(arg):
+            from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import is_view_op
+            schema = getattr(arg.target, "_schema", None)
+            return schema is not None and is_view_op(schema)
+
         def check_arg(arg):
-            return len(arg.users) > 1 or arg.op in {"placeholder", "get_attr"} or arg.target in {
-                _ops.aten.view.default,
-                _ops.aten.transpose.int,
-                _ops.aten.permute.default,
-                _ops.aten.reshape.default,
-                _ops.aten.expand.default,
-                _ops.aten.t.default,
-                _ops.aten.squeeze.default,
-                _ops.aten.unsqueeze.default,
-            }
+            return len(arg.users) > 1 or arg.op in {"placeholder", "get_attr"} or arg_is_view(arg)
 
         # Check if an impure function based on schema.
         # A call_function is impure if it has at least one mutable argument that has more
