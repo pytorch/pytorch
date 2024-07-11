@@ -355,7 +355,6 @@ def insert_deferred_runtime_asserts(
             # We add sym_constrain_range calls for symbols later in any case if they're size-like or range-constrained,
             # so calls before that are redundant.
             if node.target in (
-                torch._check_is_size,
                 torch.ops.aten.sym_constrain_range.default,
                 torch.ops.aten.sym_constrain_range_for_size.default,
             ):

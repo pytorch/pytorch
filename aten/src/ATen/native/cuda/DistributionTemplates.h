@@ -598,17 +598,17 @@ void bernoulli_tensor_cuda_kernel(
           case 4: {
             CUDA_KERNEL_ASSERT(0 <= p4 && p4 <= 1);
             v4 = static_cast<scalar_t>(rand.w <= p4);
-            // fallthrough
+            [[fallthrough]];
           }
           case 3: {
             CUDA_KERNEL_ASSERT(0 <= p3 && p3 <= 1);
             v3 = static_cast<scalar_t>(rand.z <= p3);
-            // fallthrough
+            [[fallthrough]];
           }
           case 2: {
             CUDA_KERNEL_ASSERT(0 <= p2 && p2 <= 1);
             v2 = static_cast<scalar_t>(rand.y <= p2);
-            // fallthrough
+            [[fallthrough]];
           }
           case 1: {
             CUDA_KERNEL_ASSERT(0 <= p1 && p1 <= 1);

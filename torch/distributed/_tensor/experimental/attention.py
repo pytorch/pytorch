@@ -1,4 +1,5 @@
 import contextlib
+import logging
 import weakref
 from enum import Enum
 from typing import Any, Dict, Generator, List, Optional, Protocol, Tuple, Union
@@ -13,6 +14,7 @@ from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
 aten = torch.ops.aten
+logger = logging.getLogger(__name__)
 
 
 def sdpa_handler(
@@ -22,6 +24,7 @@ def sdpa_handler(
 ) -> object:
     # extract local tensor and sharding infos to a OpInfo
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
+    logger.debug("Dispatching op_call: %s", op_info.schema)
 
     # sharding propagation
     DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
@@ -346,6 +349,7 @@ def sdpa_backward_handler(
 
     # extract local tensor and sharding infos to a OpInfo
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
+    logger.debug("Dispatching op_call: %s", op_info.schema)
 
     # sharding propagation
     DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
