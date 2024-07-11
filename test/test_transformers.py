@@ -2970,9 +2970,11 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("scale", [None, "l1"])
+    @parametrize("enable_gqa", [True, False])
+    @parametrize("n_heads", [[16, 8], [64, 8], [10, 2]])
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
-                                               scale: str):
+                                               scale: str, enable_gqa: bool, n_heads: List[int]):
         if isSM8XDevice and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
         if is_causal and seq_len_q != seq_len_k:
@@ -2981,12 +2983,16 @@ class TestSDPACudaOnly(NNTestCase):
             torch.cuda.empty_cache()  # Prevent memory fragmentation
 
         scale = scale if scale is None else (1 / head_dim)
-        n_heads = 4
-        query = torch.rand(batch_size, n_heads, seq_len_q, head_dim,
+        num_heads_q = num_heads_kv = 4
+        if enable_gqa:
+            num_heads_q = n_heads[0]
+            num_heads_kv = n_heads[1]
+
+        query = torch.rand(batch_size, num_heads_q, seq_len_q, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
-        key = torch.rand(batch_size, n_heads, seq_len_k, head_dim, device=device,
+        key = torch.rand(batch_size, num_heads_kv, seq_len_k, head_dim, device=device,
                          dtype=dtype, requires_grad=True)
-        value = torch.rand(batch_size, n_heads, seq_len_k, head_dim,
+        value = torch.rand(batch_size, num_heads_kv, seq_len_k, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
 
         # Run the math kernel on low precision references
@@ -2999,14 +3005,15 @@ class TestSDPACudaOnly(NNTestCase):
 
         if not is_dropout:
             with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-                out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
+                out = F.scaled_dot_product_attention(
+                    query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)
             with sdpa_kernel(backends=[SDPBackend.MATH]):
                 # High Precision Math Reference
                 out_ref = F.scaled_dot_product_attention(
-                    query_ref, key_ref, value_ref, is_causal=is_causal, scale=scale)
+                    query_ref, key_ref, value_ref, is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)
                 # Low Precision Math Reference
                 out_lp_ref = F.scaled_dot_product_attention(
-                    query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal, scale=scale)
+                    query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)
         else:
             # Problem: We pad sizes in the composite region of the top level SDPA. But we need the
             # Debug mask when have dropout. So I am going to manualy pad up here when testing dropout
@@ -3038,11 +3045,12 @@ class TestSDPACudaOnly(NNTestCase):
 
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, scale=scale, dropout_mask=dropout_mask)[0]
+                query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal,
+                scale=scale, dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
-                dropout_mask=dropout_mask)[0]
+                dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
@@ -3247,83 +3255,6 @@ class TestSDPACudaOnly(NNTestCase):
                              atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
             self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
                              atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
-
-
-    @skipIfRocm
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
-    @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
-    @parametrize("batch_size", [1, 8])
-    @parametrize("seq_len_q", [4, 8, 64, 143, 256, 512, 1024, 2048])
-    @parametrize("seq_len_k", [4, 8, 64, 128, 256, 587, 1024, 2048])
-    @parametrize("embedding_dim", [8, 16, 21, 32, 64, 72, 96, 128, 160, 192, 203, 256])
-    @parametrize("is_causal", [True, False])
-    @parametrize("dropout_p", [0.0, 0.22, 0.48])
-    @parametrize("dtype", [torch.float16, torch.bfloat16])
-    @parametrize("n_heads", [[16, 8], [64, 8], [10, 2]])
-    def test_flash_attention_vs_math_ref_grads_grouped_query_attention(self, device, batch_size: int, seq_len_q: int,
-                                                                       seq_len_k: int, embedding_dim: int, is_causal: bool,
-                                                                       dropout_p: float, dtype: torch.dtype, n_heads: List):
-        if isSM8XDevice and embedding_dim in range(193, 256 + 1):
-            self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
-        if is_causal and seq_len_q != seq_len_k:
-            self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
-        if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
-            unittest.skip("Reference implementation OOM")
-            return
-
-        query = torch.rand(batch_size, n_heads[0], seq_len_q, embedding_dim,
-                           device=device, dtype=dtype, requires_grad=True)
-        key = torch.rand(batch_size, n_heads[1], seq_len_k, embedding_dim, device=device,
-                         dtype=dtype, requires_grad=True)
-        value = torch.rand(batch_size, n_heads[1], seq_len_k, embedding_dim,
-                           device=device, dtype=dtype, requires_grad=True)
-
-        # Run the math kernel on low precision references
-        query_ref_lp, key_ref_lp, value_ref_lp = query_key_value_clones(query, key, value, dtype=dtype)
-
-        higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
-        query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
-
-        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-            out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal, enable_gqa=True)
-        with sdpa_kernel(backends=[SDPBackend.MATH]):
-            # High Precision Math Reference
-            out_ref = F.scaled_dot_product_attention(
-                query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, enable_gqa=True)
-            # Low Precision Math Reference
-            out_lp_ref = F.scaled_dot_product_attention(
-                query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, enable_gqa=True)
-
-
-        upstream_grad = torch.rand_like(out, requires_grad=False)
-
-        # backward for flash attention on sm86, sm87, and sm89 for headdim >= 193 currently disabled
-        if isSM8XDevice and embedding_dim in range(193, 256):
-            self.assertRaises(RuntimeError, lambda: out.backward(upstream_grad))
-            return
-        out.backward(upstream_grad)
-        out_ref.backward(upstream_grad.to(out_ref.dtype))
-        out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
-
-        output_fudge_factor = 7  # if embedding_dim % 8 != 0 or TEST_WITH_ROCM else 1
-        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref, output_fudge_factor)
-
-        query_fudge_factor = 7
-        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
-
-        key_fudge_factor = 7
-        grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad, key_fudge_factor)
-
-        value_fudge_factor = 7
-        grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
-
-        self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
-        self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
-                         atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
-        self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
-                         atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
-        self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
-                         atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
 
     @skipIfRocm  # Nested Tensor
