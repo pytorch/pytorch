@@ -17,6 +17,7 @@ from typing import (
 import torch
 import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
+from torch._logging import warning_once
 from torch.autograd import Variable
 from torch.autograd.graph import _MultiHandle
 from torch.distributed._composable_state import (
@@ -293,8 +294,18 @@ class FSDPState(_State):
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _finalize_backward(self) -> None:
-        # Clear in case a module was not used in forward, in which case we
-        # want the next forward after this backward to run forward again
+        if self._modules_to_run_forward:
+            msg = (
+                f"{len(self._modules_to_run_forward)} of the {len(self._modules)} "
+                f"modules passed to fully_shard did not run forward before backward, "
+                "which is error-prone since FSDP post-forward/pre-backward logic "
+                "will not run for these modules. We recommend passing only modules "
+                "that run forward together. Modules that did not run forward: "
+                f"{list(self._modules_to_run_forward)}"
+            )
+            warning_once(logger, msg, stacklevel=2)
+            # Clear since we want the next forward to run
+            self._modules_to_run_forward.clear()
         self._modules_to_run_forward.clear()
         if self._fsdp_param_group:
             self._fsdp_param_group.finalize_backward()
