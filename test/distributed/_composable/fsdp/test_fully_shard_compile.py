@@ -138,14 +138,14 @@ class TestFullyShardCompile(FSDPTest):
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
 
-    def _reinplace_all_gather_with_checks(self, graph):
+    def _reinplace_all_gather_with_checks(self, graph, original_func):
         self.assertTrue(
             _is_op_in_graph(
                 graph,
                 torch.ops._c10d_functional.all_gather_into_tensor.default,
             )
         )
-        comms.reinplace_fsdp_all_gather(graph)
+        original_func(graph)
         self.assertFalse(
             _is_op_in_graph(
                 graph,
@@ -158,6 +158,19 @@ class TestFullyShardCompile(FSDPTest):
                 torch.ops._c10d_functional.all_gather_into_tensor_out.default,
             )
         )
+
+    @contextlib.contextmanager
+    def _patch_reinplace_fsdp_all_gather(self):
+        original_func = comms.reinplace_fsdp_all_gather
+
+        def wrapper(graph):
+            return self._reinplace_all_gather_with_checks(graph, original_func)
+
+        comms.reinplace_fsdp_all_gather = wrapper
+        try:
+            yield
+        finally:
+            comms.reinplace_fsdp_all_gather = original_func
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._functorch.config.patch(recompute_views=True)
@@ -324,9 +337,7 @@ class TestFullyShardCompile(FSDPTest):
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_fullgraph_backend_inductor(self):
-        with torch._inductor.config.patch(
-            post_grad_custom_post_reinplace_pass=self._reinplace_all_gather_with_checks
-        ):
+        with self._patch_reinplace_fsdp_all_gather():
             self._test_traceable_fsdp(
                 *self._create_transformer_factory_fns(), "inductor", fullgraph=True
             )
