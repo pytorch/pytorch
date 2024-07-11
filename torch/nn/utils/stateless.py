@@ -94,7 +94,7 @@ def _untie_named_tensors_map(
     return untied_parameters_and_buffers
 
 
-class ReparametrizeModule:
+class _ReparametrizeModule:
     def __init__(
         self,
         module: "torch.nn.Module",
@@ -167,8 +167,8 @@ def _reparametrize_module(
     tie_weights: bool = False,
     strict: bool = False,
     stack_weights: bool = False,
-) -> ReparametrizeModule:
-    return ReparametrizeModule(
+) -> _ReparametrizeModule:
+    return _ReparametrizeModule(
         module,
         parameters_and_buffers,
         tie_weights=tie_weights,
@@ -292,7 +292,6 @@ def _functional_call(
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-
     with _reparametrize_module(
         module, parameters_and_buffers, tie_weights=tie_weights, strict=strict
     ):
