@@ -705,7 +705,7 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
 def get_device_type_test_bases():
     # set type to List[Any] due to mypy list-of-union issue:
     # https://github.com/python/mypy/issues/3351
-    test_bases: List[Any] = list()
+    test_bases: List[Any] = []
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:
@@ -1125,11 +1125,13 @@ class ops(_TestParametrizer):
                         except Exception as e:
                             tracked_input = get_tracked_input()
                             if PRINT_REPRO_ON_FAILURE and tracked_input is not None:
-                                raise Exception(  # noqa: TRY002
+                                e_tracked = Exception(  # noqa: TRY002
                                     f"Caused by {tracked_input.type_desc} "
                                     f"at index {tracked_input.index}: "
                                     f"{_serialize_sample(tracked_input.val)}"
-                                ) from e
+                                )
+                                e_tracked._tracked_input = tracked_input  # type: ignore[attr]
+                                raise e_tracked from e
                             raise e
                         finally:
                             clear_tracked_input()

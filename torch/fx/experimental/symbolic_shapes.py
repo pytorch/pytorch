@@ -247,7 +247,7 @@ def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
     if isinstance(expr, torch.SymBool):
         return expr.node.guard_size_oblivious("", 0)
     else:
-        assert isinstance(expr, bool)
+        assert isinstance(expr, bool), expr
         return expr
 
 def check_consistent(new, old) -> None:
@@ -3281,6 +3281,13 @@ class ShapeEnv:
                 assert int(sym) == hint
             out = int(sym)
         else:
+            # How can this occur? When we mark_unbacked, we end up with a real
+            # tensor that has hints for all sizes, but we MUST NOT create a
+            # SymNode with a hint, because we're hiding the hint from our eyes
+            # with the unbacked Symbol.  And in fact, the hint compute may be
+            # inconsistent with size oblivious tests.
+            if free_unbacked_symbols(sym):
+                hint = None
             out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
         return out
 
@@ -3313,6 +3320,12 @@ class ShapeEnv:
                 assert float(sym) == hint
             out = float(sym)
         else:
+            # You could give this the same treatment as SymInt above if
+            # you supported mark_unbacked on a float, but it's a kind of
+            # strange thing to do though because floats don't get 0/1
+            # specialization anyway
+            if free_unbacked_symbols(sym):
+                assert hint is None, sym
             out = SymFloat(SymNode(sym, self, float, hint, fx_node=fx_node))
         return out
 
@@ -5376,10 +5389,6 @@ class ShapeEnv:
         # NB: Don't use new_expr as expr; it could contain gunk like shape0
         # which we don't want to guard on
 
-        # If you're here because of this assert, read Note [Backwards runtime asserts]
-        # in torch/_inductor/graph.py
-        assert not self.runtime_asserts_frozen, expr
-
         # OK, we're definitely doing a runtime assert now
         if (
             self._translation_validation_enabled
@@ -5391,9 +5400,13 @@ class ShapeEnv:
             if fresh:
                 self._add_fx_node_metadata(node)
 
-        self._check_frozen(expr, sympy.true)
-
         if not self._suppress_guards_tls():
+            # If you're here because of this assert, read Note [Backwards runtime asserts]
+            # in torch/_inductor/graph.py
+            assert not self.runtime_asserts_frozen, expr
+
+            self._check_frozen(expr, sympy.true)
+
             # eliminate symbols on equality tests / refine ranges
             if isinstance(expr, sympy.Rel):
                 self._maybe_guard_rel(expr)
