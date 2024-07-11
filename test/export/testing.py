@@ -239,12 +239,6 @@ def expectedFailureTrainingIRToRunDecomp(fn):
     return fn
 
 
-# Controls tests generated in test/export/test_export_training_ir_to_run_decomp_non_strict.py
-def expectedFailureTrainingIRToRunDecompNonStrict(fn):
-    fn._expected_failure_training_ir_to_run_decomp_non_strict = True
-    return fn
-
-
 # Controls tests generated in test/export/test_export_nonstrict.py
 def expectedFailureNonStrict(fn):
     fn._expected_failure_non_strict = True

@@ -153,7 +153,6 @@ RETRACEABILITY_SUFFIX = "_retraceability"
 SERDES_SUFFIX = "_serdes"
 PREDISPATCH_SUFFIX = "_pre_dispatch"
 TRAINING_IR_DECOMP_SUFFIX = "_training_ir_to_decomp"
-TRAINING_IR_DECOMP_NS_SUFFIX = "_training_ir_to_decomp_non_strict"
 
 
 def is_non_strict_test(test_name):
@@ -349,7 +348,6 @@ graph():
 
     # Errors because non-strict is not supported in training IR (T193692164)
     @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
             def add(self, x):
@@ -422,7 +420,6 @@ graph():
 
     # Errors because non-strict is not supported in training IR (T193692164)
     @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self):
@@ -439,7 +436,6 @@ graph():
 
     # Errors because non-strict is not supported in training IR (T193692164)
     @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_basic_non_strict_fake_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self):
@@ -696,7 +692,6 @@ graph():
 
     # Predispatch has different expected results
     @testing.expectedFailureTrainingIRToRunDecomp  # T193700910
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_torch_fn(self):
         class M1(torch.nn.Module):
             def __init__(self):
@@ -792,7 +787,6 @@ def forward(self, p_linear_weight, p_linear_bias, x):
     @testing.expectedFailurePreDispatchRunDecomp
     @testing.expectedFailureRetraceability
     @testing.expectedFailureTrainingIRToRunDecomp  # T193700910
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_export_cond_preserve_torch_fn_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
             def foo(self, x):
@@ -1725,8 +1719,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "placeholder":
                 self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_dynamic_shapes_builder_kwargs(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
@@ -1967,8 +1959,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         args = (torch.rand(3, 700, 700), 150, 150)
         self.assertEqual(ecrop.module()(*args), ecrop(*args))
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_export_func_with_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, kw1, kw2):
@@ -1979,8 +1969,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         kwargs = {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_export_func_with_pytree_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b):
@@ -1994,8 +1982,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_export_func_with_default_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b=1):
@@ -2026,8 +2012,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
         self._test_export_same_as_eager(kw_func, args)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_export_func_with_keyword_only_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2):
@@ -2038,8 +2022,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         kwargs = {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_export_func_with_var_keyword_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
@@ -2134,8 +2116,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_export_func_with_var_keyword_pytree_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
@@ -2162,7 +2142,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
     @testing.expectedFailureSerDer  # we don't save placeholder metadata
     @testing.expectedFailureNonStrict
     @testing.expectedFailureTrainingIRToRunDecomp  # T193692674
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -2682,7 +2661,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(len(input_shapes), 9)
         self.assertTrue(all(shape == "torch.Size([s0])" for shape in input_shapes))
 
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_error_does_not_reference_eager_fallback(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2823,7 +2801,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(params[1].shape, [1])  # bias
 
     @testing.expectedFailureTrainingIRToRunDecomp  # T193700631
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_buffer_util(self):
         ep = export(
             torch.nn.BatchNorm2d(100, affine=False), (torch.ones(20, 100, 35, 45),)
@@ -2842,7 +2819,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
 
     @testing.expectedFailureTrainingIRToRunDecomp  # T193701564
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2878,7 +2854,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 _ = export(mod, inp, strict=True)
 
     @testing.expectedFailureTrainingIRToRunDecomp  # T193700396
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_device_to_static(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2894,7 +2869,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
 
     @testing.expectedFailureTrainingIRToRunDecomp  # T193700396
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_device_to_dynamic(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2914,7 +2888,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
 
     @testing.expectedFailureTrainingIRToRunDecomp  # T193700396
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_device_to_mutation(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2928,7 +2901,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             export(Module(), (torch.tensor(1, device="cpu"),))
 
     @testing.expectedFailureTrainingIRToRunDecomp  # T193700396
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_float_conversion(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2944,7 +2916,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
 
     @testing.expectedFailureTrainingIRToRunDecomp  # T193700396
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_device_to_mutation_float(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2958,7 +2929,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             export(Module(), (torch.tensor(1, dtype=torch.float),))
 
     @testing.expectedFailureTrainingIRToRunDecomp  # T193692674
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_module(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -3005,7 +2975,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         )
 
     @testing.expectedFailureTrainingIRToRunDecomp  # T193701564
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_module_with_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -3540,7 +3509,6 @@ def forward(self, x):
         self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
 
     @testing.expectedFailureTrainingIRToRunDecomp  # T193701923
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
         class Bar(torch.nn.Module):
             def __init__(self):
@@ -3801,7 +3769,6 @@ def forward(self, x):
             )
         )
 
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_check_is_size_error(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -3845,7 +3812,6 @@ def forward(self, x):
 
     # TODO Retracing a module with constant attrs don't work.(T193692674)
     @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     @testing.expectedFailureRetraceability  # T183144788
     def test_lifted_constants(self) -> None:
         class Module(torch.nn.Module):
@@ -3882,7 +3848,6 @@ def forward(self, x):
 
     @testing.expectedFailureRetraceability  # T183144788
     @testing.expectedFailureTrainingIRToRunDecomp  # T193701164
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):
@@ -4230,7 +4195,6 @@ graph():
 
     @testing.expectedFailureRetraceability  # Retracing tensor constants results in buffers
     @testing.expectedFailureTrainingIRToRunDecomp  # T193692674
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_nested_module_with_constant_buffer(self):
         class M1(torch.nn.Module):
             def __init__(self):
@@ -4380,8 +4344,6 @@ graph():
         self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
 
     # TODO Retracing a module with constant attrs don't work.(T193692674)
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     @unittest.skip("Test is only supposed to work with non-strict mode")
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
@@ -4660,7 +4622,6 @@ graph():
         optimized_model(tensor_cpu, mask_cpu)
 
     @testing.expectedFailureTrainingIRToRunDecomp  # T193701923
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_export_input_mutation_static_shape(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x, y):
@@ -5250,7 +5211,6 @@ def forward(self, x, b_t, y):
         self.assertEqual(ep.state_dict, m.state_dict())
 
     @testing.expectedFailureTrainingIRToRunDecomp  # T193692674
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -5318,7 +5278,6 @@ def forward(self, x, b_t, y):
 
     # TODO Retracing a module with constant attrs don't work.(T193692674)
     @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_fake_weights(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -5379,7 +5338,6 @@ def forward(self, x, b_t, y):
 
     # Errors because non-strict is not supported in training IR (T193692164)
     @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_compiling_state(self):
         class TestModule1(torch.nn.Module):
             def forward(self, x):
@@ -5430,7 +5388,6 @@ def forward(self, x, b_t, y):
         self.assertEqual(mod(torch.ones(4, 4)), ep.module()(torch.ones(4, 4)))
 
     @testing.expectedFailureTrainingIRToRunDecomp  # T193702033
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_symint_tensor_return(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -5536,7 +5493,6 @@ def forward(self, x):
     # TODO Retracing a module with constant attrs don't work.(T193692674)
     @testing.expectedFailureRetraceability
     @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
         class Foo(torch.nn.Module):
