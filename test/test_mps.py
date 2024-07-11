@@ -5351,9 +5351,10 @@ class TestMPS(TestCaseMPS):
 
     def test_reduction_ops_5D(self):
         def helper(fn, dim):
-            x_cpu = fn(torch.zeros(1, 1, 1, 1, 1), dim=dim)
-            x_mps = fn(torch.zeros(1, 1, 1, 1, 1, device="mps"), dim=dim)
-            self.assertEqual(x_cpu, x_mps.to('cpu'))
+            shape = (1, 1, 2, 1, 1)
+            x_cpu = fn(torch.zeros(shape), dim=dim)
+            x_mps = fn(torch.zeros(shape, device="mps"), dim=dim)
+            self.assertEqual(x_cpu, x_mps.cpu())
         for fn in [torch.any, torch.all]:
             for dim in range(0, 4):
                 helper(fn, dim)
