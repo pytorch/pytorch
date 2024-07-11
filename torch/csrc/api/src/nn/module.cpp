@@ -66,7 +66,8 @@ const std::string& Module::name() const noexcept {
   return *name_;
 }
 
-std::shared_ptr<Module> Module::clone(const std::optional<Device>& device) const {
+std::shared_ptr<Module> Module::clone(
+    const std::optional<Device>& device) const {
   AT_ERROR(
       "clone() has not been implemented for ",
       name(),
