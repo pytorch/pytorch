@@ -1384,7 +1384,7 @@ class ExportedProgramSerializer(metaclass=Final):
                 major=SCHEMA_VERSION[0],
                 minor=SCHEMA_VERSION[1],
             ),
-            dialect=exported_program.dialect
+            verifiers=[v.dialect for v in exported_program.verifiers],
         )
 
         # Test canonical form is well defined.
@@ -1859,6 +1859,8 @@ class GraphModuleDeserializer(metaclass=Final):
     def sync_fx_node(self, name: str, fx_node: torch.fx.Node):
         if name in self.serialized_name_to_node:
             raise SerializeError(f"Node {name} has already been deserialized before.")
+        # overwrite name
+        fx_node.name = name
         self.serialized_name_to_node[name] = fx_node
         assert "val" not in fx_node.meta
         fx_node.meta["val"] = self.serialized_name_to_meta[name]
@@ -2257,8 +2259,8 @@ class ExportedProgramDeserializer(metaclass=Final):
             range_constraints=range_constraints,
             module_call_graph=res.module_call_graph,
             example_inputs=res.example_inputs,
-            verifier=load_verifier(exported_program.dialect),
             constants=res.constants,
+            verifiers=[load_verifier(v) for v in exported_program.verifiers],
         )
 
 
@@ -2828,7 +2830,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         opset_version=opset_version,
         range_constraints=range_constraints,
         schema_version=ep.schema_version,
-        dialect=ep.dialect
+        verifiers=ep.verifiers,
     )
 
 
