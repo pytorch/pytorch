@@ -115,7 +115,7 @@ def printoptions(**kwargs):
 
 
 def tensor_totype(t):
-    dtype = torch.float if t.is_mps else torch.double
+    dtype = torch.float if (t.is_mps or t.is_xpu) else torch.double
     return t.to(dtype=dtype)
 
 
