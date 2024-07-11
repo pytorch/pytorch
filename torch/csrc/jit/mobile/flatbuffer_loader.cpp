@@ -19,7 +19,6 @@
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/ScopeExit.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/file_format.h>
@@ -35,6 +34,7 @@
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
+#include <optional>
 
 #ifndef DISABLE_UPGRADER
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
@@ -189,7 +189,7 @@ TypePtr resolveType(
     const std::string& type_string,
     std::shared_ptr<CompilationUnit> cu) {
   TypePtr type;
-  c10::string_view type_str(type_string);
+  c10::string_view_ext type_str(type_string);
   if (type_str.starts_with(kCustomClassPrefix)) {
     type = getCustomClass(type_string);
     TORCH_CHECK(
@@ -364,7 +364,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
       (operator_version < caffe2::serialize::kProducedFileFormatVersion);
 
   for (const auto* op : *method->operators()) {
-    std::optional<int> num_args = c10::nullopt;
+    std::optional<int> num_args = std::nullopt;
     if (op->num_args_serialized() > -1) {
       num_args = op->num_args_serialized();
     }
@@ -399,7 +399,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
           auto arg = c10::Argument(
               arg_tb->name()->str(),
               std::move(type_ptr),
-              c10::nullopt /*N*/,
+              std::nullopt /*N*/,
               std::move(default_value));
           args.emplace_back(std::move(arg));
         }
@@ -606,7 +606,7 @@ ClassTypePtr FlatbufferLoader::getOrCreateClassTypeForObject(
   const mobile::serialization::ObjectType* obj_type =
       module_->object_types()->Get(object->type_index());
   if (cls == nullptr) {
-    c10::string_view qn_str(
+    c10::string_view_ext qn_str(
         obj_type->type_name()->c_str(), obj_type->type_name()->size());
     if (qn_str.starts_with(kTorchPrefix) || qn_str.starts_with(kJitPrefix)) {
       c10::QualifiedName qn(obj_type->type_name()->str());

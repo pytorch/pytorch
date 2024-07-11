@@ -710,6 +710,12 @@ class TestCustomOp(CustomOpTestCaseBase):
             ),
         )
 
+        def foo_impl(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        schema = torch.library.infer_schema(foo_impl, op_name="myop", mutates_args={})
+        self.assertExpectedInline(schema, "myop(Tensor x) -> Tensor")
+
     def test_infer_schema_unsupported(self):
         with self.assertRaisesRegex(ValueError, "varargs"):
 
@@ -3146,6 +3152,65 @@ Please use `add.register_fake` to add an fake impl.""",
         result = f(device="cpu")
         self.assertEqual(result.device, torch.device("cpu"))
         self.assertEqual(result, torch.ones(3))
+
+    def test_library_schema_infer(self):
+        def foo_impl(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        schema = torch.library.infer_schema(foo_impl, op_name="myop", mutates_args={})
+        self.assertExpectedInline(schema, "myop(Tensor x) -> Tensor")
+
+        schema = torch.library.infer_schema(foo_impl, mutates_args={})
+        self.assertExpectedInline(schema, "(Tensor x) -> Tensor")
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_set_kernel_enabled(self):
+        x = torch.ones(1)
+
+        @torch.library.custom_op("mylib::f", mutates_args=())
+        def f(x: Tensor) -> Tensor:
+            return x + 1
+
+        self.assertEqual(f(x), x + 1)
+        with self.assertLogs(
+            "torch._library.custom_ops",
+        ) as captured:
+            with f.set_kernel_enabled("gpu", enabled=False):
+                self.assertEqual(f(x), x + 1)
+            self.assertIn(
+                "no kernel was registered for this device type", captured.output[0]
+            )
+
+        @f.register_kernel("cpu")
+        def _(x):
+            return x + 2
+
+        self.assertEqual(f(x), x + 2)
+
+        with self.assertLogs(
+            "torch._library.custom_ops",
+        ) as captured:
+            with f.set_kernel_enabled("cpu", enabled=True):
+                self.assertEqual(f(x), x + 2)
+            self.assertIn("already enabled", captured.output[0])
+
+        with f.set_kernel_enabled("cpu", enabled=False):
+            self.assertEqual(f(x), x + 1)
+
+            with self.assertLogs(
+                "torch._library.custom_ops",
+            ) as captured:
+                with f.set_kernel_enabled("cpu", enabled=False):
+                    self.assertEqual(f(x), x + 1)
+                self.assertIn("already disabled", captured.output[0])
+
+            self.assertEqual(f(x), x + 1)
+
+        with f.set_kernel_enabled("cpu", enabled=True):
+            self.assertEqual(f(x), x + 2)
+
+        with f.set_kernel_enabled("cpu", enabled=False):
+            self.assertEqual(f(x), x + 1)
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):
