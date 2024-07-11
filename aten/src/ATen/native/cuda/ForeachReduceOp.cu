@@ -393,7 +393,7 @@ inline void check_foreach_norm_dtype(
 std::vector<Tensor> foreach_tensor_norm_cuda(
     TensorList tensors,
     const Scalar& ord,
-    c10::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   const auto p = [&]() -> double {
     if (ord.isIntegral(false)) {
       return ord.to<int64_t>();
