@@ -1276,11 +1276,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
         self._update_losses(self._stages, losses)
 
 
-class PipelineScheduleExecutor(PipelineScheduleMulti):
+class _PipelineScheduleRuntime(PipelineScheduleMulti):
     """
     Provides a simple runtime that requires a 'schedule IR' including specified communication operations.
 
-    Can be instantiated directly by creating PipelineScheduleExecutor and calling load_csv, or can be
+    Can be instantiated directly by creating _PipelineScheduleRuntime and calling load_csv, or can be
     subclassed and the subclass can be responsible for creating a schedule IR.
     """
 
@@ -1354,7 +1354,7 @@ class PipelineScheduleExecutor(PipelineScheduleMulti):
                 stage = stage_index_to_stage[action.stage_index]
 
                 logger.debug(
-                    "PipelineScheduleExecutor running time_step %d, action %s",
+                    "_PipelineScheduleRuntime running time_step %d, action %s",
                     time_step,
                     action,
                 )
@@ -1435,7 +1435,7 @@ class PipelineScheduleExecutor(PipelineScheduleMulti):
                     raise ValueError(f"{action=} is unknown or unsupported")
         except Exception as e:
             logger.error(
-                "PipelineScheduleExecutor caught exception at step %s when running action %s.  Full Schedule:\n%s",
+                "_PipelineScheduleRuntime caught exception at step %s when running action %s.  Full Schedule:\n%s",
                 time_step,
                 action,
                 str(self.pipeline_order_with_comms),

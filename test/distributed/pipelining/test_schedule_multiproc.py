@@ -19,7 +19,7 @@ from torch.distributed.pipelining import (
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
 )
-from torch.distributed.pipelining.schedules import PipelineScheduleExecutor
+from torch.distributed.pipelining.schedules import _PipelineScheduleRuntime
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
@@ -432,7 +432,7 @@ class ScheduleTest(MultiProcContinousTest):
 
         # Attach to a schedule
         legacy_schedule = ScheduleClass(stages, chunks, loss_fn=loss_fn)
-        schedule = PipelineScheduleExecutor(stages, chunks, loss_fn=loss_fn)
+        schedule = _PipelineScheduleRuntime(stages, chunks, loss_fn=loss_fn)
         schedule._from_simple_schedule(
             legacy_schedule.pipeline_order,
             lambda s: legacy_schedule.stage_index_to_group_rank[s],
