@@ -1,11 +1,10 @@
 import logging
+import typing
 from typing import Any, Dict, Optional, Tuple
 
 import sympy
-from triton import Config
 
 import torch
-
 from .. import config as inductor_config
 from ..ir import Layout, StorageBox, TensorBox
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
@@ -18,6 +17,10 @@ from ..select_algorithm import (
 from ..utils import use_aten_gemm_kernels, use_triton_template
 from .mm import _is_static_problem  # TODO(yangsiyu) move to mm_common
 from .mm_common import mm_args, mm_grid, scaled_mm_configs
+
+if typing.TYPE_CHECKING:
+    from triton import Config  # noqa: TCH004
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
