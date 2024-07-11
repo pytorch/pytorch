@@ -139,6 +139,7 @@ class TestScheduleLowering(TestCase):
         ],
     )
     def test_action_parse(self, action_str_and_ref):
+        """Test that actions can be parsed from strings and round-tripped back to the same strings."""
         act_str, ref = action_str_and_ref
         act = _Action.from_str(act_str)
         self.assertEqual(act, ref)
@@ -154,6 +155,10 @@ class TestScheduleLowering(TestCase):
         ],
     )
     def test_unshard_reshard(self, test_info):
+        """Test the lowering pass that takes a 'compute only' schedule (with only F,B,W ops) and adds
+        FSDP unshard/reshard operations to the schedule.  This is just part of the process of adding communication
+        ops and producing a complete schedule.
+        """
         compute_sch = self._parse_actions(test_info["compute"])
         expected_comms_sch = self._parse_actions(test_info["comms"])
 
