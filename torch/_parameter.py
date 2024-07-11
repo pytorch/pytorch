@@ -3,7 +3,7 @@ The :mod:`torch.nn.parameter` module provides a kind of :class:`~torch.Tensor`
 that is to be considered a module parameter.
 
 The class definitions need to be here instead of inside ``torch/nn/`` so they
-can be used in other places in ``torch/`` (namely torch.autograd) without
+can be used in other places in ``torch/`` (namely :mod:`torch.autograd`) without
 running into circular dependency problems
 """
 
