@@ -1328,8 +1328,13 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         init_group_node(self, scheduler, snodes)
 
     def unpack(self) -> List[BaseSchedulerNode]:
+        """
+        Do fusion among nodes within this GroupedSchedulerNode,
+        and then unpack this GroupedSchedulerNode into regular nodes.
+        """
         for snode in self.snodes:
             self.scheduler.name_to_fused_node[snode.get_name()] = snode
+        del self.scheduler.name_to_fused_node[self.get_name()]
         return self.scheduler.fuse_nodes(self.snodes)
 
     @cache_on_self
@@ -1887,7 +1892,7 @@ class Scheduler:
 
     def process_grouped_nodes(self) -> None:
         """
-        Fuse within each GroupedSchedulerNode, and then unpack the grouped node into regular nodes.
+        Unpack GroupedSchedulerNode into regular nodes.
         """
         new_nodes: List[BaseSchedulerNode] = []
         for node in self.nodes:
