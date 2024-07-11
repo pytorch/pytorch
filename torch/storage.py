@@ -502,7 +502,7 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
 
 
 def _load_from_bytes(b):
-    return torch.load(io.BytesIO(b), weights_only=False)
+    return torch.load(io.BytesIO(b))
 
 
 @functools.lru_cache(maxsize=None)
