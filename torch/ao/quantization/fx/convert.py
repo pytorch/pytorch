@@ -75,8 +75,8 @@ from .custom_config import (
 from .lower_to_fbgemm import lower_to_fbgemm
 # importing the lib so that the quantized_decomposed ops are registered
 from ._decomposed import quantized_decomposed_lib  # noqa: F401
-import operator
 from torch.ao.quantization.pt2e.generate_numeric_debug_handle import NUMERIC_DEBUG_HANDLE_KEY
+import operator
 
 __all__ = [
     "convert",
@@ -221,9 +221,6 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 tuple(dq_inputs),
                 {}
             )
-
-            def remap_fn(x):
-                return dequantized_node if x is node else x
 
             node.replace_all_uses_with(dequantized_node)
             # propagate numeric debug handle from observer/fake_quant node to dequantize node
