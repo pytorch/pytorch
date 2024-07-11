@@ -128,7 +128,7 @@ def _remove_effect_tokens_from_graph_helper(
         assert inp_token.name in input_token_names
         ep.graph.erase_node(inp_token)
 
-    ep.graph._eliminate_dead_code_custom(is_impure_node=_is_impure_node)
+    ep.graph.eliminate_dead_code(is_impure_node=_is_impure_node)
 
 
 def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:

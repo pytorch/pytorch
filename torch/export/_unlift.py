@@ -184,7 +184,7 @@ def _unlift(
     )
     gm.graph._codegen = _get_codegen(in_spec, out_spec, forward_arg_names)
     gm.graph.lint()
-    gm.graph._eliminate_dead_code_custom(is_impure_node=_is_impure_node)
+    gm.graph.eliminate_dead_code(is_impure_node=_is_impure_node)
     gm.recompile()
     return gm
 

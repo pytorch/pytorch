@@ -64,7 +64,7 @@ class TestDCE(TestCase):
         # during DCE.
         orig_num_phs = self._get_num_placeholders(traced)
         if custom:
-            changed = traced.graph._eliminate_dead_code_custom(
+            changed = traced.graph.eliminate_dead_code(
                 is_impure_node=self._custom_is_impure_node
             )
         else:
