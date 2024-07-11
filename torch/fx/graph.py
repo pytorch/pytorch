@@ -1574,7 +1574,7 @@ class Graph:
                             m_itr = new_m_itr
 
     @compatibility(is_backward_compatible=True)
-    def eliminate_dead_code(self, strict=False):
+    def eliminate_dead_code(self):
         """
         Remove all dead code from the graph, based on each node's number of
         users, and whether the nodes have any side effects. The graph must be
@@ -1609,9 +1609,6 @@ class Graph:
             is very bad, so you should assume that this method is not sound
             to call unless you know that your FX graph consists entirely
             of functional operations.
-
-            If strict = True, then this will also check the schema of node target
-            to detect side-effectful nodes.
         """
         # Lint the graph first to make sure its topologically sorted, otherwise
         # DCE below will not behave as expected.
@@ -1622,7 +1619,40 @@ class Graph:
         # the removed node.
         changed = False
         for node in reversed(self.nodes):
-            if not node.is_impure(strict) and len(node.users) == 0:
+            if not node.is_impure() and len(node.users) == 0:
+                self.erase_node(node)
+                changed = True
+
+        return changed
+
+    def _eliminate_dead_code_strict(self, strict=False):
+        """
+        Remove all dead code from the graph, based on each node's number of
+        users, and whether the nodes have any side effects. This will also
+        check the schema of node target to detect side-effectful nodes.
+        The graph must be topologically sorted before calling.
+
+        Returns:
+          bool: Whether the graph was changed as a result of the pass.
+
+        .. warning::
+
+            Dead code elimination has some heuristics to avoid removing
+            side-effectful nodes (see Node.is_impure) by looking at function schema.
+            You should mark operators as side-effecful using `torch.fx.node.has_side_effect`
+            if your graph contains side-effectful operators that are not registered as mutable
+            in the schema.
+        """
+        # Lint the graph first to make sure its topologically sorted, otherwise
+        # DCE below will not behave as expected.
+        self.lint()
+
+        # Reverse iterate so that when we remove a node, any nodes used as an
+        # input to that node have an updated user count that no longer reflects
+        # the removed node.
+        changed = False
+        for node in reversed(self.nodes):
+            if not node.is_impure(strict=True) and len(node.users) == 0:
                 self.erase_node(node)
                 changed = True
 

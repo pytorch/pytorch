@@ -62,7 +62,10 @@ class TestDCE(TestCase):
             # Get the original number of placeholders to verify it doesn't change
             # during DCE.
             orig_num_phs = self._get_num_placeholders(traced)
-            changed = traced.graph.eliminate_dead_code(strict=strict)
+            if strict:
+                changed = traced.graph._eliminate_dead_code_strict()
+            else:
+                changed = traced.graph.eliminate_dead_code()
 
             self.assertTrue(changed if expect_dce_changes else not changed)
 
