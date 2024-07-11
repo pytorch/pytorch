@@ -4318,10 +4318,18 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
             dist.broadcast(tensor, 2, group=ng1)
             self.assertEqual(tensor, torch.full((1,), 2))
 
-        # test split with only one colored group, other ranks should be no color split too.
-        ng2 = c10d.split_group(pg, [[0, 2]])
+        # test split with only one colored group, other ranks should be no color split.
+        ng2 = c10d.split_group(pg, [[5, 6, 7]], timeout=timedelta(seconds=50))
         self.assertEqual(backend.comm_split_count(), 2)
 
+        if self.rank >= 5:
+            tensor2 = torch.full((1,), self.rank).cuda(device)
+            dist.broadcast(tensor2, 7, group=ng2)
+            self.assertEqual(tensor2, torch.full((1,), 7))
+        else:
+            self.assertEqual(ng2, c10d.GroupMember.NON_GROUP_MEMBER)
+        # give enough time for the broadcast to finish before destroying all pgs.
+        time.sleep(2)
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
@@ -4372,7 +4380,8 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         if self.rank == 6 or self.rank == 7:
             dist.broadcast(tensor2, 6, group=ng2)
             self.assertEqual(tensor2, torch.full((1,), 6))
-
+        # give enough time for the broadcast to finish before destroying all pgs.
+        time.sleep(2)
         dist.destroy_process_group()
 
 
