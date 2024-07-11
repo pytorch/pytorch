@@ -568,10 +568,6 @@ class FakeTensor(torch.Tensor):
     # a NestedIntSource from an offsets Tensor.
     source = None
 
-    # This is used to associate a nested int with the tensor. For non-NJT metadata
-    # tensors, this will remain None.
-    nested_int = None
-
     @property
     def device(self):
         if self.fake_mode.in_kernel_invocation:

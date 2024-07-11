@@ -141,6 +141,32 @@ def is_sparse_any(t):
     return is_sparse_coo(t) or is_sparse_compressed(t)
 
 
+def update_nested_int_registry(r, nested_int, source, shape_env):
+    from torch.nested._internal.nested_tensor import _tensor_symint_registry
+
+    if r in _tensor_symint_registry:
+        return
+
+    if source is None:
+        # Source is None in two cases:
+        # (1) tensor._base is _dummy_instance OR
+        # (2) tensor is an intermediate
+        src = torch._dynamo.source.EphemeralSource("intermediate_offsets")
+    else:
+        src = torch._dynamo.source.NestedIntSource(source)
+
+    sym_nested_int = shape_env.create_symintnode(
+        sym=shape_env.create_symbol(
+            val=nested_int,
+            source=src,
+        ),
+        hint=nested_int,
+        source=src,
+    )
+
+    _tensor_symint_registry[r] = sym_nested_int
+
+
 # Don't use id() directly, because those can get reallocated over time.
 MetaStorageId: TypeAlias = int
 MetaTensorId: TypeAlias = int
@@ -824,7 +850,10 @@ class MetaConverter:
                             )
                             assert t.data is not None
                             _safe_copy(r.real_tensor, t.data)
-                    r.nested_int = t.nested_int
+
+                    if t.nested_int is not None:
+                        update_nested_int_registry(r, t.nested_int, source, shape_env)
+
                     return r
 
                 inner_tensors = {}
@@ -1567,7 +1596,8 @@ class MetaConverter:
             if t.is_parameter:
                 r._is_param = True
 
-            r.nested_int = t.nested_int
+            if t.nested_int is not None:
+                update_nested_int_registry(r, t.nested_int, source, shape_env)
 
             self.set_tensor_memo(t, r)
 

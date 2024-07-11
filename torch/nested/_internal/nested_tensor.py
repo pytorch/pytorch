@@ -22,7 +22,12 @@ def get_tensor_symint(tensor, *, coeff=1):
         if isinstance(tensor, FunctionalTensor):
             tensor = torch._from_functional_tensor(tensor.elem)
             return get_tensor_symint(tensor, coeff=coeff)
-        elif isinstance(tensor, FakeTensor):
+
+        # allocate new nested int
+        tensor_symint = torch._C._get_nested_int(_tensor_id_counter, coeff)
+        _tensor_id_counter += 1
+
+        if isinstance(tensor, FakeTensor):
             shape_env = tensor.fake_mode.shape_env
 
             if tensor.source is None:
@@ -33,12 +38,6 @@ def get_tensor_symint(tensor, *, coeff=1):
             else:
                 src = torch._dynamo.source.NestedIntSource(tensor.source)
 
-            tensor_symint = tensor.nested_int
-            if tensor_symint is None:
-                # allocate new nested int
-                tensor_symint = torch._C._get_nested_int(_tensor_id_counter, coeff)
-                _tensor_id_counter += 1
-
             tensor_symint = shape_env.create_symintnode(
                 sym=shape_env.create_symbol(
                     val=tensor_symint,
@@ -47,10 +46,6 @@ def get_tensor_symint(tensor, *, coeff=1):
                 hint=tensor_symint,
                 source=src,
             )
-        else:
-            # allocate new nested int
-            tensor_symint = torch._C._get_nested_int(_tensor_id_counter, coeff)
-            _tensor_id_counter += 1
 
         # associate (possibly symbolic) nested int with this tensor in the registry
         _tensor_symint_registry[tensor] = tensor_symint
