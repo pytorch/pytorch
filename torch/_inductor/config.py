@@ -127,7 +127,9 @@ joint_custom_post_pass: Optional[Callable[[torch.fx.Graph], None]] = None
 pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 
 # Registers a custom pass to be run right before fusion in Inductor scheduler.
-pre_fusion_custom_pass: Optional[
+# WARNING: Inductor scheduler IR is at prototype stage and subject to change,
+# hence custom IR passes built on top of it might break in the future.
+_pre_fusion_custom_pass: Optional[
     Callable[
         [List["torch._inductor.scheduler.BaseSchedulerNode"]],
         List["torch._inductor.scheduler.BaseSchedulerNode"],
@@ -227,6 +229,8 @@ reorder_for_compute_comm_overlap = False
 
 # passes (in execution order) for increasing overlap between compute and communication
 # for built-in passes, use string name; for user-defined passes, pass in the function handle
+# WARNING: Inductor scheduler IR is at prototype stage and subject to change,
+# hence user-defined custom IR passes built on top of it might break in the future.
 reorder_for_compute_comm_overlap_passes = [
     "reorder_compute_for_overlap",
     "sink_waits",

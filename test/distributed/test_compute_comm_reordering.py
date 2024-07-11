@@ -308,7 +308,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(
         torch._inductor.config,
-        "pre_fusion_custom_pass",
+        "_pre_fusion_custom_pass",
         create_grouped_node_for_allreduce_and_its_deps,
     )
     def test_grouped_scheduler_node(self):

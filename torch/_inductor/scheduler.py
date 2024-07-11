@@ -1483,8 +1483,8 @@ class Scheduler:
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.logged_slow_fusion: Set[Tuple[str, str]] = set()
-        if config.pre_fusion_custom_pass is not None:
-            self.nodes = config.pre_fusion_custom_pass(self.nodes)
+        if config._pre_fusion_custom_pass is not None:
+            self.nodes = config._pre_fusion_custom_pass(self.nodes)
         self.nodes = self.fuse_nodes(self.nodes)
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
