@@ -106,39 +106,14 @@ def handlers():
 ASSOCIATIVE_OPS = {"minimum", "maximum", "mul", "add", "and_", "or_"}
 
 
-def sympy_interp(
-    analysis,
-    env: Dict[sympy.Symbol, Any],
-    expr: Union[sympy.Expr, SympyBoolean],
-    *,
-    index_dtype=torch.int64,
-):
-    # Handle base cases
-    dtype = None
-    if isinstance(expr, BooleanAtom):
-        dtype = torch.bool
-    elif isinstance(expr, sympy.Integer):
-        dtype = torch.int64
-    elif isinstance(expr, sympy.Number):
-        dtype = torch.double
-
-    if dtype is not None:
-        return analysis.constant(expr, dtype)
-    elif isinstance(expr, sympy.Symbol):
-        return env[expr]
-
+def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
     # Special cases
     if isinstance(expr, sympy.Pow) and isinstance(
         expr.args[1], sympy.core.numbers.Half
     ):
-        return analysis.sqrt(sympy_interp(analysis, env, expr.args[0]))
+        return analysis.sqrt(args[0])
     if isinstance(expr, ToFloat):
-        return analysis.to_dtype(
-            sympy_interp(analysis, env, expr.args[0]), torch.float64
-        )
-
-    # Recursive case
-    args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
+        return analysis.to_dtype(args[0], torch.float64)
 
     # These handlers are special because they take an extra dtype argument
     # specifying what they should convert to, and we need to appropriately set
@@ -178,3 +153,33 @@ def sympy_interp(
     except Exception:
         log.warning("failed while executing %s(%s)", handler_name, args)
         raise
+
+
+def sympy_interp(
+    analysis,
+    env: Dict[sympy.Symbol, Any],
+    expr: Union[sympy.Expr, SympyBoolean],
+    *,
+    index_dtype=torch.int64,
+):
+    # Handle base cases
+    dtype = None
+    if isinstance(expr, BooleanAtom):
+        dtype = torch.bool
+    elif isinstance(expr, sympy.Integer):
+        dtype = torch.int64
+    elif isinstance(expr, sympy.Number):
+        dtype = torch.double
+
+    if dtype is not None:
+        return analysis.constant(expr, dtype)
+    elif isinstance(expr, sympy.Symbol):
+        return env[expr]
+
+    # Recursive case
+    return _run_sympy_handler(
+        analysis,
+        [sympy_interp(analysis, env, arg) for arg in expr.args],  # type: ignore[arg-type]
+        expr,
+        index_dtype=index_dtype,
+    )  # type: ignore[arg-type]
