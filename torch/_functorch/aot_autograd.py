@@ -590,7 +590,6 @@ def create_aot_dispatcher_function(
                         pre_dispatch=aot_config.pre_dispatch,
                     )(*_dup_fake_script_obj(fake_flat_args))
 
-                fw_metadata.static_input_indices = aot_config.static_input_indices
                 req_subclass_dispatch = requires_subclass_dispatch(
                     fake_flat_args, fw_metadata
                 )
@@ -621,6 +620,7 @@ def create_aot_dispatcher_function(
                             keep_input_mutations=aot_config.keep_inference_input_mutations,
                             is_train=False,
                             pre_dispatch=aot_config.pre_dispatch,
+                            static_input_indices=aot_config.static_input_indices,
                         )(*fake_flat_args)
                     else:
                         fw_metadata = ViewAndMutationMeta(
