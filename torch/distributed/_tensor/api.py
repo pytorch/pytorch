@@ -270,11 +270,12 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 # if the index of cur chunk is smaller than num_full_chunks, meaning cur_chunk would be a full chunk. 
                 if cur_chunk < num_full_chunks:
                     unpad_index = chunk_size
-                # if the cur_chunk is not a full chunk and the tail_chunk_size is not 0, then cur_chunk is the tail chunk.
-                elif cur_chunk >= num_full_chunks and tail_chunk_size !=0:
+                # if the index of cur_chunk is num_full_chunks and the tail_chunk_size is not 0, meaning the cur_chunk is the non-empty tail chunk.
+                # There should be only 1 non-empty tail chunk. 
+                elif cur_chunk == num_full_chunks and tail_chunk_size !=0:
                     unpad_index = tail_chunk_size
-                # if the cur chunk is not a full chunk and the tail chunk_size is 0, meaning the cur_chunk would be 0 on the tensor_dim.
-                # cur_chunk is not necessarily the last chunk. For example, chunk a tensor([1, 1]) into 4 chunks, the last two chunks would be empty.
+                # Otherwise, the cur_chunk is an empty chunk on the tensor_dim. There could be more than 1 empty chunks. 
+                # For example, chunk a tensor([1, 1]) into 4 chunks, the last two chunks would be empty.
                 else:
                     unpad_index = 0
                 unpad_indices.append(unpad_index)
@@ -283,7 +284,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         
         unpad_indices = get_unpadded_chunk_size()
         spec.unpad_indices = unpad_indices
-        print(f"rank:{spec.mesh.get_rank()}, slice_indices: {unpad_indices}")
 
         r._spec = spec
         r._local_tensor = local_tensor

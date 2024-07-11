@@ -885,13 +885,20 @@ class TestDTensorPlacementTypes(DTensorTestBase):
 
 
 class DTensorStaticPadding(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 6
+
     @with_comms
     @torch.no_grad()
     def test_dtensor_uneven(self):
         from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 
         torch.manual_seed(self.rank)
-        local_tensor = torch.ones(3) * self.rank
+        tensor = torch.tensor([0,1,2,3,4,5,6,0,0,0,0,0])
+        tensor_list = torch.chunk(tensor, self.world_size, dim=0)
+        local_tensor = tensor_list[self.rank]
+
 
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
@@ -899,7 +906,7 @@ class DTensorStaticPadding(DTensorTestBase):
             mesh,
             (Shard(0),),
             tensor_meta=TensorMeta(
-                shape=(11,),
+                shape=(7,),
                 stride=local_tensor.stride(),
                 dtype=local_tensor.dtype,
             ),
@@ -910,8 +917,9 @@ class DTensorStaticPadding(DTensorTestBase):
             sharding_spec,
             requires_grad=False,
         )
-
-        print(f"{self.rank=}, {dtensor=}, {dtensor.shape=}, {dtensor.to_local()=}")
+        from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
+        local_shape, global_offset = compute_local_shape_and_global_offset(tensor.shape, mesh, (Shard(0),))
+        print(f"{self.rank=}, {dtensor=}, {dtensor.shape=}, {dtensor.to_local()=}, {local_shape=}, {global_offset=}")
 
 
 if __name__ == "__main__":
