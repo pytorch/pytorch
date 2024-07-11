@@ -55,7 +55,6 @@ from torch._inductor.utils import (
 from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -1484,7 +1483,6 @@ def compile_fx(
             graph, joint_inputs, **kwargs, compiler="inductor"
         )
 
-    @compile_time_strobelight_meta(phase_name="bw_compiler")
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         user_visible_outputs = {}
