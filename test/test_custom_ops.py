@@ -361,8 +361,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:
-            ...
+        def foo(x: torch.Tensor) -> torch.Tensor: ...
 
         @foo.impl(["cpu", "cuda"])
         def foo_impl(x):
@@ -3381,6 +3380,38 @@ Please use `add.register_fake` to add an fake impl.""",
 
         with f.set_kernel_enabled("cpu", enabled=False):
             self.assertEqual(f(x), x + 1)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_vmap(self):
+        called = False
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("foo(Tensor x, Tensor y) -> Tensor")
+            called = False
+
+            def foo_impl(x, y):
+                return x * y
+
+            lib.impl("foo", foo_impl, "CPU")
+
+            def fvmap(ctx, in_dims, x, y):
+                nonlocal called
+                called = True
+
+                x_bdim, y_bdim = in_dims
+                x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+                y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+                result = x * y
+                result = result.movedim(-1, 0)
+                return result, 0
+
+            torch.library.register_vmap("_torch_testing::foo", fvmap, lib=lib)
+
+            x = torch.ones(3, requires_grad=True) * 2
+            y = torch.ones(3, requires_grad=True) * 3
+
+            result = torch.vmap(torch.ops._torch_testing.foo)(x, y)
+            self.assertTrue(called)
+            self.assertEqual(result, torch.tensor([6.0, 6.0, 6.0]))
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):
