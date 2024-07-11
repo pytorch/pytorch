@@ -102,11 +102,11 @@ def refunctionalize_set(graph: fx.Graph) -> None:
 
     # Step 2: Re-functionalizing `.set_(primal_X, ...)`.
     # Replacement conditions:
-    # 1. `.set_(primal_X, Y)` exists in graph.
+    # 1. `set__Z = .set_(primal_X, Y)` exists in graph.
     # 2. `.set_(Y, ...)` is not called between primal_X's this `.set_(primal_X, Y)` and its next `.set_(primal_X, ...)` (or end of graph)  # noqa: B950
     #    - This ensures primal_X and Y are semantically always meant to be the same tensor within this section of the graph.
     # If the above two conditions are met, then within this section of the graph we will replace
-    # usage of output of this `.set_(primal_X, Y)` node with Y, and delete this `.set_(primal_X, Y)` node.
+    # downstream usage of set__Z with Y, and delete this `set__Z = .set_(primal_X, Y)` node.
     # For any primal input, if we have deleted the last `.set_(primal_X, ...)`, we will re-insert
     # `.set_(primal_X, Y_last)` at the end of the graph.
     for i, n in enumerate(node_list):
@@ -127,27 +127,20 @@ def refunctionalize_set(graph: fx.Graph) -> None:
                 next_set_node_idx = len(node_list) - 1
             set_node = node_list[set_node_idx]
             Y_input = set_node.args[1]
-            # Between primal_X's this `.set_(primal_X, Y)` and its next `.set_(primal_X, ...)` (or end of graph),
-            # if `.set_(Y, ...)` is not called, we will replace usage of output of this `.set_(primal_X, Y)` node with Y,
-            # and delete the `.set_(primal_X, Y)` node.
-            # (NOTE: Y may or may not be a primal input. If Y is not a primal and `.set_(Y, ...)` exists, we error out.)
-            set_Y_exists = False
+            # Between primal_X's this `set__Z = .set_(primal_X, Y)` and its next `.set_(primal_X, ...)` (or end of graph):
+            # 1. We assert that `.set_(Y, ...)` is never called.
+            # 2. Then, we will replace downstream usage of set__Z with Y, and delete the `set__Z = .set_(primal_X, Y)` node.
             for idx in range(set_node_idx + 1, next_set_node_idx):
-                if (
+                assert not (
                     node_list[idx].target is torch.ops.aten.set_.source_Tensor
-                    and node_list[idx].args[0] == Y_input
-                ):
-                    set_Y_exists = True
-                    assert (
-                        Y_input in primal_inputs
-                    ), f".set_(non_primal, ...) is not supported. Violating graph: {graph}"
-            if not set_Y_exists:
-                set_node.replace_all_uses_with(
-                    Y_input,
-                    delete_user_cb=lambda n: node_to_idx[n] > set_node_idx
-                    and node_to_idx[n] < next_set_node_idx,
-                )
-                set_nodes_to_be_deleted.add(set_node)
+                    and Y_input in node_list[idx].args
+                ), f"NYI: `.set_(Y, ...)` after `.set_(primal_X, Y)`. Violating graph: {graph}"
+            set_node.replace_all_uses_with(
+                Y_input,
+                delete_user_cb=lambda n: node_to_idx[n] > set_node_idx
+                and node_to_idx[n] < next_set_node_idx,
+            )
+            set_nodes_to_be_deleted.add(set_node)
         # For any primal input, if we have deleted the last `.set_(primal_X, ...)`,
         # we will re-insert `.set_(primal_X, Y_last)` at the end of the graph.
         last_set_node = node_list[primal_input_to_set_idx[primal_input][-1]]
