@@ -1358,9 +1358,7 @@ if(NOT INTERN_BUILD_MOBILE)
 
   # use cub in a safe manner, see:
   # https://github.com/pytorch/pytorch/pull/55292
-  if(NOT ${CUDA_VERSION} LESS 11.5)
-    string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
-  endif()
+  string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
 
   message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
   string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
@@ -1428,11 +1426,6 @@ if(NOT INTERN_BUILD_MOBILE)
   if(CORTEXA9_FOUND)
     message(STATUS "Cortex-A9 Found with compiler flag : -mcpu=cortex-a9")
     add_compile_options(-mcpu=cortex-a9)
-  endif()
-
-  if(WIN32 AND NOT CYGWIN)
-    set(BLAS_INSTALL_LIBRARIES "OFF"
-      CACHE BOOL "Copy the required BLAS DLLs into the TH install dirs")
   endif()
 
   find_package(LAPACK)
