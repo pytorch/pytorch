@@ -1,8 +1,9 @@
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict
 
 import torch
 from torch import fx
+from .functional_utils import collect_graph_epilogue_mutable_ops
 
 
 def is_primal(node: fx.Node) -> bool:
@@ -51,7 +52,7 @@ def refunctionalize_set(graph: fx.Graph) -> None:
     return_node = node_list[-1]
     assert return_node.target == "output"
     primal_inputs = [*filter(is_primal, node_list)]
-    primal_input_to_set_idx = defaultdict(list)
+    primal_input_to_set_node_idx = defaultdict(list)
     node_to_idx = {n: i for i, n in enumerate(node_list)}
     set_nodes_to_delete = set()
 
@@ -109,8 +110,8 @@ def refunctionalize_set(graph: fx.Graph) -> None:
             assert (
                 n.args[0] in primal_inputs
             ), f"NYI: Calling `.set_(X, Y)` but X is not primal input of graph. Violating graph: {graph}"
-            primal_input_to_set_idx[n.args[0]].append(i)
-    for primal_input, set_idx_list in primal_input_to_set_idx.items():
+            primal_input_to_set_node_idx[n.args[0]].append(i)
+    for primal_input, set_idx_list in primal_input_to_set_node_idx.items():
         for i in range(len(set_idx_list)):
             set_node_idx = set_idx_list[i]
             if i < len(set_idx_list) - 1:
@@ -136,7 +137,7 @@ def refunctionalize_set(graph: fx.Graph) -> None:
             set_nodes_to_delete.add(set_node)
         # For any primal input, if we have deleted the last `.set_(primal_X, ...)`,
         # we will re-insert `.set_(primal_X, Y_last)` at the end of the graph.
-        last_set_node = node_list[primal_input_to_set_idx[primal_input][-1]]
+        last_set_node = node_list[primal_input_to_set_node_idx[primal_input][-1]]
         if last_set_node in set_nodes_to_delete:
             with graph.inserting_before(return_node):
                 new_last_set_node = graph.call_function(
@@ -153,25 +154,6 @@ def refunctionalize_set(graph: fx.Graph) -> None:
     # Finally, delete the old set_ nodes.
     for set_node in set_nodes_to_delete:
         graph.erase_node(set_node)
-
-
-def collect_graph_epilogue_mutable_ops(graph: fx.Graph) -> List[fx.Node]:
-    epilogue_mutable_ops = []
-    node_list = list(graph.nodes)
-    for node in reversed(node_list):
-        if node.op == "output":
-            continue
-        elif node.op == "call_function" and (
-            isinstance(node.target, torch._ops.OpOverload)
-            and (
-                node.target._schema.is_mutable
-                or node.target is torch.ops.inductor.resize_storage_bytes_.default
-            )
-        ):
-            epilogue_mutable_ops.append(node)
-        else:
-            break
-    return reversed(epilogue_mutable_ops)  # type: ignore[return-value]
 
 
 def collect_nodes_set_into_primal_in_graph_epilogue(

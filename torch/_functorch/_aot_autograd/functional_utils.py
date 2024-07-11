@@ -8,7 +8,7 @@ This file contains utilities related to functionalization in AOTAutograd:
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 import torch
 from torch import Tensor
@@ -390,6 +390,25 @@ def was_tensor_metadata_updated(arg, new_arg):
         return arg is not new_arg and StorageWeakRef(
             arg.untyped_storage()
         ) == StorageWeakRef(new_arg.untyped_storage())
+
+
+def collect_graph_epilogue_mutable_ops(graph: torch.fx.Graph) -> List[torch.fx.Node]:
+    epilogue_mutable_ops = []
+    node_list = list(graph.nodes)
+    for node in reversed(node_list):
+        if node.op == "output":
+            continue
+        elif node.op == "call_function" and (
+            isinstance(node.target, torch._ops.OpOverload)
+            and (
+                node.target._schema.is_mutable
+                or node.target is torch.ops.inductor.resize_storage_bytes_.default
+            )
+        ):
+            epilogue_mutable_ops.append(node)
+        else:
+            break
+    return reversed(epilogue_mutable_ops)  # type: ignore[return-value]
 
 
 # Returns the number of detected copy_
