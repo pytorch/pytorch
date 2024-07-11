@@ -116,7 +116,7 @@ flex_attention_backward = FlexAttentionBackwardHOP()
 flex_attention_backward.__module__ = "torch.ops.higher_order"
 
 
-def math_attention(
+def _math_attention_inner(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -126,19 +126,6 @@ def math_attention(
     score_mod_other_buffers: Tuple = (),
     mask_fn_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Eager implementation
-
-    This implementation uses vmap to vectorize the score_mod function over the batch, head, m, and n dimensions.
-    We then apply the vectorized score_mod function to the scores matrix. Each wrap of vmap applies one of the
-    batch, head, m, or n dimensions. We need to apply vmap 4 times to vectorized over all 4 dimensions.
-
-    Args:
-        query: The query tensor
-        key: The key tensor
-        value: The value tensor
-        score_mod: The score_mod function
-        other_buffers: Other buffers that are passed to the score_mod function
-    """
     working_precision = torch.float64 if query.dtype == torch.float64 else torch.float32
 
     scores = (query @ key.transpose(-2, -1)).to(dtype=working_precision)
@@ -181,19 +168,56 @@ def math_attention(
     # rewriting.
     with TransformGetItemToIndex():
         scores = (scores * scale).to(working_precision)
-        scores = torch.where(
+        post_mod_scores = torch.where(
             mask_fn(b, h, m, n, *mask_fn_other_buffers),
             score_mod(scores, b, h, m, n, *score_mod_other_buffers),
             torch.tensor(-float("inf"), dtype=working_precision, device=scores.device),
         )
 
+    return scores, post_mod_scores
+
+
+def math_attention(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    block_mask: Tuple,
+    scale: float,
+    score_mod_other_buffers: Tuple = (),
+    mask_fn_other_buffers: Tuple = (),
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Eager implementation
+
+    This implementation uses vmap to vectorize the score_mod function over the batch, head, m, and n dimensions.
+    We then apply the vectorized score_mod function to the scores matrix. Each wrap of vmap applies one of the
+    batch, head, m, or n dimensions. We need to apply vmap 4 times to vectorized over all 4 dimensions.
+
+    Args:
+        query: The query tensor
+        key: The key tensor
+        value: The value tensor
+        score_mod: The score_mod function
+        other_buffers: Other buffers that are passed to the score_mod function
+    """
+    _, post_mod_scores = _math_attention_inner(
+        query,
+        key,
+        value,
+        score_mod,
+        block_mask,
+        scale,
+        score_mod_other_buffers,
+        mask_fn_other_buffers,
+    )
+
     # TODO Unconditionally return logsumexp for backwards
     # if any(t.requires_grad for t in (query, key, value)):
-    logsumexp = scores.logsumexp(dim=-1)
+    logsumexp = post_mod_scores.logsumexp(dim=-1)
 
-    scores = scores.softmax(dim=-1)
+    post_mod_scores = post_mod_scores.softmax(dim=-1)
 
-    return scores.to(query.dtype) @ value, logsumexp
+    return post_mod_scores.to(query.dtype) @ value, logsumexp
 
 
 @flex_attention.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -655,52 +679,16 @@ def sdpa_dense_backward(
     score_mod_other_buffers: Tuple = (),
     mask_fn_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    working_precision = torch.float64 if query.dtype == torch.float64 else torch.float32
-    scores = (query @ key.transpose(-2, -1)).to(working_precision)
-
-    b = torch.arange(0, scores.size(0), device=scores.device)
-    h = torch.arange(0, scores.size(1), device=scores.device)
-    m = torch.arange(0, scores.size(2), device=scores.device)
-    n = torch.arange(0, scores.size(3), device=scores.device)
-
-    score_mod_in_dim_buffers = (None,) * len(score_mod_other_buffers)
-    score_mod = torch.vmap(
-        fw_graph, in_dims=(0, None, None, None, 0) + score_mod_in_dim_buffers
+    scores, post_mod_scores = _math_attention_inner(
+        query,
+        key,
+        value,
+        fw_graph,
+        block_mask,
+        scale,
+        score_mod_other_buffers,
+        mask_fn_other_buffers,
     )
-    score_mod = torch.vmap(
-        score_mod, in_dims=(0, None, None, 0, None) + score_mod_in_dim_buffers
-    )
-    score_mod = torch.vmap(
-        score_mod, in_dims=(0, None, 0, None, None) + score_mod_in_dim_buffers
-    )
-    score_mod = torch.vmap(
-        score_mod, in_dims=(0, 0, None, None, None) + score_mod_in_dim_buffers
-    )
-
-    mask_fn_in_dim_buffers = (None,) * len(mask_fn_other_buffers)
-    mask_graph = block_mask[-1]
-    mask_graph = torch.vmap(
-        mask_graph, in_dims=(None, None, None, 0) + mask_fn_in_dim_buffers
-    )
-    mask_graph = torch.vmap(
-        mask_graph, in_dims=(None, None, 0, None) + mask_fn_in_dim_buffers
-    )
-    mask_graph = torch.vmap(
-        mask_graph, in_dims=(None, 0, None, None) + mask_fn_in_dim_buffers
-    )
-    mask_graph = torch.vmap(
-        mask_graph, in_dims=(0, None, None, None) + mask_fn_in_dim_buffers
-    )
-
-    with TransformGetItemToIndex():
-        scores = scores * scale
-        post_mod_scores = torch.where(
-            mask_graph(b, h, m, n, *mask_fn_other_buffers),
-            score_mod(scores, b, h, m, n, *score_mod_other_buffers).to(
-                working_precision
-            ),
-            torch.tensor(-float("inf"), dtype=working_precision),
-        )
 
     softmax_scores = torch.exp(post_mod_scores - logsumexp.unsqueeze(-1))
 
@@ -711,6 +699,12 @@ def sdpa_dense_backward(
     sum_scores = torch.sum(out * grad_out, -1, keepdim=True)
     grad_score_mod = softmax_scores * (grad_softmax_scores - sum_scores)
 
+    b = torch.arange(0, scores.size(0), device=scores.device)
+    h = torch.arange(0, scores.size(1), device=scores.device)
+    m = torch.arange(0, scores.size(2), device=scores.device)
+    n = torch.arange(0, scores.size(3), device=scores.device)
+
+    mask_graph = block_mask[-1]
     # Gradient of the inline score_mod function, with respect to the scores
     in_dim_buffers = (None,) * len(score_mod_other_buffers)
     out_dims = [0, None, None, None, None] + [None] * len(score_mod_other_buffers)
@@ -927,7 +921,6 @@ def flex_attention_backward_functionalize(
     with ctx.redispatch_to_next() as m:
         functional_fw_graph = ctx.functionalize(fw_graph)
         functional_joint_graph = ctx.functionalize(joint_graph)
-        functional_mask_graph = ctx.functionalize(block_mask[-1])
 
         grad_query, grad_key, grad_value = flex_attention_backward(
             query_unwrapped,
