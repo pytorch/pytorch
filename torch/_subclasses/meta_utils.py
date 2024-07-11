@@ -142,28 +142,13 @@ def is_sparse_any(t):
 
 
 def update_nested_int_registry(r, nested_int, source, shape_env):
+    from torch.fx.experimental.symbolic_shapes import _create_symbolic_nested_int
     from torch.nested._internal.nested_tensor import _tensor_symint_registry
 
     if r in _tensor_symint_registry:
         return
 
-    if source is None:
-        # Source is None in two cases:
-        # (1) tensor._base is _dummy_instance OR
-        # (2) tensor is an intermediate
-        src = torch._dynamo.source.EphemeralSource("intermediate_offsets")
-    else:
-        src = torch._dynamo.source.NestedIntSource(source)
-
-    sym_nested_int = shape_env.create_symintnode(
-        sym=shape_env.create_symbol(
-            val=nested_int,
-            source=src,
-        ),
-        hint=nested_int,
-        source=src,
-    )
-
+    sym_nested_int = _create_symbolic_nested_int(nested_int, source, shape_env)
     _tensor_symint_registry[r] = sym_nested_int
 
 

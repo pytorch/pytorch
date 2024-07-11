@@ -4,6 +4,7 @@ from typing import Tuple
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
+from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
 
 _tensor_id_counter = 0
@@ -16,6 +17,7 @@ def get_tensor_symint(tensor, *, coeff=1):
     if tensor_symint is None:
         from torch._subclasses.fake_tensor import FakeTensor
         from torch._subclasses.functional_tensor import FunctionalTensor
+        from torch.fx.experimental.symbolic_shapes import _create_symbolic_nested_int
 
         if isinstance(tensor, FunctionalTensor):
             tensor = torch._from_functional_tensor(tensor.elem)
@@ -26,23 +28,8 @@ def get_tensor_symint(tensor, *, coeff=1):
         _tensor_id_counter += 1
 
         if isinstance(tensor, FakeTensor):
-            shape_env = tensor.fake_mode.shape_env
-
-            if tensor.source is None:
-                # Source is None in two cases:
-                # (1) tensor._base is _dummy_instance OR
-                # (2) tensor is an intermediate
-                src = torch._dynamo.source.EphemeralSource("intermediate_offsets")
-            else:
-                src = torch._dynamo.source.NestedIntSource(tensor.source)
-
-            tensor_symint = shape_env.create_symintnode(
-                sym=shape_env.create_symbol(
-                    val=tensor_symint,
-                    source=src,
-                ),
-                hint=tensor_symint,
-                source=src,
+            tensor_symint = _create_symbolic_nested_int(
+                tensor_symint, tensor.source, tensor.fake_mode.shape_env
             )
 
         # associate (possibly symbolic) nested int with this tensor in the registry

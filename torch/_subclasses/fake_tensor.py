@@ -566,7 +566,7 @@ class FakeTensor(torch.Tensor):
 
     # This is set when an tensor input is fakified. It is used when constructing
     # a NestedIntSource from an offsets Tensor.
-    source = None
+    source: Optional[Source] = None
 
     @property
     def device(self):
