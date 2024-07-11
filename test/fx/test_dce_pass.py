@@ -1,7 +1,7 @@
 # Owner(s): ["module: fx"]
 
 import copy
-from typing import Set, Type
+from typing import Optional, Set, Type
 
 import torch
 import torch.fx
@@ -30,41 +30,52 @@ class TestDCE(TestCase):
         m: torch.nn.Module,
         expect_dce_changes: bool,
         modules_to_be_leafs: Set[Type] = None,
-        strict: bool = False,
+        strict: Optional[bool] = None,
     ):
-        class TestTracer(torch.fx.Tracer):
-            def is_leaf_module(self, m, qualname):
-                if modules_to_be_leafs and type(m) in modules_to_be_leafs:
-                    return True
-                return super().trace(m, qualname)
-
-        traced: torch.fx.GraphModule = torch.fx.GraphModule(m, TestTracer().trace(m))
-        print(str(traced.graph))
-
-        # Verify there are nodes without users (if expected).
-        has_nodes_without_users = self._has_nodes_without_users(traced, strict=strict)
-        if expect_dce_changes:
-            self.assertTrue(has_nodes_without_users)
+        if strict is None:
+            strict_cases = [True, False]
         else:
-            self.assertFalse(has_nodes_without_users)
+            strict_cases = [strict]
 
-        # Get the original number of placeholders to verify it doesn't change
-        # during DCE.
-        orig_num_phs = self._get_num_placeholders(traced)
-        changed = traced.graph.eliminate_dead_code(strict=strict)
+        for strict in strict_cases:
 
-        self.assertTrue(changed if expect_dce_changes else not changed)
+            class TestTracer(torch.fx.Tracer):
+                def is_leaf_module(self, m, qualname):
+                    if modules_to_be_leafs and type(m) in modules_to_be_leafs:
+                        return True
+                    return super().trace(m, qualname)
 
-        # Verify there are no nodes without users after DCE is run.
-        self.assertFalse(self._has_nodes_without_users(traced, strict=strict))
-        new_num_phs = self._get_num_placeholders(traced)
-        self.assertEqual(orig_num_phs, new_num_phs)
+            traced: torch.fx.GraphModule = torch.fx.GraphModule(
+                m, TestTracer().trace(m)
+            )
+            print(str(traced.graph))
 
-        traced.recompile()
-        # Make sure we run and get the same results before/after DCE.
-        inputs = [torch.tensor([1.5])] * new_num_phs
-        inputs_copy = copy.deepcopy(inputs)
-        self.assertTrue(torch.equal(m(*inputs), traced(*inputs_copy)))
+            # Verify there are nodes without users (if expected).
+            has_nodes_without_users = self._has_nodes_without_users(
+                traced, strict=strict
+            )
+            if expect_dce_changes:
+                self.assertTrue(has_nodes_without_users)
+            else:
+                self.assertFalse(has_nodes_without_users)
+
+            # Get the original number of placeholders to verify it doesn't change
+            # during DCE.
+            orig_num_phs = self._get_num_placeholders(traced)
+            changed = traced.graph.eliminate_dead_code(strict=strict)
+
+            self.assertTrue(changed if expect_dce_changes else not changed)
+
+            # Verify there are no nodes without users after DCE is run.
+            self.assertFalse(self._has_nodes_without_users(traced, strict=strict))
+            new_num_phs = self._get_num_placeholders(traced)
+            self.assertEqual(orig_num_phs, new_num_phs)
+
+            traced.recompile()
+            # Make sure we run and get the same results before/after DCE.
+            inputs = [torch.tensor([1.5])] * new_num_phs
+            inputs_copy = copy.deepcopy(inputs)
+            self.assertTrue(torch.equal(m(*inputs), traced(*inputs_copy)))
 
     def test_simple(self):
         """
