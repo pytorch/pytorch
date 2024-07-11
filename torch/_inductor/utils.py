@@ -34,6 +34,7 @@ from typing import (
     NamedTuple,
     Optional,
     Protocol,
+    Sequence,
     Set,
     Tuple,
     TypeVar,
@@ -71,6 +72,7 @@ _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 GPU_ALIGN_BYTES = 16
+ALIGNMENT = 16
 
 ALIGN_BYTES = 64
 assert (ALIGN_BYTES & (ALIGN_BYTES - 1)) == 0 and ALIGN_BYTES >= 8, "must be power of 2"
@@ -1905,3 +1907,92 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
         output_code_log.setLevel(prev_level)
         output_code_log.removeHandler(ch)
     return result, s
+
+
+def shape_env_from_inputs(inputs: List[torch.Tensor]):
+    shape_env = None
+    fake_mode = detect_fake_mode(inputs)
+
+    # TODO(voz): It would be nice to enable this assert, but there are lots of tests that
+    # pass in real inputs for now.
+    # if len(inputs) > 0:
+    # assert fake_mode is not None, breakpoint()
+
+    if fake_mode is not None:
+        return fake_mode.shape_env
+
+    # When there are no tensor inputs, get shape_env from the first SymInt.
+    for input in inputs:
+        if isinstance(input, torch.SymInt):
+            return input.node.shape_env
+
+    # TODO(voz): Should we always have one anyway?
+    return None
+
+
+def align_inputs_from_check_idxs(
+    model: Callable[[List[torch.Tensor]], Any], inputs_to_check: Sequence[int]
+):
+    if len(inputs_to_check) == 0:
+        return model
+
+    def run(new_inputs):
+        copy_misaligned_inputs(new_inputs, inputs_to_check)
+        return model(new_inputs)
+
+    return run
+
+
+def clone_preserve_strides(x: torch.Tensor):
+    needed_size = (
+        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+    )
+    buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
+    return torch.as_strided(buffer, x.size(), x.stride())
+
+
+def copy_misaligned_inputs(
+    new_inputs: List[torch.Tensor], check_inputs_idxs: Sequence[int]
+) -> None:
+    for i in check_inputs_idxs:
+        if new_inputs[i].data_ptr() % ALIGNMENT:
+            new_inputs[i] = clone_preserve_strides(new_inputs[i])
+
+
+def remove_unaligned_input_idxs(
+    inputs: Union[List[torch.Tensor], Sequence[int]],
+    static_input_idxs: Sequence[int],
+):
+    """
+    We require all inputs to be aligned, so introduce a copy for any
+    that aren't.
+    """
+    aligned_static_input_idxs = []
+    for idx, input in zip(static_input_idxs, inputs):
+        if isinstance(input, torch.Tensor) and (input.data_ptr() % ALIGNMENT) == 0:
+            aligned_static_input_idxs.append(idx)
+    if len(aligned_static_input_idxs) != len(static_input_idxs):
+        return aligned_static_input_idxs
+    return static_input_idxs
+
+
+def set_tracing_context_output_strides(example_inputs, compiled_graph):
+    # Return the output strides to the caller via TracingContext
+    context = torch._guards.TracingContext.try_get()
+    if context is not None and context.output_strides is not None:
+        assert len(context.output_strides) == 0
+        shape_env = shape_env_from_inputs(example_inputs)
+        for exprs in compiled_graph.output_strides:
+            if exprs is None:
+                context.output_strides.append(None)
+            else:
+                context.output_strides.append(
+                    tuple(
+                        (
+                            shape_env.evaluate_symexpr(e)
+                            if shape_env is not None
+                            else int(e)
+                        )
+                        for e in exprs
+                    )
+                )

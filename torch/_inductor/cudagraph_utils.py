@@ -218,3 +218,14 @@ def get_placeholder_stack_trace(placeholder: PlaceholderInfo) -> Optional[str]:
             return user.stack_trace
 
     return None
+
+
+@dataclasses.dataclass(frozen=True)
+class CudagraphCachedInfo:
+    """
+    Info needed to realign inputs
+    """
+
+    placeholders: Sequence[PlaceholderInfo]
+    stack_traces: List[Optional[str]]
+    cudagraph_fail_reasons: List[str]
