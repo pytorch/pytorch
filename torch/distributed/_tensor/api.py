@@ -246,6 +246,45 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             requires_grad=requires_grad,
         )
 
+        def get_unpadded_chunk_size():
+            import math
+            global_shape = spec.tensor_meta.shape
+            mesh = spec.mesh
+            placements = spec.placements
+
+            # 1. we calculate globally how many chunks a given tensor dim will have globally.
+            num_chunks_by_dim = [1 for _ in range(len(global_shape))]
+            for mesh_idx, placement in enumerate(placements):
+                if placement.is_shard():
+                    tensor_dim = placement.dim  # type: ignore[attr-defined]
+                    mesh_dim_size = mesh.size(mesh_idx)
+                    num_chunks_by_dim[tensor_dim] *= mesh_dim_size
+
+            # 2. compute for each tensor dim, whether the current chunk requires padding and the unpad index.
+            unpad_indices = []
+            for tensor_dim, tensor_dim_size in enumerate(global_shape):
+                chunk_size = math.ceil(tensor_dim_size / num_chunks_by_dim[tensor_dim])
+                num_full_chunks = math.floor(tensor_dim_size / chunk_size)
+                tail_chunk_size = tensor_dim_size % chunk_size
+                cur_chunk = mesh.get_rank()
+                # if the index of cur chunk is smaller than num_full_chunks, meaning cur_chunk would be a full chunk. 
+                if cur_chunk < num_full_chunks:
+                    unpad_index = chunk_size
+                # if the cur_chunk is not a full chunk and the tail_chunk_size is not 0, then cur_chunk is the tail chunk.
+                elif cur_chunk >= num_full_chunks and tail_chunk_size !=0:
+                    unpad_index = tail_chunk_size
+                # if the cur chunk is not a full chunk and the tail chunk_size is 0, meaning the cur_chunk would be 0 on the tensor_dim.
+                # cur_chunk is not necessarily the last chunk. For example, chunk a tensor([1, 1]) into 4 chunks, the last two chunks would be empty.
+                else:
+                    unpad_index = 0
+                unpad_indices.append(unpad_index)
+            
+            return unpad_indices
+        
+        unpad_indices = get_unpadded_chunk_size()
+        spec.unpad_indices = unpad_indices
+        print(f"rank:{spec.mesh.get_rank()}, slice_indices: {unpad_indices}")
+
         r._spec = spec
         r._local_tensor = local_tensor
         return r
@@ -420,7 +459,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             will depend on if the `DTensor` requires_grad or not.
         """
         if not torch.is_grad_enabled():
-            return self._local_tensor
+            unpad_indices = self._spec.unpad_indices
+            slices = [slice(0, unpad_index) for unpad_index in unpad_indices]
+            return self._local_tensor[slices]
 
         if grad_placements is not None and not isinstance(grad_placements, tuple):
             grad_placements = tuple(grad_placements)
