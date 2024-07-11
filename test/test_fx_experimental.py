@@ -1712,7 +1712,7 @@ class TestModule(torch.nn.Module):
                 "include_last_offset",
             },
         )
-        self.assertEqual(norm_args_and_kwargs.args, tuple())
+        self.assertEqual(norm_args_and_kwargs.args, ())
 
     def test_normalize_args_op_overload(self):
         for target in [torch.ops.aten.resize_as_.default, torch.ops.aten.resize_as_]:
