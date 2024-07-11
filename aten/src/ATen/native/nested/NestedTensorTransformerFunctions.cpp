@@ -7,7 +7,7 @@
 
 #include <c10/util/string_view.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 namespace at {
 namespace native {
@@ -291,7 +291,7 @@ Tensor _jagged_to_padded_dense_forward_cpu(
 Tensor _padded_dense_to_jagged_forward_cpu(
     const Tensor& padded,
     TensorList offsets_list,
-    c10::optional<int64_t> total_L) {
+    std::optional<int64_t> total_L) {
   // TODO: Make this kernel more efficient using TensorIterator or something.
   TORCH_INTERNAL_ASSERT(
       offsets_list.size() == 1,

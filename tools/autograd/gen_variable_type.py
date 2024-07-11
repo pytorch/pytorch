@@ -177,7 +177,9 @@ DONT_REQUIRE_DERIVATIVE = {
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "fill",
     "t",
+    "t_copy",
     "view",
+    "view_copy",
     "reshape",
     "reshape_as",
     "view_as",
@@ -187,6 +189,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "diag_embed",
     "repeat",
     "expand",
+    "expand_copy",
     "flip",
     "fliplr",
     "flipud",
@@ -194,9 +197,13 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "nanmean",
     "nansum",
     "transpose",
+    "transpose_copy",
     "permute",
+    "permute_copy",
     "squeeze",
+    "squeeze_copy",
     "unsqueeze",
+    "unsqueeze_copy",
     "resize",
     "resize_as",
     "tril",
@@ -227,6 +234,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "neg",
     "complex",
     "select",
+    "select_copy",
     "where",
     "as_strided",
     "as_strided_copy",
@@ -540,6 +548,8 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
     # These functions are expected to change impl or storage of input tensors
     "set_",
     "_cudnn_rnn_flatten_weight",
+    "_unsafe_masked_index",
+    "_unsafe_masked_index_put_accumulate",
 }
 DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # These non-inplace, non-out functions return tensors with use_count > 1
