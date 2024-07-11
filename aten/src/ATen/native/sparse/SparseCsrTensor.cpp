@@ -644,6 +644,17 @@ SPARSE_COMPRESSED_TENSOR(csc, kSparseCsc)
 SPARSE_COMPRESSED_TENSOR(bsr, kSparseBsr)
 SPARSE_COMPRESSED_TENSOR(bsc, kSparseBsc)
 
+Tensor empty_sparse_compressed_symint(
+    SymIntArrayRef size,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<MemoryFormat> optional_memory_format) {
+  // TODO: Don't specialize
+  return empty_sparse_compressed(C10_AS_INTARRAYREF_SLOW_ALLOC(size), dtype, layout, device, pin_memory, optional_memory_format);
+}
+
 // Warning: ideally, torch.empty(..., layout=<sparse compressed
 // format>) ought to be unsupported because it does not return a valid
 // sparse compressed tensor without initialization of compressed
@@ -927,7 +938,9 @@ Tensor empty_like_sparse_csr(
 
 template <bool require_view, bool require_copy>
 Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) {
+#ifndef STRIP_ERROR_MESSAGES
   constexpr const char* select_name = (require_view ? "select()" : "select_copy()");
+#endif
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
       self.layout(), "select", []() { return; });
   TORCH_CHECK_INDEX(

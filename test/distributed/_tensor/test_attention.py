@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import unittest
+from typing import Optional, Tuple
 
 import torch
 from torch import nn
@@ -9,7 +10,7 @@ from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.experimental.attention import (
     _CausalBehavior,
     _is_causal_behavior,
-    _scaled_dot_product_chunk_flash_attention,
+    _merge_sdpa,
     _scaled_dot_product_ring_efficient_attention,
     _scaled_dot_product_ring_flash_attention,
     attention_context_parallel,
@@ -40,6 +41,75 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 c10d_functional = torch.ops.c10d_functional
+
+
+def _scaled_dot_product_chunk_flash_attention(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    size: int,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    *,
+    scale: Optional[float] = None,
+) -> Tuple[torch.Tensor, ...]:
+    """
+    This is a single node chunked implementation of
+    _scaled_dot_product_ring_flash_attention used for verifying
+    the correctness of the backwards pass.
+    """
+
+    if return_debug_mask:
+        raise NotImplementedError("return_debug_mask is not supported yet")
+
+    if is_causal and (query.size(2) != key.size(2)):
+        raise NotImplementedError(
+            "is_causal requires the same query and context sequence lengths"
+        )
+
+    query_len = query.size(2) // size
+    ctx_len = key.size(2) // size
+
+    global_out = []
+    global_softmax_lse = []
+
+    for rank in range(size):
+        chunks = []
+        logsumexps = []
+
+        chunk_query = query[:, :, rank * query_len : (rank + 1) * query_len]
+
+        for i in range(size):
+            src_rank = (rank - i) % size
+            chunk_key = key[:, :, src_rank * ctx_len : (src_rank + 1) * ctx_len]
+            chunk_value = value[:, :, src_rank * ctx_len : (src_rank + 1) * ctx_len]
+
+            is_causal_behavior = _is_causal_behavior(
+                rank=rank, world_size=size, i=i, is_causal=is_causal
+            )
+
+            if is_causal_behavior != _CausalBehavior.SKIP:
+                local_results = torch.ops.aten._scaled_dot_product_flash_attention(
+                    chunk_query,
+                    chunk_key,
+                    chunk_value,
+                    dropout_p=dropout_p,
+                    is_causal=is_causal_behavior.value,
+                    scale=scale,
+                )
+                chunks.append(local_results[0])
+                logsumexps.append(local_results[1])
+
+        out, softmax_lse = _merge_sdpa(chunks, logsumexps)
+        global_out.append(out)
+        global_softmax_lse.append(softmax_lse)
+
+    global_out = torch.concat(global_out, dim=2)
+    global_softmax_lse = torch.concat(global_softmax_lse, dim=2)
+
+    local_results = (global_out, global_softmax_lse) + local_results[2:]
+    return local_results
 
 
 class RingAttentionTest(DTensorTestBase):
