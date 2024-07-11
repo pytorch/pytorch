@@ -149,7 +149,7 @@ static void set_axes_and_shapes(const IntArrayRef& input_shape,
 static void reduction_out_mps(const Tensor& input_t,
                               OptionalIntArrayRef opt_dim,
                               bool keepdim,
-                              c10::optional<ScalarType> dtype,
+                              std::optional<ScalarType> dtype,
                               const Tensor& output_t,
                               MPSReductionType reduction_type,
                               const std::string& func_name) {
@@ -292,10 +292,10 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
                                const OptionalScalarRef& opt_p,
                                IntArrayRef dim,
                                bool keepdim,
-                               c10::optional<ScalarType> opt_dtype,
+                               std::optional<ScalarType> opt_dtype,
                                const Tensor& output_t,
                                bool cdist = false,
-                               c10::optional<IntArrayRef> input_broadcasted_shape = c10::nullopt,
+                               std::optional<IntArrayRef> input_broadcasted_shape = std::nullopt,
                                NormOpBlock normOpBlock = nullptr) {
   auto p = opt_p.has_value() ? opt_p.get().to<double>() : Scalar(2.0).to<double>();
   if (input_tensor.numel() == 0) {
@@ -437,7 +437,7 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
 
 static Tensor std_var_common_impl_mps(const Tensor& input_t,
                                       at::OptionalIntArrayRef dim,
-                                      const c10::optional<Scalar>& correction,
+                                      const std::optional<Scalar>& correction,
                                       bool keepdim,
                                       StdVarType stdVarType) {
   using CachedGraph = MPSUnaryCachedGraph;
@@ -555,10 +555,10 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
 
   Tensor output_t = at::empty(IntArrayRef(output_shape.data(), num_output_dims),
                               input_t.scalar_type(),
-                              c10::nullopt,
+                              std::nullopt,
                               kMPS,
-                              c10::nullopt,
-                              c10::nullopt);
+                              std::nullopt,
+                              std::nullopt);
 
   if (output_t.numel() == 0 || input_t.numel() == 0) {
     return output_t;
@@ -616,7 +616,7 @@ static Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction
   IntArrayRef input_shape = input_t.sizes();
   int64_t num_in_elements = c10::multiply_integers(input_shape);
 
-  Tensor output_t = at::empty({}, input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor output_t = at::empty({}, input_t.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
 
   if (output_t.numel() == 0 || num_in_elements == 0) {
     return output_t;
@@ -785,13 +785,13 @@ static std::tuple<Tensor, Tensor> min_max_mps_impl(const Tensor& input_t,
   Tensor indices_t;
   if (!keepdim) {
     output_t =
-        at::empty(IntArrayRef(vec_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-    indices_t = at::empty(IntArrayRef(vec_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+        at::empty(IntArrayRef(vec_out_shape), input_t.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
+    indices_t = at::empty(IntArrayRef(vec_out_shape), ScalarType::Long, std::nullopt, kMPS, std::nullopt, std::nullopt);
   } else {
     output_t = at::empty(
-        IntArrayRef(vec_apparent_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+        IntArrayRef(vec_apparent_out_shape), input_t.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
     indices_t = at::empty(
-        IntArrayRef(vec_apparent_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+        IntArrayRef(vec_apparent_out_shape), ScalarType::Long, std::nullopt, kMPS, std::nullopt, std::nullopt);
   }
 
   if (output_t.numel() == 0 || input_t.numel() == 0) {
@@ -804,7 +804,7 @@ static std::tuple<Tensor, Tensor> min_max_mps_impl(const Tensor& input_t,
 }
 
 static void argmax_argmin_out_mps(const Tensor& input_t,
-                                  c10::optional<int64_t> dim,
+                                  std::optional<int64_t> dim,
                                   bool keepdim,
                                   const Tensor& output_t,
                                   MPSReductionType reduction_type,
@@ -907,7 +907,7 @@ TORCH_IMPL_FUNC(sum_out_mps)
 (const Tensor& input_t,
  OptionalIntArrayRef opt_dim,
  bool keepdim,
- c10::optional<ScalarType> dtype,
+ std::optional<ScalarType> dtype,
  const Tensor& output_t) {
   mps::reduction_out_mps(input_t, opt_dim, keepdim, dtype, output_t, mps::MPSReductionType::SUM, "sum_out_mps");
 }
@@ -915,7 +915,7 @@ TORCH_IMPL_FUNC(sum_out_mps)
 Tensor& nansum_out_mps(const Tensor& self,
                        OptionalIntArrayRef dim,
                        bool keepdim,
-                       c10::optional<ScalarType> opt_dtype,
+                       std::optional<ScalarType> opt_dtype,
                        Tensor& result) {
   TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
   if (c10::isIntegralType(self.scalar_type(), true)) {
@@ -928,7 +928,7 @@ Tensor& nansum_out_mps(const Tensor& self,
   return result;
 }
 
-Tensor nansum_mps(const Tensor& self, OptionalIntArrayRef dim, bool keepdim, c10::optional<ScalarType> opt_dtype) {
+Tensor nansum_mps(const Tensor& self, OptionalIntArrayRef dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
   ScalarType dtype = get_dtype_from_self(self, opt_dtype, true);
   Tensor result = create_reduction_result(self, dim, keepdim, dtype);
   return nansum_out_mps(self, dim, keepdim, dtype, result);
@@ -938,7 +938,7 @@ Tensor trace_mps(const Tensor& self) {
   TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
 
   Tensor output_t =
-      at::empty({}, get_dtype_from_self(self, c10::nullopt, true), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+      at::empty({}, get_dtype_from_self(self, std::nullopt, true), std::nullopt, kMPS, std::nullopt, std::nullopt);
 
   std::vector<int64_t> dims(self.dim());
   std::iota(dims.begin(), dims.end(), 0);
@@ -946,7 +946,7 @@ Tensor trace_mps(const Tensor& self) {
   mps::reduction_out_mps(self,
                          IntArrayRef(dims),
                          false,
-                         c10::nullopt,
+                         std::nullopt,
                          const_cast<Tensor&>(output_t),
                          mps::MPSReductionType::TRACE,
                          "trace_mps");
@@ -955,44 +955,44 @@ Tensor trace_mps(const Tensor& self) {
 }
 
 TORCH_IMPL_FUNC(prod_out_mps)
-(const Tensor& input_t, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype, const Tensor& output_t) {
+(const Tensor& input_t, int64_t dim, bool keepdim, std::optional<ScalarType> dtype, const Tensor& output_t) {
   int64_t dims[1] = {dim};
   mps::reduction_out_mps(
       input_t, IntArrayRef(dims, 1), keepdim, dtype, output_t, mps::MPSReductionType::PROD, "prod_out_mps");
 }
 
 TORCH_IMPL_FUNC(amax_out_mps)(const Tensor& input_t, IntArrayRef dim, bool keepdim, const Tensor& output_t) {
-  mps::reduction_out_mps(input_t, dim, keepdim, c10::nullopt, output_t, mps::MPSReductionType::AMAX, "amax_out_mps");
+  mps::reduction_out_mps(input_t, dim, keepdim, std::nullopt, output_t, mps::MPSReductionType::AMAX, "amax_out_mps");
 }
 
 TORCH_IMPL_FUNC(amin_out_mps)(const Tensor& input_t, IntArrayRef dim, bool keepdim, const Tensor& output_t) {
-  mps::reduction_out_mps(input_t, dim, keepdim, c10::nullopt, output_t, mps::MPSReductionType::AMIN, "amin_out_mps");
+  mps::reduction_out_mps(input_t, dim, keepdim, std::nullopt, output_t, mps::MPSReductionType::AMIN, "amin_out_mps");
 }
 
 TORCH_IMPL_FUNC(aminmax_out_mps)
-(const Tensor& input_t, c10::optional<int64_t> dim_opt, bool keepdim, const Tensor& min_t, const Tensor& max_t) {
+(const Tensor& input_t, std::optional<int64_t> dim_opt, bool keepdim, const Tensor& min_t, const Tensor& max_t) {
   mps::reduction_out_mps(input_t,
-                         dim_opt.has_value() ? OptionalIntArrayRef({*dim_opt}) : c10::nullopt,
+                         dim_opt.has_value() ? OptionalIntArrayRef({*dim_opt}) : std::nullopt,
                          keepdim,
-                         c10::nullopt,
+                         std::nullopt,
                          min_t,
                          mps::MPSReductionType::AMIN,
                          "aminmax_out_mps_min");
   mps::reduction_out_mps(input_t,
-                         dim_opt.has_value() ? OptionalIntArrayRef({*dim_opt}) : c10::nullopt,
+                         dim_opt.has_value() ? OptionalIntArrayRef({*dim_opt}) : std::nullopt,
                          keepdim,
-                         c10::nullopt,
+                         std::nullopt,
                          max_t,
                          mps::MPSReductionType::AMAX,
                          "aminmax_out_mps_max");
 }
 
-Tensor prod_mps(const Tensor& self, c10::optional<ScalarType> opt_dtype) {
+Tensor prod_mps(const Tensor& self, std::optional<ScalarType> opt_dtype) {
   std::vector<int64_t> dims(self.dim());
   std::iota(dims.begin(), dims.end(), 0);
 
   Tensor output_t =
-      at::empty({}, get_dtype_from_self(self, opt_dtype, true), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+      at::empty({}, get_dtype_from_self(self, opt_dtype, true), std::nullopt, kMPS, std::nullopt, std::nullopt);
 
   mps::reduction_out_mps(self,
                          IntArrayRef(dims),
@@ -1022,7 +1022,7 @@ Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims) {
   }
 
   Tensor output_t =
-      at::empty(IntArrayRef(output_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+      at::empty(IntArrayRef(output_shape), ScalarType::Long, std::nullopt, kMPS, std::nullopt, std::nullopt);
   mps::reduction_out_mps(self,
                          dims,
                          false,
@@ -1038,14 +1038,14 @@ TORCH_IMPL_FUNC(mean_out_mps)
 (const Tensor& input_t,
  OptionalIntArrayRef opt_dim,
  bool keepdim,
- c10::optional<ScalarType> dtype,
+ std::optional<ScalarType> dtype,
  const Tensor& output_t) {
   mps::reduction_out_mps(input_t, opt_dim, keepdim, dtype, output_t, mps::MPSReductionType::MEAN, "mean_out_mps");
 }
 
 TORCH_IMPL_FUNC(norm_out_mps)
 (const Tensor& self, const OptionalScalarRef opt_p, IntArrayRef dim, bool keepdim, const Tensor& result) {
-  mps::impl_func_norm_mps(self, self, opt_p, dim, keepdim, c10::nullopt, result, /*cdist=*/false);
+  mps::impl_func_norm_mps(self, self, opt_p, dim, keepdim, std::nullopt, result, /*cdist=*/false);
 }
 
 TORCH_IMPL_FUNC(norm_dtype_out_mps)
@@ -1063,13 +1063,13 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out_mps)
  const Scalar& scalar_ord,
  OptionalIntArrayRef opt_dim,
  bool keepdim,
- c10::optional<ScalarType> opt_dtype,
+ std::optional<ScalarType> opt_dtype,
  const Tensor& result) {
   mps::impl_func_norm_mps(
       self, self, scalar_ord, opt_dim.value_or(IntArrayRef{}), keepdim, opt_dtype, result, /*cdist=*/false);
 }
 
-Tensor _cdist_forward_mps(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
+Tensor _cdist_forward_mps(const Tensor& x1, const Tensor& x2, const double p, std::optional<int64_t> compute_mode) {
   using namespace mps;
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
@@ -1159,14 +1159,14 @@ Tensor _cdist_forward_mps(const Tensor& x1, const Tensor& x2, const double p, c1
     return inputTensorPNorm;
   };
 
-  c10::optional<IntArrayRef> inputBroadcastSize =
-      c10::make_optional(makeArrayRef(tensor1_view.data(), tensor1_view.size()));
+  std::optional<IntArrayRef> inputBroadcastSize =
+      std::make_optional(makeArrayRef(tensor1_view.data(), tensor1_view.size()));
   impl_func_norm_mps(x1,
                      x2,
                      OptionalScalarRef(p),
                      makeArrayRef<int64_t>(2),
                      false,
-                     c10::nullopt,
+                     std::nullopt,
                      result,
                      /*cdist=*/true,
                      inputBroadcastSize,
@@ -1176,14 +1176,14 @@ Tensor _cdist_forward_mps(const Tensor& x1, const Tensor& x2, const double p, c1
 
 Tensor var_mps(const Tensor& input_t,
                at::OptionalIntArrayRef dim,
-               const c10::optional<Scalar>& correction,
+               const std::optional<Scalar>& correction,
                bool keepdim) {
   return mps::std_var_common_impl_mps(input_t, dim, correction, keepdim, mps::STANDARD_VARIANCE);
 }
 
 Tensor std_mps(const Tensor& input_t,
                at::OptionalIntArrayRef dim,
-               const c10::optional<Scalar>& correction,
+               const std::optional<Scalar>& correction,
                bool keepdim) {
   return mps::std_var_common_impl_mps(input_t, dim, correction, keepdim, mps::STANDARD_DEVIATION);
 }
@@ -1408,12 +1408,12 @@ TORCH_IMPL_FUNC(min_out_mps)
 }
 
 TORCH_IMPL_FUNC(argmax_out_mps)
-(const Tensor& input_t, c10::optional<int64_t> dim, bool keepdim, const Tensor& output_t) {
+(const Tensor& input_t, std::optional<int64_t> dim, bool keepdim, const Tensor& output_t) {
   mps::argmax_argmin_out_mps(input_t, dim, keepdim, output_t, mps::MPSReductionType::MAX, "argmax_out_mps");
 }
 
 TORCH_IMPL_FUNC(argmin_out_mps)
-(const Tensor& input_t, c10::optional<int64_t> dim, bool keepdim, const Tensor& output_t) {
+(const Tensor& input_t, std::optional<int64_t> dim, bool keepdim, const Tensor& output_t) {
   mps::argmax_argmin_out_mps(input_t, dim, keepdim, output_t, mps::MPSReductionType::MIN, "argmin_out_mps");
 }
 
@@ -1450,7 +1450,7 @@ Tensor median_mps(const Tensor& input_t) {
 
   apparent_input_shape[0] = [NSNumber numberWithInt:num_in_elements];
 
-  Tensor output_t = at::empty({}, input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor output_t = at::empty({}, input_t.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
 
   if (output_t.numel() == 0 || num_in_elements == 0) {
     return output_t;
@@ -1631,13 +1631,13 @@ TORCH_API ::std::tuple<at::Tensor&, at::Tensor&> median_out_mps(const at::Tensor
 
   if (!keepdim) {
     values =
-        at::empty(IntArrayRef(vec_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-    indices = at::empty(IntArrayRef(vec_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+        at::empty(IntArrayRef(vec_out_shape), input_t.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
+    indices = at::empty(IntArrayRef(vec_out_shape), ScalarType::Long, std::nullopt, kMPS, std::nullopt, std::nullopt);
   } else {
     values = at::empty(
-        IntArrayRef(vec_apparent_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+        IntArrayRef(vec_apparent_out_shape), input_t.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
     indices = at::empty(
-        IntArrayRef(vec_apparent_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+        IntArrayRef(vec_apparent_out_shape), ScalarType::Long, std::nullopt, kMPS, std::nullopt, std::nullopt);
   }
 
   if (values.numel() == 0 || input_t.numel() == 0) {
@@ -1663,23 +1663,23 @@ TORCH_API ::std::tuple<at::Tensor&, at::Tensor&> median_out_mps(const at::Tensor
 
 std::tuple<Tensor, Tensor> std_mean_mps(const Tensor& self,
                                         at::OptionalIntArrayRef dim,
-                                        const c10::optional<Scalar>& correction,
+                                        const std::optional<Scalar>& correction,
                                         bool keepdim) {
   // TODO: Refactor it into a proper std_var_mean composite function
   auto std = std_mps(self, dim, correction, keepdim);
-  auto mean = at::empty(std.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, MemoryFormat::Contiguous);
-  mps::reduction_out_mps(self, dim, keepdim, c10::nullopt, mean, mps::MPSReductionType::MEAN, "mean_out_mps");
+  auto mean = at::empty(std.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
+  mps::reduction_out_mps(self, dim, keepdim, std::nullopt, mean, mps::MPSReductionType::MEAN, "mean_out_mps");
   return {std, mean};
 }
 
 std::tuple<Tensor, Tensor> var_mean_mps(const Tensor& self,
                                         at::OptionalIntArrayRef dim,
-                                        const c10::optional<Scalar>& correction,
+                                        const std::optional<Scalar>& correction,
                                         bool keepdim) {
   // TODO: Refactor it into a proper std_var_mean composite function
   auto var = var_mps(self, dim, correction, keepdim);
-  auto mean = at::empty(var.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, MemoryFormat::Contiguous);
-  mps::reduction_out_mps(self, dim, keepdim, c10::nullopt, mean, mps::MPSReductionType::MEAN, "mean_out_mps");
+  auto mean = at::empty(var.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
+  mps::reduction_out_mps(self, dim, keepdim, std::nullopt, mean, mps::MPSReductionType::MEAN, "mean_out_mps");
   return {var, mean};
 }
 

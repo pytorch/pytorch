@@ -7,8 +7,6 @@ from torch.ao.quantization.utils import is_per_tensor
 from torch.quantization import FakeQuantize
 from torch.quantization.observer import MinMaxObserver
 
-__all__ = ["AdaroundFakeQuantizer"]
-
 
 class AdaroundFakeQuantizer(FakeQuantize):
     """

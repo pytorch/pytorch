@@ -1038,6 +1038,8 @@ def aot_export_module(
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
     pre_dispatch: bool = False,
+    # If None, will be infered from inputs and mod.graph.nodes if mod is a graph module, but the inferred result might be wrong.
+    dynamic_shapes: Optional[bool] = None,
     kwargs=None,
 ) -> Tuple[torch.fx.GraphModule, GraphSignature]:
     """
@@ -1167,6 +1169,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             num_params_buffers=params_len,
             no_tangents=True,
             pre_dispatch=pre_dispatch,
+            dynamic_shapes=dynamic_shapes,
             kwargs=kwargs,
         )
     if trace_joint:
@@ -1344,6 +1347,8 @@ def _aot_export_function(
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
     pre_dispatch: bool = False,
+    # If None, `dynamic_shapes` will be infered from inputs, but the inferred result might be wrong.
+    dynamic_shapes: Optional[bool] = None,
     kwargs=None,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     kwargs = kwargs or {}
@@ -1351,11 +1356,21 @@ def _aot_export_function(
     flat_fn, out_spec = create_tree_flattened_fn(func, args, kwargs)
     flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
-    dynamic_shapes = False
-    for x in flat_args:
-        if isinstance(x, FakeTensor):
-            dynamic_shapes = x.fake_mode.shape_env is not None
-            break
+    if dynamic_shapes is None:
+        # Try to infer `dynamic_shapes from inputs and graph nodes
+        fake_mode = detect_fake_mode(flat_args)
+        if (
+            fake_mode is None
+            and hasattr(func, "_orig_mod")
+            and isinstance(func._orig_mod, torch.fx.GraphModule)
+        ):
+            vals = [
+                node.meta["val"]
+                for node in func._orig_mod.graph.nodes
+                if "val" in node.meta
+            ]
+            fake_mode = detect_fake_mode(vals)
+        dynamic_shapes = fake_mode is not None and fake_mode.shape_env is not None
 
     # The export use case doesn't care about several bits of AOTConfig
     # (1) compilers (we just export the graph)
