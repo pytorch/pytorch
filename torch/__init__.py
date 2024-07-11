@@ -514,8 +514,13 @@ class SymInt:
         if self.node.is_nested_int():
             return hash(self.node.nested_int())
         else:
-            # Force specialization
-            return hash(builtins.int(self))
+            # We could support constant SymInts as well, but not doing it for now
+            raise TypeError("unhashable type: non-nested SymInt")
+            # TODO: Force specialization
+            # This can't be done because the TypeError here is load bearing
+            # for einops
+            # https://github.com/arogozhnikov/einops/blob/6181e1e95dc58c00a3143c1726da1c6ee0463164/einops/einops.py#L237
+            # return hash(builtins.int(self))
 
 
 class SymFloat:
