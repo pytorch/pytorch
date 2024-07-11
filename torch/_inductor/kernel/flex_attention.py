@@ -271,7 +271,7 @@ flex_attention_template = TritonTemplate(
         offs_n = kv_start + tl.arange(0, BLOCK_N)
 
         acc, l_i, m_i = forward_inner(
-            Q_block_ptr, K_block_ptr, V_block_ptr, acc, l_i, m_i, offs_m, offs_n,
+            Q_block_ptr, K_block_ptr, V_block_ptr, acc, l_i, m_i, off_z, off_h, offs_m, offs_n,
             False, kv_indices, sparse_kv_num_blocks, SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE,
             BLOCK_M, BLOCK_N, BLOCK_DMODEL, PRESCALE_QK, SM_SCALE, ROWS_GUARANTEED_SAFE, MATMUL_PRECISION,
             {{gen_argdefs()}}
@@ -640,7 +640,7 @@ def flex_attention(*args, **kwargs):
             # For now, we always assume the "sound" option
             ROWS_GUARANTEED_SAFE=False,
             PRESCALE_QK=False,
-            USE_PARTIAL_MASK=(partial_kv_num_blocks.shape == (1, 1, 1)),
+            USE_PARTIAL_MASK=(partial_kv_num_blocks.shape != (1, 1, 1)),
         )
     inputs_for_autotuning = (
         [
@@ -1325,7 +1325,7 @@ def flex_attention_backward(*args, **kwargs):
             SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
             # For now, we always assume the "sound" option
             PRESCALE_QK=False,
-            USE_PARTIAL_MASK=(partial_kv_num_blocks.shape == (1, 1, 1)),
+            USE_PARTIAL_MASK=(partial_kv_num_blocks.shape != (1, 1, 1)),
         )
     inputs_for_autotuning = (
         [
