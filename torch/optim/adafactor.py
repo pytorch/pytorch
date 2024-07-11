@@ -106,6 +106,7 @@ class Adafactor(Optimizer):
             state_steps.append(state["step"])
         return False  # has_complex
 
+    @torch.no_grad()
     def step(self, closure=None):
         """Perform a single optimization step.
 
