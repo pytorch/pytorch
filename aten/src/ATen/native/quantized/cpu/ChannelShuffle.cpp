@@ -38,9 +38,9 @@ Tensor quantized_channel_shuffle_impl(
   Tensor qy = at::native::empty_affine_quantized(
       self_nhwc.sizes(),
       kQUInt8,
-      std::nullopt /* layout */,
+      c10::nullopt /* layout */,
       kCPU,
-      std::nullopt /* pin_memory */,
+      c10::nullopt /* pin_memory */,
       self_nhwc.q_scale(),
       self_nhwc.q_zero_point(),
       MemoryFormat::ChannelsLast);

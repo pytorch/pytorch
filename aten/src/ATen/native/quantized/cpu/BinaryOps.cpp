@@ -161,9 +161,9 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   Tensor qy = at::native::empty_affine_quantized(
       qa_contig.sizes(),
       kQUInt8,
-      std::nullopt /* layout */,
+      c10::nullopt /* layout */,
       kCPU,
-      std::nullopt /* pin_memory */,
+      c10::nullopt /* pin_memory */,
       scale,
       zero_point,
       qa.suggest_memory_format());
@@ -309,9 +309,9 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   Tensor qy = at::native::empty_affine_quantized(
       at::infer_size_dimvector(qa_contig.sizes(), qb_contig.sizes()),
       qa.scalar_type(),
-      std::nullopt /* layout */,
+      c10::nullopt /* layout */,
       kCPU,
-      std::nullopt /* pin_memory */,
+      c10::nullopt /* pin_memory */,
       scale,
       zero_point,
       qa_mem_format);
@@ -419,7 +419,7 @@ Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
          .memory_format(qa.suggest_memory_format()),
       scale,
       zero_point,
-      std::nullopt);
+      c10::nullopt);
   return _add_out<ReLUFused>(qc, qa, qb);
 }
 

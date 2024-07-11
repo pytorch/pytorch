@@ -350,7 +350,7 @@ VaryingShape<int64_t> TensorType::sizes() const {
         // we turn symbolic shapes into unknowns
         return ss.is_static()
             ? std::optional<int64_t>(ss.static_size())
-            : std::nullopt;
+            : c10::nullopt;
       }));
 }
 
@@ -456,7 +456,7 @@ TensorTypePtr TensorType::createContiguous(
       device,
       VaryingShape<int64_t>(sizes),
       VaryingShape<int64_t>(strides),
-      std::nullopt);
+      c10::nullopt);
 }
 
 const SymbolicShape& TensorType::symbolic_sizes() const {

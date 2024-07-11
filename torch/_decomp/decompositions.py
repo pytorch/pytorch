@@ -2142,7 +2142,7 @@ def _fused_dropout_decomposition(input, p, generator=None):
 @register_decomposition(aten._to_copy)
 @out_wrapper()
 def _to_copy(
-    x: Union[Tensor, NumberType],
+    x: Tensor,
     *,
     dtype: Optional[torch.dtype] = None,
     layout=None,
@@ -2153,33 +2153,24 @@ def _to_copy(
 ):
     assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
-    assert isinstance(x, (torch.Tensor, int, float, bool, complex))
     if device is None and dtype is None and memory_format is None:
-        if isinstance(x, torch.Tensor):
-            return x.clone()
-        else:
-            return x
+        return x.clone()
     dtype_converted = False
 
-    if isinstance(x, torch.Tensor):
-        x_tensor = x
-    else:
-        x_tensor = torch.scalar_tensor(x)
-
-    if device is not None and device != x_tensor.device:
+    if device is not None and device != x.device:
         # avoid conversions on cpu
         if dtype is not None and device.type == "cpu":
-            x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
+            x = torch._prims.convert_element_type(x, dtype)
             dtype_converted = True
-        x_tensor = torch._prims.device_put(x_tensor, device)
+        x = torch._prims.device_put(x, device)
 
     if dtype is not None and not dtype_converted:
-        x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
+        x = torch._prims.convert_element_type(x, dtype)
         dtype_converted = True
 
     if memory_format is not None:  # no ref/prim for memory format
-        return torch.clone(x_tensor, memory_format=memory_format)
-    return x_tensor
+        return torch.clone(x, memory_format=memory_format)
+    return x
 
 
 # Questionable decompositions

@@ -313,8 +313,12 @@ inline void sgd_math(
     device T & param,
     device T & grad,
     const float weight_decay,
+    const float momentum,
     const float lr,
-    const uint8_t maximize
+    const float dampening,
+    const uint8_t nesterov,
+    const uint8_t maximize,
+    const uint8_t is_first_step
 ) {
   auto grad_ = grad;
   if (maximize) {
@@ -332,8 +336,12 @@ kernel void fused_sgd(
     device   SgdArguments<T> & args    [[buffer(0)]],
     constant MetadataArguments & metadata_args [[buffer(1)]],
     constant float & weight_decay   [[buffer(2)]],
-    constant float & lr             [[buffer(3)]],
-    constant uint8_t & maximize       [[buffer(4)]],
+    constant float & momentum       [[buffer(3)]],
+    constant float & lr             [[buffer(4)]],
+    constant float & dampening          [[buffer(5)]],
+    constant uint8_t & nesterov          [[buffer(6)]],
+    constant uint8_t   & maximize       [[buffer(7)]],
+    constant uint8_t   & is_first_step       [[buffer(8)]],
     uint tid [[thread_position_in_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
     uint tptg [[threads_per_threadgroup]]) {
@@ -352,14 +360,18 @@ kernel void fused_sgd(
         *(param + i_start),
         *(grad + i_start),
         weight_decay,
+        momentum,
         lr,
-        maximize
+        dampening,
+        nesterov,
+        maximize,
+        is_first_step
       );
     }
 }
 
 template <typename T>
-kernel void fused_sgd(
+kernel void fused_sgd_momentum(
     device   SgdMomentumArguments<T> & args    [[buffer(0)]],
     constant MetadataArguments & metadata_args [[buffer(1)]],
     constant float & weight_decay   [[buffer(2)]],
@@ -399,40 +411,27 @@ kernel void fused_sgd(
     }
 }
 
-#define REGISTER_FUSED_SGD_OP(DTYPE) \
-template                                                            \
-[[host_name("fused_sgd_" #DTYPE)]]                                  \
-kernel void fused_sgd<DTYPE>(                                       \
-    device   SgdArguments<DTYPE>     & args          [[buffer(0)]], \
-    constant MetadataArguments       & metadata_args [[buffer(1)]], \
-    constant float                   & weight_decay  [[buffer(2)]], \
-    constant float                   & lr            [[buffer(3)]], \
-    constant uint8_t                 & maximize      [[buffer(4)]], \
-    uint tid  [[thread_position_in_threadgroup]], \
-    uint tgid [[threadgroup_position_in_grid]],   \
+#define REGISTER_FUSED_SGD_OP(DTYPE, HOST_NAME, KERNEL_NAME, ARGUMENTS_STRUCT)       \
+template                                    \
+[[host_name(#HOST_NAME "_" #DTYPE)]]        \
+kernel void KERNEL_NAME<DTYPE>(             \
+    device   ARGUMENTS_STRUCT<DTYPE> & args    [[buffer(0)]],\
+    constant MetadataArguments & metadata_args [[buffer(1)]],\
+    constant float & weight_decay   [[buffer(2)]],\
+    constant float & momentum       [[buffer(3)]],\
+    constant float & lr             [[buffer(4)]],\
+    constant float & dampening          [[buffer(5)]],\
+    constant uint8_t & nesterov          [[buffer(6)]],\
+    constant uint8_t   & maximize       [[buffer(7)]],\
+    constant uint8_t   & is_first_step       [[buffer(8)]],\
+    uint tid [[thread_position_in_threadgroup]],\
+    uint tgid [[threadgroup_position_in_grid]],\
     uint tptg [[threads_per_threadgroup]])
 
-#define REGISTER_FUSED_SGD_MOMENTUM_OP(DTYPE) \
-template                                                            \
-[[host_name("fused_sgd_momentum_" #DTYPE)]]                         \
-kernel void fused_sgd<DTYPE>(                                       \
-    device   SgdMomentumArguments<DTYPE> & args      [[buffer(0)]], \
-    constant MetadataArguments       & metadata_args [[buffer(1)]], \
-    constant float                   & weight_decay  [[buffer(2)]], \
-    constant float                   & momentum      [[buffer(3)]], \
-    constant float                   & lr            [[buffer(4)]], \
-    constant float                   & dampening     [[buffer(5)]], \
-    constant uint8_t                 & nesterov      [[buffer(6)]], \
-    constant uint8_t                 & maximize      [[buffer(7)]], \
-    constant uint8_t                 & is_first_step [[buffer(8)]], \
-    uint tid  [[thread_position_in_threadgroup]], \
-    uint tgid [[threadgroup_position_in_grid]],   \
-    uint tptg [[threads_per_threadgroup]])
-
-REGISTER_FUSED_SGD_OP(float);
-REGISTER_FUSED_SGD_OP(half);
-REGISTER_FUSED_SGD_MOMENTUM_OP(float);
-REGISTER_FUSED_SGD_MOMENTUM_OP(half);
+REGISTER_FUSED_SGD_OP(float, fused_sgd, fused_sgd, SgdArguments);
+REGISTER_FUSED_SGD_OP(half, fused_sgd, fused_sgd, SgdArguments);
+REGISTER_FUSED_SGD_OP(float, fused_sgd_momentum, fused_sgd_momentum, SgdMomentumArguments);
+REGISTER_FUSED_SGD_OP(half, fused_sgd_momentum, fused_sgd_momentum, SgdMomentumArguments);
 
 )METAL";
 

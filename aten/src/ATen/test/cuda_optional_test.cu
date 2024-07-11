@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 #include <assert.h>
 
