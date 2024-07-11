@@ -60,8 +60,6 @@ hop_that_doesnt_have_opinfo_test_allowlist = [
     "strict_mode",
     "_export_tracepoint",
     "call_torchbind",
-    "triton_kernel_wrapper_mutation",
-    "triton_kernel_wrapper_functional",
 ]
 
 torch.library.define(

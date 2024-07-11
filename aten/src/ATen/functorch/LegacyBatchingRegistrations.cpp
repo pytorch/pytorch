@@ -289,7 +289,7 @@ static optional<c10::SymInt> maximum_indexable_location(
     c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides, const c10::SymInt& storage_offset) {
   auto result = native::storage_size_for(sizes, strides);
   if (result == 0) {
-    return std::nullopt;
+    return nullopt;
   }
   return result + storage_offset;
 }
@@ -536,7 +536,7 @@ Tensor cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
   // we'll just slice the tensor to get a Tensor of shape [0] to pass to at::cat.
   std::vector<Tensor> tensors_to_cat;
   tensors_to_cat.reserve(tensors.size());
-  std::optional<int64_t> bdim_size = std::nullopt;
+  std::optional<int64_t> bdim_size = c10::nullopt;
 
   // find the bdim size. Might not exist if all BatchedTensors should be skipped
   // by cat's special case.
@@ -573,7 +573,7 @@ Tensor cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
   }
 
   auto new_dim = bdim_size.has_value() ? dim + 1 : dim;
-  std::optional<int64_t> new_bdim = bdim_size.has_value() ? std::make_optional((int64_t)0) : nullopt;
+  std::optional<int64_t> new_bdim = bdim_size.has_value() ? c10::make_optional((int64_t)0) : nullopt;
   auto result = at::cat(tensors_to_cat, new_dim);
   return makeBatched(result, new_bdim, get_current_level());
 }

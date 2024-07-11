@@ -5,7 +5,7 @@
 #include <type_traits>
 
 #include <ATen/core/jit_type_base.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 namespace c10 {
 

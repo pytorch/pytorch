@@ -41,8 +41,6 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   py::object check_fn;
   // modified user bytecode (protected by check_fn's guards)
   py::object code;
-  // CompileId corresponding to this compilation
-  py::object compile_id;
   // root guard manager if exists
   void* root_mgr{nullptr};
   // backend used to create this cache entry
