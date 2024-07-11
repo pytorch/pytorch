@@ -1574,7 +1574,7 @@ class Graph:
                             m_itr = new_m_itr
 
     @compatibility(is_backward_compatible=True)
-    def eliminate_dead_code(self):
+    def eliminate_dead_code(self, strict=False):
         """
         Remove all dead code from the graph, based on each node's number of
         users, and whether the nodes have any side effects. The graph must be
@@ -1609,6 +1609,9 @@ class Graph:
             is very bad, so you should assume that this method is not sound
             to call unless you know that your FX graph consists entirely
             of functional operations.
+
+            If strict = True, then this will also check the schema of node target
+            to detect side-effectful nodes.
         """
         # Lint the graph first to make sure its topologically sorted, otherwise
         # DCE below will not behave as expected.
@@ -1619,7 +1622,7 @@ class Graph:
         # the removed node.
         changed = False
         for node in reversed(self.nodes):
-            if not node.is_impure() and len(node.users) == 0:
+            if not node.is_impure(strict) and len(node.users) == 0:
                 self.erase_node(node)
                 changed = True
 
