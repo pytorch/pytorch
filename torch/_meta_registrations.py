@@ -3255,7 +3255,7 @@ def meta__int_mm(a, b):
 def meta__convert_weight_to_int4pack(w, inner_k_tiles):
     torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
     torch._check(
-        w.dtype is torch.int32,
+        w.dtype is torch.uint8,
         lambda: f"expected w to be int32, got {w.dtype}",
     )
     n = w.size(0)
@@ -6047,6 +6047,49 @@ def _check_for_unsupported_isin_dtype(dtype):
         dtype not in [torch.bool, torch.bfloat16, torch.complex128, torch.complex64],
         lambda: f"Unsupported input type encountered for isin(): {dtype}",
     )
+
+
+@register_meta(aten._embedding_bag_backward)
+def meta_embedding_bag_backward(
+    grad,
+    indices,
+    offsets,
+    offset2bag,
+    bag_size,
+    maximum_indices,
+    num_weights,
+    scale_grad_by_freq,
+    mode,
+    sparse,
+    per_sample_weights,
+    padding_idx=-1,
+):
+    if sparse:
+        return aten._embedding_bag_sparse_backward(
+            grad,
+            indices,
+            offsets,
+            offset2bag,
+            bag_size,
+            num_weights,
+            scale_grad_by_freq,
+            mode,
+            per_sample_weights,
+            padding_idx,
+        )
+    else:
+        return meta_embedding_bag_dense_backward(
+            grad,
+            indices,
+            offset2bag,
+            bag_size,
+            maximum_indices,
+            num_weights,
+            scale_grad_by_freq,
+            mode,
+            per_sample_weights,
+            padding_idx,
+        )
 
 
 @register_meta(aten._embedding_bag_dense_backward)
