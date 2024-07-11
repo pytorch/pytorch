@@ -38,8 +38,10 @@ class _ComputationType(Enum):
     WEIGHT = 3
     UNSHARD = 4
     RESHARD = 5
-    SEND = 6
-    RECV = 7
+    SEND_F = 6
+    RECV_F = 7
+    SEND_B = 8
+    RECV_B = 9
 
     def __str__(self):
         str_map = {
@@ -48,8 +50,10 @@ class _ComputationType(Enum):
             _ComputationType.WEIGHT: "W",
             _ComputationType.UNSHARD: "UNSHARD",
             _ComputationType.RESHARD: "RESHARD",
-            _ComputationType.SEND: "SEND",
-            _ComputationType.RECV: "RECV",
+            _ComputationType.SEND_F: "SEND_F",
+            _ComputationType.RECV_F: "RECV_F",
+            _ComputationType.SEND_B: "SEND_B",
+            _ComputationType.RECV_B: "RECV_B",
         }
         return str_map[self]
 
@@ -65,39 +69,49 @@ class _ComputationType(Enum):
             return _ComputationType.UNSHARD
         elif action == "RESHARD":
             return _ComputationType.RESHARD
-        elif action == "SEND":
-            return _ComputationType.SEND
-        elif action == "RECV":
-            return _ComputationType.RECV
+        elif action == "SEND_F":
+            return _ComputationType.SEND_F
+        elif action == "RECV_F":
+            return _ComputationType.RECV_F
+        elif action == "SEND_B":
+            return _ComputationType.SEND_B
+        elif action == "RECV_B":
+            return _ComputationType.RECV_B
         else:
             raise RuntimeError(f"Invalid computation type {action}")
 
 
-F = _ComputationType.FORWARD
-B = _ComputationType.BACKWARD
-W = _ComputationType.WEIGHT
+FORWARD = _ComputationType.FORWARD
+BACKWARD = _ComputationType.BACKWARD
+WEIGHT = _ComputationType.WEIGHT
 UNSHARD = _ComputationType.UNSHARD
 RESHARD = _ComputationType.RESHARD
-SEND = _ComputationType.SEND
-RECV = _ComputationType.RECV
+SEND_F = _ComputationType.SEND_F
+RECV_F = _ComputationType.RECV_F
+SEND_B = _ComputationType.SEND_B
+RECV_B = _ComputationType.RECV_B
 
-_action_regex = re.compile(r"(\d+)([F,B,W]{0,1})(\d*)(UNSHARD|RESHARD|SEND|RECV){0,1}")
+# Convenience shorthand for compute actions only since they are used in 'simple schedule format'
+F = FORWARD
+B = BACKWARD
+W = WEIGHT
+
+# Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
+_action_regex = re.compile(
+    r"(\d+)([F,B,W]|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B{0,1})(\d*)"
+)
 
 
 class _Action(NamedTuple):
     stage_index: int
-    computation_type: Optional[_ComputationType] = None
+    computation_type: _ComputationType
     microbatch_index: Optional[int] = None
-    comm_type: Optional[_ComputationType] = None
 
     def __repr__(self):
         repr = str(self.stage_index)
-        if self.computation_type is not None:
-            repr += str(self.computation_type)
+        repr += str(self.computation_type)
         if self.microbatch_index is not None:
             repr += str(self.microbatch_index)
-        if self.comm_type is not None:
-            repr += str(self.comm_type)
         return repr
 
     @staticmethod
@@ -105,23 +119,20 @@ class _Action(NamedTuple):
         """
         Reverse of __repr__
 
-        String should be formatted as [stage][(action type)][(microbatch)][(comm type)]
-            e.g. `2F0`, `1UNSHARD`, `3F1SEND`
+        String should be formatted as [stage][action type][(microbatch)]
+            e.g. `2F0`, `1UNSHARD`, `3SEND_F1`
         """
         if match := _action_regex.match(str):
-            stage_index, computation_type, microbatch_index, comm_type = match.groups()
+            stage_index, computation_type, microbatch_index = match.groups()
             return _Action(
                 int(stage_index),
-                _ComputationType.from_str(computation_type)
-                if computation_type
-                else None,
+                _ComputationType.from_str(computation_type),
                 int(microbatch_index) if len(microbatch_index) else None,
-                _ComputationType.from_str(comm_type) if comm_type else None,
             )
         elif str == "" or str.isspace():
             return None
         raise RuntimeError(
-            f"Invalid action string: {str}, should be formatted as [stage][(action type)][(microbatch)][(comm type)] e.g. 2F0"
+            f"Invalid action string: {str}, should be formatted as [stage][action type][(microbatch)] e.g. 2F0"
         )
 
 
@@ -214,8 +225,8 @@ def _validate_pipeline_order(
             computation_type = action.computation_type
             mb_index = action.microbatch_index
             assert (
-                mb_index is not None and computation_type is not None
-            ), "All currently supported action types require valid microbatch_index and computation_type"
+                mb_index is not None
+            ), "All currently supported action types require valid microbatch_index"
             if mb_index >= num_microbatches:
                 error_msg.append(f"Microbatch index {mb_index} out of range")
 
@@ -773,39 +784,16 @@ class Schedule1F1B(PipelineScheduleSingle):
         self._update_losses(self._stage, losses)
 
 
-"""Given a basic schedule involving only compute actions (F,B,W), infer the necessary communication actions.
-
-Builds a more complete schedule still composed of a list of _Action per rank.
-
-Types of communications that are inferred:
-- send/recv pair is added for every forward activation and gradient that needs to flow between stages
-- FSDP Unshard/Reshard/Reduce is added
-
-Questions
-- How much heuristic can we bake in for FSDP prefetching? will users need to pass in a custom function?
-- What about DDP? should we bake allreduce into the schedule in that case?
-- Between FSDP/DDP/HSDP, do we decide up front at the time we perform add_comms or can we put in generic enough
-    actions that any of these will work at runtime?
-    (e.g. 'grad reduce' action applies to all; unshard is no-op for DDP)
-- Should '_Action' enum contain all the comm stuff too? how do we separate the basic actions from the full set?
-- Where should 'add_comms' be called? should it be called by a particular Schedule class's __init__, and possibly
-    pass flags to control the heuristics of add_comms based on that schedule?
-
-TODO
-- add a few more test cases for the shard/unshard part
-  - refactor test helper for shard/unshard to only worry about one rank at a time
-- then do send/recv part and simplify the runtime. set up e2e tests.
-"""
-
-
 def _add_unshard_reshard(
     compute_actions: List[Optional[_Action]],
     max_active_stages: int = 3,
 ) -> List[Optional[_Action]]:
-    """
-    Adds unshard/reshard actions to the schedule.
+    """Given a basic schedule involving only compute actions (F,B,W), add UNSHARD/RESHARD actions for FSDP.
 
-    we abandon the "timestep lock"  during lowering
+    UNSHARD refers to fetching the full contents of an FSDP-sharded layer, requiring an all-gather operation.
+    RESHARD does the opposite, releasing memory (but doing no commmunication)
+
+    We abandon the "timestep lock"  during lowering
 
     max_active_stages controls how many prefetches we allow. It should be measured in mb and tuneable but in practice
     3 stages is probably the thing we want?
@@ -815,7 +803,7 @@ def _add_unshard_reshard(
     def next_stage_indices(
         count: int, next_actions: List[Optional[_Action]]
     ) -> List[int]:
-        """Remove duplicates (same stage, different microbatch) and tell me the order i'll encounter the stages in"""
+        """Remove duplicates (same stage, different microbatch), find next 'count' stages that will do compute."""
         seen: Set[int] = set()
         ret: List[int] = []
 
@@ -832,11 +820,11 @@ def _add_unshard_reshard(
 
     def _unshard(stage_index: int):
         active_stages.add(stage_index)
-        unshard_actions.append(_Action(stage_index, None, None, UNSHARD))
+        unshard_actions.append(_Action(stage_index, UNSHARD, None))
 
     def _reshard(stage_index: int):
         active_stages.remove(stage_index)
-        unshard_actions.append(_Action(stage_index, None, None, RESHARD))
+        unshard_actions.append(_Action(stage_index, RESHARD, None))
 
     for i, action in enumerate(compute_actions):
         if action is None:
@@ -885,9 +873,9 @@ def _add_send_recv(
         stage_idx = action.stage_index
         ctype = action.computation_type
         mb_idx = action.microbatch_index
-        send = _Action(stage_idx, ctype, mb_idx, SEND)
+        send = _Action(stage_idx, SEND_F if ctype == F else SEND_B, mb_idx)
         recv_stage_idx = stage_idx + 1 if ctype == F else stage_idx - 1
-        recv = _Action(recv_stage_idx, ctype, mb_idx, RECV)
+        recv = _Action(recv_stage_idx, RECV_F if ctype == F else RECV_B, mb_idx)
         return send, recv
 
     def _ready_to_schedule(
@@ -902,17 +890,15 @@ def _add_send_recv(
         elif action.computation_type == F and not action.stage_index == 0:
             expected_recv = _Action(
                 action.stage_index,
-                action.computation_type,
+                RECV_F if action.computation_type == F else RECV_B,
                 action.microbatch_index,
-                RECV,
             )
             return expected_recv in prev_actions
         elif action.computation_type == B and not action.stage_index == num_stages - 1:
             expected_recv = _Action(
                 action.stage_index,
-                action.computation_type,
+                RECV_F if action.computation_type == F else RECV_B,
                 action.microbatch_index,
-                RECV,
             )
             return expected_recv in prev_actions
         else:
