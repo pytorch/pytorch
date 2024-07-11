@@ -152,6 +152,7 @@ def unwrap_tensor_subclasses(
             for x, meta in zip(xs, subclass_metas):
                 if isinstance(meta, SubclassCreationMeta):
                     assert isinstance(meta, SubclassCreationMeta)
+                    assert meta.original_subclass is not None
                     runtime_size = x.size()
                     maybe_sym_size = meta.original_subclass.size()
                     assert len(runtime_size) == len(maybe_sym_size)
@@ -221,6 +222,7 @@ def wrap_tensor_subclasses(
                     num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
                 )
             )
+            assert subclass_meta.original_subclass is not None
             num_args_tallied += subclass_meta.arg_count + sum(
                 bool(count_extra)
                 for sz in subclass_meta.original_subclass.size()
@@ -386,8 +388,9 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
             updated_input_info.append(fw_metadata.input_info[outer_idx])
             inner_idx += 1
         else:
+            assert inp_meta.original_subclass is not None
             num_extra_symints = sum(
-                1 for s in inp_meta.original_subclass.size() if isinstance(s, SymInt)
+                True for s in inp_meta.original_subclass.size() if isinstance(s, SymInt)
             )
             for _ in range(inp_meta.arg_count):
                 updated_input_info.append(fw_metadata.input_info[outer_idx])

@@ -226,7 +226,7 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
 
         if config.functionalize_rng_ops:
             PhiloxStateTracker.mark_beginning_of_backward()
-        backward_out: Tuple[Tensor, ...] = tuple()
+        backward_out: Tuple[Tensor, ...] = ()
         # Call the backwards pass
         if grad_primals:
             with fx_traceback.preserve_node_meta():
@@ -684,6 +684,15 @@ def aot_dispatch_subclass(
             grad_inputs = wrapped_outs[1]
             subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
 
+            bw_out = unwrap_tensor_subclasses(
+                wrapped_outs[1],
+                subclass_metas=None,
+                is_joint_structure=False,
+                is_runtime=False,
+                append_extra=True,
+            )
+            wrapped_outs = (wrapped_outs[0], bw_out)
+
         # Step 3: Unwrap any subclass outputs back into dense tensors
         unwrapped_outs = unwrap_tensor_subclasses(
             wrapped_outs,
@@ -777,7 +786,7 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
 
         if not isinstance(out, (tuple, list)):
             raise RuntimeError(
-                "Graph output must be a tuple(). This is so that we can avoid "
+                "Graph output must be a (). This is so that we can avoid "
                 "pytree processing of the outputs. Please change the module to "
                 "have tuple outputs or use aot_module instead."
             )
