@@ -107,6 +107,21 @@ def refunctionalize_set(graph: fx.Graph) -> None:
     #    - This ensures primal_X and Y are semantically always meant to be the same tensor within this section of the graph.
     # If the above two conditions are met, then within this section of the graph we will replace
     # downstream usage of set__Z with Y, and delete this `set__Z = .set_(primal_X, Y)` node.
+    # Example:
+    #     ```
+    #     def f(primal_X):
+    #         ...
+    #         set__Z = .set_(primal_X, Y)
+    #         out = torch.matmul(set__Z, set__Z)
+    #         ...
+    #     ```
+    # will be transformed to:
+    #     ```
+    #     def f(primal_X):
+    #         ...
+    #         out = torch.matmul(Y, Y)
+    #         ...
+    #     ```
     # For any primal input, if we have deleted the last `.set_(primal_X, ...)`, we will re-insert
     # `.set_(primal_X, Y_last)` at the end of the graph.
     for i, n in enumerate(node_list):
