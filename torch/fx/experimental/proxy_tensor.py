@@ -729,7 +729,14 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
-    def __init__(self, tracer, tracing_mode, pre_dispatch=False, _allow_fake_constant=False, _error_on_data_dependent_ops=True):
+    def __init__(
+        self,
+        tracer,
+        tracing_mode,
+        pre_dispatch=False,
+        _allow_fake_constant=False,
+        _error_on_data_dependent_ops=True
+    ):
         dk = torch._C.DispatchKey.PreDispatch if pre_dispatch else None
         super().__init__(dk)
         self.tracer = tracer

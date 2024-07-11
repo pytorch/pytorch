@@ -74,10 +74,13 @@ class BaseSchedulerNode:
         self.scheduler: Scheduler = scheduler
         self.node: Optional[ir.Buffer] = node
         self.users: List[NodeUser] = []
-        self.inverse_users: List[BaseSchedulerNode] = []
-        self.node_users: List[BaseSchedulerNode] = []
         self.set_read_writes(node.get_read_writes())
         self.ancestors: Set[str] = set()
+        # .min_order and .max_order are only relevant for "grouped" nodes such as FusedSchedulerNode.
+        # e.g. if the FusedSchedulerNode includes nodes (op_1, op_2, op_3), and op_X is X-th node
+        # in `self.scheduler.nodes`, then for this FusedSchedulerNode, .min_order is 1 and .max_order is 3.
+        # For non-"grouped" nodes (i.e. regular SchedulerNode),
+        # .min_order = .max_order = X if this node is X-th node in `self.scheduler.nodes`.
         self.min_order: int
         self.max_order: int
         self.last_usage: Set[
@@ -663,7 +666,6 @@ def pformat(obj: Any) -> str:
 class OutputNode:
     def __init__(self, dep: StarDep) -> None:
         self.unmet_dependencies = {dep}
-        self.inverse_users: List[BaseSchedulerNode] = []
 
     def is_reduction(self) -> bool:
         return False
@@ -922,8 +924,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self.scheduler = scheduler
         self.node = None
         self.users: List[NodeUser] = []
-        self.inverse_users = []
-        self.node_users = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
         self.ancestors = set.union(
             *[x.ancestors for x in snodes if x.ancestors is not None]
@@ -1091,11 +1091,17 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def get_producer_subnode_for(
         self, consumer: BaseSchedulerNode
     ) -> Optional[BaseSchedulerNode]:
+        producers = []
         for rd in consumer.read_writes.reads:
             if rd.name in self.name_to_node:
-                return self.name_to_node[rd.name]
+                producers.append(self.name_to_node[rd.name])
 
-        return None
+        # Don't permit fusion if there are multiple subnodes
+        # that this consumer reads from
+        if len(producers) == 1:
+            return producers[0]
+        else:
+            return None
 
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
@@ -1431,8 +1437,6 @@ class Scheduler:
         self.fuse_nodes()
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
-            # Refresh node_users and inverse_users to reflect fused nodes
-            self.compute_node_users()
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
@@ -1725,44 +1729,6 @@ class Scheduler:
         for node in self.nodes:
             node.set_users(name_to_users[node.get_name()].items)
 
-        # populate inverse_users
-        for node in self.nodes:
-            for user in node.users:
-                user.node.inverse_users.append(node)
-
-    def compute_node_users(self) -> None:
-        # set up buffer name to (fused)snode mapping
-        buf_to_snode: Dict[str, BaseSchedulerNode] = {}
-        for node in self.nodes:
-            if isinstance(node, FusedSchedulerNode):
-                for x in node.snodes:
-                    buf_to_snode[x.get_name()] = node
-            buf_to_snode[node.get_name()] = node
-
-        for node in self.nodes:
-            node.node_users = []
-            node.inverse_users = []
-
-        # compute inverse_users
-        for node in self.nodes:
-            inverse_users: List[BaseSchedulerNode] = []
-            for dep in node.unmet_dependencies:
-                assert dep.name in buf_to_snode
-                dep_node = buf_to_snode[dep.name]
-                inverse_users.append(dep_node)
-            node.inverse_users = inverse_users
-
-        # compute node_users
-        # TODO: ideally, we should deduplicate .users and .node_users,
-        # but currently .users contains extra information that's difficult to
-        # extract into a standalone container.
-        node_to_users: Dict[BaseSchedulerNode, List[BaseSchedulerNode]] = {}
-        for node in self.nodes:
-            for inverse_user in node.inverse_users:
-                node_to_users.setdefault(inverse_user, []).append(node)
-        for node, users in node_to_users.items():
-            node.node_users = users
-
     def dead_node_elimination(self) -> None:
         """
         Remove any nodes without users
@@ -1917,9 +1883,6 @@ class Scheduler:
                 new_scheduler_node.min_order = node.min_order
                 new_scheduler_node.max_order = node.max_order
                 new_scheduler_node.last_usage = node.last_usage
-                for user in new_scheduler_node.users:
-                    user.node.inverse_users.remove(node)
-                    user.node.inverse_users.append(new_scheduler_node)
 
     def speedup_by_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -2679,7 +2642,7 @@ class Scheduler:
                 )
             elif is_gpu(device.type):
                 raise RuntimeError(
-                    "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
+                    "Cannot find a working triton installation. Either the package is not installed or it is too old. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
                 )
 
         return device_scheduling(self)

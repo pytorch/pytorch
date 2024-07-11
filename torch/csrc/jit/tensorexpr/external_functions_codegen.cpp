@@ -12,6 +12,7 @@ namespace torch::jit::tensorexpr {
 extern "C" {
 #endif
 
+#ifndef C10_MOBILE
 static void nnc_aten_abs(
     int64_t bufs_num,
     void** buf_data,
@@ -2884,7 +2885,6 @@ static void nnc_aten_linalg_solve(
   }
 }
 
-#ifndef C10_MOBILE
 const static RegisterNNCExternalFunction nnc_abs("nnc_aten_abs", nnc_aten_abs);
 const static RegisterNNCExternalFunction nnc_absolute(
     "nnc_aten_absolute",
