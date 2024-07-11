@@ -20,6 +20,7 @@
 #include <ATen/ops/imag.h>
 #endif
 
+#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <ATen/AccumulateType.h>
 

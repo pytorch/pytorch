@@ -5,12 +5,12 @@
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/MathConstants.h>
+#include <c10/util/Optional.h>
 #include <c10/macros/Macros.h>
 
-#include <cmath>
-#include <limits>
-#include <optional>
 #include <type_traits>
+#include <limits>
+#include <cmath>
 
 /**
  * Distributions kernel adapted from THRandom.cpp

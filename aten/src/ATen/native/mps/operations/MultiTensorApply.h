@@ -42,12 +42,12 @@ struct FusedAdamEncodingFunctor {
     [computeEncoder setBytes:&metadata_arguments
                                   length:sizeof(MetadataArguments)
                                   atIndex:1];
-    mtl_setBytes(computeEncoder, lr_lv, 2);
-    mtl_setBytes(computeEncoder, beta1_lv, 3);
-    mtl_setBytes(computeEncoder, beta2_lv, 4);
-    mtl_setBytes(computeEncoder, weight_decay_lv, 5);
-    mtl_setBytes(computeEncoder, eps_lv, 6);
-    mtl_setBytes(computeEncoder, maximize_lv, 7);
+    [computeEncoder setBytes:&lr_lv length:sizeof(float) atIndex:2];
+    [computeEncoder setBytes:&beta1_lv length:sizeof(float) atIndex:3];
+    [computeEncoder setBytes:&beta2_lv length:sizeof(float) atIndex:4];
+    [computeEncoder setBytes:&weight_decay_lv length:sizeof(float) atIndex:5];
+    [computeEncoder setBytes:&eps_lv length:sizeof(float) atIndex:6];
+    [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
   }
 
   void operator()(
@@ -73,20 +73,16 @@ struct FusedAdamEncodingFunctor {
     [computeEncoder setBytes:&metadata_arguments
                                   length:sizeof(MetadataArguments)
                                   atIndex:1];
-    mtl_setBuffer(computeEncoder, lr, 2);
-    mtl_setBytes(computeEncoder, beta1_lv, 3);
-    mtl_setBytes(computeEncoder, beta2_lv, 4);
-    mtl_setBytes(computeEncoder, weight_decay_lv, 5);
-    mtl_setBytes(computeEncoder, eps_lv, 6);
-    mtl_setBytes(computeEncoder, maximize_lv, 7);
+    [computeEncoder setBuffer:getMTLBufferStorage(lr) offset:lr.storage_offset() * lr.element_size() atIndex:2];
+    [computeEncoder setBytes:&beta1_lv length:sizeof(float) atIndex:3];
+    [computeEncoder setBytes:&beta2_lv length:sizeof(float) atIndex:4];
+    [computeEncoder setBytes:&weight_decay_lv length:sizeof(float) atIndex:5];
+    [computeEncoder setBytes:&eps_lv length:sizeof(float) atIndex:6];
+    [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
   }
 };
 
-template <bool momentum>
-struct FusedSgdEncodingFunctor {};
-
-template <>
-struct FusedSgdEncodingFunctor<true> {
+struct FusedSgdEncodingFunctor {
   void operator()(
     id<MTLComputeCommandEncoder>& computeEncoder,
       id<MTLBuffer>& tensorArgumentBuffer,
@@ -113,13 +109,13 @@ struct FusedSgdEncodingFunctor<true> {
       [computeEncoder setBytes:&metadata_arguments
                                   length:sizeof(MetadataArguments)
                                   atIndex:1];
-      mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-      mtl_setBytes(computeEncoder, momentum_lv, 3);
-      mtl_setBytes(computeEncoder, lr_lv, 4);
-      mtl_setBytes(computeEncoder, dampening_lv, 5);
-      mtl_setBytes(computeEncoder, nesterov_lv, 6);
-      mtl_setBytes(computeEncoder, maximize_lv, 7);
-      mtl_setBytes(computeEncoder, is_first_step_lv, 8);
+      [computeEncoder setBytes:&weight_decay_lv length:sizeof(float) atIndex:2];
+      [computeEncoder setBytes:&momentum_lv length:sizeof(float) atIndex:3];
+      [computeEncoder setBytes:&lr_lv length:sizeof(float) atIndex:4];
+      [computeEncoder setBytes:&dampening_lv length:sizeof(float) atIndex:5];
+      [computeEncoder setBytes:&nesterov_lv length:sizeof(uint8_t) atIndex:6];
+      [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
+      [computeEncoder setBytes:&is_first_step_lv length:sizeof(uint8_t) atIndex:8];
   }
 
   void operator()(
@@ -147,61 +143,13 @@ struct FusedSgdEncodingFunctor<true> {
       [computeEncoder setBytes:&metadata_arguments
                                   length:sizeof(MetadataArguments)
                                   atIndex:1];
-      mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-      mtl_setBytes(computeEncoder, momentum_lv, 3);
-      mtl_setBuffer(computeEncoder, lr, 4);
-      mtl_setBytes(computeEncoder, dampening_lv, 5);
-      mtl_setBytes(computeEncoder, nesterov_lv, 6);
-      mtl_setBytes(computeEncoder, maximize_lv, 7);
-      mtl_setBytes(computeEncoder, is_first_step_lv, 8);
-  }
-};
-
-template <>
-struct FusedSgdEncodingFunctor<false> {
-  void operator()(
-    id<MTLComputeCommandEncoder>& computeEncoder,
-      id<MTLBuffer>& tensorArgumentBuffer,
-      const MetadataArguments& metadata_arguments,
-      const double weight_decay,
-      const double lr,
-      const bool maximize
-    ) const {
-      float weight_decay_lv = weight_decay;
-      float lr_lv = lr;
-      uint8_t maximize_lv = maximize;
-
-      [computeEncoder setBuffer:tensorArgumentBuffer
-                                  offset:0
-                                  atIndex:0];
-      [computeEncoder setBytes:&metadata_arguments
-                                  length:sizeof(MetadataArguments)
-                                  atIndex:1];
-      mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-      mtl_setBytes(computeEncoder, lr_lv, 3);
-      mtl_setBytes(computeEncoder, maximize_lv, 4);
-  }
-
-  void operator()(
-    id<MTLComputeCommandEncoder>& computeEncoder,
-      id<MTLBuffer>& tensorArgumentBuffer,
-      const MetadataArguments& metadata_arguments,
-      const double weight_decay,
-      const at::Tensor& lr,
-      const bool maximize
-    ) const {
-      float weight_decay_lv = weight_decay;
-      uint8_t maximize_lv = maximize;
-
-      [computeEncoder setBuffer:tensorArgumentBuffer
-                                  offset:0
-                                  atIndex:0];
-      [computeEncoder setBytes:&metadata_arguments
-                                  length:sizeof(MetadataArguments)
-                                  atIndex:1];
-      mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-      mtl_setBuffer(computeEncoder, lr, 3);
-      mtl_setBytes(computeEncoder, maximize_lv, 4);
+      [computeEncoder setBytes:&weight_decay_lv length:sizeof(float) atIndex:2];
+      [computeEncoder setBytes:&momentum_lv length:sizeof(float) atIndex:3];
+      [computeEncoder setBuffer:getMTLBufferStorage(lr) offset:lr.storage_offset() * lr.element_size() atIndex:4];
+      [computeEncoder setBytes:&dampening_lv length:sizeof(float) atIndex:5];
+      [computeEncoder setBytes:&nesterov_lv length:sizeof(uint8_t) atIndex:6];
+      [computeEncoder setBytes:&maximize_lv length:sizeof(uint8_t) atIndex:7];
+      [computeEncoder setBytes:&is_first_step_lv length:sizeof(uint8_t) atIndex:8];
   }
 };
 
@@ -266,11 +214,15 @@ static void multi_tensor_apply_for_fused_optimizer(
         }
 
         for (const auto& d : c10::irange(depth)) {
-            mtl_setBuffer(tensorArgumentEncoder, tensor_lists[d][tensor_index], d * kmaxTensors + tensor_loc);
+            [tensorArgumentEncoder setBuffer:getMTLBufferStorage(tensor_lists[d][tensor_index])
+                                      offset:tensor_lists[d][tensor_index].storage_offset() * tensor_lists[d][tensor_index].element_size()
+                                     atIndex:d * kmaxTensors + tensor_loc];
             [computeEncoder useResource:getMTLBufferStorage(tensor_lists[d][tensor_index]) usage:MTLResourceUsageRead | MTLResourceUsageWrite];
         }
         if (state_steps.size() > 0){
-          mtl_setBuffer(tensorArgumentEncoder, state_steps[tensor_index], depth * kmaxTensors + tensor_loc);
+          [tensorArgumentEncoder setBuffer:getMTLBufferStorage(state_steps[tensor_index])
+                             offset:state_steps[tensor_index].storage_offset() * state_steps[tensor_index].element_size()
+                            atIndex:depth * kmaxTensors + tensor_loc];
           [computeEncoder useResource:getMTLBufferStorage(state_steps[tensor_index]) usage:MTLResourceUsageRead];
         }
         metadata_arguments.numels[tensor_loc] = tensor_lists[0][tensor_index].numel();
@@ -313,11 +265,15 @@ static void multi_tensor_apply_for_fused_optimizer(
                   [tensorArgumentEncoder setArgumentBuffer:tensorArgumentBuffer offset:0];
 
                   for (const auto& d : c10::irange(depth)) {
-                      mtl_setBuffer(tensorArgumentEncoder, tensor_lists[d][tensor_index], d * kmaxTensors);
+                      [tensorArgumentEncoder setBuffer:getMTLBufferStorage(tensor_lists[d][tensor_index])
+                                                offset:tensor_lists[d][tensor_index].storage_offset() * tensor_lists[d][tensor_index].element_size()
+                                              atIndex:d * kmaxTensors + 0];
                       [computeEncoder useResource:getMTLBufferStorage(tensor_lists[d][tensor_index]) usage:MTLResourceUsageWrite | MTLResourceUsageRead];
                   }
                   if (state_steps.size() > 0){
-                    mtl_setBuffer(tensorArgumentEncoder, state_steps[tensor_index], depth * kmaxTensors);
+                    [tensorArgumentEncoder setBuffer:getMTLBufferStorage(state_steps[tensor_index])
+                                      offset:state_steps[tensor_index].storage_offset() * state_steps[tensor_index].element_size()
+                                      atIndex:depth * kmaxTensors + 0];
                     [computeEncoder useResource:getMTLBufferStorage(state_steps[tensor_index]) usage:MTLResourceUsageRead];
                   }
                   tensor_loc = 1;
