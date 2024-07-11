@@ -9,17 +9,13 @@ PHILOX_KEY_A_U32 = hl.u32(0x9E3779B9)
 PHILOX_KEY_B_U32 = hl.u32(0xBB67AE85)
 PHILOX_ROUND_A_U32 = hl.u32(0xD2511F53)
 PHILOX_ROUND_B_U32 = hl.u32(0xCD9E8D57)
-PHILOX_KEY_A_U64 = hl.u64(0x9E3779B97F4A7C15)
-PHILOX_KEY_B_U64 = hl.u64(0xBB67AE8584CAA73B)
-PHILOX_ROUND_A_U64 = hl.u64(0xD2E7470EE14C6C93)
-PHILOX_ROUND_B_U64 = hl.u64(0xCA5A826395121157)
 
 
 def _pair_uniform_to_normal(u1, u2):
     """Box-Muller transform"""
-    u1 = hl.max(1.0e-7, u1)
-    th = 6.283185307179586 * u2
-    r = hl.sqrt(-2.0 * hl.log(u1))
+    u1 = hl.max(hl.f32(1.0e-7), u1)
+    th = hl.f32(6.283185307179586) * u2
+    r = hl.sqrt(hl.f32(-2.0) * hl.log(u1))
     return r * hl.cos(th), r * hl.sin(th)
 
 
@@ -50,31 +46,16 @@ def philox_impl(c0, c1, c2, c3, k0, k1, n_rounds):
         b = hl.cast(hl.UInt(64), b)
         return hl.cast(hl.UInt(32), ((a * b) >> 32) & hl.u64(0xFFFFFFFF))
 
-    if c0.type() == hl.UInt(32):
-        PHILOX_KEY_A, PHILOX_KEY_B, PHILOX_ROUND_A, PHILOX_ROUND_B = (
-            PHILOX_KEY_A_U32,
-            PHILOX_KEY_B_U32,
-            PHILOX_ROUND_A_U32,
-            PHILOX_ROUND_B_U32,
-        )
-    else:
-        PHILOX_KEY_A, PHILOX_KEY_B, PHILOX_ROUND_A, PHILOX_ROUND_B = (
-            PHILOX_KEY_A_U64,
-            PHILOX_KEY_B_U64,
-            PHILOX_ROUND_A_U64,
-            PHILOX_ROUND_B_U64,
-        )
-
     for _ in range(n_rounds):
         _c0, _c2 = c0, c2
 
-        c0 = umulhi(PHILOX_ROUND_B, _c2) ^ c1 ^ k0
-        c2 = umulhi(PHILOX_ROUND_A, _c0) ^ c3 ^ k1
-        c1 = PHILOX_ROUND_B * _c2
-        c3 = PHILOX_ROUND_A * _c0
+        c0 = umulhi(PHILOX_ROUND_B_U32, _c2) ^ c1 ^ k0
+        c2 = umulhi(PHILOX_ROUND_A_U32, _c0) ^ c3 ^ k1
+        c1 = PHILOX_ROUND_B_U32 * _c2
+        c3 = PHILOX_ROUND_A_U32 * _c0
         # raise key
-        k0 = k0 + PHILOX_KEY_A
-        k1 = k1 + PHILOX_KEY_B
+        k0 = k0 + PHILOX_KEY_A_U32
+        k1 = k1 + PHILOX_KEY_B_U32
 
     return c0, c1, c2, c3
 
@@ -82,14 +63,10 @@ def philox_impl(c0, c1, c2, c3, k0, k1, n_rounds):
 def halide_philox(seed, c0, c1, c2, c3, n_rounds):
     seed = hl.cast(hl.UInt(64), seed)
 
-    if c0.type().bits() == 32:
-        seed_hi = hl.cast(hl.UInt(32), (seed >> 32) & hl.u64(0xFFFFFFFF))
-        seed_lo = hl.cast(hl.UInt(32), seed & hl.u64(0xFFFFFFFF))
-    elif c0.type().bits() == 64:
-        seed_hi = hl.u64(1)
-        seed_lo = seed
-    else:
-        raise TypeError(f"Unsupported type {c0.type()} in philox")
+    assert c0.type().bits() == 32
+
+    seed_hi = hl.cast(hl.UInt(32), (seed >> 32) & hl.u64(0xFFFFFFFF))
+    seed_lo = hl.cast(hl.UInt(32), seed & hl.u64(0xFFFFFFFF))
 
     return philox_impl(c0, c1, c2, c3, seed_lo, seed_hi, n_rounds)
 
