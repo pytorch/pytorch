@@ -142,10 +142,7 @@ class TestStridedSharding(DTensorTestBase):
         """
         contiguous sharding: [0, 1 | 2, 3 | 4, 5 | 6, 7]
         """
-        split_factor = 1
-        shard_placement = _StridedShard(
-            0, _total_split=(split_factor * self.world_size)
-        )
+        shard_placement = _StridedShard(0, split_factor=1)  # same as Shard(0)
         tensor_list, _ = shard_placement._split_tensor(x, self.world_size)
         shard_x = tensor_list[self.rank]
         self.assertEqual(shard_x, x.view(self.world_size, -1)[self.rank])
@@ -161,10 +158,7 @@ class TestStridedSharding(DTensorTestBase):
         """
         strided sharding: [0, 4 | 1, 5 | 2, 6 | 3, 7]
         """
-        split_factor = 2
-        shard_placement = _StridedShard(
-            0, _total_split=(split_factor * self.world_size)
-        )
+        shard_placement = _StridedShard(0, split_factor=2)
         tensor_list, _ = shard_placement._split_tensor(x, self.world_size)
         shard_x = tensor_list[self.rank]
         self.assertEqual(
@@ -196,18 +190,15 @@ class TestStridedSharding(DTensorTestBase):
             [ 4, 5 | 6, 7 ],
         ]
         """
-        split_factor = 1
         # shard on mesh dim-0
-        shard_placement_dim0 = _StridedShard(
-            0, _total_split=(split_factor * mesh_dim0_size)
-        )
+        shard_placement_dim0 = _StridedShard(0, split_factor=1)  # same as Shard(0)
         tensor_list, _ = shard_placement_dim0._split_tensor(x, mesh_dim0_size)
         expected_shard_dim0 = x.view(mesh_dim0_size, -1)[mesh_dim0_local_rank]
         shard_x = tensor_list[mesh_dim0_local_rank]
         self.assertEqual(shard_x, expected_shard_dim0)
 
         # shard on mesh dim-1
-        shard_placement_dim1 = _StridedShard(0, _total_split=mesh_dim1_size)
+        shard_placement_dim1 = _StridedShard(0, split_factor=1)  # same as Shard(0)
         tensor_list, _ = shard_placement_dim1._split_tensor(shard_x, mesh_dim1_size)
         expected_shard_dim1 = shard_x.view(mesh_dim1_size, -1)[mesh_dim1_local_rank]
         shard_x = tensor_list[mesh_dim1_local_rank]
@@ -239,9 +230,7 @@ class TestStridedSharding(DTensorTestBase):
         """
         split_factor = 2
         # shard on mesh dim-0
-        shard_placement_dim0 = _StridedShard(
-            0, _total_split=(split_factor * mesh_dim0_size)
-        )
+        shard_placement_dim0 = _StridedShard(0, split_factor=split_factor)
         tensor_list, _ = shard_placement_dim0._split_tensor(x, mesh_dim0_size)
         expected_shard_dim0 = (
             x.view(mesh_dim0_size, -1)
@@ -255,7 +244,7 @@ class TestStridedSharding(DTensorTestBase):
         self.assertEqual(shard_x, expected_shard_dim0)
 
         # shard on mesh dim-1
-        shard_placement_dim1 = _StridedShard(0, _total_split=mesh_dim1_size)
+        shard_placement_dim1 = _StridedShard(0, split_factor=1)  # same as Shard(0)
         tensor_list, _ = shard_placement_dim1._split_tensor(shard_x, mesh_dim1_size)
         expected_shard_dim1 = shard_x.view(mesh_dim1_size, -1)[mesh_dim1_local_rank]
         shard_x = tensor_list[mesh_dim1_local_rank]
@@ -330,8 +319,8 @@ class Test2DStridedLocalShard(DTensorTestBase):
         # Ideally, with strided sharding, the offsets should be  rank0: [0, 0], rank1: [2, 0], rank2: [1, 0], rank3: [3, 0]
         # TODO: to make the local shard of FSDP2 + TP correct for resharding, it would require strided_sharding
         # as well as let compute_local_shape_and_global_offset takes into consideration of strided_sharding.
+        global_tensor = torch.arange(8).view(4, 2)
         with CommDebugMode() as comm_mode:
-            global_tensor = torch.arange(8).view(4, 2)
             mesh_2d = init_device_mesh(
                 self.device_type, (2, 2), mesh_dim_names=("DP", "TP")
             )
@@ -344,7 +333,7 @@ class Test2DStridedLocalShard(DTensorTestBase):
             sharded_param = chunks[shard_rank]
             spec_2d = DTensorSpec(
                 mesh=mesh_2d,
-                placements=(Shard(0), Shard(0)),
+                placements=(_StridedShard(0, split_factor=2), Shard(0)),
                 tensor_meta=TensorMeta(
                     global_tensor.size(),
                     global_tensor.stride(),
@@ -358,9 +347,11 @@ class Test2DStridedLocalShard(DTensorTestBase):
                 requires_grad=False,
             )
 
-            self.assertEqual(
-                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 0
-            )
+        self.assertEqual(
+            comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 0
+        )
+
+        self.assertEqual(global_tensor, dtensor_2d.full_tensor())
 
 
 if __name__ == "__main__":
