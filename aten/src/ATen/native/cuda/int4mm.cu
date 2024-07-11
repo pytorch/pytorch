@@ -1038,7 +1038,7 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
 
     auto kBase1 = kBase0 + kKTileSize / 2;
     ks[2] = kBase1 + (t / kNTileSize) * 2;
-    ks[3] = ks[4] + 1;
+    ks[3] = ks[2] + 1;
 #else
     ks[0] = kBase0 + t % 4;
     ks[1] = ks[0] + 4;
