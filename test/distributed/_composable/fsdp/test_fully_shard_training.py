@@ -5,11 +5,10 @@ import copy
 import functools
 import itertools
 import unittest
-from typing import Iterable, List, Tuple, Type, Union
+from typing import Iterable, List, Tuple, Union
 
 import torch
 import torch.distributed as dist
-import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed._composable import checkpoint, replicate
 from torch.distributed._composable.fsdp import (
@@ -25,10 +24,6 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
     apply_activation_checkpointing,
     CheckpointWrapper,
-)
-from torch.distributed.checkpoint.state_dict import (
-    get_model_state_dict,
-    get_optimizer_state_dict,
 )
 from torch.distributed.device_mesh import DeviceMesh
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -46,7 +41,6 @@ from torch.testing._internal.common_fsdp import (
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     run_tests,
-    skipIfRocm,
     wrapSwapTensorsTest,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -54,7 +48,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
     TransformerBlock,
 )
-from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 c10d_ops = torch.ops.c10d
 funcol = torch.ops.c10d_functional
