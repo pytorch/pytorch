@@ -3697,7 +3697,7 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         >>> # Rank i gets scatter_list[i].
         >>> output_tensor
         tensor([1., 1.], device='cuda:0') # Rank 0
-        tensor([5., 5.], device='cuda:0') # Rank 1
+        tensor([5., 5.], device='cuda:1') # Rank 1
 
     """
     _check_single_tensor(tensor, "tensor")
