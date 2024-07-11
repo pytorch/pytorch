@@ -2526,15 +2526,7 @@ class DtypeView(BaseView):
 
     def __post_init__(self):
         super().__post_init__()
-        if is_storage_and_layout(self.data):
-            _, old_layout = as_storage_and_layout(self.data)
-            self._layout = FixedLayout(
-                old_layout.device,
-                self.target_dtype,
-                old_layout.size,
-                old_layout.stride,
-                old_layout.offset,
-            )
+        self._layout = self.create_new_layout(self.data, self.target_dtype)
 
     @classmethod
     def create(cls, x, new_dtype):
@@ -2561,7 +2553,21 @@ class DtypeView(BaseView):
 
     @property
     def layout(self):
+        if not hasattr(self, "_layout") or self._layout is None:
+            self._layout = self.create_new_layout(self.data, self.target_dtype)
         return self._layout
+
+    def create_new_layout(self, x, new_dtype):
+        if is_storage_and_layout(x):
+            _, old_layout = as_storage_and_layout(x)
+            return FixedLayout(
+                old_layout.device,
+                new_dtype,
+                old_layout.size,
+                old_layout.stride,
+                old_layout.offset,
+            )
+        return None
 
     def get_size(self):
         return self.data.get_size()
