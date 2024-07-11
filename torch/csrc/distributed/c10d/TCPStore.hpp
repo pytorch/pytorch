@@ -9,9 +9,9 @@
 namespace c10d {
 namespace detail {
 
-// TCPStore essentially is a key-value pair storage we used for rendezvous
-// during the initialization of PyTorch distributed setup. It can also be used
-// for a centralized storage for synchronization among different processes.
+// TCPStore is a key-value store used by PyTorch mainly for distributed
+// rendezvous, but for other purposes as well. (e.g., a centralized storage for
+// synchronization among different processes.)
 //
 // It is run via a classic client-server architecture, where the server runs
 // a separate background thread (alternatively we call it daemon thread). The
@@ -28,7 +28,7 @@ namespace detail {
 //
 // Code structure:
 // ├── TCPStore client side API and server setup code:
-// │   TCPStore.hpp/TCPStore..cpp
+// │   TCPStore.hpp/TCPStore.cpp
 // ├── TCPStoreBackend server side API implementation code:
 // │   TCPStoreBackend.hpp/TCPStoreBackend.cpp
 // |   (actual class:`TCPStoreMasterDaemon`)
