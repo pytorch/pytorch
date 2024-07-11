@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import inspect
 import logging
 import operator
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
@@ -27,32 +29,32 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+@dataclass
 class _RootArgPlaceholder:
     """
-    Placeholder for model-level inputs.
+    Placeholder for model-level inputs (not received from other stages).
     """
 
-    def __init__(self, tensor):
-        self.meta = tensor.to("meta")
+    # Keep a reference to the argument
+    obj: Any
+    # input arg index
+    arg_index: int = -1
 
 
+@dataclass
 class _RecvInfo:
     """
-    Represents a stage input.
+    Represents the recv info needed for the input to a stage.
     """
 
-    def __init__(
-        self,
-        input_name: str,
-        source: int,
-        buffer: torch.Tensor,
-    ):
-        # Name of this input
-        self.input_name = input_name
-        # Stage index of the source of this input
-        self.source = source
-        # Buffer to receive the input into.
-        self.buffer = buffer
+    # Name of this input
+    input_name: str
+    # Stage index of the source of this input
+    source: int
+    # Buffer to receive the input into.
+    buffer: torch.Tensor
+    # input arg index
+    arg_index: int = -1
 
     def __repr__(self):
         return f"_RecvInfo(input={self.input_name}, source={self.source}, shape={self.buffer.size()})"
@@ -77,6 +79,24 @@ def _make_tensor_from_meta(
     )
 
 
+def _validate_args(func, args, kwargs):
+    """
+    Validate if the provided args and kwargs can be passed to the function.
+    Args:
+        func (Callable): The function (or method) to validate arguments for.
+        args (tuple): Positional arguments to be passed to the function.
+        kwargs (dict): Keyword arguments to be passed to the function.
+    Returns:
+        bool: True if arguments are valid, False otherwise.
+    """
+    try:
+        sig = inspect.signature(func)
+        sig.bind(*args, **kwargs)
+        return True
+    except TypeError as e:
+        return False
+
+
 class _PipelineStageBase(ABC):
     """
     Base class for pipeline stages.
@@ -92,6 +112,7 @@ class _PipelineStageBase(ABC):
         device: torch.device,
         group: Optional[dist.ProcessGroup] = None,
         dw_builder: Optional[Callable[[], Callable[[], None]]] = None,
+        transform_fwd_inputs: Optional[Callable] = None,
     ):
         """
         Args:
@@ -123,6 +144,9 @@ class _PipelineStageBase(ABC):
         self.group = group
 
         self.dw_builder = dw_builder
+        if transform_fwd_inputs is None:
+            transform_fwd_inputs = _transform_fwd_inputs
+        self.transform_fwd_inputs = transform_fwd_inputs
 
         # store dw_runner per microbatch_id
         self.dw_runner: Dict[int, Callable[[], None]] = {}
@@ -287,7 +311,7 @@ class _PipelineStageBase(ABC):
                 peer_rank
                 if self.group is None
                 else dist.get_global_rank(self.group, peer_rank)
-            )  # TODO
+            )
             ops.append(
                 dist.P2POp(dist.irecv, info.buffer, peer_global_rank, self.group)
             )
@@ -346,7 +370,7 @@ class _PipelineStageBase(ABC):
                     peer_rank
                     if self.group is None
                     else dist.get_global_rank(self.group, peer_rank)
-                )  # TODO
+                )
                 ops.append(dist.P2POp(dist.isend, out, peer_global_rank, self.group))
 
         return ops
@@ -380,7 +404,7 @@ class _PipelineStageBase(ABC):
                     peer_rank
                     if self.group is None
                     else dist.get_global_rank(self.group, peer_rank)
-                )  # TODO
+                )
                 ops.append(dist.P2POp(dist.isend, grad, peer_global_rank, self.group))
             else:
                 if not (grad is None and grad_recv_stage is None):
@@ -423,6 +447,8 @@ class _PipelineStageBase(ABC):
         def get_recv_tensor(info):
             if isinstance(info, _RecvInfo):
                 return info.buffer
+            elif isinstance(info, _RootArgPlaceholder):
+                return None
             else:
                 raise AssertionError(f"Expected _RecvInfo but got {type(info)}")
 
@@ -510,16 +536,17 @@ class _PipelineStageBase(ABC):
         `args` and `kwargs` are the inputs from *external* to this stage. They
         applies only to the first stage in most cases.
         """
-
         if self.is_first:
-            # First stage doesn't need to receive anything
-            composite_args = args
-            composite_kwargs = kwargs or {}
+            recv_args = ()
         else:
             # Receive activations for this chunk
             # Activations only come in args form
-            composite_args = self._retrieve_recv_activations(fwd_chunk_id)
-            composite_kwargs = {}
+            recv_args = self._retrieve_recv_activations(fwd_chunk_id)
+
+        # transform args and kwargs based on the what the user defines
+        composite_args, composite_kwargs = self.transform_fwd_inputs(
+            self, fwd_chunk_id, args, kwargs, recv_args
+        )
 
         self._validate_fwd_input(args, kwargs)
 
@@ -630,6 +657,10 @@ class _PipelineStageBase(ABC):
     def _validate_fwd_input(self, args, kwargs):
         """Raises a RuntimeError if shapes of input args/kwargs do not match the shapes configured for this stage."""
 
+        # print(f"{args=}, {kwargs=}")
+
+        # print(f"{self.args_recv_info=}")
+
         if self.is_first:
             # TODO why is there a separate recv_info for each pipeline chunk?
             # kwen2501: to avoid passing a `fwd_chunk_id` to this function, we
@@ -649,13 +680,13 @@ class _PipelineStageBase(ABC):
         # maybe it's impossible to tell whether the len mismatches because
         # (a) the user passed an extra arg or missed an arg
         # (b) the user did not pass a kwarg, which has a default value baked into expected_args
-        expected_tensors_meta = [
-            e.meta if isinstance(e, _RootArgPlaceholder) else e.buffer
-            for e in expected_args
-        ]
-        validate_tensors_metadata(
-            f"Stage {self.stage_index} forward inputs", expected_tensors_meta, args
-        )
+        # expected_tensors_meta = [
+        #     e.meta if isinstance(e, _RootArgPlaceholder) else e.buffer
+        #     for e in expected_args
+        # ]
+        # validate_tensors_metadata(
+        #     f"Stage {self.stage_index} forward inputs", expected_tensors_meta, args
+        # )
 
     def _validate_fwd_outputs(self, outputs: Tuple[torch.Tensor, ...]):
         """Raises a RuntimeError if this stage produces an output of unexpected shape/dtype.
@@ -963,6 +994,28 @@ def build_stage(
     )
 
 
+def _transform_fwd_inputs(
+    stage: _PipelineStageBase,
+    fwd_chunk_id: int,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]],
+    recv_args,
+):
+    """
+    Transform the inputs before calling the module forward
+
+    Return the args and kwargs
+    """
+    if stage.is_first:
+        composite_args = args
+        composite_kwargs = kwargs or {}
+    else:
+        composite_args = recv_args
+        composite_kwargs = {}
+
+    return composite_args, composite_kwargs
+
+
 # Manual PipelineStage functions and definition
 
 METADATA_TENSOR_LEN = 100
@@ -986,6 +1039,23 @@ def _create_empty_tensors(
     elif isinstance(tensor, (list, tuple)):
         return [torch.empty_like(t, device=device) for t in tensor]
     raise TypeError(f"Unsupported type {type(tensor)} cannot create empty tensors")
+
+
+def _check_and_convert_args_to_list(args: Any) -> Tuple[List[Any], bool]:
+    """
+    If args is not already an iterable, then convert it to an iterable.
+
+    Args:
+        args (Any): The input arguments.
+
+    Returns:
+        Tuple[List[Any], bool]: A tuple containing the list of arguments and a boolean
+            indicating whether any non-tensor objects were found.
+    """
+    if not isinstance(args, (list, tuple)):
+        args = [args]
+    has_non_tensors = any(not isinstance(arg, torch.Tensor) for arg in args)
+    return args, has_non_tensors
 
 
 def _create_metadata_tensor(
@@ -1133,10 +1203,13 @@ class PipelineStage(_PipelineStageBase):
         stage_index (int): The ID of this stage.
         num_stages (int): The total number of stages.
         device (torch.device): The device where this stage is located.
-        input_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The input arguments for the submodule.
-        output_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The output arguments for the submodule.
+        input_args (Union[Any, Tuple[Any]]): The input arguments for the submodule.
+        input_kwargs (Dict[str, Any], optional): The input key word arguments for the submodule.
+        output_args (Union[Any, Tuple[Any]], optional): The output arguments for the submodule.
         group (dist.ProcessGroup, optional): The process group for distributed training. If None, default group.
         dw_builder: TODO clean up comments
+        recv_input_args_idx_to_kwargs_key (Dict[int, str], optional): A dictionary mapping the index of the input
+            arguments to the key word arguments.
     """
 
     def __init__(
@@ -1145,32 +1218,54 @@ class PipelineStage(_PipelineStageBase):
         stage_index: int,
         num_stages: int,
         device: torch.device,
-        input_args: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
-        output_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
+        input_args: Union[Any, Tuple[Any, ...]],
+        input_kwargs: Optional[Dict[str, Any]] = None,
+        output_args: Optional[Union[Any, Tuple[Any, ...]]] = None,
         group: Optional[dist.ProcessGroup] = None,
         dw_builder: Optional[Callable[[], Callable[[], None]]] = None,
+        transform_fwd_inputs: Optional[Callable] = None,
     ):
-        super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
+        super().__init__(
+            submodule,
+            stage_index,
+            num_stages,
+            device,
+            group,
+            dw_builder,
+            transform_fwd_inputs,
+        )
         self.submod.to(self.device)
+        if input_kwargs is None:
+            input_kwargs = {}
+
         # When we materialize the model partition on cuda, we call reset_parameters() if it is available
         self.inputs: List[torch.Tensor] = []
         self.outputs: List[torch.Tensor] = []
 
-        self.inputs = _create_empty_tensors(input_args, device)
+        self.inputs, self.input_has_non_tensors = _check_and_convert_args_to_list(
+            input_args
+        )
 
         if output_args is None:
             logger.info("output_args not provided, performing forward using input_args")
-            self.outputs = self.submod(*self.inputs)
+
+            if not _validate_args(self.submod.forward, self.inputs, input_kwargs):
+                raise ValueError(
+                    f"Input args {input_args} and input kwargs {input_kwargs} are not valid to run {self.submod}."
+                )
+
+            self.outputs = self.submod(*self.inputs, **input_kwargs)
             # create buffers for the output so that the data is in the correct
             # shape in order to use in p2p op (send)
-            self.outputs = _create_empty_tensors(self.outputs, device)
+            self.outputs, self.output_has_non_tensors = _check_and_convert_args_to_list(
+                self.outputs
+            )
         else:
-            self.outputs = _create_empty_tensors(output_args, device)
+            self.outputs, self.output_has_non_tensors = _check_and_convert_args_to_list(
+                output_args
+            )
 
         self._configure_outputs_meta(tuple(self.outputs))
-
-        # these are the buffers used in backwards send/recv, they are allocated later
-        self.outputs_grad: List[torch.Tensor] = []
 
         def stage_global_rank(peer_rank):
             return (
@@ -1185,34 +1280,31 @@ class PipelineStage(_PipelineStageBase):
         logger.debug(
             f"finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
             f"{self.is_last=}, {self.num_stages=}, "
-            f"inputs: {[inp.shape for inp in self.inputs]}, "
-            f"output: {[output.shape for output in self.outputs]}"
+            f"inputs: {[inp.shape if isinstance(inp, torch.Tensor) else inp for inp in self.inputs]}, "
+            f"output: {[output.shape if isinstance(output, torch.Tensor) else output for output in self.outputs]}"
         )
 
     def _prepare_forward_infra(self, num_microbatches: int) -> None:
         # Receive info during forward
         # TODO: create args_recv_info lazily? (same needed for PipelineStage)
+        # print(f"{self.inputs=}")
         for chunk_id in range(num_microbatches):
             self.set_requires_grad[chunk_id] = False
-            if not self.is_first:
-                # We assume that we always receive from stage - 1
-                recv_infos = tuple(
-                    [
+
+            mb_recv_info: List[InputInfo] = []
+            for i, inp in enumerate(self.inputs):
+                if self.is_first or not isinstance(inp, torch.Tensor):
+                    mb_recv_info.append(_RootArgPlaceholder(inp, i))
+                else:
+                    mb_recv_info.append(
                         _RecvInfo(
                             f"recv_for_{self.stage_index}_from_{self.stage_index - 1}",
                             self.stage_index - 1,
                             _make_tensor_from_meta(inp, self.device),
+                            arg_index=i,
                         )
-                        for inp in self.inputs
-                    ]
-                )
-
-                self.args_recv_info[chunk_id] = recv_infos
-            else:
-                self.args_recv_info[chunk_id] = tuple(
-                    [_RootArgPlaceholder(i) for i in self.inputs]
-                )
-
+                    )
+            self.args_recv_info[chunk_id] = tuple(mb_recv_info)
         # Send info during forward for each activation
         # only need the rank that is being sent to
         self.act_send_info: Dict[int, List] = {}

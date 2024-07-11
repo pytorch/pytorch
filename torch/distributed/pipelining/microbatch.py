@@ -131,6 +131,7 @@ def _shard_dict_of_args(
     Returns:
         args_split: List of sharded args
     """
+    # print(args_dict, args_chunk_spec, num_chunks)
     # Stage 1+2: flatten and shard/replicate
 
     # args_sharded_replicated : [num args, num flat values, num chunks]
@@ -151,6 +152,7 @@ def _shard_dict_of_args(
         chunk_spec = args_chunk_spec[arg_key]
         assert chunk_spec is not None  # Should have been set by caller
         chunk_spec_flat, _ = tree_flatten(chunk_spec)
+        # print(flat, chunk_spec_flat)
         if len(flat) != len(chunk_spec_flat):
             raise ValueError(
                 f"Argument value {arg} did not have the same number of "
@@ -252,7 +254,7 @@ def split_args_kwargs_into_chunks(
 ) -> Tuple[List[Tuple], List[Dict]]:
     """
     Given a sequence of args and kwargs, split them into a number of chunks
-    according to  their respective chunking specs.
+    according to their respective chunking specs.
 
     Args:
         args: Tuple of args
