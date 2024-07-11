@@ -182,8 +182,8 @@ class CommDebugModeExample:
             output_tp.sum().backward()
 
         # print the module level collective tracing information
-        print(comm_mode.generate_comm_debug_tracing_table(noise_level=1))
-        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=1)
+        print(comm_mode.generate_comm_debug_tracing_table(noise_level=0))
+        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=0)
 
     def example_transformer_module_tracing(self) -> None:
         """
@@ -270,8 +270,8 @@ class CommDebugModeExample:
             output = model(inp)
 
         # print the module level collective tracing information
-        print(comm_mode.generate_comm_debug_tracing_table(noise_level=1))
-        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=1)
+        print(comm_mode.generate_comm_debug_tracing_table(noise_level=0))
+        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=0)
 
     def example_MLP_operation_tracing(self) -> None:
         """
@@ -580,9 +580,9 @@ class CommDebugModeExample:
             output = model(inp)
 
         # print the operation level collective tracing information
-        print(comm_mode.generate_comm_debug_tracing_table(noise_level=2))
+        print(comm_mode.generate_comm_debug_tracing_table(noise_level=1))
         comm_mode.log_comm_debug_tracing_table_to_file(
-            noise_level=2, file_name="transformer_operation_log.txt"
+            noise_level=1, file_name="transformer_operation_log.txt"
         )
 
     def example_MLP_json_dump(self) -> None:
@@ -615,7 +615,7 @@ class CommDebugModeExample:
         with comm_mode:
             output = model(inp)
 
-        comm_mode.generate_json_dump(file_name="transformer_log.json", noise_level=2)
+        comm_mode.generate_json_dump(file_name="transformer_log.json", noise_level=1)
 
 
 def run_example(world_size: int, rank: int, example_name: str) -> None:
