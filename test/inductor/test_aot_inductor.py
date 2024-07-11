@@ -3020,7 +3020,9 @@ class AOTInductorTestsTemplate:
             torch.randn(16, 128, device=self.device),
             torch.randint(0, 128, (16, 10), device=self.device),
         )
-        self.check_model(Model(), example_inputs, options=dict(max_autotune=max_autotune))
+        self.check_model(
+            Model(), example_inputs, options=dict(max_autotune=max_autotune)
+        )
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
