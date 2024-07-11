@@ -1580,13 +1580,13 @@ class Graph:
         users, and whether the nodes have any side effects. The graph must be
         topologically sorted before calling.
 
-        Returns:
-          bool: Whether the graph was changed as a result of the pass.
-
         Args:
             is_impure_node (Optional[Callable[[Node], bool]]): A function that returns
             whether a node is impure. If this is None, then the default behavior is to
             use Node.is_impure.
+
+        Returns:
+          bool: Whether the graph was changed as a result of the pass.
 
         Example:
 
@@ -1613,7 +1613,7 @@ class Graph:
             side-effectful nodes (see Node.is_impure) but in general coverage
             is very bad, so you should assume that this method is not sound
             to call unless you know that your FX graph consists entirely
-            of functional operations or that you supply your own custom
+            of functional operations or you supply your own custom
             function for detecting side-effectful nodes.
         """
         # Lint the graph first to make sure its topologically sorted, otherwise
