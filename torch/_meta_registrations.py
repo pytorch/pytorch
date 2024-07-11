@@ -5791,7 +5791,7 @@ def kthvalue_meta(self, k, dim=-1, keepdim=False):
     )
 
     shape = list(self.shape[:dim] + self.shape[dim + 1 :])
-    if keepdim:
+    if keepdim and self.dim() > 0:
         shape.insert(dim, 1)
     return self.new_empty(shape), self.new_empty(shape, dtype=torch.int64)
 
