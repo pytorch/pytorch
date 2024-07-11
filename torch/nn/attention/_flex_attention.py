@@ -7,7 +7,7 @@ import itertools
 import math
 import operator
 from contextlib import nullcontext
-from typing import Callable, get_args, Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 import torch
 from torch._higher_order_ops.flex_attention import (
@@ -526,8 +526,13 @@ def create_block_mask(
         block_mask (tuple): A tuple of (kv_num_blocks, kv_indices, q_num_blocks, q_indices,
                             KV_BLOCK_SIZE, Q_BLOCK_SIZE) which represents the block mask.
     """
-    is_score_mod = len(inspect.signature(fn).parameters) == len(
-        get_args(_score_mod_signature)[0]
+    is_score_mod = (
+        sum(
+            1
+            for param in inspect.signature(fn).parameters.values()
+            if param.default == inspect.Parameter.empty
+        )
+        == 5
     )
     inner_func = _create_block_mask_inner
     # This is kind of a temporary hack to workaround some issues
