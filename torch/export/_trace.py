@@ -1298,6 +1298,7 @@ def _export_to_aten_ir_make_fx(
     fake_kwargs,
     fake_params_buffers,
     constant_attrs: ConstantAttrMap,
+    transform=lambda x: x,
 ) -> ATenExportArtifact:
     @contextmanager
     def _compiling_state_context():
@@ -1307,6 +1308,27 @@ def _export_to_aten_ir_make_fx(
             yield
         finally:
             torch.compiler._is_compiling_flag = old_value
+
+    def _make_fx_helper(mod, args, kwargs, **flags):
+        kwargs = kwargs or {}
+
+        functional_call = create_functional_call(
+            mod, params_spec, params_len, store_orig_mod=True
+        )
+
+        full_args: List[Any] = []
+        full_args.extend(params_and_buffers_flat)
+
+        flat_fn, out_spec = create_tree_flattened_fn(
+            functional_call, args, kwargs
+        )
+        flat_args, in_spec = pytree.tree_flatten((args, kwargs))
+        full_args.extend(flat_args)
+
+        with enable_python_dispatcher():
+            gm = make_fx(functional_call, pre_dispatch=True)(*full_args)
+
+        return gm, None
 
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
@@ -1331,23 +1353,12 @@ def _export_to_aten_ir_make_fx(
         params_and_buffers_flat = tuple(params_and_buffers_flat)
         params_len = len(params_and_buffers)
 
-        fake_kwargs = fake_kwargs or {}
-
-        functional_call = create_functional_call(
-            mod, params_spec, params_len, store_orig_mod=True
+        gm, sig = transform(_make_fx_helper)(
+            mod,
+            fake_args,
+            trace_joint=False,
+            kwargs=fake_kwargs,
         )
-
-        full_args: List[Any] = []
-        full_args.extend(params_and_buffers_flat)
-
-        flat_fn, out_spec = create_tree_flattened_fn(
-            functional_call, fake_args, fake_kwargs
-        )
-        flat_args, in_spec = pytree.tree_flatten((fake_args, fake_kwargs))
-        full_args.extend(flat_args)
-
-        with enable_python_dispatcher():
-            gm = make_fx(functional_call, pre_dispatch=True)(*full_args)
 
         if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
             gm.meta.update(mod.meta)
@@ -1498,6 +1509,7 @@ def _non_strict_export(
     _allow_complex_guards_as_runtime_asserts: bool,
     _disable_forced_specializations: Optional[bool],
     _is_torch_jit_trace: bool,
+    _is_training: bool = False,
 ) -> ExportArtifact:
     out_spec: Optional[TreeSpec] = None
 
@@ -1536,13 +1548,15 @@ def _non_strict_export(
                 gm, sig = aot_export(wrapped_mod, args, kwargs=kwargs, **flags)
                 log.debug("Exported program from AOTAutograd:\n%s", gm)
 
-            sig.parameters = pytree.tree_map(_strip_root, sig.parameters)
-            sig.buffers = pytree.tree_map(_strip_root, sig.buffers)
-            sig.inputs_to_buffers = pytree.tree_map(_strip_root, sig.inputs_to_buffers)
-            sig.inputs_to_parameters = pytree.tree_map(
-                _strip_root, sig.inputs_to_parameters
-            )
-            sig.buffers_to_mutate = pytree.tree_map(_strip_root, sig.buffers_to_mutate)
+            if sig:
+                sig.parameters = pytree.tree_map(_strip_root, sig.parameters)
+                sig.buffers = pytree.tree_map(_strip_root, sig.buffers)
+                sig.inputs_to_buffers = pytree.tree_map(_strip_root, sig.inputs_to_buffers)
+                sig.inputs_to_parameters = pytree.tree_map(
+                    _strip_root, sig.inputs_to_parameters
+                )
+                sig.buffers_to_mutate = pytree.tree_map(_strip_root, sig.buffers_to_mutate)
+
             for node in gm.graph.nodes:
                 if "nn_module_stack" in node.meta:
                     nn_module_stack = node.meta["nn_module_stack"]
@@ -1582,15 +1596,18 @@ def _non_strict_export(
             new_fake_constant_attrs,
             map_fake_to_real,
         ):
-            aten_export_artifact = _export_to_aten_ir(
+            _to_aten_func = (
+                _export_to_aten_ir_make_fx
+                if _is_training
+                else functools.partial(_export_to_aten_ir, pre_dispatch=pre_dispatch)
+            )
+            aten_export_artifact = _to_aten_func(
                 patched_mod,
                 new_fake_args,
                 new_fake_kwargs,
                 fake_params_buffers,
                 new_fake_constant_attrs,
-                pre_dispatch=pre_dispatch,
                 transform=_tuplify_outputs,
-                _is_torch_jit_trace=_is_torch_jit_trace,
             )
             # aten_export_artifact.constants contains only fake script objects, we need to map them back
             aten_export_artifact.constants = {
@@ -1636,8 +1653,6 @@ def _export_for_training(
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
-    if not strict:
-        raise NotImplementedError("Non-strict export for training is not supported yet")
 
     if not isinstance(args, tuple):
         raise UserError(
@@ -1657,7 +1672,18 @@ def _export_for_training(
     original_state_dict = mod.state_dict(keep_vars=True)
     forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
 
-    export_artifact = _strict_export_lower_to_aten_ir(
+    export_func = (
+        functools.partial(
+            _strict_export_lower_to_aten_ir,
+            lower_to_aten_callback=_export_to_aten_ir_make_fx,
+        )
+        if strict
+        else functools.partial(
+            _non_strict_export,
+            _is_training=True,
+        )
+    )
+    export_artifact = export_func(
         mod=mod,
         args=args,
         kwargs=kwargs,
@@ -1669,7 +1695,6 @@ def _export_for_training(
         _allow_complex_guards_as_runtime_asserts=False,
         _disable_forced_specializations=False,
         _is_torch_jit_trace=False,
-        lower_to_aten_callback=_export_to_aten_ir_make_fx,
     )
 
     # Decompose here for readability.
@@ -1683,7 +1708,7 @@ def _export_for_training(
     for node in gm.graph.nodes:
         # nn_module_stack
         if node.op not in ["placeholder", "output"]:
-            for key, (fqn, mod_cls) in node.meta["nn_module_stack"].items():
+            for key, (fqn, mod_cls) in node.meta.get("nn_module_stack", {}).items():
                 if isinstance(mod_cls, type):
                     node.meta["nn_module_stack"][key] = (
                         fqn,
