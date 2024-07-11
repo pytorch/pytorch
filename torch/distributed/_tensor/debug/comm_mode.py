@@ -140,6 +140,10 @@ class CommModeModuleTracker(ModuleTracker):
         # module is no longer parent of next modules
         self.parent_list.pop()
 
+        # No modules are running anymore, so we switch our current "module" to Global
+        if len(self.parents) == 1:
+            self.name = "Global"
+
     def __enter__(self):
         self.module_parameters_dict.clear()
         self.sharding_dict.clear()
@@ -149,6 +153,7 @@ class CommModeModuleTracker(ModuleTracker):
         self.module_helper_dict["Global"] = {"depth": 0}
         self._fw_pre_handle = register_module_forward_pre_hook(self._fw_pre_hook)
         self._fw_post_handle = register_module_forward_hook(self._fw_post_hook)
+        self.name = "Global"
 
     def __exit__(self, *args):
         super().__exit__(*args)

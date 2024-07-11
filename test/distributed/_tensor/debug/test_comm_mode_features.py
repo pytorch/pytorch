@@ -367,6 +367,23 @@ class TestCommModeFeatures(DTensorTestBase):
             1,
         )
 
+    def test_no_modules_features_test(self):
+        """
+        The purpose of this test is to ensure that even if there's no module running,
+        CommDebugMode still traces the operations.
+        """
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            a = torch.tensor([1.0, -1.0])
+            b = torch.tensor([-1.0, 1.0])
+            a = a + b
+
+        self.assertEqual(len(comm_mode.comm_module_operation_counts["Global"]), 1)
+        self.assertEqual(
+            len(comm_mode.comm_module_operation_counts["Global"]["operations_list"]), 3
+        )
+
 
 if __name__ == "__main__":
     run_tests()
