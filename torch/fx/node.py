@@ -658,7 +658,7 @@ class Node(_NodeBase):
                 for (idx, arg) in enumerate(schema.arguments):
                     if arg.alias_info is not None and arg.alias_info.is_write:  # `arg` is mutable
                         # a kwarg or arg has other users except self
-                        if arg.name in self.kwargs and check_arg(self.kwargs[arg.name]) > 1:
+                        if arg.name in self.kwargs and check_arg(self.kwargs[arg.name]):
                             schema_mutable = True
                         elif not arg.kwarg_only and idx < len(self.args) and check_arg(self.args[idx]):
                             schema_mutable = True
