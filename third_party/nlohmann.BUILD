@@ -1,9 +1,14 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
-cc_library(
-    name = "nlohmann",
-    hdrs = glob(["include/**/*.hpp"]),
+cc_library(name = "nlohmann",
+    includes = ["include"],
+    deps = ["nlohmann-internal"],
     visibility = ["//visibility:public"],
+)
+
+cc_import(name = "nlohmann-internal",
+     hdrs = glob(["include/**/*.h"]),
+     visibility = ["//visibility:private"],
 )
 
 cc_library(
@@ -11,4 +16,3 @@ cc_library(
     hdrs = glob(["single_include/nlohmann/*.hpp"]),
     visibility = ["//visibility:public"],
 )
-
