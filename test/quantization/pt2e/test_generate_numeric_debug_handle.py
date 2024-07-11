@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
+import copy
 import unittest
 from collections import Counter
 from typing import Dict
@@ -24,7 +25,7 @@ def _extract_debug_handles(model) -> Dict[torch.fx.Node, int]:
 
     for node in model.graph.nodes:
         if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
-            debug_handle_map[node] = node.meta[NUMERIC_DEBUG_HANDLE_KEY]
+            debug_handle_map[str(node)] = node.meta[NUMERIC_DEBUG_HANDLE_KEY]
 
     return debug_handle_map
 
@@ -38,7 +39,7 @@ class TestGenerateNumericDebugHandle(TestCase):
     def test_simple(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = torch.export.export(m, example_inputs)
         generate_numeric_debug_handle(m)
         unique_ids = set()
         count = 0
@@ -80,3 +81,43 @@ class TestGenerateNumericDebugHandle(TestCase):
         repeated_debug_handle_ids = [2, 3, 6]
         for dh_id in repeated_debug_handle_ids:
             self.assertEqual(res_counter[dh_id], 2)
+
+    def test_copy_preserve_handle(self):
+        m = TestHelperModules.Conv2dThenConv1d()
+        example_inputs = m.example_inputs()
+        m = torch.export.export(m, example_inputs)
+        generate_numeric_debug_handle(m)
+
+        debug_handle_map_ref = _extract_debug_handles(m)
+
+        m_copy = copy.copy(m)
+        debug_handle_map = _extract_debug_handles(m_copy)
+
+        self.assertEqual(debug_handle_map, debug_handle_map_ref)
+
+    def test_deepcopy_preserve_handle(self):
+        m = TestHelperModules.Conv2dThenConv1d()
+        example_inputs = m.example_inputs()
+        m = torch.export.export(m, example_inputs)
+        generate_numeric_debug_handle(m)
+
+        debug_handle_map_ref = _extract_debug_handles(m)
+        m_copy = copy.deepcopy(m)
+        debug_handle_map = _extract_debug_handles(m_copy)
+
+        self.assertEqual(debug_handle_map, debug_handle_map_ref)
+
+    @unittest.skip(
+        "reexport is not fully supported yet, need to add support for output node"
+    )
+    def test_re_export_preserve_handle(self):
+        m = TestHelperModules.Conv2dThenConv1d()
+        example_inputs = m.example_inputs()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        generate_numeric_debug_handle(m)
+
+        debug_handle_map_ref = _extract_debug_handles(m)
+        m_export = capture_pre_autograd_graph(m, example_inputs)
+        debug_handle_map = _extract_debug_handles(m_export)
+
+        self.assertEqual(debug_handle_map, debug_handle_map_ref)
