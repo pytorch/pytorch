@@ -1451,7 +1451,7 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertTrue(isinstance(s1, torch.SymInt))
         self.assertTrue(isinstance(s2, torch.SymInt))
         self.assertTrue(isinstance(s3, int))
-        self.assertFalse(s1 is s2)
+        self.assertTrue(str(s1.node.expr) != str(s2.node.expr))
 
 
 instantiate_parametrized_tests(TestSymNumberMagicMethods)

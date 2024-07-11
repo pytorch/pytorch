@@ -2127,7 +2127,7 @@ def get_dynamic_dim(
         constraint_size_or_stride is not None
         or marked_dynamic
         or marked_weak_dynamic
-        or is_nested_int(size_or_stride_at_i)
+        or (not is_stride and is_nested_int(size_or_stride_at_i))
     ):
         # NB: We could assert static_shapes is False here, but it
         # seems better to allow the user to override symbolic_context in this
@@ -2214,10 +2214,7 @@ def _automatic_dynamic(
                 DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
                 for s in e.size()
             ],
-            dynamic_strides=[
-                DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
-                for s in e.stride()
-            ],
+            dynamic_strides=[DimDynamic.STATIC] * e.dim(),
             constraint_sizes=[None] * e.dim(),
             constraint_strides=[None] * e.dim(),
             view_base_context=view_base_context,
