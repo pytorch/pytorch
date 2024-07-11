@@ -9,11 +9,6 @@ import torch
 from torch import _VF, sym_int as _sym_int, Tensor
 from torch._C import _add_docstr, _infer_size
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
-from torch.nn._reduction import (
-    get_enum as _get_reduction_enum,
-    legacy_get_enum as _legacy_get_reduction_enum,
-    legacy_get_string as _legacy_get_reduction_string,
-)
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -3097,7 +3092,7 @@ def ctc_loss(
         input_lengths,
         target_lengths,
         blank,
-        _get_reduction_enum(reduction),
+        _Reduction.get_enum(reduction),
         zero_infinity,
     )
 
@@ -3169,9 +3164,9 @@ def nll_loss(
             reduction=reduction,
         )
     if size_average is not None or reduce is not None:
-        reduction = _legacy_get_reduction_string(size_average, reduce)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
     return torch._C._nn.nll_loss_nd(
-        input, target, weight, _get_reduction_enum(reduction), ignore_index
+        input, target, weight, _Reduction.get_enum(reduction), ignore_index
     )
 
 
@@ -3231,13 +3226,13 @@ def poisson_nll_loss(
             reduction=reduction,
         )
     if size_average is not None or reduce is not None:
-        reduction = _legacy_get_reduction_string(size_average, reduce)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
     if reduction != "none" and reduction != "mean" and reduction != "sum":
         ret = input
         raise ValueError(reduction + " is not a valid value for reduction")
 
     ret = torch.poisson_nll_loss(
-        input, target, log_input, full, eps, _get_reduction_enum(reduction)
+        input, target, log_input, full, eps, _Reduction.get_enum(reduction)
     )
     return ret
 
@@ -3388,7 +3383,7 @@ def kl_div(
             log_target=log_target,
         )
     if size_average is not None or reduce is not None:
-        reduction_enum = _legacy_get_reduction_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         if reduction == "mean":
             warnings.warn(
@@ -3399,9 +3394,9 @@ def kl_div(
 
         # special case for batchmean
         if reduction == "batchmean":
-            reduction_enum = _get_reduction_enum("sum")
+            reduction_enum = _Reduction.get_enum("sum")
         else:
-            reduction_enum = _get_reduction_enum(reduction)
+            reduction_enum = _Reduction.get_enum(reduction)
 
     reduced = torch.kl_div(input, target, reduction_enum, log_target=log_target)
 
@@ -3500,12 +3495,12 @@ def cross_entropy(
             label_smoothing=label_smoothing,
         )
     if size_average is not None or reduce is not None:
-        reduction = _legacy_get_reduction_string(size_average, reduce)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
     return torch._C._nn.cross_entropy_loss(
         input,
         target,
         weight,
-        _get_reduction_enum(reduction),
+        _Reduction.get_enum(reduction),
         ignore_index,
         label_smoothing,
     )
@@ -3563,9 +3558,9 @@ def binary_cross_entropy(
             reduction=reduction,
         )
     if size_average is not None or reduce is not None:
-        reduction_enum = _legacy_get_reduction_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction_enum = _get_reduction_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     if target.size() != input.size():
         raise ValueError(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}) is deprecated. "
@@ -3641,9 +3636,9 @@ def binary_cross_entropy_with_logits(
             pos_weight=pos_weight,
         )
     if size_average is not None or reduce is not None:
-        reduction_enum = _legacy_get_reduction_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction_enum = _get_reduction_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
 
     if not (target.size() == input.size()):
         raise ValueError(
@@ -3689,17 +3684,17 @@ def smooth_l1_loss(
             stacklevel=2,
         )
     if size_average is not None or reduce is not None:
-        reduction = _legacy_get_reduction_string(size_average, reduce)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
 
     if beta == 0.0:
         return torch._C._nn.l1_loss(
-            expanded_input, expanded_target, _get_reduction_enum(reduction)
+            expanded_input, expanded_target, _Reduction.get_enum(reduction)
         )
     else:
         return torch._C._nn.smooth_l1_loss(
-            expanded_input, expanded_target, _get_reduction_enum(reduction), beta
+            expanded_input, expanded_target, _Reduction.get_enum(reduction), beta
         )
 
 
@@ -3738,7 +3733,7 @@ def huber_loss(
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
     return torch._C._nn.huber_loss(
-        expanded_input, expanded_target, _get_reduction_enum(reduction), delta
+        expanded_input, expanded_target, _Reduction.get_enum(reduction), delta
     )
 
 
@@ -3773,11 +3768,11 @@ def l1_loss(
             stacklevel=2,
         )
     if size_average is not None or reduce is not None:
-        reduction = _legacy_get_reduction_string(size_average, reduce)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
     return torch._C._nn.l1_loss(
-        expanded_input, expanded_target, _get_reduction_enum(reduction)
+        expanded_input, expanded_target, _Reduction.get_enum(reduction)
     )
 
 
@@ -3811,11 +3806,11 @@ def mse_loss(
             stacklevel=2,
         )
     if size_average is not None or reduce is not None:
-        reduction = _legacy_get_reduction_string(size_average, reduce)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
     return torch._C._nn.mse_loss(
-        expanded_input, expanded_target, _get_reduction_enum(reduction)
+        expanded_input, expanded_target, _Reduction.get_enum(reduction)
     )
 
 
@@ -3845,9 +3840,9 @@ def margin_ranking_loss(
             reduction=reduction,
         )
     if size_average is not None or reduce is not None:
-        reduction_enum = _legacy_get_reduction_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction_enum = _get_reduction_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     if input1.dim() != input2.dim() or input1.dim() != target.dim():
         raise RuntimeError(
             f"margin_ranking_loss : All input tensors should have same dimension but got sizes: "
@@ -3880,9 +3875,9 @@ def hinge_embedding_loss(
             reduction=reduction,
         )
     if size_average is not None or reduce is not None:
-        reduction_enum = _legacy_get_reduction_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction_enum = _get_reduction_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     return torch.hinge_embedding_loss(input, target, margin, reduction_enum)
 
 
@@ -3908,9 +3903,9 @@ def multilabel_margin_loss(
             reduction=reduction,
         )
     if size_average is not None or reduce is not None:
-        reduction_enum = _legacy_get_reduction_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction_enum = _get_reduction_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     return torch._C._nn.multilabel_margin_loss(input, target, reduction_enum)
 
 
@@ -3937,9 +3932,9 @@ def soft_margin_loss(
             reduction=reduction,
         )
     if size_average is not None or reduce is not None:
-        reduction_enum = _legacy_get_reduction_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction_enum = _get_reduction_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     return torch._C._nn.soft_margin_loss(input, target, reduction_enum)
 
 
@@ -3967,7 +3962,7 @@ def multilabel_soft_margin_loss(
             reduction=reduction,
         )
     if size_average is not None or reduce is not None:
-        reduction = _legacy_get_reduction_string(size_average, reduce)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     loss = -(target * logsigmoid(input) + (1 - target) * logsigmoid(-input))
 
@@ -4016,9 +4011,9 @@ def cosine_embedding_loss(
             reduction=reduction,
         )
     if size_average is not None or reduce is not None:
-        reduction_enum = _legacy_get_reduction_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction_enum = _get_reduction_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     return torch.cosine_embedding_loss(input1, input2, target, margin, reduction_enum)
 
 
@@ -4050,9 +4045,9 @@ def multi_margin_loss(
             reduction=reduction,
         )
     if size_average is not None or reduce is not None:
-        reduction_enum = _legacy_get_reduction_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction_enum = _get_reduction_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     if p != 1 and p != 2:
         raise ValueError("only p == 1 and p == 2 supported")
     if weight is not None:
@@ -5274,9 +5269,9 @@ def triplet_margin_loss(
             reduction=reduction,
         )
     if size_average is not None or reduce is not None:
-        reduction_enum = _legacy_get_reduction_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction_enum = _get_reduction_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     if margin <= 0:
         raise ValueError(f"margin must be greater than 0, got {margin}")
     return torch.triplet_margin_loss(
@@ -6285,4 +6280,4 @@ def multi_head_attention_forward(
 
 
 # Put the import here to avoid circular imports
-from torch.nn import grad  # noqa: F401
+from torch.nn import _reduction as _Reduction, grad  # noqa: F401
