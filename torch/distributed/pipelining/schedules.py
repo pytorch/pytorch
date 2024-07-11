@@ -38,8 +38,10 @@ class _ComputationType(Enum):
     WEIGHT = 3
     UNSHARD = 4
     RESHARD = 5
-    SEND = 6
-    RECV = 7
+    SEND_F = 6
+    RECV_F = 7
+    SEND_B = 8
+    RECV_B = 9
 
     def __str__(self):
         str_map = {
@@ -48,8 +50,10 @@ class _ComputationType(Enum):
             _ComputationType.WEIGHT: "W",
             _ComputationType.UNSHARD: "UNSHARD",
             _ComputationType.RESHARD: "RESHARD",
-            _ComputationType.SEND: "SEND",
-            _ComputationType.RECV: "RECV",
+            _ComputationType.SEND_F: "SEND_F",
+            _ComputationType.RECV_F: "RECV_F",
+            _ComputationType.SEND_B: "SEND_B",
+            _ComputationType.RECV_B: "RECV_B",
         }
         return str_map[self]
 
@@ -65,10 +69,14 @@ class _ComputationType(Enum):
             return _ComputationType.UNSHARD
         elif action == "RESHARD":
             return _ComputationType.RESHARD
-        elif action == "SEND":
-            return _ComputationType.SEND
-        elif action == "RECV":
-            return _ComputationType.RECV
+        elif action == "SEND_F":
+            return _ComputationType.SEND_F
+        elif action == "RECV_F":
+            return _ComputationType.RECV_F
+        elif action == "SEND_B":
+            return _ComputationType.SEND_B
+        elif action == "RECV_B":
+            return _ComputationType.RECV_B
         else:
             raise RuntimeError(f"Invalid computation type {action}")
 
@@ -78,31 +86,32 @@ BACKWARD = _ComputationType.BACKWARD
 WEIGHT = _ComputationType.WEIGHT
 UNSHARD = _ComputationType.UNSHARD
 RESHARD = _ComputationType.RESHARD
-SEND = _ComputationType.SEND
-RECV = _ComputationType.RECV
+SEND_F = _ComputationType.SEND_F
+RECV_F = _ComputationType.RECV_F
+SEND_B = _ComputationType.SEND_B
+RECV_B = _ComputationType.RECV_B
 
 # Convenience shorthand for compute actions only since they are used in 'simple schedule format'
 F = FORWARD
 B = BACKWARD
 W = WEIGHT
 
-_action_regex = re.compile(r"(\d+)([F,B,W]{0,1})(\d*)(UNSHARD|RESHARD|SEND|RECV){0,1}")
+# Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
+_action_regex = re.compile(
+    r"(\d+)([F,B,W]|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B{0,1})(\d*)"
+)
 
 
 class _Action(NamedTuple):
     stage_index: int
-    computation_type: Optional[_ComputationType] = None
+    computation_type: _ComputationType
     microbatch_index: Optional[int] = None
-    comm_type: Optional[_ComputationType] = None
 
     def __repr__(self):
         repr = str(self.stage_index)
-        if self.computation_type is not None:
-            repr += str(self.computation_type)
+        repr += str(self.computation_type)
         if self.microbatch_index is not None:
             repr += str(self.microbatch_index)
-        if self.comm_type is not None:
-            repr += str(self.comm_type)
         return repr
 
     @staticmethod
@@ -110,23 +119,20 @@ class _Action(NamedTuple):
         """
         Reverse of __repr__
 
-        String should be formatted as [stage][(action type)][(microbatch)][(comm type)]
-            e.g. `2F0`, `1UNSHARD`, `3F1SEND`
+        String should be formatted as [stage][action type][(microbatch)]
+            e.g. `2F0`, `1UNSHARD`, `3SEND_F1`
         """
         if match := _action_regex.match(str):
-            stage_index, computation_type, microbatch_index, comm_type = match.groups()
+            stage_index, computation_type, microbatch_index = match.groups()
             return _Action(
                 int(stage_index),
-                _ComputationType.from_str(computation_type)
-                if computation_type
-                else None,
+                _ComputationType.from_str(computation_type),
                 int(microbatch_index) if len(microbatch_index) else None,
-                _ComputationType.from_str(comm_type) if comm_type else None,
             )
         elif str == "" or str.isspace():
             return None
         raise RuntimeError(
-            f"Invalid action string: {str}, should be formatted as [stage][(action type)][(microbatch)][(comm type)] e.g. 2F0"
+            f"Invalid action string: {str}, should be formatted as [stage][action type][(microbatch)] e.g. 2F0"
         )
 
 
@@ -219,8 +225,8 @@ def _validate_pipeline_order(
             computation_type = action.computation_type
             mb_index = action.microbatch_index
             assert (
-                mb_index is not None and computation_type is not None
-            ), "All currently supported action types require valid microbatch_index and computation_type"
+                mb_index is not None
+            ), "All currently supported action types require valid microbatch_index"
             if mb_index >= num_microbatches:
                 error_msg.append(f"Microbatch index {mb_index} out of range")
 
@@ -837,11 +843,11 @@ def _add_unshard_reshard(
 
     def _unshard(stage_index: int):
         active_stages.add(stage_index)
-        unshard_actions.append(_Action(stage_index, None, None, UNSHARD))
+        unshard_actions.append(_Action(stage_index, UNSHARD, None))
 
     def _reshard(stage_index: int):
         active_stages.remove(stage_index)
-        unshard_actions.append(_Action(stage_index, None, None, RESHARD))
+        unshard_actions.append(_Action(stage_index, RESHARD, None))
 
     for i, action in enumerate(compute_actions):
         if action is None:
@@ -890,9 +896,9 @@ def _add_send_recv(
         stage_idx = action.stage_index
         ctype = action.computation_type
         mb_idx = action.microbatch_index
-        send = _Action(stage_idx, ctype, mb_idx, SEND)
+        send = _Action(stage_idx, SEND_F if ctype == F else SEND_B, mb_idx)
         recv_stage_idx = stage_idx + 1 if ctype == F else stage_idx - 1
-        recv = _Action(recv_stage_idx, ctype, mb_idx, RECV)
+        recv = _Action(recv_stage_idx, RECV_F if ctype == F else RECV_B, mb_idx)
         return send, recv
 
     def _ready_to_schedule(
@@ -907,17 +913,15 @@ def _add_send_recv(
         elif action.computation_type == F and not action.stage_index == 0:
             expected_recv = _Action(
                 action.stage_index,
-                action.computation_type,
+                RECV_F if action.computation_type == F else RECV_B,
                 action.microbatch_index,
-                RECV,
             )
             return expected_recv in prev_actions
         elif action.computation_type == B and not action.stage_index == num_stages - 1:
             expected_recv = _Action(
                 action.stage_index,
-                action.computation_type,
+                RECV_F if action.computation_type == F else RECV_B,
                 action.microbatch_index,
-                RECV,
             )
             return expected_recv in prev_actions
         else:
@@ -1348,7 +1352,6 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             for time_step, action in enumerate(
                 self.pipeline_order_with_comms[self.rank]
             ):
-                comm_type = action.comm_type
                 comp_type = action.computation_type
                 mb_index = action.microbatch_index
                 stage = stage_index_to_stage[action.stage_index]
@@ -1361,48 +1364,37 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 # TODO - its a bit unfortunate that there isn't one field that i can switch over here.
                 # I separated comm/compute in Action bc send still needs to know its sending fwd output vs bwd output
                 # perhaps, i should make SEND_F and SEND_B actions so they can be merged again?
+                if comp_type not in (UNSHARD, RESHARD):
+                    assert mb_index is not None, f"{action=} missing mb_index"
+                else:
+                    # hack around lint
+                    mb_index = -1
 
-                # comms go first since absense of a comm_type implies a computation type- see todo above
-                if comm_type == SEND:
-                    assert comp_type is not None, f"{action=} missing comp_type"
-                    assert mb_index is not None, f"{action=} missing mb_index"
-                    if comp_type == FORWARD:
-                        send_ops.append(_batch_p2p(stage.get_fwd_send_ops(mb_index)))
-                    elif comp_type == BACKWARD:
-                        send_ops.append(_batch_p2p(stage.get_bwd_send_ops(mb_index)))
-                    else:
-                        raise ValueError(
-                            f"SEND {action=} computation_type is missing or invalid "
-                        )
-                elif comm_type == RECV:
-                    assert comp_type is not None, f"{action=} missing comp_type"
-                    assert mb_index is not None, f"{action=} missing mb_index"
-                    if comp_type == FORWARD:
-                        assert (
-                            mb_index not in fwd_recv_ops
-                        ), "Attempted to recv twice for the same {mb_index=} without executing forward once"
-                        fwd_recv_ops[mb_index] = _batch_p2p(
-                            stage.get_fwd_recv_ops(mb_index)
-                        )
-                    elif comp_type == BACKWARD:
-                        assert (
-                            mb_index not in bwd_recv_ops
-                        ), "Attempted to recv twice for the same {mb_index=} without executing backward once"
-                        bwd_recv_ops[mb_index] = _batch_p2p(
-                            stage.get_bwd_recv_ops(mb_index)
-                        )
-                    else:
-                        raise ValueError(
-                            f"RECV {action=} computation_type is missing or invalid "
-                        )
-                elif comm_type == UNSHARD:
+                if comp_type == SEND_F:
+                    send_ops.append(_batch_p2p(stage.get_fwd_send_ops(mb_index)))
+                elif comp_type == SEND_B:
+                    send_ops.append(_batch_p2p(stage.get_bwd_send_ops(mb_index)))
+                elif comp_type == RECV_F:
+                    assert (
+                        mb_index not in fwd_recv_ops
+                    ), "Attempted to recv twice for the same {mb_index=} without executing forward once"
+                    fwd_recv_ops[mb_index] = _batch_p2p(
+                        stage.get_fwd_recv_ops(mb_index)
+                    )
+                elif comp_type == RECV_B:
+                    assert (
+                        mb_index not in bwd_recv_ops
+                    ), "Attempted to recv twice for the same {mb_index=} without executing backward once"
+                    bwd_recv_ops[mb_index] = _batch_p2p(
+                        stage.get_bwd_recv_ops(mb_index)
+                    )
+                elif comp_type == UNSHARD:
                     # TODO
                     pass
-                elif comm_type == RESHARD:
+                elif comp_type == RESHARD:
                     # TODO
                     pass
                 elif comp_type == FORWARD:
-                    assert mb_index is not None, f"{action=} missing mb_index"
                     if not stage.is_first:
                         assert (
                             mb_index in fwd_recv_ops
@@ -1413,7 +1405,6 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     )
                     self._maybe_compute_loss(stage, output, target_mbs, mb_index)
                 elif comp_type == BACKWARD:
-                    assert mb_index is not None, f"{action=} missing mb_index"
                     if not stage.is_last:
                         assert (
                             mb_index in bwd_recv_ops
@@ -1424,7 +1415,6 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         mb_index, loss=loss, full_backward=self.use_full_backward
                     )
                 elif comp_type == WEIGHT:
-                    assert mb_index is not None, f"{action=} missing mb_index"
                     if self.use_full_backward:
                         raise ValueError(
                             f"We detected a weight update in the pipeline schedule, but \
