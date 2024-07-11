@@ -2314,6 +2314,21 @@ class GraphModule(torch.nn.Module):
         test(True, False)
         test(torch.ones(4, dtype=torch.float32), 1.1)
 
+    def test_kthvalue(self):
+        def fn(x, k, dim, keepdim):
+            return x.kthvalue(k, dim, keepdim)
+
+        def test(x, k, dim, keepdim):
+            self.assertEqual(opt_fn(x, k, dim, keepdim), fn(x, k, dim, keepdim))
+
+        opt_fn = torch.compile(fullgraph=True, dynamic=True)(fn)
+
+        test(torch.tensor(30), k=1, dim=0, keepdim=True)
+        test(torch.tensor(30), k=1, dim=-1, keepdim=False)
+        test(torch.randn(2, 3, 4), k=1, dim=0, keepdim=True)
+        test(torch.randn(2, 3, 4), k=2, dim=1, keepdim=False)
+        test(torch.randn(2, 3, 4), k=3, dim=2, keepdim=False)
+
     def test_index(self):
         def fn(x, t):
             v = operator.index(x)
