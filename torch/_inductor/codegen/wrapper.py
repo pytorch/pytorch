@@ -269,6 +269,9 @@ class EnterSubgraphLine(WrapperLine):
     wrapper: WrapperCodeGen
     graph: GraphLowering
 
+    def __post_init__(self) -> None:
+        self.wrapper.push_computed_sizes(self.wrapper.computed_sizes)
+
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper.push_codegened_graph(self.graph)
         code.do_indent()
@@ -277,6 +280,9 @@ class EnterSubgraphLine(WrapperLine):
 @dataclasses.dataclass
 class ExitSubgraphLine(WrapperLine):
     wrapper: WrapperCodeGen
+
+    def __post_init__(self) -> None:
+        self.wrapper.computed_sizes = self.wrapper.pop_computed_sizes()
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper.pop_codegened_graph()
@@ -488,6 +494,7 @@ class WrapperCodeGen(CodeGen):
         # including the graph instance into a cache key to avoid cross-graph
         # caching during lowering of nested subgraphs
         self.codegened_graph_stack = []
+        self.computed_sizes_stack = []
 
         self.write_header()
         self.write_prefix()
@@ -502,7 +509,7 @@ class WrapperCodeGen(CodeGen):
         self.freed: Set[BufferName] = set()
 
         # maps from reusing buffer to reused buffer
-        self.reuses: Dict[BufferName, BufferName] = dict()
+        self.reuses: Dict[BufferName, BufferName] = {}
 
         self.write_get_raw_stream = functools.lru_cache(None)(  # type: ignore[assignment]
             self.write_get_raw_stream
@@ -679,6 +686,14 @@ class WrapperCodeGen(CodeGen):
 
     def pop_codegened_graph(self):
         return self.codegened_graph_stack.pop()
+
+    def push_computed_sizes(self, computed_sizes):
+        from copy import deepcopy
+
+        return self.computed_sizes_stack.append(deepcopy(computed_sizes))
+
+    def pop_computed_sizes(self):
+        return self.computed_sizes_stack.pop()
 
     def next_kernel_suffix(self) -> str:
         return f"{next(self._names_iter)}"
@@ -890,7 +905,7 @@ class WrapperCodeGen(CodeGen):
             del async_compile
         """
         )
-        scope = dict()  # type: ignore[var-annotated]
+        scope = {}  # type: ignore[var-annotated]
         tuning_code = (
             self.kernel_autotune_defs.getvalue() + self.kernel_autotune_calls.getvalue()
         )
