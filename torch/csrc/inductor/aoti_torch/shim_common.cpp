@@ -3,6 +3,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <nlohmann/json.hpp>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
 #include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
@@ -13,7 +14,6 @@
 #include <cstdio>
 #include <iostream>
 #include <memory>
-#include <nlohmann/json.hpp>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
