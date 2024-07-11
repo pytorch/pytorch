@@ -340,6 +340,7 @@ class OpDispatcher:
                     if mesh != arg.device_mesh:
                         raise NotImplementedError(
                             f"{op_call}: DTensor does not support cross-mesh operation yet!"
+                            f"Got meshes: {mesh} {arg.device_mesh}"
                         )
                 else:
                     mesh = arg.device_mesh
