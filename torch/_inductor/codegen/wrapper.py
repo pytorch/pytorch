@@ -1071,11 +1071,17 @@ class WrapperCodeGen(CodeGen):
             )
         )
 
-    def codegen_reinterpret_view(self, data, size, stride, offset, writer) -> str:
+    def codegen_reinterpret_view(
+        self, data, size, stride, offset, writer, dtype=None
+    ) -> str:
         size = self.codegen_shape_tuple(size)
         stride = self.codegen_shape_tuple(stride)
         offset = self.codegen_sizevar(offset)
-        return f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
+        if dtype is not None and dtype != data.dtype:
+            inner_call = f"aten.view.dtype({data.get_name()}, {dtype})"
+        else:
+            inner_call = data.get_name()
+        return f"reinterpret_tensor({inner_call}, {size}, {stride}, {offset})"
 
     def codegen_dtype_view(self, data, dtype, writer) -> str:
         if isinstance(data, ReinterpretView):

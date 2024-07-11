@@ -47,6 +47,7 @@ from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
 from .ir import (
+    DtypeView,
     ExpandView,
     IndexingConstant,
     is_triton,
@@ -586,7 +587,7 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
         # fallback to aten eager implementation for differing bitwidths
         return fallback_handler(aten.view.dtype)(x, dtype)
     else:
-        return TensorBox(ir.DtypeView(x, dtype))
+        return TensorBox(DtypeView.create(x, dtype))
 
 
 @register_lowering(aten.view.dtype, type_promotion_kind=None)

@@ -1647,7 +1647,7 @@ class CppWrapperCpu(WrapperCodeGen):
         )
 
     def codegen_reinterpret_view(
-        self, data, size_list, stride_list, offset, writer
+        self, data, size_list, stride_list, offset, writer, dtype=None
     ) -> str:
         dim = str(len(size_list))
         size = self.codegen_shape_tuple(size_list)

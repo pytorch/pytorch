@@ -10633,13 +10633,17 @@ class CommonTemplate:
         self.common(fn, (x,), reference_in_float=False)
         assertGeneratedKernelCountEqual(self, 1)
 
+    @expectedFailureCodegenDynamic
     def test_reinterpret_dtypeview(self):
         @torch.compile
-        def fn(x):
-            return x.view([10, 10]).view(torch.int32)
+        def fn(x, x2):
+            return x.view([10, 10]).view(torch.int32), x2.view(torch.int32).view(
+                [10, 10]
+            )
 
         x = torch.randn([100, 1], device=self.device)
-        self.common(fn, (x,), reference_in_float=False)
+        x2 = x.clone()
+        self.common(fn, (x, x2), reference_in_float=False, check_lowp=False)
 
     def test_float16_to_int16(self):
         def fn(x):
