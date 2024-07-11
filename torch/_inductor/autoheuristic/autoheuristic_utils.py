@@ -126,7 +126,7 @@ def pad_mm_precondition(metadata: AHMetadata, context: AHContext) -> bool:
     elif metadata.shared_memory == 232448 and metadata.device_capa == (9, 0):
         # H100 precondition
         return check_minsize(context, 768)
-    return False
+    return True
 
 
 def pad_mm_operations() -> List[AHOperation]:
