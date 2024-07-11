@@ -6,6 +6,7 @@ from torch import Tensor
 from .optimizer import (
     _disable_dynamo_if_unsupported,
     _get_scalar_dtype,
+    _maximize_doc,
     Optimizer,
     ParamsT,
 )
@@ -169,19 +170,28 @@ Adafactor.__doc__ = (
 
     For further details regarding the algorithm we refer to `Adafactor: Adaptive Learning Rates with Sublinear Memory Cost`_.
     """
-    + r"""
+    + rf"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float, Tensor, optional): learning rate (default: 1e-3). Adafactor only
-            uses lr for weight_decay application. A tensor LR
-            is not yet supported for all our implementations. Please use a float
-            LR if you are not also specifying fused=True or capturable=True.
-        betas (Tuple[float, float], optional): coefficients used for computing
-            running averages of gradient and its square (default: (0.9, 0.999))
-        eps (Tuple[float, float], optional): term added to the denominator to improve
-            numerical stability (default: 1e-8)
+        lr (float, optional): unlike other optimizers, Adafactor does not require a
+            learning rate, and the implementation in the paper does not use lr at all.
+            Deviating from the paper, this implementation uses lr for applying weight
+            decay and as the maximum value for relative step size rho_t. Note that in
+            the paper, a constant of 0.01 is used as the maximum value for relative
+            step size, and so we set 0.01 as the default value. (default: 1e-2)
+        beta2_decay (float, optional): the decay rate of beta2. beta2 standardly refers
+            to the coefficient used for computing the running average of the gradient
+            squared. (default: -0.8)
+        eps (Tuple[float, float], optional): epsilon1 is the term added to the denominator
+            of the update calculation to improve numerical stability. This use of epsilon1
+            deviates from the algorithm written in the paper! See note below for more details.
+            epsilon2 is the term used to avoid having too small a weight update when applying
+            parameter scaling. (default: (None, 1e-3))
+        d (float, optional): the clipping threshold, used to avoid larger-than-desired
+            updates.
         weight_decay (float, optional): weight decay coefficient (default: 1e-2)
+        {_maximize_doc}
 
     .. _Adafactor: Adaptive Learning Rates with Sublinear Memory Cost:
         https://arxiv.org/pdf/1804.04235
@@ -235,9 +245,7 @@ def _single_tensor_adafactor(
             param.mul_(1 - lr * weight_decay)
 
         beta2_t = 1 - step_float**beta2_decay
-        rho_t = min(
-            lr, 1 / (step_float**0.5)
-        )  # keras uses lr instead of 0.01 => and US TOO
+        rho_t = min(lr, 1 / (step_float**0.5))
         alpha = max(eps2, param.norm(2).item() / (param.numel() ** 0.5)) * rho_t
 
         if grad.dim() > 1:
@@ -248,9 +256,6 @@ def _single_tensor_adafactor(
             col_mean = torch.norm(grad, dim=-2).square_().div_(grad.size(-2))
             col_var.lerp_(col_mean, 1 - beta2_t)
             var_estimate = row_var.unsqueeze(-1) @ col_var.unsqueeze(-2)
-            # Include in docs later: we move epsilon1 to these 2 lines
-            # as an attempt to follow the intention of the paper authors
-            # in using eps1 for stability.
             var_est_denom = (
                 row_var.mean(dim=-1).clamp_(min=eps1).unsqueeze(-1).unsqueeze(-1)
             )

@@ -27,11 +27,11 @@ void setDynamicLayerFrontBackKeysIncluded(bool included) {
 DynamicLayer::DynamicLayer(
     TransformType transform_type,
     int64_t layerId,
-    optional<c10::SymInt> batchSize,
-    optional<RandomnessType> randomness,
-    optional<bool> prev_grad_mode,
-    optional<bool> prev_fwd_grad_mode,
-    optional<bool> functionalize_add_back_views)
+    std::optional<c10::SymInt> batchSize,
+    std::optional<RandomnessType> randomness,
+    std::optional<bool> prev_grad_mode,
+    std::optional<bool> prev_fwd_grad_mode,
+    std::optional<bool> functionalize_add_back_views)
 {
   if (transform_type == TransformType::Grad) {
     TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
@@ -250,11 +250,11 @@ int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
 
 int64_t initAndPushDynamicLayer(
     TransformType transform_type,
-    optional<c10::SymInt> batch_size,
-    optional<RandomnessType> randomness,
-    optional<bool> prev_grad_mode,
-    optional<bool> prev_fwd_grad_mode,
-    optional<bool> functionalize_add_back_views) {
+    std::optional<c10::SymInt> batch_size,
+    std::optional<RandomnessType> randomness,
+    std::optional<bool> prev_grad_mode,
+    std::optional<bool> prev_fwd_grad_mode,
+    std::optional<bool> functionalize_add_back_views) {
   const auto& dynamicLayerStack = dynamicLayerStackAccessor();
   const auto layerId = 1 + dynamicLayerStack.size();
   DynamicLayer new_layer(transform_type, layerId, std::move(batch_size), randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views);
@@ -393,7 +393,7 @@ std::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int6
       return res_idx; // for everything currently in native_functions, each input aliases at most one output (tensor list counts as one output)
     }
   }
-  return nullopt;
+  return std::nullopt;
 }
 
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE

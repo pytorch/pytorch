@@ -3044,9 +3044,9 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void recordAnnotation(const std::shared_ptr<GatheredContext>& name) override {
-    for (auto& allocator : device_allocator) {
-      allocator->recordAnnotation(name);
-    }
+    c10::DeviceIndex device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    device_allocator[device]->recordAnnotation(name);
   }
 
   bool isHistoryEnabled() override {
