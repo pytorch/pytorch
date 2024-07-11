@@ -1,6 +1,8 @@
 #!/bin/bash
 set -ex
 
+# a whitespace change
+
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
 COMMIT=$(get_pinned_commit halide)
