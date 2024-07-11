@@ -109,32 +109,13 @@ class OpDispatcher:
         """
         Main dispatching logic
         """
-        if logger.isEnabledFor(logging.DEBUG):
-            tensor_args = ""
-            for idx, arg in enumerate(args):
-                if not isinstance(arg, torch.Tensor):
-                    continue
-                if hasattr(arg, "_spec"):
-                    tensor_args += f"\n  arg_{idx} (dtensor): {arg.shape=} {arg._spec=}"
-                else:
-                    tensor_args += f"\n  arg_{idx} (tensor): {arg.shape=}"
-
-            for key, arg in kwargs.items():
-                if not isinstance(arg, torch.Tensor):
-                    continue
-                if hasattr(arg, "_spec"):
-                    tensor_args += f"\n  arg_{key} (dtensor): {arg.shape=} {arg._spec=}"
-                else:
-                    tensor_args += f"\n  arg_{key} (tensor): {arg.shape=}"
-
-            logger.debug("Dispatching op_call: %s%s", op_call, tensor_args)
-
         # operators that does not need to go through sharding propagation
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
         # extract local tensor and sharding infos to a OpInfo
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
+        logger.debug("Dispatching op_call: %s", op_info.schema)
 
         self.sharding_propagator.propagate(op_info)
         output_sharding = op_info.output_sharding
@@ -363,6 +344,7 @@ class OpDispatcher:
                     if mesh != arg.device_mesh:
                         raise NotImplementedError(
                             f"{op_call}: DTensor does not support cross-mesh operation yet!"
+                            f"Got meshes: {mesh} {arg.device_mesh}"
                         )
                 else:
                     mesh = arg.device_mesh
