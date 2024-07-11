@@ -678,9 +678,10 @@ class triton:
     cudagraph_support_input_mutation = False if is_fbcode() else True
 
     # Maximal number of allowed cudagraph re-record for a function and
-    # a cudagraph node due to static input tensor address changes.
-    # i.e., allow num_recording <= cudagraph_static_input_rerecord_limit
-    cudagraph_static_input_rerecord_limit = 5
+    # a cudagraph node due to static input tensor address changes or
+    # cudagraph managed tensor data pointer changed.
+    # i.e., allow num_recording <= cudagraph_unexpected_rerecord_limit
+    cudagraph_unexpected_rerecord_limit = 5
 
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False

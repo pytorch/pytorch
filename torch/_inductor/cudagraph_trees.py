@@ -1940,7 +1940,7 @@ class CUDAGraphTreeManager:
         if (
             self.non_cudagraph_managed_mutation_hint[node_id][function_id]
             or self.num_rerecord[node_id][function_id]
-            > torch._inductor.config.triton.cudagraph_static_input_rerecord_limit
+            > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
         ):
             return self.ids_to_funcs[function_id].model(new_inputs)
 
@@ -1971,7 +1971,7 @@ class CUDAGraphTreeManager:
         )
 
         if not self.in_recording:
-            recompile_due_to_static_input_idx_mismatch = False
+            unexpected_rerecord, unexpected_rerecord_reason = False, lambda: ""
             for child in child_nodes[function_id]:
                 # here we are checking memory consistency between recording and execution,
                 # as well as things like stability of tensor locations, etc
@@ -1979,9 +1979,12 @@ class CUDAGraphTreeManager:
                 status, status_logger = child.check_invariants(new_inputs)
                 if status == CheckInvariantStatus.SUCCESS:
                     return self.execute_node(child, new_inputs)
-
-                if status == CheckInvariantStatus.StaticInputIdxMismatch:
-                    recompile_due_to_static_input_idx_mismatch = True
+                if (
+                    status == CheckInvariantStatus.StaticInputIdxMismatch
+                    or status == CheckInvariantStatus.CudagraphManagedIdxMismatch
+                ):
+                    unexpected_rerecord = True
+                    unexpected_rerecord_reason = status_logger
 
             # now that we know the new function can't be run as a child of the
             # current node, if it is a root, try to end the current execution.
@@ -2001,20 +2004,19 @@ class CUDAGraphTreeManager:
                 ]:
                     return self.ids_to_funcs[function_id].model(new_inputs)
 
-            # re-record due to static input tensor address changes
-            if recompile_due_to_static_input_idx_mismatch:
+            if unexpected_rerecord:
                 curr_node_id = self._get_node_id()
                 self.num_rerecord[curr_node_id][function_id] += 1
                 if (
                     self.num_rerecord[curr_node_id][function_id]
-                    > torch._inductor.config.triton.cudagraph_static_input_rerecord_limit
+                    > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
                 ):
                     _id = curr_node_id.id if curr_node_id else None
                     log_cudagraph_skip_and_bump_counter(
                         f"skipping cudagraph due to function {function_id.id} exceeding max "
                         f"re-recording limit "
-                        f"(={torch._inductor.config.triton.cudagraph_static_input_rerecord_limit}) "
-                        f"on cudagraph node {_id} due to static input tensor address changes."
+                        f"(={torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit}) "
+                        f"on cudagraph node {_id} due to {unexpected_rerecord_reason()}."
                     )
                     return self.ids_to_funcs[function_id].model(new_inputs)
 

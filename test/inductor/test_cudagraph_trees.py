@@ -1935,7 +1935,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-        @torch._inductor.config.patch("triton.cudagraph_static_input_rerecord_limit", 0)
+        @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
         def test_fallback_to_eager_if_recompiling_too_many_times(self):
             def fn(x, y):
                 return x * y
@@ -1952,10 +1952,10 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             FileCheck().check(
                 "skipping cudagraph due to function 0 exceeding max re-recording limit (=0) "
-                "on cudagraph node None due to static input tensor address changes."
+                "on cudagraph node None due to static input data pointer changed."
             ).check(
                 "skipping cudagraph due to function 1 exceeding max re-recording limit (=0) "
-                "on cudagraph node None due to static input tensor address changes."
+                "on cudagraph node None due to static input data pointer changed."
             ).run(
                 captured_output[0]
             )
@@ -1963,7 +1963,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-        @torch._inductor.config.patch("triton.cudagraph_static_input_rerecord_limit", 0)
+        @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
         def test_fallback_to_eager_if_recompiling_too_many_times_warn_only_once(self):
             def fn_eager(x, y):
                 return x * y
@@ -1998,12 +1998,12 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             FileCheck().check_count(
                 "skipping cudagraph due to function 0 exceeding max re-recording limit (=0) "
-                "on cudagraph node None due to static input tensor address changes.",
+                "on cudagraph node None due to static input data pointer changed.",
                 1,
                 exactly=True,
             ).check_count(
                 "skipping cudagraph due to function 1 exceeding max re-recording limit (=0) "
-                "on cudagraph node None due to static input tensor address changes.",
+                "on cudagraph node None due to static input data pointer changed.",
                 1,
                 exactly=True,
             ).run(
@@ -2011,9 +2011,53 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             )
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 2)
 
+        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
+        @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
+        def test_fallback_to_eager_if_recompiling_too_many_times_due_to_cudagraph_managed_tensor(
+            self,
+        ):
+            # By setting triton.cudagraph_support_input_mutation=True, we force re-record
+            # if cudagraph managed tensor addresses changed.
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            @torch.compile(mode="reduce-overhead")
+            def goo(x):
+                return x * 2
+
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                inp = torch.rand((2, 3), device="cuda")
+                y = foo(inp)
+                z = goo(y)
+
+            with capture_stderr() as captured_output:
+                torch.compiler.cudagraph_mark_step_begin()
+                x = torch.rand(2, 3, device="cuda")
+                y = foo(x)
+                y_clone = y.clone()
+                z = goo(y_clone)
+
+            # eager function should run successfully
+            for _ in range(5):
+                torch.compiler.cudagraph_mark_step_begin()
+                x = torch.rand(2, 3, device="cuda")
+                y = foo(x)
+                y_clone = y.clone()
+                z = goo(y_clone)
+
+            FileCheck().check_count(
+                "skipping cudagraph due to function 1 exceeding max re-recording limit (=0) "
+                "on cudagraph node 0 due to cudagraph managed tensor data pointer changed",
+                1,
+                exactly=True,
+            ).run(captured_output[0])
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-        @torch._inductor.config.patch("triton.cudagraph_static_input_rerecord_limit", 1)
+        @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 1)
         def test_not_fallback_to_eager_if_have_not_recompiling_too_many_times(self):
             def fn(x, y):
                 return x * y
