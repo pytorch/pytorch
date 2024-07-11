@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import abc
-
 import argparse
 import collections
 import contextlib
@@ -14,7 +13,6 @@ import importlib
 import itertools
 import logging
 import os
-import pathlib
 import shutil
 import signal
 import subprocess
@@ -22,7 +20,7 @@ import sys
 import time
 import weakref
 from contextlib import contextmanager
-
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -60,6 +58,7 @@ from torch._dynamo.testing import (
     same,
 )
 
+
 try:
     from torch._dynamo.utils import (
         clone_inputs,
@@ -80,6 +79,7 @@ from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map, tree_map_only
+
 
 try:
     import torch_xla
@@ -920,7 +920,7 @@ def speedup_experiment_onnx(
         2. Running ORT with OnnxModel.
 
     Writes to ./{output_filename}, which should be
-        `pathlib.Path(self.output_dir) / f"{self.compiler}_{suite}_{self.dtype}_{self.mode}_{self.device}_{self.testing}.csv".
+        `Path(self.output_dir) / f"{self.compiler}_{suite}_{self.dtype}_{self.mode}_{self.device}_{self.testing}.csv".
 
     TODO(bowbao): Record export time and export peak memory usage.
     """
@@ -1347,8 +1347,8 @@ class OnnxModel(abc.ABC):
     @classmethod
     def _generate_onnx_model_directory(
         cls, output_directory: str, compiler_name: str, model_name: str
-    ) -> pathlib.Path:
-        model_path = pathlib.Path(
+    ) -> Path:
+        model_path = Path(
             output_directory,
             ".onnx_models",
             model_name,
@@ -1547,7 +1547,12 @@ class OnnxModelFromTorchScript(OnnxModel):
         if self.use_experimental_patch:
             import torch_onnx
 
-            torch_onnx.patch_torch(error_report=True, profile=True)
+            torch_onnx.patch_torch(
+                error_report=True,
+                profile=True,
+                dump_exported_program=False,
+                artifacts_dir=os.path.dirname(output_path),
+            )
         else:
             # make sure the patch is not in effect
             try:
@@ -2267,6 +2272,9 @@ class BenchmarkRunner:
             equal_nan = False
         return equal_nan
 
+    def use_larger_multiplier_for_smaller_tensor(self, name):
+        return False
+
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):
             for device in args.devices:
@@ -2389,7 +2397,6 @@ class BenchmarkRunner:
         from diffusers.models.transformer_2d import Transformer2DModel
         from torchbenchmark.models.nanogpt.model import Block
         from transformers.models.llama.modeling_llama import LlamaDecoderLayer
-
         from transformers.models.t5.modeling_t5 import T5Block
         from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
 
@@ -2598,6 +2605,9 @@ class BenchmarkRunner:
                         cos_similarity=False,
                         tol=0,
                         equal_nan=self.equal_nan,
+                        use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
+                            name
+                        ),
                     )
                 ):
                     is_same = False
@@ -2686,6 +2696,9 @@ class BenchmarkRunner:
                     new_result,
                     fp64_outputs,
                     equal_nan=self.equal_nan,
+                    use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
+                        name
+                    ),
                     cos_similarity=cos_similarity,
                     tol=tolerance,
                 ):

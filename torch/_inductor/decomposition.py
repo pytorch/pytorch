@@ -97,6 +97,7 @@ decomps_to_exclude = [
     aten.clamp_min,
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
+    aten.slice_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.split.Tensor,  # inductor lowers this directly
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
@@ -413,11 +414,6 @@ def amin(self, dim=None, keepdim=False):
 @register_decomposition([aten.narrow_copy])
 def narrow_copy(self, dim, start, length):
     return torch.narrow(self, dim, start, length).clone()
-
-
-@register_decomposition([aten.expand_copy])
-def expand_copy(self, size, *, implicit=False):
-    return aten.expand(self, size, implicit=implicit).clone()
 
 
 @register_decomposition([aten.view_copy.default])

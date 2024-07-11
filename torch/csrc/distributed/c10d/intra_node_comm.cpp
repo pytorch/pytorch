@@ -31,6 +31,8 @@ static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
 // for testing purposes.
 static std::vector<std::string> TEST_INTRA_NODE_COMM = {"TEST_INTRA_NODE_COMM"};
 
+static int intraNodeCommIdx = 0;
+
 ////////////////////////////////////////////////////////////////////////////////
 // CUDA Functions
 ////////////////////////////////////////////////////////////////////////////////
@@ -329,10 +331,10 @@ bool IntraNodeComm::rendezvous() {
   // Detect topology
   Topology topology = detectTopology(nvlMesh, worldSize_);
 
-  set_group_info("IntraNodeComm", rank_, worldSize_, store_);
+  auto groupName = "IntraNodeComm" + std::to_string(intraNodeCommIdx++);
+  set_group_info(groupName, rank_, worldSize_, store_);
   auto allocator = get_allocator(c10::DeviceType::CUDA);
-  symmetricMemoryPtr_ =
-      allocator->alloc(bufferSize_, deviceIdx, "IntraNodeComm");
+  symmetricMemoryPtr_ = allocator->alloc(bufferSize_, deviceIdx, groupName);
   symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_);
   TORCH_CHECK(symmetricMemory_->get_signal_pad_size() >= kP2pStateSize);
 
