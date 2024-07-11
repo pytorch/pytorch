@@ -680,6 +680,7 @@ class TestSchedulePlan(unittest.TestCase):
 
 instantiate_parametrized_tests(TestSchedulePlan)
 
+
 if __name__ == "__main__":
     # Run only the TestSchedulePlan tests (single process)
     loader = unittest.TestLoader()
