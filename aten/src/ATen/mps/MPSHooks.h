@@ -5,7 +5,7 @@
 #include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/Generator.h>
 #include <ATen/mps/MPSEvent.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 namespace at::mps {
 

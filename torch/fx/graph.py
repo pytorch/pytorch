@@ -222,10 +222,8 @@ dtype_abbrs = {
     torch.int64: 'i64',
     torch.bool: 'b8',
     torch.uint8: 'u8',
-    torch.uint16: 'u16',
     torch.uint32: 'u32',
     torch.uint64: 'u64',
-    torch.bits16: 'b16',
 }
 
 @compatibility(is_backward_compatible=True)

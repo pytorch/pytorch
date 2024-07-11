@@ -164,10 +164,10 @@ std::tuple<Tensor, Tensor, Tensor> nested_layer_norm(
   const auto bias_contig = bias.expect_contiguous();
   auto output_buffer = at::native::empty_like(
       input_buffer,
-      std::nullopt /* dtype */,
-      std::nullopt /* layout */,
-      std::nullopt /* device */,
-      std::nullopt /* pin_memory */,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
       at::MemoryFormat::Contiguous);
   auto options = input_buffer.options();
   if (input_buffer.is_cuda()) {
@@ -232,7 +232,7 @@ Tensor nested_from_padded_generic(
     IntArrayRef sizes_i(
         size.data_ptr<int64_t>(), size.data_ptr<int64_t>() + size.numel());
     at::Tensor mask_i = padded_transformed.new_full(
-        sizes_i, true, kBool, std::nullopt, std::nullopt, std::nullopt);
+        sizes_i, true, kBool, c10::nullopt, c10::nullopt, c10::nullopt);
     masks.push_back(pad_tensor_to_shape(mask_i, target_size_arr));
   }
   at::Tensor final_mask = at::stack(masks);
@@ -795,7 +795,9 @@ Tensor view_nested(const Tensor& self, IntArrayRef proposed_shape) {
   // reshaping underlying tensor dimensions does not change offset
   // determine reshaped size and stride
   const Tensor& sizemat = self_ptr->get_nested_sizes();
-  auto [viewable, sizemat_reshaped, stridemat_reshaped] = NestedTensor_compute_size_stride(
+  bool viewable;
+  Tensor sizemat_reshaped, stridemat_reshaped;
+  std::tie(viewable, sizemat_reshaped, stridemat_reshaped) = NestedTensor_compute_size_stride(
       sizes, strides, proposed_shape, sizemat.options());
   TORCH_CHECK(
       viewable,
@@ -886,7 +888,9 @@ Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   // reshaping underlying tensor dimensions does not change offset
   // determine reshaped size and stride
   const Tensor& sizemat = self_ptr->get_nested_sizes();
-  auto [viewable, sizemat_reshaped, stridemat_reshaped] = NestedTensor_compute_size_stride(
+  bool viewable{false};
+  Tensor sizemat_reshaped, stridemat_reshaped;
+  std::tie(viewable, sizemat_reshaped, stridemat_reshaped) = NestedTensor_compute_size_stride(
       sizes, strides, proposed_shape, sizemat.options());
   if (viewable) {
     return self.view(proposed_shape);

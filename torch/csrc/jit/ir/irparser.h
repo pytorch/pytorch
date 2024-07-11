@@ -1,9 +1,10 @@
 #pragma once
 
-#include <optional>
+#include <torch/csrc/Export.h>
 #include <string>
 #include <unordered_map>
 
+#include <c10/util/Optional.h>
 #include <torch/csrc/Export.h>
 
 namespace torch {
