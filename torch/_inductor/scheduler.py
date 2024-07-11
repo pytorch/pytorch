@@ -1327,6 +1327,11 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
         init_group_node(self, scheduler, snodes)
 
+    def unpack(self) -> List[BaseSchedulerNode]:
+        for snode in self.snodes:
+            self.scheduler.name_to_fused_node[snode.get_name()] = snode
+        return self.scheduler.fuse_nodes(self.snodes)
+
     @cache_on_self
     def get_name(self) -> str:
         return "_".join([x.get_name() for x in self.snodes])
@@ -1887,9 +1892,7 @@ class Scheduler:
         new_nodes: List[BaseSchedulerNode] = []
         for node in self.nodes:
             if isinstance(node, GroupedSchedulerNode):
-                for sub_node in node.snodes:
-                    self.name_to_fused_node[sub_node.get_name()] = sub_node
-                new_nodes.extend(self.fuse_nodes(node.snodes))
+                new_nodes.extend(node.unpack())
             else:
                 new_nodes.append(node)
         self.nodes = new_nodes
