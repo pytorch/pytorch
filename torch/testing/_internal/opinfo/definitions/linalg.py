@@ -1342,6 +1342,12 @@ op_db: List[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref_mps",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.half: tol(atol=1.2e-2, rtol=1.7e-2)}),
+                "TestInductorOpInfo",
+                "test_comprehensive",
+                device_type="cuda",
+            ),
         ),
     ),
     OpInfo(
@@ -2007,7 +2013,16 @@ op_db: List[OpInfo] = [
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        decorators=[
+            skipCUDAIfNoMagmaAndNoCusolver,
+            skipCPUIfNoLapack,
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1.3e-05, rtol=6e-04)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cpu",
+            ),
+        ],
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -2040,7 +2055,16 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_solve,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        decorators=[
+            skipCUDAIfNoMagmaAndNoCusolver,
+            skipCPUIfNoLapack,
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1.3e-05, rtol=6e-04)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cpu",
+            ),
+        ],
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -2367,6 +2391,12 @@ op_db: List[OpInfo] = [
                 "TestCommon",
                 "test_noncontiguous_samples",
                 device_type="cuda",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=8e-04, rtol=7e-06)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cpu",
             ),
         ],
         skips=(

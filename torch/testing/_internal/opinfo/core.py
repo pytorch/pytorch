@@ -28,6 +28,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     noncontiguous_like,
+    OPINFO_SAMPLE_INPUT_INDEX,
     TEST_WITH_ROCM,
     torch_to_numpy_dtype_dict,
     TrackedInputIter,
@@ -1177,6 +1178,7 @@ class OpInfo:
         tensor in a sequence input conjugated.
         """
 
+        set_seed = kwargs.pop("set_seed", True)
         samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
         conj_samples = list(samples)
 
@@ -1193,7 +1195,12 @@ class OpInfo:
             else:
                 sample.input[0] = conjugate(sample.input[0])
 
-        return TrackedInputIter(iter(conj_samples), "conjugate sample input")
+        return TrackedInputIter(
+            iter(conj_samples),
+            "conjugate sample input",
+            set_seed=set_seed,
+            restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
+        )
 
     def sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """
@@ -1202,6 +1209,7 @@ class OpInfo:
         These samples should be sufficient to test the function works correctly
         with autograd, TorchScript, etc.
         """
+        set_seed = kwargs.pop("set_seed", True)
         samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
 
         if kwargs.get("include_conjugated_inputs", False):
@@ -1212,7 +1220,12 @@ class OpInfo:
             samples_list.extend(conj_samples)
             samples = tuple(samples_list)
 
-        return TrackedInputIter(iter(samples), "sample input")
+        return TrackedInputIter(
+            iter(samples),
+            "sample input",
+            set_seed=set_seed,
+            restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
+        )
 
     def reference_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """
@@ -1222,11 +1235,17 @@ class OpInfo:
         of inputs when reference_inputs_func is defined. If undefined this returns
         the sample inputs.
         """
+        set_seed = kwargs.pop("set_seed", True)
         if self.reference_inputs_func is None:
             samples = self.sample_inputs_func(
                 self, device, dtype, requires_grad, **kwargs
             )
-            return TrackedInputIter(iter(samples), "sample input")
+            return TrackedInputIter(
+                iter(samples),
+                "reference input",
+                set_seed=set_seed,
+                restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
+            )
 
         if kwargs.get("include_conjugated_inputs", False):
             raise NotImplementedError
@@ -1234,15 +1253,25 @@ class OpInfo:
         references = self.reference_inputs_func(
             self, device, dtype, requires_grad, **kwargs
         )
-        return TrackedInputIter(iter(references), "reference input")
+        return TrackedInputIter(
+            iter(references),
+            "reference input",
+            set_seed=set_seed,
+            restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
+        )
 
     def error_inputs(self, device, **kwargs):
         """
         Returns an iterable of ErrorInputs.
         """
+        set_seed = kwargs.pop("set_seed", True)
         errs = self.error_inputs_func(self, device, **kwargs)
         return TrackedInputIter(
-            iter(errs), "error input", callback=lambda e: e.sample_input
+            iter(errs),
+            "error input",
+            callback=lambda e: e.sample_input,
+            set_seed=set_seed,
+            restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
         )
 
     def error_inputs_sparse(self, device, layout, **kwargs):

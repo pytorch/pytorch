@@ -29,7 +29,7 @@ from .bytecode_transformation import (
     is_generator,
     transform_code_object,
 )
-from .guards import CheckFunctionManager, GuardedCode
+from .guards import CheckFunctionManager, CompileId, GuardedCode
 from .utils import same
 
 unsupported = eval_frame.unsupported
@@ -163,7 +163,7 @@ def debug_insert_nops(
         f_code=frame.f_code,
     )
 
-    return GuardedCode(code, CheckFunctionManager(graph).check_fn)
+    return GuardedCode(code, CheckFunctionManager(graph).check_fn, CompileId(0, 0))
 
 
 class CompileCounter:

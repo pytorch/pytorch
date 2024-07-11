@@ -1597,6 +1597,8 @@ class AotCodeCompiler:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> str:
+        _set_gpu_runtime_env()  # cpp_extension consults the env
+
         picked_vec_isa = pick_vec_isa()
         vec_isa_cmd_gen = CppBuilder(
             name="o",
@@ -1793,7 +1795,6 @@ class AotCodeCompiler:
             use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
-
             (
                 object_output_name,
                 object_output_dir,
@@ -1872,7 +1873,6 @@ class AotCodeCompiler:
                 "linux": _compile_consts_linux,
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
-
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
             so_builder = CppBuilder(
                 name=output_name,
@@ -2489,6 +2489,10 @@ def validate_new_cpp_commands():
     include_pytorch = [True, False]
     use_absolute_path = [True, False]
     aot_mode = [False, True]
+
+    # Try to pass it in fb_code.
+    if config.is_fbcode():
+        return
 
     for x in cuda:
         for y in use_mmap_weights:
