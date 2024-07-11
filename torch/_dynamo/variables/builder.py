@@ -66,6 +66,7 @@ from ..source import (
     is_constant_source,
     is_from_defaults,
     is_from_optimizer_source,
+    is_unspecialized_builtin_nnmodule_attr,
     LocalSource,
     NumpyTensorSource,
     OptimizerSource,
@@ -1070,6 +1071,17 @@ class VariableBuilder:
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
+
+        if (
+            self.source
+            and is_unspecialized_builtin_nnmodule_attr(self.source)
+            and type(value) is tuple
+            and all(ConstantVariable.is_literal(x) for x in value)
+        ):
+            # Heuristic to speedup up guards coming from conv2d attrs like dilation and padding.
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return TupleVariable([ConstantVariable.create(x) for x in value])
+
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
         self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
