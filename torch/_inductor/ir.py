@@ -2518,6 +2518,7 @@ class DtypeView(BaseView):
     """Pretend our storage has a different type"""
 
     target_dtype: torch.dtype
+
     def __post_init__(self):
         super().__post_init__()
         if is_storage_and_layout(self.data):
@@ -2529,8 +2530,6 @@ class DtypeView(BaseView):
                 old_layout.stride,
                 old_layout.offset,
             )
-        else:
-            self._layout = None
 
     def __str__(self):
         return self.str_helper([self.data, self.target_dtype])
