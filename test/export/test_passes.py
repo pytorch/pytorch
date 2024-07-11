@@ -624,7 +624,13 @@ class TestPasses(TestCase):
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
     def test_predispatceh_set_grad(self):
+        def _check_node_users_in_the_same_graph(gm):
+            for node in gm.graph.nodes:
+                for user in node.users:
+                    self.assertTrue(user.graph is gm.graph)
+
         mod, args = self.SET_GRAD_ENABLED_TESTS["op"]
+        _check_node_users_in_the_same_graph(mod)
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
@@ -639,7 +645,9 @@ def forward(self, x):
     return pytree.tree_unflatten((add_1, sub), self._out_spec)
     """,
         )
+
         mod, args = self.SET_GRAD_ENABLED_TESTS["op_under_no_grad"]
+        _check_node_users_in_the_same_graph(mod)
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
@@ -656,6 +664,7 @@ def forward(self, x):
         )
 
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager"]
+        _check_node_users_in_the_same_graph(mod)
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
@@ -670,7 +679,9 @@ def forward(self, x):
     return pytree.tree_unflatten((add_1, sub), self._out_spec)
     """,
         )
+
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_under_no_grad"]
+        _check_node_users_in_the_same_graph(mod)
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
@@ -685,7 +696,9 @@ def forward(self, x):
     return pytree.tree_unflatten((add_1, sub), self._out_spec)
     """,
         )
+
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep"]
+        _check_node_users_in_the_same_graph(mod)
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
@@ -705,7 +718,9 @@ def forward(self, x):
     return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
     """,  # noqa: B950
         )
+
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep_no_grad"]
+        _check_node_users_in_the_same_graph(mod)
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
