@@ -287,7 +287,7 @@ bool isClampFusable(
         vmap.find("output_max") != vmap.end(),
         "Expected to find output_max as well given "
         "output_min exist in pattern graph.");
-    // If output_min/max are not constant, we get c10::nullopt.
+    // If output_min/max are not constant, we get std::nullopt.
     auto output_min =
         graph_rewrite_helper::getIValue("output_min", match_vmap, vmap);
     auto output_max =

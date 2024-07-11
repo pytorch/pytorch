@@ -279,7 +279,9 @@ class PythonArgument:
                 and self.default.startswith("{")
                 and self.default.endswith("}")
             ):
-                default = "(" + self.default[1:-1] + ")"
+                default = (
+                    "(" + ", ".join(map(str.strip, self.default[1:-1].split(","))) + ")"
+                )
             else:
                 default = {
                     "nullptr": "None",
@@ -1228,7 +1230,7 @@ def cpp_dispatch_exprs(
 ) -> tuple[str, ...]:
     cpp_args: Sequence[Binding] = _cpp_signature(f, method=False).arguments()
 
-    exprs: tuple[str, ...] = tuple()
+    exprs: tuple[str, ...] = ()
     if not isinstance(python_signature, PythonSignatureDeprecated):
         # By default the exprs are consistent with the C++ signature.
         exprs = tuple(a.name for a in cpp_args)

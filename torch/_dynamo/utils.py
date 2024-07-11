@@ -78,7 +78,7 @@ try:
             np.random: tnp.random,
         }
     else:
-        NP_SUPPORTED_MODULES = tuple()
+        NP_SUPPORTED_MODULES = ()
 
         NP_TO_TNP_MODULE = {}
     from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -89,6 +89,7 @@ import importlib
 
 import torch
 import torch._functorch.config
+import torch._inductor.config as inductor_config
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
@@ -462,8 +463,8 @@ class ExactWeakKeyDictionary:
     """Similar to weakref.WeakKeyDictionary, but use `is`/`id` rather than `==` to compare equality"""
 
     def __init__(self):
-        self.values = dict()
-        self.refs = dict()
+        self.values = {}
+        self.refs = {}
 
     def __getitem__(self, key):
         return self.values[id(key)]
@@ -578,6 +579,24 @@ def is_function(value):
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
+        ),
+    )
+
+
+def is_wrapper_or_member_descriptor(value):
+    return isinstance(
+        value,
+        (
+            # set up by PyGetSetDef
+            types.GetSetDescriptorType,
+            # set by PyMethodDef, e.g. list.append
+            types.MethodDescriptorType,
+            # slots - list.__add__
+            types.WrapperDescriptorType,
+            # set up by PyMemberDef
+            types.MemberDescriptorType,
+            # wrapper over C functions
+            types.MethodWrapperType,
         ),
     )
 
@@ -1125,10 +1144,10 @@ def check_numpy_ndarray_args(args, kwargs):
     )
 
 
-dict_keys: Type[KeysView[Any]] = type(dict().keys())
-dict_values: Type[ValuesView[Any]] = type(dict().values())
+dict_keys: Type[KeysView[Any]] = type({}.keys())
+dict_values: Type[ValuesView[Any]] = type({}.values())
 odict_values: Type[ValuesView[Any]] = type(collections.OrderedDict().values())
-tuple_iterator: Type[Iterator[Any]] = type(iter(tuple()))
+tuple_iterator: Type[Iterator[Any]] = type(iter(()))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
 
@@ -1321,6 +1340,7 @@ def same(
     relax_numpy_equality=False,
     ignore_non_fp=False,
     log_error=log.error,
+    use_larger_multiplier_for_smaller_tensor=False,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -1454,7 +1474,15 @@ def same(
                 # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
                 multiplier = 3.0 if res.dtype == torch.bfloat16 else 2.0
 
-                if (
+                if use_larger_multiplier_for_smaller_tensor and (
+                    fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
+                ):
+                    multiplier = 10.0
+                elif use_larger_multiplier_for_smaller_tensor and (
+                    fp64_ref.numel() <= 500 and tol >= 4 * 1e-2
+                ):
+                    multiplier = 5.0
+                elif (
                     fp64_ref.numel() < 1000
                     or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
                     # large tol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE
@@ -1466,6 +1494,16 @@ def same(
                     multiplier = 3.0
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
+                if (
+                    not passes_test
+                    and equal_nan
+                    and math.isnan(ref_error)
+                    and math.isnan(res_error)
+                    # Some unit test for the accuracy minifier relies on
+                    # returning false in this case.
+                    and not inductor_config.cpp.inject_relu_bug_TESTING_ONLY
+                ):
+                    passes_test = True
                 if not passes_test:
                     log_error(
                         "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, tol: %f",
@@ -1572,7 +1610,7 @@ orig_code_map = ExactWeakKeyDictionary()
 guard_failures: DefaultDict[Any, List[Any]] = collections.defaultdict(list)
 
 # Keep a record of graph break reasons for logging
-graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReason"] = list()
+graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReason"] = []
 
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously

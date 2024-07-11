@@ -76,6 +76,11 @@ class BaseSchedulerNode:
         self.users: List[NodeUser] = []
         self.set_read_writes(node.get_read_writes())
         self.ancestors: Set[str] = set()
+        # .min_order and .max_order are only relevant for "grouped" nodes such as FusedSchedulerNode.
+        # e.g. if the FusedSchedulerNode includes nodes (op_1, op_2, op_3), and op_X is X-th node
+        # in `self.scheduler.nodes`, then for this FusedSchedulerNode, .min_order is 1 and .max_order is 3.
+        # For non-"grouped" nodes (i.e. regular SchedulerNode),
+        # .min_order = .max_order = X if this node is X-th node in `self.scheduler.nodes`.
         self.min_order: int
         self.max_order: int
         self.last_usage: Set[
@@ -1086,11 +1091,17 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def get_producer_subnode_for(
         self, consumer: BaseSchedulerNode
     ) -> Optional[BaseSchedulerNode]:
+        producers = []
         for rd in consumer.read_writes.reads:
             if rd.name in self.name_to_node:
-                return self.name_to_node[rd.name]
+                producers.append(self.name_to_node[rd.name])
 
-        return None
+        # Don't permit fusion if there are multiple subnodes
+        # that this consumer reads from
+        if len(producers) == 1:
+            return producers[0]
+        else:
+            return None
 
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
@@ -1533,7 +1544,7 @@ class Scheduler:
                 items: Optional[List[T]] = None,
                 membership: Optional[Set[T]] = None,
             ) -> None:
-                self.items = items or list()
+                self.items = items or []
                 self.membership = membership or set()
 
             def append(self, node_user: T) -> None:
@@ -2631,7 +2642,7 @@ class Scheduler:
                 )
             elif is_gpu(device.type):
                 raise RuntimeError(
-                    "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
+                    "Cannot find a working triton installation. Either the package is not installed or it is too old. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
                 )
 
         return device_scheduling(self)
