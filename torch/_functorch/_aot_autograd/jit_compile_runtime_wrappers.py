@@ -273,7 +273,7 @@ def collect_donated_buffer_metadata_from_tensor(
 
     for i in range(num_saved_tensor):
         t = fw_outputs[fw_saved_tensor_begin + i]
-        if StorageWeakRef(t.untyped_storage()) in storage_refs:
+        if StorageWeakRef(t.untyped_storage()) not in storage_refs:
             is_donated_buffer[i] = True
 
     return is_donated_buffer
@@ -407,6 +407,10 @@ def aot_dispatch_autograd(
                 num_inner_fwd_outputs,
                 num_fw_outs_saved_for_bw - num_symints_saved_for_bw,
             )
+
+            if aot_config.enable_log:
+                msg = f"backward donated indices: {inner_meta.bw_donated_indices}"
+                log.info(msg)
 
         # Note [Detaching inputs that never need gradients]
         # See https://github.com/pytorch/pytorch/issues/97745
