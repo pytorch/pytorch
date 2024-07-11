@@ -779,8 +779,6 @@ aten::empty_permuted.out
 aten::empty_quantized
 aten::empty_quantized.out
 aten::equal
-aten::expand_copy
-aten::expand_copy.out
 aten::fake_quantize_per_channel_affine_cachemask
 aten::fake_quantize_per_channel_affine_cachemask.out
 aten::fake_quantize_per_tensor_affine_cachemask
@@ -1016,8 +1014,6 @@ aten::ones.names_out
 aten::ones.out
 aten::ormqr
 aten::ormqr.out
-aten::permute_copy
-aten::permute_copy.out
 aten::poisson
 aten::poisson.out
 aten::polygamma
