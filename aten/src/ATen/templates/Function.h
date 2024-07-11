@@ -13,7 +13,7 @@
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Deprecated.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 ${static_dispatch_ops_headers}
 

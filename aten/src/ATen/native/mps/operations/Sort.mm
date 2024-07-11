@@ -19,7 +19,7 @@ namespace at::native {
 // sort
 TORCH_IMPL_FUNC(sort_stable_out_mps)
 (const Tensor& self,
- std::optional<bool> stable,
+ c10::optional<bool> stable,
  int64_t dim,
  bool descending,
  const Tensor& values,

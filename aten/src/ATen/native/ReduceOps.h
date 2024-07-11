@@ -2,7 +2,7 @@
 
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/ArrayRef.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 namespace c10 {
 class Scalar;

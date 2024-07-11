@@ -79,9 +79,9 @@ Tensor _mul_out_xnnpack(
   Tensor out = at::native::empty_affine_quantized(
       at::infer_size_dimvector(self_contig.sizes(), other_contig.sizes()),
       self.scalar_type(),
-      std::nullopt /* layout */,
+      c10::nullopt /* layout */,
       kCPU,
-      std::nullopt /* pin_memory */,
+      c10::nullopt /* pin_memory */,
       output_scale,
       output_zero_point,
       qa_mem_format);
