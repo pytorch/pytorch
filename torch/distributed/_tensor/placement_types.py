@@ -340,8 +340,13 @@ class Shard(Placement):
         return f"S({self.dim})"
 
 
-@dataclass(frozen=True, kw_only=True)
+# kw_only is only available in python >= 3.10
+kw_only_dataclass = dict(kw_only=True) if "kw_only" in dataclass.__kwdefaults__ else {}
+
+
+@dataclass(frozen=True, **kw_only_dataclass)
 class _StridedShard(Shard):
+    # TODO: change description
     """
     StridedShard allows a more flexible Shard placement on device compared to the default
     behavior where tensor is sharded on the leftmost (i.e. outermost) mesh dimension
@@ -397,30 +402,27 @@ class _StridedShard(Shard):
         )
     """
 
-    # the shard stride for current mesh dimension: the shard on next local rank along the
-    # mesh dim will be (_shard_stride - 1) shards away from the current shard.
-    _total_split: int
-    # _stride: int (_stride == mesh.size(idx))
-    # TODO: post-init check that _stride is a factor of _total_split
+    # TODO: add comment for `split_factor`
+    split_factor: int
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Shard):
             return False
         # question: does sharding order matter here???
-        return self.dim == other.dim and self._total_split == other._total_split
+        return self.dim == other.dim and self.split_factor == other.split_factor
 
     def __hash__(self) -> int:
-        return hash((self.dim, self._total_split))
+        return hash((self.dim, self.split_factor))
 
     def __repr__(self) -> str:
         """
         machine readable representation of the _StridedShard placement
         """
-        return f"_StridedShard(dim={self.dim}, _total_split={self._total_split})"
+        return f"_StridedShard(dim={self.dim}, sf={self.split_factor})"
 
     def __str__(self) -> str:
         """human readable representation of the _StridedShard placement"""
-        return f"_S({self.dim}, {self._total_split})"
+        return f"_S({self.dim}, {self.split_factor})"
 
     def _split_tensor(
         self,
@@ -437,21 +439,15 @@ class _StridedShard(Shard):
             self.dim <= tensor.ndim
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
 
-        assert self._total_split % num_chunks == 0, (
-            f"_StridedShard requires _total_split % num_chunks == 0 but "
-            f"{self._total_split} % {num_chunks} == {self._total_split % num_chunks}"
-        )
-
-        assert tensor.size(self.dim) % self._total_split == 0, (
+        total_split = num_chunks * self.split_factor
+        assert tensor.size(self.dim) % total_split == 0, (
             "_StridedShard currently only allows even sharding but got tensor size"
-            f" {tensor.size(self.dim)} on dim {self.dim} and _total_split"
-            f" {self._total_split}"
+            f" {tensor.size(self.dim)} on dim {self.dim} and total split"
+            f" {total_split}={num_chunks} * {self.split_factor}"
         )
 
-        group_size = self._total_split // num_chunks
-        total_split_tensor_list = list(
-            torch.chunk(tensor, self._total_split, dim=self.dim)
-        )
+        group_size = self.split_factor
+        total_split_tensor_list = list(torch.chunk(tensor, total_split, dim=self.dim))
         tensor_list = [
             torch.cat(
                 [
