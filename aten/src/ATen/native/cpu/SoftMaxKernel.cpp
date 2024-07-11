@@ -13,7 +13,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <ATen/OpMathType.h>
 

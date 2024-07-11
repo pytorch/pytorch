@@ -295,22 +295,22 @@ Tensor relu(const Tensor& self) {
   return (
       (self.scalar_type() == at::kQUInt8)
           ? ops::_clamp(
-                self, 0, c10::nullopt, VK_KERNEL(quantized_clamp_quint8))
+                self, 0, std::nullopt, VK_KERNEL(quantized_clamp_quint8))
           : ((self.scalar_type() == at::kQInt8)
                  ? ops::_clamp(
-                       self, 0, c10::nullopt, VK_KERNEL(quantized_clamp_qint8))
-                 : ops::_clamp(self, 0, c10::nullopt, VK_KERNEL(clamp))));
+                       self, 0, std::nullopt, VK_KERNEL(quantized_clamp_qint8))
+                 : ops::_clamp(self, 0, std::nullopt, VK_KERNEL(clamp))));
 }
 
 Tensor& relu_(Tensor& self) {
   return (
       (self.scalar_type() == at::kQUInt8)
           ? ops::_clamp_(
-                self, 0, c10::nullopt, VK_KERNEL(quantized_clamp_quint8_))
+                self, 0, std::nullopt, VK_KERNEL(quantized_clamp_quint8_))
           : ((self.scalar_type() == at::kQInt8)
                  ? ops::_clamp_(
-                       self, 0, c10::nullopt, VK_KERNEL(quantized_clamp_qint8_))
-                 : ops::_clamp_(self, 0, c10::nullopt, VK_KERNEL(clamp_))));
+                       self, 0, std::nullopt, VK_KERNEL(quantized_clamp_qint8_))
+                 : ops::_clamp_(self, 0, std::nullopt, VK_KERNEL(clamp_))));
 }
 
 Tensor hardswish(const Tensor& self) {
