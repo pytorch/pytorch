@@ -7,7 +7,7 @@ cc_library(name = "nlohmann",
 )
 
 cc_import(name = "nlohmann-internal",
-     hdrs = glob(["include/**/*.h"]),
+     hdrs = glob(["include/**/*.hpp"]),
      visibility = ["//visibility:private"],
 )
 
