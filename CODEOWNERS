@@ -1,0 +1,167 @@
+# IMPORTANT:
+# This file is ONLY used to subscribe for notifications for PRs
+# related to a specific file path. Approvals from people in this
+# file are not required for merges.
+
+# This is a comment.
+# Each line is a file pattern followed by one or more owners.
+# For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.
+
+/torch/utils/cpp_extension.py @fmassa @soumith @ezyang
+
+# Not there to strictly require the approval, but to be tagged as a reviewer
+# on the PRs to push them into a high priority inbox.
+/torch/csrc/autograd/ @albanD @soulitzer
+/torch/autograd/ @albanD @soulitzer
+/tools/autograd/ @albanD @soulitzer
+/torch/nn/ @albanD @jbschlosser @mikaylagawarecki
+/torch/optim/ @albanD @janeyx99
+/test/test_public_bindings.py @albanD
+/test/allowlist_for_publicAPI.json @albanD
+/docs/source/conf.py @albanD
+/aten/src/ATen/native/tags.yaml @ezyang
+
+# Architecture Optimization (quantization, sparsity, etc.)
+/aten/src/ATen/native/ao_sparse @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized @jerryzh168 @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cpu @jerryzh168 @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cuda @jerryzh168
+/aten/src/ATen/native/quantized/cudnn @jerryzh168
+/test/test_quantization.py @jerryzh168
+/test/ao/ @jerryzh168 @hdcharles
+/test/quantization/ @jerryzh168
+/torch/quantization/ @jerryzh168
+ao/sparisty/ @hdcharles
+ao/quantization/ @jerryzh168
+nn/intrinsic/ @jerryzh168
+nn/quantized/ @jerryzh168
+nn/quantizable/ @jerryzh168
+nn/qat/ @jerryzh168
+
+# Tensorpipe RPC Agent.
+/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw
+/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
+
+# ONNX Export
+/torch/_dynamo/backends/onnxrt.py @wschin @xadupre
+/torch/csrc/jit/passes/onnx.h @titaiwangms @shubhambhokare1 @xadupre
+/torch/csrc/jit/passes/onnx.cpp @titaiwangms @shubhambhokare1 @xadupre
+/torch/csrc/jit/passes/onnx/ @titaiwangms @shubhambhokare1 @xadupre
+/torch/onnx/ @titaiwangms @shubhambhokare1 @justinchuby @wschin @xadupre
+/test/onnx/  @titaiwangms @shubhambhokare1 @justinchuby @wschin @xadupre
+
+# CI
+/.ci  @pytorch/pytorch-dev-infra
+
+# Docker
+/.ci/docker/ @jeffdaily
+/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+/.ci/docker/ci_commit_pins/triton-rocm.txt @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+/.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
+
+# Github Actions
+# This list is for people wanting to be notified every time there's a change
+# related to Github Actions
+/.github/ @pytorch/pytorch-dev-infra
+
+# Custom Test Infrastructure
+/test/run_test.py @pytorch/pytorch-dev-infra
+/torch/testing/_internal/common_device_type.py @mruberry
+/torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
+/torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4
+
+# Parametrizations
+/torch/nn/utils/parametriz*.py @lezcano
+
+# torch.linalg
+# docs
+/torch/linalg/ @lezcano @IvanYashchuk
+# code
+/aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved @IvanYashchuk
+# tests
+/test/test_linalg.py @lezcano @nikitaved @IvanYashchuk
+
+# OpInfo-related files
+/torch/testing/_internal/common_methods_invocations.py @mruberry
+/torch/testing/_internal/common_device_type.py @mruberry
+test/test_ops.py @mruberry
+test/test_ops_gradients.py @mruberry @soulitzer
+test/test_ops_fwd_gradients.py @mruberry @soulitzer
+test/test_unary_ufuncs.py @mruberry
+test/test_binary_ufuncs.py @mruberry
+test/test_reductions.py @mruberry
+test/test_type_promotion.py @mruberry
+
+# functorch-related things
+# This list is for people wanting to be notified every time there's a change
+# Useful for e.g. auditing xfails that other folks add to tests
+test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
+test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
+
+# torch MPS
+test/test_mps.py @kulinseth @malfet
+aten/src/ATen/mps/ @kulinseth @malfet
+aten/src/ATen/native/mps/ @kulinseth @malfet
+
+# MTIA
+aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
+torch/csrc/mtia/ @egienvalue
+
+# Profiler
+torch/csrc/autograd/profiler* @aaronenyeshi @sraikund16
+torch/autograd/profiler* @aaronenyeshi @sraikund16
+torch/csrc/profiler/ @aaronenyeshi @sraikund16
+torch/profiler/ @aaronenyeshi @sraikund16
+
+# AOTDispatch tests
+test/functorch/test_aotdispatch.py @ezyang @Chillee
+
+# Dataloader
+torch/utils/data/ @andrewkho @gokulavasan
+
+# hipify
+torch/utils/hipify/ @jeffdaily @jithunnair-amd
+tools/amd_build/ @jeffdaily @jithunnair-amd
+
+# ROCm-specific files
+aten/src/ATen/hip/ @jeffdaily @jithunnair-amd
+aten/src/ATen/miopen/ @jeffdaily @jithunnair-amd
+aten/src/ATen/native/miopen/ @jeffdaily @jithunnair-amd
+c10/hip @jeffdaily @jithunnair-amd
+caffe2/core/hip @jeffdaily @jithunnair-amd
+caffe2/operators/hip @jeffdaily @jithunnair-amd
+caffe2/operators/rnn/hip @jeffdaily @jithunnair-amd
+caffe2/utils/hip @jeffdaily @jithunnair-amd
+
+# XPU-specific files
+/aten/src/ATen/xpu/ @EikanWang @gujinghui
+/c10/xpu/ @EikanWang @gujinghui
+/torch/csrc/xpu/ @EikanWang @gujinghui
+/torch/xpu/ @EikanWang @gujinghui
+/test/xpu/ @EikanWang @gujinghui
+/test/test_xpu.py @EikanWang @gujinghui
+/third_party/xpu.txt @EikanWang @gujinghui
+
+# torch.export
+/torch/export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
+/torch/_export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
+
+# serialization-related files
+/aten/src/ATen/MapAllocator* @mikaylagawarecki
+/caffe2/serialize/ @mikaylagawarecki
+/torch/serialization.py @mikaylagawarecki
+/torch/storage.py @mikaylagawarecki
+/torch/csrc/Storage* @mikaylagawarecki
+# subscribing for PyTorchFileWriter/PyTorchFileReader changes
+/torch/csrc/jit/python/init.cpp @mikaylagawarecki
+
+# CUDA and CUDA math libraries
+aten/src/ATen/cuda/ @eqy
+aten/src/ATen/cudnn/ @eqy
+aten/src/ATen/native/cuda/ @eqy
+aten/src/ATen/native/cudnn/ @eqy
+c10/cuda @eqy
+torch/cuda/ @eqy
+torch/csrc/cuda/ @eqy
+torch/backends/cuda/ @eqy
+torch/backends/cudnn/ @eqy

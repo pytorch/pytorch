@@ -1,0 +1,82 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: 0 0 * * *
+  push:
+    tags:
+      # NOTE: Doc build pipelines should only get triggered on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - ciflow/nightly/*
+  workflow_dispatch:
+
+
+concurrency:
+  group: ${{ github.workflow }}--${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  docs-build:
+    name: docs build
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-py3.8-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
+
+  docs-push:
+    name: docs push
+    uses: ./.github/workflows/_docs.yml
+    needs: docs-build
+    with:
+      build-environment: linux-jammy-py3.8-gcc11
+      docker-image: ${{ needs.docs-build.outputs.docker-image }}
+      push: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.event.ref, 'refs/tags/v') }}
+      run-doxygen: true
+    secrets:
+      GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+
+  update-vision-commit-hash:
+    runs-on: ubuntu-latest
+    environment: update-commit-hash
+    steps:
+      - name: update-vision-commit-hash
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        if: ${{ github.event_name == 'schedule' }}
+        with:
+          repo-name: vision
+          branch: main
+          pin-folder: .github/ci_commit_pins
+          test-infra-ref: main
+          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
+          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+
+  update-audio-commit-hash:
+    runs-on: ubuntu-latest
+    environment: update-commit-hash
+    steps:
+      - name: update-audio-commit-hash
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        if: ${{ github.event_name == 'schedule' }}
+        with:
+          repo-name: audio
+          branch: main
+          pin-folder: .github/ci_commit_pins
+          test-infra-ref: main
+          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
+          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+
+  update-executorch-commit-hash:
+    runs-on: ubuntu-latest
+    environment: update-commit-hash
+    steps:
+      - name: update-executorch-commit-hash
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        if: ${{ github.event_name == 'schedule' }}
+        with:
+          repo-name: executorch
+          branch: main
+          pin-folder: .ci/docker/ci_commit_pins
+          test-infra-ref: main
+          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
+          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
