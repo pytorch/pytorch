@@ -414,7 +414,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
   // Fuse transform_0213 inside
   auto proj = transform0213_gemm_nt_bias(
       attn_ctx, proj_weight, proj_bias, query);
-#ifndef NDEBUG
+// TODO: Remove me when https://github.com/pytorch/pytorch/issues/130073 is fixed
+#if !defined(NDEBUG) && 0
   debug_assert_shape(__LINE__, proj, {B, T, D});
 #endif
   if (need_weights && average_attn_weights) {
@@ -522,7 +523,7 @@ inline void validate_sdpa_input(
 std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
   // Pass through
   if(!attn_mask.has_value()){
-    return c10::nullopt;
+    return std::nullopt;
   }
   // Convert boolean mask to additive mask; need to invert mask to indicate what
   // to mask *out*.
@@ -692,7 +693,7 @@ Tensor scaled_dot_product_attention(
     case sdp::SDPBackend::cudnn_attention: {
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
-          query_, key, value, dropout_p, is_causal, compute_logsumexp, scale);
+          query_, key, value, attn_mask_, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::flash_attention: {
@@ -890,7 +891,7 @@ _scaled_dot_product_fused_attention_overrideable(
     const at::Tensor & query,
     const at::Tensor & key,
     const at::Tensor & value,
-    const c10::optional<at::Tensor> & attn_bias,
+    const std::optional<at::Tensor> & attn_bias,
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,

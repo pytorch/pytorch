@@ -3,7 +3,7 @@
 #include <c10/macros/Export.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/attention.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 namespace at {
 namespace native {

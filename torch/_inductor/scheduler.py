@@ -1086,11 +1086,17 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def get_producer_subnode_for(
         self, consumer: BaseSchedulerNode
     ) -> Optional[BaseSchedulerNode]:
+        producers = []
         for rd in consumer.read_writes.reads:
             if rd.name in self.name_to_node:
-                return self.name_to_node[rd.name]
+                producers.append(self.name_to_node[rd.name])
 
-        return None
+        # Don't permit fusion if there are multiple subnodes
+        # that this consumer reads from
+        if len(producers) == 1:
+            return producers[0]
+        else:
+            return None
 
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
@@ -2631,7 +2637,7 @@ class Scheduler:
                 )
             elif is_gpu(device.type):
                 raise RuntimeError(
-                    "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
+                    "Cannot find a working triton installation. Either the package is not installed or it is too old. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
                 )
 
         return device_scheduling(self)
