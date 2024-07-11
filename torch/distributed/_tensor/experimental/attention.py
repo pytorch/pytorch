@@ -419,7 +419,6 @@ def _scaled_dot_product_ring_flash_attention_backward(
         )
 
         if is_causal_behavior != _CausalBehavior.SKIP:
-
             if _rerun_forward:
                 # Keep this implementation for verification purpose.
                 # TODO(chienchin): remove this implementation after more E2E
