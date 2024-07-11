@@ -4307,32 +4307,51 @@ def split_group(
     group_desc=None,
 ):
     """
-    Create a new distributed group splitted from the given parent group.
+    Create a new process group splitted from the given parent process group.
 
-    users of this API must gurantee that all ranks in the parent group enter this API call.
-    And the split of the group is the same accross the ranks.
+    warning:: only the ``NCCL`` backend supports this API. Other backends will raise an error.
+    users of this API must gurantee that all ranks in the parent group enter this API call,
+    and the split of the sub groups is the same accross all ranks in the parent group.
 
     Args:
         parent_pg (ProcessGroup, optional): The parent process group. If None,
-            the default process group will be used. Users need to gurantee that 
+            the default process group will be used. Users need to gurantee that
             the parent group is fully initialized (e.g, communicators are initialized)
-        split_ranks (list[int]): the split ranks, which is a list of list of ranks.
-            Users need to make sure the validity of the split rannks such that one 
+        split_ranks (list[list[int]]): the split ranks, which is a list of list of ranks.
+            Users need to make sure the validity of the split ranks such that one
             split (represented by one inner list of ints) does not overlap with any other split.
-            note, the ranks in each split is the group rank in the parent pg.
-        timeout (timedelta, optional): see `init_process_group` for details and default value.    
+            Note that the ranks in each split is the group rank (instead of global rank)
+            in the parent pg. For example, if the parent group has 4 ranks, and split_ranks can be
+            [[0, 1], [2, 3]]. Note [[0,1]] is also a valid split, in which case ranks 2, 3 would
+            return a non-group member.
+        timeout (timedelta, optional): see `init_process_group` for details and default value.
+        pg_options (ProcessGroupNCCLOptions, optional): process group options
+            specifying what additional options need to be passed in during
+            the construction of specific process groups. i.e.``is_high_priority_stream``
+            can be specified so that process group can pick up high priority cuda streams.
         group_desc (str, optional): a string to describe the process group.
 
     Returns:
-        A handle of distributed group that can be given to collective calls or
-        GroupMember.NON_GROUP_MEMBER if the rank is not part of any split_ranks`.
+        ProcessGroup if the current rank is within one split/subgroup given by split_ranks,
+        or GroupMember.NON_GROUP_MEMBER if the current rank is not part of any split_ranks`.
 
     """
-    global _world
-
+    # check inputs
     if split_ranks is None:
         raise ValueError("split_ranks cannot be None")
 
+    if pg_options is not None:
+        assert isinstance(
+            pg_options, ProcessGroupNCCL.Options
+        ), "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
+    else:
+        # default pg_options for NCCL
+        pg_options = ProcessGroupNCCL.Options()
+        pg_options.is_high_priority_stream = False
+
+    group_desc = "undefined" if group_desc is None else group_desc
+
+    global _world
     default_pg = _get_default_group()
     device_id = default_pg.bound_device_id
     if not device_id:
@@ -4341,37 +4360,30 @@ def split_group(
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
 
-    group_desc = "undefined" if group_desc is None else group_desc
-
-  
     if not parent_pg:
         parent_pg = default_pg
-
     if parent_pg not in _world.pg_group_ranks:
-        raise ValueError(
-            f"Group {parent_pg} is not registered."
-        )
+        raise ValueError(f"Group {parent_pg} is not registered")
+
     parent_global_to_group_ranks = _world.pg_group_ranks[parent_pg]
     parent_group_to_global_ranks = {group_rank: global_rank for global_rank, group_rank in parent_global_to_group_ranks.items()}
-    
+
     if global_rank not in parent_global_to_group_ranks:
         raise ValueError(f"Global rank {global_rank} is not part of the parent group {parent_pg}")
+
     parent_group_rank = parent_global_to_group_ranks[global_rank]
-    
-    try:
-        parent_backend = parent_pg._get_backend(torch.device("cuda"))
-    except RuntimeError:
-        # no cuda device associated with this backend
-        pass
-    
-    # if the parent backend does not support splitting, we return None
+    parent_backend = parent_pg._get_backend(torch.device("cuda"))
+
+    # if the parent backend does not support splitting, raise error
     # currently this API only support NCCL backend
     if not parent_backend or not parent_backend.supports_splitting or not isinstance(parent_backend, ProcessGroupNCCL):
-        raise RuntimeError("No parent process group or its backend does not support splitting")
+        raise RuntimeError("No backend for the parent process group or its backend does not support splitting")
 
     parent_backend_str, _ = _world.pg_map[parent_pg]
+    # same type of backend as the parent process group
     backend = Backend(parent_backend_str)
     backend_config = BackendConfig(backend)
+
     # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
     # which may just pass their timeout value (or None)
     if timeout is None:
@@ -4380,8 +4392,8 @@ def split_group(
 
     # find my group of ranks and my group local rank in split_ranks
     my_group = None
-    group_rank = None
-    
+    group_rank = -1
+
     for split_group in split_ranks:
         if len(split_group) == 0:
             raise ValueError("the split group cannot be empty")
@@ -4396,9 +4408,9 @@ def split_group(
             my_group = split_group
             group_rank = split_group.index(parent_group_rank)
             break
-    # if my rank does not belong to any sub group or my rank is the only member in the subgroup, 
+    # if my rank does not belong to any sub group or my rank is the only member in the subgroup,
     # no_color split should be called
-    if my_group is None or len(my_group) == 1:
+    if my_group is None or group_rank == -1 or len(my_group) == 1:
         parent_backend.perform_nocolor_split(device_id)
         return GroupMember.NON_GROUP_MEMBER
 
@@ -4413,19 +4425,6 @@ def split_group(
     )
     pg.bound_device_id = device_id
 
-    if pg_options is not None:
-        assert isinstance(
-            pg_options, ProcessGroupNCCL.Options
-        ), "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
-        if pg_options._timeout != timeout:
-            warnings.warn(
-                "pg_options._timeout was specified, "
-                "but timeout kwarg has a default value that will always override it. "
-            )
-    else:
-        # default pg_options for NCCL
-        pg_options = ProcessGroupNCCL.Options()
-        pg_options.is_high_priority_stream = False
     pg_options._timeout = timeout
     pg_options.split_from = parent_backend
     pg_options.split_color = _process_group_color(my_group)
