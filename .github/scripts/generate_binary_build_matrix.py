@@ -400,9 +400,7 @@ def generate_wheels_matrix(
                                 gpu_arch_type, gpu_arch_version
                             ),
                             "use_split_build": "True",
-                            "devtoolset": (
-                                "cxx11-abi" if arch_version == "cuda-aarch64" else ""
-                            ),
+                            "devtoolset": "",
                             "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                             "package_type": package_type,
                             "pytorch_extra_install_requirements": (
@@ -415,6 +413,26 @@ def generate_wheels_matrix(
                             ),
                         }
                     )
+                    # Special build building to use on Colab. PyThon 3.10 for 12.1 CUDA
+                    if python_version == "3.10" and arch_version == "12.1":
+                        ret.append(
+                            {
+                                "python_version": python_version,
+                                "gpu_arch_type": gpu_arch_type,
+                                "gpu_arch_version": gpu_arch_version,
+                                "desired_cuda": translate_desired_cuda(
+                                    gpu_arch_type, gpu_arch_version
+                                ),
+                                "use_split_build": "False",
+                                "devtoolset": "",
+                                "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                                "package_type": package_type,
+                                "pytorch_extra_install_requirements": "",
+                                "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-full".replace(  # noqa: B950
+                                    ".", "_"
+                                ),
+                            }
+                        )
             else:
                 ret.append(
                     {
