@@ -5360,7 +5360,7 @@ class TestMPS(TestCaseMPS):
 
         # 6D tensor reductions
         # Regression test for https://github.com/pytorch/pytorch/issues/95538
-        x = (torch.rand(2, 3, 4, 3, 4, 2, device="mps")-.5).relu()
+        x = (torch.rand(2, 3, 4, 3, 4, 2, device="mps") - .5).relu()
         self.assertEqual(x.all(), x.cpu().all())
         for i in range(-5, 6):
             self.assertEqual(x.all(dim=i), x.cpu().all(dim=i))
@@ -5433,7 +5433,6 @@ class TestMPS(TestCaseMPS):
         x_cpu = torch.tensor([], dtype=torch.bool)
         x_mps = x_cpu.to("mps")
         self.assertEqual(x_cpu.all(), x_mps.all().cpu())
-
 
     # Test forward min
     def test_min_el(self):
