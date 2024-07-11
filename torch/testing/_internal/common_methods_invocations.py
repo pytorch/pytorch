@@ -18381,7 +18381,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs__unsafe_masked_index,
            skips=(
-               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
                DecorateInfo(slowTest, 'TestDecomp', 'test_quick_core_backward',
                             dtypes=(torch.float64,), active_if=IS_WINDOWS),
            ),),
