@@ -249,7 +249,7 @@ def collect_donated_buffer_metadata_from_tensor(
     fw_outputs: List[torch.Tensor],
     bw_outputs: List[torch.Tensor],
     fw_saved_tensor_range: Tuple[int, int],
-) -> List[bool]:
+) -> List[int]:
     """
     Checks if the saved tensors are donated buffers, which means a saved tensor is not
     an alias of any tensors in fw_inputs, bw_outputs, and fw_outputs (except other saved
@@ -264,19 +264,19 @@ def collect_donated_buffer_metadata_from_tensor(
     """
     fw_saved_tensor_begin, fw_saved_tensor_end = fw_saved_tensor_range
     num_saved_tensor = fw_saved_tensor_end - fw_saved_tensor_begin
-    is_donated_buffer = [False] * num_saved_tensor
 
     storage_refs = set()
     for t in itertools.chain(fw_inputs, fw_outputs[:fw_saved_tensor_begin], bw_outputs):
         if isinstance(t, torch.Tensor):
             storage_refs.add(StorageWeakRef(t.untyped_storage()))
 
+    donated_buffer_idxs = []
     for i in range(num_saved_tensor):
         t = fw_outputs[fw_saved_tensor_begin + i]
         if StorageWeakRef(t.untyped_storage()) not in storage_refs:
-            is_donated_buffer[i] = True
+            donated_buffer_idxs.append(i)
 
-    return is_donated_buffer
+    return donated_buffer_idxs
 
 
 def collect_donated_buffer_metadata(
@@ -284,7 +284,7 @@ def collect_donated_buffer_metadata(
     bw_module: torch.fx.GraphModule,
     num_inner_fwd_outputs: int,
     num_saved_tensor: int,
-) -> List[bool]:
+) -> List[int]:
     """
     Collects donated buffer metadata from fw_module and bw_module.
     """
@@ -300,7 +300,7 @@ def collect_donated_buffer_metadata(
         fw_outputs = [n.meta["val"] for n in fw_outputs]
         bw_outputs = [n.meta["val"] for n in bw_outputs]
     except KeyError:
-        return [False] * num_saved_tensor
+        return []
 
     return collect_donated_buffer_metadata_from_tensor(
         fw_inputs,
