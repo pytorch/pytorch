@@ -2117,6 +2117,7 @@ def get_dynamic_dim(
     marked_weak_dynamic,
     static_shapes,
     marked_static,
+    is_stride,
 ):
     from torch.fx.experimental.symbolic_shapes import is_nested_int
 
@@ -2133,6 +2134,8 @@ def get_dynamic_dim(
         # case
         return DimDynamic.DYNAMIC
     elif static_shapes or config.assume_static_by_default or marked_static:
+        return DimDynamic.STATIC
+    elif is_stride:
         return DimDynamic.STATIC
     else:
         return DimDynamic.DUCK
@@ -2414,6 +2417,7 @@ def _automatic_dynamic(
             marked_weak_dynamic,
             static_shapes,
             marked_static,
+            is_stride=False,
         )
         dynamic_stride = get_dynamic_dim(
             e.stride()[i],
@@ -2423,6 +2427,7 @@ def _automatic_dynamic(
             False,
             static_shapes,
             False,
+            is_stride=True,
         )
         dynamic_sizes.append(dynamic_size)
         dynamic_strides.append(dynamic_stride)
