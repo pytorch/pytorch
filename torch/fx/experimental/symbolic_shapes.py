@@ -418,6 +418,10 @@ def _create_symbolic_nested_int(nested_int, base_source, shape_env):
     # (2) tensor is an intermediate
     from torch._dynamo.source import EphemeralSource, NestedIntSource
 
+    # check if the nested int is already symbolic
+    if is_symbolic(nested_int):
+        return nested_int
+
     nested_source: Source = (
         EphemeralSource("intermediate_offsets_or_lengths")
         if base_source is None
