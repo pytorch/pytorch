@@ -21,10 +21,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-DENY_LIST = (
-    # Currently no explicit denys
-)
-
 
 def _find_all_importables(pkg):
     """Find all importables in the project.
@@ -38,19 +34,6 @@ def _find_all_importables(pkg):
             ),
         ),
     )
-
-
-def _should_check(pkg):
-    try:
-        if pkg.rsplit(".", 1)[1].startswith("test_"):
-            return False
-    except IndexError:
-        pass
-    if ".examples." in pkg:
-        return False
-    if pkg in DENY_LIST:
-        return False
-    return True
 
 
 def _discover_path_importables(pkg_pth, pkg_name):
@@ -68,14 +51,12 @@ def _discover_path_importables(pkg_pth, pkg_name):
             continue
         rel_pt = pkg_dir_path.relative_to(pkg_pth)
         pkg_pref = ".".join((pkg_name,) + rel_pt.parts)
-
         yield from (
             pkg_path
             for _, pkg_path, _ in pkgutil.walk_packages(
                 (str(pkg_dir_path),),
                 prefix=f"{pkg_pref}.",
             )
-            if _should_check(pkg_path)
         )
 
 
