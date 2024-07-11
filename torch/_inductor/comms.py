@@ -113,12 +113,24 @@ def raise_comms_and_sink_waits(
                 if snode_num_deps[snode] == 0:
                     heapq.heappush(ready, Runnable(snode))
 
+    # for snode in snode_with_nonzero_num_deps:
+    #     scheduled.append(snode)
+    
+    for snode, num_deps in snode_num_deps.items():
+        if num_deps != 0:
+            torch_log.warning(f"num_deps: {num_deps}, snode: {snode}, snode.debug_str(): {snode.debug_str()}")
+    
     snode_with_nonzero_num_deps = {
         snode: num_deps for snode, num_deps in snode_num_deps.items() if num_deps > 0
     }
+    if not len(snode_with_nonzero_num_deps) == 0:
+        for snode, num_deps in snode_with_nonzero_num_deps.items():
+            torch_log.warning(f"num_deps: {num_deps}, snode: {snode}, snode.debug_str(): {snode.debug_str()}")
+        for snode in scheduled:
+            torch_log.warning(f"scheduled: snode: {snode}, snode.debug_str(): {snode.debug_str()}")
     assert (
         len(snode_with_nonzero_num_deps) == 0
-    ), f"Unscheduled nodes: {snode_with_nonzero_num_deps}"
+    ), f"Unscheduled nodes: {snode_with_nonzero_num_deps}. \n Scheduled: {scheduled}"
     return scheduled
 
 
@@ -625,9 +637,6 @@ def enforce_comm_ordering_for_fsdp(
             snode = snode_name_to_final_snode[snode.get_name()]
         if snode in scheduled:
             continue
-        torch_log.warning(
-            f"scheduling snode: {snode}, snode.debug_str(): {snode.debug_str()}"
-        )
         new_order.append(snode)
         scheduled.add(snode)
 
