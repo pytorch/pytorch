@@ -346,11 +346,51 @@ class ScheduleTest(MultiProcContinousTest):
         schedule = ScheduleClass(stages, chunks, loss_fn=loss_fn)
         if use_new_runtime:
             old_schedule = schedule
-            schedule = _PipelineScheduleRuntime(stages, chunks, loss_fn=loss_fn)
-            schedule._from_simple_schedule(
-                old_schedule.pipeline_order,
-                lambda s: old_schedule.stage_index_to_group_rank[s],
+            tmp_schedule = _PipelineScheduleRuntime(
+                stages,
+                chunks,
+                loss_fn=loss_fn,
+                stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
             )
+            tmp_schedule._load_actions(old_schedule.pipeline_order)
+            # test that csv round-trip works for compute_comms schedule
+            schedule = _PipelineScheduleRuntime(
+                stages,
+                chunks,
+                loss_fn=loss_fn,
+                stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
+            )
+            with tempfile.NamedTemporaryFile() as f:
+                tmp_schedule._dump_csv(f.name)
+                f.seek(0)
+                schedule._load_csv(f.name, format="compute_comms")
+            one_more_schedule = _PipelineScheduleRuntime(
+                stages,
+                chunks,
+                loss_fn=loss_fn,
+                stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
+            )
+            one_more_schedule._load_actions(
+                schedule.pipeline_order_with_comms, format="compute_comms"
+            )
+            self.assertEqual(
+                len(schedule.pipeline_order_with_comms),
+                len(
+                    one_more_schedule.pipeline_order_with_comms,
+                ),
+            )
+            for rank in schedule.pipeline_order_with_comms:
+                self.assertEqual(
+                    len(schedule.pipeline_order_with_comms[rank]),
+                    len(
+                        one_more_schedule.pipeline_order_with_comms[rank],
+                    ),
+                )
+                for a, b in zip(
+                    schedule.pipeline_order_with_comms[rank],
+                    one_more_schedule.pipeline_order_with_comms[rank],
+                ):
+                    self.assertEqual(a, b)
 
         # Run
         for _ in range(2):

@@ -183,12 +183,12 @@ class ComposabilityTest(MultiProcContinousTest):
             if use_new_runtime:
                 old_sch = pipeline_schedule
                 pipeline_schedule = _PipelineScheduleRuntime(
-                    stages, num_microbatches, loss_fn=loss_fn
+                    stages,
+                    num_microbatches,
+                    loss_fn=loss_fn,
+                    stage_index_to_group_rank=old_sch.stage_index_to_group_rank,
                 )
-                pipeline_schedule._from_simple_schedule(
-                    old_sch.pipeline_order,
-                    lambda s: old_sch.stage_index_to_group_rank[s],
-                )
+                pipeline_schedule._load_actions(old_sch.pipeline_order)
 
         # Run
         pipeline_schedule._step_microbatches(arg_mbs=input_mb, target_mbs=input_mb)
