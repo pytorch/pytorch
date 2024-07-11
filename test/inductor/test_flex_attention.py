@@ -936,6 +936,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         fc.check("buf0 = empty_strided_cuda((1, 1, 1)")  # FULL_KV_NUM_BLKS
         fc.check("buf1 = empty_strided_cuda((1, 1, 1, 1)")  # FULL_KV_IDX
         fc.check("buf8 = empty_strided_cuda")  # logsumexp
+        fc.check("buf9 = empty_strided_cuda") # attention output
         fc.check("buf11 = empty_strided_cuda")  # cos(attention)
         fc.run(code[0])
         fc = FileCheck()
