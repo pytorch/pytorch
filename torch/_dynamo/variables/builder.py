@@ -2345,8 +2345,12 @@ def _automatic_dynamic(
             frame_state_entry.size is None or frame_state_entry.size[i] is None
         )
 
+        # if size is None, no need to make stride dynamic
         automatic_dynamic_stride = config.automatic_dynamic_shapes and (
-            frame_state_entry.stride is None or frame_state_entry.stride[i] is None
+            frame_state_entry.size is not None
+            and (
+                frame_state_entry.stride is None or frame_state_entry.stride[i] is None
+            )
         )
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride

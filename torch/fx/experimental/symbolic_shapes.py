@@ -3160,7 +3160,7 @@ class ShapeEnv:
                 dynamic_dims.append(r)
                 dynamic_strides.append(r)
             dynamic_dims = [DimDynamic.DUCK] * dim
-            dynamic_strides = [DimDynamic.DUCK] * dim
+            dynamic_strides = [DimDynamic.STATIC] * dim
             # symbolic_context is None - set one
             symbolic_context = StatelessSymbolicContext(
                 dynamic_sizes=dynamic_dims,
