@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import functools
-import itertools
 import logging
 import operator
 import warnings
@@ -116,17 +115,7 @@ class OpDispatcher:
 
         # extract local tensor and sharding infos to a OpInfo
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
-        if logger.isEnabledFor(logging.DEBUG):
-            tensor_args = ""
-            for idx, arg in enumerate(
-                itertools.chain(op_info.local_args, op_info.local_kwargs)
-            ):
-                if isinstance(arg, dtensor.DTensor):
-                    tensor_args += f"\n  arg_{idx} (dtensor): {arg.shape=} {arg._spec=}"
-                elif isinstance(arg, torch.Tensor):
-                    tensor_args += f"\n  arg_{idx} (tensor): {arg.shape=}"
-
-            logger.debug("Dispatching op_call: %s%s", op_call, tensor_args)
+        logger.debug("Dispatching op_call: %s", op_info.schema)
 
         self.sharding_propagator.propagate(op_info)
         output_sharding = op_info.output_sharding
@@ -355,6 +344,7 @@ class OpDispatcher:
                     if mesh != arg.device_mesh:
                         raise NotImplementedError(
                             f"{op_call}: DTensor does not support cross-mesh operation yet!"
+                            f"Got meshes: {mesh} {arg.device_mesh}"
                         )
                 else:
                     mesh = arg.device_mesh
