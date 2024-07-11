@@ -252,14 +252,14 @@ control_plane::RegisterHandler dumpHandler{
       const std::string includeStackTracesStr = "includestacktraces";
       const std::string onlyActiveStr = "onlyactive";
 
-      std::unordered_map<std::string, bool> expectedParams = {
+      std::unordered_map<std::string, bool> processedParams = {
           {includeCollectivesStr, true},
           {includeStackTracesStr, true},
           {onlyActiveStr, false}};
 
       for (const auto& [paramName, paramValue] : params) {
-        auto it = expectedParams.find(paramName);
-        if (it != expectedParams.end()) {
+        auto it = processedParams.find(paramName);
+        if (it != processedParams.end()) {
           validParamCount++;
           if (paramValue == "true") {
             it->second = true;
@@ -283,9 +283,9 @@ control_plane::RegisterHandler dumpHandler{
       }
       res.setContent(
           dump_nccl_trace(
-              expectedParams[includeCollectivesStr],
-              expectedParams[includeStackTracesStr],
-              expectedParams[onlyActiveStr]),
+              processedParams[includeCollectivesStr],
+              processedParams[includeStackTracesStr],
+              processedParams[onlyActiveStr]),
           "application/octet-stream");
     }};
 
@@ -299,12 +299,12 @@ control_plane::RegisterHandler jsonDumpHandler{
       const std::string includeCollectivesStr = "includecollectives";
       const std::string onlyActiveStr = "onlyactive";
 
-      std::unordered_map<std::string, bool> expectedParams = {
+      std::unordered_map<std::string, bool> processedParams = {
           {includeCollectivesStr, true}, {onlyActiveStr, false}};
 
       for (const auto& [paramName, paramValue] : params) {
-        auto it = expectedParams.find(paramName);
-        if (it != expectedParams.end()) {
+        auto it = processedParams.find(paramName);
+        if (it != processedParams.end()) {
           validParamCount++;
           if (paramValue == "true") {
             it->second = true;
@@ -329,8 +329,8 @@ control_plane::RegisterHandler jsonDumpHandler{
       res.setStatus(200);
       res.setContent(
           dump_nccl_trace_json(
-              expectedParams[includeCollectivesStr],
-              expectedParams[onlyActiveStr]),
+              processedParams[includeCollectivesStr],
+              processedParams[onlyActiveStr]),
           "application/json");
     }};
 
