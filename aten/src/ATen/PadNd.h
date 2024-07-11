@@ -23,7 +23,7 @@ static inline c10::string_view padding_mode_string(padding_mode m) {
     case padding_mode::constant:
       return "constant";
     case padding_mode::symmetric:
-      return "constant";
+      return "symmetric";
   }
   TORCH_CHECK(false, "Invalid padding mode (", static_cast<int64_t>(m), ")");
 }
