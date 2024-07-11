@@ -10,7 +10,9 @@ import torch._dynamo.testing
 import torch.distributed._composable.fsdp._fsdp_param
 from torch import nn
 from torch._dynamo import compiled_autograd
-from torch._functorch._aot_autograd.fx_passes import collect_graph_epilogue_mutable_ops
+from torch._functorch._aot_autograd.functional_utils import (
+    collect_graph_epilogue_mutable_ops,
+)
 
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState

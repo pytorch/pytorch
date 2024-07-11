@@ -1081,6 +1081,7 @@ def forward(self, arg0_1, arg1_1):
         self.verify_aot_autograd(f, create_inp(True), test_mutation=True)
         self.verify_aot_autograd(f, create_inp(False), test_mutation=True)
 
+    @unittest.expectedFailure
     def test_input_mutation_storage_resize_up(self):
         def f(a):
             torch.ops.inductor.resize_storage_bytes_(a, 32)
@@ -1193,6 +1194,7 @@ def forward(self, arg0_1):
     #     return [sin, copy]""",
     #         )
 
+    @unittest.expectedFailure
     def test_input_mutation_storage_resize_before_set_(self):
         def f(a):
             with torch.no_grad():

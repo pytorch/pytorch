@@ -4235,7 +4235,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn("10"), fn("10"))
         self.assertEqual(cnt.frame_count, 4)
 
-    @unittest.expectedFailure
     @parametrize(
         "backend",
         ["eager", "aot_eager", "inductor"],
