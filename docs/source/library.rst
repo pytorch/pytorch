@@ -44,7 +44,6 @@ via PyTorch's C++ operator registration APIs).
 .. autofunction:: register_fake
 .. autofunction:: impl_abstract
 .. autofunction:: get_ctx
-.. autofunction:: register_torch_dispatch
 .. autoclass:: torch._library.custom_ops.CustomOpDef
 
     .. automethod:: set_kernel_enabled
