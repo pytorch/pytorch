@@ -1334,13 +1334,10 @@ class GroupedSchedulerNode(BaseSchedulerNode):
     def get_first_name(self) -> str:
         return self.snodes[0].get_name()
 
-    # GroupedSchedulerNode specific methods
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
+        # GroupedSchedulerNode cannot be fused with another node
         return False
-
-    def add_fake_dep(self, name: Dep) -> None:
-        self.set_read_writes(self.read_writes.with_read(name))
 
 
 def pick_loop_order(
