@@ -1206,14 +1206,37 @@ TORCH_IMPL_FUNC(any_out_mps)
   @autoreleasepool {
     string key = string("any_out_mps:") + getTensorsStringKey(input_t) + ":" + std::to_string(dim_);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
+      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
 
-      MPSGraphTensor* castInputTensor =
-          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
-      MPSGraphTensor* castOutputTensor = [mpsGraph reductionOrWithTensor:castInputTensor axis:dim_ name:nil];
-      MPSGraphTensor* outputTensor = castOutputTensor;
-      if (MPSDataTypeBool != [castOutputTensor dataType]) {
-        outputTensor = [mpsGraph castTensor:castOutputTensor toType:MPSDataTypeBool name:@"outputTensor"];
+      auto castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+      // reductionOrWithTensor:axis: will throw an internal assert if number of dimentions is more than 4
+      // See https://github.com/pytorch/pytorch/issues/95538
+      MPSGraphTensor* outputTensor = nil;
+      if (input_t.ndimension() > 4) {
+        auto reduceDimLen = input_t.size(dim_);
+        if (dim_ == 0) {
+          castInputTensor = [mpsGraph reshapeTensor:castInputTensor withShape:@[ @(reduceDimLen), @-1 ] name:nil];
+          outputTensor = [mpsGraph reductionOrWithTensor:castInputTensor axis:dim_ name:nil];
+        } else {
+          if (dim_ == input_t.dim() - 1) {
+            castInputTensor = [mpsGraph reshapeTensor:castInputTensor withShape:@[ @-1, @(reduceDimLen) ] name:nil];
+          } else {
+            auto beforeNumel = 1;
+            for (auto i : c10::irange(dim_)) {
+              beforeNumel *= input_t.size(i);
+            }
+            castInputTensor = [mpsGraph reshapeTensor:castInputTensor
+                                            withShape:@[ @(beforeNumel), @(reduceDimLen), @-1 ]
+                                                 name:nil];
+          }
+          outputTensor = [mpsGraph reductionOrWithTensor:castInputTensor axis:1 name:nil];
+        }
+        outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:apparent_out_shape name:nil];
+      } else {
+        outputTensor = [mpsGraph reductionOrWithTensor:castInputTensor axis:dim_ name:nil];
+      }
+      if (MPSDataTypeBool != [outputTensor dataType]) {
+        outputTensor = castMPSTensor(mpsGraph, outputTensor, MPSDataTypeBool);
       }
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->outputTensor_ = outputTensor;
@@ -1244,14 +1267,17 @@ TORCH_IMPL_FUNC(any_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
   @autoreleasepool {
     string key = string("any_all_out_mps:") + getTensorsStringKey(input_t);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-      MPSGraphTensor* castInputTensor =
-          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
-      MPSGraphTensor* castOutputTensor = [mpsGraph reductionOrWithTensor:castInputTensor axes:nil name:nil];
+      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
+      auto castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus); 
+      // reductionOrWithTensor:axes: will throw an internal assert if number of dimentions is more than 4
+      // See https://github.com/pytorch/pytorch/issues/95538
+      if (input_t.dim() > 4) {
+        castInputTensor = [mpsGraph reshapeTensor:castInputTensor withShape:@[ @-1 ] name:nil];
+      }
+      auto outputTensor = [mpsGraph reductionOrWithTensor:castInputTensor axes:nil name:nil];
 
-      MPSGraphTensor* outputTensor = castOutputTensor;
-      if (getMPSDataType(output_t) != [castOutputTensor dataType]) {
-        outputTensor = castMPSTensor(mpsGraph, castOutputTensor, output_t.scalar_type());
+      if (getMPSDataType(output_t) != [outputTensor dataType]) {
+        outputTensor = castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type());
       }
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->outputTensor_ = outputTensor;
