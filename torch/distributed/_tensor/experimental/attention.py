@@ -366,6 +366,7 @@ def _templated_ring_attention_backward(
     out_grad_keys = []
     out_grad_values = []
 
+    rest = tuple()
     for i in range(size):
         # overlap communication with compute
         if next_kv is not None:
@@ -669,7 +670,7 @@ def enable_context_parallel(
             all_args.append(arg)
 
         new_args = tuple(all_args[0 : len(args)])
-        new_kwargs = {k: v for k, v in zip(kwargs.keys(), all_args[len(args) :])}
+        new_kwargs = dict(kwargs.keys(), all_args[len(args) :])
         if not _function_cm:
             _function_cm[attention_input_fn] = attention_context_parallel()
             manager = _function_cm[attention_input_fn]

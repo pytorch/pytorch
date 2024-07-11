@@ -15,6 +15,8 @@ from torch.distributed._tensor.experimental.attention import (
     _scaled_dot_product_ring_flash_attention,
     attention_context_parallel,
     AttentionContextParallel,
+    context_parallel_buffers,
+    enable_context_parallel,
 )
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -347,7 +349,7 @@ class RingAttentionTest(DTensorTestBase):
             args.vocab_size, (bs, args.max_seq_len), device=self.device_type
         )
 
-        with context_parallelism_buffers(
+        with context_parallel_buffers(
             cp_rank=device_mesh.get_local_rank(),
             cp_world_size=device_mesh.size(),
             buffers=[seq, model.pos],
