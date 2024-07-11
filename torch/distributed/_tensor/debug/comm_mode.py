@@ -65,7 +65,7 @@ class CommModeModuleTracker(ModuleTracker):
 
     def __init__(self):
         super().__init__()
-        self.module_depth_dict = {}
+        self.module_helper_dict = {}
         self.module_parameters_dict = {}
         self.parent_dict = {}
         self.parent_list = []
@@ -81,7 +81,13 @@ class CommModeModuleTracker(ModuleTracker):
         self.name = super()._get_mod_name(mod)
 
         # contains information about module ordering and depth in the module tree
-        self.module_depth_dict[self.name] = len(self.parents)
+        if self.name not in self.module_helper_dict:
+            self.module_helper_dict[self.name] = {}
+
+        self.module_helper_dict[self.name]["module_type"] = (
+            str(type(mod)).replace("<", "").replace(">", "")
+        )
+        self.module_helper_dict[self.name]["depth"] = len(self.parents)
         # adds current sub-module to module tracker parent class
         super()._get_append_fn(self.name, False)()
 
@@ -99,6 +105,13 @@ class CommModeModuleTracker(ModuleTracker):
             if isinstance(param.data, DTensor):
                 key_name = self.name + "." + param_name
                 self.sharding_dict[key_name] = param.data.placements
+
+                if "parameters" not in self.module_helper_dict[self.name]:
+                    self.module_helper_dict[self.name]["parameters"] = {}
+
+                self.module_helper_dict[self.name]["parameters"][param_name] = str(
+                    param.data.placements
+                )
 
         # used to create parent-child module associations for json dumps
         parent = self.parent_list[-1]
@@ -123,8 +136,8 @@ class CommModeModuleTracker(ModuleTracker):
         self.sharding_dict.clear()
         self.parent_dict.clear()
         self.parent_list = ["Global"]
-        self.module_depth_dict.clear()
-        self.module_depth_dict["Global"] = 0
+        self.module_helper_dict.clear()
+        self.module_helper_dict["Global"] = {"depth": 0}
         self._fw_pre_handle = register_module_forward_pre_hook(self._fw_pre_hook)
         self._fw_post_handle = register_module_forward_hook(self._fw_post_hook)
 
@@ -179,11 +192,18 @@ class CommDebugMode(TorchDispatchMode):
         # recursively builds json data
         def add_json_information(json_dict, fqn):
             json_dict["fqn"] = fqn
+            json_dict["module_type"] = ""
+            json_dict["parameters"] = []
             json_dict["children"] = []
             json_dict["collectives_forward"] = []
             json_dict["collectives_backward"] = []
             json_dict["operations_forward"] = []
             json_dict["operations_backward"] = []
+
+            if "module_type" in self.advanced_module_tracker.module_helper_dict[fqn]:
+                json_dict[
+                    "module_type"
+                ] = self.advanced_module_tracker.module_helper_dict[fqn]["module_type"]
 
             # adds module collective information
             if fqn in self.comm_module_counts:
@@ -233,6 +253,15 @@ class CommDebugMode(TorchDispatchMode):
             json_dict["operations_forward"] = forward_operations
             json_dict["operations_backward"] = backward_operations
 
+            if "parameters" in self.advanced_module_tracker.module_helper_dict[fqn]:
+                for (
+                    param_name,
+                    placement,
+                ) in self.advanced_module_tracker.module_helper_dict[fqn][
+                    "parameters"
+                ].items():
+                    json_dict["parameters"].append((param_name, placement))
+
             if fqn not in self.advanced_module_tracker.parent_dict:
                 return json_dict
 
@@ -256,8 +285,10 @@ class CommDebugMode(TorchDispatchMode):
         """
 
         table = ""
-        for fqn in self.advanced_module_tracker.module_depth_dict:
-            indent = "    " * (self.advanced_module_tracker.module_depth_dict[fqn])
+        for fqn in self.advanced_module_tracker.module_helper_dict:
+            indent = "    " * (
+                self.advanced_module_tracker.module_helper_dict[fqn]["depth"]
+            )
             table += f"{indent}{fqn}\n"
             indent += "  "
             collective_indent = indent
@@ -286,16 +317,34 @@ class CommDebugMode(TorchDispatchMode):
         """
 
         table = ""
-        for fqn in self.advanced_module_tracker.module_depth_dict:
+        for fqn in self.advanced_module_tracker.module_helper_dict:
             # setting up indentations for table formatting
-            indent = "  " * (2 * self.advanced_module_tracker.module_depth_dict[fqn])
+            indent = "  " * (
+                2 * self.advanced_module_tracker.module_helper_dict[fqn]["depth"]
+            )
             table += f"{indent}{fqn}\n"
+            if "module_type" in self.advanced_module_tracker.module_helper_dict[fqn]:
+                module_type = self.advanced_module_tracker.module_helper_dict[fqn][
+                    "module_type"
+                ]
+                table += f"{indent}*module type: {module_type}\n"
+
+            if "parameters" in self.advanced_module_tracker.module_helper_dict[fqn]:
+                table += f"{indent}*Parameter List\n"
+                for (
+                    param_name,
+                    placement,
+                ) in self.advanced_module_tracker.module_helper_dict[fqn][
+                    "parameters"
+                ].items():
+                    table += f"{indent} *{param_name}: {placement}\n"
+
             indent += "  "
             collective_indent = "  " * (
-                2 * self.advanced_module_tracker.module_depth_dict[fqn] + 2
+                2 * self.advanced_module_tracker.module_helper_dict[fqn]["depth"] + 2
             )
             operation_indent = "  " * (
-                2 * self.advanced_module_tracker.module_depth_dict[fqn] + 3
+                2 * self.advanced_module_tracker.module_helper_dict[fqn]["depth"] + 3
             )
 
             # separate the module's collective and operations by forward and backward
@@ -333,9 +382,11 @@ class CommDebugMode(TorchDispatchMode):
                     if len(operation["input_shape"]):
                         operation_shape = operation["input_shape"]
                         operation_sharding = operation["input_sharding"]
-                        table += f"\033[1;31m{operation_indent}shape: {operation_shape}\033[0m\n"
+                        operation_device_mesh = operation["device_mesh"]
 
+                        table += f"\033[1;31m{operation_indent}shape: {operation_shape}\033[0m\n"
                         table += f"\033[1;31m{operation_indent}sharding: {operation_sharding}\033[0m\n"
+                        table += f"\033[1;31m{operation_indent}device mesh: {operation_device_mesh}\033[0m\n"
 
                 return table
 
@@ -427,6 +478,7 @@ class CommDebugMode(TorchDispatchMode):
 
         operation_dict["input_shape"] = []
         operation_dict["input_sharding"] = []
+        operation_dict["device_mesh"] = ""
 
         # tracks if the operation is part of the backward pass
         operation_dict["is_bw"] = self.advanced_module_tracker.is_bw
@@ -437,6 +489,7 @@ class CommDebugMode(TorchDispatchMode):
                     # saves shapes and placements of all DTensor args
                     operation_dict["input_shape"].append(ele.shape)
                     operation_dict["input_sharding"].append(ele.placements)
+                    operation_dict["device_mesh"] = str(ele.device_mesh)
 
             self.comm_module_operation_counts[self.advanced_module_tracker.name][
                 "operations_list"

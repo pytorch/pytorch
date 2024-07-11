@@ -628,12 +628,21 @@ from a multi-output view call"
         def view_avoid_dupes_with_primals(t, parent_cls, attr):
             if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
                 return transform_subclass(
-                    t, lambda attr, inner_t: view_avoid_dupes_with_primals(inner_t, type(t), attr)
+                    t,
+                    lambda attr, inner_t: view_avoid_dupes_with_primals(
+                        inner_t, type(t), attr
+                    ),
                 )
             if isinstance(t, Tensor):
                 out = t.view(t.shape)
-                if parent_cls is  torch.nested._internal.nested_tensor.NestedTensor and (attr == "_offsets" or attr == "_lengths"):
-                    from torch.nested._internal.nested_tensor import _tensor_symint_registry
+                if (
+                    parent_cls is torch.nested._internal.nested_tensor.NestedTensor
+                    and (attr == "_offsets" or attr == "_lengths")
+                ):
+                    from torch.nested._internal.nested_tensor import (
+                        _tensor_symint_registry,
+                    )
+
                     _tensor_symint_registry[out] = _tensor_symint_registry[t]
                 return out
             return t

@@ -325,6 +325,8 @@ class MetaTensorDescriber:
             }
             type_v = type(t)
 
+        from torch.nested._internal.nested_tensor import _tensor_symint_registry
+
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
         r = MetaTensorDesc(
@@ -353,7 +355,7 @@ class MetaTensorDescriber:
             is_parameter=isinstance(t, torch.nn.Parameter),
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
-            nested_int=torch.nested._internal.nested_tensor._tensor_symint_registry.get(t, None),
+            nested_int=_tensor_symint_registry.get(t, None),
             is_functional=is_functional,
             layout=layout,
             device=t.device,
