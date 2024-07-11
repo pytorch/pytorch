@@ -239,14 +239,22 @@ def split_module(
     active_autocasts = set()
 
     for node in m.graph.nodes:
+        # This will prefer placeholder bindings, because those come first.
+        # This is a little dangerous though: it is possible that an unbacked
+        # symbol is used without any binding site for it, in which case we
+        # will get a KeyError not able to find it.  I'd like to fix this by
+        # having passes.runtime_assert establish some invariants that I can
+        # rely on later, but this needs some extra work.  Quick fix first.
+        # See https://github.com/pytorch/pytorch/issues/130534
+        if (
+            (val := node.meta.get("example_value")) is not None and
+            isinstance(val, torch.SymInt) and
+            isinstance(s0 := val.node.expr, sympy.Symbol) and
+            s0 not in symbol_to_node
+        ):
+            symbol_to_node[val.node.expr] = node
+
         if node.op in ["placeholder", "get_attr", "output"]:
-            if (
-                node.op == "placeholder" and
-                (val := node.meta.get("example_value")) is not None and
-                isinstance(val, torch.SymInt) and
-                isinstance(val.node.expr, sympy.Symbol)
-            ):
-                symbol_to_node[val.node.expr] = node
             continue
 
         instantiate_node_partition_mapping(node)
