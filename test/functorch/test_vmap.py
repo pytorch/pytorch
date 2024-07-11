@@ -4801,11 +4801,12 @@ class TestVmapOperatorsOpInfo(TestCase):
             fn = torch.index_put_ if inplace else torch.index_put
             return fn(t, idx, v)
 
-        t = torch.zeros((1, 5), device="cuda")
+        N = 2
+        t = torch.zeros((N, 5), device="cuda")
         idx = torch.tensor([1, 3])
         v = torch.tensor(1, dtype=t.dtype, device="cpu")
 
-        expected = torch.tensor([[0, 1, 0, 1, 0]], dtype=t.dtype)
+        expected = torch.tensor([[0, 1, 0, 1, 0], [0, 1, 0, 1, 0]], dtype=t.dtype)
         self.assertEqual(expected, vmap(f, in_dims=(0, None, None))(t, (idx,), v))
 
     @parametrize("training", [True, False])
