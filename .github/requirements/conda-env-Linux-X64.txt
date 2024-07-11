@@ -1,4 +1,4 @@
-cmake=3.22.*
+cmake=3.25.*
 mkl=2022.1.0
 mkl-include=2022.1.0
 ninja=1.10.2
