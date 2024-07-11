@@ -18,6 +18,7 @@ import sys
 import textwrap
 import types
 import weakref
+from contextlib import contextmanager
 from inspect import currentframe, getframeinfo
 from typing import (
     Any,
@@ -49,6 +50,8 @@ from torch._dynamo.source import (
     TensorPropertySource,
 )
 from torch._guards import (
+    CompileContext,
+    CompileId,
     DuplicateInputs,
     Guard,
     GuardBuilderBase,
@@ -83,7 +86,6 @@ from .source import (
     GradSource,
     LocalSource,
     NNModuleSource,
-    NotNNModuleSource,
     NumpyTensorSource,
     ODictGetItemSource,
     OptimizerSource,
@@ -92,6 +94,8 @@ from .source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
     TypeSource,
+    UnspecializedBuiltinNNModuleSource,
+    UnspecializedNNModuleSource,
     WeakRefCallSource,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
@@ -154,6 +158,16 @@ class GuardManager:
         self.id_matched_objs = None
         self.no_tensor_aliasing_sources = []
 
+        self.print_no_tensor_aliasing_guard = True
+
+    @contextmanager
+    def _preserve_print_no_tensor_aliasing_flag(self):
+        self.print_no_tensor_aliasing_guard = True
+        try:
+            yield
+        finally:
+            self.print_no_tensor_aliasing_guard = True
+
     def get_guard_lines(self, guard):
         guard_name = guard.__class__.__name__
         parts = guard.verbose_code_parts()
@@ -183,7 +197,18 @@ class GuardManager:
     def construct_manager_string(self, mgr, body):
         with body.indent():
             for guard in mgr.get_leaf_guards():
-                body.writelines(self.get_guard_lines(guard))
+                if isinstance(guard, torch._C._dynamo.guards.NO_TENSOR_ALIASING):  # type: ignore[attr-defined]
+                    if self.print_no_tensor_aliasing_guard:
+                        self.print_no_tensor_aliasing_guard = False
+                        body.writelines(self.get_guard_lines(guard))
+                    else:
+                        body.writelines(
+                            [
+                                guard.__class__.__name__,
+                            ]
+                        )
+                else:
+                    body.writelines(self.get_guard_lines(guard))
 
             # This works for both DictGuardManager and SubclassedDictGuardManager
             if isinstance(mgr, DictGuardManager):
@@ -211,15 +236,16 @@ class GuardManager:
                 else:
                     super().writeline("+- " + line)
 
-        body = IndentedBufferWithPrefix()
-        body.tabwidth = 1
-        body.writeline("", skip_prefix=True)
-        body.writeline("TREE_GUARD_MANAGER:", skip_prefix=True)
-        body.writeline("RootGuardManager")
-        self.construct_manager_string(self.root, body)
-        for guard in self.root.get_epilogue_lambda_guards():
-            body.writelines(self.get_guard_lines(guard))
-        return body.getvalue()
+        with self._preserve_print_no_tensor_aliasing_flag():
+            body = IndentedBufferWithPrefix()
+            body.tabwidth = 1
+            body.writeline("", skip_prefix=True)
+            body.writeline("TREE_GUARD_MANAGER:", skip_prefix=True)
+            body.writeline("RootGuardManager")
+            self.construct_manager_string(self.root, body)
+            for guard in self.root.get_epilogue_lambda_guards():
+                body.writelines(self.get_guard_lines(guard))
+            return body.getvalue()
 
     def check(self, x):
         # Only needed for debugging purposes.
@@ -619,7 +645,7 @@ class GuardBuilder(GuardBuilderBase):
                     source=key_source,
                     example_value=key,
                     guard_manager_enum=GuardManagerType.GUARD_MANAGER,
-                ).add_equals_match_guard(l2_key, [f"{key_source} == {l2_key!r}"])
+                ).add_equals_match_guard(key, [f"{key_source} == {key!r}"])
 
                 # Install the value manager
                 return mgr.get_value_manager(
@@ -831,7 +857,13 @@ class GuardBuilder(GuardBuilderBase):
             )
         elif istype(
             source,
-            (OptimizerSource, NNModuleSource, NotNNModuleSource, FSDPNNModuleSource),
+            (
+                OptimizerSource,
+                NNModuleSource,
+                UnspecializedNNModuleSource,
+                FSDPNNModuleSource,
+                UnspecializedBuiltinNNModuleSource,
+            ),
         ):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager
@@ -2133,6 +2165,7 @@ class CheckFunctionManager:
                     reasons = get_guard_fail_reason_helper(
                         self.guard_manager,  # type: ignore[arg-type]
                         output_graph.local_scope,
+                        CompileContext.current_compile_id(),
                     )
                     raise AssertionError(f"Guard check failed: {reasons}")
 
@@ -2300,9 +2333,10 @@ class CheckFunctionManager:
                 add_code_part(code, gcl.guard, config.enable_cpp_guard_manager)
 
         # OK, all done generating guards
-        torch._logging.trace_structured(
-            "dynamo_guards", payload_fn=lambda: [f() for f in structured_guard_fns]
-        )
+        if structured_guard_fns:
+            torch._logging.trace_structured(
+                "dynamo_guards", payload_fn=lambda: [f() for f in structured_guard_fns]
+            )
 
         global_state = convert_frame.initial_global_state
         if global_state is None:
@@ -2472,6 +2506,7 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
 def get_guard_fail_reason_helper(
     guard_fn: GuardFn,
     f_locals: Dict[str, object],
+    compile_id: CompileId,
 ) -> str:
     """
     Return the reason why `guard_fn` failed.
@@ -2536,7 +2571,7 @@ def get_guard_fail_reason_helper(
                 if not is_recompiles_verbose_enabled():
                     break
 
-    reason_str = "\n".join(reasons)
+    reason_str = f"{compile_id}: " + "; ".join(reasons)
     return reason_str
 
 
@@ -2544,8 +2579,9 @@ def get_guard_fail_reason(
     guard_fn: GuardFn,
     code: types.CodeType,
     f_locals: Dict[str, object],
+    compile_id: CompileId,
 ) -> str:
-    reason_str = get_guard_fail_reason_helper(guard_fn, f_locals)
+    reason_str = get_guard_fail_reason_helper(guard_fn, f_locals, compile_id)
     guard_failures[orig_code_map[code]].append(reason_str)
 
     try:
@@ -2572,7 +2608,10 @@ def get_and_maybe_log_recompilation_reason(
     reasons = []
     while cache_entry is not None:
         reason = get_guard_fail_reason(
-            cache_entry.check_fn, cache_entry.code, frame.f_locals
+            cache_entry.check_fn,
+            cache_entry.code,
+            frame.f_locals,
+            cache_entry.compile_id,
         )
         if reason:
             reasons.append(reason)
@@ -2605,6 +2644,15 @@ def get_and_maybe_log_recompilation_reason(
                 recompiles_log.debug(message)
         if config.error_on_recompile:
             raise exc.RecompileError(message)
+
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "recompile_reasons",
+            "encoding": "json",
+        },
+        payload_fn=lambda: reasons,
+    )
 
     return reasons
 

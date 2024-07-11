@@ -328,6 +328,7 @@ class Test2DStridedLocalShard(DTensorTestBase):
             dtensor_tp = distribute_tensor(
                 global_tensor, tp_mesh, placements=[Shard(0)]
             )
+            """
             chunks = list(torch.chunk(dtensor_tp.to_local(), 2, dim=0))
             shard_rank = 0 if self.rank // 2 == 0 else 1
             sharded_param = chunks[shard_rank]
@@ -346,6 +347,10 @@ class Test2DStridedLocalShard(DTensorTestBase):
                 spec_2d,
                 requires_grad=False,
             )
+            """
+            dp_mesh = mesh_2d["DP"]
+            dtensor_2d = distribute_tensor(dtensor_tp, dp_mesh, [Shard(0)])
+            print(f"rank{self.rank}, {dtensor_2d}")
 
         self.assertEqual(
             comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 0

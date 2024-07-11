@@ -1,7 +1,7 @@
 #pragma once
-#include <c10/util/Optional.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
+#include <optional>
 #include <vector>
 
 namespace torch {
