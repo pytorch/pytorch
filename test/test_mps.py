@@ -277,6 +277,7 @@ def mps_ops_modifier(ops):
         'exp',
         'expand',
         'expand_as',
+        'expand_copy',
         'flatten',
         'fill',
         'full',
@@ -317,6 +318,7 @@ def mps_ops_modifier(ops):
         'ones',
         'outer',
         'permute',
+        'permute_copy',
         'positive',
         'randn',
         'ravel',
@@ -347,6 +349,7 @@ def mps_ops_modifier(ops):
         'transpose_copy',
         'T',
         'unbind',
+        'unbind_copy',
         'unflatten',
         'unfold',
         'unfold_copy',
@@ -9178,10 +9181,8 @@ class TestLinalgMPS(TestCaseMPS):
 
         def convert_weight_to_int4pack(b):
             b_int32, b_scales_and_zeros = _group_quantize_tensor(
-                b.to("cpu"), n_bit=4, q_group_size=q_group
+                b, n_bit=4, q_group_size=q_group
             )
-            b_int32 = b_int32.to("mps")
-            b_scales_and_zeros = b_scales_and_zeros.to("mps")
             b_int4pack = torch._convert_weight_to_int4pack(
                 b_int32, inner_k_tiles
             )
@@ -12034,7 +12035,7 @@ class TestCommon(TestCase):
         # does not support float64 Tensors.
         # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
         # get patched up and this workaround removed.
-        broken_on_ref_inputs = op.name in ['clamp', 'where']
+        broken_on_ref_inputs = op.name in ('where',)
 
         # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
         inputs = (
