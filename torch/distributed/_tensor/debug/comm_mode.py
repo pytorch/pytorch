@@ -56,7 +56,14 @@ c10d_collective_ops = {
     c10d_ops.reduce_scatter_tensor_coalesced_,
 }
 
-trivial_ops = {"aten.detach.default", "aten.t.default", "aten.view.default"}
+trivial_ops = {
+    "aten.detach.default",
+    "aten.t.default",
+    "aten.view.default",
+    "aten._to_copy.default",
+    "aten.as_strided.default",
+    "aten.transpose.int",
+}
 
 
 class CommModeModuleTracker(ModuleTracker):
@@ -191,6 +198,15 @@ class CommDebugMode(TorchDispatchMode):
         Creates json file used to build browser visual
         """
 
+        include_ops = False
+        include_trivial_ops = False
+
+        if noise_level > 1:
+            include_ops = True
+
+        if noise_level > 2:
+            include_trivial_ops = True
+
         # recursively builds json data
         def add_json_information(json_dict, fqn):
             json_dict["fqn"] = fqn
@@ -204,7 +220,7 @@ class CommDebugMode(TorchDispatchMode):
 
             if (
                 "module_type" in self.advanced_module_tracker.module_helper_dict[fqn]
-                and noise_level >= 2
+                and include_ops
             ):
                 json_dict[
                     "module_type"
@@ -234,7 +250,7 @@ class CommDebugMode(TorchDispatchMode):
             # adds module operation information
             forward_operations = []
             backward_operations = []
-            if noise_level >= 2:
+            if include_ops:
                 if fqn in self.comm_module_operation_counts:
                     forward_operations = [
                         op
@@ -251,7 +267,7 @@ class CommDebugMode(TorchDispatchMode):
                         if op["is_bw"]
                     ]
 
-            if noise_level < 3:
+            if not include_trivial_ops:
                 forward_operations = [
                     op
                     for op in forward_operations
@@ -299,7 +315,7 @@ class CommDebugMode(TorchDispatchMode):
         with open(file_name, "w") as json_file:
             json.dump(json_dict, json_file, indent=4)
 
-    def generate_comm_debug_tracing_table(self, noise_level):
+    def generate_comm_debug_tracing_table(self, noise_level=3):
         """
         Generates detailed table displaying operations and collective tracing information
         on a module level. Amount of information is dependent on noise_level
@@ -308,6 +324,14 @@ class CommDebugMode(TorchDispatchMode):
         2. prints operations not included in trivial operations
         3. prints all operations
         """
+        include_ops = False
+        include_trivial_ops = False
+
+        if noise_level > 1:
+            include_ops = True
+
+        if noise_level > 2:
+            include_trivial_ops = True
 
         table = ""
         for fqn in self.advanced_module_tracker.module_helper_dict:
@@ -317,7 +341,7 @@ class CommDebugMode(TorchDispatchMode):
             )
             table += f"{indent}{fqn}\n"
 
-            if noise_level >= 2:
+            if include_ops:
                 if (
                     "module_type"
                     in self.advanced_module_tracker.module_helper_dict[fqn]
@@ -354,7 +378,7 @@ class CommDebugMode(TorchDispatchMode):
 
             forward_operations = []
             backward_operations = []
-            if noise_level >= 2:
+            if include_ops:
                 if fqn in self.comm_module_operation_counts:
                     forward_operations = [
                         op
@@ -381,7 +405,7 @@ class CommDebugMode(TorchDispatchMode):
                 for operation in operation_list:
                     operation_name = str(operation["name"])
 
-                    if operation_name not in trivial_ops or noise_level >= 3:
+                    if operation_name not in trivial_ops or include_trivial_ops:
                         table += (
                             f"\033[1;33m{collective_indent}**{operation_name}\033[0m\n"
                         )
@@ -447,11 +471,16 @@ class CommDebugMode(TorchDispatchMode):
         self.advanced_module_tracker.__exit__()
         super().__exit__(*args)
 
-    def log_comm_debug_tracing_table_to_file(self, noise_level):
+    def log_comm_debug_tracing_table_to_file(
+        self, file_name="comm_mode_log.txt", noise_level=3
+    ):
+        """
+        Alternative to console CommDebugMode output, writes to file specified by the user
+        """
         ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
         table = ansi_escape.sub("", self.generate_comm_debug_tracing_table(noise_level))
 
-        with open("output.txt", "w") as log_file:
+        with open(file_name, "w") as log_file:
             log_file.write(table)
 
     def print_paramater_info(self):

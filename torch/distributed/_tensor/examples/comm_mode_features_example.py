@@ -155,7 +155,7 @@ class CommDebugModeExample:
     def example_MLP_module_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module level tracing using a MLP model.
-        Prints a table of module level collective tracing information and logs table to output.txt
+        Prints a table of module level collective tracing information and logs table to comm_mode_log.txt
 
         Expected Output:
         Global
@@ -188,7 +188,7 @@ class CommDebugModeExample:
     def example_transformer_module_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module level tracing using a distributed Transformer model.
-        Prints a table of module level collective tracing information and logs table to output.txt
+        Prints a table of module level collective tracing information and logs table to comm_mode_log.txt
 
         Expected output:
         Global
@@ -276,7 +276,7 @@ class CommDebugModeExample:
     def example_MLP_operation_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module operation level tracing using a distributed MLP model.
-        Prints a table of module opoeration level collective tracing information and logs table to output.txt
+        Prints a table of module opoeration level collective tracing information and logs table to comm_mode_log.txt
 
         Expected output:
         Global
@@ -568,7 +568,7 @@ class CommDebugModeExample:
         """
         Example code to demonstrate CommModeDebug's module operation level tracing using a distributed transformer model.
         Prints a table of module opoeration level collective tracing information, excluding trivial operations and logs
-        table to output.txt
+        table to transformer_operation_log.txt
         """
 
         torch.manual_seed(0)
@@ -581,7 +581,9 @@ class CommDebugModeExample:
 
         # print the operation level collective tracing information
         print(comm_mode.generate_comm_debug_tracing_table(noise_level=2))
-        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=2)
+        comm_mode.log_comm_debug_tracing_table_to_file(
+            noise_level=2, file_name="transformer_operation_log.txt"
+        )
 
     def example_MLP_json_dump(self) -> None:
         """
