@@ -135,7 +135,8 @@ constexpr void swap(
     basic_string_view<CharT>& rhs) noexcept {
   lhs.swap(rhs);
 }
-using string_view = basic_string_view<char>;
+using std::string_view;
+using string_view_ext = basic_string_view<char>;
 
 } // namespace c10
 
