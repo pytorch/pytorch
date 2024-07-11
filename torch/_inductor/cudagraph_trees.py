@@ -838,11 +838,9 @@ class CUDAGraphNode:
 
         # precompute expanded dims to avoid computing in the hot path
         self.expanded_dims: List[List[int]] = [
-            (
-                get_expanded_dims(x)
-                if isinstance(x, torch.Tensor) and idx not in self.static_input_idxs
-                else []
-            )
+            get_expanded_dims(x)
+            if isinstance(x, torch.Tensor) and idx not in self.static_input_idxs
+            else []
             for idx, x in enumerate(inputs)
         ]
 
@@ -886,11 +884,9 @@ class CUDAGraphNode:
         # non owning and do not prevent deallocation. On subsequent executions, input values
         # will be copied over to these tensors.
         self.reconstructed_inputs: InputList[Union[Tensor, int]] = [
-            (
-                self._reconstruct_from_tensor_metadata(self._tensor_metadata(x))
-                if isinstance(x, torch.Tensor)
-                else x
-            )
+            self._reconstruct_from_tensor_metadata(self._tensor_metadata(x))
+            if isinstance(x, torch.Tensor)
+            else x
             for x in recording_inputs
         ]
 
@@ -933,9 +929,9 @@ class CUDAGraphNode:
         self.static_output_tensors: OutputList[Optional[Tensor]] = []
 
         # Cleared after recording
-        self.recording_outputs: Optional[OutputList[Union[torch.Tensor, int]]] = (
-            self._record(wrapped_function.model, recording_inputs)
-        )
+        self.recording_outputs: Optional[
+            OutputList[Union[torch.Tensor, int]]
+        ] = self._record(wrapped_function.model, recording_inputs)
         self.outputs_metadata: OutputList[Union[Dict[str, Any], int, None]] = []
 
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
@@ -1979,6 +1975,7 @@ class CUDAGraphTreeManager:
                 status, status_logger = child.check_invariants(new_inputs)
                 if status == CheckInvariantStatus.SUCCESS:
                     return self.execute_node(child, new_inputs)
+
                 if (
                     status == CheckInvariantStatus.StaticInputIdxMismatch
                     or status == CheckInvariantStatus.CudagraphManagedIdxMismatch

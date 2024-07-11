@@ -220,7 +220,6 @@ def log_data_ptr_mismatch(
         placeholders
     ), "length mismatch between inputs, recorded_data_ptr, and placeholders"
 
-    # TODO: length mismatch
     t_tensors = [inputs[i] for i in target_idxs]
     t_data_ptrs = [recorded_data_ptr[i] for i in target_idxs]
     error_msg = f"{mismatch}.\n"
