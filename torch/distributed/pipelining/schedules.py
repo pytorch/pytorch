@@ -8,15 +8,30 @@ import re
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from enum import Enum
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 import torch.distributed as dist
+from torch.distributed._composable.fsdp.fully_shard import FSDPModule, UnshardHandle
+
 from torch.profiler import record_function
 
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
 from .stage import _PipelineStageBase
 
+if TYPE_CHECKING:
+    from torch.distributed import Work
 
 __all__ = [
     "PipelineScheduleSingle",
@@ -141,7 +156,6 @@ def _format_pipeline_order(pipeline_order: Dict[int, List[Optional[_Action]]]) -
     Formats the pipeline order in a timestep (row) x rank (column) grid of actions
     and returns the formatted string
     """
-
     # Calculate the maximum number of steps across all ranks
     num_steps = max(len(actions) for actions in pipeline_order.values())
     step_labels = [
@@ -1320,32 +1334,49 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             self.pipeline_order_with_comms is not None
         ), "Must call _from_simple_schedule() before calling _step_microbatches()"
 
-        # recv ops need to be waited on before use
-        bwd_recv_ops = {}
-        fwd_recv_ops = {}
+        # recv ops indexed by (stage_idx, mb_idx) need to be waited on before use
+        bwd_recv_ops: Dict[Tuple[int, int], Work] = {}
+        fwd_recv_ops: Dict[Tuple[int, int], Work] = {}
+
         # send ops should be waited on before step() exists, mainly for hygeine
-        send_ops = []
+        send_ops: List[Work] = []
+
+        # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
+        unshard_ops: Dict[int, UnshardHandle] = {}
+        unsharded_stages = set()
+
+        def _assert_unsharded(stage_idx: int):
+            """If an unshard is active for `stage_idx`, wait() it and mark `stage_idx` unshared."""
+            if stage_idx in unshard_ops:
+                unshard_ops[stage_idx].wait()
+                del unshard_ops[stage_idx]
+                unsharded_stages.add(stage_idx)
+            assert (
+                stage_idx in unsharded_stages
+            ), f"Attempted to compute on sharded {stage_idx=}"
+
         try:
             for time_step, action in enumerate(
                 self.pipeline_order_with_comms[self.rank]
             ):
                 comp_type = action.computation_type
                 mb_index = action.microbatch_index
-                stage = stage_index_to_stage[action.stage_index]
+                stage_idx = action.stage_index
+                stage = stage_index_to_stage[stage_idx]
+                stage_uses_fsdp = isinstance(stage.submod, FSDPModule)
 
                 logger.debug(
                     "_PipelineScheduleRuntime running time_step %d, action %s",
                     time_step,
                     action,
                 )
-                # TODO - its a bit unfortunate that there isn't one field that i can switch over here.
-                # I separated comm/compute in Action bc send still needs to know its sending fwd output vs bwd output
-                # perhaps, i should make SEND_F and SEND_B actions so they can be merged again?
-                if comp_type not in (UNSHARD, RESHARD):
-                    assert mb_index is not None, f"{action=} missing mb_index"
-                else:
-                    # hack around lint
+
+                if comp_type in (UNSHARD, RESHARD):
+                    # mb_index wouldn't be used for these ops,
+                    # make mypy happy but also avoid asserting inside each elif branch
                     mb_index = -1
+
+                assert mb_index is not None, f"{action=} missing mb_index"
 
                 if comp_type == SEND_F:
                     send_ops.append(_batch_p2p(stage.get_fwd_send_ops(mb_index)))
@@ -1353,45 +1384,72 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     send_ops.append(_batch_p2p(stage.get_bwd_send_ops(mb_index)))
                 elif comp_type == RECV_F:
                     assert (
-                        mb_index not in fwd_recv_ops
-                    ), "Attempted to recv twice for the same {mb_index=} without executing forward once"
-                    fwd_recv_ops[mb_index] = _batch_p2p(
+                        stage_idx,
+                        mb_index,
+                    ) not in fwd_recv_ops, "Recv twice for {stage_idx=} {mb_index=} without executing forward"
+                    fwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
                         stage.get_fwd_recv_ops(mb_index)
                     )
                 elif comp_type == RECV_B:
                     assert (
-                        mb_index not in bwd_recv_ops
-                    ), "Attempted to recv twice for the same {mb_index=} without executing backward once"
-                    bwd_recv_ops[mb_index] = _batch_p2p(
+                        stage_idx,
+                        mb_index,
+                    ) not in bwd_recv_ops, "Recv twice for {stage_idx=} {mb_index=} without executing backward"
+                    bwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
                         stage.get_bwd_recv_ops(mb_index)
                     )
                 elif comp_type == UNSHARD:
-                    # TODO
-                    pass
+                    if stage_uses_fsdp:
+                        assert (
+                            stage_idx not in unsharded_stages
+                        ), f"Unsharding the same {stage_idx=} twice"
+                        assert (
+                            stage_idx not in unshard_ops
+                        ), f"Unsharding the same {stage_idx=} twice"
+                        unshard_ops[stage_idx] = stage.submod.unshard(async_op=True)
                 elif comp_type == RESHARD:
-                    # TODO
-                    pass
+                    if stage_uses_fsdp:
+                        assert (
+                            stage_idx in unsharded_stages
+                        ), f"Resharding {stage_idx=} without unsharding"
+                        assert (
+                            stage_idx not in unshard_ops
+                        ), f"Resharding {stage_idx=} before finishing unshard"
+                        stage.submod.reshard()
                 elif comp_type == FORWARD:
+                    if stage_uses_fsdp:
+                        _assert_unsharded(stage_idx)
+
                     if not stage.is_first:
                         assert (
-                            mb_index in fwd_recv_ops
-                        ), f"Attempted to run compute {action=} before receiving input"
-                        fwd_recv_ops.pop(mb_index).wait()
+                            stage_idx,
+                            mb_index,
+                        ) in fwd_recv_ops, f"Computing {action=} before receiving input"
+                        fwd_recv_ops.pop((stage_idx, mb_index)).wait()
                     output = stage.forward_one_chunk(
                         mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
                     )
                     self._maybe_compute_loss(stage, output, target_mbs, mb_index)
                 elif comp_type == BACKWARD:
+                    if stage_uses_fsdp:
+                        _assert_unsharded(stage_idx)
+
                     if not stage.is_last:
                         assert (
-                            mb_index in bwd_recv_ops
-                        ), f"Attempted to run compute {action=} before receiving input"
-                        bwd_recv_ops.pop(mb_index).wait()
+                            stage_idx,
+                            mb_index,
+                        ) in bwd_recv_ops, (
+                            f"Attempted to run compute {action=} before receiving input"
+                        )
+                        bwd_recv_ops.pop((stage_idx, mb_index)).wait()
                     loss = self._maybe_get_loss(stage, mb_index)
                     stage.backward_one_chunk(
                         mb_index, loss=loss, full_backward=self.use_full_backward
                     )
                 elif comp_type == WEIGHT:
+                    if stage_uses_fsdp:
+                        _assert_unsharded(stage_idx)
+
                     if self.use_full_backward:
                         raise ValueError(
                             f"We detected a weight update in the pipeline schedule, but \
@@ -1402,14 +1460,17 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     raise ValueError(f"{action=} is unknown or unsupported")
         except Exception as e:
             logger.error(
-                "_PipelineScheduleRuntime caught exception at step %s when running action %s.  Full Schedule:\n%s",
+                "_PipelineScheduleRuntime caught exception at step %s when running action %s.  Full Schedule:",
                 time_step,
                 action,
-                str(self.pipeline_order_with_comms),
             )
-            # TODO fix format for lowered schedule
-            # logger.error("%s", _format_pipeline_order(self.pipeline_order))
+            # TODO(whc) what is the best practice for printing a multiline log?
+            # logger will split it into multiple log lines, but this makes it hard to read (too wide)
+            print(_format_pipeline_order(self.pipeline_order_with_comms))  # type: ignore[arg-type]
             raise e
+
+        for s in send_ops:
+            s.wait()
 
         # Return losses if there is a container passed in
         self._update_losses(self._stages, losses)
