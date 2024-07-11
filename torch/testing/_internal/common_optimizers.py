@@ -13,6 +13,7 @@ from torch import Tensor
 from torch.nn import Parameter
 from torch.optim import (
     Adadelta,
+    Adafactor,
     Adagrad,
     Adam,
     Adamax,
@@ -119,7 +120,7 @@ class OptimizerInfo:
         ),
         # A subset of the global-cliquey flags (fused, foreach, differentiable) the optimizer
         # supports. See NOTE: [optimizer kwarg categories] for what global-cliquey means.
-        supported_impls: Tuple[str] = ("foreach", "differentiable"),
+        supported_impls: Tuple[str, ...] = ("foreach", "differentiable"),
         # the optim supports passing in sparse gradients as well as dense grads
         supports_sparse: bool = False,
         # the optim only supports one config: sparse grads w/ dense params, see SparseAdam
@@ -139,7 +140,7 @@ class OptimizerInfo:
         skips=(),  # Indicates which tests to skip
         decorators=None,  # Additional decorators to apply to generated tests
         optim_error_inputs_func=None,  # Function to generate optim inputs that error
-        supports_fused_on: Tuple[str] = (),
+        supports_fused_on: Tuple[str, ...] = (),
     ):
         self.optim_cls = optim_cls
         self.optim_inputs_func = optim_inputs_func
@@ -333,6 +334,79 @@ def optim_error_inputs_func_adadelta(device, dtype):
                 ),
                 error_type=ValueError,
                 error_regex="Invalid rho value: 1.1",
+            ),
+        ]
+    return error_inputs
+
+
+def optim_inputs_func_adafactor(device, dtype=None):
+    return [
+        OptimizerInput(params=None, kwargs={}, desc="default"),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "lr": 0.01},
+            desc="nonzero weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "maximize": True},
+            desc="maximize",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"beta2_decay": -1.0},
+            desc="non-default beta2_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"d": 1.5},
+            desc="non-default clipping threshold d",
+        ),
+    ]
+
+
+def optim_error_inputs_func_adafactor(device, dtype):
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if _get_device_type(device) == "cpu":
+        complex_param = torch.rand(2, 3, device=device, dtype=torch.complex64)
+        complex_param.grad = torch.rand_like(complex_param)
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(eps=(-1e-30, 1e-3)),
+                    desc="epsilon1 should be >= 0",
+                ),
+                error_type=ValueError,
+                error_regex="epsilon1 should be >= 0",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(d=0.0),
+                    desc="invalid d",
+                ),
+                error_type=ValueError,
+                error_regex="Clipping threshold d should be >= 1",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(beta2_decay=0.8),
+                    desc="invalid beta2_decay",
+                ),
+                error_type=ValueError,
+                error_regex="beta2_decay should be <= 0",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[complex_param],
+                    kwargs=dict(),
+                    desc="does not support complex parameters",
+                ),
+                error_type=RuntimeError,
+                error_regex="Adafactor does not support complex parameters",
+                error_on=OptimizerErrorEnum.STEP_ERROR,
             ),
         ]
     return error_inputs
@@ -1154,6 +1228,14 @@ optim_db: List[OptimizerInfo] = [
                 "test_defaults_changed_to_foreach",
             ),
         ),
+    ),
+    OptimizerInfo(
+        Adafactor,
+        optim_inputs_func=optim_inputs_func_adafactor,
+        optim_error_inputs_func=optim_error_inputs_func_adafactor,
+        supported_impls=(),
+        supports_complex=False,
+        skips=(),
     ),
     OptimizerInfo(
         Adagrad,
