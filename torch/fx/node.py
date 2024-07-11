@@ -646,7 +646,16 @@ class Node(_NodeBase):
             return True
 
         def check_arg(arg):
-            return len(arg.users) > 1 or arg.op in {"placeholder", "get_attr"}
+            return len(arg.users) > 1 or arg.op in {"placeholder", "get_attr"} or arg.target in {
+                _ops.aten.view.default,
+                _ops.aten.transpose.int,
+                _ops.aten.permute.default,
+                _ops.aten.reshape.default,
+                _ops.aten.expand.default,
+                _ops.aten.t.default,
+                _ops.aten.squeeze.default,
+                _ops.aten.unsqueeze.default,
+            }
 
         # Check if an impure function based on schema.
         # A call_function is impure if it has at least one mutable argument that has more
