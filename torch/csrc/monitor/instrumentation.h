@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -10,6 +11,31 @@
 
 namespace torch {
 namespace monitor {
+
+class DynamicCounterHandle {
+ public:
+  // Note: the callback must be very fast since it will get called frequently
+  DynamicCounterHandle(std::string_view key, std::function<int64_t()> callback);
+
+  DynamicCounterHandle(const DynamicCounterHandle& src) = delete;
+
+  DynamicCounterHandle& operator=(const DynamicCounterHandle& src) = delete;
+
+  DynamicCounterHandle(DynamicCounterHandle&& src) noexcept;
+  DynamicCounterHandle& operator=(const DynamicCounterHandle&& src) = delete;
+
+  ~DynamicCounterHandle();
+
+  void flushIntegral(
+      std::chrono::steady_clock::time_point now =
+          std::chrono::steady_clock::now()) const;
+
+  struct State;
+
+ private:
+  const std::string key_;
+  State* statePtr_;
+};
 
 // A handle to a wait counter.
 class WaitCounterHandle {

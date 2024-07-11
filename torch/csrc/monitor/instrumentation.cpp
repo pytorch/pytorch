@@ -23,7 +23,19 @@ ssize_t toTimestampUs(std::chrono::steady_clock::time_point now) {
 } // namespace
 
 struct WaitCounterHandle::State {
-  explicit State(const std::string& key) : waitStat_{key}, key_{key} {}
+  explicit State(const std::string& key) 
+      : waitStat_{key}, 
+      waiters_{
+          key + "_active_waiters",
+          [&]() -> ssize_t {
+            auto lastPublishUsAndRefCountSnapshot =
+                lastPublishUsAndRefCount_.load(std::memory_order_relaxed);
+            if (!lastPublishUsAndRefCountSnapshot.refCount()) {
+              return 0;
+            }
+            return lastPublishUsAndRefCountSnapshot.refCount();
+          }},
+      key_{key} {}
 
   ~State() {
     DCHECK(
@@ -56,6 +68,7 @@ struct WaitCounterHandle::State {
   }
 
   void start(std::chrono::steady_clock::time_point now) {
+    waiters_.flushIntegral(now);
     auto lastPublishUsAndRefCountSnapshot =
         lastPublishUsAndRefCount_.load(std::memory_order_relaxed);
     LastPublishUsAndRefCount lastPublishUsAndRefCountNew{};
@@ -81,6 +94,7 @@ struct WaitCounterHandle::State {
   }
 
   void stop(std::chrono::steady_clock::time_point now) {
+    waiters_.flushIntegral(now);
     auto lastPublishUsAndRefCountSnapshot =
         lastPublishUsAndRefCount_.load(std::memory_order_relaxed);
     LastPublishUsAndRefCount lastPublishUsAndRefCountNew{};
@@ -141,14 +155,55 @@ struct WaitCounterHandle::State {
   // wait_start_timestamp * kMaxRefCount_ + (num_waiters - 1). -1 if wait is not
   // active
   std::atomic<LastPublishUsAndRefCount> lastPublishUsAndRefCount_{};
+  DynamicCounterHandle waiters_;
   const std::string key_;
+};
+
+struct DynamicCounterHandle::State {
+ public:
+  State(std::string_view key, std::function<int64_t()> callback)
+      : periodicStats_(key),
+        integralStats_(std::string(key) + "_integral_us"),
+        callback_(std::move(callback)) {}
+
+  int64_t getValue() const {
+    return callback_();
+  }
+
+  void flushIntegral(
+      std::optional<int64_t> value,
+      std::chrono::steady_clock::time_point now) {
+    auto nowUs = toTimestampUs(now);
+    auto lastPublishUs =
+        lastPublishUs_.exchange(nowUs, std::memory_order_relaxed);
+    if (!value) {
+      value = getValue();
+    }
+    integralStats_.addValue(*value * (nowUs - lastPublishUs));
+  }
+
+  void publishPeriodic(std::chrono::steady_clock::time_point now) {
+    auto value = getValue();
+    flushIntegral(value, now);
+    periodicStats_.addValue(value, now);
+  }
+
+ private:
+  std::atomic<ssize_t> lastPublishUs_{
+      toTimestampUs(std::chrono::steady_clock::now())};
+  PeriodicAvgStat periodicStats_;
+  PeriodicSumStat integralStats_;
+  std::function<int64_t()> callback_;
 };
 
 namespace {
 struct Counters {
+  using DynamicCounters = c10::Synchronized<
+      std::unordered_map<std::string, std::unique_ptr<DynamicCounterHandle::State>>>;
   using WaitCounters = c10::Synchronized<
       std::unordered_map<std::string, std::weak_ptr<WaitCounterHandle::State>>>;
 
+  DynamicCounters dynamicCountersMap;
   WaitCounters waitCountersMap;
 };
 // Leaky Meyer's Singleton
@@ -175,6 +230,13 @@ class CountersPublisher {
       constexpr auto kCollectionPeriod = std::chrono::milliseconds{10};
       while (!terminated_) {
         auto now = std::chrono::steady_clock::now();
+        {
+          countersSingleton->dynamicCountersMap.withLock([&](auto& rDynamicCountersMap){
+            for (const auto& keyToStats : rDynamicCountersMap) {
+              keyToStats.second->publishPeriodic(now);
+            }
+          });
+        }
         {
           countersSingleton->waitCountersMap.withLock([&](auto&
                                                               rWaitCountersMap) {
@@ -206,6 +268,39 @@ bool CountersPublisher::terminated_ = false;
 
 auto& publisherSingleton = CountersPublisher::getInstance();
 } // namespace
+
+DynamicCounterHandle::DynamicCounterHandle(
+    std::string_view key,
+    std::function<int64_t()> callback)
+    : key_(key) {
+  countersSingleton->dynamicCountersMap.withLock(
+    [&](auto& wCounters) {
+      statePtr_ = wCounters.emplace(key_, std::make_unique<State>(key, callback)).first->second.get();
+    }
+  );
+  registerCallback(
+      key_, [statePtr = statePtr_]() { return statePtr->getValue(); });
+}
+
+DynamicCounterHandle::DynamicCounterHandle(DynamicCounterHandle&& src) noexcept
+    : key_{src.key_}, statePtr_{std::exchange(src.statePtr_, nullptr)} {}
+
+DynamicCounterHandle::~DynamicCounterHandle() {
+  if (statePtr_ == nullptr) {
+    return;
+  }
+  unregisterCallback(key_);
+  countersSingleton->dynamicCountersMap.withLock(
+    [&](auto& wCounters) {
+      wCounters.erase(key_);
+    }
+  );
+}
+
+void DynamicCounterHandle::flushIntegral(
+    std::chrono::steady_clock::time_point now) const {
+  statePtr_->flushIntegral({}, now);
+}
 
 WaitCounterHandle::WaitCounterHandle(std::string_view key) : key_(key) {
   {
