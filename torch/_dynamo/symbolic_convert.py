@@ -2262,6 +2262,14 @@ class InstructionTranslatorBase(
     def CALL_KW(self, inst):
         self._call(inst, call_kw=True)
 
+    @break_graph_if_unsupported(push=1)
+    def TO_BOOL(self, inst):
+        value = self.pop()
+        if value.is_python_constant():
+            self.push(ConstantVariable(bool(value.as_python_constant())))
+        else:
+            self.push(BuiltinVariable(bool).call_function(self, [value], {}))
+
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
             # perf optimization only
