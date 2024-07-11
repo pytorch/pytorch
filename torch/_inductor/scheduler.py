@@ -76,6 +76,11 @@ class BaseSchedulerNode:
         self.users: List[NodeUser] = []
         self.set_read_writes(node.get_read_writes())
         self.ancestors: Set[str] = set()
+        # .min_order and .max_order are only relevant for "grouped" nodes such as FusedSchedulerNode.
+        # e.g. if the FusedSchedulerNode includes nodes (op_1, op_2, op_3), and op_X is X-th node
+        # in `self.scheduler.nodes`, then for this FusedSchedulerNode, .min_order is 1 and .max_order is 3.
+        # For non-"grouped" nodes (i.e. regular SchedulerNode),
+        # .min_order = .max_order = X if this node is X-th node in `self.scheduler.nodes`.
         self.min_order: int
         self.max_order: int
         self.last_usage: Set[
