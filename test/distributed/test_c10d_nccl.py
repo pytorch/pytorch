@@ -4250,6 +4250,7 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
             del process_group
             sys.exit(1)
 
+
 # tests that needs to be run with a larger world size
 class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
     def _create_process_group_nccl(self, store, opts, device_id=None):
@@ -4293,7 +4294,6 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
     def rank_to_GPU(self):
         # return rank to GPU map
         return init_multigpu_helper(self.world_size, "nccl")
-
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -4374,6 +4374,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
             self.assertEqual(tensor2, torch.full((1,), 6))
 
         dist.destroy_process_group()
+
 
 if __name__ == "__main__":
     assert (

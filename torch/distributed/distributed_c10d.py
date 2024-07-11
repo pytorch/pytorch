@@ -4355,7 +4355,9 @@ def split_group(
     default_pg = _get_default_group()
     device_id = default_pg.bound_device_id
     if not device_id:
-        raise RuntimeError("No device associated with the default pg, not safe to split any process groups")
+        raise RuntimeError(
+            "No device associated with the default pg, not safe to split any process groups"
+        )
     default_backend, default_store = _world.pg_map[default_pg]
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
@@ -4366,18 +4368,29 @@ def split_group(
         raise ValueError(f"Group {parent_pg} is not registered")
 
     parent_global_to_group_ranks = _world.pg_group_ranks[parent_pg]
-    parent_group_to_global_ranks = {group_rank: global_rank for global_rank, group_rank in parent_global_to_group_ranks.items()}
+    parent_group_to_global_ranks = {
+        group_rank: global_rank
+        for global_rank, group_rank in parent_global_to_group_ranks.items()
+    }
 
     if global_rank not in parent_global_to_group_ranks:
-        raise ValueError(f"Global rank {global_rank} is not part of the parent group {parent_pg}")
+        raise ValueError(
+            f"Global rank {global_rank} is not part of the parent group {parent_pg}"
+        )
 
     parent_group_rank = parent_global_to_group_ranks[global_rank]
     parent_backend = parent_pg._get_backend(torch.device("cuda"))
 
     # if the parent backend does not support splitting, raise error
     # currently this API only support NCCL backend
-    if not parent_backend or not parent_backend.supports_splitting or not isinstance(parent_backend, ProcessGroupNCCL):
-        raise RuntimeError("No backend for the parent process group or its backend does not support splitting")
+    if (
+        not parent_backend
+        or not parent_backend.supports_splitting
+        or not isinstance(parent_backend, ProcessGroupNCCL)
+    ):
+        raise RuntimeError(
+            "No backend for the parent process group or its backend does not support splitting"
+        )
 
     parent_backend_str, _ = _world.pg_map[parent_pg]
     # same type of backend as the parent process group
@@ -4460,7 +4473,8 @@ def split_group(
 
     # Create the global rank to group rank mapping
     _world.pg_group_ranks[pg] = {
-        global_rank: group_rank for group_rank, global_rank in enumerate(global_ranks_in_my_group)
+        global_rank: group_rank
+        for group_rank, global_rank in enumerate(global_ranks_in_my_group)
     }
 
     return pg
