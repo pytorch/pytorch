@@ -7,7 +7,7 @@
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
-#include <optional>
+#include <c10/util/Optional.h>
 
 namespace at::native {
 

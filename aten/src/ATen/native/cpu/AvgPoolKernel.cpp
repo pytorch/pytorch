@@ -309,7 +309,8 @@ void cpu_avg_pool2d_channels_last(
           int64_t d2 = 0;
           for (; d2 < size - (size % bVec::size()); d2 += bVec::size()) {
             bVec data_bvec = bVec::loadu(in + d2);
-            auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
+            fVec data_fvec0, data_fvec1;
+            std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
 
             fVec sum_fvec0 = fVec::loadu(sum + d2) + data_fvec0;
             fVec sum_fvec1 = fVec::loadu(sum + d2 + fVec::size()) + data_fvec1;
@@ -868,7 +869,8 @@ void cpu_avg_pool3d_channels_last(
             int64_t d2 = 0;
             for (; d2 < size - (size % bVec::size()); d2 += bVec::size()) {
               bVec data_bvec = bVec::loadu(in + d2);
-              auto [data_fvec0, data_fvec1] = convert_bfloat16_float(data_bvec);
+              fVec data_fvec0, data_fvec1;
+              std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
 
               fVec sum_fvec0 = fVec::loadu(sum + d2) + data_fvec0;
               fVec sum_fvec1 = fVec::loadu(sum + d2 + fVec::size()) + data_fvec1;

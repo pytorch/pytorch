@@ -124,7 +124,7 @@ def log_export_usage(**kwargs):
     pass
 
 
-def log_torchscript_usage(api: str, **kwargs):
+def log_torchscript_usage(api: str):
     _ = api
     return
 
