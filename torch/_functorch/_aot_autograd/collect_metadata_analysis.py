@@ -668,6 +668,16 @@ from a multi-output view call"
         )
         user_outs = pytree.tree_map(from_fun, f_output_tangents)
 
+        nonlocal static_input_indices
+        static_input_indices = static_input_indices or []
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            passed_indices = set(static_input_indices)
+            static_input_indices = [
+                i
+                for i, arg in enumerate(flat_args)
+                if (isinstance(arg, torch.nn.Parameter) or i in passed_indices)
+            ]
+
         f_mutated_inputs = [
             inp
             for inp, info in zip(flat_f_args, input_info)
@@ -719,7 +729,7 @@ from a multi-output view call"
             subclass_tangent_meta=create_subclass_meta(traced_tangents),
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,
-            static_input_indices=static_input_indices if static_input_indices else [],
+            static_input_indices=static_input_indices,
             tokens=mode._tokens,
         )
         return metadata
