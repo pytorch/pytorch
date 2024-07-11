@@ -328,7 +328,7 @@ template<typename T>
 inline void FunctionSchema::checkArg(
     const IValue& value,
     const Argument& argument,
-    optional<size_t> pos) const {
+    std::optional<size_t> pos) const {
   if (value.isTensor() && argument.type() == TensorType::get()) {
     // Fast-path for the common case
     return;
