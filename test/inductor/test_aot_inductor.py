@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_CI,
     IS_FBCODE,
+    IS_MACOS,
     IS_WINDOWS,
     skipIfRocm,
     TEST_WITH_ROCM,
@@ -3000,6 +3001,9 @@ class AOTInductorTestsTemplate:
 
     @common_utils.parametrize("max_autotune", [False, True])
     def test_misc_1(self, max_autotune):
+        if self.device == "cpu" and IS_MACOS and max_autotune:
+            raise unittest.Skip("max_autotune not supported on macos")
+
         class Model(nn.Module):
             def __init__(self):
                 super().__init__()
