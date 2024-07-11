@@ -554,6 +554,8 @@ class FxGraphCachePickler(pickle.Pickler):
         """
         with io.BytesIO() as stream:
             pickler = cls(stream)
+            # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
+            pickler.fast = True  # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
             try:
                 pickler.dump(obj)
             except (TypeError, AttributeError) as e:
