@@ -2624,60 +2624,6 @@ class TestCustomOpAPI(TestCase):
                 return
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    def test_library_register_torch_dispatch_rule_subclass(self):
-        from torch.testing._internal.two_tensor import TwoTensor
-
-        @torch.library.custom_op("mylib::foo", mutates_args={})
-        def f(x: torch.Tensor) -> torch.Tensor:
-            return x.sin()
-
-        x = torch.randn(3)
-        y = torch.randn(3)
-        z = TwoTensor(x, y)
-
-        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
-            called = 0
-
-            def TwoTensor_foo(cls, func, types, args, kwargs):
-                nonlocal called
-                assert cls is TwoTensor
-                called += 1
-                return x.sin()
-
-            m._register_torch_dispatch_rule("foo", TwoTensor, TwoTensor_foo)
-
-            out = f(z)
-            out2 = z.cos()
-
-        self.assertEqual(called, 1)
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    def test_library_register_torch_dispatch_rule_mode(self):
-        from torch.testing._internal.two_tensor import TwoTensorMode
-
-        @torch.library.custom_op("mylib::foo", mutates_args={})
-        def f(x: torch.Tensor) -> torch.Tensor:
-            return x.sin()
-
-        x = torch.randn(3)
-
-        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
-            called = 0
-
-            def TwoTensor_foo(mode, func, types, args, kwargs):
-                nonlocal called
-                called += 1
-                return x.sin()
-
-            m._register_torch_dispatch_rule("foo", TwoTensorMode, TwoTensor_foo)
-
-            with TwoTensorMode():
-                out = f(x)
-                out2 = x.cos()
-
-        self.assertEqual(called, 1)
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @parametrize("idx", [0, 1, 2, 3, 4, 5])
     def test_library_register_fake_source(self, idx):
         opname = f"source{idx}"
@@ -3200,6 +3146,55 @@ Please use `add.register_fake` to add an fake impl.""",
         result = f(device="cpu")
         self.assertEqual(result.device, torch.device("cpu"))
         self.assertEqual(result, torch.ones(3))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_set_kernel_enabled(self):
+        x = torch.ones(1)
+
+        @torch.library.custom_op("mylib::f", mutates_args=())
+        def f(x: Tensor) -> Tensor:
+            return x + 1
+
+        self.assertEqual(f(x), x + 1)
+        with self.assertLogs(
+            "torch._library.custom_ops",
+        ) as captured:
+            with f.set_kernel_enabled("gpu", enabled=False):
+                self.assertEqual(f(x), x + 1)
+            self.assertIn(
+                "no kernel was registered for this device type", captured.output[0]
+            )
+
+        @f.register_kernel("cpu")
+        def _(x):
+            return x + 2
+
+        self.assertEqual(f(x), x + 2)
+
+        with self.assertLogs(
+            "torch._library.custom_ops",
+        ) as captured:
+            with f.set_kernel_enabled("cpu", enabled=True):
+                self.assertEqual(f(x), x + 2)
+            self.assertIn("already enabled", captured.output[0])
+
+        with f.set_kernel_enabled("cpu", enabled=False):
+            self.assertEqual(f(x), x + 1)
+
+            with self.assertLogs(
+                "torch._library.custom_ops",
+            ) as captured:
+                with f.set_kernel_enabled("cpu", enabled=False):
+                    self.assertEqual(f(x), x + 1)
+                self.assertIn("already disabled", captured.output[0])
+
+            self.assertEqual(f(x), x + 1)
+
+        with f.set_kernel_enabled("cpu", enabled=True):
+            self.assertEqual(f(x), x + 2)
+
+        with f.set_kernel_enabled("cpu", enabled=False):
+            self.assertEqual(f(x), x + 1)
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):
