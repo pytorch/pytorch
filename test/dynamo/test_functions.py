@@ -357,7 +357,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         wrapped = torch.compile(backend="eager", fullgraph=True)(forward)
 
-        for i in 0, 1, 2.5:
+        for i in (0, 1, 2.5):
             m = num_type(i)
             t = torch.tensor([1])
             actual = wrapped(t, m)
