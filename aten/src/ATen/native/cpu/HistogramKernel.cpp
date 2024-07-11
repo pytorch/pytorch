@@ -287,7 +287,8 @@ template<typename scalar_t>
 void infer_bin_edges_from_input(const Tensor& input, const int64_t N,
         std::vector<double> &leftmost_edges, std::vector<double> &rightmost_edges) {
     // Calls aminmax on input with dim=0, reducing all but the innermost dimension of input.
-    auto [min, max] = aminmax(input, 0);
+    Tensor min, max;
+    std::tie(min, max) = aminmax(input, 0);
 
     TORCH_INTERNAL_ASSERT(min.is_contiguous() && max.is_contiguous());
 
