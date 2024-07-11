@@ -1,0 +1,54 @@
+#pragma once
+
+#include <torch/csrc/utils/python_compat.h>
+
+// Functions that need to be copied from the CPython source
+// should go in cpython_defs.c. Copying is required when, e.g.,
+// we need to call internal CPython functions that are not exposed.
+
+#if IS_PYTHON_3_13_PLUS
+#define F_CODE(x) ((PyCodeObject*)(x)->f_executable)
+#define PREV_INSTR(x) (x)->instr_ptr
+#else
+#define F_CODE(x) ((PyCodeObject*)(x)->f_code)
+#define PREV_INSTR(x) (x)->prev_instr
+#endif
+
+#if IS_PYTHON_3_11_PLUS
+
+#define Py_BUILD_CORE
+#include <internal/pycore_frame.h>
+#undef Py_BUILD_CORE
+
+int THP_PyFrame_FastToLocalsWithError(
+    _PyInterpreterFrame* frame,
+    int* free_vars_copied);
+
+PyFunctionObject* _PyFunction_CopyWithNewCode(
+    PyFunctionObject* o,
+    PyCodeObject* code);
+
+void THP_PyFrame_Clear(_PyInterpreterFrame* frame);
+
+_PyInterpreterFrame* THP_PyThreadState_BumpFramePointerSlow(
+    PyThreadState* tstate,
+    size_t size);
+
+void THP_PyThreadState_PopFrame(
+    PyThreadState* tstate,
+    _PyInterpreterFrame* frame);
+
+#endif
+
+// pointers to _PyOpcode_Caches for C++
+#ifdef __cplusplus
+
+extern "C" const uint8_t* THP_PyOpcode_Caches;
+extern "C" const int THP_PyOpcode_Caches_size;
+
+#else
+
+extern const uint8_t* THP_PyOpcode_Caches;
+extern const int THP_PyOpcode_Caches_size;
+
+#endif
