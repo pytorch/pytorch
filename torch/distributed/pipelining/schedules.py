@@ -890,13 +890,43 @@ def _add_send_recv(
         recv = _Action(recv_stage_idx, ctype, mb_idx, RECV)
         return send, recv
 
-    # go in order of ranks even if dict keys aren't ordered
+    def _ready_to_schedule(
+        action: Optional[_Action], prev_actions: List[_Action]
+    ) -> bool:
+        """We don't put our own recv ops in the schedule, we let a sender on another rank put our recv ops in place.
+        This helps ensure a sane (non-hanging) ordering of sends and recvs.
+        But it also means we might not be able to schedule our next compute action yet.
+        """
+        if action is None:
+            return True
+        elif action.computation_type == F and not action.stage_index == 0:
+            expected_recv = _Action(
+                action.stage_index,
+                action.computation_type,
+                action.microbatch_index,
+                RECV,
+            )
+            return expected_recv in prev_actions
+        elif action.computation_type == B and not action.stage_index == num_stages - 1:
+            expected_recv = _Action(
+                action.stage_index,
+                action.computation_type,
+                action.microbatch_index,
+                RECV,
+            )
+            return expected_recv in prev_actions
+        else:
+            return True
+
     while compute_actions:
+        progress = False
+        # go in order of ranks even if dict keys aren't ordered
         for rank in range(len(compute_actions)):
             assert len(compute_actions[rank]) > 0
-            action = compute_actions[rank].pop(0)
-            if len(compute_actions[rank]) == 0:
-                del compute_actions[rank]
+            action = compute_actions[rank][0]
+
+            if not _ready_to_schedule(action, comm_actions[rank]):
+                continue
 
             if action is not None:
                 comm_actions[rank].append(action)
@@ -907,6 +937,11 @@ def _add_send_recv(
                     comm_actions[rank].append(send)
                     comm_actions[stage_to_rank(recv.stage_index)].append(recv)
 
+            compute_actions[rank].pop(0)
+            if len(compute_actions[rank]) == 0:
+                del compute_actions[rank]
+            progress = True
+        assert progress, "Malformed compute schedule, can't schedule sends/recvs"
     return comm_actions
 
 
