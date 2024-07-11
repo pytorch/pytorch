@@ -294,7 +294,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             f,
             default_args_generator((x,)),
             ifdynstaticdefault(2, 3),
-            expected_opcount=ifdynstaticdefault(2, 3),
+            expected_opcount=2,
         )
 
     def test_wrap_pytree_args_nested(self):
@@ -356,7 +356,7 @@ class GraphModule(torch.nn.Module):
             f,
             default_args_generator((x, y)),
             ifdynstaticdefault(2, 3),
-            expected_opcount=ifdynstaticdefault(2, 3),
+            expected_opcount=2,
             return_graph=True,
         )
         if torch._dynamo.config.assume_static_by_default:
@@ -387,10 +387,8 @@ class GraphModule(torch.nn.Module):
     def forward(self, s0: "Sym(s0)", L_x_: "f32[s0, 1]"):
         l_x_ = L_x_
 
-        size: "Sym(s0)" = l_x_.size(0)
-
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, size);  wrap_body_0 = l_x_ = size = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, s0);  wrap_body_0 = l_x_ = s0 = None
         getitem: "f32[s0]" = wrap[0];  wrap = None
         return (getitem,)
 
@@ -1136,12 +1134,12 @@ def forward(self, L_xs_ : torch.Tensor, L_y_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem, l_y_):
-    getitem_1 = getitem[0]
+def forward(self, child, l_y_):
+    child_1 = child[0]
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, [getitem], [l_y_]);  map_body_0 = getitem = l_y_ = None
-    getitem_2 = map_impl[0];  map_impl = None
-    return (getitem_2,)""",
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, [child], [l_y_]);  map_body_0 = child = l_y_ = None
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
             )
 
     def test_map_multi_return(self):
@@ -1168,10 +1166,10 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem):
-    sin = getitem.sin()
-    sin_1 = getitem.sin();  getitem = None
-    return (sin, sin_1)""",
+def forward(self, child):
+    child_1 = child.sin()
+    child_2 = child.sin();  child = None
+    return (child_1, child_2)""",
             )
 
     def test_map_pytree_return(self):
@@ -1209,8 +1207,8 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem):
-    return (getitem, getitem, getitem, getitem, getitem, getitem, getitem)""",
+def forward(self, child):
+    return (child, child, child, child, child, child, child)""",
             )
 
     def test_map_kwargs(self):
@@ -1252,8 +1250,8 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem, const):
-    add = getitem + 3;  getitem = None
+def forward(self, child, const_unused):
+    add = child + 3;  child = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
             )
@@ -1286,8 +1284,8 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem, const):
-    add = getitem + 3;  getitem = None
+def forward(self, child, const_unused):
+    add = child + 3;  child = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
             )
@@ -1793,10 +1791,10 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_arg1_0_: "f32[3]", l_arg2_0_: "f32[3]"):
-            add: "f32[3]" = l_arg1_0_ + 1;  l_arg1_0_ = None
+            child: "f32[3]" = l_arg1_0_ + 1;  l_arg1_0_ = None
 
-            add_1: "f32[3]" = l_arg2_0_ + 1;  l_arg2_0_ = None
-            return (add, add_1)
+            child_1: "f32[3]" = l_arg2_0_ + 1;  l_arg2_0_ = None
+            return (child, child_1)
 """,
         )
 
@@ -1992,9 +1990,9 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[2, 3]"):
-            sin: "f32[2, 3]" = l_x_.sin()
-            cos: "f32[2, 3]" = l_x_.cos();  l_x_ = None
-            return (sin, cos)
+            child: "f32[2, 3]" = l_x_.sin()
+            child_1: "f32[2, 3]" = l_x_.cos();  l_x_ = None
+            return (child, child_1)
 """,
         )
 
@@ -2027,8 +2025,8 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3]"):
-            neg: "f32[3]" = -l_x_;  l_x_ = None
-            return (neg,)
+            child: "f32[3]" = -l_x_;  l_x_ = None
+            return (child,)
 """,
         )
 
@@ -2472,9 +2470,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([])""",
+            """torch._functorch.pyfunctorch.compare_functorch_state([])""",
             munge_exc(record.getMessage()),
         )
 
@@ -2504,9 +2500,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "forward_ad")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch.autograd.forward_ad._current_level == -1""",
+            """torch.autograd.forward_ad._current_level == -1""",
             munge_exc(record.getMessage()),
         )
 
@@ -2536,17 +2530,13 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         if self.hasRecord(records, "pyfunctorch"):
             record = self.getRecord(records, "pyfunctorch")
             self.assertIn(
-                """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([])""",
+                """torch._functorch.pyfunctorch.compare_functorch_state([])""",
                 munge_exc(record.getMessage()),
             )
         elif self.hasRecord(records, "forward_ad"):
             record = self.getRecord(records, "forward_ad")
             self.assertIn(
-                """\
-    triggered by the following guard failure(s):
-    - torch.autograd.forward_ad._current_level == -1""",
+                """torch.autograd.forward_ad._current_level == -1""",
                 munge_exc(record.getMessage()),
             )
 
@@ -2590,9 +2580,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])""",
+            """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])""",
             record.getMessage(),
         )
 
@@ -2616,9 +2604,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
+            """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
             record.getMessage(),
         )
 
@@ -2646,9 +2632,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
+            """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
             munge_exc(record.getMessage()),
         )
 
@@ -2667,9 +2651,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
-            """\
-    triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])""",
+            """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])""",
             munge_exc(record.getMessage()),
         )
 
