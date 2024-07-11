@@ -382,6 +382,8 @@ inductor_override_kwargs = {
     },
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
+    ("_unsafe_masked_index_put_accumulate", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("_unsafe_masked_index_put_accumulate", "cpu", f16): {"atol": 1e-4, "rtol": 0.01},
     # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
     ("nn.functional.interpolate.bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.upsample_bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
@@ -447,6 +449,8 @@ inductor_one_sample = {
     ("__rmod__", "cuda"): {f16, i64},
     ("__rmul__", "cuda"): {f16},
     ("__rpow__", "cuda"): {f16},
+    ("_unsafe_masked_index", "cuda"): {f16},
+    ("_unsafe_masked_index_put_accumulate", "cuda"): {f16},
     ("addcdiv", "cuda"): {f16},
     ("addcmul", "cuda"): {f16},
     ("atan2", "cuda"): {f16},

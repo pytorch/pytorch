@@ -22,15 +22,15 @@ def _remove_effect_tokens_from_graph_helper(
 
     output_node = None
     with_effect_nodes: List[torch.fx.Node] = []
+
+    # Output node need to check its args agianst output_token_names (collected from output_spec)
+    # Therefore, we only need to find the top-levele output node
+    output_node = next(reversed(ep.graph_module.graph.find_nodes(op="output")))
     for module in ep.graph_module.modules():
         if not isinstance(module, torch.fx.GraphModule):
             continue
 
-        for node in ep.graph.nodes:
-            if node.op == "output":
-                output_node = node
-                break
-
+        for node in module.graph.nodes:
             if not (node.op == "call_function" and node.target is with_effects):
                 continue
 
@@ -44,6 +44,7 @@ def _remove_effect_tokens_from_graph_helper(
     output_node.args = (tuple(output_args[num_tokens:]),)
     for out_token in out_token_nodes:
         assert out_token.name in output_token_names
+        out_token.users.clear()
         ep.graph.erase_node(out_token)
 
     # Replace with_effects(token, func, args) with just func(args)

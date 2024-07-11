@@ -34,9 +34,10 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
+    skipIfXpu,
 )
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU, GPU_TYPE, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
@@ -72,6 +73,7 @@ class TestMaxAutotune(TestCase):
     def _create_buffer(self, name, shape):
         return Buffer(name, FixedLayout(torch.device(GPU_TYPE), torch.float32, shape))
 
+    @skipIfXpu
     def test_benchmark_choice_in_subproc(self):
         gm = make_fx(
             lambda: torch.zeros(2, 3)
@@ -110,6 +112,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(0, child.exitcode)
             print(f"timings is {timings}, out {out}, expected_out {expected_out}")
 
+    @skipIfXpu
     def test_benchmark_choice_fail_in_subproc(self):
         gm = make_fx(
             lambda: torch.zeros(2, 3)
@@ -200,8 +203,8 @@ class TestMaxAutotune(TestCase):
             a = torch.sin(a)
             return a @ b
 
-        a = torch.randn(100, 10).to(GPU_TYPE)
-        b = torch.randn(10, 100).to(GPU_TYPE)
+        a = torch.randn(256, 256).to(GPU_TYPE)
+        b = torch.randn(256, 256).to(GPU_TYPE)
 
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
@@ -466,6 +469,7 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
     @skipIfRocm
+    @skipIfXpu
     @fresh_inductor_cache()
     @config.patch(max_autotune=True, max_fusion_size=2)
     def test_jit_fusion_matches_aot_fusion(self):
@@ -483,10 +487,14 @@ class TestMaxAutotune(TestCase):
             buf4 = x**2
             return buf0, buf1, buf2, buf3, buf4
 
-        inputs = (torch.rand([256, 256], device=GPU_TYPE), torch.tensor(3, device=GPU_TYPE))
+        inputs = (
+            torch.rand([256, 256], device=GPU_TYPE),
+            torch.tensor(3, device=GPU_TYPE),
+        )
         torch._export.aot_compile(fn, args=inputs)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
+    @skipIfXpu
     @skipIfRocm
     def test_precompilations(self):
         def fn(a, b, c):
@@ -605,7 +613,8 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm=True,
     )
     @unittest.skipIf(
-        get_interface_for_device(GPU_TYPE).device_count() < 2, "Need at least 2 devices for this test"
+        get_interface_for_device(GPU_TYPE).device_count() < 2,
+        "Need at least 2 devices for this test",
     )
     def test_autotune_device_guard(self):
         x = torch.randn(1024, 1024, device=f"{GPU_TYPE}:1")
@@ -671,6 +680,16 @@ class TestMaxAutotune(TestCase):
             z = torch.randint(0, 10, (224,)).to(device=GPU_TYPE)
             f(x, y, z)
 
+    def test_conv3d(self):
+        fn = torch.nn.functional.conv3d
+        image = torch.randn([1, 3, 8, 16, 32])
+        filt = torch.randn([3, 3, 7, 7, 7])
+
+        with config.patch({"max_autotune": True}):
+            expected = fn(image, filt)
+            actual = torch.compile(fn)(image, filt)
+            torch.testing.assert_close(actual, expected, atol=6e-5, rtol=0.001)
+
     def test_non_contiguous_input_mm(self):
         """
         Make sure the triton template can work with non-contiguous inputs without crash.
@@ -720,6 +739,7 @@ class TestMaxAutotune(TestCase):
         act = f(x, y)
         self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
 
+    @skipIfXpu
     def test_non_contiguous_input_mm_plus_mm(self):
         x1 = rand_strided((50257, 32768), (1, 50304), device=GPU_TYPE)
         y1 = rand_strided((32768, 768), (768, 1), device=GPU_TYPE)
@@ -835,7 +855,7 @@ class TestTuningProcess(TestCase):
             self.assertEqual(timings[choice], bmreq.value)
 
             tuning_pool.terminate()
-
+    @skipIfXpu
     def test_tuning_pool_multiple_devices(self):
         with config.patch({"autotune_multi_device": True}):
             # Adapt the test to the available devices (and whether CUDA_VISIBLE_DEVICES

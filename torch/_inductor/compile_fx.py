@@ -1307,7 +1307,14 @@ def compile_fx(
         with config.patch(
             {
                 "cpp_wrapper": False,
-                "triton.autotune_at_compile_time": True,
+                # For triton.autotune_at_compile_time, disable by default for
+                # FBCode, but enabled by default for OSS.
+                "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
+                if config.is_fbcode()
+                else os.environ.get(
+                    "TORCHINDUCTOR_TRITON_AUTOTUNE_AT_COMPILE_TIME", "1"
+                )
+                == "1",
                 "triton.autotune_cublasLt": False,
                 "triton.cudagraphs": False,
                 "triton.store_cubin": True,

@@ -118,6 +118,14 @@ class DeviceInterface(metaclass=DeviceInterfaceMeta):
     def get_compute_capability(device: _device_t = None):
         raise NotImplementedError
 
+    @staticmethod
+    def get_rng_state() -> torch.Tensor:
+        raise NotImplementedError
+
+    @staticmethod
+    def set_rng_state(new_state: torch.Tensor) -> None:
+        raise NotImplementedError
+
 
 class DeviceGuard:
     """
@@ -195,6 +203,8 @@ class CudaInterface(DeviceInterface):
     get_raw_stream = staticmethod(get_cuda_stream)  # type: ignore[arg-type]
     exchange_device = staticmethod(torch.cuda._exchange_device)  # type: ignore[arg-type]
     maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)  # type: ignore[arg-type]
+    get_rng_state = staticmethod(torch.cuda.get_rng_state)
+    set_rng_state = staticmethod(torch.cuda.set_rng_state)
 
     # Can be mock patched by @patch decorator.
     @staticmethod
@@ -265,6 +275,8 @@ class XpuInterface(DeviceInterface):
     get_raw_stream = staticmethod(get_xpu_stream)  # type: ignore[arg-type]
     exchange_device = staticmethod(torch.xpu._exchange_device)  # type: ignore[arg-type]
     maybe_exchange_device = staticmethod(torch.xpu._maybe_exchange_device)  # type: ignore[arg-type]
+    get_rng_state = staticmethod(torch.xpu.get_rng_state)
+    set_rng_state = staticmethod(torch.xpu.set_rng_state)
 
     # Can be mock patched by @patch decorator.
     @staticmethod

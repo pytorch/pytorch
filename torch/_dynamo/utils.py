@@ -89,11 +89,14 @@ import importlib
 
 import torch
 import torch._functorch.config
+import torch._inductor.config as inductor_config
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._guards import TracingContext
+from torch._inductor.utils import GPU_TYPE
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import log_compilation_event
 
@@ -101,6 +104,8 @@ from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 
+
+unpatched_nn_module_getattr = torch.nn.Module.__getattr__
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
 optimus_scuba_log: Dict[str, Any] = {}
@@ -580,6 +585,24 @@ def is_function(value):
     )
 
 
+def is_wrapper_or_member_descriptor(value):
+    return isinstance(
+        value,
+        (
+            # set up by PyGetSetDef
+            types.GetSetDescriptorType,
+            # set by PyMethodDef, e.g. list.append
+            types.MethodDescriptorType,
+            # slots - list.__add__
+            types.WrapperDescriptorType,
+            # set up by PyMemberDef
+            types.MemberDescriptorType,
+            # wrapper over C functions
+            types.MethodWrapperType,
+        ),
+    )
+
+
 def unwrap_if_wrapper(fn):
     return unwrap_with_attr_name_if_wrapper(fn)[0]
 
@@ -890,15 +913,22 @@ def preserve_rng_state():
     with disable_current_modes(), disable_functorch():
         rng_state = torch.clone(torch.random.get_rng_state())
         skip_frame_if_in_functorch_mode(rng_state)
-        if torch.cuda.is_available():
-            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
+        gpu_rng_state = None
+        device_interface = get_interface_for_device(GPU_TYPE)
+        if device_interface.is_available():
+            assert (
+                gpu_rng_state is None
+            ), "There should be only one available GPU device"
+            gpu_rng_state = torch.clone(device_interface.get_rng_state())
+
     try:
         yield
     finally:
         with torch.utils._python_dispatch._disable_current_modes():
             torch.random.set_rng_state(rng_state)
-            if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
+            device_interface = get_interface_for_device(GPU_TYPE)
+            if device_interface.is_available():
+                device_interface.set_rng_state(gpu_rng_state)  # type: ignore[possibly-undefined, arg-type]
 
 
 def is_jit_model(model0):
@@ -1319,6 +1349,7 @@ def same(
     relax_numpy_equality=False,
     ignore_non_fp=False,
     log_error=log.error,
+    use_larger_multiplier_for_smaller_tensor=False,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -1452,7 +1483,15 @@ def same(
                 # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
                 multiplier = 3.0 if res.dtype == torch.bfloat16 else 2.0
 
-                if (
+                if use_larger_multiplier_for_smaller_tensor and (
+                    fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
+                ):
+                    multiplier = 10.0
+                elif use_larger_multiplier_for_smaller_tensor and (
+                    fp64_ref.numel() <= 500 and tol >= 4 * 1e-2
+                ):
+                    multiplier = 5.0
+                elif (
                     fp64_ref.numel() < 1000
                     or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
                     # large tol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE
@@ -1464,6 +1503,16 @@ def same(
                     multiplier = 3.0
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
+                if (
+                    not passes_test
+                    and equal_nan
+                    and math.isnan(ref_error)
+                    and math.isnan(res_error)
+                    # Some unit test for the accuracy minifier relies on
+                    # returning false in this case.
+                    and not inductor_config.cpp.inject_relu_bug_TESTING_ONLY
+                ):
+                    passes_test = True
                 if not passes_test:
                     log_error(
                         "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, tol: %f",

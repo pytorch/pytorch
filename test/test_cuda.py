@@ -46,8 +46,10 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     instantiate_parametrized_tests,
     IS_ARM64,
+    IS_FBCODE,
     IS_JETSON,
     IS_LINUX,
+    IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
     NO_MULTIPROCESSING_SPAWN,
@@ -275,6 +277,12 @@ class TestCuda(TestCase):
         # ensure out of memory error doesn't disturb subsequent kernel
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "uuid attribute not yet available")
+    def test_uuid(self):
+        uuid = torch.cuda.get_device_properties(0).uuid
+        self.assertEqual(len(str(uuid)), 36)  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        self.assertEqual(len(uuid.bytes), 16)
 
     def test_copy_non_blocking(self):
         def _test_copy_non_blocking(a, b):
@@ -2006,13 +2014,12 @@ torch.cuda.synchronize()
         input = torch.rand(
             (8, 8), device="cuda", dtype=torch.float16, requires_grad=True
         )
-        with torch.autocast(
-            "cuda",
-        ):
-            output = checkpoint_sequential(model, 2, input, use_reentrant=True)
-        self.assertTrue(output.requires_grad)
-        self.assertTrue(output.dtype is torch.float16)
-        output.sum().backward()
+        for reentrant in (True, False):
+            with torch.autocast("cuda"):
+                output = checkpoint_sequential(model, 2, input, use_reentrant=reentrant)
+            self.assertTrue(output.requires_grad)
+            self.assertTrue(output.dtype is torch.float16)
+            output.sum().backward()
 
     def test_cuda_autocast_deprecated_warning(self):
         with self.assertWarnsRegex(
@@ -2318,6 +2325,9 @@ exit(2)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
     def test_graph_capture_oom(self):
         oom_regex = (
@@ -3064,13 +3074,25 @@ exit(2)
                 ).cuda()
 
             def forward(self, x):
-                return {"output": self.net_2(self.net_1(x))}
+                return self.net_2(self.net_1(x))
+
+        class ParameterlessModule(torch.nn.Module):
+            def forward(self, x):
+                idx = (
+                    torch.arange(x.size(0), device=x.device)
+                    .view(-1, 1)
+                    .repeat(1, x.size(1))
+                )
+                return {"output": torch.gather(x, 0, idx)}
 
         models = []
         for _ in range(2):
             model_section1 = MLP1(D_in, H, H).cuda()
             model_section2 = MLP2(H, H, D_out).cuda()
-            models.append(torch.nn.Sequential(model_section1, model_section2))
+            model_section3 = ParameterlessModule().cuda()
+            models.append(
+                torch.nn.Sequential(model_section1, model_section2, model_section3)
+            )
 
         model_graphed = models[0]
         model_control = models[1]
@@ -3082,6 +3104,7 @@ exit(2)
 
         x = torch.randn(N, D_in, device="cuda")
         h = torch.randn(N, H, device="cuda", requires_grad=True)
+        h2 = torch.randn(N, D_out, device="cuda", requires_grad=True)
         unused_input = torch.randn(N, H, device="cuda", requires_grad=True)
         y_pred = torch.randn(N, D_out, device="cuda", requires_grad=True)
         y = torch.randn(N, D_out, device="cuda")
@@ -3094,13 +3117,21 @@ exit(2)
             (
                 model_graphed[0],
                 model_graphed[1],
+                model_graphed[2],
                 relu_graphed,
                 loss_fn_graphed,
             ) = torch.cuda.make_graphed_callables(
-                (model_graphed[0], model_graphed[1], relu_control, loss_fn_control),
+                (
+                    model_graphed[0],
+                    model_graphed[1],
+                    model_graphed[2],
+                    relu_control,
+                    loss_fn_control,
+                ),
                 (
                     ({"x": x, "unused_input": unused_input},),
                     (h,),
+                    (h2,),
                     (y_pred,),
                     (y_pred, y),
                 ),
@@ -3131,6 +3162,84 @@ exit(2)
 
         for p, pc in zip(model_graphed.parameters(), model_control.parameters()):
             self.assertEqual(p, pc)
+
+        # We graphed the models in training mode. Eval should still run ungraphed.
+        model_graphed.eval()
+        model_control.eval()
+        self.assertEqual(
+            model_graphed({"x": real_inputs[0]}), model_control({"x": real_inputs[0]})
+        )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @parametrize(
+        "with_amp,cache_enabled,allow_unused_input",
+        [
+            subtest((False, False, True), decorators=[skipIfRocm]),
+            subtest((True, False, True), decorators=[skipIfRocm]),
+            subtest((True, True, True), decorators=[unittest.expectedFailure]),
+            subtest((False, False, False), decorators=[skipIfRocm]),
+        ],
+        name_fn=lambda x, y, z: "{}{}{}".format(
+            {True: "with_amp", False: "without_amp"}[x],
+            {True: "_cache_enabled", False: "_cache_disabled"}[y] if x else "",
+            {True: "_allow_unused_input", False: "_not_allow_unused_input"}[z],
+        ),
+    )
+    @serialTest()
+    def test_graph_make_graphed_callables_parameterless_nograd_module(
+        self, with_amp, cache_enabled, allow_unused_input
+    ):
+        torch.manual_seed(5)
+        torch.cuda.manual_seed(5)
+
+        N, D_in, H, D_out = 640, 4096, 2048, 1024
+
+        class ParameterlessModule(torch.nn.Module):
+            def forward(self, input_dict: dict):
+                x = input_dict["x"]
+                idx = (
+                    torch.arange(x.size(0), device=x.device)
+                    .view(-1, 1)
+                    .repeat(1, x.size(1))
+                )
+                return {"output": torch.gather(x, 0, idx)}
+
+        models = []
+        for _ in range(2):
+            model_section1 = ParameterlessModule().cuda()
+            models.append(torch.nn.Sequential(model_section1))
+
+        model_graphed = models[0]
+        model_control = models[1]
+
+        model_graphed.load_state_dict(model_control.state_dict())
+
+        x = torch.randn(N, D_in, device="cuda", requires_grad=False)
+        unused_input = torch.randn(N, H, device="cuda", requires_grad=False)
+        y_pred = torch.randn(N, D_in, device="cuda", requires_grad=False)
+        y = torch.randn(N, D_in, device="cuda")
+
+        # This is a good stress test. It graphs four callables: two Modules and two python functions.
+        with torch.cuda.amp.autocast(with_amp, cache_enabled=cache_enabled):
+            model_graphed[0] = torch.cuda.make_graphed_callables(
+                model_graphed[0],
+                ({"x": x, "unused_input": unused_input},),
+                allow_unused_input=allow_unused_input,
+            )
+
+        real_inputs = [torch.rand_like(x, requires_grad=True) for _ in range(10)]
+        real_targets = [torch.rand_like(y) for _ in range(10)]
+
+        for m in (model_graphed, model_control):
+            # Resets RNC states before iterations for graphed and ungraphed models,
+            # so dropout math should be bitwise identical for both.
+            torch.manual_seed(5)
+            torch.cuda.manual_seed(5)
+            for data, target in zip(real_inputs, real_targets):
+                with torch.cuda.amp.autocast(with_amp, cache_enabled=cache_enabled):
+                    out = m({"x": data, "unused_input": unused_input})["output"]
 
         # We graphed the models in training mode. Eval should still run ungraphed.
         model_graphed.eval()
@@ -3749,17 +3858,47 @@ exit(2)
             )
             self.assertEqual(rc, "3")
 
-    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
-    @unittest.skipIf(TEST_WITH_ROCM, "too lazy to debug this on ROCm")
-    def test_device_count_not_cached_pre_init(self):
+    @unittest.skipIf(not TEST_WITH_ROCM, "not relevant for CUDA testing")
+    def test_hip_device_count(self):
+        """Validate device_count works with both CUDA/HIP visible devices"""
         test_script = """\
 import torch
 import os
+print(f"{torch.cuda.device_count()}")
+"""
+        custom_envs = [
+            {"CUDA_VISIBLE_DEVICES": "0", "HIP_VISIBLE_DEVICES": None},
+            {"CUDA_VISIBLE_DEVICES": None, "HIP_VISIBLE_DEVICES": "0"},
+            {"CUDA_VISIBLE_DEVICES": "0,1,2,3", "HIP_VISIBLE_DEVICES": "0"},
+        ]
+
+        for env_config in custom_envs:
+            env = os.environ.copy()
+            for key, value in env_config.items():
+                if value is None:
+                    env.pop(key, None)
+                else:
+                    env[key] = value
+            r = (
+                subprocess.check_output([sys.executable, "-c", test_script], env=env)
+                .decode("ascii")
+                .strip()
+            )
+            self.assertEqual("1", r)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
+    def test_device_count_not_cached_pre_init(self):
+        visible_devices = (
+            "HIP_VISIBLE_DEVICES" if torch.version.hip else "CUDA_VISIBLE_DEVICES"
+        )
+        test_script = f"""\
+import torch
+import os
 r1 = torch.cuda.device_count()
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['{visible_devices}'] = '0'
 r2 = torch.cuda.device_count()
 torch.empty(10, device='cuda')
-print(f"{r1}, {r2}")
+print(f"{{r1}}, {{r2}}")
 """
 
         r = (
@@ -4821,6 +4960,35 @@ class TestCudaOptims(TestCase):
                                 actual = actual.squeeze()
                             tracker.add(state_control[k])
                             tracker.pop_check_set(actual, self)
+
+    @onlyCUDA
+    @parametrize("in_place_unscale", [False, True])
+    @optims(
+        [optim for optim in optim_db if "cuda" in optim.supports_fused_on],
+        dtypes=[torch.float32],
+    )
+    def test_grad_scaler_with_preset_grad_scale(
+        self, device, dtype, optim_info, in_place_unscale
+    ):
+        weight = torch.ones((5, 5), device="cuda", requires_grad=True)
+        weight.grad = torch.full_like(weight, fill_value=15)
+        opt = optim_info.optim_cls([weight], lr=0.1, fused=True)
+        scaler = torch.amp.GradScaler(init_scale=5)
+
+        # simulate scaling a loss
+        scaler.scale(torch.ones(5))
+
+        if in_place_unscale:
+            scaler.unscale_(opt)
+            # the gradient should have been divided in-place
+            self.assertEqual(weight.grad, torch.full_like(weight, fill_value=3))
+
+        # the user sets a `grad_scale` value which should be fused with the optimizer step
+        opt.grad_scale = torch.Tensor([3]).cuda()
+        scaler.step(opt)
+
+        # check that the user's grad_scale was respected (i.e. the gradient was divided by 5 * 3)
+        self.assertEqual(weight.grad, torch.full_like(weight, fill_value=1))
 
     @onlyCUDA
     @unittest.skipIf(

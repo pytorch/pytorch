@@ -140,7 +140,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
         "), but got ",
         size.size());
     if (nnz() > 0) {
-      auto alt_options_msg =
+      [[maybe_unused]] auto constexpr alt_options_msg =
           "You could try the following options:\n\
 1. If you need an empty sparse tensor of this size, call `x = torch.sparse_coo_tensor(size)`.\n\
 2. If you need to resize this tensor, you have the following options:\n\

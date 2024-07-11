@@ -14,7 +14,7 @@ import sys
 import textwrap
 import time
 from collections import namedtuple
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -25,8 +25,10 @@ from filelock import FileLock
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
@@ -63,7 +65,7 @@ log = logging.getLogger(__name__)
 # correctness checks struggle with fp16/tf32
 VERIFY: Dict[str, Any] = dict()
 PRINT_AUTOTUNE = True
-DEBUG = True
+DEBUG = False
 
 
 class KernelNamespace:
@@ -314,18 +316,21 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_size()[index]
         return texpr(self.rename_indexing(val))
 
-    def stride(self, name, index):
+    def stride(self, name, index=None):
         """
         Hook called from template code to get the stride of an arg.
         Will add needed args to pass it in if it is dynamic.
         """
-        assert isinstance(index, int)
         if name is None:
-            val = self.output_node.get_stride()[index]
+            val = self.output_node.get_stride()
         else:
             assert isinstance(name, str)
-            val = self.named_input_nodes[name].get_stride()[index]
-        return texpr(self.rename_indexing(val))
+            val = self.named_input_nodes[name].get_stride()
+
+        if isinstance(index, int):
+            return texpr(self.rename_indexing(val[index]))
+        else:
+            return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
     def modification(
         self, subgraph_number: int, output_name: str, **fixed_inputs
@@ -376,9 +381,9 @@ class TritonTemplateKernel(TritonKernel):
                     subgraph, ir.ComputedBuffer
                 ), f"Expected the subgraph to be a ComputedBuffer, got {type(subgraph)}"
                 if isinstance(subgraph.data, ir.InputBuffer):
-                    out = subgraph.data.make_loader()((1,))
+                    out = subgraph.data.make_loader()(())
                 else:
-                    out = subgraph.data.inner_fn((1,))
+                    out = subgraph.data.inner_fn(())
 
             self.codegen_body()
             self.body.writeline(f"{output_name} = {out.value}")
@@ -1185,10 +1190,6 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
-            # TODO - debug issue
-            if torch.version.hip:
-                return no_op
-
             # check local and global cache before precompiling
             timings = self.lookup(
                 choices,
@@ -1230,42 +1231,25 @@ class AlgorithmSelectorCache(PersistentCache):
                     return choice.precompile()
 
             executor = ThreadPoolExecutor(max_workers=num_workers)
-            futures = executor.map(
-                lambda c: precompile_with_captured_stdout(c),
-                [c for c in choices if hasattr(c, "precompile")],
-                timeout=precompilation_timeout_seconds,
-            )
+
+            futures = {}
+            for c in choices:
+                if hasattr(c, "precompile"):
+                    future = executor.submit(precompile_with_captured_stdout, c)
+                    futures[future] = c
 
             @functools.lru_cache(None)
             @restore_stdout_stderr(initial_stdout, initial_stderr)
             def wait_on_futures():
                 counters["inductor"]["select_algorithm_precompile"] += 1
-                try:
-                    iterator = iter(futures)
-                    while True:
-                        try:
-                            next(iterator)
-                        except CUDACompileError:
-                            log.error(  # noqa: G201
-                                "CUDA Compilation error", exc_info=True
-                            )
-                except TimeoutError:
-                    log.warning(
-                        f"Precompilation timed out after {precompilation_timeout_seconds} seconds."  # noqa: G004
-                    )
-                except StopIteration:
-                    pass
-                except Exception as e:
-                    try:
-                        from triton.runtime.autotuner import OutOfResources
-
-                        if isinstance(e, OutOfResources):
-                            # This config is invalid due to requiring too many resources
-                            pass
-                        else:
-                            raise e
-                    except ImportError:
-                        raise e from None
+                for future in as_completed(
+                    futures,
+                    timeout=precompilation_timeout_seconds,
+                ):
+                    if e := future.exception():
+                        log.error(
+                            "Exception %s for benchmark choice %s", e, futures[future]
+                        )
 
                 executor.shutdown(wait=True)
 
@@ -1436,10 +1420,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 result = choice.benchmark(*example_inputs, out=out)
             if VERIFY and expected is not None:
                 torch.testing.assert_close(out_extern, expected, **VERIFY)
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()  # shake out any CUDA errors
-            if torch.xpu.is_available():
-                torch.xpu.synchronize()  # shake out any CUDA errors
+
+            device_interface = get_interface_for_device(GPU_TYPE)
+            if device_interface.is_available():
+                device_interface.synchronize()  # shake out any CUDA errors
 
             return result
 
@@ -1519,7 +1503,9 @@ class AlgorithmSelectorCache(PersistentCache):
         elapse: float,
         precompile_elapse: float,
     ):
-        V.debug.log_autotuning_results(name, input_nodes, timings, elapse)
+        V.debug.log_autotuning_results(
+            name, input_nodes, timings, elapse, precompile_elapse
+        )
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
             return
         sizes = ", ".join(

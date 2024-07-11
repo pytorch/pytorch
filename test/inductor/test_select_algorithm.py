@@ -12,8 +12,8 @@ from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import TritonBenchmarkRequest
 from torch._inductor.test_case import run_tests, TestCase
 
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_GPU, GPU_TYPE
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, skipIfXpu
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 aten = torch.ops.aten
 
@@ -110,6 +110,7 @@ class TestSelectAlgorithm(TestCase):
 
     # FIXME: Investigate why _int_mm_out_cuda is not compiled on ROCm
     @skipIfRocm
+    @skipIfXpu
     @patches
     def test__int_mm(self):
         @torch.compile
@@ -123,6 +124,7 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
+    @skipIfXpu
     def test_mm_skip(self):
         @torch.compile
         def foo(a, b):
@@ -250,6 +252,7 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @skipIfRocm
+    @skipIfXpu
     @patches
     def test_mm_dropout(self):
         @torch.compile
