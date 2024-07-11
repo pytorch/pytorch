@@ -193,3 +193,44 @@ class CheckInvariantStatus(Enum):
 
     # Expected dead indices before graph are live
     ExpectedDeadIndicesBeforeGraphMismatch = 4
+
+    def __str__(self):
+        if self.name == "CudagraphManagedIdxMismatch":
+            return "cudagraph managed tensor data pointer changed"
+        elif self.name == "StaticInputIdxMismatch":
+            return "static input data pointer changed"
+        elif self.name == "ExpectedDeadIndicesBeforeGraphMismatch":
+            return "expected dead indices before graph are live"
+        else:
+            return f"{self.name}: {self.value}"
+
+
+def log_data_ptr_mismatch(
+    placeholders: List[torch.fx.Node],
+    inputs: List[torch.Tensor],
+    recorded_data_ptr: List[Optional[int]],
+    target_idxs: List[int],
+    mismatch: CheckInvariantStatus,
+) -> str:
+    """
+    Logs the mismatch between input data pointers and recorded data pointers.
+    This checks only idxs in target_idxs.
+    """
+    assert len(inputs) == len(recorded_data_ptr) and len(inputs) == len(
+        placeholders
+    ), "length mismatch between inputs, recorded_data_ptr, and placeholders"
+
+    # TODO: length mismatch
+    t_tensors = [inputs[i] for i in target_idxs]
+    t_data_ptrs = [recorded_data_ptr[i] for i in target_idxs]
+    error_msg = f"{mismatch}.\n"
+    for i, (tensor, data_ptr) in enumerate(zip(t_tensors, t_data_ptrs)):
+        index = target_idxs[i]
+        if tensor.data_ptr() != data_ptr:
+            placeholder = placeholders[index]
+            error_msg = (
+                f"{error_msg}input name: {placeholder.name}. "
+                f"data pointer changed from {data_ptr} to {tensor.data_ptr()}. "
+                f"input stack trace: {get_placeholder_stack_trace(placeholder)}\n"
+            )
+    return error_msg

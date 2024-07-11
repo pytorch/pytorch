@@ -82,8 +82,8 @@ from torch._inductor.cudagraph_utils import (
     check_for_mutation,
     CheckInvariantStatus,
     FunctionID,
-    get_placeholder_stack_trace,
     log_cudagraph_skip_and_bump_counter,
+    log_data_ptr_mismatch,
     WrappedFunction,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -933,9 +933,9 @@ class CUDAGraphNode:
         self.static_output_tensors: OutputList[Optional[Tensor]] = []
 
         # Cleared after recording
-        self.recording_outputs: Optional[
-            OutputList[Union[torch.Tensor, int]]
-        ] = self._record(wrapped_function.model, recording_inputs)
+        self.recording_outputs: Optional[OutputList[Union[torch.Tensor, int]]] = (
+            self._record(wrapped_function.model, recording_inputs)
+        )
         self.outputs_metadata: OutputList[Union[Dict[str, Any], int, None]] = []
 
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
@@ -978,21 +978,13 @@ class CUDAGraphNode:
             )
         ):
             # this should error
-            static_tensors = [new_inputs[i] for i in self.non_managed_static_input_idxs]
-            data_ptrs = [
-                self.static_input_data_ptrs[i]
-                for i in self.non_managed_static_input_idxs
-            ]
-            error_msg = "static input data pointer changed.\n"
-            for i, (t, data_ptr) in enumerate(zip(static_tensors, data_ptrs)):
-                index = self.non_managed_static_input_idxs[i]
-                if t.data_ptr() != data_ptr:
-                    placeholder = self.wrapped_function.placeholders[index]
-                    error_msg = (
-                        f"{error_msg}input name: {placeholder.name}. "
-                        f"data pointer changed from {data_ptr} to {t.data_ptr()}. "
-                        f"input stack trace: {get_placeholder_stack_trace(placeholder)}\n"
-                    )
+            error_msg = log_data_ptr_mismatch(
+                self.wrapped_function.placeholders,
+                new_inputs,
+                self.static_input_data_ptrs,
+                self.non_managed_static_input_idxs,
+                CheckInvariantStatus.StaticInputIdxMismatch,
+            )
             torch._check(False, lambda: error_msg)
 
     def run_first_inputs(self, new_inputs):
@@ -1576,11 +1568,20 @@ class CUDAGraphNode:
 
         return recording_inputs
 
-    def check_invariants(self, inputs: List[Tensor]) -> CheckInvariantStatus:
+    def check_invariants(
+        self, inputs: List[Tensor]
+    ) -> Tuple[CheckInvariantStatus, Callable[..., str]]:
         """
         Checks if this node can be run. The same pattern of tensor liveness, static inputs,
         and tensors managed in the cudagraph private pool must remain stable.
         """
+
+        _logger = functools.partial(
+            log_data_ptr_mismatch,
+            self.wrapped_function.placeholders,
+            inputs,
+            self.static_input_data_ptrs,
+        )
 
         # previously managed data pointers remain stable
         # this is on the hot path so moved to C++. equivalent to:
@@ -1588,12 +1589,19 @@ class CUDAGraphNode:
         if not torch._C._tensors_data_ptrs_at_indices_equal(
             inputs, self.static_input_data_ptrs, self.cudagraph_managed_idxs
         ):
-            return CheckInvariantStatus.CudagraphManagedIdxMismatch
+            status = CheckInvariantStatus.CudagraphManagedIdxMismatch
+            _logger = functools.partial(
+                _logger,
+                self.cudagraph_managed_idxs,
+                status,
+            )
+            return status, _logger
 
         if not self._check_liveness(
             self.expected_dead_indices_before_graph, self.path_weakrefs
         ):
-            return CheckInvariantStatus.ExpectedDeadIndicesBeforeGraphMismatch
+            status = CheckInvariantStatus.ExpectedDeadIndicesBeforeGraphMismatch
+            return status, lambda: f"{status}"
 
         # static input data pointers should remain stable
         # if we are inlining builtin nn modules we re-record in this case
@@ -1605,7 +1613,13 @@ class CUDAGraphNode:
                 inputs, self.static_input_data_ptrs, self.static_input_idxs
             )
         ):
-            return CheckInvariantStatus.StaticInputIdxMismatch
+            status = CheckInvariantStatus.StaticInputIdxMismatch
+            _logger = functools.partial(
+                _logger,
+                self.static_input_idxs,
+                status,
+            )
+            return status, _logger
 
         # the cudagraph managed tensors which died upon recording must also die upon
         # this invocation. it is too late to check after we've replayed the graph,
@@ -1620,7 +1634,7 @@ class CUDAGraphNode:
             lambda: "TODO: graph recording observed an input tensor deallocate during graph "
             " recording that did not occur during replay. Please file an issue.",
         )
-        return CheckInvariantStatus.SUCCESS
+        return CheckInvariantStatus.SUCCESS, lambda: f"{CheckInvariantStatus.SUCCESS}"
 
     def num_descendants(self) -> int:
         "Total number of descendents of this node"
@@ -1962,7 +1976,7 @@ class CUDAGraphTreeManager:
                 # here we are checking memory consistency between recording and execution,
                 # as well as things like stability of tensor locations, etc
                 # and other
-                status = child.check_invariants(new_inputs)
+                status, status_logger = child.check_invariants(new_inputs)
                 if status == CheckInvariantStatus.SUCCESS:
                     return self.execute_node(child, new_inputs)
 
