@@ -1078,7 +1078,11 @@ class WrapperCodeGen(CodeGen):
         return f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
 
     def codegen_dtype_view(self, data, dtype, writer) -> str:
-        return f"aten.view.dtype({data.get_name()}, {dtype})"
+        if isinstance(data, ReinterpretView):
+            inner_call = data.codegen_reference()
+        else:
+            inner_call = data.get_name()
+        return f"aten.view.dtype({inner_call}, {dtype})"
 
     def codegen_device_copy(self, src, dst):
         self.writeline(f"{dst}.copy_({src})")

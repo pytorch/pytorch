@@ -11,7 +11,6 @@ import re
 import textwrap
 import traceback
 from contextlib import nullcontext
-from copy import deepcopy
 from functools import partial
 from typing import (
     Any,
@@ -2520,11 +2519,6 @@ class DtypeView(BaseView):
 
     target_dtype: torch.dtype
 
-    def __post_init__(self):
-        super().__post_init__()
-        if isinstance(self.data, BaseView):
-            self.data = self.data.unwrap_view()
-
     def __str__(self):
         return self.str_helper([self.data, self.target_dtype])
 
@@ -2536,9 +2530,14 @@ class DtypeView(BaseView):
 
     @property
     def layout(self):
-        old_layout = self.data.get_layout()
-        new_layout = deepcopy(old_layout)
-        new_layout.dtype = self.target_dtype
+        storage, old_layout = as_storage_and_layout(self.data)
+        new_layout = FixedLayout(
+            old_layout.device,
+            self.target_dtype,
+            old_layout.size,
+            old_layout.stride,
+            old_layout.offset,
+        )
         return new_layout
 
     def get_size(self):
@@ -4474,10 +4473,10 @@ class ExternKernel(InputsKernel):
             return x
         if isinstance(x, TensorBox):
             return cls.realize_input(x.data)
-        if isinstance(x, ReinterpretView):
-            return ReinterpretView(cls.realize_input(x.data), x.get_layout())
         if isinstance(x, DtypeView):
             return DtypeView(cls.realize_input(x.data), x.target_dtype)
+        if isinstance(x, ReinterpretView):
+            return ReinterpretView(cls.realize_input(x.data), x.get_layout())
         if isinstance(x, BaseView):
             x.realize()
             if is_storage_and_layout(x.unwrap_view()):
