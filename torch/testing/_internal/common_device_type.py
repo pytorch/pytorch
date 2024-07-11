@@ -506,7 +506,11 @@ class DeviceTypeTestBase(TestCase):
             decorator_fn,
         ) in parametrize_fn(test, generic_cls, cls):
             test_suffix = "" if test_suffix == "" else "_" + test_suffix
-            cls_device_type = cls.device_type if cls.device_type != "privateuse1" else torch._C._get_privateuse1_backend_name()
+            cls_device_type = (
+                cls.device_type
+                if cls.device_type != "privateuse1"
+                else torch._C._get_privateuse1_backend_name()
+            )
             device_suffix = "_" + cls_device_type
 
             # Note: device and dtype suffix placement
