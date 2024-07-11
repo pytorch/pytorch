@@ -225,6 +225,86 @@ flex_attention_template = TritonTemplate(
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = kv_start + tl.arange(0, BLOCK_N)
 
+    acc, l_i, m_i = forward_inner(
+        Q_block_ptr, K_block_ptr, V_block_ptr, acc, l_i, m_i, off_z, off_h, offs_m, offs_n,
+        True, kv_indices, sparse_kv_num_blocks, SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE,
+        BLOCK_M, BLOCK_N, BLOCK_DMODEL, PRESCALE_QK, SM_SCALE, ROWS_GUARANTEED_SAFE, MATMUL_PRECISION,
+        {{gen_argdefs()}}
+    )
+
+    if USE_PARTIAL_MASK:
+        # ~~~~~~~~~~~~~~ partially unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # PARTIAL_KV_IDX and PARTIAL_KV_NUM_BLKS are always contiguous.
+        sparse_hz_offset = sparse_idx_z * SPARSE_H + sparse_idx_h
+        sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + start_m // SPARSE_Q_MULTIPLE
+        sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (start_m // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
+        kv_indices = PARTIAL_KV_IDX + sparse_kv_idx_offset
+        kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
+        sparse_kv_num_blocks = tl.load(PARTIAL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
+
+        Q_block_ptr = tl.make_block_ptr(
+            base=Q + q_offset,
+            shape=(Q_LEN, BLOCK_DMODEL),
+            strides=(stride_qm, stride_qk),
+            offsets=(start_m * BLOCK_M, 0),
+            block_shape=(BLOCK_M, BLOCK_DMODEL),
+            order=(1, 0)
+        )
+        K_block_ptr = tl.make_block_ptr(
+            base=K + k_offset,
+            shape=(BLOCK_DMODEL, KV_LEN),
+            strides=(stride_kk, stride_kn),
+            offsets=(0, kv_start),
+            block_shape=(BLOCK_DMODEL, BLOCK_N),
+            order=(0, 1)
+        )
+        V_block_ptr = tl.make_block_ptr(
+            base=V + v_offset,
+            shape=(KV_LEN, BLOCK_DMODEL),
+            strides=(stride_vn, stride_vk),
+            offsets=(kv_start, 0),
+            block_shape=(BLOCK_N, BLOCK_DMODEL),
+            order=(1, 0)
+        )
+        # initialize offsets
+        offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+        offs_n = kv_start + tl.arange(0, BLOCK_N)
+
+        acc, l_i, m_i = forward_inner(
+            Q_block_ptr, K_block_ptr, V_block_ptr, acc, l_i, m_i, offs_m, offs_n,
+            False, kv_indices, sparse_kv_num_blocks, SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE,
+            BLOCK_M, BLOCK_N, BLOCK_DMODEL, PRESCALE_QK, SM_SCALE, ROWS_GUARANTEED_SAFE, MATMUL_PRECISION,
+            {{gen_argdefs()}}
+        )
+
+
+    # Store output and logsumexp
+    acc = acc / l_i[:, None]
+    idx_z = tl.program_id(1) // H
+    idx_h = tl.program_id(1) % H
+    idx_m = offs_m[:, None]
+    idx_d = tl.arange(0, BLOCK_DMODEL)[None, :]
+
+    mask = idx_m < Q_LEN
+    # TODO generalize and add proper mask support
+    {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "acc", "mask")}}
+
+    # TODO dont want to write this if we dont require grad
+    if OUTPUT_LOGSUMEXP:
+        off_hz = tl.program_id(1)
+        l_ptrs = LSE + off_hz * Q_LEN + offs_m
+        lse = m_i + tl.math.log2(l_i)
+        tl.store(l_ptrs, lse)
+
+
+@triton.jit
+def forward_inner(
+    Q_block_ptr, K_block_ptr, V_block_ptr, acc, l_i, m_i, off_z, off_h, offs_m, offs_n,
+    IS_FULL_BLKS, kv_indices, sparse_kv_num_blocks, SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE,
+    BLOCK_M, BLOCK_N, BLOCK_DMODEL, PRESCALE_QK, SM_SCALE, ROWS_GUARANTEED_SAFE, MATMUL_PRECISION,
+    {{gen_argdefs()}}
+):
+
     q = tl.load(Q_block_ptr)
     RCP_LN2 = 1.44269504
 
@@ -255,6 +335,20 @@ flex_attention_template = TritonTemplate(
             n="n",
             out="qk"
         ) | indent_except_first(2) }}
+
+        if not IS_FULL_BLKS:
+            {{ modification(
+                subgraph_number=1,
+                output_name="mask_fn_output",
+                score="qk",
+                b="off_z",
+                h="off_h",
+                m="m",
+                n="n",
+            ) | indent_except_first(3) }}
+            # apply mask for partially unmasked blocks
+            post_mod_scores = tl.where(mask_fn_output, post_mod_scores, float("-inf"))
+
         # TODO: In the case that score_mod is linear, this can be LICMed
         if not PRESCALE_QK:
             post_mod_scores *= RCP_LN2
@@ -297,148 +391,8 @@ flex_attention_template = TritonTemplate(
 
         offs_n = offs_n + offset
 
-    if USE_PARTIAL_MASK:
-        # ~~~~~~~~~~~~~~ partially unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # PARTIAL_KV_IDX and PARTIAL_KV_NUM_BLKS are always contiguous.
-        sparse_hz_offset = sparse_idx_z * SPARSE_H + sparse_idx_h
-        sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + start_m // SPARSE_Q_MULTIPLE
-        sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (start_m // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
-        kv_indices = PARTIAL_KV_IDX + sparse_kv_idx_offset
-        kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
-        sparse_kv_num_blocks = tl.load(PARTIAL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
+    return acc, l_i, m_i
 
-        Q_block_ptr = tl.make_block_ptr(
-            base=Q + q_offset,
-            shape=(Q_LEN, BLOCK_DMODEL),
-            strides=(stride_qm, stride_qk),
-            offsets=(start_m * BLOCK_M, 0),
-            block_shape=(BLOCK_M, BLOCK_DMODEL),
-            order=(1, 0)
-        )
-        K_block_ptr = tl.make_block_ptr(
-            base=K + k_offset,
-            shape=(BLOCK_DMODEL, KV_LEN),
-            strides=(stride_kk, stride_kn),
-            offsets=(0, kv_start),
-            block_shape=(BLOCK_DMODEL, BLOCK_N),
-            order=(0, 1)
-        )
-        V_block_ptr = tl.make_block_ptr(
-            base=V + v_offset,
-            shape=(KV_LEN, BLOCK_DMODEL),
-            strides=(stride_vn, stride_vk),
-            offsets=(kv_start, 0),
-            block_shape=(BLOCK_N, BLOCK_DMODEL),
-            order=(1, 0)
-        )
-        # initialize offsets
-        offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
-        offs_n = kv_start + tl.arange(0, BLOCK_N)
-
-        q = tl.load(Q_block_ptr)
-        RCP_LN2 = 1.44269504
-
-        if PRESCALE_QK:
-            q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
-
-        # loop over k, v and update accumulator
-        lo = 0
-        hi = sparse_kv_num_blocks * SPARSE_KV_MULTIPLE
-
-        for start_n in range(0, hi):
-            # -- load k --
-            k = tl.load(K_block_ptr)
-            # -- compute qk ---
-            qk = tl.dot(q, k)
-            if not PRESCALE_QK:
-                qk *= SM_SCALE
-            # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-            m = offs_m[:, None]
-            n = offs_n[None, :]
-
-            {{ modification(
-                subgraph_number=1,
-                output_name="mask_fn_output",
-                score="qk",
-                b="off_z",
-                h="off_h",
-                m="m",
-                n="n",
-            ) | indent_except_first(3) }}
-
-            {{ modification(
-                subgraph_number=0,
-                output_name="post_mod_scores",
-                score="qk",
-                b="off_z",
-                h="off_h",
-                m="m",
-                n="n",
-                out="qk"
-            ) | indent_except_first(3) }}
-
-            # apply mask for partially unmasked blocks
-            post_mod_scores = tl.where(mask_fn_output, post_mod_scores, float("-inf"))
-
-            # TODO: In the case that score_mod is linear, this can be LICMed
-            if not PRESCALE_QK:
-                post_mod_scores *= RCP_LN2
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-            # -- compute scaling constant ---
-            m_ij = tl.maximum(m_i, tl.max(post_mod_scores, 1))
-
-            alpha = tl.math.exp2(m_i - m_ij)
-            p = tl.math.exp2(post_mod_scores - m_ij[:, None])
-            if not ROWS_GUARANTEED_SAFE:
-                masked_out_rows = (m_ij == float("-inf"))
-                alpha = tl.where(masked_out_rows, 0, alpha)
-                p = tl.where(masked_out_rows[:, None], 0, p)
-
-            # NB: l_i update is pulled up here since it's a bit faster
-            # NB: For headdim=256, it's faster to move it back down to after m_i =
-            # m_ij
-            l_i = l_i * alpha + tl.sum(p, 1)
-            # # -- scale and update acc --
-            acc = acc * alpha[:, None]
-            v = tl.load(V_block_ptr)
-            acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
-
-            # -- update m_i
-            m_i = m_ij
-
-            # update pointers
-            indices_idx = start_n // SPARSE_KV_MULTIPLE
-
-            cur_block = tl.load(kv_indices + indices_idx, eviction_policy="evict_last")
-            next_block = tl.load(kv_indices + indices_idx + 1, eviction_policy="evict_last")
-            needs_jump = (start_n + 1) % SPARSE_KV_MULTIPLE == 0
-            jump_to_block = (next_block - cur_block ) * SPARSE_KV_BLOCK_SIZE - (SPARSE_KV_MULTIPLE - 1) * BLOCK_N
-
-            offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_N
-
-            V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
-            K_block_ptr = tl.advance(K_block_ptr, (0, offset))
-
-            offs_n = offs_n + offset
-
-    # Store output and logsumexp
-    acc = acc / l_i[:, None]
-    idx_z = tl.program_id(1) // H
-    idx_h = tl.program_id(1) % H
-    idx_m = offs_m[:, None]
-    idx_d = tl.arange(0, BLOCK_DMODEL)[None, :]
-
-    mask = idx_m < Q_LEN
-    # TODO generalize and add proper mask support
-    {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "acc", "mask")}}
-
-    # TODO dont want to write this if we dont require grad
-    if OUTPUT_LOGSUMEXP:
-        off_hz = tl.program_id(1)
-        l_ptrs = LSE + off_hz * Q_LEN + offs_m
-        lse = m_i + tl.math.log2(l_i)
-        tl.store(l_ptrs, lse)
  """,
 )
 
@@ -879,74 +833,15 @@ flex_attention_backward_template = TritonTemplate(
         lse = tl.load(LSE + offs_m2)
         lse = lse[:, None]
 
-        start_n2 = kv_start
-        offs_n2 = start_n2 + tl.arange(0, BLOCK_N2)
-        kT_ptrs = K + offs_n2[None, :] * stride_kn + offs_k[:, None] * stride_kd
-        vT_ptrs = V + offs_n2[None, :] * stride_vn + offs_k[:, None] * stride_vd
-        # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
-        tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
+        dq = bwd_dq_inner(
+            dq, q, K, V, do, Di, lse,
+            off_z, off_h, offs_m2, offs_k,
+            stride_kn, stride_kd, stride_vn, stride_vd,
+            True, kv_start, kv_indices, sparse_kv_num_blocks, SPARSE_KV_MULTIPLE, SPARSE_KV_BLOCK_SIZE,
+            BLOCK_M2, BLOCK_N2, PRESCALE_QK, SM_SCALE, RCP_LN2, MATMUL_PRECISION,
+            {{gen_argdefs()}}
+        )
 
-        curr_n = start_n2
-        hi = sparse_kv_num_blocks * SPARSE_KV_MULTIPLE
-        if PRESCALE_QK:
-            q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
-        for start_n in range(0, hi):
-            offs_n2 = curr_n + tl.arange(0, BLOCK_N2)
-            kT = tl.load(kT_ptrs)
-            vT = tl.load(vT_ptrs)
-            qk = tl.dot(q, kT)
-            if not PRESCALE_QK:
-                qk *= SM_SCALE
-            # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-            pre_mod_scores = qk
-            m = offs_m2[:, None]
-            n = offs_n2[None, :]
-            {{ modification(
-                subgraph_number=0,
-                output_name="post_mod_scores",
-                score="qk",
-                b="off_z",
-                h="off_h",
-                m="m",
-                n="n",
-                out="qk"
-            ) | indent_except_first(3) }}
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            if not PRESCALE_QK:
-                post_mod_scores *= RCP_LN2
-            p = tl.math.exp2(post_mod_scores - lse)
-            # Compute dP and dS.
-            dp = tl.dot(do, vT)
-            ds = p * (dp - Di[:, None])
-            # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
-            {{ modification(
-                subgraph_number=1,
-                output_name = "grad_scores",
-                score="pre_mod_scores",
-                b="off_z",
-                h="off_h",
-                m="m",
-                n="n",
-                grad_score_mod="ds"
-            ) | indent_except_first(3) }}
-            ds = grad_scores
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            ds = ds.to(MATMUL_PRECISION)
-            # Compute dQ.
-            dq += tl.dot(ds, tl.trans(kT))
-
-            # Increment pointers.
-            indices_idx = start_n // SPARSE_KV_MULTIPLE
-            cur_block = tl.load(kv_indices + indices_idx)
-            next_block = tl.load(kv_indices + indices_idx + 1)
-            needs_jump = (start_n + 1) % SPARSE_KV_MULTIPLE == 0
-            jump_to_block = (next_block - cur_block ) * SPARSE_KV_BLOCK_SIZE - (SPARSE_KV_MULTIPLE - 1) * BLOCK_N2
-            offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_N2
-
-            kT_ptrs += offset * stride_kn
-            vT_ptrs += offset * stride_vn
-
-            curr_n += offset
 
         if USE_PARTIAL_MASK:
             # ~~~~~~~~~~~ partial unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -969,91 +864,14 @@ flex_attention_backward_template = TritonTemplate(
             lse = tl.load(LSE + offs_m2)
             lse = lse[:, None]
 
-            start_n2 = kv_start
-            offs_n2 = start_n2 + tl.arange(0, BLOCK_N2)
-            kT_ptrs = K + offs_n2[None, :] * stride_kn + offs_k[:, None] * stride_kd
-            vT_ptrs = V + offs_n2[None, :] * stride_vn + offs_k[:, None] * stride_vd
-            # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
-            tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
-
-            curr_n = start_n2
-            hi = sparse_kv_num_blocks * SPARSE_KV_MULTIPLE
-            if PRESCALE_QK:
-                q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
-            for start_n in range(0, hi):
-                offs_n2 = curr_n + tl.arange(0, BLOCK_N2)
-                kT = tl.load(kT_ptrs)
-                vT = tl.load(vT_ptrs)
-                qk = tl.dot(q, kT)
-                if not PRESCALE_QK:
-                    qk *= SM_SCALE
-                # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-                pre_mod_scores = qk
-                m = offs_m2[:, None]
-                n = offs_n2[None, :]
-
-                {{ modification(
-                    subgraph_number=2,
-                    output_name="mask_fn_output",
-                    score="qk",
-                    b="off_z",
-                    h="off_h",
-                    m="m",
-                    n="n",
-                ) | indent_except_first(4) }}
-
-                {{ modification(
-                    subgraph_number=0,
-                    output_name="post_mod_scores",
-                    score="qk",
-                    b="off_z",
-                    h="off_h",
-                    m="m",
-                    n="n",
-                    out="qk"
-                ) | indent_except_first(4) }}
-
-                # apply mask for partial masked block
-                post_mod_scores = tl.where(mask_fn_output, post_mod_scores, float("-inf"))
-
-                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                if not PRESCALE_QK:
-                    post_mod_scores *= RCP_LN2
-                p = tl.math.exp2(post_mod_scores - lse)
-                # Compute dP and dS.
-                dp = tl.dot(do, vT)
-                ds = p * (dp - Di[:, None])
-                # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
-                {{ modification(
-                    subgraph_number=1,
-                    output_name = "grad_scores",
-                    score="pre_mod_scores",
-                    b="off_z",
-                    h="off_h",
-                    m="m",
-                    n="n",
-                    grad_score_mod="ds"
-                ) | indent_except_first(4) }}
-                ds = grad_scores
-                # (grads) apply mask for partially unmasked block
-                ds = tl.where(mask_fn_output, ds, 0.0)
-                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                ds = ds.to(MATMUL_PRECISION)
-                # Compute dQ.
-                dq += tl.dot(ds, tl.trans(kT))
-
-                # Increment pointers.
-                indices_idx = start_n // SPARSE_KV_MULTIPLE
-                cur_block = tl.load(kv_indices + indices_idx)
-                next_block = tl.load(kv_indices + indices_idx + 1)
-                needs_jump = (start_n + 1) % SPARSE_KV_MULTIPLE == 0
-                jump_to_block = (next_block - cur_block ) * SPARSE_KV_BLOCK_SIZE - (SPARSE_KV_MULTIPLE - 1) * BLOCK_N2
-                offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_N2
-
-                kT_ptrs += offset * stride_kn
-                vT_ptrs += offset * stride_vn
-
-                curr_n += offset
+            dq = bwd_dq_inner(
+                dq, q, K, V, do, Di, lse,
+                off_z, off_h, offs_m2, offs_k,
+                stride_kn, stride_kd, stride_vn, stride_vd,
+                False, kv_start, kv_indices, sparse_kv_num_blocks, SPARSE_KV_MULTIPLE, SPARSE_KV_BLOCK_SIZE,
+                BLOCK_M2, BLOCK_N2, PRESCALE_QK, SM_SCALE, RCP_LN2, MATMUL_PRECISION,
+                {{gen_argdefs()}}
+            )
 
         # Write back dQ.
         dq_ptrs = DQ + offs_m2[:, None] * stride_dqm + offs_k[None, :] * stride_dqd
@@ -1091,77 +909,15 @@ flex_attention_backward_template = TritonTemplate(
             k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
         v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd)
 
-        offs_m1 = start_m1 + tl.arange(0, BLOCK_M1)
-        offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
-        qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
-        do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_k[None, :] * stride_dod
-        # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
-        tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
+        dk, dv = bwd_dkdv_inner(
+            dk, dv, Q, k, v, DO, DELTA, LSE,
+            off_z, off_h, offs_n1, offs_k, start_n1, start_m1,
+            stride_qm, stride_qd, stride_dom, stride_dod,
+            True, q_start, q_indices, sparse_q_num_blocks, SPARSE_Q_MULTIPLE, SPARSE_Q_BLOCK_SIZE,
+            BLOCK_M1, BLOCK_N1, PRESCALE_QK, SM_SCALE, RCP_LN2, MATMUL_PRECISION,
+            {{gen_argdefs()}}
+        )
 
-        curr_m = start_m1
-        hi = sparse_q_num_blocks * SPARSE_Q_MULTIPLE
-        for start_m in range(0, hi):
-            qT = tl.load(qT_ptrs)
-            # Load LSE before computing qk to reduce pipeline stall.
-            offs_m1 = curr_m + tl.arange(0, BLOCK_M1)
-            lse = tl.load(LSE + offs_m1)
-            qkT = tl.dot(k, qT)
-            if not PRESCALE_QK:
-                qkT *= SM_SCALE
-            # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-            m = offs_m1[None, :]
-            n = offs_n1[:, None]
-            pre_mod_scores = qkT
-            {{ modification(
-                subgraph_number=0,
-                output_name="post_mod_scores",
-                score="qkT",
-                b="off_z",
-                h="off_h",
-                m="m",
-                n="n",
-                out="qkT"
-            ) | indent_except_first(3) }}
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            if not PRESCALE_QK:
-                post_mod_scores *= RCP_LN2
-            pT = tl.math.exp2(post_mod_scores - lse[None, :])
-            do = tl.load(do_ptrs)
-            # Compute dV.
-            ppT = pT
-            dv += tl.dot(ppT.to(MATMUL_PRECISION), do)
-            Di = tl.load(DELTA + offs_m1)
-            # Compute dP and dS.
-            dpT = tl.dot(v, tl.trans(do))
-            dsT = pT * (dpT - Di[None, :])
-            # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
-            m = offs_m1[None, :]
-            n = offs_n1[:, None]
-            {{ modification(
-                subgraph_number=1,
-                output_name = "grad_scores",
-                score="pre_mod_scores",
-                b="off_z",
-                h="off_h",
-                m="m",
-                n="n",
-                grad_score_mod="dsT"
-            ) | indent_except_first(3) }}
-            dsT = grad_scores
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
-            # Increment pointers.
-            indices_idx = start_m // SPARSE_Q_MULTIPLE
-            cur_block = tl.load(q_indices + indices_idx)
-            next_block = tl.load(q_indices + indices_idx + 1)
-            needs_jump = (start_m + 1) % SPARSE_Q_MULTIPLE == 0
-            jump_to_block = (next_block - cur_block ) * SPARSE_Q_BLOCK_SIZE - (SPARSE_Q_MULTIPLE - 1) * BLOCK_M1
-            offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_M1
-
-            qT_ptrs += offset * stride_qm
-            do_ptrs += offset * stride_dom
-
-            curr_m += offset
 
         if USE_PARTIAL_MASK:
             # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1184,92 +940,14 @@ flex_attention_backward_template = TritonTemplate(
                 k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
             v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd)
 
-            offs_m1 = start_m1 + tl.arange(0, BLOCK_M1)
-            offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
-            qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
-            do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_k[None, :] * stride_dod
-            # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
-            tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
-
-            curr_m = start_m1
-            hi = sparse_q_num_blocks * SPARSE_Q_MULTIPLE
-            for start_m in range(0, hi):
-                qT = tl.load(qT_ptrs)
-                # Load LSE before computing qk to reduce pipeline stall.
-                offs_m1 = curr_m + tl.arange(0, BLOCK_M1)
-                lse = tl.load(LSE + offs_m1)
-                qkT = tl.dot(k, qT)
-                if not PRESCALE_QK:
-                    qkT *= SM_SCALE
-                # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-                m = offs_m1[None, :]
-                n = offs_n1[:, None]
-                pre_mod_scores = qkT
-
-                {{ modification(
-                    subgraph_number=2,
-                    output_name="mask_fn_output",
-                    score="qkT",
-                    b="off_z",
-                    h="off_h",
-                    m="m",
-                    n="n",
-                ) | indent_except_first(4) }}
-
-                {{ modification(
-                    subgraph_number=0,
-                    output_name="post_mod_scores",
-                    score="qkT",
-                    b="off_z",
-                    h="off_h",
-                    m="m",
-                    n="n",
-                    out="qkT"
-                ) | indent_except_first(4) }}
-                # apply mask for partial masked block
-                post_mod_scores = tl.where(mask_fn_output, post_mod_scores, float("-inf"))
-                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                if not PRESCALE_QK:
-                    post_mod_scores *= RCP_LN2
-                pT = tl.math.exp2(post_mod_scores - lse[None, :])
-                do = tl.load(do_ptrs)
-                # Compute dV.
-                ppT = pT
-                dv += tl.dot(ppT.to(MATMUL_PRECISION), do)
-                Di = tl.load(DELTA + offs_m1)
-                # Compute dP and dS.
-                dpT = tl.dot(v, tl.trans(do))
-                dsT = pT * (dpT - Di[None, :])
-                # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
-                m = offs_m1[None, :]
-                n = offs_n1[:, None]
-                {{ modification(
-                    subgraph_number=1,
-                    output_name = "grad_scores",
-                    score="pre_mod_scores",
-                    b="off_z",
-                    h="off_h",
-                    m="m",
-                    n="n",
-                    grad_score_mod="dsT"
-                ) | indent_except_first(4) }}
-                dsT = grad_scores
-                # (grads) apply mask for partially unmasked block
-                dsT = tl.where(mask_fn_output, dsT, 0.0)
-                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
-                # Increment pointers.
-                indices_idx = start_m // SPARSE_Q_MULTIPLE
-                cur_block = tl.load(q_indices + indices_idx)
-                next_block = tl.load(q_indices + indices_idx + 1)
-                needs_jump = (start_m + 1) % SPARSE_Q_MULTIPLE == 0
-                jump_to_block = (next_block - cur_block ) * SPARSE_Q_BLOCK_SIZE - (SPARSE_Q_MULTIPLE - 1) * BLOCK_M1
-                offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_M1
-
-                qT_ptrs += offset * stride_qm
-                do_ptrs += offset * stride_dom
-
-                curr_m += offset
+            dk, dv = bwd_dkdv_inner(
+                dk, dv, Q, k, v, DO, DELTA, LSE,
+                off_z, off_h, offs_n1, offs_k, start_n1, start_m1,
+                stride_qm, stride_qd, stride_dom, stride_dod,
+                False, q_start, q_indices, sparse_q_num_blocks, SPARSE_Q_MULTIPLE, SPARSE_Q_BLOCK_SIZE,
+                BLOCK_M1, BLOCK_N1, PRESCALE_QK, SM_SCALE, RCP_LN2, MATMUL_PRECISION,
+                {{gen_argdefs()}}
+            )
 
         dv_ptrs = DV + offs_n1[:, None] * stride_dvm + offs_k[None, :] * stride_dvd
         tl.store(dv_ptrs, dv)
@@ -1281,6 +959,204 @@ flex_attention_backward_template = TritonTemplate(
         dk *= SM_SCALE
         mask = index_n <= KV_LEN
         {{store_output(("off_z", "off_h", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
+
+@triton.jit
+def bwd_dq_inner(
+    dq, q, K, V, do, Di, lse,
+    off_z, off_h, offs_m2, offs_k,
+    stride_kn, stride_kd, stride_vn, stride_vd,
+    IS_FULL_BLKS, kv_start, kv_indices, sparse_kv_num_blocks, SPARSE_KV_MULTIPLE, SPARSE_KV_BLOCK_SIZE,
+    BLOCK_M2, BLOCK_N2, PRESCALE_QK, SM_SCALE, RCP_LN2, MATMUL_PRECISION,
+    {{gen_argdefs()}}
+):
+    start_n2 = kv_start
+    offs_n2 = start_n2 + tl.arange(0, BLOCK_N2)
+    kT_ptrs = K + offs_n2[None, :] * stride_kn + offs_k[:, None] * stride_kd
+    vT_ptrs = V + offs_n2[None, :] * stride_vn + offs_k[:, None] * stride_vd
+    # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
+    tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
+
+    curr_n = start_n2
+    hi = sparse_kv_num_blocks * SPARSE_KV_MULTIPLE
+    if PRESCALE_QK:
+        q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
+    for start_n in range(0, hi):
+        offs_n2 = curr_n + tl.arange(0, BLOCK_N2)
+        kT = tl.load(kT_ptrs)
+        vT = tl.load(vT_ptrs)
+        qk = tl.dot(q, kT)
+        if not PRESCALE_QK:
+            qk *= SM_SCALE
+        # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+        pre_mod_scores = qk
+        m = offs_m2[:, None]
+        n = offs_n2[None, :]
+        {{ modification(
+            subgraph_number=0,
+            output_name="post_mod_scores",
+            score="qk",
+            b="off_z",
+            h="off_h",
+            m="m",
+            n="n",
+            out="qk"
+        ) | indent_except_first(2) }}
+
+        if not IS_FULL_BLKS:
+            {{ modification(
+                subgraph_number=2,
+                output_name="mask_fn_output",
+                score="qk",
+                b="off_z",
+                h="off_h",
+                m="m",
+                n="n",
+            ) | indent_except_first(3) }}
+
+            # apply mask for partial masked block
+            post_mod_scores = tl.where(mask_fn_output, post_mod_scores, float("-inf"))
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        if not PRESCALE_QK:
+            post_mod_scores *= RCP_LN2
+        p = tl.math.exp2(post_mod_scores - lse)
+        # Compute dP and dS.
+        dp = tl.dot(do, vT)
+        ds = p * (dp - Di[:, None])
+        # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
+        {{ modification(
+            subgraph_number=1,
+            output_name = "grad_scores",
+            score="pre_mod_scores",
+            b="off_z",
+            h="off_h",
+            m="m",
+            n="n",
+            grad_score_mod="ds"
+        ) | indent_except_first(2) }}
+        ds = grad_scores
+
+        if not IS_FULL_BLKS:
+            # (grads) apply mask for partially unmasked block
+            ds = tl.where(mask_fn_output, ds, 0.0)
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        ds = ds.to(MATMUL_PRECISION)
+        # Compute dQ.
+        dq += tl.dot(ds, tl.trans(kT))
+
+        # Increment pointers.
+        indices_idx = start_n // SPARSE_KV_MULTIPLE
+        cur_block = tl.load(kv_indices + indices_idx)
+        next_block = tl.load(kv_indices + indices_idx + 1)
+        needs_jump = (start_n + 1) % SPARSE_KV_MULTIPLE == 0
+        jump_to_block = (next_block - cur_block ) * SPARSE_KV_BLOCK_SIZE - (SPARSE_KV_MULTIPLE - 1) * BLOCK_N2
+        offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_N2
+
+        kT_ptrs += offset * stride_kn
+        vT_ptrs += offset * stride_vn
+
+        curr_n += offset
+
+    return dq
+
+
+@triton.jit
+def bwd_dkdv_inner(
+    dk, dv, Q, k, v, DO, DELTA, LSE,
+    off_z, off_h, offs_n1, offs_k, start_n1, start_m1,
+    stride_qm, stride_qd, stride_dom, stride_dod,
+    IS_FULL_BLKS, q_start, q_indices, sparse_q_num_blocks, SPARSE_Q_MULTIPLE, SPARSE_Q_BLOCK_SIZE,
+    BLOCK_M1, BLOCK_N1, PRESCALE_QK, SM_SCALE, RCP_LN2, MATMUL_PRECISION,
+    {{gen_argdefs()}}
+):
+    offs_m1 = start_m1 + tl.arange(0, BLOCK_M1)
+    offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
+    qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
+    do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_k[None, :] * stride_dod
+    # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
+    tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
+
+    curr_m = start_m1
+    hi = sparse_q_num_blocks * SPARSE_Q_MULTIPLE
+    for start_m in range(0, hi):
+        qT = tl.load(qT_ptrs)
+        # Load LSE before computing qk to reduce pipeline stall.
+        offs_m1 = curr_m + tl.arange(0, BLOCK_M1)
+        lse = tl.load(LSE + offs_m1)
+        qkT = tl.dot(k, qT)
+        if not PRESCALE_QK:
+            qkT *= SM_SCALE
+        # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+        m = offs_m1[None, :]
+        n = offs_n1[:, None]
+        pre_mod_scores = qkT
+        {{ modification(
+            subgraph_number=0,
+            output_name="post_mod_scores",
+            score="qkT",
+            b="off_z",
+            h="off_h",
+            m="m",
+            n="n",
+            out="qkT"
+        ) | indent_except_first(2) }}
+        if not IS_FULL_BLKS:
+            {{ modification(
+                subgraph_number=2,
+                output_name="mask_fn_output",
+                score="qkT",
+                b="off_z",
+                h="off_h",
+                m="m",
+                n="n",
+            ) | indent_except_first(3) }}
+            # (grads) apply mask for fully masked block
+            post_mod_scores = tl.where(mask_fn_output, post_mod_scores, float("-inf"))
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        if not PRESCALE_QK:
+            post_mod_scores *= RCP_LN2
+        pT = tl.math.exp2(post_mod_scores - lse[None, :])
+        do = tl.load(do_ptrs)
+        # Compute dV.
+        ppT = pT
+        dv += tl.dot(ppT.to(MATMUL_PRECISION), do)
+        Di = tl.load(DELTA + offs_m1)
+        # Compute dP and dS.
+        dpT = tl.dot(v, tl.trans(do))
+        dsT = pT * (dpT - Di[None, :])
+        # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
+        m = offs_m1[None, :]
+        n = offs_n1[:, None]
+        {{ modification(
+            subgraph_number=1,
+            output_name = "grad_scores",
+            score="pre_mod_scores",
+            b="off_z",
+            h="off_h",
+            m="m",
+            n="n",
+            grad_score_mod="dsT"
+        ) | indent_except_first(2) }}
+        dsT = grad_scores
+        if not IS_FULL_BLKS:
+            # (grads) apply mask for partially unmasked block
+            dsT = tl.where(mask_fn_output, dsT, 0.0)
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
+        # Increment pointers.
+        indices_idx = start_m // SPARSE_Q_MULTIPLE
+        cur_block = tl.load(q_indices + indices_idx)
+        next_block = tl.load(q_indices + indices_idx + 1)
+        needs_jump = (start_m + 1) % SPARSE_Q_MULTIPLE == 0
+        jump_to_block = (next_block - cur_block ) * SPARSE_Q_BLOCK_SIZE - (SPARSE_Q_MULTIPLE - 1) * BLOCK_M1
+        offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_M1
+
+        qT_ptrs += offset * stride_qm
+        do_ptrs += offset * stride_dom
+
+        curr_m += offset
+
+    return dk, dv
+
  """,
 )
 
