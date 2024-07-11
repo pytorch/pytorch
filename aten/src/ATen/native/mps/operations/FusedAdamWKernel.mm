@@ -137,4 +137,5 @@ void _fused_adamw_kernel_mps_(at::TensorList params,
                                 found_inf);
   }
 }
+
 } // namespace at::native
