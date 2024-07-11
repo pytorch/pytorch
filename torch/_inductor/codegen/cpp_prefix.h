@@ -250,6 +250,10 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
 template <typename scalar_t>
 Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc) {
   using Vec = at::vec::Vectorized<scalar_t>;
+  Welford<scalar_t> result;
+  if (acc.index == 0) {
+    return result;
+  }
   // if all values of acc.weight are same as index,
   // use index to reduce to save the overhead of vec_shuffle_down for acc.weight
   bool use_index = (acc.weight - Vec(acc.index)).zero_mask() == 0xFFFF;
@@ -262,7 +266,6 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
     acc = welford_combine(acc, shuffled, use_index);
   }
 
-  Welford<scalar_t> result;
   alignas(alignof(Vec)) scalar_t array[Vec::size()];
   acc.mean.store(array);
   result.mean = array[0];

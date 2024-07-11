@@ -38,7 +38,7 @@ optional<int64_t> valIfNonempty(optional<int64_t> maybe_empty, int64_t new_val) 
   if (maybe_empty.has_value()) {
     return new_val;
   }
-  return nullopt;
+  return std::nullopt;
 }
 
 int64_t getPhysicalDim(const Tensor& tensor, bool has_batch_dim, int64_t logical_dim) {
