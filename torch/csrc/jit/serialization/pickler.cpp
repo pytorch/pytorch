@@ -607,7 +607,7 @@ std::optional<std::string> type_printer(const c10::Type& type) {
   if (auto dyn = type.castRaw<c10::DynamicType>()) {
     return dyn->fallback()->annotation_str(type_printer);
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 } // namespace
 
