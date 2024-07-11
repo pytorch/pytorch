@@ -36,7 +36,6 @@ from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
-from torch._utils_internal import justknobs_check
 
 from torch.hub import _Faketqdm, tqdm
 
@@ -133,10 +132,7 @@ class AsyncCompile:
     def process_pool() -> AnyPool:
         assert config.compile_threads > 1
         pool: AnyPool
-        if (
-            justknobs_check("pytorch/inductor:subprocess_parallel_compile")
-            or config.worker_start_method == "subprocess"
-        ):
+        if config.worker_start_method == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
             pool = SubprocPool(config.compile_threads)
         else:

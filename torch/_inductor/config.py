@@ -4,6 +4,7 @@ import sys
 from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING, Union
 
 import torch
+from torch._utils_internal import justknobs_check
 
 
 def is_fbcode():
@@ -419,9 +420,12 @@ optimize_scatter_upon_const_tensor = (
 # The multiprocessing start method to use for inductor workers in the codecache.
 # "subprocess", "fork", or "spawn"
 def decide_worker_start_method():
-    start_method = os.environ.get(
-        "TORCHINDUCTOR_WORKER_START", "fork" if is_fbcode() else "subprocess"
-    )
+    if justknobs_check("pytorch/inductor:subprocess_parallel_compile"):
+        start_method = "subprocess"
+    else:
+        start_method = os.environ.get(
+            "TORCHINDUCTOR_WORKER_START", "fork" if is_fbcode() else "subprocess"
+        )
     assert start_method in [
         "subprocess",
         "fork",
