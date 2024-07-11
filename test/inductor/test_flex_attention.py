@@ -1432,7 +1432,7 @@ class GraphModule(torch.nn.Module):
     @supported_platform
     def test_nyi_for_non_divisible_seq_lens(self):
         with self.assertRaisesRegex(
-            NotImplementedError, "NYI: S and L must be a multiple of 128"
+            NotImplementedError, "NYI: L must be a multiple of 128"
         ):
             flex_attention(
                 torch.randn((2, 3, 4)),
@@ -1442,7 +1442,7 @@ class GraphModule(torch.nn.Module):
             )
 
         with self.assertRaisesRegex(
-            NotImplementedError, "NYI: S and L must be a multiple of 128"
+            NotImplementedError, "NYI: L must be a multiple of 128"
         ):
             compiled_flex = torch.compile(flex_attention)
             compiled_flex(
