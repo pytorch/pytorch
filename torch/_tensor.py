@@ -1103,7 +1103,7 @@ class Tensor(torch._C.TensorBase):
             array = array.astype("uint8")
         return torch.from_numpy(array)
 
-    def __contains__(self, element):
+    def __contains__(self, element: Any, /) -> bool:
         r"""Check if `element` is present in tensor
 
         Args:
@@ -1116,7 +1116,7 @@ class Tensor(torch._C.TensorBase):
             element, (torch.Tensor, Number, torch.SymInt, torch.SymFloat, torch.SymBool)
         ):
             # type hint doesn't understand the __contains__ result array
-            return (element == self).any().item()  # type: ignore[union-attr]
+            return bool((element == self).any().item())  # type: ignore[union-attr]
 
         raise RuntimeError(
             f"Tensor.__contains__ only supports Tensor or scalar, but you passed in a {type(element)}."
@@ -1159,14 +1159,19 @@ class Tensor(torch._C.TensorBase):
         typestr = {
             torch.complex64: "<c8",
             torch.complex128: "<c16",
+            torch.bfloat16: "<f2",
             torch.float16: "<f2",
             torch.float32: "<f4",
             torch.float64: "<f8",
             torch.uint8: "|u1",
             torch.int8: "|i1",
+            torch.uint16: "<u2",
             torch.int16: "<i2",
+            torch.uint32: "<u4",
             torch.int32: "<i4",
+            torch.uint64: "<u8",
             torch.int64: "<i8",
+            torch.bool: "|b1",
         }[self.dtype]
 
         itemsize = self.element_size()

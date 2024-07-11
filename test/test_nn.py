@@ -1435,6 +1435,19 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertRaisesRegex(TypeError, 'module name should be a string. Got NoneType',
                                    lambda: getattr(net, fn)(None, l))
 
+    def test_set_submodule(self):
+        net = nn.Module()
+        net.t = nn.Module()
+        l = nn.Linear(1, 2)
+        target = "t.l"
+        net.set_submodule(target, l)
+        self.assertEqual(net.get_submodule(target), l)
+        l2 = nn.Linear(2, 1)
+        net.set_submodule(target, l2)
+        self.assertEqual(net.get_submodule(target), l2)
+        self.assertRaises(ValueError, net.set_submodule, "", l)
+        self.assertRaises(AttributeError, net.set_submodule, "a.l", l)
+
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))
         cpu = torch.device('cpu')
@@ -7064,6 +7077,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaises(RuntimeError):
             res = arg_class(*arg_4)
 
+    def test_pickle_module_no_weights_only_warning(self):
+        with warnings.catch_warnings(record=True) as w:
+            pickle.loads(pickle.dumps(torch.nn.Linear(10, 10)))
+        self.assertEqual(len(w), 0)
+
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),), dtype=np.double),
@@ -8011,7 +8029,28 @@ class TestNNDeviceType(NNTestCase):
         o.sum().backward()
         o_cpu = m(a_cpu)
         o_cpu.sum().backward()
+        # workaround for memory usage overhead of assertEqual
         self.assertTrue(torch.allclose(a.grad.cpu(), a_cpu.grad.half()))
+
+    @onlyCUDA
+    @largeTensorTest("48GB", "cpu")
+    @largeTensorTest("48GB", "cuda")
+    def test_avg_pool_large_tensor2(self, device):
+        # test for https://github.com/pytorch/pytorch/issues/129785
+        out_size = [2048, 64, 104, 79]
+        size = [2048, 64, 209, 159]
+        inp = torch.randn(size, device=device, requires_grad=True, dtype=torch.float)
+        inp_cpu = inp.detach().cpu()
+        m = torch.nn.AvgPool2d([2, 2], [2, 2], [0, 0], False, True, None)
+        o = m(inp)
+        inp_cpu.requires_grad = True
+        o.sum().backward()
+        o_cpu = m(inp_cpu)
+        o_cpu.sum().backward()
+        self.assertEqual(o.shape, out_size)
+        self.assertEqual(o_cpu.shape, out_size)
+        # reduce memory usage
+        self.assertEqual(inp.grad.sum(), inp_cpu.grad.sum())
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
