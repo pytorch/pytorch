@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""
 This package introduces support for the XPU backend, specifically tailored for
 Intel GPU optimization.

@@ -794,6 +794,9 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   size_t getDriverAllocatedMemory() const override {
     return _getAllocImpl().getDriverAllocatedMemory();
   }
+  size_t getRecommendedMaxMemory() const override {
+    return _getAllocImpl().getRecommendedMaxMemory();
+  }
   ssize_t getLowWatermarkValue() const override {
     return _getAllocImpl().getLowWatermarkValue();
   }
@@ -865,13 +868,13 @@ namespace at::native {
 // Pinned memory will be helpful on Apple Silicon Macs with Unified memory as we
 // will be able to use SharedStorageMode for MTLBuffer allocations. This will
 // avoid extra copies on DataLoading operations.
-bool is_pinned_mps(const Tensor& self, c10::optional<Device> device) {
+bool is_pinned_mps(const Tensor& self, std::optional<Device> device) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_mps());
   return at::mps::_getSharedAllocator().isSharedBuffer(self.storage().data());
 }
 
 // torch.pin_memory() implementation
-Tensor _pin_memory_mps(const Tensor& self, c10::optional<Device> device) {
+Tensor _pin_memory_mps(const Tensor& self, std::optional<Device> device) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_mps());
   auto* shared_allocator = at::mps::getIMPSAllocator(true);
   TORCH_CHECK(shared_allocator, "unable to pin memory on a non-unified memory device");

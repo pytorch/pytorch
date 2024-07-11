@@ -1,19 +1,27 @@
+# mypy: allow-untyped-defs
 # pyre-strict
+from __future__ import annotations
 
-from typing import List
+from collections import defaultdict
+from typing import Dict, List, Set, Tuple, TYPE_CHECKING
 
 import torch
 
-from . import config, ir, scheduler
+from . import config, ir
 from .dependencies import WeakDep
 from .utils import is_collective, is_wait, tuple_sorted
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
+if TYPE_CHECKING:
+    from .scheduler import BaseSchedulerNode
+
 
 def sink_waits(
-    snodes: List["scheduler.BaseSchedulerNode"],
-) -> List["scheduler.BaseSchedulerNode"]:
+    snodes: List[BaseSchedulerNode],
+    node_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
+    inverse_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
+) -> List[BaseSchedulerNode]:
     """
     Greedily moves waits as late as possible (i.e. until we reach a use). Optimal in terms of
     communication overlap.
@@ -25,7 +33,7 @@ def sink_waits(
             cur_waits.add(snode)
         else:
             for wait in tuple_sorted(cur_waits):
-                if snode in wait.node_users:
+                if snode in node_users[wait]:
                     new_order.append(wait)
                     cur_waits.remove(wait)
             new_order.append(snode)
@@ -34,8 +42,10 @@ def sink_waits(
 
 
 def raise_comms(
-    snodes: List["scheduler.BaseSchedulerNode"],
-) -> List["scheduler.BaseSchedulerNode"]:
+    snodes: List[BaseSchedulerNode],
+    node_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
+    inverse_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
+) -> List[BaseSchedulerNode]:
     """
     Greedily moves comms as early as possible (i.e. until we reach an input).
     Optimal in terms of communication overlap.
@@ -45,16 +55,16 @@ def raise_comms(
     which is the beginning of the forwards pass. We'll have to either do a special pass for FSDP,
     or we'll want to redo this pass with memory considerations so we handle the FSDP case in a general way.
     """
-    new_order_reversed: List[scheduler.BaseSchedulerNode] = []
-    cur_comms: List[scheduler.BaseSchedulerNode] = []
+    new_order_reversed: List[BaseSchedulerNode] = []
+    cur_comms: List[BaseSchedulerNode] = []
     for snode in reversed(snodes):
         if is_collective(snode.node):
             cur_comms.append(snode)
         else:
             for comm in cur_comms:
-                assert len(comm.inverse_users) > 0
+                assert len(inverse_users[comm]) > 0
             while len(cur_comms) > 0 and any(
-                snode in comm.inverse_users for comm in cur_comms
+                snode in inverse_users[comm] for comm in cur_comms
             ):
                 comm = cur_comms.pop(0)
                 new_order_reversed.append(comm)
@@ -64,13 +74,13 @@ def raise_comms(
     return new_order_reversed[::-1]
 
 
-def get_ancestors(node):
+def get_ancestors(node, inverse_users):
     ancestors = set()
     cur_nodes = [node]
     while len(cur_nodes) > 0:
         new_nodes = []
         for node in cur_nodes:
-            for inp in node.inverse_users:
+            for inp in inverse_users[node]:
                 if inp not in ancestors:
                     ancestors.add(inp)
                     new_nodes.append(inp)
@@ -78,13 +88,13 @@ def get_ancestors(node):
     return ancestors
 
 
-def get_descendants(node):
+def get_descendants(node, node_users):
     descendants = set()
     cur_nodes = [node]
     while len(cur_nodes) > 0:
         new_nodes = []
         for node in cur_nodes:
-            for inp in node.node_users:
+            for inp in node_users[node]:
                 if inp not in descendants:
                     descendants.add(inp)
                     new_nodes.append(inp)
@@ -92,7 +102,7 @@ def get_descendants(node):
     return descendants
 
 
-def decide_global_ordering_of_comms(nodes: List["scheduler.BaseSchedulerNode"]):
+def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
     """
     Decide global ordering of comms, by just enforcing the ordering that's in the input graph
     (might not be the same ordering as the eager mode program).
@@ -104,11 +114,11 @@ def decide_global_ordering_of_comms(nodes: List["scheduler.BaseSchedulerNode"]):
         comm_nodes[i].add_fake_dep(WeakDep(comm_nodes[i - 1].get_name()))
 
 
-def assert_no_comm_nodes(snodes: List["scheduler.BaseSchedulerNode"]) -> None:
+def assert_no_comm_nodes(snodes: List[BaseSchedulerNode]) -> None:
     assert not any(is_collective(snode.node) for snode in snodes)
 
 
-def estimate_op_runtime(snode: "scheduler.BaseSchedulerNode") -> float:
+def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
     """
     Returns estimated op runtime in nanoseconds (ns)
     """
@@ -120,9 +130,45 @@ def estimate_op_runtime(snode: "scheduler.BaseSchedulerNode") -> float:
     return runtime
 
 
+def compute_node_users(
+    snodes: List[BaseSchedulerNode],
+) -> Tuple[
+    Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
+    Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
+]:
+    from .scheduler import FusedSchedulerNode
+
+    # set up buffer name to (fused)snode mapping
+    buf_to_snode: Dict[str, BaseSchedulerNode] = {}
+    for node in snodes:
+        if isinstance(node, FusedSchedulerNode):
+            for x in node.snodes:
+                buf_to_snode[x.get_name()] = node
+        buf_to_snode[node.get_name()] = node
+
+    # compute inverse_users
+    inverse_users = {
+        node: {buf_to_snode[dep.name] for dep in node.unmet_dependencies}
+        for node in snodes
+    }
+
+    # compute node_users
+    # TODO: ideally, we should deduplicate .users and .node_users,
+    # but currently .users contains extra information that's difficult to
+    # extract into a standalone container.
+    node_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]] = defaultdict(set)
+    for node, node_inverse_users in inverse_users.items():
+        for inverse_user in node_inverse_users:
+            node_users[inverse_user].add(node)
+
+    return inverse_users, node_users
+
+
 def reorder_compute_for_overlap(
-    snodes: List["scheduler.BaseSchedulerNode"],
-) -> List["scheduler.BaseSchedulerNode"]:
+    snodes: List[BaseSchedulerNode],
+    node_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
+    inverse_users: Dict[BaseSchedulerNode, Set[BaseSchedulerNode]],
+) -> List[BaseSchedulerNode]:
     """
     Decides a global ordering of all compute and communication nodes,
     assuming that we already have a global ordering of communication nodes.
@@ -147,12 +193,12 @@ def reorder_compute_for_overlap(
         # if there is no comm nodes, return the current order
         return snodes
 
-    comm_ancestors = {node: get_ancestors(node) for node in comm_nodes}
-    comm_descendants = {node: get_descendants(node) for node in comm_nodes}
+    comm_ancestors = {node: get_ancestors(node, inverse_users) for node in comm_nodes}
+    comm_descendants = {node: get_descendants(node, node_users) for node in comm_nodes}
 
     indeg = dict.fromkeys(snodes, 0)
     for snode in snodes:
-        for user in snode.node_users:
+        for user in node_users[snode]:
             if user in indeg:
                 indeg[user] += 1
     ready_to_schedule_nodes = {node for node in snodes if indeg[node] == 0}
@@ -169,7 +215,7 @@ def reorder_compute_for_overlap(
         ready_to_schedule_nodes.remove(snode)
         unscheduled_nodes.remove(snode)
         final_order.append(snode)
-        for user in tuple_sorted(snode.node_users):
+        for user in tuple_sorted(node_users[snode]):
             if user in indeg:
                 indeg[user] -= 1
                 if indeg[user] == 0:
@@ -335,9 +381,11 @@ def visualize_overlap(order):
 
 
 def reorder_compute_and_comm_for_overlap(
-    snodes: List["scheduler.BaseSchedulerNode"],
-) -> List["scheduler.BaseSchedulerNode"]:
+    snodes: List[BaseSchedulerNode],
+) -> List[BaseSchedulerNode]:
     order = snodes
+    inverse_users, node_users = compute_node_users(snodes)
+
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():
             p = globals()[p]  # it is a builtin pass
@@ -349,7 +397,7 @@ def reorder_compute_and_comm_for_overlap(
                 visualize_overlap(order)
             except Exception as e:
                 overlap_log.debug(str(e))
-        order = p(order)  # type: ignore[operator]
+        order = p(order, node_users, inverse_users)  # type: ignore[operator]
         if torch.distributed.get_rank() == 0:
             overlap_log.debug(
                 f"==== Visualize overlap after reordering pass {p} ===="  # noqa: G004

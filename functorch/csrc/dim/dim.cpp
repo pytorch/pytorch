@@ -751,6 +751,8 @@ public:
     static mpy::obj<Tensor> create() {
         if (!TensorType) {
             TensorType = (PyTypeObject*) mpy::import("functorch.dim").attr("Tensor").ptr();
+            // NB: leak
+            Py_INCREF(TensorType);
         }
         return Tensor::alloc(TensorType);
     }
@@ -1639,16 +1641,6 @@ static PyObject* _dims(PyObject *self,
     return result.release();
     PY_END(nullptr)
 }
-
-static int64_t dim_index(const std::vector<mpy::obj<Dim>>& dims, mpy::hdl<Dim> dim) {
-    for (int64_t i = 0, N  = dims.size(); i < N; ++i) {
-        if (dims[i].ptr() == dim.ptr()) {
-            return i;
-        }
-    }
-    return -1;
-}
-
 
 struct DotPart {
     Slice<DimEntry> dims;

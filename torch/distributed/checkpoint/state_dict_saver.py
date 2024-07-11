@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import inspect
 import os
 import warnings
@@ -8,7 +9,6 @@ from typing_extensions import deprecated
 import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
-
 from torch.distributed.checkpoint._storage_utils import _storage_setup
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
@@ -166,8 +166,8 @@ def async_save(
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
 ) -> Future:
-    """Asynchronous version of ``save``. This code first de-stages the state_dict on CPU, and then calls
-    `save` in a separate thread.
+    """Asynchronous version of ``save``. This code first de-stages the state_dict on to the
+    staging storage (defaults to CPU memory), and then calls the `save` in a separate thread.
 
     .. warning::
         This feature is experimental and subject to change.
@@ -180,8 +180,8 @@ def async_save(
             It can also be a key if the storage is a key-value store.
             (Default: ``None``)
         storage_writer (Optional[StorageWriter]):
-            Instance of StorageWriter used to perform writes. If this is not
-            specified, DCP will automatically infer the writer based on the
+            Instance of StorageWriter used to perform 'stage' and  'save'. If
+            this is not specified, DCP will automatically infer the writer based on the
             checkpoint_id. If checkpoint_id is also None, an exception will
             be raised. (Default: ``None``)
         planner (Optional[SavePlanner]):

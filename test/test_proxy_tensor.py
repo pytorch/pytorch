@@ -1201,7 +1201,9 @@ def forward(self, x_1):
         batch_size = 4
         src_tokens = torch.randint(1, vocab_size, (batch_size, prompt_size))
         gm = make_fx(f, tracing_mode="symbolic")(src_tokens)
-        self.assertEqual(len(gm.shape_env.guards), 0)
+        # Guards to rule out batch_size == sys.maxsize (wobbling between 2 and
+        # 1 ok)
+        self.assertEqual(len(gm.shape_env.guards), 1)
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_cpu_scalar_cuda(self):
@@ -1618,7 +1620,8 @@ def forward(self, lengths_1, values_1):
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
-    pow_1 = sym_size_int ** 0.5;  sym_size_int = None
+    sym_float = torch.sym_float(sym_size_int);  sym_size_int = None
+    pow_1 = sym_float ** 0.5;  sym_float = None
     div = torch.ops.aten.div.Tensor(a_1, pow_1);  a_1 = pow_1 = None
     return div""")
 
@@ -2061,7 +2064,6 @@ out_symbolic_tensor_failures = {
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
     xfail('triangular_solve', ''),
-    xfail('view_copy', ''),
 
     # SymIntArrayRef expected to contain only concrete
     xfail('ones', ''),

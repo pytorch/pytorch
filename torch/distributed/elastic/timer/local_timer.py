@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -13,9 +14,11 @@ from typing import Any, Dict, List, Set, Tuple
 
 from .api import RequestQueue, TimerClient, TimerRequest, TimerServer
 
-__all__ = ['LocalTimerClient', 'MultiprocessingRequestQueue', 'LocalTimerServer']
+
+__all__ = ["LocalTimerClient", "MultiprocessingRequestQueue", "LocalTimerServer"]
 
 logger = logging.getLogger(__name__)
+
 
 class LocalTimerClient(TimerClient):
     """
@@ -100,7 +103,7 @@ class LocalTimerServer(TimerServer):
                 self._timers[(pid, scope_id)] = request
 
     def clear_timers(self, worker_ids: Set[int]) -> None:
-        for (pid, scope_id) in list(self._timers.keys()):
+        for pid, scope_id in list(self._timers.keys()):
             if pid in worker_ids:
                 self._timers.pop((pid, scope_id))
 

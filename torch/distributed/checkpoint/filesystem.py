@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import dataclasses
 import io
@@ -31,7 +32,6 @@ import torch
 from torch import Tensor
 from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
-
 from torch.distributed.checkpoint.metadata import (
     Metadata,
     MetadataIndex,
@@ -56,6 +56,7 @@ from torch.distributed.checkpoint.storage import (
 )
 from torch.distributed.checkpoint.utils import _create_file_view
 from torch.futures import Future
+
 
 __all__ = ["FileSystemWriter", "FileSystemReader", "FileSystem", "FileSystemBase"]
 
@@ -695,7 +696,7 @@ class FileSystemReader(StorageReader):
     @property
     def checkpoint_id(self) -> Union[str, os.PathLike]:
         """
-        return the checkpoint_id that will be used to save the checkpoint.
+        return the checkpoint_id that will be used to load the checkpoint.
         """
         return self.path
 

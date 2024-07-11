@@ -4,7 +4,6 @@
 #include <utility>
 #include <vector>
 
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
@@ -368,7 +367,7 @@ inline std::optional<int64_t> intValue(const ExprPtr& e) {
   }
   AT_FORALL_INT_TYPES(TYPE_CASE);
 #undef TYPE_CASE
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 inline std::optional<int64_t> intValue(const ExprHandle& e) {
@@ -827,7 +826,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
         return "isnan";
       default:
         throw std::runtime_error(
-            "invalid op_type: " + c10::to_string(op_type()));
+            "invalid op_type: " + std::to_string(op_type()));
     }
   }
 

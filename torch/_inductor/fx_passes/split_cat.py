@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 import logging
 import operator
@@ -57,6 +58,7 @@ post_grad_pass_names = [
     "normalization_aten_pass",
     "decompose_mm_pass",
     "unbind_stack_aten_pass",
+    "shape_padding_multiplier",
 ]
 
 for pass_name in pre_grad_pass_names:
@@ -80,7 +82,7 @@ for pass_name in post_grad_pass_names:
     )
 
 
-def construct_pattern_matcher_pass(pass_name: str) -> PatternMatcherPass:
+def construct_pattern_matcher_pass(pass_name: str):
     """
     Return the specific pattern_matcher_pass given the pass name.
     """
@@ -601,6 +603,7 @@ class SplitCatSimplifier:
             graph, split_node, next_users, user_inputs_list_new, transform_params_list  # type: ignore[arg-type]
         )
         self.erase_old_nodes(graph, split_node, next_users)  # type: ignore[arg-type]
+        counters["inductor"]["unbind_stack_pass"] += 1
 
     def get_user_input_list(
         self, split_node: torch.fx.Node, next_users: List[torch.fx.Node]
@@ -1707,6 +1710,10 @@ def merge_unbind_stack_aten(match: Match, *args, **kwargs):
     if get_arg_value(select_nodes[0], 2, "index") != 0 or not is_sorted_and_consecutive(
         [get_arg_value(select_node, 2, "index") for select_node in select_nodes]
     ):
+        return
+    # check the users of parent of select node only from unsqueeze nodes that go to the cat node
+    # we simply check the number of users of the parent of select node
+    if len(parent_of_select_node.users.keys()) != len(node.args[0]):  # type: ignore[arg-type]
         return
     node.replace_all_uses_with(parent_of_select_node)
     graph.erase_node(node)

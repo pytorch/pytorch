@@ -732,13 +732,16 @@ class TestAbs(TestCase):
 
 @instantiate_parametrized_tests
 class TestBitShifts(TestCase):
-    @parametrize("type_code", np.typecodes["Integer"] + "B")
+    @parametrize("type_code", np.typecodes["AllInteger"])
     @parametrize("op", [operator.rshift, operator.lshift])
     def test_shift_all_bits(self, type_code, op):
         """Shifts where the shift amount is the width of the type or wider"""
         # gh-2449
         dt = np.dtype(type_code)
         nbits = dt.itemsize * 8
+        if dt in (np.dtype(np.uint64), np.dtype(np.uint32), np.dtype(np.uint16)):
+            raise SkipTest("NYI: bitshift uint64")
+
         for val in [5, -5]:
             for shift in [nbits, nbits + 4]:
                 val_scl = np.array(val).astype(dt)[()]

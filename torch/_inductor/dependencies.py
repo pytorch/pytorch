@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import abc
 import collections
 import dataclasses
@@ -605,6 +606,9 @@ class FreeUnbackedSymbolsOpsHandler:
         return (None,) * 2
 
     def scan(self, dtypes, combine_fn, values):
+        return (None,) * len(values)
+
+    def sort(self, dtypes, values, stable, descending):
         return (None,) * len(values)
 
     def reduction(

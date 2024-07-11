@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import contextlib
@@ -323,6 +324,7 @@ class MetaTensorDescriber:
             is_view=is_view,
             is_conj=t.is_conj(),
             is_neg=t.is_neg(),
+            is_parameter=isinstance(t, torch.nn.Parameter),
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
             is_functional=is_functional,
@@ -453,6 +455,7 @@ class MetaTensorDesc:
     is_functional: bool = False
     is_conj: bool = False
     is_neg: bool = False
+    is_parameter: bool = False
     stride: Optional[Tuple[int, ...]] = None
     storage_offset: int = 0
     # NB: We have a choice whether or not to store the id or a direct pointer
@@ -776,10 +779,6 @@ class MetaConverter:
             # NB: t.ctx could be None if the subclass in question has no
             # meaningful context
 
-            assert symbolic_context is None or isinstance(
-                symbolic_context, SubclassSymbolicContext
-            )
-
             # Note: transform_subclass will use __tensor_unflatten__ to generate
             # a fresh subclass wrapper with outer sizes / strides according to the
             # outer symbolic context (passed in to this function). Inner size / stride
@@ -789,40 +788,61 @@ class MetaConverter:
             #
             # Morally, the code here is same as transform_subclass, but we've
             # written it from scratch to read EmptyCreateSubclass
-
             outer_size = outer_size if outer_size is not None else t.size
             outer_stride = outer_stride if outer_stride is not None else t.stride
 
-            def transform(attr, inner_t):
-                r = callback(
-                    lambda: empty_create(
-                        inner_t,
-                        AttrSource(source, attr),
-                        symbolic_context=(
-                            None
-                            if symbolic_context is None
-                            else symbolic_context.inner_contexts[attr]
-                        ),
-                    )
-                )
-                if self.copy_data:
-                    with torch.no_grad(), no_dispatch():
-                        r.real_tensor = torch.empty_strided(
-                            inner_t.size,
-                            inner_t.stride,
-                            dtype=inner_t.dtype,
-                            device=inner_t.device,
+            assert symbolic_context is None or isinstance(
+                symbolic_context, SubclassSymbolicContext
+            )
+
+            def _empty_create_subclass(
+                t, outer_size, outer_stride, symbolic_context, callback, source
+            ):
+                # We are hitting plain meta_desc tensor so actually
+                # create a tensor here.
+                if t.attrs is None:
+                    r = callback(
+                        lambda: empty_create(
+                            t,
+                            source,
+                            symbolic_context,
                         )
-                        assert inner_t.data is not None
-                        _safe_copy(r.real_tensor, inner_t.data)
-                return r
+                    )
+                    if self.copy_data:
+                        with torch.no_grad(), no_dispatch():
+                            r.real_tensor = torch.empty_strided(
+                                t.size,
+                                t.stride,
+                                dtype=t.dtype,
+                                device=t.device,
+                            )
+                            assert t.data is not None
+                            _safe_copy(r.real_tensor, t.data)
+                    return r
 
-            transformed_tensors_dict = {
-                attr: transform(attr, inner_t) for attr, inner_t in t.attrs.items()
-            }
+                inner_tensors = {}
+                for attr, meta_tensor_desc in t.attrs.items():
+                    current_context = None
+                    if symbolic_context is not None:
+                        current_context = symbolic_context.inner_contexts[attr]
 
-            sub = t.type.__tensor_unflatten__(
-                transformed_tensors_dict, t.ctx, outer_size, outer_stride
+                    current_source = AttrSource(source, attr)
+                    new_empty_tensor = _empty_create_subclass(
+                        meta_tensor_desc,
+                        meta_tensor_desc.size,
+                        meta_tensor_desc.stride,
+                        current_context,
+                        callback,
+                        current_source,
+                    )
+                    inner_tensors[attr] = new_empty_tensor
+
+                return t.type.__tensor_unflatten__(
+                    inner_tensors, t.ctx, outer_size, outer_stride
+                )
+
+            sub = _empty_create_subclass(
+                t, outer_size, outer_stride, symbolic_context, callback, source
             )
 
             # NB: Purposefully guard here to simplify the inner / outer symbols.
@@ -873,7 +893,7 @@ class MetaConverter:
                 t_symbolic_context = SubclassSymbolicContext(
                     dynamic_sizes=t_dynamic_sizes,
                     constraint_sizes=[None] * t.ndim,
-                    inner_contexts=inner_contexts,
+                    inner_contexts=inner_contexts,  # type: ignore[arg-type]
                     tensor_source=source,
                     view_base_context=view_base_context,
                 )
@@ -961,7 +981,8 @@ class MetaConverter:
                 # assumption of it being simplified out will fail and it may be guarded on,
                 # which will hard error.
                 sym_source = EphemeralSource("symint_visitor_fn")
-                symbol = shape_env.create_symbol(s, sym_source)
+
+                symbol = shape_env.create_symbol(s, sym_source, positive=None)
                 return shape_env.create_symintnode(symbol, hint=s, source=sym_source)
 
             real_to_fake_mapping = {}
@@ -1535,6 +1556,10 @@ class MetaConverter:
             # Need to reflect this in the generated FakeTensor.
             if t.storage is not None and t.storage.size == 0:
                 r.untyped_storage().resize_(0)
+
+            if t.is_parameter:
+                r._is_param = True
+
             self.set_tensor_memo(t, r)
 
         return self.get_tensor_memo(t)

@@ -11,6 +11,7 @@
 #include <cstring>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace torch {
@@ -151,7 +152,7 @@ static inline hash_t Hash(const std::string& value) {
   return DataHash(value.data(), value.size());
 }
 
-static inline hash_t Hash(const c10::string_view& value) {
+static inline hash_t Hash(const std::string_view& value) {
   return DataHash(value.data(), value.size());
 }
 
@@ -191,7 +192,7 @@ hash_t Hash(const std::vector<T>& values) {
   return ContainerHash(values);
 }
 
-// Need a special case for optional<container>?
+// Need a special case for std::optional<container>?
 template <typename T>
 hash_t Hash(const std::optional<std::vector<T>>& value) {
   if (value.has_value()) {

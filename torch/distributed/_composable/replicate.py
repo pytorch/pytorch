@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import weakref
 from typing import Any, cast, Dict, Iterable, List, NoReturn, Optional, Set, Tuple
 
@@ -7,6 +8,7 @@ from torch.distributed._composable_state import _State
 from torch.nn.parallel import DistributedDataParallel
 
 from .contract import _get_registry, contract
+
 
 _ROOT_MODULE_PREFIX = ""
 

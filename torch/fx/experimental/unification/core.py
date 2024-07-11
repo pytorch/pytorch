@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from collections.abc import Iterator  # type: ignore[import]
 from functools import partial
 
