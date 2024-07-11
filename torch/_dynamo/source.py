@@ -530,14 +530,9 @@ class NNModuleSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
-class UnspecializedNNModuleSource(NNModuleSource):
+class NotNNModuleSource(NNModuleSource):
     def guard_source(self):
         return _GUARD_SOURCE_NOT_NN_MODULE[self.base.guard_source()]
-
-
-@dataclasses.dataclass(frozen=True)
-class UnspecializedBuiltinNNModuleSource(UnspecializedNNModuleSource):
-    pass
 
 
 @dataclasses.dataclass(frozen=True)
@@ -676,9 +671,3 @@ def is_from_defaults(source: Source):
 
 def is_cell_contents(source: Source):
     return isinstance(source, AttrSource) and source.member == "cell_contents"
-
-
-def is_unspecialized_builtin_nnmodule_attr(source: Source):
-    return isinstance(source, AttrSource) and isinstance(
-        source.base, UnspecializedBuiltinNNModuleSource
-    )
