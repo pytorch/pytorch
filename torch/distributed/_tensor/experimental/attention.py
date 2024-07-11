@@ -1,3 +1,5 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates
+
 import contextlib
 import logging
 import weakref
@@ -16,6 +18,32 @@ from torch.distributed.tensor.parallel.style import ParallelStyle
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 _rerun_forward = False
+
+
+class _CausalBehavior(Enum):
+    SKIP = None
+    NOT_IS_CAUSAL = False
+    IS_CAUSAL = True
+
+
+def _is_causal_behavior(
+    rank: int, world_size: int, i: int, is_causal: bool
+) -> _CausalBehavior:
+    """
+    Calculate is_causal behavior for each KV block. The attention can either be
+    calculated in full, not at all or with the causal mask applied.
+    """
+    if not is_causal:
+        return _CausalBehavior.NOT_IS_CAUSAL
+
+    if i == 0:
+        return _CausalBehavior.IS_CAUSAL
+
+    source_rank = (rank - i) % world_size
+    if source_rank < rank:
+        return _CausalBehavior.NOT_IS_CAUSAL
+    else:
+        return _CausalBehavior.SKIP
 
 
 def sdpa_handler(
@@ -91,12 +119,12 @@ def _scaled_dot_product_ring_flash_attention(
 
     return _templated_ring_attention(
         mesh,
-        torch.ops.aten._scaled_dot_product_flash_attention,
+        aten._scaled_dot_product_flash_attention,
         query=query,
         key=key,
         value=value,
-        dropout_p=dropout_p,
         is_causal=is_causal,
+        dropout_p=dropout_p,
         scale=scale,
     )
 
@@ -120,13 +148,13 @@ def _scaled_dot_product_ring_efficient_attention(
 
     return _templated_ring_attention(
         mesh,
-        torch.ops.aten._scaled_dot_product_efficient_attention,
+        aten._scaled_dot_product_efficient_attention,
         query=query,
         key=key,
         value=value,
+        is_causal=is_causal,
         attn_bias=attn_bias,
         dropout_p=dropout_p,
-        is_causal=is_causal,
         scale=scale,
         compute_log_sumexp=compute_log_sumexp,
     )
@@ -149,12 +177,12 @@ def _scaled_dot_product_ring_cudnn_attention(
 
     return _templated_ring_attention(
         mesh,
-        torch.ops.aten._scaled_dot_product_cudnn_attention,
+        aten._scaled_dot_product_cudnn_attention,
         query=query,
         key=key,
         value=value,
-        dropout_p=dropout_p,
         is_causal=is_causal,
+        dropout_p=dropout_p,
         return_debug_mask=return_debug_mask,
         scale=scale,
     )
@@ -180,8 +208,6 @@ class AttentionOp(Protocol):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        *args: object,
-        is_causal: bool = False,
         **kwargs: object,
     ) -> Tuple[torch.Tensor, ...]:
         ...
@@ -193,7 +219,6 @@ def _templated_ring_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    *args: object,
     is_causal: bool = False,
     **kwargs: object,
 ) -> Tuple[torch.Tensor, ...]:
@@ -258,7 +283,6 @@ def _templated_ring_attention(
                 query,
                 key,
                 value,
-                *args,
                 is_causal=is_causal_behavior.value,
                 **kwargs,
             )
@@ -268,75 +292,6 @@ def _templated_ring_attention(
     out, softmax_lse = _merge_sdpa(chunks, logsumexps)
 
     local_results = (out, softmax_lse) + local_results[2:]
-    return local_results
-
-
-def _scaled_dot_product_chunk_flash_attention(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    size: int,
-    dropout_p: float = 0.0,
-    is_causal: bool = False,
-    return_debug_mask: bool = False,
-    *,
-    scale: Optional[float] = None,
-) -> Tuple[torch.Tensor, ...]:
-    """
-    This is a single node chunked implementation of
-    _scaled_dot_product_ring_flash_attention used for verifying
-    the correctness of the backwards pass.
-    """
-
-    if return_debug_mask:
-        raise NotImplementedError("return_debug_mask is not supported yet")
-
-    if is_causal and (query.size(2) != key.size(2)):
-        raise NotImplementedError(
-            "is_causal requires the same query and context sequence lengths"
-        )
-
-    query_len = query.size(2) // size
-    ctx_len = key.size(2) // size
-
-    global_out = []
-    global_softmax_lse = []
-
-    for rank in range(size):
-        chunks = []
-        logsumexps = []
-
-        chunk_query = query[:, :, rank * query_len : (rank + 1) * query_len]
-
-        for i in range(size):
-            src_rank = (rank - i) % size
-            chunk_key = key[:, :, src_rank * ctx_len : (src_rank + 1) * ctx_len]
-            chunk_value = value[:, :, src_rank * ctx_len : (src_rank + 1) * ctx_len]
-
-            is_causal_behavior = _is_causal_behavior(
-                rank=rank, world_size=size, i=i, is_causal=is_causal
-            )
-
-            if is_causal_behavior != _CausalBehavior.SKIP:
-                local_results = torch.ops.aten._scaled_dot_product_flash_attention(
-                    chunk_query,
-                    chunk_key,
-                    chunk_value,
-                    dropout_p=dropout_p,
-                    is_causal=is_causal_behavior.value,
-                    scale=scale,
-                )
-                chunks.append(local_results[0])
-                logsumexps.append(local_results[1])
-
-        out, softmax_lse = _merge_sdpa(chunks, logsumexps)
-        global_out.append(out)
-        global_softmax_lse.append(softmax_lse)
-
-    global_out = torch.concat(global_out, dim=2)
-    global_softmax_lse = torch.concat(global_softmax_lse, dim=2)
-
-    local_results = (global_out, global_softmax_lse) + local_results[2:]
     return local_results
 
 
@@ -370,24 +325,17 @@ def sdpa_backward_handler(
     return DTensor._op_dispatcher.wrap(local_results, output_sharding.output_spec)
 
 
-def _scaled_dot_product_ring_flash_attention_backward(
+def _templated_ring_attention_backward(
     mesh: DeviceMesh,
+    op: AttentionOp,
     grad_out: torch.Tensor,
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
     out: torch.Tensor,
-    softmax_lse: torch.Tensor,
-    cum_seq_q: torch.Tensor,
-    cum_seq_k: torch.Tensor,
-    max_q: int,
-    max_k: int,
-    dropout_p: float,
+    logsumexp: torch.Tensor,
     is_causal: bool,
-    philox_seed: torch.Tensor,
-    philox_offset: torch.Tensor,
-    *,
-    scale: Optional[float] = None,
+    **kwargs: Any,
 ) -> Tuple[torch.Tensor, ...]:
     pg = mesh.get_group()
     assert isinstance(pg, dist.ProcessGroup), "must be single dimension"
@@ -419,14 +367,13 @@ def _scaled_dot_product_ring_flash_attention_backward(
         )
 
         if is_causal_behavior != _CausalBehavior.SKIP:
-
             if _rerun_forward:
                 # Keep this implementation for verification purpose.
                 # TODO(chienchin): remove this implementation after more E2E
                 # verification.
                 (
                     output,
-                    logsumexp,
+                    logsumexp_,
                     cum_seq_q,
                     cum_seq_k,
                     max_q,
@@ -434,43 +381,32 @@ def _scaled_dot_product_ring_flash_attention_backward(
                     philox_seed,
                     philox_offset,
                     _,
-                ) = torch.ops.aten._scaled_dot_product_flash_attention(
+                ) = aten._scaled_dot_product_flash_attention(
                     query,
                     key,
                     value,
-                    dropout_p=dropout_p,
+                    dropout_p=kwargs["dropout_p"],
                     is_causal=is_causal_behavior.value,
-                    scale=scale,
+                    scale=kwargs["scale"],
                 )
-                softmax_lse_corrected = torch.exp(logsumexp - softmax_lse)
+                softmax_lse_corrected = torch.exp(logsumexp_ - logsumexp)
                 grad_out_ = grad_out * softmax_lse_corrected.conj().unsqueeze(-1).to(
                     grad_out.dtype
                 )
             else:
                 grad_out_ = grad_out
-                logsumexp = softmax_lse
+                logsumexp_ = logsumexp
                 output = out
 
-            (
-                grad_query,
-                grad_key,
-                grad_value,
-            ) = torch.ops.aten._scaled_dot_product_flash_attention_backward(
+            (grad_query, grad_key, grad_value, *rest) = op(
                 grad_out=grad_out_,
                 query=query,
                 key=key,
                 value=value,
                 out=output,
-                logsumexp=logsumexp,
-                cum_seq_q=cum_seq_q,
-                cum_seq_k=cum_seq_k,
-                max_q=max_q,
-                max_k=max_k,
-                dropout_p=dropout_p,
+                logsumexp=logsumexp_,
                 is_causal=is_causal_behavior.value,
-                philox_seed=philox_seed,
-                philox_offset=philox_offset,
-                scale=scale,
+                **kwargs,
             )
         else:
             grad_query = torch.zeros_like(query)
@@ -500,13 +436,56 @@ def _scaled_dot_product_ring_flash_attention_backward(
     out_grad_key = torch.stack(out_grad_keys).sum(dim=0)
     out_grad_value = torch.stack(out_grad_values).sum(dim=0)
 
-    return out_grad_query, out_grad_key, out_grad_value
+    return out_grad_query, out_grad_key, out_grad_value, *rest
+
+
+def _scaled_dot_product_ring_flash_attention_backward(
+    mesh: DeviceMesh,
+    grad_out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    out: torch.Tensor,
+    logsumexp: torch.Tensor,
+    cum_seq_q: torch.Tensor,
+    cum_seq_k: torch.Tensor,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    philox_seed: torch.Tensor,
+    philox_offset: torch.Tensor,
+    *,
+    scale: Optional[float] = None,
+) -> Tuple[torch.Tensor, ...]:
+    return _templated_ring_attention_backward(
+        mesh,
+        aten._scaled_dot_product_flash_attention_backward.default,
+        grad_out=grad_out,
+        query=query,
+        key=key,
+        value=value,
+        out=out,
+        logsumexp=logsumexp,
+        is_causal=is_causal,
+        cum_seq_q=cum_seq_q,
+        cum_seq_k=cum_seq_k,
+        max_q=max_q,
+        max_k=max_k,
+        dropout_p=dropout_p,
+        philox_seed=philox_seed,
+        philox_offset=philox_offset,
+        scale=scale,
+    )
 
 
 customized_ops = {
     aten._scaled_dot_product_flash_attention.default: sdpa_handler,
     aten._scaled_dot_product_flash_attention_backward.default: sdpa_backward_handler,
 }
+
+
+# Following APIs are experimental to allow users to enable CP.
 
 
 @contextlib.contextmanager
@@ -633,29 +612,3 @@ class AttentionContextParallel(ParallelStyle):
             return out[0]
 
         return tuple(out)
-
-
-class _CausalBehavior(Enum):
-    SKIP = None
-    NOT_IS_CAUSAL = False
-    IS_CAUSAL = True
-
-
-def _is_causal_behavior(
-    rank: int, world_size: int, i: int, is_causal: bool
-) -> _CausalBehavior:
-    """
-    Calculate is_causal behavior for each KV block. The attention can either be
-    calculated in full, not at all or with the causal mask applied.
-    """
-    if not is_causal:
-        return _CausalBehavior.NOT_IS_CAUSAL
-
-    if i == 0:
-        return _CausalBehavior.IS_CAUSAL
-
-    source_rank = (rank - i) % world_size
-    if source_rank < rank:
-        return _CausalBehavior.NOT_IS_CAUSAL
-    else:
-        return _CausalBehavior.SKIP
