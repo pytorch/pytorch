@@ -378,7 +378,7 @@ class TestFP8Lowering(TestCase):
     def test_tensorwise_scaling(self, dtype: torch.dtype, shape: str, has_bias: bool):
         device = "cuda"
         dtype_float8 = torch.float8_e4m3fn
-        use_fast_accum = True 
+        use_fast_accum = True
 
         shape = [int(dim) for dim in shape.split(",")]
         M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]

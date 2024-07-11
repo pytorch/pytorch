@@ -1,15 +1,14 @@
 import logging
+from typing import Any, Dict, Optional, Tuple
 
 import sympy
+from triton import Config
 
 import torch
 
 from .. import config as inductor_config
-from ..lowering import (
-    add_layout_constraint,
-    constrain_to_fx_strides,
-    register_lowering,
-)
+from ..ir import Layout, StorageBox, TensorBox
+from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -103,8 +102,8 @@ scaled_mm_template = TritonTemplate(
 )
 
 
-# Inductor does not allow optional tensor input arguments currently (pass None as an 
-# input node to template choices), but since for _scaled_mm there is only one such arg 
+# Inductor does not allow optional tensor input arguments currently (pass None as an
+# input node to template choices), but since for _scaled_mm there is only one such arg
 # (bias), work around by having a second template when bias is provided.
 scaled_mm_bias_template = TritonTemplate(
     name="scaled_mm_bias",
@@ -193,17 +192,16 @@ aten__fp8_mm = ExternKernelChoice(torch._scaled_mm, "at::_scaled_mm")
 
 
 def scaled_mm_options(
-    config,
-    sym_m,
-    sym_n,
-    sym_k,
-    layout,
-    bias,
-    scale_a,
-    scale_b,
-    use_fast_accum,
-    b_prologue_cast_type=None,
-):
+    config: Config,
+    sym_m: sympy.core.numbers.Integer,
+    sym_n: sympy.core.numbers.Integer,
+    sym_k: sympy.core.numbers.Integer,
+    layout: Layout,
+    scale_a: StorageBox,
+    scale_b: StorageBox,
+    use_fast_accum: bool,
+    b_prologue_cast_type: Optional[str] = None,
+) -> Dict[str, Any]:
     # these two options are copied from mm_common.mm_options()
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
@@ -226,29 +224,31 @@ def scaled_mm_options(
         USE_FAST_ACCUM=use_fast_accum,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
-        SCALING_ROWWISE=len(scale_a.get_size()) != 0,  # tensor-wise scaling if scalar scales
+        # tensor-wise scaling if scalar scales
+        SCALING_ROWWISE=len(scale_a.get_size()) != 0,
         **config.kwargs,
     )
 
 
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)
 def tuned_scaled_mm(
-    mat_a,
-    mat_b,
-    scale_a,
-    scale_b,
-    bias=None,
-    scale_result=None,
-    out_dtype=None,
-    use_fast_accum=True,
-    layout=None,
-):
+    mat_a: TensorBox,
+    mat_b: TensorBox,
+    scale_a: TensorBox,
+    scale_b: TensorBox,
+    bias: Optional[TensorBox] = None,
+    scale_result: Optional[TensorBox] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    use_fast_accum: bool = True,
+    layout: Optional[Layout] = None,
+) -> TensorBox:
     add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
     scale_a, scale_b = realize_inputs(scale_a, scale_b)
 
+    input_nodes: Tuple[Any, ...]
     if bias is None:
         input_nodes = (mat_a, mat_b, scale_a, scale_b)
         triton_template = scaled_mm_template
@@ -258,14 +258,20 @@ def tuned_scaled_mm(
         triton_template = scaled_mm_bias_template
 
     choices = (
-        [aten__fp8_mm.bind(input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum)] if use_aten_gemm_kernels() else []
+        [
+            aten__fp8_mm.bind(
+                input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum
+            )
+        ]
+        if use_aten_gemm_kernels()
+        else []
     )
 
     static_shape, is_nonzero = _is_static_problem([mat_a, mat_b], layout)
     if is_nonzero and use_triton_template(layout, enable_float8=True):
         for config in scaled_mm_configs(m, n, k):
             kwargs = scaled_mm_options(
-                config, m, n, k, layout, bias, scale_a, scale_b, use_fast_accum
+                config, m, n, k, layout, scale_a, scale_b, use_fast_accum
             )
             # possibly appends a TritonTemplateCaller to choices
             triton_template.maybe_append_choice(
