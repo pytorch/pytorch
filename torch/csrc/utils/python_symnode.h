@@ -144,7 +144,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     py::gil_scoped_acquire acquire;
     const auto& r = getPyObj().attr("maybe_as_int")();
     if (r.is_none()) {
-      return c10::nullopt;
+      return std::nullopt;
     } else {
       return r.cast<int64_t>();
     }

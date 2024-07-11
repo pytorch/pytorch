@@ -18,7 +18,7 @@ from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
-from torch._inductor import codecache, config, metrics, test_operators
+from torch._inductor import config, cpu_vec_isa, metrics, test_operators
 from torch._inductor.codegen.common import OptimizationContext
 from torch._inductor.codegen.cpp import (
     CppOverrides,
@@ -34,6 +34,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import InterpreterShim
 from torch._inductor.utils import timed
 from torch._inductor.virtualized import V
+from torch._prims_common import is_float_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
@@ -67,12 +68,12 @@ aten = torch.ops.aten
 check_model = test_torchinductor.check_model
 
 requires_vectorization = unittest.skipUnless(
-    codecache.valid_vec_isa_list(), "Does not support vectorization"
+    cpu_vec_isa.valid_vec_isa_list(), "Does not support vectorization"
 )
 
 
 def check_metrics_vec_kernel_count(num_expected_vec_kernels):
-    if codecache.valid_vec_isa_list():
+    if cpu_vec_isa.valid_vec_isa_list():
         assert metrics.generated_cpp_vec_kernel_count == num_expected_vec_kernels
 
 
@@ -1583,14 +1584,14 @@ class CPUReproTests(TestCase):
             self.common(fn, (value,))
 
     @unittest.skipIf(
-        platform.machine() != "x86_64" or not codecache.valid_vec_isa_list(),
+        platform.machine() != "x86_64" or not cpu_vec_isa.valid_vec_isa_list(),
         "Does not support vectorization or not x86_64 machine",
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_simd(self):
-        vec_amx = codecache.supported_vec_isa_list[0]
-        vec_avx512 = codecache.supported_vec_isa_list[1]
-        vec_avx2 = codecache.supported_vec_isa_list[2]
+        vec_amx = cpu_vec_isa.supported_vec_isa_list[0]
+        vec_avx512 = cpu_vec_isa.supported_vec_isa_list[1]
+        vec_avx2 = cpu_vec_isa.supported_vec_isa_list[2]
         self.assertTrue(vec_amx.bit_width() == 512)
         self.assertTrue(vec_amx.nelements() == 16)
         self.assertTrue(vec_amx.nelements(torch.bfloat16) == 32)
@@ -1602,43 +1603,43 @@ class CPUReproTests(TestCase):
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
 
         with config.patch({"cpp.simdlen": None}):
-            isa = codecache.pick_vec_isa()
-            if vec_amx in codecache.valid_vec_isa_list():
+            isa = cpu_vec_isa.pick_vec_isa()
+            if vec_amx in cpu_vec_isa.valid_vec_isa_list():
                 self.assertTrue(isa == vec_amx)
-            elif vec_avx512 in codecache.valid_vec_isa_list():
+            elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
                 self.assertTrue(isa == vec_avx512)
             else:
                 self.assertTrue(isa == vec_avx2)
 
         with config.patch({"cpp.simdlen": 0}):
-            isa = codecache.pick_vec_isa()
+            isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 1}):
-            isa = codecache.pick_vec_isa()
+            isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 257}):
-            isa = codecache.pick_vec_isa()
+            isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 513}):
-            isa_list = codecache.valid_vec_isa_list()
+            isa_list = cpu_vec_isa.valid_vec_isa_list()
             if vec_avx512 in isa_list:
                 self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 512}):
-            isa_list = codecache.valid_vec_isa_list()
-            isa = codecache.pick_vec_isa()
+            isa_list = cpu_vec_isa.valid_vec_isa_list()
+            isa = cpu_vec_isa.pick_vec_isa()
             if vec_amx in isa_list:
                 self.assertTrue(isa == vec_amx)
             elif vec_avx512 in isa_list:
                 self.assertTrue(isa == vec_avx512)
 
         with config.patch({"cpp.simdlen": 256}):
-            isa_list = codecache.valid_vec_isa_list()
+            isa_list = cpu_vec_isa.valid_vec_isa_list()
             if vec_avx2 in isa_list:
-                isa = codecache.pick_vec_isa()
+                isa = cpu_vec_isa.pick_vec_isa()
                 self.assertTrue(isa == vec_avx2)
 
     @requires_vectorization
@@ -1989,7 +1990,9 @@ class CPUReproTests(TestCase):
         x[0, 0] = torch.nan
         x[1, -1] = torch.nan
 
-        bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()] + [None]
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()] + [
+            None
+        ]
         for item in bit_widths:
             with config.patch({"cpp.simdlen": item}):
                 torch._dynamo.reset()
@@ -2007,7 +2010,7 @@ class CPUReproTests(TestCase):
 
             return fn
 
-        bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()]
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
         ih = [16, 65]
         iw = ih
         oh = ih
@@ -2060,6 +2063,82 @@ class CPUReproTests(TestCase):
                     _args = (x, y)
                 self.common(_fn, _args)
                 check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
+    def test_vec_bitwise(self):
+        for dtype in [
+            torch.bool,
+            torch.uint8,
+            torch.int8,
+            torch.int32,
+            torch.int64,
+        ]:
+            x = torch.randn(64, dtype=torch.float32)
+            y = torch.randn(64, dtype=torch.float32)
+            if dtype == torch.bool:
+                x = x > 0
+                y = y > 0
+            else:
+                x = x.to(dtype)
+                y = y.to(dtype)
+            bitwise_fns = [
+                torch.bitwise_and,
+                torch.bitwise_not,
+                torch.bitwise_or,
+                torch.bitwise_xor,
+                torch.bitwise_left_shift,
+                torch.bitwise_right_shift,
+            ]
+            for bitwise_fn in bitwise_fns:
+                if (
+                    bitwise_fn
+                    in [
+                        torch.bitwise_left_shift,
+                        torch.bitwise_right_shift,
+                    ]
+                    and dtype == torch.bool
+                ):
+                    # Eager doesn't support bool
+                    # https://pytorch.org/docs/stable/generated/torch.bitwise_left_shift.html
+                    continue
+                torch._dynamo.reset()
+                metrics.reset()
+                if bitwise_fn == torch.bitwise_not:
+                    _args = (x,)
+                else:
+                    _args = (x, y)
+                self.common(bitwise_fn, _args)
+                check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
+    def test_vec_remainder(self):
+        for dtype in [
+            torch.int8,
+            torch.uint8,
+            torch.int32,
+            torch.int64,
+            torch.bfloat16,
+            torch.float16,
+            torch.float32,
+        ]:
+            if is_float_dtype(dtype):
+                x = torch.randn(64, dtype=dtype)
+                y = torch.randn(64, dtype=dtype)
+            else:
+                lower = 1 if dtype == torch.uint8 else -100
+                x = torch.randint(lower, 100, (64,), dtype=dtype)
+                y = torch.randint(lower, 100, (64,), dtype=dtype)
+                y = torch.where(
+                    y == torch.zeros_like(y),
+                    torch.ones_like(y),
+                    y,
+                )
+
+            torch._dynamo.reset()
+            metrics.reset()
+            _args = (x, y)
+            self.common(torch.remainder, _args)
+            check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -2266,7 +2345,7 @@ class CPUReproTests(TestCase):
             graph_lowering
         ):
             # The moset inner loop variable is used in the index_expr
-            tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
+            tiling_factor = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.float)
             with CppVecKernelChecker(
                 args=None, num_threads=1, tiling_factor=tiling_factor
             ) as vec_checker:
@@ -2366,7 +2445,7 @@ class CPUReproTests(TestCase):
         ):
             itervars = [sympy.Symbol("i"), sympy.Symbol("j"), sympy.Symbol("k")]
 
-            tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
+            tiling_factor = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.float)
             # The most inner loop variable is used in the index_expr
             with CppVecKernelChecker(
                 args=None, num_threads=1, tiling_factor=tiling_factor
@@ -3332,13 +3411,19 @@ class CPUReproTests(TestCase):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
 
-        x = torch.randint(1, 100, (32, 32))
-        y = torch.randint(1, 100, (32, 32))
-        for mode in [None, "trunc", "floor"]:
-            with torch.no_grad():
-                metrics.reset()
-                self.common(fn, (x, y, mode))
-                check_metrics_vec_kernel_count(1)
+        for dtype in [
+            torch.int8,
+            torch.uint8,
+            torch.int32,
+            torch.int64,
+        ]:
+            x = torch.randint(1, 100, (32, 32), dtype=dtype)
+            y = torch.randint(1, 100, (32, 32), dtype=dtype)
+            for mode in [None, "trunc", "floor"]:
+                with torch.no_grad():
+                    metrics.reset()
+                    self.common(fn, (x, y, mode))
+                    check_metrics_vec_kernel_count(1)
 
     def test_uint8_add(self):
         # https://github.com/pytorch/pytorch/issues/113016
@@ -3816,6 +3901,20 @@ class CPUReproTests(TestCase):
             1,
             exactly=True,
         ).run(code)
+
+    def test_convert_fp32_int64_oob_vec(self):
+        # https://github.com/pytorch/pytorch/issues/129863
+        def fn(x):
+            float32 = x.to(torch.float32)
+            return float32.to(torch.int64)
+
+        x = torch.full((32,), -9223372036854775808, dtype=torch.int64)
+        for simdlen in (None, 256):
+            with config.patch({"cpp.simdlen": simdlen}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x,))
+                check_metrics_vec_kernel_count(1)
 
 
 if __name__ == "__main__":

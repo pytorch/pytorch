@@ -177,6 +177,28 @@ TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities);
 
+/**
+ * When a C++ thread really has no control over how the profiler was enabled,
+ * for example, by some unreachable Python code, it can call these functions
+ * to test/join/unjoin itself into the collection set of a profiler, if any.
+ * Without calling these functions, the symptom may be "not seeing GPU events
+ * from some child C++ threads". This is an example on how to use them,
+ *
+ *    using namespace torch::autograd::profiler;
+ *    bool enabled = isProfilerEnabledInMainThread();
+ *    if (enabled != saved_enabled_state) {
+ *      if (enabled) {
+ *        enableProfilerInChildThread();
+ *      } else {
+ *        disableProfilerInChildThread();
+ *      }
+ *      saved_enabled_state = enabled;
+ *    }
+ */
+TORCH_API bool isProfilerEnabledInMainThread();
+TORCH_API void enableProfilerInChildThread();
+TORCH_API void disableProfilerInChildThread();
+
 } // namespace autograd::profiler
 
 namespace profiler::impl {
