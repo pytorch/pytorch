@@ -10633,6 +10633,14 @@ class CommonTemplate:
         self.common(fn, (x,), reference_in_float=False)
         assertGeneratedKernelCountEqual(self, 1)
 
+    def test_reinterpret_dtypeview(self):
+        @torch.compile
+        def fn(x):
+            return x.view([10, 10]).view(torch.int32)
+
+        x = torch.randn([100, 1], device=self.device)
+        self.common(fn, (x,), reference_in_float=False)
+
     def test_float16_to_int16(self):
         def fn(x):
             x_view = x.view(dtype=torch.int16)
