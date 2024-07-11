@@ -556,14 +556,20 @@ class CppCSEVariable(CSEVariable):
         # current op.
         # TODO(jgong5): A more accurate way of deciding the dtype of the variables is to
         # propagate the dtypes here inside `update_on_args`.
-        if (
+        if name == "index_expr":
+            self.dtype = args[1]
+        elif (
+            name == "add"
+            and len(args) == 2
+            and all(arg.dtype is not None for arg in args)
+        ):
+            # enough information to calculate the dtype at runtime
+            self.dtype = get_promote_dtype(args)
+        elif (
             getattr(V.interpreter, "current_node", None) is not None
             and get_current_node_opt_ctx() is not None
         ):
-            if name == "index_expr":
-                self.dtype = args[1]
-            else:
-                self.dtype = get_current_node_opt_ctx().dtype
+            self.dtype = get_current_node_opt_ctx().dtype
 
         if name in BIN_CMP_OPS:
             self.dtype = torch.bool
@@ -958,6 +964,31 @@ class CppOverrides(OpOverrides):
 CppOverrides._initialize_pointwise_overrides("cpp")
 
 
+def get_promote_dtype(args):
+    return (
+        functools.reduce(
+            torch.promote_types,  # type: ignore[arg-type]
+            [n.dtype for n in args if isinstance(n, CppCSEVariable)],
+        )
+        if all(n.dtype is not None for n in args if isinstance(n, CppCSEVariable))
+        else None  # not enough info to calculate the promote dtype
+    )
+
+
+def promote_arg(arg, promote_type):
+    if (
+        isinstance(arg, CppCSEVariable)
+        and arg.dtype
+        and promote_type
+        and arg.dtype != promote_type
+    ):
+        assert arg.is_vec, "expect vec arg"
+        arg = ops.to_dtype(arg, promote_type)
+        arg = arg.value if isinstance(arg, OpsValue) else arg
+        arg.dtype = promote_type
+    return arg
+
+
 class CppVecOverrides(CppOverrides):
     """Map element-wise ops to aten vectorization C++"""
 
@@ -999,10 +1030,7 @@ class CppVecOverrides(CppOverrides):
                     # However, in previous implementation, we cast scalar to vec data type int8
                     # for calculation which causes following node data type mis match.
                     # We should cast vec/scalar arg to promote data type instead.
-                    promote_type = functools.reduce(
-                        torch.promote_types,  # type: ignore[arg-type]
-                        [n.dtype for n in args if isinstance(n, CppCSEVariable)],
-                    )
+                    promote_type = get_promote_dtype(args)
                     for arg in args:
                         if isinstance(arg, (int, sympy.Expr)):
                             if isinstance(arg, sympy.Expr) and not arg.is_number:
@@ -1013,7 +1041,11 @@ class CppVecOverrides(CppOverrides):
                         if isinstance(arg, CppCSEVariable):
                             assert isinstance(V.kernel, CppVecKernel)
                             # align scalar data type to the vector for binary ops
-                            if len(args) == 2 and arg.dtype != promote_type:
+                            if (
+                                len(args) == 2
+                                and promote_type
+                                and arg.dtype != promote_type
+                            ):
                                 arg = ops.to_dtype(arg, promote_type)
                                 arg = arg.value if isinstance(arg, OpsValue) else arg
                                 # See NOTE [dtype of CppCSEVariable]: we have to fix arg.dtype since
@@ -1035,27 +1067,29 @@ class CppVecOverrides(CppOverrides):
                         # 3. fp32 and int32 in test_torchinductor_dynamic_shapes.py::test_avg_pool2d8_dynamic_shapes_cpu
                         # Note: We limit the data type promotion to binary op since for ops like where
                         # the first input is with bool type which should do data type promotion.
-                        promote_type = functools.reduce(
-                            torch.promote_types,  # type: ignore[arg-type]
-                            [
-                                n.dtype
-                                for n in new_args
-                                if isinstance(n, CppCSEVariable)
-                            ],
+                        promote_type = get_promote_dtype(new_args)
+                        new_args = list(
+                            map(
+                                functools.partial(
+                                    promote_arg,
+                                    promote_type=promote_type,
+                                ),
+                                new_args,
+                            )
                         )
-                        def promote_args(arg):
-                            if (
-                                isinstance(arg, CppCSEVariable)
-                                and arg.dtype != promote_type
-                            ):
-                                assert arg.is_vec, "expect vec arg"
-                                arg = ops.to_dtype(arg, promote_type)
-                                arg = arg.value if isinstance(arg, OpsValue) else arg
-                                arg.dtype = promote_type
-                            return arg
-
-                        new_args = list(map(promote_args, new_args))
-
+                    elif func == CppVecOverrides.where:
+                        # Refer to test_torchinductor_dynamic_shapes.py::test_index_select_dynamic_shapes_cpu
+                        args_to_promote = new_args[1:]
+                        promote_type = get_promote_dtype(args_to_promote)
+                        new_args[1:] = list(
+                            map(
+                                functools.partial(
+                                    promote_arg,
+                                    promote_type=promote_type,
+                                ),
+                                args_to_promote,
+                            )
+                        )
                     return func(*new_args, **kwargs)
                 else:
                     # fallback to scalar ops
