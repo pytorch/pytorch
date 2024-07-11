@@ -169,9 +169,7 @@ def _ring_rotate(block: torch.Tensor, pg: dist.ProcessGroup) -> torch.Tensor:
     output_split_sizes = [0] * size
     output_split_sizes[(rank - 1) % size] = len(block)
 
-    out = ft_c.all_to_all_single_autograd(
-        block, input_split_sizes, output_split_sizes, pg
-    )
+    out = ft_c.all_to_all_single(block, output_split_sizes, input_split_sizes, pg)
     return out
 
 
@@ -474,7 +472,7 @@ def _scaled_dot_product_ring_flash_attention_backward(
             out_grad_keys.append(grad_key)
             out_grad_values.append(grad_value)
         elif i > 0:
-            grad_dsts = [(-i) % size for i in range(size)]
+            grad_dsts = [(j - i) % size for j in range(size)]
 
             grad_kv = torch.cat([grad_key.flatten(), grad_value.flatten()])
             grad_kv = ft_c.permute_tensor(grad_kv, grad_dsts, pg)
