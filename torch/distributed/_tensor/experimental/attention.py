@@ -351,6 +351,7 @@ def _templated_ring_attention_backward(
     out_grad_keys = []
     out_grad_values = []
 
+    rest = tuple()
     for i in range(size):
         # overlap communication with compute
         if next_kv is not None:
