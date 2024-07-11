@@ -3,7 +3,7 @@
 from copy import deepcopy
 
 import torch
-import torch.distributed.checkpoint as dcp
+import torch.distributed.checkpoint as DCP
 
 from torch.distributed._tensor import init_device_mesh
 
@@ -61,9 +61,9 @@ class TestTpCheckpoint(DTensorTestBase):
         optimizer = torch.optim.SGD(model.parameters(), lr=0.25)
         original_state_dict = deepcopy(model.state_dict())
 
-        dcp.save(
+        DCP.save_state_dict(
             state_dict=original_state_dict,
-            storage_writer=dcp.FileSystemWriter(CHECKPOINT_DIR),
+            storage_writer=DCP.FileSystemWriter(CHECKPOINT_DIR),
             planner=DefaultSavePlanner(),
         )
 
@@ -79,9 +79,9 @@ class TestTpCheckpoint(DTensorTestBase):
         for param1, param2 in zip(original_state_dict.values(), state_dict.values()):
             self.assertNotEqual(param1.to_local(), param2.to_local())
 
-        dcp.load(
+        DCP.load_state_dict(
             state_dict=state_dict,
-            storage_reader=dcp.FileSystemReader(CHECKPOINT_DIR),
+            storage_reader=DCP.FileSystemReader(CHECKPOINT_DIR),
             planner=DefaultLoadPlanner(),
         )
 
@@ -107,9 +107,9 @@ class TestTpCheckpoint(DTensorTestBase):
         model = parallelize_module(model, tp_mesh, parallelize_plan=parallelize_plan)
         original_state_dict = deepcopy(model.state_dict())
 
-        dcp.save(
+        DCP.save_state_dict(
             state_dict=original_state_dict,
-            storage_writer=dcp.FileSystemWriter(CHECKPOINT_DIR),
+            storage_writer=DCP.FileSystemWriter(CHECKPOINT_DIR),
         )
 
         model2 = parallelize_module(
@@ -117,9 +117,9 @@ class TestTpCheckpoint(DTensorTestBase):
         )
         state_dict_to_load = model2.state_dict()
 
-        dcp.load(
+        DCP.load_state_dict(
             state_dict=state_dict_to_load,
-            storage_reader=dcp.FileSystemReader(CHECKPOINT_DIR),
+            storage_reader=DCP.FileSystemReader(CHECKPOINT_DIR),
         )
         model2.load_state_dict(state_dict_to_load, assign=True)
         state_dict_after_load = model2.state_dict()
