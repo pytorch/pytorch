@@ -1049,7 +1049,7 @@ class VariableBuilder:
                 )
             )
 
-            fake_script_obj = torch._library.fake_class_registry.to_fake_obj(
+            fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 self.tx.output.fake_mode, value
             )
 

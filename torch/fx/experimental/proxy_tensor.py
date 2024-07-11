@@ -1328,7 +1328,7 @@ class _MakefxTracer:
                         source=source
                     )
                 elif isinstance(x, torch.ScriptObject):
-                    return torch._library.fake_class_registry.to_fake_obj(self.fake_tensor_mode, x)
+                    return torch._library.fake_class_registry.maybe_to_fake_obj(self.fake_tensor_mode, x)
 
                 assert not isinstance(x, FakeScriptObject), f"ScriptObject {x} has been fakified. Cannot wrap_fake it again."
                 return x

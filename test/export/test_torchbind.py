@@ -199,7 +199,7 @@ def forward(self, token, obj_attr, x, n):
     def test_method_schema(self):
         tq = _empty_tensor_queue()
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        fake_obj = torch._library.fake_class_registry.to_fake_obj(fake_mode, tq)
+        fake_obj = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, tq)
         self.assertExpectedInline(
             str(fake_obj.push.schema),
             """push(__torch__.torch.classes._TorchScriptTesting._TensorQueue _0, Tensor _1) -> NoneType _0""",
@@ -956,7 +956,7 @@ def forward(self, arg0_1, arg1_1):
         x = torch.ones(2, 3)
 
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        fake_tq1 = torch._library.fake_class_registry.to_fake_obj(fake_mode, tq1)
+        fake_tq1 = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, tq1)
         fake_x = fake_mode.from_tensor(x)
         gm = aot_export_module(mod, (fake_tq1, fake_x), trace_joint=False)[0]
 
