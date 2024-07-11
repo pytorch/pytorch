@@ -1049,7 +1049,7 @@ def _make_node_magic(method, func):
             log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
         out = safe_expand(out)
-        sym_node_log.debug("%s %s %s -> %s", func, self.expr, other.expr, out)
+        sym_node_log.debug("%s %s %s -> %s", method, self.expr, other.expr, out)
         pytype: Type
         # This is not strictly correct. In Python, a**b may return complex when
         # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This
