@@ -327,7 +327,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-            # A few expectations:
+            # Expectations:
             # 1. `add = a + a` and `div = add / a` are still fused, which means fusion
             #    still happens among nodes within a GroupedSchedulerNode.
             # 2. `mul = a * a` is not fused with `add` or `div`, because the latter two are within
