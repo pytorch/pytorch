@@ -416,11 +416,6 @@ def narrow_copy(self, dim, start, length):
     return torch.narrow(self, dim, start, length).clone()
 
 
-@register_decomposition([aten.expand_copy])
-def expand_copy(self, size, *, implicit=False):
-    return aten.expand(self, size, implicit=implicit).clone()
-
-
 @register_decomposition([aten.view_copy.default])
 def view_copy_default(self, size):
     return aten.view(self, size).clone()
