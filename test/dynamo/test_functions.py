@@ -960,11 +960,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self._test_default_dict_helper(dict)
 
     def test_default_dict_lambda(self):
-        self._test_default_dict_helper(lambda: dict())
+        self._test_default_dict_helper(lambda: dict())  # noqa: C408
 
     def test_default_dict_closure(self):
         def factory():
-            return dict()
+            return dict()  # noqa: C408
 
         self._test_default_dict_helper(factory)
 
@@ -972,7 +972,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         param = torch.nn.Parameter(torch.ones([2, 2]))
 
         def fn(x):
-            dd = collections.defaultdict(lambda: dict())
+            dd = collections.defaultdict(lambda: dict())  # noqa: C408
             dd["a"] = x + 1
             dd[param] = 123
             dd["c"] = x * 2
@@ -1011,7 +1011,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_call_dict1(x):
-        d1 = dict()
+        d1 = dict()  # noqa: C408
         d1["x"] = x + 1
         d2 = collections.OrderedDict()
         d2["x"] = x + 2
@@ -1019,7 +1019,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_call_dict2(x):
-        d1 = dict()
+        d1 = dict()  # noqa: C408
         d1["x"] = x
         d2 = collections.OrderedDict(d1)
         if isinstance(d2, collections.OrderedDict):

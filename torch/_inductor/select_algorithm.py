@@ -61,7 +61,7 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 # correctness checks struggle with fp16/tf32
-VERIFY: Dict[str, Any] = dict()
+VERIFY: Dict[str, Any] = {}
 PRINT_AUTOTUNE = True
 DEBUG = False
 
@@ -154,7 +154,7 @@ class TritonTemplateKernel(TritonKernel):
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
         self.epilogue_fn = epilogue_fn
-        self.render_hooks = dict()  # type: ignore[var-annotated]
+        self.render_hooks = {}  # type: ignore[var-annotated]
         self.triton_meta: Optional[Dict[str, object]] = None
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: Optional[List[ir.ComputedBuffer]] = subgraphs
@@ -314,18 +314,21 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_size()[index]
         return texpr(self.rename_indexing(val))
 
-    def stride(self, name, index):
+    def stride(self, name, index=None):
         """
         Hook called from template code to get the stride of an arg.
         Will add needed args to pass it in if it is dynamic.
         """
-        assert isinstance(index, int)
         if name is None:
-            val = self.output_node.get_stride()[index]
+            val = self.output_node.get_stride()
         else:
             assert isinstance(name, str)
-            val = self.named_input_nodes[name].get_stride()[index]
-        return texpr(self.rename_indexing(val))
+            val = self.named_input_nodes[name].get_stride()
+
+        if isinstance(index, int):
+            return texpr(self.rename_indexing(val[index]))
+        else:
+            return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
     def modification(
         self, subgraph_number: int, output_name: str, **fixed_inputs
@@ -376,9 +379,9 @@ class TritonTemplateKernel(TritonKernel):
                     subgraph, ir.ComputedBuffer
                 ), f"Expected the subgraph to be a ComputedBuffer, got {type(subgraph)}"
                 if isinstance(subgraph.data, ir.InputBuffer):
-                    out = subgraph.data.make_loader()((1,))
+                    out = subgraph.data.make_loader()(())
                 else:
-                    out = subgraph.data.inner_fn((1,))
+                    out = subgraph.data.inner_fn(())
 
             self.codegen_body()
             self.body.writeline(f"{output_name} = {out.value}")
@@ -572,7 +575,7 @@ def _jinja2_env():
 
 class TritonTemplate(KernelTemplate):
     index_counter = itertools.count()
-    all_templates: Dict[str, "TritonTemplate"] = dict()
+    all_templates: Dict[str, "TritonTemplate"] = {}
 
     def __init__(self, name: str, grid: Any, source: str, debug=False):
         super().__init__(name)
