@@ -1,14 +1,6 @@
 #pragma once
 
-#ifdef __cplusplus
-#include <cstdio>
-#else
 #include <stdio.h>
-#endif
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #ifdef _WIN32
 #define unlikely(x) (x)
@@ -51,8 +43,4 @@ extern "C" {
 #define DEBUG_TRACE(msg, ...)
 #define DEBUG_TRACE0(msg)
 
-#endif
-
-#ifdef __cplusplus
-} // extern "C"
 #endif
