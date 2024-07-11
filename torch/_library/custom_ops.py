@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
 import inspect
+import logging
 import weakref
+from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
@@ -10,6 +12,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Union,
 )
@@ -21,6 +24,7 @@ from . import utils
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
+log = logging.getLogger(__name__)
 
 
 @exposed_in("torch.library")
@@ -178,6 +182,7 @@ class CustomOpDef:
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher()
+        self._disabled_kernel: Set = set()
         OPDEFS[self._qualname] = self
 
     @property
@@ -186,6 +191,55 @@ class CustomOpDef:
 
     def __repr__(self) -> str:
         return f"<CustomOpDef({self._qualname})>"
+
+    @contextmanager
+    def set_kernel_enabled(self, device_type: str, enabled: bool = True):
+        """
+        Disable or re-enable an already registered kernel for this custom operator.
+
+        If the kernel is already disabled/enabled, this is a no-op.
+
+        Note:
+            If a kernel is first disabled and then registered, it is disabled until enabled again.
+
+        Args:
+            device_type (str): The device type to disable/enable the kernel for.
+            disable (bool): Whether to disable or enable the kernel.
+        """
+        action = "enable" if enabled else "disable"
+        originally_disabled = device_type in self._disabled_kernel
+        if device_type not in self._backend_fns:
+            log.warning(
+                "Attempted to %s kernel for %s but no kernel was registered for this device type.",
+                action,
+                device_type,
+            )
+
+        if not enabled:
+            if originally_disabled:
+                log.warning(
+                    "Attempted to disable kernel for %s but it was already disabled.",
+                    device_type,
+                )
+            else:
+                self._disabled_kernel.add(device_type)
+        else:  # enable the kernel
+            if not originally_disabled:
+                log.warning(
+                    "Attempted to enable kernel for  %s but it was already enabled.",
+                    device_type,
+                )
+            else:
+                self._disabled_kernel.remove(device_type)
+
+        try:
+            yield
+        finally:
+            # restore original state
+            if originally_disabled:
+                self._disabled_kernel.add(device_type)
+            else:
+                self._disabled_kernel.discard(device_type)
 
     def register_kernel(
         self, device_types: device_types_t, fn: Optional[Callable] = None, /
@@ -275,7 +329,16 @@ class CustomOpDef:
                             backend_impl,
                             _C._dispatch_key_for_device(device_type),
                         )
-                self._backend_fns[device_type] = fn
+
+                # Wrap function to choose between the default implementation or the device-specific
+                # implementation depending on if the kernel is disabled.
+                def wrapped_fn(*args, **kwargs):
+                    if device_type in self._disabled_kernel:
+                        return self._init_fn(*args, **kwargs)
+                    else:
+                        return fn(*args, **kwargs)
+
+                self._backend_fns[device_type] = wrapped_fn
             return fn
 
         from torch._library.utils import get_device_arg_index, has_tensor_arg

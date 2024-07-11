@@ -57,9 +57,11 @@ def raise_comms_and_sink_waits(
     # When only raise_comms is True, only score_0 and score_2 are considered.
     # When only sink_waits is True, only score_1 and score_2 are considered.
     # When neither is True, the original order is yielded.
+    name_to_snode = {}
     scores_0, scores_1, scores_2 = {}, {}, {}
     for idx, snode in enumerate(snodes):
-        for name in snode.get_operation_names():
+        for name in snode.get_names():
+            name_to_snode[name] = snode
             scores_0[name] = sys.maxsize
             scores_1[name] = 0
             scores_2[name] = idx
@@ -77,7 +79,7 @@ def raise_comms_and_sink_waits(
     class Runnable:
         def __init__(self, snode):
             self.snode = snode
-            name = next(iter(snode.get_operation_names()))
+            name = next(iter(snode.get_names()))
             self.score = (
                 scores_0[name],
                 scores_1[name],
@@ -87,30 +89,54 @@ def raise_comms_and_sink_waits(
         def __lt__(self, other):
             return self.score < other.score
 
-    ready: List[Runnable] = []
-    snode_num_deps: Dict[BaseSchedulerNode, int] = {}
-
-    buf_name_to_downstream_ops = defaultdict(set)
+    # A mutating node's unmet_dependencies doesn't cover the dependencies
+    # caused by the mutation. Instead, they are described by associated
+    # MutationOutput node. Thus, to safely schedule a mutating node, we have to
+    # add the unmet_dependencies of the associated MutationOutput nodes to the
+    # mutating node.
+    # TODO(yifu): this is needed due to a mutation handling bug in the
+    # scheduler. It should be fixed by https://github.com/pytorch/pytorch/pull/128893.
+    # We can remove this logic once the fix is landed.
+    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {}
     for snode in snodes:
-        deps = snode.unmet_dependencies
-        for dep in deps:
-            buf_name_to_downstream_ops[dep.name].add(snode)
-        snode_num_deps[snode] = len(deps)
+        if isinstance(snode.node, ir.MutationOutput):
+            src_name = snode.node.node_doing_mutating.get_name()
+            src_snode = name_to_snode[src_name]
+            assert src_snode in unmet_deps
+            unmet_deps[src_snode] |= {
+                dep.name for dep in snode.unmet_dependencies if dep.name != src_name
+            }
+        assert snode not in unmet_deps
+        unmet_deps[snode] = {dep.name for dep in snode.unmet_dependencies}
+
+    ready: List[Runnable] = []
+    buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(set)
+
+    for snode, deps in unmet_deps.items():
         if len(deps) == 0:
             heapq.heappush(ready, Runnable(snode))
+        for dep in deps:
+            buffer_users[dep].add(snode)
 
     scheduled = []
-    while len(ready):
-        curr = heapq.heappop(ready).snode
-        scheduled.append(curr)
-        for scheduler_buf in curr.get_outputs():
-            for snode in buf_name_to_downstream_ops[scheduler_buf.get_name()]:
-                snode_num_deps[snode] -= 1
-                if snode_num_deps[snode] == 0:
+
+    def schedule(snode):
+        scheduled.append(snode)
+        for buf_name in snode.get_names():
+            for snode in buffer_users[buf_name]:
+                unmet_deps[snode].remove(buf_name)
+                if len(unmet_deps[snode]) == 0:
                     heapq.heappush(ready, Runnable(snode))
 
-    for snode, num_deps in snode_num_deps.items():
-        assert num_deps == 0, "Unscheduled nodes"
+    while len(ready):
+        snode = heapq.heappop(ready).snode
+        schedule(snode)
+
+    for snode, deps in unmet_deps.items():
+        assert len(deps) == 0, (
+            "Detected unscheduled nodes. "
+            f"Nodes with unmet dependencies: {unmet_deps}"
+        )
     return scheduled
 
 
@@ -149,14 +175,9 @@ def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
     TODO: Come up with a better approach
     """
     comm_nodes = [n for n in nodes if is_collective(n.node)]
-
-    def item(x: Set[str]) -> str:
-        assert len(x) == 1
-        return next(iter(x))
-
     for i in range(1, len(comm_nodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
-        comm_nodes[i].add_fake_dep(WeakDep(item(comm_nodes[i - 1].get_buffer_names())))
+        comm_nodes[i].add_fake_dep(WeakDep(comm_nodes[i - 1].get_name()))
 
 
 def assert_no_comm_nodes(snodes: List[BaseSchedulerNode]) -> None:
@@ -188,11 +209,8 @@ def compute_node_users(
     for node in snodes:
         if isinstance(node, FusedSchedulerNode):
             for x in node.snodes:
-                for buf in x.get_outputs():
-                    buf_to_snode[buf.get_name()] = node
-
-        for buf in node.get_outputs():
-            buf_to_snode[buf.get_name()] = node
+                buf_to_snode[x.get_name()] = node
+        buf_to_snode[node.get_name()] = node
 
     # compute inverse_users
     inverse_users = {
