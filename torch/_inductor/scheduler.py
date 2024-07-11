@@ -10,7 +10,6 @@ import math
 import operator
 import os
 import pprint
-import sys
 import textwrap
 import typing
 from typing import (
@@ -900,12 +899,41 @@ class SchedulerNode(BaseSchedulerNode):
         return buffers_store_as_atomic_add
 
 
+def init_group_node(
+    group_snode: BaseSchedulerNode,
+    scheduler: Scheduler,
+    snodes: List[BaseSchedulerNode],
+) -> None:
+    assert isinstance(group_snode, (FusedSchedulerNode, GroupedSchedulerNode))
+    group_snode.snodes = snodes
+    group_snode.scheduler = scheduler
+    group_snode.node = None
+    group_snode.ancestors = set.union(
+        *[x.ancestors for x in snodes if x.ancestors is not None]
+    )
+
+    group_snode.set_read_writes(
+        dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
+    )
+
+    group_snode.unmet_dependencies = {
+        dep
+        for dep in set.union(*[x.unmet_dependencies for x in snodes])
+        if dep.name not in group_snode.get_names()
+    } - group_snode.read_writes.writes
+
+    group_snode.min_order = min(x.min_order for x in group_snode.snodes)
+    group_snode.max_order = max(x.max_order for x in group_snode.snodes)
+
+
 class FusedSchedulerNode(BaseSchedulerNode):
     """
     This is a "fake" scheduler node that represents a group of scheduler nodes
     that are meant to be fused together. The way it does this is by maintaining
     its unmet dependencies as the union of its constituent nodes.
     """
+
+    snodes: List[BaseSchedulerNode]
 
     @classmethod
     def fuse(
@@ -917,30 +945,11 @@ class FusedSchedulerNode(BaseSchedulerNode):
         nodes = list(itertools.chain(node1.get_nodes(), node2.get_nodes()))
         return cls(node1.scheduler, nodes)
 
-    def __init__(
-        self, scheduler: Scheduler, snodes: Sequence[BaseSchedulerNode]
-    ) -> None:
+    def __init__(self, scheduler: Scheduler, snodes: List[BaseSchedulerNode]) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
-        self.snodes = snodes
-        self.scheduler = scheduler
-        self.node = None
+        init_group_node(self, scheduler, snodes)
         self.users: List[NodeUser] = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
-        self.ancestors = set.union(
-            *[x.ancestors for x in snodes if x.ancestors is not None]
-        )
-
-        self.set_read_writes(
-            dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
-        )
-
-        self.unmet_dependencies = {
-            dep
-            for dep in set.union(*[x.unmet_dependencies for x in snodes])
-            if dep.name not in self.get_names()
-        } - self.read_writes.writes
-        self.min_order = min(x.min_order for x in self.snodes)
-        self.max_order = max(x.max_order for x in self.snodes)
 
     @cache_on_self
     def get_name(self) -> str:
@@ -1200,7 +1209,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def __init__(
         self,
         scheduler: Scheduler,
-        nodes: Sequence[BaseSchedulerNode],
+        nodes: List[BaseSchedulerNode],
         prev_node_1: Optional[BaseSchedulerNode] = None,
         prev_node_2: Optional[BaseSchedulerNode] = None,
     ) -> None:
@@ -1302,37 +1311,21 @@ class GroupedSchedulerNode(BaseSchedulerNode):
     At codegen time, this scheduler node will be unpacked and codegen is called on each constituent node.
     """
 
+    snodes: List[BaseSchedulerNode]
+
     @classmethod
     def create(cls, snodes: List[BaseSchedulerNode]) -> GroupedSchedulerNode:
         scheduler = snodes[0].scheduler
         assert all(node.scheduler is scheduler for node in snodes)
-        return cls(scheduler, snodes)  # type: ignore[arg-type]
+        grouped_snode = cls(scheduler, snodes)  # type: ignore[arg-type]
+        for snode in snodes:
+            scheduler.name_to_fused_node[snode.get_name()] = grouped_snode
+        scheduler.name_to_fused_node[grouped_snode.get_name()] = grouped_snode
+        return grouped_snode
 
     def __init__(self, scheduler: Scheduler, snodes: List[BaseSchedulerNode]) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
-
-        assert not any(isinstance(x, FusedSchedulerNode) for x in snodes)
-        self.snodes = snodes
-        self.scheduler = scheduler
-        for snode in snodes:
-            scheduler.name_to_fused_node[snode.get_name()] = self
-        self.node = None
-        self.ancestors = set.union(
-            *[x.ancestors for x in snodes if x.ancestors is not None]
-        )
-
-        self.set_read_writes(
-            dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
-        )
-
-        self.unmet_dependencies = {
-            dep
-            for dep in set.union(*[x.unmet_dependencies for x in snodes])
-            if dep.name not in self.get_names()
-        } - self.read_writes.writes
-
-        self.min_order = sys.maxsize
-        self.max_order = -sys.maxsize
+        init_group_node(self, scheduler, snodes)
 
     @cache_on_self
     def get_name(self) -> str:
@@ -1894,7 +1887,7 @@ class Scheduler:
         """
         Fuse within each GroupedSchedulerNode, and then unpack the grouped node into regular nodes.
         """
-        new_nodes = []
+        new_nodes: List[BaseSchedulerNode] = []
         for node in self.nodes:
             if isinstance(node, GroupedSchedulerNode):
                 for sub_node in node.snodes:
