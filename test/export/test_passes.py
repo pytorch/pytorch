@@ -470,6 +470,39 @@ class TestPasses(TestCase):
         self.assertTrue(torch.allclose(orig_res, ep_res))
         self.assertTrue(torch.allclose(orig_res, without_token_res))
 
+    def test_remove_effect_token_kwargs(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_tuple_return(
+                    foo=self.attr, x=x
+                )
+                y = a[0] + a[1]
+                b = torch.ops._TorchScriptTesting.takes_foo(foo=self.attr, x=y)
+                return b
+
+        m = MyModule()
+        inputs = (torch.ones(2, 3),)
+        ep = torch.export.export(m, inputs, strict=False)
+        without_token_ep = _remove_effect_tokens(ep)
+        self.assertExpectedInline(
+            without_token_ep.graph_module.code.strip(),
+            """\
+def forward(self, token, obj_attr, x):
+    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_tuple_return.default, foo = obj_attr, x = x);  token = x = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1]
+    getitem_2 = with_effects[2];  with_effects = None
+    add = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = getitem_2 = None
+    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, foo = obj_attr, x = add);  getitem = obj_attr = add = None
+    getitem_3 = with_effects_1[0]
+    getitem_4 = with_effects_1[1];  with_effects_1 = None
+    return (getitem_3, getitem_4)""",  # noqa: B950
+        )
+
     def test_fakify_script_objects(self):
         for m in [
             ModelsWithScriptObjectAttr.Simple(),
