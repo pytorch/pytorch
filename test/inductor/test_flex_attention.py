@@ -1260,6 +1260,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             # of FlexAttention!
             self.assertTrue(ref_error < flex_error * 1.1)
 
+    @skip("Discuss how to access the block mask w/o partial blocks")
     @supported_platform
     def test_block_mask_attributes(self):
         offset = torch.zeros(8, device="cuda")

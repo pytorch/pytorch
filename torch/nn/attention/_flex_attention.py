@@ -367,10 +367,10 @@ def _create_sparse_block_from_block_mask(
         # Triton kernel would skip computation for these blocks.
         z, h, m, k = full_blocks.shape
         partial_bm = (
-            torch.zeros([z, h, m], dtype=torch.int32, device=full_blocks.device),
-            torch.zeros([z, h, m, k], dtype=torch.int32, device=full_blocks.device),
-            torch.zeros([z, h, m], dtype=torch.int32, device=full_blocks.device),
-            torch.zeros([z, h, m, k], dtype=torch.int32, device=full_blocks.device),
+            torch.zeros([1, 1, 1], dtype=torch.int32, device=full_blocks.device),
+            torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=full_blocks.device),
+            torch.zeros([1, 1, 1], dtype=torch.int32, device=full_blocks.device),
+            torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=full_blocks.device),
         )
 
     return BlockMask(

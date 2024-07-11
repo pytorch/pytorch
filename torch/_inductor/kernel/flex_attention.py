@@ -640,7 +640,7 @@ def flex_attention(*args, **kwargs):
             # For now, we always assume the "sound" option
             ROWS_GUARANTEED_SAFE=False,
             PRESCALE_QK=False,
-            USE_PARTIAL_MASK=(partial_kv_num_blocks.shape != (1, 1, 1)),
+            USE_PARTIAL_MASK=(sum(partial_kv_num_blocks.shape) != 3),
         )
     inputs_for_autotuning = (
         [
@@ -1325,7 +1325,7 @@ def flex_attention_backward(*args, **kwargs):
             SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
             # For now, we always assume the "sound" option
             PRESCALE_QK=False,
-            USE_PARTIAL_MASK=(partial_kv_num_blocks.shape != (1, 1, 1)),
+            USE_PARTIAL_MASK=(sum(partial_kv_num_blocks.shape) != 3),
         )
     inputs_for_autotuning = (
         [
