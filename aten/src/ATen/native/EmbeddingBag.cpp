@@ -937,7 +937,7 @@ void make_bag_size_out(
   if (requires_grad || mode == EmbeddingBagMode::MEAN ||
       mode == EmbeddingBagMode::MAX) {
     auto num_bags = offsets.size(0) - (include_last_offset ? 1 : 0);
-    at::native::resize_(bag_size_out, {num_bags}, c10::nullopt);
+    at::native::resize_(bag_size_out, {num_bags}, std::nullopt);
     // Compute this for EmbeddingBagMode::MEAN and EmbeddingBagMode::MAX (latter
     // needed for backwards)
     if (num_bags != 1) {
@@ -949,7 +949,7 @@ void make_bag_size_out(
       bag_size_out[-1] = indices.size(0) - offsets[num_bags - 1];
     }
   } else {
-    at::native::resize_(bag_size_out, offsets.sizes(), c10::nullopt);
+    at::native::resize_(bag_size_out, offsets.sizes(), std::nullopt);
   }
 }
 
@@ -968,10 +968,10 @@ void make_max_indices_out(
         numBags >= 1, "include_last_offset: numBags should be at least 1");
       numBags -= 1;
     }
-    at::native::resize_(max_indices_out, {numBags, weight.sizes()[1]}, c10::nullopt);
+    at::native::resize_(max_indices_out, {numBags, weight.sizes()[1]}, std::nullopt);
     at::native::zero_(max_indices_out);
   } else {
-    at::native::resize_(max_indices_out, bag_size.sizes(), c10::nullopt);
+    at::native::resize_(max_indices_out, bag_size.sizes(), std::nullopt);
   }
 }
 
@@ -990,7 +990,7 @@ void make_offset2bag_out(
 
   if (mode == EmbeddingBagMode::MEAN || mode == EmbeddingBagMode::MAX ||
       !fast_path_sum) {
-    at::native::resize_(offset2bag, {indices.size(0) + 1}, c10::nullopt);
+    at::native::resize_(offset2bag, {indices.size(0) + 1}, std::nullopt);
     at::native::zero_(offset2bag);
 
     int64_t offsets_size = offsets.size(0);
@@ -1003,7 +1003,7 @@ void make_offset2bag_out(
       _offsets = offsets.narrow(0, 0, offsets_size - 1);
     }
     make_offset2bag(_offsets, offset2bag);
-    at::native::resize_(offset2bag, {indices.size(0)}, c10::nullopt);
+    at::native::resize_(offset2bag, {indices.size(0)}, std::nullopt);
     // only initialize output in slow path
     at::native::zero_(output);
   }
@@ -1274,7 +1274,7 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
               const int64_t mode, bool sparse, const std::optional<Tensor>& per_sample_weights_opt,
               bool include_last_offset) {
   return at::native::embedding_bag(weight, indices, offsets, scale_grad_by_freq,
-      mode, sparse, per_sample_weights_opt, include_last_offset, c10::nullopt);
+      mode, sparse, per_sample_weights_opt, include_last_offset, std::nullopt);
 }
 
 // Assumes all input tensors except for `weight` are contiguous.
@@ -1692,7 +1692,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
 
     make_offset2bag(offsets, offset2bag_);
 
-    at::native::resize_(offset2bag_, {indices.size(0)}, c10::nullopt);
+    at::native::resize_(offset2bag_, {indices.size(0)}, std::nullopt);
   } else {
     auto offset2bag_arg = TensorArg(offset2bag, "offset2bag", 1);
     checkScalarTypes("embedding_bag", offset2bag_arg, {kLong, kInt});
