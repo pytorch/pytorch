@@ -953,6 +953,49 @@ def register_torch_dispatch(
     else:
         return register(func)
 
+def register_vmap(
+    op: _op_identifier,
+    func: Callable,
+    /,
+    *,
+    setup_context: Optional[Callable] = None,
+    lib=None,
+) -> None:
+    if not isinstance(
+        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
+    ):
+        raise ValueError(f"register_vmap(op): got unexpected type for op: {type(op)}")
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None and opdef._vmap_fn is not None:
+        opdef.register_vmap(func, setup_context=setup_context)
+        return
+
+    assert isinstance(op, str)
+    qualname = op
+    op = torch._library.utils.lookup_op(qualname)
+    schema = op._schema
+    if not _library.utils.is_functional_schema(schema):
+        raise RuntimeError(
+            f"Cannot register vmap formula for non-functional operator "
+            f"{op} with schema {schema}. Please create "
+            f"a functional operator and register a vmap formula for that."
+        )
+    if _library.utils.has_kwarg_only_tensors(schema):
+        raise NotImplementedError(
+            f"register_vmap with kwarg-only Tensor args. In the original "
+            f"definition of the op, please make your tensors not kwarg-only. "
+            f"Got: {schema}"
+        )
+
+    info = _library.vmap.Info(func, setup_context)
+    vmap_kernel = _library.vmap.make_vmap_impl(op, info)
+    namespace, opname = torch._library.utils.parse_namespace(qualname)
+    if lib is None:
+        lib = Library(namespace, "FRAGMENT")
+        _keep_alive.append(lib)
+    lib.impl(opname, vmap_kernel, "FuncTorchDynamicLayerFrontMode", with_keyset=True)
 
 # If the op was defined in C++, then we want to make sure there was an
 # m.set_python_module(module, ...) call and that the module is the
