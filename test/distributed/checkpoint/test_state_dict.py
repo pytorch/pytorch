@@ -897,7 +897,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_full_state_dict_with_fsdp(self) -> None:
+    def test_setting_meta_device_model(self) -> None:
         torch.manual_seed(0)
         with torch.device("meta"):
             meta_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
@@ -911,6 +911,26 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             meta_model,
             model_state_dict=full_sd,
             options=ptd_state_dict.StateDictOptions(full_state_dict=True, strict=False),
+        )
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_setting_meta_device_model_broadcasting(self) -> None:
+        torch.manual_seed(0)
+        with torch.device("meta"):
+            meta_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
+            for layer in meta_model:
+                fully_shard(layer)
+            fully_shard(meta_model)
+        with torch.device("cpu"):
+            cpu_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
+            full_sd = cpu_model.state_dict()
+        ptd_state_dict.set_model_state_dict(
+            meta_model,
+            model_state_dict=full_sd,
+            options=ptd_state_dict.StateDictOptions(
+                broadcast_from_rank0=True, full_state_dict=True, strict=False
+            ),
         )
 
 

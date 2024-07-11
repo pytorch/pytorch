@@ -22,7 +22,6 @@ from typing import (
 
 import torch
 import torch.distributed as dist
-from torch._utils import _get_device_module
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._state_dict_utils import (
@@ -549,10 +548,6 @@ def _load_model_state_dict(
             ) and fqn != fqn_with_prefix:
                 state_dict[fqn_with_prefix] = state_dict.pop(fqn)
             local_state_dict[fqn_with_prefix] = value
-            if value.device == torch.device("meta"):
-                meta_tensor = dist.checkpoint.planner_helpers._init_meta_tensor(value)
-                local_state_dict[fqn_with_prefix] = meta_tensor
-                local_state_dict[fqn_with_prefix].copy_(meta_tensor)
 
     if info.broadcast_from_rank0:
         device = None
@@ -564,6 +559,7 @@ def _load_model_state_dict(
                     assert device == value.device
         if device == torch.device("meta"):
             device = dist.distributed_c10d._get_pg_default_device()
+            model.to_empty(device=device)
         assert device is not None
         _broadcast_state_dict(
             state_dict, local_state_dict, device=device, strict=info.strict
