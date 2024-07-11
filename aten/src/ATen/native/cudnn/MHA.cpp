@@ -203,11 +203,11 @@ void setMHAParams(
   // uninit is OK as the struct is memset 0'd
   if (params.has_attn_bias) {
     std::copy(attn_bias.value().sizes().begin(),
-              attn_bias.value().sizes().end(),
-              params.bias_dim.begin());
+        attn_bias.value().sizes().end(),
+        params.bias_dim.begin());
     std::copy(attn_bias.value().strides().begin(),
-              attn_bias.value().strides().end(),
-              params.bias_stride.begin());
+        attn_bias.value().strides().end(),
+        params.bias_stride.begin());
   }
 }
 
@@ -382,12 +382,13 @@ auto build_graph_and_tensors(
     bias = mha_graph->tensor(fe::graph::Tensor_attributes()
                                  .set_name("bias")
                                  .set_dim(std::vector<int64_t>(
-                                     attn_bias.value().sizes().data(), attn_bias.value().sizes().data() + attn_bias.value().sizes().size()))
-                                 .set_stride(
-                                     std::vector<int64_t>(
-                                         attn_bias.value().strides().data(),
-                                         attn_bias.value().strides().data() +
-                                             attn_bias.value().strides().size())));
+                                     attn_bias.value().sizes().data(),
+				     attn_bias.value().sizes().data() +
+				         attn_bias.value().sizes().size()))
+                                 .set_stride(std::vector<int64_t>(
+                                     attn_bias.value().strides().data(),
+                                     attn_bias.value().strides().data() +
+                                         attn_bias.value().strides().size())));
     scaled_dot_product_flash_attention_options.set_bias(bias.value());
   }
   auto seq_q = mha_graph->tensor(fe::graph::Tensor_attributes()
