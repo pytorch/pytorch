@@ -18,10 +18,10 @@ def move_resize_zero_to_end_of_graph(graph: fx.Graph) -> None:
     node_to_usage_map = defaultdict(list)
     for i, n in enumerate(node_list):
         if n.op == "call_function":
-            if (
-                n.target is torch.ops.inductor.resize_storage_bytes_.default
-                and n.args[1] == 0
-            ):
+            if n.target is torch.ops.inductor.resize_storage_bytes_.default:
+                assert (
+                    n.args[1] == 0
+                ), "NYI: inductor.resize_storage_bytes_() to non-zero size"
                 resize_nodes_to_insert_at_end.append((n, i))
             args_flat = pytree.arg_tree_leaves(*n.args, **n.kwargs)
             for arg in args_flat:
