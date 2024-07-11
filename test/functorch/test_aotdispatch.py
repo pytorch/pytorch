@@ -4935,6 +4935,26 @@ def forward(self, arg0_1):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
             aot_export_module(mod, [inp], trace_joint=False)
 
+    def test_aot_export_unbacked_arg(self):
+        class M(torch.nn.Module):
+            def forward(self):
+                full = torch.full((), 11)
+                i0 = full.item()
+                return (torch.full((i0,), 0),)
+
+        gm, _ = aot_export_module(
+            mod=M(), args=(), trace_joint=False, dynamic_shapes=True
+        )
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self):
+    full = torch.ops.aten.full.default([], 11, device = device(type='cpu'), pin_memory = False)
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(full);  full = None
+    full_1 = torch.ops.aten.full.default([_local_scalar_dense], 0, device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return (full_1,)""",  # noqa: B950
+        )
+
 
 class TestPartitioning(AOTTestCase):
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
@@ -6273,30 +6293,7 @@ FAILING_CACHE_TESTS = (
     "test_backward_mutation_data",  # Custom Autograd Function
     "test_backward_mutation_metadata",  # Custom Autograd Function
     "test_custom_autograd",  # Custom Autograd Function
-    # Pickle error: OutputAliasInfo/functional tensor
-    "test_input_mutation_set__nop",
-    "test_input_aliased_with_mutation_output_alias",
-    "test_input_data_and_metadata_mutation",
-    "test_input_mutation_aliases_and_output_alias",
-    "test_input_mutation_alias_everything",
-    "test_input_mutation_and_output_view",
-    "test_input_mutation_output_view_multiple",
     "test_input_output_aliase_custom_autograd_function",
-    "test_input_output_view_metadata_mutate_multiple",
-    "test_input_output_view_mutate_multiple",
-    "test_input_output_view_simple",
-    "test_output_aliases_intermediate_and_returned",
-    "test_output_aliases_intermediate_and_returned_different_grad",
-    "test_output_aliases_intermediate_and_returned_flipped",
-    "test_output_aliases_intermediate_multiple",
-    "test_output_aliases_intermediate_multiple_mixed",
-    "test_output_aliases_intermediate_returned_multiple_times",
-    "test_output_aliases_multiple_inputs_get_correct_one",
-    "test_output_all_alias_types",
-    "test_some_outputs_dont_require_grad_view",
-    "test_view_and_inplace_view",
-    "test_view_detach",
-    "test_some_output_requires_grad_input_doesnt",
 )
 
 
@@ -6334,7 +6331,11 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         )
 
     @torch._functorch.config.patch(
-        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+        {
+            "enable_autograd_cache": True,
+            "strict_autograd_cache": True,
+            "view_replay_for_aliased_outputs": False,
+        }
     )
     @torch._inductor.config.patch("fx_graph_cache", True)
     def verify_aot_autograd(
