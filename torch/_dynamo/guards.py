@@ -645,7 +645,7 @@ class GuardBuilder(GuardBuilderBase):
                     source=key_source,
                     example_value=key,
                     guard_manager_enum=GuardManagerType.GUARD_MANAGER,
-                ).add_equals_match_guard(l2_key, [f"{key_source} == {l2_key!r}"])
+                ).add_equals_match_guard(key, [f"{key_source} == {key!r}"])
 
                 # Install the value manager
                 return mgr.get_value_manager(
