@@ -1144,7 +1144,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
             node_name = self.scheduler.name_to_buf[rd.name].defining_op.get_name()
             if node_name in self.name_to_node:
-                producers.append(self.name_to_node[rd.name])
+                producers.append(self.name_to_node[node_name])
 
         # Don't permit fusion if there are multiple subnodes
         # that this consumer reads from
@@ -1891,21 +1891,29 @@ class Scheduler:
         def replace_operation_buffer(
             orig_node: ir.MultiTemplateBuffer, new_node: ir.OperationBuffer
         ) -> None:
-            replaced_name = new_node.name
-            orig_name = orig_node.get_name()
-            assert isinstance(orig_name, str) and isinstance(replaced_name, str)
+            replaced_buf_name = new_node.get_name()
+            orig_buf_name = orig_node.get_name()
+            assert isinstance(orig_buf_name, str) and isinstance(replaced_buf_name, str)
 
-            del V.graph.name_to_buffer[replaced_name]
-            new_node.name = orig_name
+            replaced_op_name = new_node.get_operation_name()
+            orig_op_name = orig_node.get_operation_name()
+            assert isinstance(orig_op_name, str) and isinstance(replaced_op_name, str)
+
+            del V.graph.name_to_buffer[replaced_buf_name]
+            new_node.name = orig_buf_name
+
+            del V.graph.name_to_op[replaced_op_name]
+            new_node.operation_name = orig_op_name
 
             orig = V.graph.buffers.index(orig_node)
             V.graph.buffers.remove(new_node)
             V.graph.buffers[orig] = new_node
-            V.graph.name_to_buffer[orig_name] = new_node
+            V.graph.name_to_buffer[orig_buf_name] = new_node
 
             orig = V.graph.operations.index(orig_node)
             V.graph.operations.remove(new_node)
             V.graph.operations[orig] = new_node
+            V.graph.name_to_op[orig_op_name] = new_node
 
         for i, node in enumerate(self.nodes):
             if isinstance(node, SchedulerNode) and isinstance(
@@ -2724,7 +2732,7 @@ class Scheduler:
                 )
             elif is_gpu(device.type):
                 raise RuntimeError(
-                    "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
+                    "Cannot find a working triton installation. Either the package is not installed or it is too old. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
                 )
 
         return device_scheduling(self)

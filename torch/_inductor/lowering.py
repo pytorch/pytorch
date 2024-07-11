@@ -759,7 +759,7 @@ if hasattr(aten, "lift_fresh"):
     register_lowering(aten.lift_fresh)(nop)
 
 
-@register_lowering(aten.squeeze, type_promotion_kind=None)
+@register_lowering([aten.squeeze, prims.squeeze], type_promotion_kind=None)
 def squeeze(x, dim=None):
     assert isinstance(x, TensorBox)
     if dim is None:
