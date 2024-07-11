@@ -401,16 +401,18 @@ def aot_dispatch_autograd(
             fw_metadata.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             inner_meta.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
-            inner_meta.fw_donated_buffer = collect_donated_buffer_metadata(
-                fw_module,
-                bw_module,
-                num_inner_fwd_outputs,
-                num_fw_outs_saved_for_bw - num_symints_saved_for_bw,
-            )
 
-            if aot_config.enable_log:
-                msg = f"backward donated indices: {inner_meta.bw_donated_indices}"
-                log.info(msg)
+            if torch._functorch.config.donated_buffer:
+                inner_meta.fw_donated_buffer = collect_donated_buffer_metadata(
+                    fw_module,
+                    bw_module,
+                    num_inner_fwd_outputs,
+                    num_fw_outs_saved_for_bw - num_symints_saved_for_bw,
+                )
+
+                if aot_config.enable_log:
+                    msg = f"backward donated indices: {inner_meta.bw_donated_indices}"
+                    log.info(msg)
 
         # Note [Detaching inputs that never need gradients]
         # See https://github.com/pytorch/pytorch/issues/97745

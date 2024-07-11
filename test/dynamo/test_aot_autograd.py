@@ -1191,6 +1191,7 @@ SeqNr|OrigAten|SrcFn
         with self.assertRaises(Exception):
             opt_fn(x_opt)
 
+    @torch._functorch.config.patch(donated_buffer=True)
     def test_donated_buffer1(self):
         logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
 
@@ -1199,15 +1200,14 @@ SeqNr|OrigAten|SrcFn
             return torch.nn.functional.relu(x)
 
         with self.assertLogs(logger_name, level="INFO") as captured:
-            relu(
-                torch.rand([3, 3], device="cuda", requires_grad=True)
-            ).sum().backward()
+            relu(torch.rand([3, 3], device="cuda", requires_grad=True)).sum().backward()
 
         # le is a donated buffer from relu
         FileCheck().check("backward donated indices: [0]").run(
             "\n".join(captured.output)
         )
 
+    @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer2(self):
         logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
 
@@ -1231,6 +1231,7 @@ SeqNr|OrigAten|SrcFn
             "\n".join(captured.output)
         )
 
+    @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer3(self):
         logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
 
@@ -1255,6 +1256,7 @@ SeqNr|OrigAten|SrcFn
             "\n".join(captured.output)
         )
 
+    @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer4(self):
         logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
 
@@ -1286,6 +1288,7 @@ SeqNr|OrigAten|SrcFn
             "\n".join(captured.output)
         )
 
+    @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer5(self):
         logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
 
