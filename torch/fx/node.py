@@ -636,13 +636,10 @@ class Node(_NodeBase):
         return [n for n in to_process if n not in skipped]
 
     @compatibility(is_backward_compatible=False)
-    def is_impure(self, strict=False):
+    def is_impure(self):
         """
         Returns whether this op is impure, i.e. if its op is a placeholder or
         output, or if a call_function or call_module which is impure.
-
-        If strict is true, then this will also check the schema of a call_function
-        to determine if it has side effects.
 
         Returns:
 
@@ -653,12 +650,7 @@ class Node(_NodeBase):
 
         # Check if an impure function.
         if self.op == "call_function":
-            if not strict:
-                return self.target in _side_effectful_functions
-
-            schema = getattr(self.target, "_schema", None)
-            schema_mutable = schema is not None and schema.is_mutable
-            return schema_mutable or self.target in _side_effectful_functions
+            return self.target in _side_effectful_functions
 
         # Check if an impure module.
         if self.op == "call_module":

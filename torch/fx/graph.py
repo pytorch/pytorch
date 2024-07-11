@@ -1625,23 +1625,18 @@ class Graph:
 
         return changed
 
-    def _eliminate_dead_code_strict(self, strict=False):
+    def _eliminate_dead_code_custom(self, is_impure_node: Callable[[Node], bool]):
         """
         Remove all dead code from the graph, based on each node's number of
-        users, and whether the nodes have any side effects. This will also
-        check the schema of node target to detect side-effectful nodes.
-        The graph must be topologically sorted before calling.
+        users, and whether the nodes have any side effects. The graph must be
+        topologically sorted before calling.
+
+        Args:
+            is_impure_node (Callable[[Node], bool]): A function that returns whether
+            a node is impure.
 
         Returns:
           bool: Whether the graph was changed as a result of the pass.
-
-        .. warning::
-
-            Dead code elimination has some heuristics to avoid removing
-            side-effectful nodes (see Node.is_impure) by looking at function schema.
-            You should mark operators as side-effecful using `torch.fx.node.has_side_effect`
-            if your graph contains side-effectful operators that are not registered as mutable
-            in the schema.
         """
         # Lint the graph first to make sure its topologically sorted, otherwise
         # DCE below will not behave as expected.
@@ -1652,7 +1647,7 @@ class Graph:
         # the removed node.
         changed = False
         for node in reversed(self.nodes):
-            if not node.is_impure(strict=True) and len(node.users) == 0:
+            if not is_impure_node(node) and len(node.users) == 0:
                 self.erase_node(node)
                 changed = True
 
