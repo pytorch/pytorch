@@ -1046,7 +1046,6 @@ class CppVecOverrides(CppOverrides):
                                 if isinstance(n, CppCSEVariable)
                             ],
                         )
-
                         def promote_args(arg):
                             if (
                                 isinstance(arg, CppCSEVariable)
