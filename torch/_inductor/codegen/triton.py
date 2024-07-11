@@ -3033,7 +3033,9 @@ class TritonScheduling(SIMDScheduling):
         assert len(launchers) == 1
         if launchers[0].n_spills > 0:
             # skip benchmarking the kernel if there are register spills
-            log.debug(f"Kernel {mod.__file__} has {launchers[0].n_spills} register spill.")
+            log.debug(
+                "Kernel %s has %s register spill.", mod.__file__, launchers[0].n_spills
+            )
             ms = float("inf")
         else:
             # We have to clone the inplace updated arguments to avoid earlier calls

@@ -46,6 +46,19 @@ from unittest import mock
 import sympy
 
 import torch
+
+GPU_TYPES = ["cuda", "xpu"]
+
+
+def _get_gpu_type():
+    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
+    assert len(avail_gpus) <= 1
+    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+    return gpu_type
+
+
+GPU_TYPE = _get_gpu_type()
+
 import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
@@ -70,17 +83,6 @@ log = logging.getLogger(__name__)
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
-GPU_TYPES = ["cuda", "xpu"]
-
-
-def _get_gpu_type():
-    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
-    assert len(avail_gpus) <= 1
-    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
-    return gpu_type
-
-
-GPU_TYPE = _get_gpu_type()
 
 GPU_ALIGN_BYTES = 16
 

@@ -200,11 +200,11 @@ class TestMaxAutotune(TestCase):
         """
 
         def mm(a, b):
-            a = torch.sin(a)
-            return a @ b
+            # a = torch.sin(a)
+            return torch.nn.GELU()(a @ b)
 
-        a = torch.randn(256, 256).to(GPU_TYPE)
-        b = torch.randn(256, 256).to(GPU_TYPE)
+        a = torch.randn(100, 10).to(GPU_TYPE)
+        b = torch.randn(10, 100).to(GPU_TYPE)
 
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
@@ -855,6 +855,7 @@ class TestTuningProcess(TestCase):
             self.assertEqual(timings[choice], bmreq.value)
 
             tuning_pool.terminate()
+
     @skipIfXpu
     def test_tuning_pool_multiple_devices(self):
         with config.patch({"autotune_multi_device": True}):
