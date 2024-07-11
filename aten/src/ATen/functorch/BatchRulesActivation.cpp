@@ -12,7 +12,7 @@
 // These are only the ones that have special batch rules to help with organization
 namespace at::functorch {
 static std::tuple<Tensor,optional<int64_t>>
-glu_batch_rule(const Tensor& self, optional<int64_t> self_bdim, int64_t dim) {
+glu_batch_rule(const Tensor& self, std::optional<int64_t> self_bdim, int64_t dim) {
   // repeated error message from glu because 0D -> 1D when batched
   // this can't pass anyway because a 0-dimensional tensor has "size" 1, which
   // can't be evenly halved, but give a nicer error message here.
@@ -28,8 +28,8 @@ glu_batch_rule(const Tensor& self, optional<int64_t> self_bdim, int64_t dim) {
 }
 
 static std::tuple<Tensor,optional<int64_t>> glu_backward_batch_rule(
-    const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-    const Tensor& self, optional<int64_t> self_bdim, int64_t dim) {
+    const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
+    const Tensor& self, std::optional<int64_t> self_bdim, int64_t dim) {
   if (self_bdim) {
     // repeated error message from glu because 0D -> 1D when batched
     // this can't pass anyway because a 0-dimensional tensor has "size" 1, which
