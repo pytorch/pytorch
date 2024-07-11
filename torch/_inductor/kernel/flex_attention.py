@@ -239,16 +239,7 @@ flex_attention_template = TritonTemplate(
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = offs_n[None, :]
-        {{ modification(
-            subgraph_number=0,
-            output_name="post_mod_scores",
-            score="qk",
-            b="off_z",
-            h="off_h",
-            m="m",
-            n="n",
-            out="qk"
-        ) | indent_except_first(2) }}
+        post_mod_scores = modification(qk, off_z, off_h, m, n, {{gen_argdefs()}})
         # TODO: In the case that score_mod is linear, this can be LICMed
         if not PRESCALE_QK:
             post_mod_scores *= RCP_LN2
@@ -308,6 +299,19 @@ flex_attention_template = TritonTemplate(
         l_ptrs = LSE + off_hz * Q_LEN + offs_m
         lse = m_i + tl.math.log2(l_i)
         tl.store(l_ptrs, lse)
+
+@triton.jit
+def modification(qk, off_z, off_h, m, n, {{gen_argdefs()}}):
+    {{ modification(
+        subgraph_number=0,
+        output_name="post_mod_scores",
+        score="qk",
+        b="off_z",
+        h="off_h",
+        m="m",
+        n="n",
+    ) | indent_except_first(1) }}
+    return post_mod_scores
  """,
 )
 
