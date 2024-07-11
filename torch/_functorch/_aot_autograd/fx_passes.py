@@ -3,7 +3,6 @@ from typing import Dict, List
 
 import torch
 from torch import fx
-from torch.utils import _pytree as pytree
 
 
 def is_primal(node: fx.Node) -> bool:
@@ -15,52 +14,32 @@ def move_resize_zero_to_end_of_graph(graph: fx.Graph) -> None:
     return_node = node_list[-1]
     assert return_node.target == "output"
     resize_nodes_to_insert_at_end = []
-    node_to_usage_map = defaultdict(list)
+    resized_tensors = set()
+    nodes_seen = set()
     for i, n in enumerate(node_list):
-        if n.op == "call_function":
-            if n.target is torch.ops.inductor.resize_storage_bytes_.default:
-                assert (
-                    n.args[1] == 0
-                ), "NYI: inductor.resize_storage_bytes_() to non-zero size"
-                resize_nodes_to_insert_at_end.append((n, i))
-            args_flat = pytree.arg_tree_leaves(*n.args, **n.kwargs)
-            for arg in args_flat:
-                node_to_usage_map[arg].append(i)
-    # Assumptions: the size-0 tensor X can then be used only in the following ops:
-    # 1. `aten.set_(X, ...)`
-    # 2. `aten.set_(..., X)`
-    # 3. `inductor.resize_storage_bytes_(X, 0)`
-    # 4. graph output
+        nodes_seen.add(n)
+        if (
+            n.op == "call_function"
+            and n.target is torch.ops.inductor.resize_storage_bytes_.default
+        ):
+            resize_node = n
+            resized_tensor = resize_node.args[0]
+            assert (
+                resize_node.args[1] == 0
+            ), f"NYI: resizing a tensor `{resized_tensor}` to non-zero size. Violating graph: {graph}"
+            assert (
+                resized_tensor not in resized_tensors
+            ), f"NYI: resizing the same tensor `{resized_tensor}` multiple times. Violating graph: {graph}"
+            assert (
+                len(set(resize_node.users.keys()) - nodes_seen) == 0
+            ), f"NYI: output of resize node `{resize_node}` should not be used in downstream ops. Violating graph: {graph}"
+            assert (
+                len(set(resized_tensor.users.keys()) - nodes_seen) == 0
+            ), f"NYI: size-0 tensor `{resized_tensor}` should not be used in downstream ops. Violating graph: {graph}"
+            resize_nodes_to_insert_at_end.append((resize_node, i))
+            resized_tensors.add(resized_tensor)
     for resize_node, resize_node_idx in reversed(resize_nodes_to_insert_at_end):
-        usage_idx_list = node_to_usage_map[resize_node.args[0]]
-        pos_in_usage_idx_list = usage_idx_list.index(resize_node_idx)
-        for i in range(pos_in_usage_idx_list + 1, len(usage_idx_list)):
-            node = node_list[usage_idx_list[i]]
-            if node.target is torch.ops.aten.set_.source_Tensor and (
-                node.args[0] == resize_node.args[0]
-                or node.args[1] == resize_node.args[0]
-            ):
-                continue
-            if (
-                node.target is torch.ops.inductor.resize_storage_bytes_.default
-                and node.args[0] == resize_node.args[0]
-                and node.args[1] == 0
-            ):
-                continue
-            if node.target == "output":
-                continue
-            raise RuntimeError(
-                f"Input to .resize_storage_bytes_(X, 0) is used after the resize-to-0 op by `{node}`. "
-                f"Violating graph: {graph}"
-            )
-        if pos_in_usage_idx_list == len(usage_idx_list) - 1:
-            # If `.resize_(X, 0)` node is the last usage of X, we move the resize node to the end of the graph.
-            next_valid_usage_of_resized_tensor = return_node
-        else:
-            next_valid_usage_of_resized_tensor = node_list[
-                usage_idx_list[pos_in_usage_idx_list + 1]
-            ]
-        with graph.inserting_before(next_valid_usage_of_resized_tensor):
+        with graph.inserting_before(return_node):
             new_resize_node = graph.call_function(
                 torch.ops.inductor.resize_storage_bytes_.default, resize_node.args
             )
