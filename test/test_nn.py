@@ -8484,7 +8484,7 @@ class TestNNDeviceType(NNTestCase):
 
 
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
-    def test_pad_symmetric(self):
+    def test_pad_symmetric(self, device):
         """Test support for symetric padding."""
         for pad_list in [[(6, 6), (6, 6)],
                          [(5, 6), (6, 5)],
