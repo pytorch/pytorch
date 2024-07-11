@@ -481,6 +481,12 @@ class ViewAndMutationMeta:
         # this information.
         self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
 
+        # length = # tensors_saved_for_backwards
+        # A list of bools, indicating whether each saved tensor is a donated buffer.
+        # Donated buffer means the tensor is not alias of any forward user input, forward user output,
+        # and backward output.
+        self.fw_donated_buffer: Optional[List[bool]] = None
+
     def make_runtime_safe(self):
         """
         There are various fields in ViewAndMutationMeta that aren't serializable. This function is called after all tracing
@@ -544,6 +550,20 @@ class ViewAndMutationMeta:
             return slice(-self.num_symints_saved_for_bw, None)
         else:
             return slice(0, 0)  # empty slice
+
+    @property
+    def bw_donated_indices(self):
+        if self.fw_donated_buffer is None:
+            return []
+
+        # assuming backward input layout:
+        # [*symints, *saved_tensors, *flat_bw_args_with_grads, *rng_args].
+        assert self.num_symints_saved_for_bw is not None
+        return [
+            self.num_symints_saved_for_bw + i
+            for i, is_donated in enumerate(self.fw_donated_buffer)
+            if is_donated
+        ]
 
     def __eq__(self, other):
         if not isinstance(other, ViewAndMutationMeta):
