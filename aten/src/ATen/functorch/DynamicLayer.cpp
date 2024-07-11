@@ -393,7 +393,7 @@ std::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int6
       return res_idx; // for everything currently in native_functions, each input aliases at most one output (tensor list counts as one output)
     }
   }
-  return nullopt;
+  return std::nullopt;
 }
 
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE

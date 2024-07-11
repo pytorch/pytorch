@@ -44,6 +44,7 @@ via PyTorch's C++ operator registration APIs).
 .. autofunction:: register_fake
 .. autofunction:: impl_abstract
 .. autofunction:: get_ctx
+.. autofunction:: infer_schema
 
 Low-level APIs
 --------------
