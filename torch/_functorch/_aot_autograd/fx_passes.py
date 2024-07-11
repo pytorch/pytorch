@@ -53,7 +53,7 @@ def refunctionalize_set(graph: fx.Graph) -> None:
     primal_inputs = [*filter(is_primal, node_list)]
     primal_input_to_set_idx = defaultdict(list)
     node_to_idx = {n: i for i, n in enumerate(node_list)}
-    set_nodes_to_be_deleted = set()
+    set_nodes_to_delete = set()
 
     # Step 1: Clean up to enforce `.set_(primal_X, ...)` usage.
     # We replace:
@@ -105,11 +105,10 @@ def refunctionalize_set(graph: fx.Graph) -> None:
     # `.set_(primal_X, Y_last)` at the end of the graph.
     for i, n in enumerate(node_list):
         # For aten.set_(X, Y), X must be primal input of graph.
-        if (
-            n.op == "call_function"
-            and n.target is torch.ops.aten.set_.source_Tensor
-            and n.args[0] in primal_inputs
-        ):
+        if n.op == "call_function" and n.target is torch.ops.aten.set_.source_Tensor:
+            assert (
+                n.args[0] in primal_inputs
+            ), f"NYI: Calling `.set_(X, Y)` but X is not primal input of graph. Violating graph: {graph}"
             primal_input_to_set_idx[n.args[0]].append(i)
     for primal_input, set_idx_list in primal_input_to_set_idx.items():
         for i in range(len(set_idx_list)):
@@ -134,11 +133,11 @@ def refunctionalize_set(graph: fx.Graph) -> None:
                 delete_user_cb=lambda n: node_to_idx[n] > set_node_idx
                 and node_to_idx[n] < next_set_node_idx,
             )
-            set_nodes_to_be_deleted.add(set_node)
+            set_nodes_to_delete.add(set_node)
         # For any primal input, if we have deleted the last `.set_(primal_X, ...)`,
         # we will re-insert `.set_(primal_X, Y_last)` at the end of the graph.
         last_set_node = node_list[primal_input_to_set_idx[primal_input][-1]]
-        if last_set_node in set_nodes_to_be_deleted:
+        if last_set_node in set_nodes_to_delete:
             with graph.inserting_before(return_node):
                 new_last_set_node = graph.call_function(
                     last_set_node.target, last_set_node.args
@@ -146,13 +145,13 @@ def refunctionalize_set(graph: fx.Graph) -> None:
     # Replace set_ nodes in graph output with the corresponding primal input.
     new_return_node_args = []
     for arg in return_node.args:
-        if arg in set_nodes_to_be_deleted:
+        if arg in set_nodes_to_delete:
             arg = arg.args[0]
             assert arg in primal_inputs
         new_return_node_args.append(arg)
     return_node.args = tuple(new_return_node_args)
     # Finally, delete the old set_ nodes.
-    for set_node in set_nodes_to_be_deleted:
+    for set_node in set_nodes_to_delete:
         graph.erase_node(set_node)
 
 
