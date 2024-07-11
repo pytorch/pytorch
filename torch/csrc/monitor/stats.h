@@ -7,15 +7,17 @@
 namespace torch {
 namespace monitor {
 
-void registerCallback(std::string key, const std::function<double()>& callback);
-void unregisterCallback(std::string key);
+void registerCallback(
+    const std::string& key,
+    const std::function<double()>& callback);
+void unregisterCallback(const std::string& key);
 
 namespace detail {
 class StatImpl;
 } // namespace detail
 
 class PeriodicAvgStat {
-  public:
+ public:
   explicit PeriodicAvgStat(std::string_view key);
   void addValue(
       double value,

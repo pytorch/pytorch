@@ -1,30 +1,23 @@
 #ifndef FBCODE_CAFFE2
 #include <torch/csrc/monitor/stats.h>
 #include <chrono>
+#include <string>
 
 namespace torch {
 namespace monitor {
 
-void registerCallback(std::string key, const std::function<double()>& callback) {
+void registerCallback(
+    const std::string& key,
+    const std::function<double()>& callback) {
   // implement
 }
-void unregisterCallback(std::string key) {
+void unregisterCallback(const std::string& key) {
   // implement
 }
 
 namespace detail {
 class StatImpl {};
 } // namespace detail
-
-PeriodicStat::PeriodicStat(std::string_view key)
-    : impl_(nullptr) {}
-
-void PeriodicStat::addValue(
-    double value,
-    std::chrono::steady_clock::time_point now =
-        std::chrono::steady_clock::now()) {
-  // implement
-}
 
 PeriodicAvgStat::PeriodicAvgStat(std::string_view key) : impl_(nullptr) {}
 
