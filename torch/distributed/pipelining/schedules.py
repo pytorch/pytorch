@@ -753,39 +753,16 @@ class Schedule1F1B(PipelineScheduleSingle):
         self._update_losses(self._stage, losses)
 
 
-"""Given a basic schedule involving only compute actions (F,B,W), infer the necessary communication actions.
-
-Builds a more complete schedule still composed of a list of _Action per rank.
-
-Types of communications that are inferred:
-- send/recv pair is added for every forward activation and gradient that needs to flow between stages
-- FSDP Unshard/Reshard/Reduce is added
-
-Questions
-- How much heuristic can we bake in for FSDP prefetching? will users need to pass in a custom function?
-- What about DDP? should we bake allreduce into the schedule in that case?
-- Between FSDP/DDP/HSDP, do we decide up front at the time we perform add_comms or can we put in generic enough
-    actions that any of these will work at runtime?
-    (e.g. 'grad reduce' action applies to all; unshard is no-op for DDP)
-- Should '_Action' enum contain all the comm stuff too? how do we separate the basic actions from the full set?
-- Where should 'add_comms' be called? should it be called by a particular Schedule class's __init__, and possibly
-    pass flags to control the heuristics of add_comms based on that schedule?
-
-TODO
-- add a few more test cases for the shard/unshard part
-  - refactor test helper for shard/unshard to only worry about one rank at a time
-- then do send/recv part and simplify the runtime. set up e2e tests.
-"""
-
-
 def _add_unshard_reshard(
     compute_actions: List[Optional[_Action]],
     max_active_stages: int = 3,
 ) -> List[Optional[_Action]]:
-    """
-    Adds unshard/reshard actions to the schedule.
+    """Given a basic schedule involving only compute actions (F,B,W), add UNSHARD/RESHARD actions for FSDP.
 
-    we abandon the "timestep lock"  during lowering
+    UNSHARD refers to fetching the full contents of an FSDP-sharded layer, requiring an all-gather operation.
+    RESHARD does the opposite, releasing memory (but doing no commmunication)
+
+    We abandon the "timestep lock"  during lowering
 
     max_active_stages controls how many prefetches we allow. It should be measured in mb and tuneable but in practice
     3 stages is probably the thing we want?
@@ -795,7 +772,7 @@ def _add_unshard_reshard(
     def next_stage_indices(
         count: int, next_actions: List[Optional[_Action]]
     ) -> List[int]:
-        """Remove duplicates (same stage, different microbatch) and tell me the order i'll encounter the stages in"""
+        """Remove duplicates (same stage, different microbatch), find next 'count' stages that will do compute."""
         seen: Set[int] = set()
         ret: List[int] = []
 
