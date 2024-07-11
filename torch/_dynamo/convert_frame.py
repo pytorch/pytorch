@@ -519,7 +519,6 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
-@compile_time_strobelight_meta(phase_name="_compile")
 @_use_lazy_graph_module(config.use_lazy_graph_module)
 def _compile(
     code: types.CodeType,
@@ -604,6 +603,7 @@ def _compile(
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
     @dynamo_timed(phase_name="entire_frame_compile")
+    @compile_time_strobelight_meta(phase_name="compile_inner")
     @maybe_cprofile
     def compile_inner(
         code: types.CodeType,
