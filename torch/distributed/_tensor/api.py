@@ -649,6 +649,26 @@ def distribute_tensor(
         # 1. if the we can further shard this DTensor if the two device mesh belong to
         #   the same parenet mesh and further sharding is possible.
         # 2. check if device mesh and placements are the same
+
+        # use case: nested distribute_tensor() over 1-d mesh for composable parallelisms
+        if (
+            len(placements) == 1
+            and placements[0].is_shard()
+            and device_mesh.ndim == 1
+            and _mesh_resources.get_parent_mesh(tensor.device_mesh)
+            == _mesh_resources.get_parent_mesh(device_mesh)
+        ):
+            placement = placements[0]
+            shard_dim = cast(Shard, placement).dim
+            # check if the tensor dim has been sharded
+            if tensor._spec.dim_map[shard_dim] != -1:
+                # split_factor = tensor._spec.num_shards_map[shard_dim]
+                # perform contiguous sharding
+                local_tensor = tensor.to_local().detach()
+                local_tensor = placement._shard_tensor(local_tensor, device_mesh, 0)
+                # TODO: construct DTensorSpec
+                # note: how to construct the new device mesh???
+
         if tensor.device_mesh != device_mesh:
             raise ValueError(
                 f"Cannot distribute a DTensor with device mesh {tensor.device_mesh} "
