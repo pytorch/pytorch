@@ -1896,10 +1896,9 @@ class Scheduler:
         """
         new_nodes: List[BaseSchedulerNode] = []
         for node in self.nodes:
-            if isinstance(node, GroupedSchedulerNode):
-                new_nodes.extend(node.unpack())
-            else:
-                new_nodes.append(node)
+            new_nodes.extend(
+                node.unpack() if isinstance(node, GroupedSchedulerNode) else [node]
+            )
         self.nodes = new_nodes
 
     def benchmark_fused_nodes(
