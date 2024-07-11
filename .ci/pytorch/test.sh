@@ -544,6 +544,10 @@ test_single_dynamo_benchmark() {
       # For CPU device, we perfer non ABI-compatible mode on CI when testing AOTInductor.
       export TORCHINDUCTOR_ABI_COMPATIBLE=1
     fi
+
+    if [[ "${TEST_CONFIG}" == *_avx2* ]]; then
+      TEST_CONFIG=${TEST_CONFIG::-5}
+    fi
     python "benchmarks/dynamo/$suite.py" \
       --ci --accuracy --timing --explain \
       "${DYNAMO_BENCHMARK_FLAGS[@]}" \
@@ -1317,7 +1321,7 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
-    if [[ "${BUILD_ENVIRONMENT}" != *jammy* ]]; then
+    if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.8-gcc11-build ]]; then
       # Temporarily skip test_inductor_aoti due to https://github.com/pytorch/pytorch/issues/130311
       test_inductor_aoti
       test_inductor_distributed

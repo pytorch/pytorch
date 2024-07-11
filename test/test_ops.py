@@ -32,7 +32,6 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     skipMeta,
-    expectedFailureCPU,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
