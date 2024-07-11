@@ -482,7 +482,7 @@ class TestPasses(TestCase):
                 shape_env=ShapeEnv(tracked_fakes=[]),
                 allow_non_fake_inputs=True,
             )
-            with _fakify_script_objects(m, tuple(), {}, fake_mode) as (
+            with _fakify_script_objects(m, (), {}, fake_mode) as (
                 patched_mod,
                 _,
                 _,
@@ -502,7 +502,7 @@ class TestPasses(TestCase):
             shape_env=ShapeEnv(tracked_fakes=[]),
             allow_non_fake_inputs=True,
         )
-        with _fakify_script_objects(m, tuple(), {}, fake_mode) as (
+        with _fakify_script_objects(m, (), {}, fake_mode) as (
             patched_mod,
             _,
             _,
