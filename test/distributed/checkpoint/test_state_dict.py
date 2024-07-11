@@ -898,6 +898,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_setting_meta_device_model(self) -> None:
+        # This test verifies that we can set model state dict by a meta device model
         torch.manual_seed(0)
         with torch.device("meta"):
             meta_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
@@ -916,6 +917,9 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_setting_meta_device_model_broadcasting(self) -> None:
+        # This test verifies that we can set model state dict by a meta device model
+        # With the correlated changes in state_dict, meta device model should be accepted 
+        # in broadcasting and get copied successfully. 
         torch.manual_seed(0)
         with torch.device("meta"):
             meta_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
