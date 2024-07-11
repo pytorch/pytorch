@@ -2414,11 +2414,11 @@ def _automatic_dynamic(
         dynamic_stride = get_dynamic_dim(
             e.stride()[i],
             constraint_stride,
-            marked_unbacked,
-            marked_dynamic,
-            marked_weak_dynamic,
+            False,
+            False,
+            False,
             static_shapes,
-            marked_static,
+            False,
         )
         dynamic_sizes.append(dynamic_size)
         dynamic_strides.append(dynamic_stride)
