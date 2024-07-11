@@ -16,6 +16,7 @@ import torch
 
 import torch._prims as prims
 import torch._prims_common as utils
+import torch.utils._pytree as pytree
 from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
@@ -259,6 +260,7 @@ __all__ = [
     "dstack",
     "expand",
     "expand_as",
+    "expand_copy",
     "flatten",
     "flip",
     "fliplr",
@@ -272,6 +274,7 @@ __all__ = [
     "native_group_norm",
     "native_layer_norm",
     "permute",
+    "permute_copy",
     "ravel",
     "repeat",
     "reshape",
@@ -282,16 +285,21 @@ __all__ = [
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
+    "squeeze_copy",
     "t",
+    "t_copy",
     "T",
     "take_along_dim",
     "tensor_split",
     "transpose",
+    "transpose_copy",
     "unfold",
     "unfold_copy",
     "unsqueeze",
+    "unsqueeze_copy",
     "view",
     "view_as",
+    "view_copy",
     "vsplit",
     "vstack",
     "view_as_complex",
@@ -2200,18 +2208,25 @@ def _make_copy_from_view(fn):
     """
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
-    name = fn.__name__
-    fn = out_wrapper()(fn)
+    aten_fn = getattr(aten, fn.__name__)
+    annotations = fn.__annotations__
+    fn = out_wrapper()(aten_fn)
 
+    @wraps(fn)
     def _fn(*args, out=None, **kwargs):
         result = fn(*args, out=out, **kwargs)
-        if out is None:
-            return result.clone(memory_format=torch.contiguous_format)
-        return result
+        if out is not None:
+            return result
 
-    copy_name = f"{name}_copy"
+        return pytree.tree_map(
+            lambda x: x.clone(memory_format=torch.contiguous_format),
+            result,
+        )
+
+    copy_name = f"{fn.__name__}_copy"
     _fn.__name__ = copy_name
-    _fn = register_decomposition(getattr(aten, copy_name))(_fn)
+    _fn.__annotations__.update(annotations)
+    register_decomposition(getattr(aten, copy_name))(_fn)
     return _fn
 
 
@@ -2565,6 +2580,14 @@ def addr(
         vec2.ndim == 1,
         lambda: f"addr: Expected 1-D argument vec2, but got {vec2.ndim}-D",
     )
+    for arg, arg_name in ((alpha, "alpha"), (beta, "beta")):
+        if isinstance(arg, bool):
+            torch._check(
+                utils.is_boolean_dtype(self.dtype)
+                and utils.is_boolean_dtype(vec1.dtype)
+                and utils.is_boolean_dtype(vec2.dtype),
+                lambda: f"Boolean {arg_name} only supported for Boolean results.",
+            )
     self = self.expand(vec1.shape[0], vec2.shape[0])
     if utils.is_boolean_dtype(self.dtype):
         # Integers are accepted for booleans
@@ -2663,9 +2686,6 @@ def as_strided(
         storage_offset if storage_offset is not None else a.storage_offset()
     )
     return prims.as_strided(a, size, stride, storage_offset_int)
-
-
-as_strided_copy = _make_copy_from_view(as_strided)
 
 
 @register_decomposition(aten.as_strided_scatter)
@@ -3063,11 +3083,6 @@ def narrow(
         lambda: f"start ({start}) + length ({length}) exceeds dimension size ({dim_length}).",
     )
     return prims.slice_in_dim(a, start, start + length, axis=dim)
-
-
-# TODO: This must return a sparse tensor if the input is sparse, but refs have
-# no sparse support. See narrow_copy_sparse in core.
-narrow_copy = _make_copy_from_view(narrow)
 
 
 def _normalize(
@@ -4318,9 +4333,6 @@ def diagonal(
     return result
 
 
-diagonal_copy = _make_copy_from_view(diagonal)
-
-
 @register_decomposition(aten.diag_embed)
 @out_wrapper()
 def diag_embed(
@@ -4476,9 +4488,6 @@ def alias(a: TensorLikeType) -> TensorLikeType:
     return prims.view_of(a)
 
 
-alias_copy = _make_copy_from_view(alias)
-
-
 @register_decomposition(aten.transpose)
 def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
@@ -4504,14 +4513,6 @@ def unfold(
         self.shape, self.stride(), dimension, size, step
     )
     return self.as_strided(shape, strides)
-
-
-@register_decomposition(aten.unfold_copy)
-@out_wrapper()
-def unfold_copy(self: TensorLikeType, dimension: int, size: int, step: int):
-    return self.unfold(dimension, size, step).clone(
-        memory_format=torch.contiguous_format
-    )
 
 
 def _cumsumprod_common(
@@ -6312,6 +6313,24 @@ exponential_ = _make_inplace(exponential)
 geometric_ = _make_inplace(geometric)
 log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
+
+# make copy variants of ops that returns views
+alias_copy = _make_copy_from_view(alias)
+as_strided_copy = _make_copy_from_view(as_strided)
+diagonal_copy = _make_copy_from_view(diagonal)
+expand_copy = _make_copy_from_view(expand)
+# TODO: narrow_copy must return a sparse tensor if the input is sparse, but refs have
+# no sparse support. See narrow_copy_sparse in core.
+narrow_copy = _make_copy_from_view(narrow)
+permute_copy = _make_copy_from_view(permute)
+squeeze_copy = _make_copy_from_view(squeeze)
+t_copy = _make_copy_from_view(t)
+transpose_copy = _make_copy_from_view(transpose)
+unfold_copy = _make_copy_from_view(unfold)
+unsqueeze_copy = _make_copy_from_view(unsqueeze)
+view_copy = _make_copy_from_view(view)
+
+# TODO: unbind_copy
 
 
 # xref: isStorage in torch/csrc/DynamicTypes.cpp
