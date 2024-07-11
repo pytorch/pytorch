@@ -171,6 +171,8 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
     constraint_strides = [None] * arg.dim()
     if dynamic_dims is None:
         dynamic_dims = [DimDynamic.DUCK] * arg.dim()
+    # STATIC for strides means that symbolic shapes will try to infer strides from size.
+    dynamic_strides = [DimDynamic.STATIC] * arg.dim()
     (
         sym_shapes,
         sym_strides,
@@ -180,7 +182,7 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
         source=source,
         symbolic_context=StatelessSymbolicContext(
             dynamic_sizes=dynamic_dims,
-            dynamic_strides=dynamic_dims,
+            dynamic_strides=dynamic_strides,
             constraint_sizes=constraint_dims,
             constraint_strides=constraint_strides,
         ),
@@ -1359,6 +1361,97 @@ class TestSymNumberMagicMethods(TestCase):
         sz2 = torch.Size([3, j2, 4])
         self.assertIs(sz1 == sz2, True)
         self.assertIs(sz1 != sz2, False)
+
+    def test_stride_symnode(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+
+        def _create_symbolic_tensor(x, dynamic_sizes, dynamic_strides):
+            with FakeTensorMode(shape_env=shape_env) as fake_mode:
+                return fake_mode.from_tensor(
+                    x,
+                    symbolic_context=StatelessSymbolicContext(
+                        dynamic_sizes=dynamic_sizes,
+                        dynamic_strides=dynamic_strides,
+                    ),
+                )
+
+        # check everything static
+        t = _create_symbolic_tensor(
+            x=torch.ones(3, 6),
+            dynamic_sizes=[
+                DimDynamic.STATIC,
+                DimDynamic.STATIC,
+            ],
+            dynamic_strides=[
+                DimDynamic.STATIC,
+                DimDynamic.STATIC,
+            ],
+        )
+        self.assertTrue(all(isinstance(size, int) for size in t.size()))
+        self.assertTrue(all(isinstance(stride, int) for stride in t.stride()))
+
+        # check dynamic size but static dims
+        t = _create_symbolic_tensor(
+            x=torch.ones(3, 6),
+            dynamic_sizes=[
+                DimDynamic.DYNAMIC,
+                DimDynamic.DYNAMIC,
+            ],
+            dynamic_strides=[
+                DimDynamic.STATIC,
+                DimDynamic.STATIC,
+            ],
+        )
+        # Expect stride to be inferred
+        s0, s1 = t.size()
+        s2, s3 = t.stride()
+        self.assertTrue(isinstance(s0, torch.SymInt))
+        self.assertTrue(isinstance(s1, torch.SymInt))
+        self.assertTrue(isinstance(s2, torch.SymInt))
+        self.assertTrue(s1 == s2)
+        self.assertEqual(s3, 1)
+
+        # Check dynamic stride but static dims
+        t = _create_symbolic_tensor(
+            x=torch.ones(3, 6),
+            dynamic_sizes=[
+                DimDynamic.STATIC,
+                DimDynamic.STATIC,
+            ],
+            dynamic_strides=[
+                DimDynamic.DYNAMIC,
+                DimDynamic.STATIC,
+            ],
+        )
+        s0, s1 = t.size()
+        s2, s3 = t.stride()
+        self.assertTrue(isinstance(s0, int))
+        self.assertTrue(isinstance(s1, int))
+        self.assertTrue(isinstance(s2, torch.SymInt))
+        self.assertTrue(isinstance(s3, int))
+
+        # Check dynamic sizes and dims, and ensure different symbol
+        t = _create_symbolic_tensor(
+            x=torch.ones(3, 6),
+            dynamic_sizes=[
+                DimDynamic.DYNAMIC,
+                DimDynamic.DYNAMIC,
+            ],
+            dynamic_strides=[
+                DimDynamic.DYNAMIC,
+                DimDynamic.STATIC,
+            ],
+        )
+        print(t.size(), t.stride())
+        s0, s1 = t.size()
+        s2, s3 = t.stride()
+        self.assertTrue(isinstance(s0, torch.SymInt))
+        self.assertTrue(isinstance(s1, torch.SymInt))
+        self.assertTrue(isinstance(s2, torch.SymInt))
+        self.assertTrue(isinstance(s3, int))
+        self.assertFalse(s1 is s2)
 
 
 instantiate_parametrized_tests(TestSymNumberMagicMethods)

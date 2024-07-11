@@ -90,7 +90,8 @@ def fakify(
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
             symbolic_context.constraint_strides[i] = constraint.constraint_range
             symbolic_context.dynamic_sizes[i] = DimDynamic.DYNAMIC
-            symbolic_context.dynamic_strides[i] = DimDynamic.DYNAMIC
+            # STATIC strides means inferred strides from size
+            symbolic_context.dynamic_strides[i] = DimDynamic.STATIC
             src = TensorPropertySource(base=source, prop=TensorProperty.SIZE, idx=i)
             sources[(t_id, i)].append(src)
             mode.shape_env.source_name_to_debug_name[src.name()] = constraint.debug_name  # type: ignore[assignment]

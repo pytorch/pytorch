@@ -1019,8 +1019,6 @@ class DimDynamic(Enum):
     STATIC = 2
     # Treat the dimension as a size-like unbacked
     SIZE_LIKE_UNBACKED = 3
-    # Infer the stride
-    INFER_STRIDE = 4
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -3216,8 +3214,9 @@ class ShapeEnv:
                 key=_nested_int_aware_sort,
             )
             for _, i in val_list:
-                # Only set stride with candidates if it is marked INFER_STRIDE
-                if stride[i] is None and dynamic_strides[i] is DimDynamic.INFER_STRIDE and ex_stride[i] in candidates:
+                # Set stride to a candidate only for DimDynamic.STATIC. If DYNAMIC, the user wants to have a separate
+                # symbol for it.
+                if stride[i] is None and dynamic_strides[i] == DimDynamic.STATIC and ex_stride[i] in candidates:
                     stride[i] = candidates[ex_stride[i]]
                     candidates[ex_size[i] * ex_stride[i]] = size[i] * stride[i]
 
@@ -3522,8 +3521,6 @@ class ShapeEnv:
             duck = self.duck_shape
         elif dynamic_dim is DimDynamic.DYNAMIC:
             duck = False
-        elif dynamic_dim is DimDynamic.INFER_STRIDE:
-            duck = False
         else:
             raise AssertionError(f"unhandled dynamic_dim {dynamic_dim}")
 
@@ -3713,7 +3710,8 @@ class ShapeEnv:
             return StatelessSymbolicContext(
                 # Ignored; only the constraints part is relevant below.
                 dynamic_sizes=[DimDynamic.DYNAMIC] * t.dim(),
-                dynamic_strides=[DimDynamic.DYNAMIC] * t.dim(),
+                # STATIC stride means infer strides from size
+                dynamic_strides=[DimDynamic.STATIC] * t.dim(),
                 constraint_sizes=[None] * t.dim(),
                 constraint_strides=[None] * t.dim()
             )

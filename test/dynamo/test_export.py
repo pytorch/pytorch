@@ -3420,7 +3420,8 @@ def forward(self, x):
                     x,
                     symbolic_context=StatelessSymbolicContext(
                         dynamic_sizes=[DimDynamic.DYNAMIC for _ in range(x.dim())],
-                        dynamic_strides=[DimDynamic.DYNAMIC for _ in range(x.dim())],
+                        # stride being STATIC means infer from size
+                        dynamic_strides=[DimDynamic.STATIC for _ in range(x.dim())],
                     ),
                 )
                 for i, size in enumerate(size_tests):

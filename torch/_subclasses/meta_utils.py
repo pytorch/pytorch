@@ -882,6 +882,8 @@ class MetaConverter:
 
             t_symbolic_context: SymbolicContext
             t_dynamic_sizes = [DimDynamic.DYNAMIC] * t.ndim
+            # STATIC means Infer strides from sizes
+            t_dynamic_strides = [DimDynamic.STATIC] * t.ndim
             if t.is_traceable_wrapper_subclass:
                 assert t.attrs is not None
                 inner_contexts: Dict[str, SymbolicContext] = {}
@@ -892,7 +894,7 @@ class MetaConverter:
                     )
                 t_symbolic_context = SubclassSymbolicContext(
                     dynamic_sizes=t_dynamic_sizes,
-                    dynamic_strides=t_dynamic_sizes,
+                    dynamic_strides=t_dynamic_strides,
                     constraint_sizes=[None] * t.ndim,
                     constraint_strides=[None] * t.ndim,
                     inner_contexts=inner_contexts,  # type: ignore[arg-type]
@@ -902,7 +904,7 @@ class MetaConverter:
             else:
                 t_symbolic_context = StatelessSymbolicContext(
                     dynamic_sizes=t_dynamic_sizes,
-                    dynamic_strides=t_dynamic_sizes,
+                    dynamic_strides=t_dynamic_strides,
                     constraint_sizes=[None] * t.ndim,
                     constraint_strides=[None] * t.ndim,
                     view_base_context=view_base_context,

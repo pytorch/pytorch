@@ -2117,7 +2117,6 @@ def get_dynamic_dim(
     marked_weak_dynamic,
     static_shapes,
     marked_static,
-    is_stride,
 ):
     from torch.fx.experimental.symbolic_shapes import is_nested_int
 
@@ -2134,8 +2133,6 @@ def get_dynamic_dim(
         # case
         return DimDynamic.DYNAMIC
     elif static_shapes or config.assume_static_by_default or marked_static:
-        if is_stride:
-            return DimDynamic.INFER_STRIDE
         return DimDynamic.STATIC
     else:
         return DimDynamic.DUCK
@@ -2215,7 +2212,7 @@ def _automatic_dynamic(
                 for s in e.size()
             ],
             dynamic_strides=[
-                DimDynamic.INFER_STRIDE if isinstance(s, SymInt) else DimDynamic.STATIC
+                DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
                 for s in e.stride()
             ],
             constraint_sizes=[None] * e.dim(),
@@ -2265,19 +2262,21 @@ def _automatic_dynamic(
                         has_size_changed = True
                         frame_state_entry.size[i] = None
 
-                # We want to trigger dynamism for stride changes as well. But we have to be careful here, as stride can
-                # change due to various reasons. If stride changes just because size changes, we don't want to insert
-                # new symbols for it. If there is no connection between strides and sizes (e.g. if user, outside of
-                # torch.compile scope, is using views to create tensors of different shape and strides), then we do want
-                # track dynamism. This can complicate the logic.
+                # We want to trigger automatic dynamism when strides change, but we have to think whether stride should
+                # be STATIC or DYNAMIC. Stride marked as STATIC means that the stride will be INFERRED from the size.
+                #
+                # Case 1: if strides change because of size changes, we might not want to allocate a new symbol for
+                # stride. Lets say we have a tensor (10, 20) and we mark the dim=1 dynamic for size. Resulting size will
+                # be (10, s0) and stride can be either (s0, 1) or (s1, 1). In most cases, (s0, 1) is preferred because
+                # users are not changing both size and stride.
+                #
+                # Case 2: But for another case, lets suppose the size remains same between the two invocations but stride
+                # change. In this case, we definitely want to mark the changing stride to be DYNAMIC.
 
-                # To simplify, we think of 2 cases
-                # 1) size changes and stride changes - In this case, we assume that stride changes just because of size
-                # change and rely on INFER_STRIDE to insert symbols for stride. This can cause a few more recompilations
-                # if user intentionally changes strides and strides in arbitrary fashion.
-                # 2) size stays same but stride changes - Here, we instruct symbolic shape to conside the stride to be
-                # DYNAMIC and dont rely on INFER_STRIDE.
-
+                # Here, we use a hueristic to simplify determination of dynamic stride. For case 1, we will always
+                # assume that stride will be inferred (STATIC). This might be suboptimal, where user is doing something
+                # arbitrary size and stride resizing, and we fail to trigger dynamism, but we have not seen any cases
+                # yet. For case 2, we will mark the changing dimensions DYNAMIC.
                 if not has_size_changed:
                     for i, dim in enumerate(frame_state_entry.stride):
                         if dim is not None and e.stride()[i] != dim:
@@ -2350,6 +2349,8 @@ def _automatic_dynamic(
             frame_state_entry.stride is None or frame_state_entry.stride[i] is None
         )
 
+        automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
+
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
         if frame_state_entry.size and marked_dynamic:
@@ -2384,9 +2385,7 @@ def _automatic_dynamic(
                         )
                 else:
                     constraint_size = RelaxedUnspecConstraint(warn_only=False)
-            elif not marked_static and (
-                automatic_dynamic_size or automatic_dynamic_stride
-            ):
+            elif not marked_static and automatic_dynamic:
                 if automatic_dynamic_size:
                     constraint_size = RelaxedUnspecConstraint(warn_only=True)
                 if automatic_dynamic_stride:
@@ -2411,7 +2410,6 @@ def _automatic_dynamic(
             marked_weak_dynamic,
             static_shapes,
             marked_static,
-            is_stride=False,
         )
         dynamic_stride = get_dynamic_dim(
             e.stride()[i],
@@ -2421,7 +2419,6 @@ def _automatic_dynamic(
             marked_weak_dynamic,
             static_shapes,
             marked_static,
-            is_stride=True,
         )
         dynamic_sizes.append(dynamic_size)
         dynamic_strides.append(dynamic_stride)

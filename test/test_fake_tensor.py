@@ -643,7 +643,7 @@ class FakeTensorTest(TestCase):
             torch.randn(10),
             symbolic_context=StatelessSymbolicContext(
                 dynamic_sizes=[DimDynamic.DYNAMIC],
-                dynamic_strides=[DimDynamic.DYNAMIC],
+                dynamic_strides=[DimDynamic.STATIC],
                 constraint_sizes=[None],
                 constraint_strides=[None]
             ),

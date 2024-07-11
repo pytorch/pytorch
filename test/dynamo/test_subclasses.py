@@ -807,14 +807,16 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                     x,
                     symbolic_context=StatelessSymbolicContext(
                         dynamic_sizes=[dim_dynamic for i in range(x.dim())],
-                        dynamic_strides=[dim_dynamic for i in range(x.dim())],
+                        # STATIC strides means inferred strides from size
+                        dynamic_strides=[DimDynamic.STATIC for i in range(x.dim())],
                     ),
                 )
                 x1_fake = fake_mode.from_tensor(
                     x1,
                     symbolic_context=StatelessSymbolicContext(
                         dynamic_sizes=[dim_dynamic for i in range(x.dim())],
-                        dynamic_strides=[dim_dynamic for i in range(x.dim())],
+                        # STATIC strides means inferred strides from size
+                        dynamic_strides=[DimDynamic.STATIC for i in range(x.dim())],
                     ),
                 )
                 opt_f(x_fake)
@@ -845,7 +847,8 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                         inp,
                         symbolic_context=StatelessSymbolicContext(
                             [dim_dynamic for i in range(x.dim())],
-                            [dim_dynamic for i in range(x.dim())],
+                            # STATIC strides means inferred strides from size
+                            [DimDynamic.STATIC for i in range(x.dim())],
                         ),
                     )
                     opt_f(fake_inp)
@@ -1388,7 +1391,8 @@ s1 > 3""",
                     x,
                     symbolic_context=StatelessSymbolicContext(
                         dynamic_sizes=[DimDynamic.DYNAMIC for i in range(x.dim())],
-                        dynamic_strides=[DimDynamic.DYNAMIC for i in range(x.dim())],
+                        # STATIC strides means inferred strides from size
+                        dynamic_strides=[DimDynamic.STATIC for i in range(x.dim())],
                     ),
                 )
                 for i, size in enumerate(sizes):
