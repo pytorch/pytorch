@@ -1,5 +1,8 @@
 # mypy: allow-untyped-defs
-import halide as hl  # type: ignore[import-untyped, import-not-found]
+try:
+    import halide as hl  # type: ignore[import-untyped, import-not-found]
+except ImportError:
+    hl = None
 
 PHILOX_N_ROUNDS_DEFAULT = 10  # Default number of rounds for philox
 PHILOX_KEY_A_U32 = hl.u32(0x9E3779B9)
@@ -93,7 +96,7 @@ def halide_philox(seed, c0, c1, c2, c3, n_rounds):
 
 def randint4x(seed: hl.Expr, offsets: hl.Expr, n_rounds):
     offsets = hl.cast(hl.UInt(32), offsets)
-    _0 = offsets * hl.u32(0)
+    _0 = hl.u32(0)
     return halide_philox(seed, offsets, _0, _0, _0, n_rounds)
 
 
@@ -132,7 +135,7 @@ def randint64(seed: hl.Expr, offsets: hl.Expr, low, high):
     result = r0 | (r1 << 32)
     size = high - low
     result = result % hl.cast(hl.UInt(64), size)
-    result = hl.cast(hl.UInt(64), result) + low
+    result = hl.cast(hl.Int(64), result) + low
     return result
 
 
