@@ -10,9 +10,9 @@ namespace detail {
 class StatImpl;
 } // namespace detail
 
-class IntegralStat {
+class PeriodicSumStat {
  public:
-  explicit IntegralStat(std::string_view key);
+  explicit PeriodicSumStat(std::string_view key);
   void addValue(
       double value,
       std::chrono::steady_clock::time_point now =

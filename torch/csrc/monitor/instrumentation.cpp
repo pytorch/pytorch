@@ -23,7 +23,7 @@ ssize_t toTimestampUs(std::chrono::steady_clock::time_point now) {
 } // namespace
 
 struct WaitCounterHandle::State {
-  explicit State(const std::string& key) : stats_{key}, key_{key} {}
+  explicit State(const std::string& key) : waitStat_{key}, key_{key} {}
 
   ~State() {
     DCHECK(
@@ -50,7 +50,7 @@ struct WaitCounterHandle::State {
     DCHECK(
         lastPublishUsAndRefCountNew.refCount() ==
         lastPublishUsAndRefCountSnapshot.refCount());
-    stats_.addValue(
+    waitStat_.addValue(
         lastPublishUsAndRefCountNew.timestampUs() -
         lastPublishUsAndRefCountSnapshot.timestampUs());
   }
@@ -102,8 +102,8 @@ struct WaitCounterHandle::State {
     if (lastPublishUsAndRefCountNew.refCount()) {
       return;
     }
-    stats_.addValue(
-        toTimestampUs(now) - lastPublishUsAndRefCountSnapshot.timestampUs());
+    waitStat_.addValue(
+       double(toTimestampUs(now) - lastPublishUsAndRefCountSnapshot.timestampUs()));
   }
 
  private:
@@ -137,7 +137,7 @@ struct WaitCounterHandle::State {
     ssize_t storage_{-1};
   };
 
-  IntegralStat stats_;
+  PeriodicSumStat waitStat_;
   // wait_start_timestamp * kMaxRefCount_ + (num_waiters - 1). -1 if wait is not
   // active
   std::atomic<LastPublishUsAndRefCount> lastPublishUsAndRefCount_{};
