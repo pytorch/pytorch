@@ -628,6 +628,29 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_comm_split_group(self):
+        # Test `ncclCommSplit` for smaller subgroups of the world when
+        # we've passed a specific device_id to init_process_group.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        backend = pg._get_backend(torch.device(device))
+
+        tensor = torch.full((1,), self.rank).cuda(device)
+        ng1 = c10d.split_group(pg, [[0, 1]])
+
+        # comm split happens eagerly since device_id is passed to init_process_group.
+        self.assertEqual(backend.comm_split_count(), 1)
+        dist.broadcast(tensor, 0, group=ng1)
+        self.assertEqual(tensor, torch.full((1,), 0))
+
+        ng2 = c10d.split_group(pg, [[0, 1]])
+        self.assertEqual(backend.comm_split_count(), 2)
+        
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_non_blocking_init(self):
         # Test creating a pg using nonblocking mode but not eagerly
         os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
@@ -4227,6 +4250,113 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
             del process_group
             sys.exit(1)
 
+# tests that needs to be run with a larger world size
+class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
+    def _create_process_group_nccl(self, store, opts, device_id=None):
+        # create nccl processgroup with opts
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            pg_options=opts,
+            device_id=device_id,
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+        return pg
+
+    def opts(self, high_priority_stream=False):
+        opts = c10d.ProcessGroupNCCL.Options()
+        opts.is_high_priority_stream = high_priority_stream
+        return opts
+
+    def setUp(self):
+        super().setUp()
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        # self.num_gpus = torch.cuda.device_count()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def world_size(self):
+        return 8
+
+    @property
+    def rank_to_GPU(self):
+        # return rank to GPU map
+        return init_multigpu_helper(self.world_size, "nccl")
+
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_if_lt_x_gpu(8)
+    def test_comm_split_group_larger_scale(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        backend = pg._get_backend(torch.device(device))
+
+        tensor = torch.full((1,), self.rank).cuda(device)
+        ng1 = c10d.split_group(pg, [[0, 1], [2, 3 ,4, 5, 6, 7]])
+        backend1 = ng1._get_backend(torch.device(device))
+
+        # comm split happens eagerly since device_id is passed to init_process_group.
+        self.assertEqual(backend.comm_split_count(), 1)
+        # dist.broadcast take Source rank on global process group
+        if self.rank < 2:
+            dist.broadcast(tensor, 0, group=ng1)
+            self.assertEqual(tensor, torch.full((1,), 0))
+        else:
+            dist.broadcast(tensor, 2, group=ng1)
+            self.assertEqual(tensor, torch.full((1,), 2))
+        
+        # test split with only one colored group, other ranks should be no color split too.
+        ng2 = c10d.split_group(pg, [[0, 2]])
+        self.assertEqual(backend.comm_split_count(), 2)      
+               
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_if_lt_x_gpu(8)
+    def test_comm_recursive_split_group(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        backend = pg._get_backend(torch.device(device))
+
+        tensor = torch.full((1,), self.rank).cuda(device)
+        ng1 = c10d.split_group(pg, [[0, 1, 2, 3], [4, 5, 6, 7]])
+        backend1 = ng1._get_backend(torch.device(device))
+
+        # comm split happens eagerly since device_id is passed to init_process_group.
+        self.assertEqual(backend.comm_split_count(), 1)
+        self.assertEqual(backend1.comm_split_count(), 0)
+
+        ng2 = c10d.split_group(ng1, [[0, 1], [2, 3]])
+        backend2 = ng2._get_backend(torch.device(device))
+        self.assertEqual(backend.comm_split_count(), 1)
+        self.assertEqual(backend1.comm_split_count(), 1)
+        self.assertEqual(backend2.comm_split_count(), 0)
+
+        if self.rank == 0 or self.rank == 1:
+            dist.broadcast(tensor, 1, group=ng2)
+            self.assertEqual(tensor, torch.full((1,), 1))
+        
+        if self.rank == 2 or self.rank == 3:
+            dist.broadcast(tensor, 2, group=ng2)
+            self.assertEqual(tensor, torch.full((1,), 2))
+      
+               
+        dist.destroy_process_group()
 
 if __name__ == "__main__":
     assert (
