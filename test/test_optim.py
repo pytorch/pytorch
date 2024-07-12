@@ -1328,7 +1328,10 @@ class TestOptimRenewed(TestCase):
             loss = (w.mv(i) + b).pow(2).sum()
             loss.backward()
             if optim.__class__.__name__ == "SparseAdam":
-                optim.grad = optim.grad.to_sparse()
+                if w.grad is not None:
+                    w.grad = w.grad.to_sparse()
+                if b.grad is not None:
+                    b.grad = b.grad.to_sparse()
             return loss
 
         for optim_input in all_optim_inputs:
