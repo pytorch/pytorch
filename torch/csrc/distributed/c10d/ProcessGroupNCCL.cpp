@@ -2115,7 +2115,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // Get the device index
   auto deviceIndex = device.index();
   gpuGuard.set_index(deviceIndex);
+
 #ifdef NCCL_HAS_COMM_SPLIT
+  options_->config.splitShare = 1;
   if (options_->split_from) {
     TORCH_CHECK(
         options_->split_color != 0,
