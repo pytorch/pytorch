@@ -4313,7 +4313,7 @@ def split_group(
     parent_pg: Optional[ProcessGroup] = None,
     split_ranks: Optional[list[list[int]]] = None,
     timeout: Optional[timedelta] = None,
-    pg_options: Optional[ProcessGroupNCCL.Options] = None,
+    pg_options: Optional[Any] = None,
     group_desc: Optional[str] = None,
 ) -> Optional[ProcessGroup]:
     """
@@ -4335,7 +4335,7 @@ def split_group(
             [[0, 1], [2, 3]]. Note [[0,1]] is also a valid split, in which case ranks 2, 3 would
             return a non-group member.
         timeout (timedelta, optional): see `init_process_group` for details and default value.
-        pg_options (ProcessGroupNCCLOptions, optional): process group options
+        pg_options (ProcessGroupOptions, optional): only ProcessGroupNCCLOptions is supported now.
             specifying what additional options need to be passed in during
             the construction of specific process groups. i.e.``is_high_priority_stream``
             can be specified so that process group can pick up high priority cuda streams.
