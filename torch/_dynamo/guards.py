@@ -18,7 +18,6 @@ import sys
 import textwrap
 import types
 import weakref
-from contextlib import contextmanager
 from inspect import currentframe, getframeinfo
 from typing import (
     Any,
@@ -86,6 +85,7 @@ from .source import (
     GradSource,
     LocalSource,
     NNModuleSource,
+    NotNNModuleSource,
     NumpyTensorSource,
     ODictGetItemSource,
     OptimizerSource,
@@ -94,8 +94,6 @@ from .source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
     TypeSource,
-    UnspecializedBuiltinNNModuleSource,
-    UnspecializedNNModuleSource,
     WeakRefCallSource,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
@@ -158,16 +156,6 @@ class GuardManager:
         self.id_matched_objs = None
         self.no_tensor_aliasing_sources = []
 
-        self.print_no_tensor_aliasing_guard = True
-
-    @contextmanager
-    def _preserve_print_no_tensor_aliasing_flag(self):
-        self.print_no_tensor_aliasing_guard = True
-        try:
-            yield
-        finally:
-            self.print_no_tensor_aliasing_guard = True
-
     def get_guard_lines(self, guard):
         guard_name = guard.__class__.__name__
         parts = guard.verbose_code_parts()
@@ -197,18 +185,7 @@ class GuardManager:
     def construct_manager_string(self, mgr, body):
         with body.indent():
             for guard in mgr.get_leaf_guards():
-                if isinstance(guard, torch._C._dynamo.guards.NO_TENSOR_ALIASING):  # type: ignore[attr-defined]
-                    if self.print_no_tensor_aliasing_guard:
-                        self.print_no_tensor_aliasing_guard = False
-                        body.writelines(self.get_guard_lines(guard))
-                    else:
-                        body.writelines(
-                            [
-                                guard.__class__.__name__,
-                            ]
-                        )
-                else:
-                    body.writelines(self.get_guard_lines(guard))
+                body.writelines(self.get_guard_lines(guard))
 
             # This works for both DictGuardManager and SubclassedDictGuardManager
             if isinstance(mgr, DictGuardManager):
@@ -236,16 +213,15 @@ class GuardManager:
                 else:
                     super().writeline("+- " + line)
 
-        with self._preserve_print_no_tensor_aliasing_flag():
-            body = IndentedBufferWithPrefix()
-            body.tabwidth = 1
-            body.writeline("", skip_prefix=True)
-            body.writeline("TREE_GUARD_MANAGER:", skip_prefix=True)
-            body.writeline("RootGuardManager")
-            self.construct_manager_string(self.root, body)
-            for guard in self.root.get_epilogue_lambda_guards():
-                body.writelines(self.get_guard_lines(guard))
-            return body.getvalue()
+        body = IndentedBufferWithPrefix()
+        body.tabwidth = 1
+        body.writeline("", skip_prefix=True)
+        body.writeline("TREE_GUARD_MANAGER:", skip_prefix=True)
+        body.writeline("RootGuardManager")
+        self.construct_manager_string(self.root, body)
+        for guard in self.root.get_epilogue_lambda_guards():
+            body.writelines(self.get_guard_lines(guard))
+        return body.getvalue()
 
     def check(self, x):
         # Only needed for debugging purposes.
@@ -645,7 +621,7 @@ class GuardBuilder(GuardBuilderBase):
                     source=key_source,
                     example_value=key,
                     guard_manager_enum=GuardManagerType.GUARD_MANAGER,
-                ).add_equals_match_guard(key, [f"{key_source} == {key!r}"])
+                ).add_equals_match_guard(l2_key, [f"{key_source} == {l2_key!r}"])
 
                 # Install the value manager
                 return mgr.get_value_manager(
@@ -857,13 +833,7 @@ class GuardBuilder(GuardBuilderBase):
             )
         elif istype(
             source,
-            (
-                OptimizerSource,
-                NNModuleSource,
-                UnspecializedNNModuleSource,
-                FSDPNNModuleSource,
-                UnspecializedBuiltinNNModuleSource,
-            ),
+            (OptimizerSource, NNModuleSource, NotNNModuleSource, FSDPNNModuleSource),
         ):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager

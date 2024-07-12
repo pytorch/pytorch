@@ -87,7 +87,7 @@ struct StreamData3Holder : c10::intrusive_ptr_target {
 } // namespace ivalue
 
 // This is an owning wrapper for a std::optional<std::vector<T>>
-// that can be implicitly converted to a (non-owning) std::optional<ArrayRef<T>>.
+// that can be implicitly converted to a (non-owning) optional<ArrayRef<T>>.
 // Its purpose is to be used in generated code to keep the vector alive
 // either until the end of a statement (as a temporary), or as a saved arg
 // in autograd.
@@ -1021,9 +1021,9 @@ struct TORCH_API IValue final {
   // ToOptional: convert a IValue to the Optional obj that accepts both T and
   // None
   template <typename T>
-  std::optional<T> toOptional();
+  optional<T> toOptional();
   template <typename T>
-  std::optional<T> toOptional() const;
+  optional<T> toOptional() const;
 
   /// @private [doxygen private]
   /// this is a shallow comparison of two IValues to test the object identity

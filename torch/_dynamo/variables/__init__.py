@@ -80,11 +80,7 @@ from .misc import (
     TypingVariable,
     UnknownVariable,
 )
-from .nn_module import (
-    NNModuleVariable,
-    UnspecializedBuiltinNNModuleVariable,
-    UnspecializedNNModuleVariable,
-)
+from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
@@ -160,7 +156,6 @@ __all__ = [
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",
-    "UnspecializedBuiltinNNModuleVariable",
     "UnspecializedPythonVariable",
     "UntypedStorageVariable",
     "UserDefinedClassVariable",

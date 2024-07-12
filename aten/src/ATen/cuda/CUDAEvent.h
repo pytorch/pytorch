@@ -72,7 +72,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     return left.event_ < right.event_;
   }
 
-  std::optional<at::Device> device() const {
+  optional<at::Device> device() const {
     if (is_created_) {
       return at::Device(at::kCUDA, device_index_);
     } else {

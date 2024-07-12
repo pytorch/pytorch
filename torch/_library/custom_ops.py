@@ -205,27 +205,6 @@ class CustomOpDef:
         Args:
             device_type (str): The device type to disable/enable the kernel for.
             disable (bool): Whether to disable or enable the kernel.
-
-        Example:
-            >>> inp = torch.randn(1)
-            >>>
-            >>> # define custom op `f`.
-            >>> @custom_op("mylib::f", mutates_args=())
-            >>> def f(x: Tensor) -> Tensor:
-            >>>     return torch.zeros(1)
-            >>>
-            >>> print(f(inp))  # tensor([0.]), default kernel
-            >>>
-            >>> @f.register_kernel("cpu")
-            >>> def _(x):
-            >>>     return torch.ones(1)
-            >>>
-            >>> print(f(inp))  # tensor([1.]), CPU kernel
-            >>>
-            >>> # temporarily disable the CPU kernel
-            >>> with f.set_kernel_enabled("cpu", enabled = False):
-            >>>     print(f(inp))  # tensor([0.]) with CPU kernel disabled
-
         """
         action = "enable" if enabled else "disable"
         originally_disabled = device_type in self._disabled_kernel

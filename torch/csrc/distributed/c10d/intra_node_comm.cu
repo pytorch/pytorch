@@ -441,18 +441,13 @@ static inline size_t alignUp(uint32_t a, uint32_t b) {
   return divUp(a, b) * b;
 }
 
-static void checkInput(const at::Tensor& input, int deviceIdx) {
+static void checkInput(const at::Tensor& input, size_t rank) {
   TORCH_CHECK(
       input.dtype() == at::kBFloat16,
       "oneShotAllReduce only supports bf16 for now");
   TORCH_CHECK(input.is_non_overlapping_and_dense());
   TORCH_CHECK(input.device().is_cuda());
-  TORCH_CHECK(
-      input.get_device() == deviceIdx,
-      "IntraNodeComm: expect input to be on device ",
-      deviceIdx,
-      ", got device ",
-      input.get_device());
+  TORCH_CHECK(static_cast<size_t>(input.get_device()) == rank);
 }
 
 static void getLaunchConfig(
@@ -512,7 +507,7 @@ void* initTopoInfo(Topology topology, NvlMesh nvlMesh, size_t rank) {
 at::Tensor IntraNodeComm::oneShotAllReduce(
     const at::Tensor& input,
     at::cuda::CUDAStream& stream) {
-  checkInput(input, deviceIdx_);
+  checkInput(input, rank_);
 
   const size_t numelPerWarp =
       kBytesPerThread / input.element_size() * kWarpSize;

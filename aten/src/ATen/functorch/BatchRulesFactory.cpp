@@ -16,7 +16,7 @@ template <typename F, F Func, typename A, typename B, typename... T>
 struct NewBlahBatchRuleHelperSymInt<F, Func, typelist<A, B, T...>> {
   static std::tuple<Tensor,optional<int64_t>> apply(
       const Tensor& tensor,
-      std::optional<int64_t> batch_dim,
+      optional<int64_t> batch_dim,
       SymIntArrayRef shape,
       T... extra_args) {
     const auto bdim_size = tensor.sym_size(batch_dim.value());
@@ -35,7 +35,7 @@ template <typename F, F Func, typename A, typename B, typename... T>
 struct NewBlahBatchRuleHelper<F, Func, typelist<A, B, T...>> {
   static std::tuple<Tensor,optional<int64_t>> apply(
       const Tensor& tensor,
-      std::optional<int64_t> batch_dim,
+      optional<int64_t> batch_dim,
       IntArrayRef shape,
       T... extra_args) {
     const auto bdim_size = tensor.size(batch_dim.value());
@@ -63,8 +63,8 @@ struct NewBlahBatchRuleHelper<F, Func, typelist<A, B, T...>> {
       c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
 static std::tuple<Tensor,optional<int64_t>> _new_zeros_with_same_feature_meta_batch_rule(
-    const Tensor& self, std::optional<int64_t> self_bdim,
-    const Tensor& other, std::optional<int64_t> other_bdim,
+    const Tensor& self, optional<int64_t> self_bdim,
+    const Tensor& other, optional<int64_t> other_bdim,
     int64_t self_num_batch_dims) {
   // The "self, other" naming is too confusing
   // What this function really says is "create a new tangent for this base".
@@ -104,8 +104,8 @@ static std::tuple<Tensor,optional<int64_t>> _new_zeros_with_same_feature_meta_ba
 }
 
 static std::tuple<Tensor,optional<int64_t>> linspace_logspace_batch_rule_helper(
-    const at::Tensor& start, std::optional<int64_t> start_bdim,
-    const at::Tensor& end, std::optional<int64_t> end_bdim,
+    const at::Tensor& start, optional<int64_t> start_bdim,
+    const at::Tensor& end, optional<int64_t> end_bdim,
     int64_t steps,
     std::optional<double> base,
     std::optional<at::ScalarType> dtype,
@@ -142,8 +142,8 @@ static std::tuple<Tensor,optional<int64_t>> linspace_logspace_batch_rule_helper(
 }
 
 static std::tuple<Tensor,optional<int64_t>> linspace_Tensor_Tensor_batch_rule(
-    const at::Tensor& start, std::optional<int64_t> start_bdim,
-    const at::Tensor& end, std::optional<int64_t> end_bdim,
+    const at::Tensor& start, optional<int64_t> start_bdim,
+    const at::Tensor& end, optional<int64_t> end_bdim,
     int64_t steps,
     std::optional<at::ScalarType> dtype,
     std::optional<at::Layout> layout,
@@ -153,7 +153,7 @@ static std::tuple<Tensor,optional<int64_t>> linspace_Tensor_Tensor_batch_rule(
 }
 
 static std::tuple<Tensor,optional<int64_t>> linspace_Tensor_Scalar_batch_rule(
-    const at::Tensor& start, std::optional<int64_t> start_bdim,
+    const at::Tensor& start, optional<int64_t> start_bdim,
     const at::Scalar& end,
     int64_t steps,
     std::optional<at::ScalarType> dtype,
@@ -167,7 +167,7 @@ static std::tuple<Tensor,optional<int64_t>> linspace_Tensor_Scalar_batch_rule(
 
 static std::tuple<Tensor,optional<int64_t>> linspace_Scalar_Tensor_batch_rule(
     const at::Scalar& start,
-    const at::Tensor& end, std::optional<int64_t> end_bdim,
+    const at::Tensor& end, optional<int64_t> end_bdim,
     int64_t steps,
     std::optional<at::ScalarType> dtype,
     std::optional<at::Layout> layout,
@@ -179,8 +179,8 @@ static std::tuple<Tensor,optional<int64_t>> linspace_Scalar_Tensor_batch_rule(
 }
 
 static std::tuple<Tensor,optional<int64_t>> logspace_Tensor_Tensor_batch_rule(
-    const at::Tensor& start, std::optional<int64_t> start_bdim,
-    const at::Tensor& end, std::optional<int64_t> end_bdim,
+    const at::Tensor& start, optional<int64_t> start_bdim,
+    const at::Tensor& end, optional<int64_t> end_bdim,
     int64_t steps,
     double base,
     std::optional<at::ScalarType> dtype,
@@ -191,7 +191,7 @@ static std::tuple<Tensor,optional<int64_t>> logspace_Tensor_Tensor_batch_rule(
 }
 
 static std::tuple<Tensor,optional<int64_t>> logspace_Tensor_Scalar_batch_rule(
-    const at::Tensor& start, std::optional<int64_t> start_bdim,
+    const at::Tensor& start, optional<int64_t> start_bdim,
     const at::Scalar& end,
     int64_t steps,
     double base,
@@ -206,7 +206,7 @@ static std::tuple<Tensor,optional<int64_t>> logspace_Tensor_Scalar_batch_rule(
 
 static std::tuple<Tensor,optional<int64_t>> logspace_Scalar_Tensor_batch_rule(
     const at::Scalar& start,
-    const at::Tensor& end, std::optional<int64_t> end_bdim,
+    const at::Tensor& end, optional<int64_t> end_bdim,
     int64_t steps,
     double base,
     std::optional<at::ScalarType> dtype,

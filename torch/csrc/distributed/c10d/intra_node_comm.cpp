@@ -280,8 +280,8 @@ bool IntraNodeComm::rendezvous() {
     return false;
   }
 
-  deviceIdx_ = at::cuda::current_device();
-  c10::cuda::CUDAGuard guard(deviceIdx_);
+  auto deviceIdx = at::cuda::current_device();
+  c10::cuda::CUDAGuard guard(deviceIdx);
 
   // First hand shake: exchange hostname and device bus ID
   struct DevInfo {
@@ -292,7 +292,7 @@ bool IntraNodeComm::rendezvous() {
   DevInfo devInfo{};
   gethostname(devInfo.hostname, sizeof(devInfo.hostname));
   cudaDeviceProp prop{};
-  AT_CUDA_CHECK(cudaGetDeviceProperties(&prop, deviceIdx_));
+  AT_CUDA_CHECK(cudaGetDeviceProperties(&prop, deviceIdx));
   snprintf(
       devInfo.busId,
       sizeof(devInfo.busId),
@@ -334,7 +334,7 @@ bool IntraNodeComm::rendezvous() {
   auto groupName = "IntraNodeComm" + std::to_string(intraNodeCommIdx++);
   set_group_info(groupName, rank_, worldSize_, store_);
   auto allocator = get_allocator(c10::DeviceType::CUDA);
-  symmetricMemoryPtr_ = allocator->alloc(bufferSize_, deviceIdx_, groupName);
+  symmetricMemoryPtr_ = allocator->alloc(bufferSize_, deviceIdx, groupName);
   symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_);
   TORCH_CHECK(symmetricMemory_->get_signal_pad_size() >= kP2pStateSize);
 

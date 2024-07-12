@@ -1534,10 +1534,10 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
   auto ind_sort = std::get<1>(ind_sort_);
   auto offset2bag = offset2bag_.index_select(0, ind_sort);
 
-  std::optional<Tensor> per_sample_weights;
+  optional<Tensor> per_sample_weights;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const scalar_t* per_sample_weights_data;
-  std::optional<int64_t> per_sample_weights_stride;
+  optional<int64_t> per_sample_weights_stride;
   if (per_sample_weights_.defined()) {
     per_sample_weights = per_sample_weights_.index_select(0, ind_sort);
     per_sample_weights_data = per_sample_weights->const_data_ptr<scalar_t>();

@@ -434,7 +434,7 @@ public:
     std::optional<std::variant<OperatorName, FunctionSchema>> schemaOrName_;
 
     std::vector<KernelRegistrationConfig> kernels;
-    std::optional<AliasAnalysisKind> aliasAnalysisKind_;
+    optional<AliasAnalysisKind> aliasAnalysisKind_;
     friend class RegisterOperators;
     friend class Library;
   };

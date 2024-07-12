@@ -16,7 +16,7 @@ class TensorBase;
 // actually exists outside of c10 and needs to be moved in.
 
 // TensorImpl has a unique_ptr<NamedTensorMetaInterface> field.
-// XXX: Ideally we would just put std::optional<vector<Dimname>> into TensorImpl.
+// XXX: Ideally we would just put optional<vector<Dimname>> into TensorImpl.
 //
 // This class has an important invariant: there must be at least ONE
 // non-wildcard
