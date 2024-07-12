@@ -953,6 +953,7 @@ def register_torch_dispatch(
     else:
         return register(func)
 
+
 def register_vmap(
     op: _op_identifier,
     func: Callable,
@@ -987,14 +988,17 @@ def register_vmap(
         lib = Library(namespace, "FRAGMENT")
         _keep_alive.append(lib)
 
-    from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
     from torch._functorch.autograd_function import custom_function_call_vmap_helper
+    from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
 
     def wrapped_func(keyset, *args, **kwargs):
         interpreter = retrieve_current_functorch_interpreter()
-        return custom_function_call_vmap_helper(interpreter, func, None, *args, **kwargs)
+        return custom_function_call_vmap_helper(
+            interpreter, func, None, *args, **kwargs
+        )
 
     lib.impl(opname, wrapped_func, "FuncTorchBatched", with_keyset=True)
+
 
 # If the op was defined in C++, then we want to make sure there was an
 # m.set_python_module(module, ...) call and that the module is the
