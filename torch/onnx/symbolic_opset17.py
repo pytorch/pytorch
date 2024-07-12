@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+# mypy: disable-error-code=arg-type
 """This file exports ONNX ops for opset 17.
 
 Note [ONNX Operators that are added/updated in opset 17]
@@ -153,7 +154,7 @@ def stft(
             signal,
             g.op("Constant", value_t=torch.tensor([0], dtype=torch.int64)),
         )
-    elif signal_rank > 2:
+    elif signal_rank is None or signal_rank > 2:
         raise errors.SymbolicValueError(
             msg="STFT can only take inputs of 1 [signal] or 2 [batch, signal] dimensions. "
             f"Current rank of signal is {signal_rank}, please reduce it.",

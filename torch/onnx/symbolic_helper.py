@@ -358,7 +358,7 @@ def quantized_args(
                 return descriptor and _is_value(arg) and _is_tuple_construct(arg)
 
             # Run regular symbolic function if none of the argument is QTensor.
-            is_quantized = list()
+            is_quantized = []
             for descriptor, arg in descriptor_args:
                 # ListConstruct
                 if _is_packed_list(arg):
@@ -640,10 +640,10 @@ def _type_promote_from_values(*args) -> _type_utils.JitScalarType:
     if len(jit_types) == 0:
         return undef
     if len(jit_types) == 1:
-        return jit_types[0]
-    new_dtype = jit_types[0].dtype()
+        return jit_types[0]  # type: ignore[return-value]
+    new_dtype = jit_types[0].dtype()  # type: ignore[union-attr]
     for t in jit_types:
-        new_dtype = torch.promote_types(new_dtype, t.dtype())
+        new_dtype = torch.promote_types(new_dtype, t.dtype())  # type: ignore[union-attr]
     return _type_utils.JitScalarType.from_dtype(new_dtype)
 
 
@@ -1237,7 +1237,7 @@ def _repeat_interleave_single_value_repeat_helper(
     # repeats_per_dim is 1 for all dims except for the new unsqueezed dim, where it has value 'repeats'.
     if const_repeats:
         # 'Repeats' is a constant, 'repeats_per_dim' can be a constant.
-        onehot = torch.ones(_get_tensor_rank(unsqueezed), dtype=torch.int64)
+        onehot = torch.ones(_get_tensor_rank(unsqueezed), dtype=torch.int64)  # type: ignore[arg-type]
         onehot[dim + 1] = reps
         repeats_per_dim = g.op("Constant", value_t=onehot)
     else:
@@ -1724,7 +1724,7 @@ def _apply_params(*args, **kwargs):
 def _reduce_op_symbolic_helper(onnx_op_name, allow_multi_dim_support=True):
     def symbolic(g, self, dim=None, keepdim=None):
         self = _maybe_cast_reduce_op_input(g, self)
-        if dim is None or dim == tuple():
+        if dim is None or dim == ():
             # Dim can be 0, which will cause (not dim) == True. So we don't want to do
             # (not dim)
             # all-reduce path

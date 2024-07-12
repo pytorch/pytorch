@@ -263,7 +263,7 @@ def _fx_args_to_torch_args(
                     f"{type(fake_tensor)}."
                 )
         elif isinstance(arg, Sequence):
-            wrapped_args.append(_fx_args_to_torch_args(arg, fx_graph_module))
+            wrapped_args.append(_fx_args_to_torch_args(arg, fx_graph_module))  # type: ignore[arg-type]
         elif isinstance(arg, (int, float, torch.dtype)) or arg is None:
             wrapped_args.append(arg)
         elif isinstance(arg, torch.device):
@@ -365,7 +365,7 @@ def _convert_tensor_to_numpy(input: fx_type_utils.Argument) -> Any:
             input = torch.view_as_real(input.resolve_conj())
         return input.detach().cpu().numpy()
     if isinstance(input, torch.dtype):
-        return int(jit_type_utils.JitScalarType.from_dtype(input).onnx_type())  # type: ignore[union-attr]
+        return int(jit_type_utils.JitScalarType.from_dtype(input).onnx_type())  # type: ignore[union-attr,call-overload]
     if isinstance(input, (tuple, list)):
         if len(input) == 0:
             return np.array((), dtype=np.int64)

@@ -230,7 +230,7 @@ class _ModuleStackMeta:
             if is_exported_program:
                 is_exported_program = False
                 continue
-            self.push(_ModuleMeta.from_raw_meta(item))
+            self.push(_ModuleMeta.from_raw_meta(item))  # type: ignore[arg-type]
 
     def __len__(self) -> int:
         return len(self._module_stack)

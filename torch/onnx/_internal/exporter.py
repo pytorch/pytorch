@@ -393,7 +393,7 @@ class ResolvedExportOptions(ExportOptions):
             else:
                 self.fx_tracer = dynamo_graph_extractor.DynamoExport()
 
-            self.fake_context = resolve(options.fake_context, None)
+            self.fake_context = resolve(options.fake_context, None)  # type: ignore[arg-type]
             self.diagnostic_context = diagnostics.DiagnosticContext(
                 "torch.onnx.dynamo_export",
                 torch.__version__,
@@ -401,10 +401,8 @@ class ResolvedExportOptions(ExportOptions):
             )
 
             self.onnx_registry = resolve(options.onnx_registry, OnnxRegistry())
-            self.decomposition_table = (
-                decomposition_table.create_onnx_friendly_decomposition_table(
-                    self.onnx_registry
-                )
+            self.decomposition_table = decomposition_table.create_onnx_friendly_decomposition_table(  # type: ignore[assignment]
+                self.onnx_registry
             )
 
             from torch.onnx._internal.fx import onnxfunction_dispatcher
@@ -731,7 +729,7 @@ class ONNXProgram:
             ort_session = onnxruntime.InferenceSession(onnx_model, providers=providers)
 
             onnxruntime_input = {
-                k.name: v.numpy(force=True)
+                k.name: v.numpy(force=True)  # type: ignore[union-attr]
                 for k, v in zip(ort_session.get_inputs(), onnx_input)
             }
 
@@ -920,7 +918,7 @@ class ONNXProgram:
         assert (
             model_with_state_dict is not None
         ), "model_with_state_dict must be specified."
-        return self._input_adapter.apply(
+        return self._input_adapter.apply(  # type: ignore[return-value]
             *model_args, model=model_with_state_dict, **model_kwargs
         )
 
@@ -982,7 +980,7 @@ class ONNXProgram:
         assert (
             model_with_state_dict is not None
         ), "model_with_state_dict must be specified."
-        return self._output_adapter.apply(model_outputs, model=model_with_state_dict)
+        return self._output_adapter.apply(model_outputs, model=model_with_state_dict)  # type: ignore[return-value]
 
     def save(
         self,
@@ -1113,8 +1111,7 @@ class ONNXProgram:
         # https://github.com/pytorch/pytorch/issues/103764
         import onnx
 
-        # TODO: Should we populate ONNXProgram with more info, such _model_torch for easier debug?
-        return ONNXProgram(
+        return cls(
             onnx.ModelProto(),  # type: ignore[attr-defined]
             io_adapter.InputAdapter(),
             io_adapter.OutputAdapter(),
