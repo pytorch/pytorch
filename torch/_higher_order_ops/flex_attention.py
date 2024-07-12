@@ -135,34 +135,15 @@ def _math_attention_inner(
     m = torch.arange(0, scores.size(2), device=scores.device)
     n = torch.arange(0, scores.size(3), device=scores.device)
 
-    score_mod_in_dim_buffers = (None,) * len(score_mod_other_buffers)
-    score_mod = torch.vmap(
-        score_mod, in_dims=(0, None, None, None, 0) + score_mod_in_dim_buffers
-    )
-    score_mod = torch.vmap(
-        score_mod, in_dims=(0, None, None, 0, None) + score_mod_in_dim_buffers
-    )
-    score_mod = torch.vmap(
-        score_mod, in_dims=(0, None, 0, None, None) + score_mod_in_dim_buffers
-    )
-    score_mod = torch.vmap(
-        score_mod, in_dims=(0, 0, None, None, None) + score_mod_in_dim_buffers
-    )
+    captured_buffers_in_dim = (None,) * len(score_mod_other_buffers)
+    from torch.nn.attention._flex_attention import _vmap_for_bhqkv
+
+    # first input is score
+    score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,), suffix=captured_buffers_in_dim)
 
     mask_fn = block_mask[-1]
     mask_fn_in_dim_buffers = (None,) * len(mask_fn_other_buffers)
-    mask_fn = torch.vmap(
-        mask_fn, in_dims=(None, None, None, 0) + mask_fn_in_dim_buffers
-    )
-    mask_fn = torch.vmap(
-        mask_fn, in_dims=(None, None, 0, None) + mask_fn_in_dim_buffers
-    )
-    mask_fn = torch.vmap(
-        mask_fn, in_dims=(None, 0, None, None) + mask_fn_in_dim_buffers
-    )
-    mask_fn = torch.vmap(
-        mask_fn, in_dims=(0, None, None, None) + mask_fn_in_dim_buffers
-    )
+    mask_fn = _vmap_for_bhqkv(mask_fn, prefix=(), suffix=mask_fn_in_dim_buffers)
 
     # todo: We wouldn't need these overrides in this file if Dynamo always did the
     # rewriting.
@@ -574,14 +555,14 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             value,
             out,
             logsumexp,
+            kv_num_blocks,
+            kv_indices,
+            q_num_blocks,
+            q_indices,
             full_kv_num_blocks,
             full_kv_indices,
             full_q_num_blocks,
             full_q_indices,
-            partial_kv_num_blocks,
-            partial_kv_indices,
-            partial_q_num_blocks,
-            partial_q_indices,
             *other_buffers,
         ) = fw_args
         fw_graph = ctx._fw_graph
@@ -606,14 +587,14 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             fw_graph,
             joint_graph,
             (
+                kv_num_blocks,
+                kv_indices,
+                q_num_blocks,
+                q_indices,
                 full_kv_num_blocks,
                 full_kv_indices,
                 full_q_num_blocks,
                 full_q_indices,
-                partial_kv_num_blocks,
-                partial_kv_indices,
-                partial_q_num_blocks,
-                partial_q_indices,
                 KV_BLOCK_SIZE,
                 Q_BLOCK_SIZE,
                 mask_graph,
@@ -706,26 +687,16 @@ def sdpa_dense_backward(
 
     mask_graph = block_mask[-1]
     # Gradient of the inline score_mod function, with respect to the scores
-    in_dim_buffers = (None,) * len(score_mod_other_buffers)
+    captured_buffers_in_dim = (None,) * len(score_mod_other_buffers)
     out_dims = [0, None, None, None, None] + [None] * len(score_mod_other_buffers)
-    joint_score_mod = torch.vmap(
+    from torch.nn.attention._flex_attention import _vmap_for_bhqkv
+
+    # inputs are [score, b, h, q_idx, kv_idx, gradOut, ...]
+    # score and gradOut are "fully" batched
+    joint_score_mod = _vmap_for_bhqkv(
         joint_graph,
-        in_dims=(0, None, None, None, 0, 0) + in_dim_buffers,
-        out_dims=out_dims,
-    )
-    joint_score_mod = torch.vmap(
-        joint_score_mod,
-        in_dims=(0, None, None, 0, None, 0) + in_dim_buffers,
-        out_dims=out_dims,
-    )
-    joint_score_mod = torch.vmap(
-        joint_score_mod,
-        in_dims=(0, None, 0, None, None, 0) + in_dim_buffers,
-        out_dims=out_dims,
-    )
-    joint_score_mod = torch.vmap(
-        joint_score_mod,
-        in_dims=(0, 0, None, None, None, 0) + in_dim_buffers,
+        prefix=(0,),
+        suffix=(0,) + captured_buffers_in_dim,
         out_dims=out_dims,
     )
     with TransformGetItemToIndex():
