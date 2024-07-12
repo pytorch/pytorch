@@ -1226,7 +1226,8 @@ class _ModuleNotInstalledAsSubmoduleError(NameError):
 
 # Base class for inline _ModuleStackTracer.__init__.AttrProxy
 class _AttrProxy:
-    pass
+    def reset_proxy_mapping(self, base: Module, path: str) -> None:
+        pass
 
 class _ModuleStackTracer(PythonKeyTracer):
     r"""Customized version of PythonKeyTracer that retains module stack
@@ -1251,6 +1252,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         super().__init__()
         self.scope_root = scope_root
         self.proxy_paths: WeakKeyDictionary[_AttrProxy, str] = WeakKeyDictionary()
+        self.attr_proxy_map: WeakKeyDictionary[Module, _AttrProxy] = WeakKeyDictionary()
         self.proxy_modules: WeakKeyDictionary[_AttrProxy, Module] = WeakKeyDictionary()
         self.counter = 0
 
@@ -1265,6 +1267,7 @@ class _ModuleStackTracer(PythonKeyTracer):
 
         class AttrProxy(_AttrProxy):
             def __init__(self, base: Module, path: str) -> None:
+                # Class is modified to be a subclass of torch.nn.Module
                 # Warning: We blow away our own attributes here to mimic the base class
                 # - so don't expect `self.x` to do anything useful.
                 self.__class__ = type(
@@ -1275,17 +1278,33 @@ class _ModuleStackTracer(PythonKeyTracer):
                 self.__dict__ = base.__dict__
                 self.__class__.__module__ = base.__class__.__module__
                 self.__class__.__qualname__ = base.__class__.__qualname__
+                self.reset_proxy_mapping(base, path)
+
+            def reset_proxy_mapping(self, base: Module, path: str) -> None:
                 tracer.proxy_paths[self] = path
                 tracer.proxy_modules[self] = base
 
             def __getattr__(self, name: str) -> AttrProxy:
                 assert isinstance(self, Module)
+                # Calling into torch.nn.Module.__getattr__ with super(),
+                # That __getattr__ is patched to be module_getattr_wrapper in _symbolic_trace.py.
+                # which then calls into _ModuleStackTracer.getattr
                 attr_val = super().__getattr__(name)  # type: ignore[misc]
                 if isinstance(attr_val, AttrProxy):
                     attr_val = tracer.proxy_modules[attr_val]
                 elif not isinstance(attr_val, Module):
                     return attr_val
-                return AttrProxy(attr_val, tracer.proxy_paths[self] + "." + name)
+                if attr_val not in tracer.attr_proxy_map:
+                    tracer.attr_proxy_map[attr_val] = AttrProxy(attr_val, tracer.proxy_paths[self] + "." + name)
+                else:
+                    # NOTE [caching AttrProxy]. Caching ensures a 1-1 mapping between AttrProxy and the actual attr_val.
+                    # 1. We reset the proxy_mapping to solve the diamond shape reference problem: we want to record the
+                    # path as A.B.D instead of A.C.D (the purpose of _ModuleStackTracer).
+                    # 2. Instead of creating a new AttrProxy, we just reset the proxy_mapping of existing one. This is to avoid
+                    # dynamo creating multiple guards for the same attr_val but different AttrProxy when exporting
+                    # a model that calls torch.compile (e.g when a model uses torch.cond.)
+                    tracer.attr_proxy_map[attr_val].reset_proxy_mapping(attr_val, tracer.proxy_paths[self] + "." + name)
+                return tracer.attr_proxy_map[attr_val]
 
             @property
             def _modules(self) -> Dict[str, AttrProxy]:
@@ -1320,7 +1339,13 @@ class _ModuleStackTracer(PythonKeyTracer):
             return super().getattr(attr, attr_val, parameter_proxy_cache)
         if isinstance(attr_val, _AttrProxy):
             return attr_val
-        return self.proxy_type(attr_val, attr)
+
+        # See NOTE [caching AttrProxy].
+        if attr_val not in self.attr_proxy_map:
+            self.attr_proxy_map[attr_val] = self.proxy_type(attr_val, attr)
+        else:
+            self.attr_proxy_map[attr_val].reset_proxy_mapping(attr_val, attr)
+        return self.attr_proxy_map[attr_val]
 
     def trace(
             self,
