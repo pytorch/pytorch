@@ -1327,6 +1327,8 @@ class TestOptimRenewed(TestCase):
             optim.zero_grad()
             loss = (w.mv(i) + b).pow(2).sum()
             loss.backward()
+            if optim.__class__.__name__ == "SparseAdam":
+                optim.grad = optim.grad.to_sparse()
             return loss
 
         for optim_input in all_optim_inputs:
@@ -1336,16 +1338,10 @@ class TestOptimRenewed(TestCase):
             # Prime the optimizer
             for _ in range(10):
                 if optim_info.step_requires_closure:
-                    if optimizer.__class__.__name__ == "SparseAdam":
-                        optimizer.step(closure, sparse=True)
-                    else:
-                        optimizer.step(closure)
+                    optimizer.step(closure)
                 else:
                     closure()
-                    if optimizer.__class__.__name__ == "SparseAdam":
-                        optimizer.step(sparse=True)
-                    else:
-                        optimizer.step()
+                    optimizer.step()
 
             # Clone the weights and construct a new optimizer for them
             with torch.no_grad():
