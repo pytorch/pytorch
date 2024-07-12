@@ -10,6 +10,8 @@ from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
     generate_numeric_debug_handle,
     NUMERIC_DEBUG_HANDLE_KEY,
+    prepare_for_propagation_comparison,
+    extract_results_from_loggers,
 )
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
@@ -121,3 +123,40 @@ class TestNumericDebugger(TestCase):
         debug_handle_map = _extract_debug_handles(m_export)
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
+
+    def test_prepare_for_propagation_comparison(self):
+        m = TestHelperModules.Conv2dThenConv1d()
+        example_inputs = m.example_inputs()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        generate_numeric_debug_handle(m)
+        m_logger = prepare_for_propagation_comparison(m)
+        ref = m(*example_inputs)
+        res = m_logger(*example_inputs)
+
+        from torch.ao.quantization.pt2e.numeric_debugger import OutputLogger
+        assert any(isinstance(m, OutputLogger) for m in m_logger.modules())
+
+        self.assertEqual(res, ref)
+
+    def test_extract_results_from_loggers(self):
+        m = TestHelperModules.Conv2dThenConv1d()
+        example_inputs = m.example_inputs()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        generate_numeric_debug_handle(m)
+        m_ref_logger = prepare_for_propagation_comparison(m)
+
+        quantizer = XNNPACKQuantizer().set_global(
+            get_symmetric_quantization_config(is_per_channel=False)
+        )
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m)
+        debug_handle_map = _extract_debug_handles(m)
+        m_quant_logger = prepare_for_propagation_comparison(m)
+
+        m_ref_logger(*example_inputs)
+        m_quant_logger(*example_inputs)
+        results = extract_results_from_loggers(m_ref_logger, m_quant_logger)
+        for node, node_summary in results.items():
+            if len(node_summary.results) > 0:
+                self.assertTrue(node_summary.results[0].sqnr >= 35)

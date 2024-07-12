@@ -18,6 +18,8 @@ from .pt2e.export_utils import _move_exported_model_to_train as move_exported_mo
 from .pt2e.export_utils import _allow_exported_model_train_eval as allow_exported_model_train_eval
 from .pt2e.numeric_debugger import generate_numeric_debug_handle  # noqa: F401
 from .pt2e.numeric_debugger import NUMERIC_DEBUG_HANDLE_KEY  # noqa: F401
+from .pt2e.numeric_debugger import prepare_for_propagation_comparison  # noqa: F401
+from .pt2e.numeric_debugger import extract_results_from_loggers  # noqa: F401
 from typing import Union, List, Callable, Tuple, Optional
 from torch import Tensor
 import torch
