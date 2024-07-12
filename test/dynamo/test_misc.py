@@ -1407,7 +1407,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         r1 = fn(i, [])
         opt_fn = torch._dynamo.optimize("eager")(fn)
         r2 = opt_fn(i, [])
-        r3 = opt_fn(i, tuple())
+        r3 = opt_fn(i, ())
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
@@ -4312,7 +4312,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         subs_of_foo_reg = Foo.__subclasses__()
         sub_of_foo_subclass_var_reg = subs_of_foo_reg[0].__subclasses__()
 
-        sub_of_foo_subclass_var_optim = list()
+        sub_of_foo_subclass_var_optim = []
         counter = CompileCounter()
 
         @torch._dynamo.optimize_assert(counter)
@@ -7081,7 +7081,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         od = collections.OrderedDict
 
         def fn():
-            d1 = dict()
+            d1 = dict()  # noqa: C408
             d1["a"] = 1
             d2 = od(d1)
             d2["b"] = 2
