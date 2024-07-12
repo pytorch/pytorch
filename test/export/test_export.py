@@ -5729,7 +5729,7 @@ def forward(self, x, y):
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
     def test_disable_forced_specializations_ok(self):
-        # check that _disable_forced_specializations and _allow_complex_guards_as_runtime_asserts flags
+        # check that _disable_forced_specializations and allow_complex_guards_as_runtime_asserts flags
         # both behave correctly, avoiding forced specializations and deferring to runtime.
         # case 1: modulo guards
         from torch.export import dims
@@ -5763,7 +5763,7 @@ def forward(self, x, y):
             Mod4Reshape(),
             inputs,
             dynamic_shapes={"x": (dx, dy)},
-            _allow_complex_guards_as_runtime_asserts=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         out1 = ep.module()(torch.randn(8, 7))
         self.assertEqual(out1.shape, torch.ones(7, 4, 2).shape)
@@ -5812,7 +5812,7 @@ def forward(self, x, y):
             FreeReshape(),
             inputs,
             dynamic_shapes=dynamic_shapes,
-            _allow_complex_guards_as_runtime_asserts=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         out1 = ep.module()(torch.randn(48, 1), torch.randn(4, 12), torch.randn(48))
         self.assertEqual(out1.shape, torch.ones(48).shape)
@@ -5863,7 +5863,7 @@ def forward(self, x, y):
             Reshape3d(),
             inputs,
             dynamic_shapes=dynamic_shapes,
-            _allow_complex_guards_as_runtime_asserts=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         out1 = ep.module()(torch.randn(9, 7, 2), torch.randn(126))
         self.assertEqual(out1.shape, torch.ones(126).shape)
@@ -5965,7 +5965,7 @@ def forward(self, x, y):
             model,
             (x,),
             dynamic_shapes=dynamic_shapes,
-            _allow_complex_guards_as_runtime_asserts=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         with self.assertRaisesRegex(
             RuntimeError,
@@ -5997,7 +5997,7 @@ def forward(self, x, y):
             Foo(),
             inputs,
             dynamic_shapes=dynamic_shapes,
-            _allow_complex_guards_as_runtime_asserts=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         # check forward pass
         out0, out1 = ep.module()(torch.randn(9), torch.randn(27))
@@ -6032,7 +6032,7 @@ def forward(self, x, y):
                 Foo(),
                 inputs,
                 dynamic_shapes=dynamic_shapes,
-                _allow_complex_guards_as_runtime_asserts=True,
+                allow_complex_guards_as_runtime_asserts=True,
             ).run_decompositions()
 
         self.assertEqual(
@@ -6205,7 +6205,7 @@ def forward(self, x, y):
             Foo(),
             inputs,
             dynamic_shapes=shapes,
-            _allow_complex_guards_as_runtime_asserts=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         # count 2 pow nodes, 2 sym_size.int nodes
         self.assertEqual(
