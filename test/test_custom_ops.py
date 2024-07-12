@@ -361,7 +361,8 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor: ...
+        def foo(x: torch.Tensor) -> torch.Tensor: 
+            ...
 
         @foo.impl(["cpu", "cuda"])
         def foo_impl(x):
@@ -3436,7 +3437,7 @@ Please use `add.register_fake` to add an fake impl.""",
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap(self):
-        for mode in ["function", "qualname", "opoverload"]:
+        for mode in ["function", "qualname", "opoverload", "c_opdef"]:
 
             @torch.library.custom_op("mylib::f", mutates_args=())
             def f(x: Tensor, y: Tensor) -> Tensor:
@@ -3469,11 +3470,14 @@ Please use `add.register_fake` to add an fake impl.""",
                     torch.ops.mylib.f.default,
                     fvmap,
                 )
+            elif mode == "c_opdef":
+                f.register_vmap(
+                    fvmap,
+                )
 
             x = torch.randn(2, 2)
             y = torch.randn(2, 2)
 
-            print(mode)
             result = torch.vmap(f)(x, y)
             self.assertTrue(called)
             self.assertEqual(result, x * y)
