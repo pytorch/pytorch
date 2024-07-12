@@ -1600,7 +1600,7 @@ def is_start_of_fx_graph(graph: torch.fx.Graph, node: torch.fx.Node) -> bool:
     return node is next(iter(graph.nodes))
 
 
-# match: copy_, relu_, _set_grad_enabled, manual_seed, enter_functional_autocast, etc
+# match: copy_, relu_, _set_grad_enabled, manual_seed, _enter_autocast, etc
 # doesn't match: __rshift__, etc
 _mutation_op_re = re.compile(r"(?<!_)(_$|_[.]|(\b|_)(set|enter|exit|seed)(\b|_))(?!_)")
 
