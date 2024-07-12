@@ -253,16 +253,16 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_colin(self, device):
-        def fn(a, x):
-            u0 = x.item()
+    def test_unbacked_range_tree_divisor(self, device):
+        def fn(x, num):
+            u0 = num.item()
             torch._check_is_size(u0)
-            b = torch.zeros(u0, device=device, dtype=torch.int)
-            return (torch.ops.aten.index(a, [None, b]),)
+            zeros = torch.zeros(u0, device=device, dtype=torch.int)
+            return (torch.ops.aten.index(x, [None, zeros]),)
 
         example_inputs = (
-            torch.randn(8, 8, device=device),
-            torch.tensor(8, device=device),
+            torch.randn(16, 16, device=device),
+            torch.tensor(3, device=device),
         )
 
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
