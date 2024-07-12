@@ -390,11 +390,11 @@ def xavier_uniform_(
         >>> nn.init.xavier_uniform_(w, gain=nn.init.calculate_gain('relu'))
 
     Note:
-        Be aware that `fan_in` and `fan_out` are calculated assuming that the weight
-        matrix is used in a transposed manner (i.e., `x @ w.T` in `Linear` layers).
-        For `Linear` layers, `w.shape = [fan_out, fan_in]`. This is important for
-        correct initialization. If you plan to use `x @ w`, pass in
-        `nn.init.xavier_uniform_(w.T, ...)`, where `w.shape = [fan_in, fan_out]`.
+        Be aware that ``fan_in`` and ``fan_out`` are calculated assuming that the weight
+        matrix is used in a transposed manner (i.e., ``x @ w.T`` in ``Linear`` layers).
+        For ``Linear`` layers, ``w.shape = [fan_out, fan_in]``. This is important for
+        correct initialization. If you plan to use ``x @ w``, pass in
+        ``nn.init.xavier_uniform_(w.T, ...)``, where ``w.shape = [fan_in, fan_out]``.
     """
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
