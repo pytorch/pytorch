@@ -4298,14 +4298,24 @@ def _get_backend_from_str(backend: Optional[str] = None) -> Backend:
     return Backend(backend)
 
 
+def _is_safe_to_split() -> bool:
+    """
+    Checks if it is safe to split the any process group in the world.
+    This is only safe if the default pg has a bound device id, otherwise
+    users must be aware that a pg is only splittable after the first collective is
+    issued.
+    """
+    return False if _get_default_group().bound_device_id is None else True
+
+
 @_time_logger
 def split_group(
-    parent_pg=None,
-    split_ranks=None,
-    timeout=None,
-    pg_options=None,
-    group_desc=None,
-):
+    parent_pg: Optional[ProcessGroup] = None,
+    split_ranks: Optional[list[list[int]]] = None,
+    timeout: Optional[timedelta] = None,
+    pg_options: Optional[ProcessGroupNCCL.Options] = None,
+    group_desc: Optional[str] = None,
+) -> Optional[ProcessGroup]:
     """
     Create a new process group splitted from the given parent process group.
 
@@ -4333,23 +4343,12 @@ def split_group(
 
     Returns:
         ProcessGroup if the current rank is within one split/subgroup given by split_ranks,
-        or GroupMember.NON_GROUP_MEMBER if the current rank is not part of any split_ranks`.
+        or None if the current rank is not part of any split_ranks`.
 
     """
     # check inputs
     if split_ranks is None:
         raise ValueError("split_ranks cannot be None")
-
-    if pg_options is not None:
-        assert isinstance(
-            pg_options, ProcessGroupNCCL.Options
-        ), "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
-    else:
-        # default pg_options for NCCL
-        pg_options = ProcessGroupNCCL.Options()
-        pg_options.is_high_priority_stream = False
-
-    group_desc = "undefined" if group_desc is None else group_desc
 
     global _world
     default_pg = _get_default_group()
@@ -4392,10 +4391,25 @@ def split_group(
             "No backend for the parent process group or its backend does not support splitting"
         )
 
+    # set the group_desc before the color or no_cloor split
+    group_desc = (
+        f"{parent_pg.group_desc}:split:{parent_backend.comm_split_count()}"
+        if group_desc is None
+        else group_desc
+    )
+
     parent_backend_str, _ = _world.pg_map[parent_pg]
     # same type of backend as the parent process group
     backend = Backend(parent_backend_str)
     backend_config = BackendConfig(backend)
+
+    if pg_options is not None:
+        assert isinstance(
+            pg_options, ProcessGroupNCCL.Options
+        ), "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
+    else:
+        # default pg_options same as the parent process group
+        pg_options = parent_backend.options
 
     # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
     # which may just pass their timeout value (or None)
@@ -4425,7 +4439,7 @@ def split_group(
     # no_color split should be called
     if my_group is None or group_rank == -1 or len(my_group) == 1:
         parent_backend.perform_nocolor_split(device_id)
-        return GroupMember.NON_GROUP_MEMBER
+        return None
 
     group_name = _process_group_name(my_group, use_hashed_name=False)
     global_ranks_in_my_group = [parent_group_to_global_ranks[rank] for rank in my_group]
@@ -4451,7 +4465,7 @@ def split_group(
 
     pg._register_backend(torch.device("cuda"), backend_type, backend_class)
 
-    # set group_name and group_dsec to backend
+    # set group_name and group_desc to backend
     assert group_name is not None
     assert group_desc is not None
     pg._set_group_name(group_name)
@@ -4467,7 +4481,6 @@ def split_group(
     _register_process_group(group_name, pg)
     _world.pg_backend_config[pg] = str(backend_config)
     pg_tag = f"ptd:{group_name}"
-    _world.tags_to_pg.setdefault("", []).append(pg)
     _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
     _world.pg_to_tag[pg] = pg_tag
 

@@ -638,6 +638,15 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         tensor = torch.full((1,), self.rank).cuda(device)
         ng1 = c10d.split_group(pg, [[0, 1]])
+        backend1 = pg._get_backend(torch.device(device))
+
+        # check basic options are the same between parent and child
+        self.assertEqual(backend.options._timeout, backend1.options._timeout)
+        self.assertEqual(
+            backend.options.is_high_priority_stream,
+            backend1.options.is_high_priority_stream,
+        )
+        self.assertEqual(ng1.group_desc, "default_pg:split:0")
 
         # comm split happens eagerly since device_id is passed to init_process_group.
         self.assertEqual(backend.comm_split_count(), 1)
@@ -645,6 +654,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(tensor, torch.full((1,), 0))
 
         ng2 = c10d.split_group(pg, [[0, 1]])
+        self.assertEqual(ng2.group_desc, "default_pg:split:1")
         self.assertEqual(backend.comm_split_count(), 2)
 
         dist.destroy_process_group()
@@ -4296,7 +4306,6 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         return init_multigpu_helper(self.world_size, "nccl")
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @skip_if_lt_x_gpu(8)
     def test_comm_split_group_larger_scale(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -4327,13 +4336,12 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
             dist.broadcast(tensor2, 7, group=ng2)
             self.assertEqual(tensor2, torch.full((1,), 7))
         else:
-            self.assertEqual(ng2, c10d.GroupMember.NON_GROUP_MEMBER)
+            self.assertEqual(ng2, None)
         # give enough time for the broadcast to finish before destroying all pgs.
         time.sleep(2)
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @skip_if_lt_x_gpu(8)
     def test_comm_recursive_split_group(self):
         store = c10d.FileStore(self.file_name, self.world_size)
