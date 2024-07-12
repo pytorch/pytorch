@@ -1086,10 +1086,8 @@ class FxGraphCache:
         compiled_graph: CompiledFxGraph,
         example_inputs: List[torch.Tensor],
     ):
-        if compiled_graph.fx_kwargs["aot_mode"]:
-            return compiled_graph
-        cudagraphs = compiled_graph.fx_kwargs["cudagraphs"]
         set_tracing_context_output_strides(example_inputs, compiled_graph)
+        cudagraphs = compiled_graph.fx_kwargs["cudagraphs"]
         if cudagraphs:
             cudagraph_post_compile(
                 example_inputs,
@@ -1104,6 +1102,8 @@ class FxGraphCache:
             compiled_graph,
             inputs_to_check,
         )
+
+        return compiled_graph
 
     @staticmethod
     def _save_graph(

@@ -562,7 +562,9 @@ def compile_fx_inner(
 
                     has_mutation_str = (
                         check_for_mutation_ignore_cuda_graph_managed_tensor(
-                            gm, compiled_graph, static_input_idxs
+                            gm,
+                            compiled_graph,
+                            static_input_idxs,  # type:ignore[arg-type]
                         )
                     )
                     has_mutation = has_mutation_str is not None
@@ -626,14 +628,16 @@ def compile_fx_inner(
             remote=fx_graph_remote_cache,
         )
     else:
-        compiled_graph = fx_codegen_and_compile(
-            gm, example_inputs, **graph_kwargs  # type: ignore[arg-type]
+        compiled_graph = codegen_and_compile(
+            gm, example_inputs, inputs_to_check, graph_kwargs  # type: ignore[arg-type]
         )
-        set_tracing_context_output_strides(example_inputs, compiled_graph)
+        if aot_mode:
+            set_tracing_context_output_strides(example_inputs, compiled_graph)
+            return compiled_graph
+        compiled_graph = FxGraphCache.post_compile(compiled_graph, example_inputs)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
-    #
     _step_logger()(
         logging.INFO,
         "torchinductor done compiling "
