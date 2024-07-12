@@ -304,6 +304,7 @@ def collect_bw_donated_buffer_idxs(
         saved_tensors,
     )
 
+    assert fw_metadata.num_symints_saved_for_bw is not None
     return [fw_metadata.num_symints_saved_for_bw + i for i in fw_donated_buffer]
 
 
