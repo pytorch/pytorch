@@ -172,7 +172,6 @@ def calculate_time_spent():
         )
 
         for key, timing in timings.items():
-            total += timing
             if key not in total_by_key:
                 total_by_key[key] = timing
             else:
