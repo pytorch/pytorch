@@ -1342,7 +1342,10 @@ class TestOptimRenewed(TestCase):
                         optimizer.step(closure)
                 else:
                     closure()
-                    optimizer.step()
+                    if optimizer.__class__.__name__ == "SparseAdam":
+                        optimizer.step(sparse=True)
+                    else:
+                        optimizer.step()
 
             # Clone the weights and construct a new optimizer for them
             with torch.no_grad():
