@@ -681,7 +681,8 @@ class triton:
     # a cudagraph node due to static input tensor address changes or
     # cudagraph managed tensor data pointer changed.
     # i.e., allow num_recording <= cudagraph_unexpected_rerecord_limit
-    cudagraph_unexpected_rerecord_limit = 5
+    # note: we are conservative here and choose a large limit.
+    cudagraph_unexpected_rerecord_limit = 128
 
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False

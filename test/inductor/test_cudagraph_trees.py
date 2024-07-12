@@ -1934,11 +1934,16 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.run_static_input_param_test(fn, 6)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
         def test_fallback_to_eager_if_recompiling_too_many_times(self):
-            def fn(x, y):
-                return x * y
+            class Foo(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.param = torch.nn.Parameter(torch.rand([2, 2], device="cuda"))
+
+                def forward(self, x):
+                    return x * self.param
 
             with capture_stderr() as captured_output:
                 # We have 3 graphs here
@@ -1947,26 +1952,33 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 # (fwd w/ p1, Graph 0)            (bwd w/p2, Graph2)
                 # (bwd w/ p1, Graph 1)
                 # All other graphs are skipped because we hit the max recording limit
-                # (=1 for each node and function pair)
-                self.run_static_input_param_test(fn, 3)
+                # (=0 for each node and function pair)
+                fn_compiled = torch.compile(Foo(), mode="reduce-overhead")
+                for _ in range(3):
+                    fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
+
+                # Change static tensor address
+                fn_compiled.param.data = torch.rand([2, 2], device="cuda")
+                fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
+                self.assertEqual(self.get_manager().new_graph_id().id, 3)
 
             FileCheck().check(
                 "skipping cudagraph due to function 0 exceeding max re-recording limit (=0) "
                 "on cudagraph node None due to static input data pointer changed."
-            ).check(
-                "skipping cudagraph due to function 1 exceeding max re-recording limit (=0) "
-                "on cudagraph node None due to static input data pointer changed."
-            ).run(
-                captured_output[0]
-            )
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 2)
+            ).run(captured_output[0])
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
         def test_fallback_to_eager_if_recompiling_too_many_times_warn_only_once(self):
-            def fn_eager(x, y):
-                return x * y
+            class Foo(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.param = torch.nn.Parameter(torch.rand([2, 2], device="cuda"))
+
+                def forward(self, x):
+                    return x * self.param
 
             with capture_stderr() as captured_output:
                 with torch.device("cuda"):
@@ -1976,25 +1988,15 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     # (fwd w/ p1, Graph 0)            (bwd w/p2, Graph2)
                     # (bwd w/ p1, Graph 1)
                     # All other graphs are skipped because we hit the max recording limit
-                    # (=1 for each node and function pair)
-                    fn_compiled = torch.compile(fn_eager, mode="reduce-overhead")
+                    # (=0 for each node and function pair)
+                    fn_compiled = torch.compile(Foo(), mode="reduce-overhead")
+                    for _ in range(3):
+                        fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
 
-                    p1 = torch.nn.Parameter(torch.rand([2, 2]))
-                    self._assert_equal_multi_loop(p1, fn_eager, fn_compiled)
-
-                    p2 = torch.nn.Parameter(torch.rand([2, 2]))
-                    self._assert_equal_multi_loop(p2, fn_eager, fn_compiled)
-
-                    p3 = torch.nn.Parameter(torch.rand([2, 2]))
-                    self._assert_equal_multi_loop(p3, fn_eager, fn_compiled)
-
-                    p4 = torch.nn.Parameter(torch.rand([2, 2]))
-                    self._assert_equal_multi_loop(p4, fn_eager, fn_compiled)
-
-                    # Run p1 again to ensure we reuse the previous recording
-                    self._assert_equal_multi_loop(p1, fn_eager, fn_compiled)
-
-                    self.assertEqual(self.get_manager().new_graph_id().id, 3)
+                    for _ in range(5):
+                        # Change static tensor address
+                        fn_compiled.param.data = torch.rand([2, 2], device="cuda")
+                        fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
 
             FileCheck().check_count(
                 "skipping cudagraph due to function 0 exceeding max re-recording limit (=0) "

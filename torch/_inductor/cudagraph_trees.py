@@ -1915,6 +1915,17 @@ class CUDAGraphTreeManager:
         else:
             raise RuntimeError(f"Unknown node type {type(self.current_node)}")
 
+    def exceed_rerecord_limit(
+        self, node_id: Optional[GraphID], function_id: FunctionID
+    ):
+        if torch._dynamo.config.inline_inbuilt_nn_modules:
+            return False
+
+        return (
+            self.num_rerecord[node_id][function_id]
+            > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
+        )
+
     def _run(self, new_inputs: List[Tensor], function_id: FunctionID):
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
@@ -1933,11 +1944,9 @@ class CUDAGraphTreeManager:
         # Early exit if the function mutates inputs which are neither parameters/buffers nor
         # cudagraph recorded tensors. This check should happen after `try_end_curr_recording`
         # and `try_end_curr_warmup` which may change self.current_node.
-        if (
-            self.non_cudagraph_managed_mutation_hint[node_id][function_id]
-            or self.num_rerecord[node_id][function_id]
-            > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
-        ):
+        if self.non_cudagraph_managed_mutation_hint[node_id][
+            function_id
+        ] or self.exceed_rerecord_limit(node_id, function_id):
             return self.ids_to_funcs[function_id].model(new_inputs)
 
         # warming up a function and subsequentally recording may use different memory addresses
@@ -2001,13 +2010,13 @@ class CUDAGraphTreeManager:
                 ]:
                     return self.ids_to_funcs[function_id].model(new_inputs)
 
+            # nb: run before checkpointing because checkpointing is slow, and we will
+            # be using the eager caching allocator pool which does not require live
+            # accounting of tensors in cudagraph allocator
             if unexpected_rerecord:
                 curr_node_id = self._get_node_id()
                 self.num_rerecord[curr_node_id][function_id] += 1
-                if (
-                    self.num_rerecord[curr_node_id][function_id]
-                    > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
-                ):
+                if self.exceed_rerecord_limit(curr_node_id, function_id):
                     _id = curr_node_id.id if curr_node_id else None
                     log_cudagraph_skip_and_bump_counter(
                         f"skipping cudagraph due to function {function_id.id} exceeding max "
