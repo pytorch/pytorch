@@ -318,9 +318,10 @@ class FSDPParam:
             if self.pin_memory:
                 padded_sharded_param = padded_sharded_param.pin_memory()
         self._sharded_param_data = padded_sharded_param.view(-1)
-        self.sharded_param = nn.Parameter(
-            self.to_sharded_dtensor(padded_sharded_param[: sharded_param.size(0)])
-        )
+        # self.sharded_param = nn.Parameter(
+        #     self.to_sharded_dtensor(padded_sharded_param[: sharded_param.size(0)])
+        # )
+        self.sharded_param = nn.Parameter(self.to_sharded_dtensor(padded_sharded_param))
         self.sharded_param.requires_grad_(param.requires_grad)
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
@@ -525,10 +526,10 @@ class FSDPParam:
         Converts a local tensor representing either the sharded parameter or
         sharded gradient to DTensor.
         """
-        if tensor.shape != self.sharded_size:
-            _raise_assert_with_print(
-                f"Expects size {self.sharded_size} but got {tensor.shape}"
-            )
+        # if tensor.shape != self.sharded_size:
+        #     _raise_assert_with_print(
+        #         f"Expects size {self.sharded_size} but got {tensor.shape}"
+        #     )
         return _from_local_no_grad(
             tensor,
             self._sharding_spec,
