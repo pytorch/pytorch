@@ -358,8 +358,8 @@ def forward(self, x_1):
 
 def forward(self, x_1):
     zeros = torch.ops.aten.zeros.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    copy_ = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
-    return copy_
+    copy_ = torch.ops.aten.copy_.default(zeros, x_1);  x_1 = None
+    return zeros
     """)
 
     def test_make_fx_reentrant_dispatch(self):
@@ -581,9 +581,9 @@ def forward(self, x_1):
             return bool(val.item() == 2.1)
 
         def test_f():
-            make_fx(f, tracing_mode=self.tracing_mode)()
+            return make_fx(f, tracing_mode=self.tracing_mode)()()
 
-        self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
+        self.assertEqual(test_f(), f())
 
     def test_decomposition_interpreter(self):
         def fn(x):
