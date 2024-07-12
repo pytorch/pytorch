@@ -648,6 +648,74 @@ class TestExport(TestCase):
                 actual_result.append(node.meta.get("torch_fn"))
         self.assertEqual(actual_result, expected_result)
 
+    def test_export_predispatch_custom_ops_warnings(self):
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        @foo.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return foo(x)
+
+        x = torch.randn(3)
+
+        # Assert no warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            torch.export.export(Foo(), (x,))
+
+        # Assert warning for CompositeImplictAutograd op
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("foo123(Tensor x) -> Tensor")
+            lib.impl("foo123", lambda x: x.sin(), "CompositeImplicitAutograd")
+
+            class Bar(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.mylib.foo123(x)
+
+            with self.assertWarnsRegex(
+                UserWarning, "CompositeImplicitAutograd and have functional schema"
+            ):
+                with warnings.catch_warnings():
+                    warnings.simplefilter("always")
+                    torch.export.export(Bar(), (x,))
+
+    def test_export_preserve_linear_at_aot_level(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return torch.ops.aten.chunk.default(x, 3, 0)
+
+        gm = (
+            torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            )
+            .run_decompositions({}, _preserve_ops=(torch.ops.aten.linear.default,))
+            .graph_module
+        )
+        # linear is CompositeImplicitAutograd functional op so we should preserve it
+        # chunk is CompositeImplicitAutograd non-functional op we decompose.
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, x):
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    split = torch.ops.aten.split.Tensor(linear, 1);  linear = None
+    getitem = split[0]
+    getitem_1 = split[1]
+    getitem_2 = split[2];  split = None
+    return (getitem, getitem_1, getitem_2)""",
+        )
+
     # TODO(yidi)
     # Expected failure for test cases that calls run_decomposition().
     # The top-level cond node has pre-existing metadata,

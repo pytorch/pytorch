@@ -334,38 +334,32 @@ class FunctionalTensorMode(TorchDispatchMode):
             # We never decompose dropout in export
             if self.export and func == torch.ops.aten.dropout.default:
                 return False
-            # TODO (tmanlaibaatar)
-            # Eventually, we don't want to decompose any aten op at all
-            # but there is a safety and coverage gap that we need to close
-            # before that.
-            #
-            # (1) the "safety" is what we are risking with this PR
-            #     (we are blindly taking every op that advertises as
-            #      functional and sending it to the functional fallback.
-            #      We risk silent correctness if we have an op that lies about its schema,
-            #      that we didn't manually hardcode above) Therefore we always decompose them
-            # (2) the "not every composite inplace op has a functional variant" is a coverage gap,
-            #      but not really a safety risk, since we'll loudly error when we try to generate
-            #      functionalization kernels for these new (composite) inplace/view ops. But until we
-            #      establish such gap more concretely, we still decompose them
-            if self._dispatch_key is not None:
-                # it is unsafe to not decompose ops that claim to be functional but actually aren't
-                if func in FunctionalTensor.maybe_aliasing_or_mutating_ops:
-                    return True
-                # only decompose view or inplace mutating ops
-                alias_info = len(
-                    [i for i in func._schema.arguments if i.alias_info is not None]
-                )
-                should_decompose = alias_info != 0 or func._schema.is_mutable
-                if not should_decompose:
-                    if func.namespace not in ["aten", "prim"]:
-                        warnings.warn(
-                            f"At pre-dispatch tracing, we will assume that any "
-                            f"custom op that is marked with CompositeImplicitAutograd "
-                            f"and functional are safe to not decompose. We found {func}"
-                            f" to be one such op."
-                        )
-                return should_decompose
+
+            # We unconditionally decompose ops that are maybe aliasing or mutating ops
+            if func in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+                return True
+
+            # (1) we unconditionally decompose maybe-aliasing or maybe-mutating ops,
+            # because we must know statically of an op mutates or aliasing in order to functionalize it properly
+            # (2) for mutating ops that have CompositeImplicit decomps, we choose to decompose them today.
+            # In theory, we could walk this back and avoid decomposing them later if we need to.
+            alias_info_present = any(arg.alias_info for arg in func._schema.arguments)
+            if alias_info_present or func._schema.is_mutable:
+                return True
+
+            # If we are here, it means we are seeing functional composite op.
+            # For pre-dispatch IR or export inference IR, we wont' decompose them
+            if (self.export or self.pre_dispatch) and func._can_decompose():
+                if func.namespace not in ["aten", "prim"]:
+                    # TODO (tmanlaibaatar) check if the op is PT2 compliant
+                    warnings.warn(
+                        f"At pre-dispatch tracing, we assume that any custom op marked with "
+                        f"CompositeImplicitAutograd and have functional schema are safe to not decompose. "
+                        f"Found {func} to be one such op."
+                    )
+                return False
+
+            # in normal torch.compile IR, we decompose functional composite ops
             return True
 
         if (
