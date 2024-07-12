@@ -1066,6 +1066,12 @@ __device__ void f32(
         __high2half(y1.data.val)));
 }
 
+template <typename F>
+__device__ void
+fh(__half& v_out, const __half& x, const __half& y0, const __half& y1, F f) {
+  v_out = f(x, y0, y1);
+}
+
 template <typename index_t, typename F>
 __global__ void jagged_dense_dense_elementwise_jagged_output_opt_gather_kernel_(
     at::PackedTensorAccessor32<c10::Half, 2, at::RestrictPtrTraits> values,
@@ -1132,10 +1138,12 @@ __global__ void jagged_dense_dense_elementwise_jagged_output_opt_gather_kernel_(
             v_out.data.mask;
       }
       for (int tid = threadIdx.x + (E / 2) * 2; tid < E; tid += blockDim.x) {
-        auto v_x = static_cast<__half>(x_ptr[tid]);
-        auto v_y0 = static_cast<__half>(y0_ptr[tid]);
-        auto v_y1 = static_cast<__half>(y1_ptr[tid]);
-        values_ptr[tid] = f(v_x, v_y0, v_y1);
+        __half v_x, v_out, v_y0, v_y1;
+        v_x = static_cast<__half>(x_ptr[tid]);
+        v_y0 = static_cast<__half>(y0_ptr[tid]);
+        v_y1 = static_cast<__half>(y1_ptr[tid]);
+        fh(v_out, v_x, v_y0, v_y1, f);
+        values_ptr[tid] = v_out;
       }
     } else {
       for (int tid = threadIdx.x; tid < E / 8; tid += blockDim.x) {
@@ -1163,8 +1171,10 @@ __global__ void jagged_dense_dense_elementwise_jagged_output_opt_gather_kernel_(
             v_out.data.mask;
       }
       for (int tid = threadIdx.x + (E / 2) * 2; tid < E; tid += blockDim.x) {
-        auto v_x = static_cast<__half>(x_ptr[tid]);
-        values_ptr[tid] = f(v_x, __half{}, __half{});
+        __half v_x, v_out, v_y0, v_y1;
+        v_x = static_cast<__half>(x_ptr[tid]);
+        fh(v_out, v_x, v_y0, v_y1, f);
+        values_ptr[tid] = v_out;
       }
     }
   }

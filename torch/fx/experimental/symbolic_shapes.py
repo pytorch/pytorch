@@ -247,7 +247,7 @@ def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
     if isinstance(expr, torch.SymBool):
         return expr.node.guard_size_oblivious("", 0)
     else:
-        assert isinstance(expr, bool), expr
+        assert isinstance(expr, bool)
         return expr
 
 def check_consistent(new, old) -> None:
@@ -3281,13 +3281,6 @@ class ShapeEnv:
                 assert int(sym) == hint
             out = int(sym)
         else:
-            # How can this occur? When we mark_unbacked, we end up with a real
-            # tensor that has hints for all sizes, but we MUST NOT create a
-            # SymNode with a hint, because we're hiding the hint from our eyes
-            # with the unbacked Symbol.  And in fact, the hint compute may be
-            # inconsistent with size oblivious tests.
-            if free_unbacked_symbols(sym):
-                hint = None
             out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
         return out
 
@@ -3320,12 +3313,6 @@ class ShapeEnv:
                 assert float(sym) == hint
             out = float(sym)
         else:
-            # You could give this the same treatment as SymInt above if
-            # you supported mark_unbacked on a float, but it's a kind of
-            # strange thing to do though because floats don't get 0/1
-            # specialization anyway
-            if free_unbacked_symbols(sym):
-                assert hint is None, sym
             out = SymFloat(SymNode(sym, self, float, hint, fx_node=fx_node))
         return out
 

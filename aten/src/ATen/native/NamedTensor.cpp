@@ -31,12 +31,12 @@
 
 namespace at::native {
 
-Tensor& rename_(Tensor& self, std::optional<DimnameList> names) {
+Tensor& rename_(Tensor& self, optional<DimnameList> names) {
   at::internal_set_names_inplace(self, names);
   return self;
 }
 
-Tensor rename(const Tensor& self, std::optional<DimnameList> names) {
+Tensor rename(const Tensor& self, optional<DimnameList> names) {
   auto result = self.alias();
   at::internal_set_names_inplace(result, names);
   return result;

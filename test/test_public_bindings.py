@@ -6,6 +6,8 @@ import json
 import os
 import pkgutil
 import unittest
+from itertools import chain
+from pathlib import Path
 from typing import Callable
 
 import torch
@@ -18,6 +20,44 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+
+
+def _find_all_importables(pkg):
+    """Find all importables in the project.
+
+    Return them in order.
+    """
+    return sorted(
+        set(
+            chain.from_iterable(
+                _discover_path_importables(Path(p), pkg.__name__) for p in pkg.__path__
+            ),
+        ),
+    )
+
+
+def _discover_path_importables(pkg_pth, pkg_name):
+    """Yield all importables under a given path and package.
+
+    This is like pkgutil.walk_packages, but does *not* skip over namespace
+    packages. Taken from https://stackoverflow.com/questions/41203765/init-py-required-for-pkgutil-walk-packages-in-python3
+    """
+    for dir_path, _d, file_names in os.walk(pkg_pth):
+        pkg_dir_path = Path(dir_path)
+
+        if pkg_dir_path.parts[-1] == "__pycache__":
+            continue
+        if all(Path(_).suffix != ".py" for _ in file_names):
+            continue
+        rel_pt = pkg_dir_path.relative_to(pkg_pth)
+        pkg_pref = ".".join((pkg_name,) + rel_pt.parts)
+        yield from (
+            pkg_path
+            for _, pkg_path, _ in pkgutil.walk_packages(
+                (str(pkg_dir_path),),
+                prefix=f"{pkg_pref}.",
+            )
+        )
 
 
 class TestPublicBindings(TestCase):
@@ -267,12 +307,7 @@ class TestPublicBindings(TestCase):
     @skipIfTorchDynamo("Broken and not relevant for now")
     def test_modules_can_be_imported(self):
         failures = []
-
-        def onerror(modname):
-            failures.append((modname, ImportError))
-
-        for mod in pkgutil.walk_packages(torch.__path__, "torch.", onerror=onerror):
-            modname = mod.name
+        for modname in _find_all_importables(torch):
             try:
                 # TODO: fix "torch/utils/model_dump/__main__.py"
                 # which calls sys.exit() when we try to import it
@@ -334,10 +369,6 @@ class TestPublicBindings(TestCase):
             "torch.testing._internal.distributed.rpc_utils",
             "torch._inductor.codegen.cuda.cuda_template",
             "torch._inductor.codegen.cuda.gemm_template",
-            "torch._inductor.codegen.cpp_template",
-            "torch._inductor.codegen.cpp_gemm_template",
-            "torch._inductor.codegen.cpp_micro_gemm",
-            "torch._inductor.codegen.cpp_template_kernel",
             "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",
@@ -593,8 +624,7 @@ class TestPublicBindings(TestCase):
                             elem, modname, mod, is_public=True, is_all=False
                         )
 
-        for mod in pkgutil.walk_packages(torch.__path__, "torch."):
-            mod = mod.name
+        for modname in _find_all_importables(torch):
             test_module(modname)
         test_module("torch")
 

@@ -135,7 +135,7 @@ namespace at::meta {
 
 static ScalarType infer_dtype_from_optional(
     const Tensor& self,
-    const std::optional<ScalarType>& opt_dtype,
+    const optional<ScalarType>& opt_dtype,
     const Tensor& result) {
   // 'opt_dtype' has the priority for both cases.
   if (result.defined()) {
@@ -274,7 +274,7 @@ TORCH_META_FUNC(cumprod)
 }
 
 TORCH_META_FUNC2(sum, dim_IntList)
-(const Tensor& self, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
+(const Tensor& self, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto out_dtype = infer_dtype_from_optional(self, opt_dtype, maybe_get_output());
   resize_reduction(*this, self, opt_dim, keepdim, out_dtype);
 }
@@ -289,7 +289,7 @@ TORCH_META_FUNC2(prod, dim_int)
 }
 
 TORCH_META_FUNC2(mean, dim)
-(const Tensor& self, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
+(const Tensor& self, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto in_dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
 
   if (!at::isFloatingType(in_dtype) && !at::isComplexType(in_dtype)) {
@@ -1195,7 +1195,7 @@ TORCH_IMPL_FUNC(sum_out)
 (const Tensor& self,
  OptionalIntArrayRef opt_dim,
  bool keepdim,
- std::optional<ScalarType> opt_dtype,
+ optional<ScalarType> opt_dtype,
  const Tensor& result) {
   auto iter = meta::make_reduction_from_out_ty(self, result, opt_dim, keepdim, result.scalar_type());
   if (iter.numel() == 0) {
@@ -1226,12 +1226,12 @@ Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, std::optional<Scal
 }
 
 Tensor& sum_out(const Tensor& self, DimnameList dim,
-                bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
+                bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   return at::sum_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 
 Tensor& nansum_out(const Tensor& self, at::OptionalIntArrayRef dim,
-                       bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
+                       bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   if (self.device().is_cpu()) {
     TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
   }
@@ -1338,7 +1338,7 @@ Tensor prod(const Tensor& self, Dimname dim, bool keepdim, std::optional<ScalarT
 }
 
 Tensor& prod_out(const Tensor& self, Dimname dim,
-                 bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
+                 bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   return at::prod_out(result, self, dimname_to_position(self, dim), keepdim, opt_dtype);
 }
 
@@ -1398,11 +1398,11 @@ TORCH_IMPL_FUNC(mean_out)
   }
 }
 
-Tensor mean(const Tensor &self, std::optional<ScalarType> dtype) {
+Tensor mean(const Tensor &self, optional<ScalarType> dtype) {
   return at::mean(self, IntArrayRef{}, false, dtype);
 }
 
-Tensor mean(const Tensor& self, DimnameList dim, bool keepdim, std::optional<ScalarType> dtype) {
+Tensor mean(const Tensor& self, DimnameList dim, bool keepdim, optional<ScalarType> dtype) {
   return at::mean(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
@@ -1431,7 +1431,7 @@ Tensor nanmean(
     const Tensor& self,
     at::OptionalIntArrayRef dim,
     bool keepdim,
-    std::optional<ScalarType> opt_dtype) {
+    optional<ScalarType> opt_dtype) {
   TORCH_CHECK(
       self.is_floating_point() || self.is_complex(),
       "nanmean(): expected input to have floating point or complex dtype but got ",
@@ -1508,7 +1508,7 @@ static void impl_func_norm(
     const OptionalScalarRef& opt_p,
     IntArrayRef dim,
     bool keepdim,
-    std::optional<ScalarType> opt_dtype,
+    optional<ScalarType> opt_dtype,
     const Tensor& result) {
   // Left this implementation without deprecating it as it is called in a number of places
   // in the codebase. We should swap those by linalg_vector_norm
@@ -1537,7 +1537,7 @@ TORCH_IMPL_FUNC(norm_dtype_out)
 
 Tensor sparse_norm(
     const Tensor& self,
-    const std::optional<Scalar>& p,
+    const optional<Scalar>& p,
     IntArrayRef dim,
     bool keepdim) {
   return at::native_norm(self, p, dim, keepdim, std::nullopt);
@@ -1545,14 +1545,14 @@ Tensor sparse_norm(
 
 Tensor sparse_dtype_norm(
     const Tensor& self,
-    const std::optional<Scalar>& p,
+    const optional<Scalar>& p,
     IntArrayRef dim,
     bool keepdim,
     ScalarType dtype) {
   return at::native_norm(self, p, dim, keepdim, dtype);
 }
 
-Tensor norm(const Tensor& self, const std::optional<Scalar>& p, ScalarType dtype) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, ScalarType dtype) {
   return at::norm(self, p, IntArrayRef{}, false, dtype);
 }
 
@@ -2125,19 +2125,19 @@ std::tuple<Tensor,Tensor> std_mean(const Tensor& self, DimnameList dim,
   return at::std_mean(self, dimnames_to_positions(self, dim), correction, keepdim);
 }
 
-Tensor& norm_out(const Tensor& self, const std::optional<Scalar>& p, DimnameList dim, bool keepdim, ScalarType dtype, Tensor& result) {
+Tensor& norm_out(const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim, ScalarType dtype, Tensor& result) {
   return at::norm_out(result, self, p, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor& norm_out(const Tensor& self, const std::optional<Scalar>& p, DimnameList dim, bool keepdim, Tensor& result) {
+Tensor& norm_out(const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim, Tensor& result) {
   return at::norm_out(result, self, p, dimnames_to_positions(self, dim), keepdim);
 }
 
-Tensor norm(const Tensor& self, const std::optional<Scalar>& p, DimnameList dim, bool keepdim, ScalarType dtype) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim, ScalarType dtype) {
   return at::norm(self, p, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor norm(const Tensor& self, const std::optional<Scalar>& p, DimnameList dim, bool keepdim) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim) {
   return at::norm(self, p, dimnames_to_positions(self, dim), keepdim);
 }
 
