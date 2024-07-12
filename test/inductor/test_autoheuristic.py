@@ -119,7 +119,6 @@ class AutoHeuristicTest(TestCase):
             self.assertEqual("5,b,2", lines[3].rstrip())
             self.assertEqual("5,c,3", lines[4].rstrip())
 
-
     @unittest.skipIf(not IS_A100, "heuristic only run on A100")
     @inductor_config.patch(autoheuristic_use="pad_mm")
     def test_autoheuristic_a100(self):
