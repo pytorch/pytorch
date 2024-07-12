@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import ctypes
 import importlib
@@ -287,16 +288,17 @@ class HigherOrderOperator(OperatorBase):
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
 
-    def dispatch(self, dispatch_key, *args, **kwargs):
+    # Use `self_` to avoid naming collide with custom ops arguments that are named "self".
+    def dispatch(self_, dispatch_key, *args, **kwargs):  # noqa: B902
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
-        if dispatch_key in self._dispatch_cache:
-            kernel = self._dispatch_cache[dispatch_key]
+        if dispatch_key in self_._dispatch_cache:
+            kernel = self_._dispatch_cache[dispatch_key]
             assert not isinstance(kernel, torch._C.DispatchKey)
             return kernel(*args, **kwargs)
 
         if dispatch_key == torch._C.DispatchKey.FuncTorchDynamicLayerFrontMode:
-            return dispatch_functorch(self, args, kwargs)
+            return dispatch_functorch(self_, args, kwargs)
 
         if dispatch_key == torch._C.DispatchKey.Python:
             # The place to handle ProxyTorchDispatchMode, FakeTensorMode, etc
@@ -307,9 +309,9 @@ class HigherOrderOperator(OperatorBase):
                 curr_mode is not None
             ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
             assert (
-                type(curr_mode) in self.python_key_mode_table
+                type(curr_mode) in self_.python_key_mode_table
             ), f"Current active mode {curr_mode} not registered"
-            handler = self.python_key_mode_table[type(curr_mode)]
+            handler = self_.python_key_mode_table[type(curr_mode)]
             with _pop_mode_temporarily() as mode:
                 return handler(mode, *args, **kwargs)
 
@@ -329,19 +331,19 @@ class HigherOrderOperator(OperatorBase):
                     curr_mode is not None
                 ), "Illegal invocation of dispatch on torch._C.DispatchKey.PreDispatch without a mode."
                 assert (
-                    type(curr_mode) in self.python_key_mode_table
+                    type(curr_mode) in self_.python_key_mode_table
                 ), f"Current active mode {curr_mode} not registered"
-                handler = self.python_key_mode_table[type(curr_mode)]
+                handler = self_.python_key_mode_table[type(curr_mode)]
                 with _pop_mode_temporarily(functionality_key) as mode:
                     return handler(mode, *args, **kwargs)
 
-        final_key = resolve_key(self, dispatch_key)
+        final_key = resolve_key(self_, dispatch_key)
 
         # This can current fail due to backend fallbacks.  You just have to
         # register them by hand for HigherOrderOperator.
-        if final_key not in self.py_kernels:
+        if final_key not in self_.py_kernels:
             raise NotImplementedError(
-                f"could not find kernel for HigherOrderOperator {self._name} "
+                f"could not find kernel for HigherOrderOperator {self_._name} "
                 f"at dispatch key {final_key} (resolved from {dispatch_key})"
             )
 
@@ -350,14 +352,14 @@ class HigherOrderOperator(OperatorBase):
         # Also we do same thing for normal ops:
         # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
         if dispatch_key != torch._C.DispatchKey.PreDispatch:
-            self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
-        kernel = self.py_kernels[final_key]
+            self_._dispatch_cache[dispatch_key] = self_.py_kernels[final_key]
+        kernel = self_.py_kernels[final_key]
         # It's illegal to register DispatchKey to py_kernels, since there's no
         # C++ kernel to call into
         assert not isinstance(kernel, torch._C.DispatchKey)
         return kernel(*args, **kwargs)
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self_, *args, **kwargs):  # noqa: B902
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
         import torch._dynamo
@@ -368,11 +370,11 @@ class HigherOrderOperator(OperatorBase):
             flat_args = _to_flat_tuple(args, kwargs)
             if torch.overrides.has_torch_function(flat_args):
                 return torch.overrides.handle_torch_function(
-                    self, flat_args, *args, **kwargs
+                    self_, flat_args, *args, **kwargs
                 )
 
-            dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
-            return self.dispatch(
+            dispatch_key_set = _compute_keyset(args, kwargs, self_.non_fallthrough_keys)
+            return self_.dispatch(
                 dispatch_key_set.highestPriorityTypeId(), *args, **kwargs
             )
 
@@ -380,6 +382,9 @@ class HigherOrderOperator(OperatorBase):
 
     def __str__(self):
         return f"{self.name()}"
+
+    # def __repr__(self):
+    #     return f"torch.ops._higher_order_ops.{self._name}"
 
     def name(self):
         return self._name
@@ -1161,8 +1166,10 @@ class _OpNamespace(types.ModuleType):
         # for overloads and raise an exception if there are more than one.
         namespace_name = self.name
         qualified_op_name = f"{namespace_name}::{op_name}"
+        module_name = self.__module__ + "." + namespace_name
+
         try:
-            op, overload_names = torch._C._jit_get_operation(qualified_op_name)
+            op, overload_names = _get_packet(qualified_op_name, module_name)
             if op is None:
                 raise AttributeError(
                     f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
@@ -1174,10 +1181,7 @@ class _OpNamespace(types.ModuleType):
                 f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
             ) from e
 
-        # let the script frontend know that op is identical to the builtin op
-        # with qualified_op_name
-        torch.jit._builtins._register_builtin(op, qualified_op_name)
-        op.__module__ = self.__module__ + "." + namespace_name
+        op.__module__ = module_name
         opoverloadpacket = OpOverloadPacket(
             qualified_op_name, op_name, op, overload_names
         )
@@ -1187,6 +1191,23 @@ class _OpNamespace(types.ModuleType):
         setattr(self, op_name, opoverloadpacket)
         self._dir.append(op_name)
         return opoverloadpacket
+
+
+def _get_packet(qualname, op_module):
+    op, overload_names = torch._C._jit_get_operation(qualname)
+    if op is not None:
+        # let the script frontend know that op is identical to the builtin op
+        # with qualified_op_name
+        torch.jit._builtins._register_builtin(op, qualname)
+        op.__module__ = op_module
+    return op, overload_names
+
+
+def _refresh_packet(packet):
+    op, overload_names = _get_packet(packet._qualified_op_name, packet._op.__module__)
+    assert op is not None
+    packet._op = op
+    packet._overload_names = overload_names
 
 
 class _PyOpNamespace(_OpNamespace):

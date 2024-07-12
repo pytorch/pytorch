@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import traceback
 from typing import (
@@ -19,6 +20,7 @@ from torch import nn
 from torch.nn.parallel._functions import _get_stream
 from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.nn.utils.rnn import PackedSequence
+
 
 __all__ = []  # type: ignore[var-annotated]
 
@@ -280,7 +282,7 @@ def _to_kwargs(
 def _verify_param_shape_across_processes(
     process_group: dist.ProcessGroup,
     tensors: List[torch.Tensor],
-    logger: Optional[dist.Logger] = None,
+    logger: Optional["dist.Logger"] = None,
 ):
     return dist._verify_params_across_processes(process_group, tensors, logger)
 

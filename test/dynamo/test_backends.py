@@ -135,6 +135,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_tvm(self):
         self._check_backend_works("tvm")
         self._check_backend_works("tvm", options={"scheduler": None})
+        self._check_backend_works("tvm", options={"opt_level": 0})
 
     def test_list_backends(self):
         self.assertIn("inductor", torch._dynamo.list_backends())

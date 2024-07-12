@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import collections
@@ -20,7 +21,6 @@ from typing import (
     Sequence,
     Set,
     Tuple,
-    TYPE_CHECKING,
     Union,
 )
 
@@ -38,7 +38,7 @@ from ..codecache import code_hash
 from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
 from ..ir import TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
-from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
+from ..runtime.hints import ReductionHint
 from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
@@ -54,8 +54,6 @@ from ..virtualized import ops, OpsWrapper, V
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
 from .multi_kernel import MultiKernel
 
-if TYPE_CHECKING:
-    pass
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -161,16 +159,17 @@ class IterationRangesRoot(IterationRanges):
         for node in self.nodes.values():
             node.cache_clear()
 
+    def index_sym(self):
+        return sympy_index_symbol(f"{self.prefix}index")
+
     def lookup(self, divisor, length):
         """
         Lookup a given RangeTreeEntry, creating it if needed
         """
         if V.graph.sizevars.statically_known_equals(divisor * length, self.numel):
-            expr = FloorDiv(sympy_index_symbol(f"{self.prefix}index"), divisor)
+            expr = FloorDiv(self.index_sym(), divisor)
         else:
-            expr = ModularIndexing(
-                sympy_index_symbol(f"{self.prefix}index"), divisor, length
-            )
+            expr = ModularIndexing(self.index_sym(), divisor, length)
 
         if expr not in self.nodes:
             node = IterationRangesEntry(
@@ -312,7 +311,7 @@ class SIMDKernel(Kernel):
         mutations: Optional[Set[str]] = None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
-        disable_persistent_reduction=False,
+        override_persistent_reduction=None,
     ):
         if pid_cache is None:
             pid_cache = {}
@@ -330,8 +329,10 @@ class SIMDKernel(Kernel):
         self.last_usage: Set[str] = set()
         self.buf_accesses: DefaultDict[str, List[Dep]] = collections.defaultdict(list)
         self.persistent_reduction: bool = (
-            not disable_persistent_reduction
-        ) and self.should_use_persistent_reduction()
+            override_persistent_reduction
+            if override_persistent_reduction is not None
+            else self.should_use_persistent_reduction()
+        )
         self.no_x_dim = self.want_no_x_dim()
         self.code_hash = None
 
@@ -341,7 +342,8 @@ class SIMDKernel(Kernel):
             index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
             for tree in self.range_trees:
                 index = self.combine_contiguous_dims(index, tree)
-            return index
+
+            return self.combine_modular_indexing_pairs(index)
 
         self.simplify_indexing = simplify_indexing
         self.initialize_range_tree(pid_cache)
@@ -385,6 +387,13 @@ class SIMDKernel(Kernel):
                 )
             )
 
+    def finalize_indexing(self, indices: Sequence[sympy.Expr]):
+        """
+        Hook called right before codegen with every index that will be
+        used in the fused kernel.
+        """
+        pass
+
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
         prior = self.inside_reduction
         self.inside_reduction = False
@@ -425,7 +434,32 @@ class SIMDKernel(Kernel):
         sizes = self.dense_size_list()
         return f"[{', '.join(sizes)}]"
 
+    def combine_modular_indexing_pairs(self, index):
+        if not isinstance(index, ModularIndexing):
+            return index
+        x = index.args[0]
+        if (tree_node := self.range_tree_nodes.get(x)) is None:
+            return index
+        new_index = sympy_subs(index, {x: tree_node.expr})
+        new_index = V.graph.sizevars.combine_modular_indexing_pairs(new_index)
+        # the index now contains xindex/etc, which is nonstandard, fix it up
+        return sympy_subs(
+            new_index,
+            {
+                tree_node.root.index_sym(): tree_node.root.lookup(
+                    sympy.Integer(1), tree_node.root.numel
+                ).symbol()
+            },
+        )
+
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
+        if expand_res := V.graph.sizevars.expand_floor_div(index):
+            new_index, denominator = expand_res  # type: ignore[misc]
+            return FloorDiv(self._combine_contiguous_dims(new_index, tree), denominator)
+        else:
+            return self._combine_contiguous_dims(index, tree)
+
+    def _combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
         More aggressive simplification to merge contiguous dims
         """
@@ -670,24 +704,6 @@ class SIMDKernel(Kernel):
             trees[:count] = reversed(trees[:count])
         return trees
 
-    def filter_masks(self, mask_vars):
-        for tree in self.range_trees:
-            # Masks are superfluous if we only have one element
-            if V.graph.sizevars.statically_known_equals(tree.numel, 1):  # type: ignore[arg-type]
-                mask_vars.discard(f"{tree.prefix}mask")
-                continue
-            # Masks are superfluous if numel is a multiple of BLOCK
-            # (We use the fact that BLOCK is required by triton to be a power of 2)
-            if tree.prefix.upper() not in TRITON_MAX_BLOCK:
-                continue
-            max_block = TRITON_MAX_BLOCK[tree.prefix.upper()]
-            # Optional optimization: if block divides numel exactly, we will
-            # never need to do a masked load to handle stragglers at the end.
-            # It's faster to avoid masking at all.  But it is sound to always
-            # mask.
-            if V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block):  # type: ignore[arg-type]
-                mask_vars.discard(f"{tree.prefix}mask")
-
     def codegen_indexing(self, expr: sympy.Expr):
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
         for sym in sorted(expr.free_symbols, key=str):
@@ -705,19 +721,22 @@ class SIMDKernel(Kernel):
         return expr
 
     @contextlib.contextmanager
-    def mask_loads(self, mask):
+    def mask_loads(self, mask, value):
         """Context manager to add an additional mask to tl.load/store"""
         prior = self._load_mask
+        prior_val = self._load_other
         if prior:
             mask = ops.logical_and(mask, prior)
 
         mask = OpsWrapper._unwrap(mask)
         self._load_mask = mask
+        self._load_other = value
         try:
             # TODO(jansel): do we need a reshape here?
             yield mask
         finally:
             self._load_mask = prior
+            self._load_other = prior_val
 
     def get_strides_of_load(self, index: sympy.Expr):
         """
@@ -895,7 +914,7 @@ class SIMDKernel(Kernel):
         pass
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry):
-        raise NotImplementedError
+        pass
 
 
 class SIMDScheduling(BaseScheduling):
@@ -904,6 +923,7 @@ class SIMDScheduling(BaseScheduling):
     int64_type = "torch.int64"
 
     def __init__(self, scheduler):
+        super().__init__()
         self.scheduler = scheduler
 
     def group_fn(self, sizes):
@@ -1283,13 +1303,32 @@ class SIMDScheduling(BaseScheduling):
             isinstance(node, BaseSchedulerNode) and node.is_split_scan()
             for node in node_schedule
         )
-        kernel_type = TritonSplitScanKernel if is_split_scan else self.kernel_type
+        kernel_type: type = self.kernel_type
+        if is_split_scan and issubclass(TritonSplitScanKernel, kernel_type):
+            kernel_type = TritonSplitScanKernel
+
         kernel_args = tiled_groups
-        kernel_kwargs = {
-            "reduction_hint": reduction_hint_val,
-            "mutations": mutations,
-            "index_dtype": index_dtype,
-        }
+        kernel_kwargs = dict(
+            reduction_hint=reduction_hint_val,
+            mutations=mutations,
+            index_dtype=index_dtype,
+        )
+
+        def _node_has_sort(node):
+            if node in (EnableReduction, DisableReduction):
+                return False
+
+            sort_nodes = node._body.root_block.graph.find_nodes(
+                op="call_method", target="sort"
+            )
+            return bool(sort_nodes)
+
+        # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
+        # so taking the hit of non-coalesced loads is okay
+        has_sort = any(_node_has_sort(node) for node in node_schedule)
+        if has_sort:
+            kernel_kwargs["override_persistent_reduction"] = True
+
         kernel = kernel_type(
             *kernel_args,
             **kernel_kwargs,
@@ -1306,11 +1345,11 @@ class SIMDScheduling(BaseScheduling):
         kernel.kernel_name = kernel_name
         kernel.code_hash = code_hash(src_code)
 
-        if kernel.persistent_reduction and config.triton.multi_kernel:
+        if kernel.persistent_reduction and config.triton.multi_kernel and not has_sort:
             kernel2 = self.kernel_type(
                 *kernel_args,
                 **kernel_kwargs,
-                disable_persistent_reduction=True,
+                override_persistent_reduction=False,
             )
             self.codegen_node_schedule_with_kernel(node_schedule, kernel2)
             with V.set_kernel_handler(kernel2):
@@ -1368,10 +1407,26 @@ class SIMDScheduling(BaseScheduling):
         with kernel:
             stack = contextlib.ExitStack()
             kernel.set_last_usage(current_reduction_nodes(node_schedule))
+            all_indexing = {}
 
+            # First pass to collect indexing and decide inplace updates
             for node in node_schedule:
-                if node not in (EnableReduction, DisableReduction):
+                if node is DisableReduction:
+                    stack.enter_context(kernel.disable_reduction())
+                elif node is EnableReduction:
+                    stack.close()
+                else:
                     node.decide_inplace_update()
+                    index_vars = kernel.split_and_set_ranges(node.get_ranges())
+                    all_indexing.update(
+                        dict.fromkeys(
+                            node._body.indexing_from_args(index_vars).values()
+                        )
+                    )
+
+            kernel.finalize_indexing(all_indexing.keys())
+
+            # Second pass to do codegen
             for i, node in enumerate(node_schedule):
                 if node is DisableReduction:
                     stack.enter_context(kernel.disable_reduction())

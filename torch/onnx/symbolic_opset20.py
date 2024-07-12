@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """This file exports ONNX ops for opset 20.
 
 Note [ONNX Operators that are added/updated in opset 20]
@@ -31,7 +32,7 @@ from torch.onnx._internal import _beartype, jit_utils, registration
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
-__all__ = ["_grid_sampler", "_affine_grid_generator"]
+__all__ = ["_grid_sampler", "_affine_grid_generator", "gelu"]
 
 
 def convert_grid_sample_mode(mode_s):
@@ -83,3 +84,10 @@ def _affine_grid_generator(
         size,
         align_corners_i=int(align_corners),
     )
+
+
+@_onnx_symbolic("aten::gelu")
+@symbolic_helper.parse_args("v", "s")
+@_beartype.beartype
+def gelu(g: jit_utils.GraphContext, self: _C.Value, approximate: str = "none"):
+    return g.op("Gelu", self, approximate_s=approximate)

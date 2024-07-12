@@ -14,7 +14,7 @@ namespace control_plane {
 
 class TORCH_API WorkerServer : public c10::intrusive_ptr_target {
  public:
-  WorkerServer(const std::string& socketFile);
+  WorkerServer(const std::string& hostOrFile, int port = -1);
   ~WorkerServer();
 
   void shutdown();

@@ -10,9 +10,7 @@
 #include <ATen/Tensor.h>
 #include <torch/library.h>
 
-namespace at {
-namespace native {
-namespace metal {
+namespace at::native::metal {
 
 using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
 
@@ -58,7 +56,7 @@ static inline void checkInputs(const Tensor& input1, const Tensor& input2) {
   }
 }
 
-Tensor binaryElementwiseShaderKernel(
+static Tensor binaryElementwiseShaderKernel(
     const Tensor& input1,
     const Tensor& input2,
     const std::string& arrayKernel,
@@ -98,7 +96,7 @@ Tensor binaryElementwiseShaderKernel(
   return output;
 }
 
-Tensor& binaryElementwiseShaderKernel_(
+static Tensor& binaryElementwiseShaderKernel_(
     Tensor& input1,
     const Tensor& input2,
     const std::string& arrayKernel,
@@ -208,7 +206,7 @@ Tensor& binaryElementwiseMPSCNNKernel_(Tensor& input1, const Tensor& input2) {
   return input1;
 }
 
-Tensor add_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alpha) {
+static Tensor add_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
@@ -219,7 +217,7 @@ Tensor add_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alph
   }
 }
 
-Tensor& add__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
+static Tensor& add__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
@@ -230,7 +228,7 @@ Tensor& add__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   }
 }
 
-Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alpha) {
+static Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
@@ -241,7 +239,7 @@ Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alph
   }
 }
 
-Tensor& sub__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
+static Tensor& sub__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
@@ -252,7 +250,7 @@ Tensor& sub__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   }
 }
 
-Tensor mul_Tensor(const Tensor& input1, const Tensor& input2) {
+static Tensor mul_Tensor(const Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(input1.is_metal());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
@@ -263,7 +261,7 @@ Tensor mul_Tensor(const Tensor& input1, const Tensor& input2) {
   }
 }
 
-Tensor& mul__Tensor(Tensor& input1, const Tensor& input2) {
+static Tensor& mul__Tensor(Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(input1.is_metal());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
@@ -274,7 +272,7 @@ Tensor& mul__Tensor(Tensor& input1, const Tensor& input2) {
   }
 }
 
-Tensor div_Tensor(const Tensor& input1, const Tensor& input2) {
+static Tensor div_Tensor(const Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(input1.is_metal());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
@@ -285,7 +283,7 @@ Tensor div_Tensor(const Tensor& input1, const Tensor& input2) {
   }
 }
 
-Tensor& div__Tensor(Tensor& input1, const Tensor& input2) {
+static Tensor& div__Tensor(Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(input1.is_metal());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
@@ -305,8 +303,6 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::sub_.Tensor"), TORCH_FN(sub__Tensor));
   m.impl(TORCH_SELECTIVE_NAME("aten::div.Tensor"), TORCH_FN(div_Tensor));
   m.impl(TORCH_SELECTIVE_NAME("aten::div_.Tensor"), TORCH_FN(div__Tensor));
-};
+}
 
-}
-}
-}
+} // namespace at::native::metal

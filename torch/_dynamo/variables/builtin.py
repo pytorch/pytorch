@@ -13,6 +13,7 @@ from typing import Dict, List
 
 import torch
 from torch import sym_float, sym_int
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, polyfill, variables
 from ..exc import (
@@ -1392,7 +1393,17 @@ class BuiltinVariable(VariableTracker):
             def _tensor_isinstance(tensor_var, tensor_type):
                 def check_type(ty):
                     if ty not in tensortype_to_dtype:
-                        return issubclass(arg.python_type(), ty)
+                        example_val = arg.as_proxy().node.meta["example_value"]
+                        if (
+                            is_traceable_wrapper_subclass(example_val)
+                            and ty is torch.nn.parameter.Parameter
+                        ):
+                            # N.B: we are calling isinstance directly on the example value.
+                            # torch.nn.Parameter has a meta-class that overrides __isinstance__,
+                            # the isinstance check here allows us to invoke that logic.
+                            return isinstance(example_val, ty)
+                        else:
+                            return issubclass(arg.python_type(), ty)
 
                     dtypes = tensortype_to_dtype[ty]
                     return arg.dtype in dtypes
@@ -1546,11 +1557,8 @@ class BuiltinVariable(VariableTracker):
                         f"pending mutation on nn module, so graph breaking at {name!r} call"
                     )
 
-            try:
-                # re-read a pending side effect?
-                return tx.output.side_effects.load_attr(obj, name)
-            except KeyError:
-                pass
+        if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
+            return tx.output.side_effects.load_attr(obj, name)
 
         if default is not None:
             hasattr_var = self.call_hasattr(tx, obj, name_var)
@@ -1633,7 +1641,6 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             obj,
             (
-                variables.DataClassVariable,
                 variables.CustomizedDictVariable,
                 variables.PlacementVariable,
                 variables.UserDefinedObjectVariable,

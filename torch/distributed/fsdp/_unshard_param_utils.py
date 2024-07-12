@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import warnings
 from typing import cast, Generator
@@ -24,6 +25,7 @@ from torch.distributed.fsdp._runtime_utils import (
 from torch.distributed.utils import _p_assert
 
 from ._flat_param import FlatParamHandle
+
 
 FLAT_PARAM = "_flat_param"
 

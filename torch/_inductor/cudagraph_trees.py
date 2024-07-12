@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 CUDA graph trees are a safety abstraction over CUDAGraphs, similar to make_graph_callables,
 which share the same memory pool.  Sharing a memory pool is an extremely
@@ -67,7 +68,7 @@ from typing import (
 import torch.fx
 from torch import Tensor
 from torch._dynamo.mutation_guard import GenerationTracker
-from torch._dynamo.utils import preserve_rng_state
+from torch._dynamo.utils import counters, preserve_rng_state
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,
     copy_misaligned_inputs,
@@ -753,6 +754,11 @@ class CUDAGraphNode:
         self.device = device_index
         self.stack_traces = stack_traces
         self.stream = stream
+        # If we are inlining builtin nn modules we will re-record if static inputs change
+        # if not we should error because dynamo should have recompiled in this case
+        self.rerecord_if_static_inputs_change = (
+            torch._dynamo.config.inline_inbuilt_nn_modules
+        )
 
         # if this is a root parent will be None. use weakref to prevent reference cycle
         self._parent = weakref.ref(parent) if parent is not None else None
@@ -799,6 +805,10 @@ class CUDAGraphNode:
         self.non_static_input_idx: LevelList[int] = [
             i for i in range(len(inputs)) if i not in self.static_input_idxs
         ]
+
+        counters["inductor"]["cudagraph_recorded_non_static_inputs"] += len(
+            self.non_static_input_idx
+        )
 
         self.non_managed_static_input_idxs: LevelList[int] = [
             i
@@ -952,8 +962,13 @@ class CUDAGraphNode:
 
     def check_static_inputs_are_stable(self, new_inputs):
         # avoid checking managed tensor static points since we already checked those in check_invariants
-        if not torch._C._tensors_data_ptrs_at_indices_equal(
-            new_inputs, self.static_input_data_ptrs, self.non_managed_static_input_idxs
+        if (
+            not self.rerecord_if_static_inputs_change
+            and not torch._C._tensors_data_ptrs_at_indices_equal(
+                new_inputs,
+                self.static_input_data_ptrs,
+                self.non_managed_static_input_idxs,
+            )
         ):
             # this should error
             static_tensors = [new_inputs[i] for i in self.non_managed_static_input_idxs]
@@ -999,6 +1014,9 @@ class CUDAGraphNode:
 
         if config.triton.force_cudagraph_sync:
             torch.cuda.synchronize()
+
+        # Reset this to run the check in the future
+        self.static_inputs_stable = False
 
         return outputs
 
@@ -1553,8 +1571,8 @@ class CUDAGraphNode:
 
     def check_invariants(self, inputs: List[Tensor]) -> bool:
         """
-        Checks if this node can be run. The same pattern of tensor liveness and tensors
-        managed in the cudagraph private pool must remain stable.
+        Checks if this node can be run. The same pattern of tensor liveness, static inputs,
+        and tensors managed in the cudagraph private pool must remain stable.
         """
 
         # previously managed data pointers remain stable
@@ -1562,6 +1580,18 @@ class CUDAGraphNode:
         # return all(t.data_ptr() == data_ptr for (t, data_ptr) in zip(tensors, data_ptrs))
         if not torch._C._tensors_data_ptrs_at_indices_equal(
             inputs, self.static_input_data_ptrs, self.cudagraph_managed_idxs
+        ):
+            return False
+
+        # static input data pointers should remain stable
+        # if we are inlining builtin nn modules we re-record in this case
+        # if we are not inlining builtin nn modules, we check this in check_static_inputs_are_stable
+        # and error if they are not stable
+        if (
+            self.rerecord_if_static_inputs_change
+            and not torch._C._tensors_data_ptrs_at_indices_equal(
+                inputs, self.static_input_data_ptrs, self.static_input_idxs
+            )
         ):
             return False
 

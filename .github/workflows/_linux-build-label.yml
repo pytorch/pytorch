@@ -56,6 +56,13 @@ on:
         required: false
         type: string
         default: ""
+      use_split_build:
+        description: |
+          [Experimental] Build a libtorch only wheel and build pytorch such that
+          are built from the libtorch wheel.
+        required: false
+        type: boolean
+        default: false
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -107,3 +114,4 @@ jobs:
           aws-role-to-assume: ${{ inputs.aws-role-to-assume }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+          use_split_build: ${{ inputs.use_split_build }}

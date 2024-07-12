@@ -13,7 +13,7 @@ std::unordered_map<std::string, worker_id_t> collectNames(
   std::vector<uint8_t> selfNameVector(
       (uint8_t*)selfName.c_str(),
       (uint8_t*)selfName.c_str() + selfName.length());
-  store.set(c10::to_string(selfId), selfNameVector);
+  store.set(std::to_string(selfId), selfNameVector);
 
   std::unordered_map<std::string, worker_id_t> nameToId;
   nameToId.reserve(worldSize);
@@ -22,7 +22,7 @@ std::unordered_map<std::string, worker_id_t> collectNames(
     if (workerId == selfId) {
       continue;
     }
-    std::vector<uint8_t> workerNameVector = store.get(c10::to_string(workerId));
+    std::vector<uint8_t> workerNameVector = store.get(std::to_string(workerId));
     std::string workerName(
         (char*)workerNameVector.data(), workerNameVector.size());
 
@@ -69,7 +69,7 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
 
   // Check that ID does not already exist and set {ID : NAME}
   std::vector<uint8_t> resultVector = store.compareSet(
-      c10::to_string(selfId), std::vector<uint8_t>(), selfNameVector);
+      std::to_string(selfId), std::vector<uint8_t>(), selfNameVector);
   TORCH_CHECK(
       resultVector == selfNameVector,
       "RPC worker id ",
@@ -80,7 +80,7 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
       selfNameVector,
       " cannot be added.");
 
-  store.set(c10::to_string(selfId), selfNameVector);
+  store.set(std::to_string(selfId), selfNameVector);
 
   std::unordered_map<std::string, worker_id_t> nameToId;
   nameToId.emplace(selfName, selfId);

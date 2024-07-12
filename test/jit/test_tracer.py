@@ -911,51 +911,6 @@ class TestTracer(JitTestCase):
         self.assertEqual(len(list(g.inputs())), 2)
         FileCheck().check("mul").check("add").run(str(g))
 
-    def test_trace_c10_ops(self):
-        try:
-            _ = torch.ops._caffe2.GenerateProposals
-        except AttributeError:
-            self.skipTest("Skip the test since c2 ops are not registered.")
-
-        class MyModel(torch.nn.Module):
-            def forward(self, scores, bbox_deltas, im_info, anchors):
-                a, b = torch.ops._caffe2.GenerateProposals(
-                    (scores),
-                    (bbox_deltas),
-                    (im_info),
-                    (anchors),
-                    2.0,
-                    6000,
-                    300,
-                    0.7,
-                    16,
-                    True,
-                    -90,
-                    90,
-                    1.0,
-                    True,
-                )
-                return a, b
-
-        model = MyModel()
-        A = 4
-        H = 10
-        W = 8
-        img_count = 3
-        scores = torch.ones(img_count, A, H, W, dtype=torch.float32)
-        bbox_deltas = torch.linspace(
-            0, 10, steps=img_count * 4 * A * H * W, dtype=torch.float32
-        )
-        bbox_deltas = bbox_deltas.view(img_count, 4 * A, H, W)
-        im_info = torch.ones(img_count, 3, dtype=torch.float32)
-        anchors = torch.ones(A, 4, dtype=torch.float32)
-        inputs = (scores, bbox_deltas, im_info, anchors)
-        traced_model = torch.jit.trace(model, inputs)
-        self.assertEqual(traced_model(*inputs), model(*inputs))
-        self.assertExportImportModule(
-            traced_model, (scores, bbox_deltas, im_info, anchors)
-        )
-
     def run_ge_tests(self, optimize, use_cuda):
         with enable_profiling_mode_for_profiling_tests():
             with torch.jit.optimized_execution(optimize):
