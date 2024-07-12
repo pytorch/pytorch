@@ -4550,7 +4550,7 @@ class ShapeEnv:
         # sympy will not simplify the a. The two appeareances of the a will then make value ranges
         # analysis give lose bounds
         new_expr = canonicalize_bool_expr(safe_expand(new_expr))
-        if new_expr.is_number:
+        if len(new_expr.free_symbols) == 0:
             return new_expr
 
         # This is bad to do, the replacement with division leaves us with
