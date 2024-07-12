@@ -730,7 +730,9 @@ def devirtualize_jumps(instructions):
                     raise RuntimeError("Python 3.11+ should not have absolute jumps")
             else:  # relative jump
                 # byte offset between target and next instruction
-                inst.arg = abs(int(target.offset - inst.offset - instruction_size(inst)))
+                inst.arg = abs(
+                    int(target.offset - inst.offset - instruction_size(inst))
+                )
                 if sys.version_info >= (3, 10):
                     # see bytecode size comment in the absolute jump case above
                     inst.arg //= 2
