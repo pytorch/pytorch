@@ -913,13 +913,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def causal_mask(score, b, h, q_idx, kv_idx):
             return torch.where(q_idx >= kv_idx, score, -float("inf"))
 
-        block_mask_a = create_block_mask(causal_mask, 1, 1, 512, 512, _compiled=True)
-        block_mask_b = create_block_mask(causal_mask, 1, 1, 512, 512, _compiled=False)
-        self.assertEqual(
-            block_mask_a.full_kv_num_blocks, block_mask_b.full_kv_num_blocks
-        )
-        self.assertEqual(block_mask_a.full_kv_indices, block_mask_b.full_kv_indices)
-        self.assertEqual(block_mask_a.full_q_num_blocks, block_mask_b.full_q_num_blocks)
+        block_mask_a = create_block_mask(causal_mask, 1, 1, 512, 512, _compile=True)
+        block_mask_b = create_block_mask(causal_mask, 1, 1, 512, 512, _compile=False)
+        self.assertEqual(block_mask_a.kv_num_blocks, block_mask_b.kv_num_blocks)
+        self.assertEqual(block_mask_a.kv_indices, block_mask_b.kv_indices)
+        self.assertEqual(block_mask_a.q_num_blocks, block_mask_b.q_num_blocks)
 
     @supported_platform
     def test_epilogue_fused(self):
@@ -933,17 +931,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         _, code = run_and_get_code(f, q, k, v)
         # TODO: attention output is not being DCE'd
         fc = FileCheck()
-        fc.check("buf0 = empty_strided_cuda((1, 1, 1)")  # FULL_KV_NUM_BLKS
-        fc.check("buf1 = empty_strided_cuda((1, 1, 1, 1)")  # FULL_KV_IDX
-        fc.check("buf8 = empty_strided_cuda")  # logsumexp
-        fc.check("buf9 = empty_strided_cuda")  # attention output
-        fc.check("buf11 = empty_strided_cuda")  # cos(attention)
-        fc.run(code[0])
-        fc = FileCheck()
-        fc.check_not("buf2 =")  # Dead buffer
-        fc.check_not("buf3 =")  # Dead buffer
-        fc.check_not("buf6 =")  # Dead buffer, attention output
-        fc.check_not("buf7 =")  # Mutation-buffer, not allocated
+        fc.check("triton_tem_fused")  # template call
+        fc.check_not("poi_fused_cos")  # No cos pointwise operation
         fc.run(code[0])
         accessed_bytes = 1 * 8 * 1024 * 64 * torch.float32.itemsize
         num_accesses = 4  # q, k, v reads, one output.
@@ -1371,14 +1360,6 @@ class GraphModule(torch.nn.Module):
 
         zeros_1: "i32[1, 1, 1, 1]" = torch.zeros([1, 1, 1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
 
-        zeros_2: "i32[1, 1, 1]" = torch.zeros([1, 1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
-
-        zeros_3: "i32[1, 1, 1, 1]" = torch.zeros([1, 1, 1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
-
-        zeros_4: "i32[1, 1, 1]" = torch.zeros([1, 1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
-
-        zeros_5: "i32[1, 1, 1, 1]" = torch.zeros([1, 1, 1, 1], dtype = torch.int32, device = device(type='cuda', index=0))
-
         child_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         child_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         child_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
@@ -1390,7 +1371,7 @@ class GraphModule(torch.nn.Module):
         child_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         child_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (ones, zeros, ones_1, zeros_1, zeros_2, zeros_3, zeros_4, zeros_5, 8, 8, mask_fn_0), 0.5, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = ones = zeros = ones_1 = zeros_1 = zeros_2 = zeros_3 = zeros_4 = zeros_5 = mask_fn_0 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (ones, zeros, ones_1, zeros_1, None, None, None, None, 8, 8, mask_fn_0), 0.5, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = ones = zeros = ones_1 = zeros_1 = mask_fn_0 = None
         out: "f64[2, 2, 8, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -1426,11 +1407,11 @@ class GraphModule(torch.nn.Module):
             joint_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", full_default: "i32[1, 1, 1]", full_default_1: "i32[1, 1, 1, 1]", full_default_4: "i32[1, 1, 1]", getitem: "f64[2, 2, 8, 4]", getitem_1: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
+    def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", full_default: "i32[1, 1, 1]", full_default_1: "i32[1, 1, 1, 1]", getitem: "f64[2, 2, 8, 4]", getitem_1: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
         mask_graph = self.mask_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, (full_default, full_default_1, full_default, full_default_1, full_default_4, full_default_1, full_default_4, full_default_1, 8, 8, mask_graph), 0.5, (), ());  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = full_default_4 = mask_graph = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, (full_default, full_default_1, full_default, full_default_1, None, None, None, None, 8, 8, mask_graph), 0.5, (), ());  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = mask_graph = None
         getitem_2: "f64[2, 2, 8, 4]" = flex_attention_backward[0]
         getitem_3: "f64[2, 2, 8, 4]" = flex_attention_backward[1]
         getitem_4: "f64[2, 2, 8, 4]" = flex_attention_backward[2];  flex_attention_backward = None
