@@ -28,6 +28,9 @@ from torch.types import Device
 from .. import device as _device
 from .._utils import _dummy_type, _LazySeedTracker, classproperty
 from ._utils import _get_device_index
+from .gds import (
+    GdsFile, gds_register_buffer, gds_deregister_buffer
+)
 from .graphs import (
     CUDAGraph,
     graph,

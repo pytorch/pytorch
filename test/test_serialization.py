@@ -4167,8 +4167,8 @@ class TestSerialization(TestCase, SerializationMixin):
     @unittest.skipIf(not torch.cuda.is_available(), "testing")
     def test_can_test_gds_in_ci(self):
         with TemporaryFileName() as f:
-            gds_file = torch._C._CudaGdsFileBase(f, 'w')
-
+            gds_file = torch.cuda.GdsFile(f, 'w')
+    
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)
