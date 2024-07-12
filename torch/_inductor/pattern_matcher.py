@@ -1643,14 +1643,12 @@ def compute_mutation_region_ids(graph: torch.fx.GraphModule) -> None:
 class PatternMatcherPass:
     def __init__(
         self,
-        prevent_match_across_mutations: bool = True,
         pass_name: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.patterns: DefaultDict[
             Tuple[str, torch.fx.node.Target], List[PatternEntry]
         ] = defaultdict(list)
-        self.prevent_match_across_mutations = prevent_match_across_mutations
         self.pass_name = pass_name
 
     def __getitem__(self, item: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
@@ -1668,12 +1666,11 @@ class PatternMatcherPass:
             raise RuntimeError(
                 f"The input to PatternMatcherPass must be a GraphModule or a Graph, but got {type(gm)}"
             )
-        if self.prevent_match_across_mutations:
-            if should_compute_mutation_region_ids(graph):
-                compute_mutation_region_ids(graph)
-            get_mutation_region_id_partial = functools.partial(
-                get_mutation_region_id, graph
-            )
+        if should_compute_mutation_region_ids(graph):
+            compute_mutation_region_ids(graph)
+        get_mutation_region_id_partial = functools.partial(
+            get_mutation_region_id, graph
+        )
         count = 0
         nodes = []
         has_call_module = False
@@ -1706,8 +1703,7 @@ class PatternMatcherPass:
                     m = entry.pattern.match(node)
                     # pattern match crosses mutation barrier - discard
                     if (
-                        self.prevent_match_across_mutations
-                        and is_match(m)
+                        is_match(m)
                         and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
                     ):
                         continue

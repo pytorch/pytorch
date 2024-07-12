@@ -1000,9 +1000,7 @@ class TestPatternMatcher(TestCase):
 
     def test_match_with_mutation(self):
         counter = 0
-        test_pass = PatternMatcherPass(
-            prevent_match_across_mutations=True, pass_name="test"
-        )
+        test_pass = PatternMatcherPass(pass_name="test")
 
         @register_graph_pattern(
             CallFunction(
@@ -1159,7 +1157,7 @@ class TestPatternMatcher(TestCase):
 
     def test_match_equivalent_function_invocations1(self):
         counter = 0
-        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+        test_pass = PatternMatcherPass()
 
         args = [
             torch.randn(20, device="cuda"),
@@ -1215,7 +1213,7 @@ class TestPatternMatcher(TestCase):
 
     def test_match_equivalent_function_invocations2(self):
         counter = 0
-        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+        test_pass = PatternMatcherPass()
 
         args = [
             torch.randn(20, device="cuda"),
@@ -1260,7 +1258,7 @@ class TestPatternMatcher(TestCase):
 
     def test_match_equivalent_function_invocations3(self):
         counter = 0
-        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+        test_pass = PatternMatcherPass()
 
         args = [
             torch.randn(20, device="cuda"),
