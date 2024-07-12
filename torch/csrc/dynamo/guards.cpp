@@ -2098,20 +2098,20 @@ class DictGuardManager : public GuardManager {
         KeyValueManager& key_value_manager = _key_value_managers[dict_pointer];
         std::unique_ptr<GuardManager>& key_manager = key_value_manager.first;
         // If dict tag matches and key is immutable, skip the key guard manager
-        bool skip_key_manager =
-            matches_dict_tag && _is_key_at_index_immutable[dict_pointer];
+        bool skip_key_manager = !key_manager ||
+            (matches_dict_tag && _is_key_at_index_immutable[dict_pointer]);
         if (!skip_key_manager) {
-          if (key_manager && !key_manager->check_nopybind(key)) {
+          if (key_manager->check_nopybind(key)) {
             return false;
           }
         }
         // If dict tag matches and value is immutable, skip the value guard
         // manager
         std::unique_ptr<GuardManager>& value_manager = key_value_manager.second;
-        bool skip_value_manager =
-            matches_dict_tag && _is_value_at_index_immutable[dict_pointer];
+        bool skip_value_manager = !value_manager ||
+            (matches_dict_tag && _is_value_at_index_immutable[dict_pointer]);
         if (!skip_value_manager) {
-          if (value_manager && !value_manager->check_nopybind(value)) {
+          if (!value_manager->check_nopybind(value)) {
             return false;
           }
         }
