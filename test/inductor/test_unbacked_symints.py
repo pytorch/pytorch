@@ -107,14 +107,18 @@ class TestUnbackedSymints(InductorTestCase):
         # Tests View.create(slice, size_with_unbacked_symint)
         def fn(x):
             nz = torch.nonzero(x)  # introduce unbacked symint
+            # (u0, 4), (1, u0)
             squared = nz * nz  # avoid ReinterpretView when lowering Slice
             sliced = torch.ops.aten.slice.Tensor(squared, dim=1, start=-2, end=None)
+            # (u0, 2), (1, Max(1, u0))
             view = sliced.unsqueeze(dim=0)
-            return view.squeeze(
-                dim=0
-            )  # make sure no unbacked symint in output's stride
+            # (1, u0, 2), (u0, 1, Max(1, u0))
+            return view.squeeze(dim=0)[
+                :, 0
+            ]  # make sure no unbacked symint in output's stride
 
-        example_inputs = (torch.randn(1, 1, 1, 1, device=device),)
+        # Make sure nonzero's input has numel > 1
+        example_inputs = (torch.randn(1, 2, 1, 1, device=device),)
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
