@@ -1229,7 +1229,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         batch, seq = 4, 256
 
         def create_args():
-            return tuple()
+            return ()
 
         def create_kwargs():
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
@@ -1336,7 +1336,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         batch, seq = 4, 256
 
         def create_args():
-            return tuple()
+            return ()
 
         def create_kwargs():
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
@@ -1369,7 +1369,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         batch, seq = 4, 256
 
         def create_args():
-            return tuple()
+            return ()
 
         def create_kwargs():
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
@@ -1406,7 +1406,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return transformers.GPT2Model(config).eval()
 
         def create_args():
-            return tuple()
+            return ()
 
         def create_kwargs():
             batch, seq = 4, 256
@@ -1454,7 +1454,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return transformers.GPTNeoXModel(config).eval()
 
         def create_args():
-            return tuple()
+            return ()
 
         def create_kwargs():
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
