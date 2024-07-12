@@ -511,11 +511,23 @@ class SymInt:
         return self.node.expr
 
     def __hash__(self) -> builtins.int:
+        return hash(self._get_int())
+
+    def as_integer_ratio(self) -> _Tuple[builtins.int, builtins.int]:
+        """Represent this int as an exact integer ratio"""
+        return self._get_int(), 1
+
+    def bit_length(self) -> "SymInt":
+        return SymInt(self.node.wrap_int(self._get_int().bit_length()))
+
+    def conjugate(self) -> "SymInt":
+        return self
+
+    def _get_int(self) -> builtins.int:
         if self.node.is_nested_int():
-            return hash(self.node.nested_int())
+            return self.node.nested_int()
         else:
-            # Force specialization
-            return hash(builtins.int(self))
+            return builtins.int(self)
 
 
 class SymFloat:
@@ -615,6 +627,10 @@ class SymFloat:
         """Return True if the float is an integer."""
         raise TypeError("type stub not overridden")
 
+    def as_integer_ratio(self) -> _Tuple[builtins.int, builtins.int]:
+        """Represent this float as an exact integer ratio"""
+        return self._get_float().as_integer_ratio()
+
     def __repr__(self):
         return self.node.str()
 
@@ -622,11 +638,10 @@ class SymFloat:
         return self.node.expr
 
     def __hash__(self):
-        if self.node.is_constant():
-            return hash(self.node.float_())
-        else:
-            # Force specialization
-            return hash(builtins.float(self))
+        return hash(self._get_float())
+
+    def _get_float(self) -> builtins.float:
+        return self.node.float_() if self.node.is_constant() else builtins.float(self)
 
 
 class SymBool:
