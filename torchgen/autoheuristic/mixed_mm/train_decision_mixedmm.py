@@ -5,23 +5,25 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from train import AHTrain
+from train_decision import AHTrainDecisionTree
 
-from torch._inductor.fx_passes.pad_mm import pad_mm_operations
+from torch._inductor.autoheuristic.autoheuristic_utils import mixed_mm_operations
 
 
-class AHTrainPadMM(AHTrain):
+class AHTrainDecisionTreeMixedMM(AHTrainDecisionTree):
     def __init__(self):
         super().__init__()
 
     def add_new_features(self, results):
-        ops = pad_mm_operations()
+        ops = mixed_mm_operations()
+        added_categorical_features = []
         for op in ops:
             results[op.name] = results.apply(op.func, axis=1)
-        added_categorical_features = [op.name for op in ops if op.is_categorical]
+            if op.is_categorical:
+                added_categorical_features.append(op.name)
         return (results, added_categorical_features)
 
 
 if __name__ == "__main__":
-    train = AHTrainPadMM()
+    train = AHTrainDecisionTreeMixedMM()
     train.generate_heuristic()

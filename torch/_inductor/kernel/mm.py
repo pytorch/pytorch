@@ -8,6 +8,7 @@ from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgor
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
     context_add_strides,
+    mixed_mm_operations,
 )
 from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
@@ -495,6 +496,7 @@ def mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes):
         input_nodes=input_nodes,
         context=context,
         name=name,
+        augment_context=mixed_mm_operations(),
     )
     return autoheuristic.get_choice_caller()
 
