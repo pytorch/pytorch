@@ -353,29 +353,24 @@ auto build_graph_and_tensors(
       fe::graph::Tensor_attributes()
           .set_name("Q")
           .set_dim(q.sizes().vec())
-          .set_stride(fixSizeOneDimStrideSDPA(
-              q.sizes(),
-              q.strides().vec())));
+          .set_stride(fixSizeOneDimStrideSDPA(q.sizes(), q.strides().vec())));
   auto K = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_name("K")
           .set_dim(k.sizes().vec())
-          .set_stride(fixSizeOneDimStrideSDPA(
-              k.sizes(),
-              k.strides().vec())));
+          .set_stride(fixSizeOneDimStrideSDPA(k.sizes(), k.strides().vec())));
   auto V = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_name("V")
           .set_dim(v.sizes().vec())
-          .set_stride(fixSizeOneDimStrideSDPA(
-              v.sizes(),
-              v.strides().vec())));
+          .set_stride(fixSizeOneDimStrideSDPA(v.sizes(), v.strides().vec())));
   std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
   if (attn_bias.has_value()) {
-    bias = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                 .set_name("bias")
-                                 .set_dim(attn_bias.value().sizes().vec())
-                                 .set_stride(attn_bias.value().strides().vec()));
+    bias =
+        mha_graph->tensor(fe::graph::Tensor_attributes()
+                              .set_name("bias")
+                              .set_dim(attn_bias.value().sizes().vec())
+                              .set_stride(attn_bias.value().strides().vec()));
     scaled_dot_product_flash_attention_options.set_bias(bias.value());
   }
   auto seq_q = mha_graph->tensor(fe::graph::Tensor_attributes()
@@ -391,9 +386,7 @@ auto build_graph_and_tensors(
 
   auto [O, Stats] =
       mha_graph->sdpa(Q, K, V, scaled_dot_product_flash_attention_options);
-  O->set_output(true)
-      .set_dim(o.sizes().vec())
-      .set_stride(o.strides().vec());
+  O->set_output(true).set_dim(o.sizes().vec()).set_stride(o.strides().vec());
 
   if (Stats) {
     Stats->set_output(true).set_data_type(fe::DataType_t::FLOAT);
@@ -464,27 +457,25 @@ auto build_graph_and_tensors_backward(
                                    .set_name("CUDNN_SDPA_BACKWARD")
                                    .set_causal_mask(is_causal)
                                    .set_attn_scale(attn_scale);
-  auto Q = mha_graph->tensor(
-      fe::graph::Tensor_attributes()
-          .set_name("Q")
-          .set_dim(q.sizes().vec())
-          .set_stride(q.strides().vec()));
-  auto K = mha_graph->tensor(
-      fe::graph::Tensor_attributes()
-          .set_name("K")
-          .set_dim(k.sizes().vec())
-          .set_stride(k.strides().vec()));
-  auto V = mha_graph->tensor(
-      fe::graph::Tensor_attributes()
-          .set_name("V")
-          .set_dim(v.sizes().vec())
-          .set_stride(v.strides().vec()));
+  auto Q = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                 .set_name("Q")
+                                 .set_dim(q.sizes().vec())
+                                 .set_stride(q.strides().vec()));
+  auto K = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                 .set_name("K")
+                                 .set_dim(k.sizes().vec())
+                                 .set_stride(k.strides().vec()));
+  auto V = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                 .set_name("V")
+                                 .set_dim(v.sizes().vec())
+                                 .set_stride(v.strides().vec()));
   std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
   if (attn_bias.has_value()) {
-    bias = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                 .set_name("bias")
-                                 .set_dim(attn_bias.value().sizes().vec())
-                                 .set_stride(attn_bias.value().strides().vec()));
+    bias =
+        mha_graph->tensor(fe::graph::Tensor_attributes()
+                              .set_name("bias")
+                              .set_dim(attn_bias.value().sizes().vec())
+                              .set_stride(attn_bias.value().strides().vec()));
     sdpa_backward_options.set_bias(bias.value());
   }
   auto Seed = mha_graph->tensor(fe::graph::Tensor_attributes()
@@ -497,36 +488,27 @@ auto build_graph_and_tensors_backward(
                                       .set_dim({1, 1, 1, 1})
                                       .set_stride({1, 1, 1, 1})
                                       .set_data_type(fe::DataType_t::INT32));
-  auto O = mha_graph->tensor(
-      fe::graph::Tensor_attributes()
-          .set_name("O")
-          .set_dim(o.sizes().vec())
-          .set_stride(o.strides().vec()));
-  auto STATS = mha_graph->tensor(
-      fe::graph::Tensor_attributes()
-          .set_name("Stats")
-          .set_dim(softmaxstats.sizes().vec())
-          .set_stride(softmaxstats.strides().vec())
-          .set_data_type(fe::DataType_t::FLOAT));
-  auto DO = mha_graph->tensor(
-      fe::graph::Tensor_attributes()
-          .set_name("DO")
-          .set_dim(dO.sizes().vec())
-          .set_stride(dO.strides().vec()));
+  auto O = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                 .set_name("O")
+                                 .set_dim(o.sizes().vec())
+                                 .set_stride(o.strides().vec()));
+  auto STATS = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                     .set_name("Stats")
+                                     .set_dim(softmaxstats.sizes().vec())
+                                     .set_stride(softmaxstats.strides().vec())
+                                     .set_data_type(fe::DataType_t::FLOAT));
+  auto DO = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                  .set_name("DO")
+                                  .set_dim(dO.sizes().vec())
+                                  .set_stride(dO.strides().vec()));
   if (dropout_probability != 0.0f) {
     sdpa_backward_options.set_dropout(dropout_probability, Seed, Offset);
   }
   auto [DQ, DK, DV] =
       mha_graph->sdpa_backward(Q, K, V, O, DO, STATS, sdpa_backward_options);
-  DQ->set_output(true)
-      .set_dim(dQ.sizes().vec())
-      .set_stride(dQ.strides().vec());
-  DK->set_output(true)
-      .set_dim(dK.sizes().vec())
-      .set_stride(dK.strides().vec());
-  DV->set_output(true)
-      .set_dim(dV.sizes().vec())
-      .set_stride(dV.strides().vec());
+  DQ->set_output(true).set_dim(dQ.sizes().vec()).set_stride(dQ.strides().vec());
+  DK->set_output(true).set_dim(dK.sizes().vec()).set_stride(dK.strides().vec());
+  DV->set_output(true).set_dim(dV.sizes().vec()).set_stride(dV.strides().vec());
   AT_CUDNN_FRONTEND_CHECK(mha_graph->validate());
   AT_CUDNN_FRONTEND_CHECK(mha_graph->build_operation_graph(handle));
   AT_CUDNN_FRONTEND_CHECK(
