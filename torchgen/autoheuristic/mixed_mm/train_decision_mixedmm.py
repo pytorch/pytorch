@@ -23,6 +23,9 @@ class AHTrainDecisionTreeMixedMM(AHTrainDecisionTree):
                 added_categorical_features.append(op.name)
         return (results, added_categorical_features)
 
+    def get_default_config(self, row):
+        return "extern_fallback_mixed_mm"
+
 
 if __name__ == "__main__":
     train = AHTrainDecisionTreeMixedMM()

@@ -2,6 +2,7 @@
 
 import itertools
 import json
+import math
 import warnings
 
 
@@ -42,19 +43,24 @@ class AHTrainDecisionTree(AHTrain):
         return sorted_classes[:k]
 
     def train_and_evaluate_models(
-        self, datasets, max_depths, min_samples_leafs, feature_columns
+        self, datasets, max_depths, min_samples_leafs, criterion_list, feature_columns
     ):
         results = []
         best_model = None
         best_model_safe_proba = 0
         best_model_num_correct = 0
         best_model_num_wrong = 0
-        for max_depth, min_samples_leaf in itertools.product(
-            max_depths, min_samples_leafs
+        for max_depth, min_samples_leaf, criterion in itertools.product(
+            max_depths, min_samples_leafs, criterion_list
         ):
-            print(f"max_depth={max_depth} min_samples_leaf={min_samples_leaf}")
+            print(
+                f"max_depth={max_depth} min_samples_leaf={min_samples_leaf} criterion={criterion}"
+            )
             model = DecisionTreeClassifier(
-                max_depth=max_depth, min_samples_leaf=min_samples_leaf, random_state=42
+                max_depth=max_depth,
+                min_samples_leaf=min_samples_leaf,
+                criterion=criterion,
+                random_state=42,
             )
 
             df_train = datasets["train"]
@@ -95,6 +101,7 @@ class AHTrainDecisionTree(AHTrain):
                 results.append(
                     (
                         name,
+                        criterion,
                         max_depth,
                         min_samples_leaf,
                         eval_result["correct"],
@@ -107,6 +114,9 @@ class AHTrainDecisionTree(AHTrain):
                         eval_result["wrong_max_speedup_k"],
                         eval_result["wrong_gmean_speedup_k"],
                         eval_result["top_k_unsure"],
+                        eval_result["max_speedup_default"],
+                        eval_result["gmean_speedup_default"],
+                        eval_result["non_default_predictions"],
                     )
                 )
 
@@ -118,6 +128,7 @@ class AHTrainDecisionTree(AHTrain):
                 results,
                 columns=[
                     "set",
+                    "crit",
                     "max_depth",
                     "min_samples_leaf",
                     "correct",
@@ -130,6 +141,9 @@ class AHTrainDecisionTree(AHTrain):
                     "wrong_max_spdup_k",
                     "wrong_gman_spdup_k",
                     "top_k_unsure",
+                    "max_spdup_default",
+                    "gman_spdup_default",
+                    "non_default_preds",
                 ],
             ),
             best_model,
@@ -170,14 +184,15 @@ class AHTrainDecisionTree(AHTrain):
         print(df["winner"].value_counts())
         datasets = self.prepare_datasets(df, other_datasets, cat_feature2cats)
         feature_columns = self.get_feature_columns(df, datasets)
-        max_depths = [5, 6, 7, 8]
-        min_samples_leafs = [1, 5, 10, 0.01, 0.05, 0.02, 0.005]
+        max_depths = [5, 6, 7]
+        min_samples_leafs = [1, 5, 10, 0.01, 0.05, 0.02]
+        criterion_list = ["gini", "entropy"]
         (
             results_df,
             best_model,
             best_model_safe_proba,
         ) = self.train_and_evaluate_models(
-            datasets, max_depths, min_samples_leafs, feature_columns
+            datasets, max_depths, min_samples_leafs, criterion_list, feature_columns
         )
 
         # prints results for all models and datasets
@@ -301,6 +316,18 @@ class AHTrainDecisionTree(AHTrain):
         threshold=0.0,
         k=3,
     ):
+        def compute_speedup_over_default(default_config, pred, df, i, predicted_time):
+            nonlocal num_non_default_predictions
+            nonlocal speedups_over_default
+            if default_config is not None:
+                if pred != default_config:
+                    num_non_default_predictions += 1
+                default_time = self.get_time(df.iloc[i], default_config)
+                # TODO: We should keep track of how often this happens
+                if default_time is not None and not math.isinf(default_time):
+                    speedup_over_default = default_time / predicted_time
+                    speedups_over_default.append(speedup_over_default)
+
         y_true = df["winner"]
         num_correct = 0
         num_wrong = 0
@@ -311,6 +338,8 @@ class AHTrainDecisionTree(AHTrain):
         num_correct_top_k = 0
         wrong_speedups_top_k = []
         top_k_unsure = 0
+        speedups_over_default = []
+        num_non_default_predictions = 0
         for pred, true, prob in zip(predictions, y_true, probas):
             avail_choices = df["avail_choices"].iloc[i]
             top_k_choices = self.top_k_classes(
@@ -319,14 +348,23 @@ class AHTrainDecisionTree(AHTrain):
             predicted_time = self.get_time(df.iloc[i], pred)
             assert true in avail_choices, f"{true} not in {avail_choices}"
 
+            default_config = self.get_default_config(df.iloc[i])
+
             max_prob = max(prob)
             if pred not in avail_choices or (
                 max_prob != 1.0 and max(prob) <= threshold
             ):
                 num_unsure += 1
+                speedups_over_default.append(1.0)
             elif pred == true:
+                compute_speedup_over_default(
+                    default_config, pred, df, i, predicted_time
+                )
                 num_correct += 1
             else:
+                compute_speedup_over_default(
+                    default_config, pred, df, i, predicted_time
+                )
                 num_wrong += 1
                 wrong_probas.append(max_prob)
                 best_time = self.get_time(df.iloc[i], true)
@@ -365,6 +403,13 @@ class AHTrainDecisionTree(AHTrain):
         gmean_speedup = gmean(speedups_wrong) if speedups_wrong else 0
         max_speedup_top_k = max(wrong_speedups_top_k) if wrong_speedups_top_k else 0
         gmean_speedup_top_k = gmean(wrong_speedups_top_k) if wrong_speedups_top_k else 0
+
+        max_speedup_over_default = (
+            max(speedups_over_default) if speedups_over_default else 0
+        )
+        gmean_speedup_over_default = (
+            gmean(speedups_over_default) if speedups_over_default else 0
+        )
         return {
             "correct": num_correct,
             "wrong": num_wrong,
@@ -376,6 +421,9 @@ class AHTrainDecisionTree(AHTrain):
             "wrong_max_speedup_k": max_speedup_top_k,
             "wrong_gmean_speedup_k": gmean_speedup_top_k,
             "top_k_unsure": top_k_unsure,
+            "max_speedup_default": max_speedup_over_default,
+            "gmean_speedup_default": gmean_speedup_over_default,
+            "non_default_predictions": num_non_default_predictions,
         }
 
     def gen_classes(self, classes, num_spaces):
@@ -395,6 +443,9 @@ class AHTrainDecisionTree(AHTrain):
             f"({value:.3f}, {index})" for value, index in probas_indices_sorted
         )
         return f"[{probas_indices_sorted_str}]"
+
+    def get_default_config(self, row):
+        return None
 
     def handle_leaf(self, tree_, node, indent):
         leaf_num_samples = tree_.n_node_samples[node]
