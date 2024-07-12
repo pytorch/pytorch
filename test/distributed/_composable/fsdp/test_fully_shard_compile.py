@@ -324,14 +324,11 @@ class TestFullyShardCompile(FSDPTest):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_nested_fully_shard_fullgraph_backend_inductor(self):
-        with torch._inductor.config.patch(
-            post_grad_custom_post_pass=self._apply_fsdp_passes_with_checks,
-        ):
-            self._test_traceable_fsdp(
-                *self._create_nested_fully_shard_factory_fns(),
-                "inductor",
-                fullgraph=True,
-            )
+        self._test_traceable_fsdp(
+            *self._create_nested_fully_shard_factory_fns(),
+            "inductor",
+            fullgraph=True,
+        )
 
     def _create_transformer_factory_fns(self):
         seq_len = 16
