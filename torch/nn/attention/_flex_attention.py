@@ -106,7 +106,9 @@ class BlockMask:
         self.KV_BLOCK_SIZE = KV_BLOCK_SIZE
         self.Q_BLOCK_SIZE = Q_BLOCK_SIZE
         if mask_fn is None:
-            self.mask_fn = _no_mask
+            mask_fn = _no_mask
+        self.mask_fn = mask_fn
+
 
     def as_tuple(self):
         return (
