@@ -274,7 +274,7 @@ def validate_vmap_returns_tuple_of_two_elements(result):
 
 
 @custom_function_call.py_impl(TransformType.Vmap)
-def custom_function_call_vmap(interpreter, autograd_function, *operands):
+def custom_function_call_vmap(interpreter, autograd_function, *operands, **kwargs):
     if autograd_function.generate_vmap_rule:
         if has_overriden_vmap_rule(autograd_function):
             # TODO: Update link to stable once that's out
@@ -303,12 +303,12 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
         )
 
     return custom_function_call_vmap_helper(
-        interpreter, autograd_function.vmap, autograd_function, *operands
+        interpreter, autograd_function.vmap, autograd_function, *operands, **kwargs
     )
 
 
 def custom_function_call_vmap_helper(
-    interpreter, vmap_function, autograd_function, *operands
+    interpreter, vmap_function, op, *operands, **kwargs
 ):
     current_level = interpreter.level()
     info = VmapInfo(
@@ -316,16 +316,18 @@ def custom_function_call_vmap_helper(
         randomness=interpreter.randomness(),
     )
     unwrapped_operands, in_dims = unwrap_batched(operands, current_level)
-
     # If none of the tensors are batched at the current level, then we skip the
     # current level. This saves the user from needing to handle this case in
     # their vmap staticmethod (and is consistent with our C++ batching rule API)
     if pytree.tree_all(lambda dim: dim is None, in_dims):
         with interpreter.lower():
-            return custom_function_call(autograd_function, *operands)
+            if isinstance(op, torch.autograd.function.FunctionMeta):
+                return custom_function_call(op, *operands)
+            else:
+                return op(*operands, **kwargs)
 
     with interpreter.lower():
-        result = vmap_function(info, in_dims, *unwrapped_operands)
+        result = vmap_function(info, in_dims, *unwrapped_operands, **kwargs)
     validate_vmap_returns_tuple_of_two_elements(result)
     unwrapped_output, out_dims = result
 
