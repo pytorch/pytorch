@@ -726,6 +726,8 @@ def fx_codegen_and_compile(
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
 
+    inductor_counters = counters["inductor"].copy()
+
     # lift the maximum depth of the Python interpreter stack
     # to adapt large/deep models
     sys.setrecursionlimit(max(sys.getrecursionlimit(), 2000))
@@ -842,7 +844,9 @@ def fx_codegen_and_compile(
             const_code=const_code,
             const_module=const_graph,
         )
+
         metrics_helper = metrics.CachedMetricsHelper()
+
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
             output_strides: List[Optional[Tuple[_StrideExprStr, ...]]] = []
@@ -912,6 +916,7 @@ def fx_codegen_and_compile(
                 output_strides,
                 V.graph.disable_cudagraphs_reason,
                 metrics_helper.get_deltas(),
+                counters["inductor"] - inductor_counters,
             )
 
     return compiled_graph
