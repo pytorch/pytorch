@@ -668,6 +668,16 @@ class CustomOpDef:
         func: Callable,
     ) -> None:
         self._vmap_fn = func
+        from torch._functorch.autograd_function import custom_function_call_vmap_helper
+        from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
+
+        def wrapped_func(keyset, *args, **kwargs):
+            interpreter = retrieve_current_functorch_interpreter()
+            return custom_function_call_vmap_helper(
+                interpreter, self._vmap_fn, None, *args, **kwargs
+            )
+
+        self._lib.impl(self._name, wrapped_func, "FuncTorchBatched", with_keyset=True)
 
 
 # NOTE: [Supporting decorator and non-decorator usage]

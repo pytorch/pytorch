@@ -975,13 +975,6 @@ def register_vmap(
     assert isinstance(op, str)
     qualname = op
     op = torch._library.utils.lookup_op(qualname)
-    schema = op._schema
-    if _library.utils.has_kwarg_only_tensors(schema):
-        raise NotImplementedError(
-            f"register_vmap with kwarg-only Tensor args. In the original "
-            f"definition of the op, please make your tensors not kwarg-only. "
-            f"Got: {schema}"
-        )
 
     namespace, opname = torch._library.utils.parse_namespace(qualname)
     if lib is None:
@@ -993,9 +986,7 @@ def register_vmap(
 
     def wrapped_func(keyset, *args, **kwargs):
         interpreter = retrieve_current_functorch_interpreter()
-        return custom_function_call_vmap_helper(
-            interpreter, func, None, *args, **kwargs
-        )
+        return custom_function_call_vmap_helper(interpreter, func, op, *args, **kwargs)
 
     lib.impl(opname, wrapped_func, "FuncTorchBatched", with_keyset=True)
 
