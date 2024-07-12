@@ -2530,7 +2530,6 @@ class TestNestedTensorDeviceType(TestCase):
         ):
             nt_noncont.narrow(dim=0, start=0, length=1)
 
-    @unittest.skip("Doesn't support the sdpa requirements")
     @parametrize("input_dim", [3, 4])
     def test_scaled_dot_product_attention(self, device, input_dim):
         def rand_tensor(*shape):

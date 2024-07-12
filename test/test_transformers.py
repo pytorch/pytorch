@@ -2980,6 +2980,9 @@ class TestSDPACudaOnly(NNTestCase):
             self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
         if TEST_WITH_ROCM and seq_len_q >= 1024 and seq_len_k >= 1024 and batch_size > 1:
             torch.cuda.empty_cache()  # Prevent memory fragmentation
+        if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
+            unittest.skip("Reference implementation OOM")
+            return
 
         scale = scale if scale is None else (1 / head_dim)
         num_heads_q = num_heads_kv = 4
