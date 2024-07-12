@@ -1912,13 +1912,10 @@ def forward(self, l_x_):
             ):
                 # True branch and false branch return tensors of different shape
                 torch._dynamo.export(mod)(torch.randn(3, 2))
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile",
-            ):
-                # True branch and false branch return tensors of different shape
-                test_x = torch.randn(3, 2)
-                mod(test_x)
+
+            # We specialize into one of the branches since predicate is a python boolean.
+            test_x = torch.randn(3, 2)
+            mod(test_x)
 
     def test_export_with_map_cond(self):
         from functorch.experimental.control_flow import cond, map
@@ -3428,8 +3425,7 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
+            RuntimeError, "Unmatched number of outputs from cond"
         ):
             torch._dynamo.export(
                 f_mismatch_return_length,

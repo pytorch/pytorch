@@ -1870,7 +1870,7 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
 
 
 def _args(n: torch.fx.Node) -> List[torch.fx.node.Argument]:
-    args: List[torch.fx.node.Argument] = list()
+    args: List[torch.fx.node.Argument] = []
     torch.fx.map_arg((n.args, n.kwargs), args.append)
     return args
 
