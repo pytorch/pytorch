@@ -283,53 +283,22 @@ class TestControlFlow(TestCase):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        gm = make_fx(f)(pred, x)
+        gm = make_fx(f, tracing_mode="symbolic")(pred, x)
 
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.code.strip(),
             """\
-class f(torch.nn.Module):
-    def forward(self, pred_1: "b8[]", x_1: "f32[4]"):
-        # No stacktrace found for following nodes
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
-        getitem: "f32[4]" = conditional[0];  conditional = None
-        ones_like: "f32[4]" = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
-        true_graph_1 = self.true_graph_1
-        false_graph_1 = self.false_graph_1
-        conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
-        getitem_1: "f32[4]" = conditional_1[0];  conditional_1 = None
-        return (getitem_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            sin: "f32[4]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
-            return (sin,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            cos: "f32[4]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
-            return (cos,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            sin: "f32[4]" = torch.ops.aten.sin.default(arg1_1)
-            cos: "f32[4]" = torch.ops.aten.cos.default(arg1_1);  arg1_1 = None
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, cos);  arg0_1 = cos = None
-            return [mul]
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            cos: "f32[4]" = torch.ops.aten.cos.default(arg1_1)
-            sin: "f32[4]" = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
-            neg: "f32[4]" = torch.ops.aten.neg.default(sin);  sin = None
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, neg);  arg0_1 = neg = None
-            return [mul]""",  # noqa: B950
+def forward(self, pred_1, x_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
+    getitem = conditional[0];  conditional = None
+    ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
+    getitem_1 = conditional_1[0];  conditional_1 = None
+    return (getitem_1,)""",  # noqa: B950
         )
 
     def test_cond_autograd_complex(self):
@@ -356,63 +325,21 @@ class f(torch.nn.Module):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        gm = make_fx(f)(pred, x)
+        gm = make_fx(f, tracing_mode="symbolic")(pred, x)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.code.strip(),
             """\
-class f(torch.nn.Module):
-    def forward(self, pred_1: "b8[]", x_1: "f32[4]"):
-        # No stacktrace found for following nodes
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
-        getitem: "f32[4]" = conditional[0];  conditional = None
-        ones_like: "f32[4]" = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
-        true_graph_1 = self.true_graph_1
-        false_graph_1 = self.false_graph_1
-        conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
-        getitem_1: "f32[4]" = conditional_1[0];  conditional_1 = None
-        return (getitem_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            pow_1: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg0_1, 2);  arg0_1 = None
-            sin: "f32[4]" = torch.ops.aten.sin.default(pow_1);  pow_1 = None
-            abs_1: "f32[4]" = torch.ops.aten.abs.default(sin);  sin = None
-            return (abs_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            add: "f32[4]" = torch.ops.aten.add.Tensor(arg0_1, 42);  arg0_1 = None
-            cos: "f32[4]" = torch.ops.aten.cos.default(add);  add = None
-            return (cos,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            pow_1: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg1_1, 2)
-            sin: "f32[4]" = torch.ops.aten.sin.default(pow_1)
-            abs_1: "f32[4]" = torch.ops.aten.abs.default(sin)
-            sgn: "f32[4]" = torch.ops.aten.sgn.default(sin);  sin = None
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, sgn);  arg0_1 = sgn = None
-            cos: "f32[4]" = torch.ops.aten.cos.default(pow_1);  pow_1 = None
-            mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(mul, cos);  mul = cos = None
-            pow_2: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg1_1, 1.0);  arg1_1 = None
-            mul_2: "f32[4]" = torch.ops.aten.mul.Scalar(pow_2, 2.0);  pow_2 = None
-            mul_3: "f32[4]" = torch.ops.aten.mul.Tensor(mul_1, mul_2);  mul_1 = mul_2 = None
-            return [mul_3]
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            add: "f32[4]" = torch.ops.aten.add.Tensor(arg1_1, 42);  arg1_1 = None
-            cos: "f32[4]" = torch.ops.aten.cos.default(add)
-            sin: "f32[4]" = torch.ops.aten.sin.default(add);  add = None
-            neg: "f32[4]" = torch.ops.aten.neg.default(sin);  sin = None
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, neg);  arg0_1 = neg = None
-            return [mul]""",  # noqa: B950
+def forward(self, pred_1, x_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
+    getitem = conditional[0];  conditional = None
+    ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
+    getitem_1 = conditional_1[0];  conditional_1 = None
+    return (getitem_1,)""",  # noqa: B950
         )
 
     def test_cond_autograd_nested(self):
@@ -505,57 +432,22 @@ class f(torch.nn.Module):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        gm = make_fx(f)(pred, x, y, x)
+        gm = make_fx(f, tracing_mode="symbolic")(pred, x, y, x)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.code.strip(),
             """\
-class f(torch.nn.Module):
-    def forward(self, pred_1: "b8[]", x_1: "f32[4]", y_1: "f32[4]", z_1: "f32[4]"):
-        # No stacktrace found for following nodes
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (z_1, y_1));  true_graph_0 = false_graph_0 = None
-        getitem: "f32[4]" = conditional[0];  conditional = None
-        ones_like: "f32[4]" = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
-        true_graph_1 = self.true_graph_1
-        false_graph_1 = self.false_graph_1
-        conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, z_1, y_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = z_1 = y_1 = None
-        getitem_1: "f32[4]" = conditional_1[0]
-        getitem_2 = conditional_1[1];  conditional_1 = None
-        return (getitem_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg1_1 = None
-            mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(mul, arg0_1);  mul = arg0_1 = None
-            return (mul_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            add: "f32[4]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg1_1 = None
-            add_1: "f32[4]" = torch.ops.aten.add.Tensor(add, arg0_1);  add = arg0_1 = None
-            return (add_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg1_1, arg2_1)
-            mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(mul, arg1_1)
-            mul_2: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, mul);  mul = None
-            mul_3: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-            mul_4: "f32[4]" = torch.ops.aten.mul.Tensor(mul_3, arg2_1);  mul_3 = arg2_1 = None
-            add: "f32[4]" = torch.ops.aten.add.Tensor(mul_2, mul_4);  mul_2 = mul_4 = None
-            return [add, None]
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            add: "f32[4]" = torch.ops.aten.add.Tensor(arg1_1, arg2_1);  arg2_1 = None
-            add_1: "f32[4]" = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
-            add_2: "f32[4]" = torch.ops.aten.add.Tensor(arg0_1, arg0_1);  arg0_1 = None
-            return [add_2, None]""",  # noqa: B950
+def forward(self, pred_1, x_1, y_1, z_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (z_1, y_1));  true_graph_0 = false_graph_0 = None
+    getitem = conditional[0];  conditional = None
+    ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, z_1, y_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = z_1 = y_1 = None
+    getitem_1 = conditional_1[0]
+    getitem_2 = conditional_1[1];  conditional_1 = None
+    return (getitem_1,)""",  # noqa: B950
         )
 
     def test_cond_autograd_grad_through_cond(self):
@@ -591,90 +483,32 @@ class f(torch.nn.Module):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (nn_module.weight,), grad_out)
 
-        gm = make_fx(f)(pred, x)
+        # need to set _allow_non_fake_inputs = True because model parameters don't
+        # get fakified.
+        gm = make_fx(f, tracing_mode="symbolic", _allow_non_fake_inputs=True)(pred, x)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.code.strip(),
             """\
-class f(torch.nn.Module):
-    def forward(self, pred_1: "b8[]", x_1: "f32[4]"):
-        # No stacktrace found for following nodes
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        _param_constant0 = self._param_constant0
-        _param_constant1 = self._param_constant1
-        conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_param_constant0, _param_constant1, x_1));  true_graph_0 = false_graph_0 = _param_constant0 = _param_constant1 = None
-        getitem: "f32[4]" = conditional[0];  conditional = None
-        ones_like: "f32[4]" = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
-        true_graph_1 = self.true_graph_1
-        false_graph_1 = self.false_graph_1
-        _param_constant0_1 = self._param_constant0
-        _param_constant1_1 = self._param_constant1
-        conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, _param_constant0_1, _param_constant1_1, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = _param_constant0_1 = _param_constant1_1 = x_1 = None
-        getitem_1: "f32[4]" = conditional_1[0]
-        getitem_2: "f32[4, 4]" = conditional_1[1]
-        getitem_3: "f32[4]" = conditional_1[2];  conditional_1 = None
-        return (getitem_2,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4, 4]", arg2_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            view: "f32[1, 4]" = torch.ops.aten.view.default(arg2_1, [1, 4]);  arg2_1 = None
-            t: "f32[4, 4]" = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
-            addmm: "f32[1, 4]" = torch.ops.aten.addmm.default(arg0_1, view, t);  arg0_1 = view = t = None
-            view_1: "f32[4]" = torch.ops.aten.view.default(addmm, [4]);  addmm = None
-            return (view_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4, 4]", arg2_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            view: "f32[1, 4]" = torch.ops.aten.view.default(arg2_1, [1, 4])
-            t: "f32[4, 4]" = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
-            addmm: "f32[1, 4]" = torch.ops.aten.addmm.default(arg0_1, view, t);  arg0_1 = view = t = None
-            view_1: "f32[4]" = torch.ops.aten.view.default(addmm, [4]);  addmm = None
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg2_1, view_1);  arg2_1 = view_1 = None
-            return (mul,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4, 4]", arg3_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            view: "f32[1, 4]" = torch.ops.aten.view.default(arg3_1, [1, 4]);  arg3_1 = None
-            t: "f32[4, 4]" = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
-            addmm: "f32[1, 4]" = torch.ops.aten.addmm.default(arg1_1, view, t);  arg1_1 = None
-            view_1: "f32[4]" = torch.ops.aten.view.default(addmm, [4]);  addmm = None
-            view_2: "f32[1, 4]" = torch.ops.aten.view.default(arg0_1, [1, 4]);  arg0_1 = None
-            t_1: "f32[4, 4]" = torch.ops.aten.t.default(t);  t = None
-            mm: "f32[1, 4]" = torch.ops.aten.mm.default(view_2, t_1);  t_1 = None
-            t_2: "f32[4, 1]" = torch.ops.aten.t.default(view_2)
-            mm_1: "f32[4, 4]" = torch.ops.aten.mm.default(t_2, view);  t_2 = view = None
-            t_3: "f32[4, 4]" = torch.ops.aten.t.default(mm_1);  mm_1 = None
-            sum_1: "f32[1, 4]" = torch.ops.aten.sum.dim_IntList(view_2, [0], True);  view_2 = None
-            view_3: "f32[4]" = torch.ops.aten.view.default(sum_1, [4]);  sum_1 = None
-            t_4: "f32[4, 4]" = torch.ops.aten.t.default(t_3);  t_3 = None
-            view_4: "f32[4]" = torch.ops.aten.view.default(mm, [4]);  mm = None
-            return [view_3, t_4, view_4]
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4, 4]", arg3_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            view: "f32[1, 4]" = torch.ops.aten.view.default(arg3_1, [1, 4])
-            t: "f32[4, 4]" = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
-            addmm: "f32[1, 4]" = torch.ops.aten.addmm.default(arg1_1, view, t);  arg1_1 = None
-            view_1: "f32[4]" = torch.ops.aten.view.default(addmm, [4]);  addmm = None
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg3_1, view_1)
-            mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, arg3_1);  arg3_1 = None
-            mul_2: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, view_1);  arg0_1 = view_1 = None
-            view_2: "f32[1, 4]" = torch.ops.aten.view.default(mul_1, [1, 4]);  mul_1 = None
-            t_1: "f32[4, 4]" = torch.ops.aten.t.default(t);  t = None
-            mm: "f32[1, 4]" = torch.ops.aten.mm.default(view_2, t_1);  t_1 = None
-            t_2: "f32[4, 1]" = torch.ops.aten.t.default(view_2)
-            mm_1: "f32[4, 4]" = torch.ops.aten.mm.default(t_2, view);  t_2 = view = None
-            t_3: "f32[4, 4]" = torch.ops.aten.t.default(mm_1);  mm_1 = None
-            sum_1: "f32[1, 4]" = torch.ops.aten.sum.dim_IntList(view_2, [0], True);  view_2 = None
-            view_3: "f32[4]" = torch.ops.aten.view.default(sum_1, [4]);  sum_1 = None
-            t_4: "f32[4, 4]" = torch.ops.aten.t.default(t_3);  t_3 = None
-            view_4: "f32[4]" = torch.ops.aten.view.default(mm, [4]);  mm = None
-            add: "f32[4]" = torch.ops.aten.add.Tensor(mul_2, view_4);  mul_2 = view_4 = None
-            return [view_3, t_4, add]""",  # noqa: B950
+def forward(self, pred_1, x_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    _param_constant0 = self._param_constant0
+    _param_constant1 = self._param_constant1
+    _tensor_constant0 = self._tensor_constant0
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_param_constant0, _param_constant1, x_1, _tensor_constant0));  true_graph_0 = false_graph_0 = _param_constant0 = _param_constant1 = _tensor_constant0 = None
+    getitem = conditional[0];  conditional = None
+    ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    _param_constant0_1 = self._param_constant0
+    _param_constant1_1 = self._param_constant1
+    _tensor_constant0_1 = self._tensor_constant0
+    conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, _param_constant0_1, _param_constant1_1, x_1, _tensor_constant0_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = _param_constant0_1 = _param_constant1_1 = x_1 = _tensor_constant0_1 = None
+    getitem_1 = conditional_1[0]
+    getitem_2 = conditional_1[1]
+    getitem_3 = conditional_1[2]
+    getitem_4 = conditional_1[3];  conditional_1 = None
+    return (getitem_2,)""",  # noqa: B950
         )
 
     def test_cond_in_forloop(self):
@@ -717,10 +551,41 @@ class f(torch.nn.Module):
         # requires_grad attribute set to False, while the false_fn has it
         # set to true. Therefore, the tracing of the cond errors out.
         # Similar to behavior to the test case test_cond_autograd_same_pytree_output
-        gm = make_fx(f)(x)
+        gm = make_fx(f, tracing_mode="symbolic")(x)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
-            """""",  # noqa: B950
+            gm.code.strip(),
+            """\
+def forward(self, x_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(True, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
+    getitem = conditional[0];  conditional = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
+    view = torch.ops.aten.view.default(getitem, [sym_size_int])
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    conditional_1 = torch.ops.higher_order.cond(True, true_graph_1, false_graph_1, (view,));  true_graph_1 = false_graph_1 = view = None
+    getitem_1 = conditional_1[0];  conditional_1 = None
+    view_1 = torch.ops.aten.view.default(getitem_1, [sym_size_int])
+    true_graph_2 = self.true_graph_2
+    false_graph_2 = self.false_graph_2
+    conditional_2 = torch.ops.higher_order.cond(True, true_graph_2, false_graph_2, (view_1,));  true_graph_2 = false_graph_2 = view_1 = None
+    getitem_2 = conditional_2[0];  conditional_2 = None
+    view_2 = torch.ops.aten.view.default(getitem_2, [sym_size_int]);  sym_size_int = None
+    ones_like = torch.ops.aten.ones_like.default(view_2, pin_memory = False);  view_2 = None
+    true_graph_3 = self.true_graph_3
+    false_graph_3 = self.false_graph_3
+    conditional_3 = torch.ops.higher_order.cond(True, true_graph_3, false_graph_3, (ones_like, getitem_2));  true_graph_3 = false_graph_3 = ones_like = getitem_2 = None
+    getitem_3 = conditional_3[0];  conditional_3 = None
+    true_graph_4 = self.true_graph_4
+    false_graph_4 = self.false_graph_4
+    conditional_4 = torch.ops.higher_order.cond(True, true_graph_4, false_graph_4, (getitem_3, getitem_1));  true_graph_4 = false_graph_4 = getitem_3 = getitem_1 = None
+    getitem_4 = conditional_4[0];  conditional_4 = None
+    true_graph_5 = self.true_graph_5
+    false_graph_5 = self.false_graph_5
+    conditional_5 = torch.ops.higher_order.cond(True, true_graph_5, false_graph_5, (getitem_4, getitem));  true_graph_5 = false_graph_5 = getitem_4 = getitem = None
+    getitem_5 = conditional_5[0];  conditional_5 = None
+    return (getitem_5,)""",  # noqa: B950
         )
 
     def test_cond_in_while(self):
@@ -792,10 +657,53 @@ class f(torch.nn.Module):
         # requires_grad attribute set to False, while the false_fn has it
         # set to true. Therefore, the tracing of the cond errors out.
         # Similar to behavior to the test case test_cond_autograd_same_pytree_output
-        gm = make_fx(f)(x)
+        gm = make_fx(f, tracing_mode="symbolic")(x)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
-            """""",  # noqa: B950
+            gm.code.strip(),
+            """\
+def forward(self, x_1):
+    _tensor_constant0 = self._tensor_constant0
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
+    lt = torch.ops.aten.lt.Scalar(lift_fresh_copy, 3)
+    lt_1 = torch.ops.aten.lt.Scalar(lift_fresh_copy, 3)
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(lt_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
+    getitem = conditional[0];  conditional = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
+    view = torch.ops.aten.view.default(getitem, [sym_size_int])
+    add_ = torch.ops.aten.add_.Tensor(lift_fresh_copy, 1);  lift_fresh_copy = None
+    lt_2 = torch.ops.aten.lt.Scalar(add_, 3)
+    lt_3 = torch.ops.aten.lt.Scalar(add_, 3)
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    conditional_1 = torch.ops.higher_order.cond(lt_3, true_graph_1, false_graph_1, (view,));  true_graph_1 = false_graph_1 = view = None
+    getitem_1 = conditional_1[0];  conditional_1 = None
+    view_1 = torch.ops.aten.view.default(getitem_1, [sym_size_int])
+    add__1 = torch.ops.aten.add_.Tensor(add_, 1);  add_ = None
+    lt_4 = torch.ops.aten.lt.Scalar(add__1, 3)
+    lt_5 = torch.ops.aten.lt.Scalar(add__1, 3)
+    true_graph_2 = self.true_graph_2
+    false_graph_2 = self.false_graph_2
+    conditional_2 = torch.ops.higher_order.cond(lt_5, true_graph_2, false_graph_2, (view_1,));  true_graph_2 = false_graph_2 = view_1 = None
+    getitem_2 = conditional_2[0];  conditional_2 = None
+    view_2 = torch.ops.aten.view.default(getitem_2, [sym_size_int]);  sym_size_int = None
+    add__2 = torch.ops.aten.add_.Tensor(add__1, 1);  add__1 = None
+    lt_6 = torch.ops.aten.lt.Scalar(add__2, 3);  add__2 = None
+    ones_like = torch.ops.aten.ones_like.default(view_2, pin_memory = False);  view_2 = None
+    true_graph_3 = self.true_graph_3
+    false_graph_3 = self.false_graph_3
+    conditional_3 = torch.ops.higher_order.cond(lt_5, true_graph_3, false_graph_3, (ones_like, getitem_2));  lt_5 = true_graph_3 = false_graph_3 = ones_like = getitem_2 = None
+    getitem_3 = conditional_3[0];  conditional_3 = None
+    true_graph_4 = self.true_graph_4
+    false_graph_4 = self.false_graph_4
+    conditional_4 = torch.ops.higher_order.cond(lt_3, true_graph_4, false_graph_4, (getitem_3, getitem_1));  lt_3 = true_graph_4 = false_graph_4 = getitem_3 = getitem_1 = None
+    getitem_4 = conditional_4[0];  conditional_4 = None
+    true_graph_5 = self.true_graph_5
+    false_graph_5 = self.false_graph_5
+    conditional_5 = torch.ops.higher_order.cond(lt_1, true_graph_5, false_graph_5, (getitem_4, getitem));  lt_1 = true_graph_5 = false_graph_5 = getitem_4 = getitem = None
+    getitem_5 = conditional_5[0];  conditional_5 = None
+    return (getitem_5,)""",  # noqa: B950
         )
 
     def test_cond_autograd_pytree_not_all_inputs_used(self):
@@ -859,69 +767,31 @@ class f(torch.nn.Module):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (a, b), grad_out)
 
-        gm = make_fx(f)(pred)
+        # need to set _allow_non_fake_inputs = True because model parameters don't
+        # get fakified.
+        gm = make_fx(f, tracing_mode="symbolic", _allow_non_fake_inputs=True)(pred)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.code.strip(),
             """\
-class f(torch.nn.Module):
-    def forward(self, pred_1: "b8[]"):
-        # No stacktrace found for following nodes
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        _tensor_constant0 = self._tensor_constant0
-        _tensor_constant1 = self._tensor_constant1
-        _tensor_constant2 = self._tensor_constant2
-        conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_tensor_constant0, _tensor_constant1, _tensor_constant2));  true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
-        getitem: "f32[4]" = conditional[0];  conditional = None
-        ones_like: "f32[4]" = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
-        true_graph_1 = self.true_graph_1
-        false_graph_1 = self.false_graph_1
-        _tensor_constant0_1 = self._tensor_constant0
-        _tensor_constant1_1 = self._tensor_constant1
-        _tensor_constant2_1 = self._tensor_constant2
-        conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, _tensor_constant0_1, _tensor_constant1_1, _tensor_constant2_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = _tensor_constant0_1 = _tensor_constant1_1 = _tensor_constant2_1 = None
-        getitem_1: "f32[4]" = conditional_1[0]
-        getitem_2: "f32[4]" = conditional_1[1]
-        getitem_3: "f32[4]" = conditional_1[2];  conditional_1 = None
-        return (getitem_1, getitem_2)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg1_1, arg2_1);  arg1_1 = arg2_1 = None
-            add: "f32[4]" = torch.ops.aten.add.Tensor(arg0_1, mul);  arg0_1 = mul = None
-            return (add,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            div: "f32[4]" = torch.ops.aten.div.Tensor(arg2_1, arg1_1);  arg2_1 = arg1_1 = None
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, div);  arg0_1 = div = None
-            return (mul,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]", arg3_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg2_1, arg3_1)
-            add: "f32[4]" = torch.ops.aten.add.Tensor(arg1_1, mul);  arg1_1 = mul = None
-            mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, arg2_1);  arg2_1 = None
-            mul_2: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, arg3_1);  arg3_1 = None
-            clone: "f32[4]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-            return [clone, mul_2, mul_1]
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]", arg3_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            div: "f32[4]" = torch.ops.aten.div.Tensor(arg3_1, arg2_1)
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg1_1, div)
-            mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg1_1 = None
-            mul_2: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, div);  arg0_1 = div = None
-            div_1: "f32[4]" = torch.ops.aten.div.Tensor(arg3_1, arg2_1);  arg3_1 = None
-            div_2: "f32[4]" = torch.ops.aten.div.Tensor(div_1, arg2_1);  div_1 = None
-            neg: "f32[4]" = torch.ops.aten.neg.default(mul_1)
-            mul_3: "f32[4]" = torch.ops.aten.mul.Tensor(neg, div_2);  neg = div_2 = None
-            div_3: "f32[4]" = torch.ops.aten.div.Tensor(mul_1, arg2_1);  mul_1 = arg2_1 = None
-            return [mul_2, mul_3, div_3]""",  # noqa: B950
+def forward(self, pred_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    _tensor_constant0 = self._tensor_constant0
+    _tensor_constant1 = self._tensor_constant1
+    _tensor_constant2 = self._tensor_constant2
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_tensor_constant0, _tensor_constant1, _tensor_constant2));  true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
+    getitem = conditional[0];  conditional = None
+    ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    _tensor_constant0_1 = self._tensor_constant0
+    _tensor_constant1_1 = self._tensor_constant1
+    _tensor_constant2_1 = self._tensor_constant2
+    conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, _tensor_constant0_1, _tensor_constant1_1, _tensor_constant2_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = _tensor_constant0_1 = _tensor_constant1_1 = _tensor_constant2_1 = None
+    getitem_1 = conditional_1[0]
+    getitem_2 = conditional_1[1]
+    getitem_3 = conditional_1[2];  conditional_1 = None
+    return (getitem_1, getitem_2)""",  # noqa: B950
         )
 
     def test_cond_autograd_different_pytree_output(self):
@@ -940,7 +810,7 @@ class f(torch.nn.Module):
         ):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile. Scroll up to find out what causes the graph break.",
+                "Cond doesn't work unless it is captured completely with torch.compile.",
             ):
                 cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
 
@@ -966,44 +836,34 @@ class f(torch.nn.Module):
             result_exp = fn({"t": [a, {"b": b}, (c,)]})
             self.assertEqual(result, result_exp)
 
-            # TODO: Gradient computation for such complex pytree output does not work
-            # only forward path is tested
+            result_flat, _ = pytree.tree_flatten(result)
+            result_exp_flat, _ = pytree.tree_flatten(result_exp)
 
-            grad_out = torch.ones_like(a)
-            expected_grads = torch.autograd.grad(result_exp, (a,), grad_out)
-            grads = torch.autograd.grad(result, (a,), grad_out)
+            grad_out = [torch.ones_like(g) for g in result_flat]
+            expected_grads = torch.autograd.grad(result_exp_flat, (c,), grad_out)
+            grads = torch.autograd.grad(result_flat, (c,), grad_out)
             self.assertEqual(expected_grads, grads)
 
         def f(pred):
             result = cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
             return result
 
-        gm = make_fx(f)(pred)
+        gm = make_fx(f, tracing_mode="symbolic", _allow_non_fake_inputs=True)(pred)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.code.strip(),
             """\
-class f(torch.nn.Module):
-    def forward(self, pred_1: "b8[]"):
-        # No stacktrace found for following nodes
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        _tensor_constant0 = self._tensor_constant0
-        _tensor_constant1 = self._tensor_constant1
-        _tensor_constant2 = self._tensor_constant2
-        conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_tensor_constant0, _tensor_constant1, _tensor_constant2));  pred_1 = true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
-        getitem: "f32[4]" = conditional[0]
-        getitem_1: "f32[4]" = conditional[1];  conditional = None
-        view: "f32[4]" = torch.ops.aten.view.default(getitem, [4]);  getitem = None
-        view_1: "f32[4]" = torch.ops.aten.view.default(getitem_1, [4]);  getitem_1 = None
-        return {'res': [view, (view_1,)]}
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]"):
-            return (arg1_1, arg0_1)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]"):
-            return (arg2_1, arg0_1)""",  # noqa: B950
+def forward(self, pred_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    _tensor_constant0 = self._tensor_constant0
+    _tensor_constant1 = self._tensor_constant1
+    _tensor_constant2 = self._tensor_constant2
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_tensor_constant0, _tensor_constant1, _tensor_constant2));  pred_1 = true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
+    getitem = conditional[0]
+    getitem_1 = conditional[1];  conditional = None
+    view = torch.ops.aten.view.default(getitem, [4]);  getitem = None
+    view_1 = torch.ops.aten.view.default(getitem_1, [4]);  getitem_1 = None
+    return {'res': [view, (view_1,)]}""",  # noqa: B950
         )
 
     def test_cond_autograd_torch_nn_module(self):
@@ -1093,7 +953,7 @@ class f(torch.nn.Module):
 
             graph = make_fx(false_fn)(x)
             if "detach" in graph._code:
-                raise Exception("Failed")
+                raise Exception("Failed")  # noqa: TRY002
 
         for nn_module_false in nn_module_false_not_working:
 
@@ -1102,7 +962,7 @@ class f(torch.nn.Module):
 
             graph = make_fx(false_fn)(x)
             if "detach" not in graph._code:
-                raise Exception("Failed")
+                raise Exception("Failed")  # noqa: TRY002
 
         nn_module_false = torch.nn.Linear(4, 4)
 
@@ -1129,78 +989,25 @@ class f(torch.nn.Module):
 
         gm = make_fx(f)(pred, x)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.code.strip(),
             """\
-class f(torch.nn.Module):
-    def forward(self, pred_1: "b8[]", x_1: "f32[4]"):
-        # No stacktrace found for following nodes
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        _param_constant0 = self._param_constant0
-        _param_constant1 = self._param_constant1
-        conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, _param_constant0, _param_constant1));  true_graph_0 = false_graph_0 = _param_constant0 = _param_constant1 = None
-        getitem: "f32[4]" = conditional[0];  conditional = None
-        ones_like: "f32[4]" = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
-        true_graph_1 = self.true_graph_1
-        false_graph_1 = self.false_graph_1
-        _param_constant0_1 = self._param_constant0
-        _param_constant1_1 = self._param_constant1
-        conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, _param_constant0_1, _param_constant1_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = _param_constant0_1 = _param_constant1_1 = None
-        getitem_1: "f32[4]" = conditional_1[0]
-        getitem_2: "f32[4]" = conditional_1[1]
-        getitem_3: "f32[4, 4]" = conditional_1[2];  conditional_1 = None
-        return (getitem_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4, 4]"):
-            # No stacktrace found for following nodes
-            pow_1: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg0_1, 2);  arg0_1 = None
-            sin: "f32[4]" = torch.ops.aten.sin.default(pow_1);  pow_1 = None
-            abs_1: "f32[4]" = torch.ops.aten.abs.default(sin);  sin = None
-            return (abs_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4, 4]"):
-            # No stacktrace found for following nodes
-            view: "f32[1, 4]" = torch.ops.aten.view.default(arg0_1, [1, 4]);  arg0_1 = None
-            t: "f32[4, 4]" = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
-            addmm: "f32[1, 4]" = torch.ops.aten.addmm.default(arg1_1, view, t);  arg1_1 = view = t = None
-            view_1: "f32[4]" = torch.ops.aten.view.default(addmm, [4]);  addmm = None
-            return (view_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]", arg3_1: "f32[4, 4]"):
-            # No stacktrace found for following nodes
-            pow_1: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg1_1, 2)
-            sin: "f32[4]" = torch.ops.aten.sin.default(pow_1)
-            abs_1: "f32[4]" = torch.ops.aten.abs.default(sin)
-            sgn: "f32[4]" = torch.ops.aten.sgn.default(sin);  sin = None
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, sgn);  arg0_1 = sgn = None
-            cos: "f32[4]" = torch.ops.aten.cos.default(pow_1);  pow_1 = None
-            mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(mul, cos);  mul = cos = None
-            pow_2: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg1_1, 1.0);  arg1_1 = None
-            mul_2: "f32[4]" = torch.ops.aten.mul.Scalar(pow_2, 2.0);  pow_2 = None
-            mul_3: "f32[4]" = torch.ops.aten.mul.Tensor(mul_1, mul_2);  mul_1 = mul_2 = None
-            return [mul_3, None, None]
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]", arg3_1: "f32[4, 4]"):
-            # No stacktrace found for following nodes
-            view: "f32[1, 4]" = torch.ops.aten.view.default(arg1_1, [1, 4]);  arg1_1 = None
-            t: "f32[4, 4]" = torch.ops.aten.t.default(arg3_1);  arg3_1 = None
-            addmm: "f32[1, 4]" = torch.ops.aten.addmm.default(arg2_1, view, t);  arg2_1 = None
-            view_1: "f32[4]" = torch.ops.aten.view.default(addmm, [4]);  addmm = None
-            view_2: "f32[1, 4]" = torch.ops.aten.view.default(arg0_1, [1, 4]);  arg0_1 = None
-            t_1: "f32[4, 4]" = torch.ops.aten.t.default(t);  t = None
-            mm: "f32[1, 4]" = torch.ops.aten.mm.default(view_2, t_1);  t_1 = None
-            t_2: "f32[4, 1]" = torch.ops.aten.t.default(view_2)
-            mm_1: "f32[4, 4]" = torch.ops.aten.mm.default(t_2, view);  t_2 = view = None
-            t_3: "f32[4, 4]" = torch.ops.aten.t.default(mm_1);  mm_1 = None
-            sum_1: "f32[1, 4]" = torch.ops.aten.sum.dim_IntList(view_2, [0], True);  view_2 = None
-            view_3: "f32[4]" = torch.ops.aten.view.default(sum_1, [4]);  sum_1 = None
-            t_4: "f32[4, 4]" = torch.ops.aten.t.default(t_3);  t_3 = None
-            view_4: "f32[4]" = torch.ops.aten.view.default(mm, [4]);  mm = None
-            return [view_4, view_3, t_4]""",  # noqa: B950
+def forward(self, pred_1, x_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    _param_constant0 = self._param_constant0
+    _param_constant1 = self._param_constant1
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, _param_constant0, _param_constant1));  true_graph_0 = false_graph_0 = _param_constant0 = _param_constant1 = None
+    getitem = conditional[0];  conditional = None
+    ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    _param_constant0_1 = self._param_constant0
+    _param_constant1_1 = self._param_constant1
+    conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, _param_constant0_1, _param_constant1_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = _param_constant0_1 = _param_constant1_1 = None
+    getitem_1 = conditional_1[0]
+    getitem_2 = conditional_1[1]
+    getitem_3 = conditional_1[2];  conditional_1 = None
+    return (getitem_1,)""",  # noqa: B950
         )
 
     def test_cond_autograd_torch_nn_module2(self):
@@ -1233,208 +1040,37 @@ class f(torch.nn.Module):
 
         gm = make_fx(f)(pred, x)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.code.strip(),
             """\
-class f(torch.nn.Module):
-    def forward(self, pred_1: "b8[]", x_1: "f32[4]"):
-        # No stacktrace found for following nodes
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        _param_constant0 = self._param_constant0
-        _param_constant1 = self._param_constant1
-        _param_constant2 = self._param_constant2
-        _param_constant3 = self._param_constant3
-        _param_constant4 = self._param_constant4
-        _param_constant5 = self._param_constant5
-        conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, _param_constant0, _param_constant1, _param_constant2, _param_constant3, _param_constant4, _param_constant5));  true_graph_0 = false_graph_0 = _param_constant0 = _param_constant1 = _param_constant2 = _param_constant3 = _param_constant4 = _param_constant5 = None
-        getitem: "f32[4]" = conditional[0];  conditional = None
-        ones_like: "f32[4]" = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
-        true_graph_1 = self.true_graph_1
-        false_graph_1 = self.false_graph_1
-        _param_constant0_1 = self._param_constant0
-        _param_constant1_1 = self._param_constant1
-        _param_constant2_1 = self._param_constant2
-        _param_constant3_1 = self._param_constant3
-        _param_constant4_1 = self._param_constant4
-        _param_constant5_1 = self._param_constant5
-        conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, _param_constant0_1, _param_constant1_1, _param_constant2_1, _param_constant3_1, _param_constant4_1, _param_constant5_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = _param_constant0_1 = _param_constant1_1 = _param_constant2_1 = _param_constant3_1 = _param_constant4_1 = _param_constant5_1 = None
-        getitem_1: "f32[4]" = conditional_1[0]
-        getitem_2 = conditional_1[1]
-        getitem_3 = conditional_1[2]
-        getitem_4: "f32[12]" = conditional_1[3]
-        getitem_5: "f32[12]" = conditional_1[4]
-        getitem_6: "f32[12, 4]" = conditional_1[5]
-        getitem_7: "f32[12, 4]" = conditional_1[6];  conditional_1 = None
-        return (getitem_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4, 4]", arg3_1: "f32[12]", arg4_1: "f32[12]", arg5_1: "f32[12, 4]", arg6_1: "f32[12, 4]"):
-            # No stacktrace found for following nodes
-            pow_1: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg0_1, 2);  arg0_1 = None
-            sin: "f32[4]" = torch.ops.aten.sin.default(pow_1);  pow_1 = None
-            abs_1: "f32[4]" = torch.ops.aten.abs.default(sin);  sin = None
-            view: "f32[1, 4]" = torch.ops.aten.view.default(abs_1, [1, 4]);  abs_1 = None
-            t: "f32[4, 4]" = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
-            addmm: "f32[1, 4]" = torch.ops.aten.addmm.default(arg1_1, view, t);  arg1_1 = view = t = None
-            view_1: "f32[4]" = torch.ops.aten.view.default(addmm, [4]);  addmm = None
-            return (view_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4, 4]", arg3_1: "f32[12]", arg4_1: "f32[12]", arg5_1: "f32[12, 4]", arg6_1: "f32[12, 4]"):
-            # No stacktrace found for following nodes
-            add: "f32[4]" = torch.ops.aten.add.Tensor(arg0_1, 42);  arg0_1 = None
-            cos: "f32[4]" = torch.ops.aten.cos.default(add);  add = None
-            unsqueeze: "f32[1, 4]" = torch.ops.aten.unsqueeze.default(cos, 0);  cos = None
-            zeros: "f32[1, 4]" = torch.ops.aten.zeros.default([1, 4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-            t: "f32[4, 12]" = torch.ops.aten.t.default(arg6_1);  arg6_1 = None
-            addmm: "f32[1, 12]" = torch.ops.aten.addmm.default(arg4_1, unsqueeze, t);  arg4_1 = unsqueeze = t = None
-            unsafe_split = torch.ops.aten.unsafe_split.Tensor(addmm, 4, 1);  addmm = None
-            getitem: "f32[1, 4]" = unsafe_split[0]
-            getitem_1: "f32[1, 4]" = unsafe_split[1]
-            getitem_2: "f32[1, 4]" = unsafe_split[2];  unsafe_split = None
-            t_1: "f32[4, 12]" = torch.ops.aten.t.default(arg5_1);  arg5_1 = None
-            addmm_1: "f32[1, 12]" = torch.ops.aten.addmm.default(arg3_1, zeros, t_1);  arg3_1 = t_1 = None
-            unsafe_split_1 = torch.ops.aten.unsafe_split.Tensor(addmm_1, 4, 1);  addmm_1 = None
-            getitem_3: "f32[1, 4]" = unsafe_split_1[0]
-            getitem_4: "f32[1, 4]" = unsafe_split_1[1]
-            getitem_5: "f32[1, 4]" = unsafe_split_1[2];  unsafe_split_1 = None
-            add_: "f32[1, 4]" = torch.ops.aten.add_.Tensor(getitem_3, getitem);  getitem_3 = getitem = None
-            sigmoid_: "f32[1, 4]" = torch.ops.aten.sigmoid_.default(add_);  add_ = None
-            detach: "f32[1, 4]" = torch.ops.aten.detach.default(sigmoid_)
-            detach_1: "f32[1, 4]" = torch.ops.aten.detach.default(detach);  detach = None
-            add__1: "f32[1, 4]" = torch.ops.aten.add_.Tensor(getitem_4, getitem_1);  getitem_4 = getitem_1 = None
-            sigmoid__1: "f32[1, 4]" = torch.ops.aten.sigmoid_.default(add__1);  add__1 = None
-            detach_2: "f32[1, 4]" = torch.ops.aten.detach.default(sigmoid__1)
-            detach_3: "f32[1, 4]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
-            clone: "f32[1, 4]" = torch.ops.aten.clone.default(getitem_5)
-            mul_: "f32[1, 4]" = torch.ops.aten.mul_.Tensor(getitem_5, sigmoid_);  getitem_5 = sigmoid_ = None
-            add_1: "f32[1, 4]" = torch.ops.aten.add.Tensor(getitem_2, mul_);  getitem_2 = mul_ = None
-            tanh_: "f32[1, 4]" = torch.ops.aten.tanh_.default(add_1);  add_1 = None
-            detach_4: "f32[1, 4]" = torch.ops.aten.detach.default(tanh_)
-            detach_5: "f32[1, 4]" = torch.ops.aten.detach.default(detach_4);  detach_4 = None
-            sub: "f32[1, 4]" = torch.ops.aten.sub.Tensor(zeros, tanh_);  zeros = None
-            clone_1: "f32[1, 4]" = torch.ops.aten.clone.default(sub)
-            mul__1: "f32[1, 4]" = torch.ops.aten.mul_.Tensor(sub, sigmoid__1);  sub = sigmoid__1 = None
-            add__2: "f32[1, 4]" = torch.ops.aten.add_.Tensor(mul__1, tanh_);  mul__1 = tanh_ = None
-            squeeze: "f32[4]" = torch.ops.aten.squeeze.dim(add__2, 0);  add__2 = None
-            return (squeeze,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]", arg3_1: "f32[4, 4]", arg4_1: "f32[12]", arg5_1: "f32[12]", arg6_1: "f32[12, 4]", arg7_1: "f32[12, 4]"):
-            # No stacktrace found for following nodes
-            pow_1: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg1_1, 2)
-            sin: "f32[4]" = torch.ops.aten.sin.default(pow_1)
-            abs_1: "f32[4]" = torch.ops.aten.abs.default(sin)
-            view: "f32[1, 4]" = torch.ops.aten.view.default(abs_1, [1, 4]);  abs_1 = None
-            t: "f32[4, 4]" = torch.ops.aten.t.default(arg3_1);  arg3_1 = None
-            addmm: "f32[1, 4]" = torch.ops.aten.addmm.default(arg2_1, view, t);  arg2_1 = None
-            view_1: "f32[4]" = torch.ops.aten.view.default(addmm, [4]);  addmm = None
-            view_2: "f32[1, 4]" = torch.ops.aten.view.default(arg0_1, [1, 4]);  arg0_1 = None
-            t_1: "f32[4, 4]" = torch.ops.aten.t.default(t);  t = None
-            mm: "f32[1, 4]" = torch.ops.aten.mm.default(view_2, t_1);  t_1 = None
-            t_2: "f32[4, 1]" = torch.ops.aten.t.default(view_2)
-            mm_1: "f32[4, 4]" = torch.ops.aten.mm.default(t_2, view);  t_2 = view = None
-            t_3: "f32[4, 4]" = torch.ops.aten.t.default(mm_1);  mm_1 = None
-            sum_1: "f32[1, 4]" = torch.ops.aten.sum.dim_IntList(view_2, [0], True);  view_2 = None
-            view_3: "f32[4]" = torch.ops.aten.view.default(sum_1, [4]);  sum_1 = None
-            t_4: "f32[4, 4]" = torch.ops.aten.t.default(t_3);  t_3 = None
-            view_4: "f32[4]" = torch.ops.aten.view.default(mm, [4]);  mm = None
-            sgn: "f32[4]" = torch.ops.aten.sgn.default(sin);  sin = None
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(view_4, sgn);  view_4 = sgn = None
-            cos: "f32[4]" = torch.ops.aten.cos.default(pow_1);  pow_1 = None
-            mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(mul, cos);  mul = cos = None
-            pow_2: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg1_1, 1.0);  arg1_1 = None
-            mul_2: "f32[4]" = torch.ops.aten.mul.Scalar(pow_2, 2.0);  pow_2 = None
-            mul_3: "f32[4]" = torch.ops.aten.mul.Tensor(mul_1, mul_2);  mul_1 = mul_2 = None
-            return [mul_3, view_3, t_4, None, None, None, None]
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]", arg3_1: "f32[4, 4]", arg4_1: "f32[12]", arg5_1: "f32[12]", arg6_1: "f32[12, 4]", arg7_1: "f32[12, 4]"):
-            # No stacktrace found for following nodes
-            add: "f32[4]" = torch.ops.aten.add.Tensor(arg1_1, 42);  arg1_1 = None
-            cos: "f32[4]" = torch.ops.aten.cos.default(add)
-            unsqueeze: "f32[1, 4]" = torch.ops.aten.unsqueeze.default(cos, 0);  cos = None
-            zeros: "f32[1, 4]" = torch.ops.aten.zeros.default([1, 4], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-            t: "f32[4, 12]" = torch.ops.aten.t.default(arg7_1);  arg7_1 = None
-            addmm: "f32[1, 12]" = torch.ops.aten.addmm.default(arg5_1, unsqueeze, t);  arg5_1 = None
-            unsafe_split = torch.ops.aten.unsafe_split.Tensor(addmm, 4, 1);  addmm = None
-            getitem: "f32[1, 4]" = unsafe_split[0]
-            getitem_1: "f32[1, 4]" = unsafe_split[1]
-            getitem_2: "f32[1, 4]" = unsafe_split[2];  unsafe_split = None
-            t_1: "f32[4, 12]" = torch.ops.aten.t.default(arg6_1);  arg6_1 = None
-            addmm_1: "f32[1, 12]" = torch.ops.aten.addmm.default(arg4_1, zeros, t_1);  arg4_1 = t_1 = None
-            unsafe_split_1 = torch.ops.aten.unsafe_split.Tensor(addmm_1, 4, 1);  addmm_1 = None
-            getitem_3: "f32[1, 4]" = unsafe_split_1[0]
-            getitem_4: "f32[1, 4]" = unsafe_split_1[1]
-            getitem_5: "f32[1, 4]" = unsafe_split_1[2];  unsafe_split_1 = None
-            add_: "f32[1, 4]" = torch.ops.aten.add_.Tensor(getitem_3, getitem);  getitem_3 = getitem = None
-            sigmoid_: "f32[1, 4]" = torch.ops.aten.sigmoid_.default(add_);  add_ = None
-            detach: "f32[1, 4]" = torch.ops.aten.detach.default(sigmoid_)
-            detach_1: "f32[1, 4]" = torch.ops.aten.detach.default(detach);  detach = None
-            detach_2: "f32[1, 4]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-            detach_3: "f32[1, 4]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
-            add__1: "f32[1, 4]" = torch.ops.aten.add_.Tensor(getitem_4, getitem_1);  getitem_4 = getitem_1 = None
-            sigmoid__1: "f32[1, 4]" = torch.ops.aten.sigmoid_.default(add__1);  add__1 = None
-            detach_4: "f32[1, 4]" = torch.ops.aten.detach.default(sigmoid__1)
-            detach_5: "f32[1, 4]" = torch.ops.aten.detach.default(detach_4);  detach_4 = None
-            detach_6: "f32[1, 4]" = torch.ops.aten.detach.default(detach_5);  detach_5 = None
-            detach_7: "f32[1, 4]" = torch.ops.aten.detach.default(detach_6);  detach_6 = None
-            clone: "f32[1, 4]" = torch.ops.aten.clone.default(getitem_5)
-            mul_: "f32[1, 4]" = torch.ops.aten.mul_.Tensor(getitem_5, sigmoid_);  getitem_5 = None
-            add_1: "f32[1, 4]" = torch.ops.aten.add.Tensor(getitem_2, mul_);  getitem_2 = mul_ = None
-            tanh_: "f32[1, 4]" = torch.ops.aten.tanh_.default(add_1);  add_1 = None
-            detach_8: "f32[1, 4]" = torch.ops.aten.detach.default(tanh_)
-            detach_9: "f32[1, 4]" = torch.ops.aten.detach.default(detach_8);  detach_8 = None
-            detach_10: "f32[1, 4]" = torch.ops.aten.detach.default(detach_9);  detach_9 = None
-            detach_11: "f32[1, 4]" = torch.ops.aten.detach.default(detach_10);  detach_10 = None
-            sub: "f32[1, 4]" = torch.ops.aten.sub.Tensor(zeros, tanh_)
-            clone_1: "f32[1, 4]" = torch.ops.aten.clone.default(sub)
-            mul__1: "f32[1, 4]" = torch.ops.aten.mul_.Tensor(sub, sigmoid__1);  sub = None
-            add__2: "f32[1, 4]" = torch.ops.aten.add_.Tensor(mul__1, tanh_);  mul__1 = tanh_ = None
-            squeeze: "f32[4]" = torch.ops.aten.squeeze.dim(add__2, 0);  add__2 = None
-            unsqueeze_1: "f32[1, 4]" = torch.ops.aten.unsqueeze.default(arg0_1, 0);  arg0_1 = None
-            mul: "f32[1, 4]" = torch.ops.aten.mul.Tensor(unsqueeze_1, clone_1);  clone_1 = None
-            mul_1: "f32[1, 4]" = torch.ops.aten.mul.Tensor(unsqueeze_1, sigmoid__1);  sigmoid__1 = None
-            neg: "f32[1, 4]" = torch.ops.aten.neg.default(mul_1);  mul_1 = None
-            add_2: "f32[1, 4]" = torch.ops.aten.add.Tensor(unsqueeze_1, neg);  unsqueeze_1 = neg = None
-            detach_12: "f32[1, 4]" = torch.ops.aten.detach.default(detach_11);  detach_11 = None
-            detach_13: "f32[1, 4]" = torch.ops.aten.detach.default(detach_12);  detach_12 = None
-            detach_14: "f32[1, 4]" = torch.ops.aten.detach.default(detach_13);  detach_13 = None
-            detach_15: "f32[1, 4]" = torch.ops.aten.detach.default(detach_14);  detach_14 = None
-            tanh_backward: "f32[1, 4]" = torch.ops.aten.tanh_backward.default(add_2, detach_15);  add_2 = detach_15 = None
-            mul_2: "f32[1, 4]" = torch.ops.aten.mul.Tensor(tanh_backward, clone);  clone = None
-            mul_3: "f32[1, 4]" = torch.ops.aten.mul.Tensor(tanh_backward, sigmoid_);  sigmoid_ = None
-            detach_16: "f32[1, 4]" = torch.ops.aten.detach.default(detach_7);  detach_7 = None
-            detach_17: "f32[1, 4]" = torch.ops.aten.detach.default(detach_16);  detach_16 = None
-            detach_18: "f32[1, 4]" = torch.ops.aten.detach.default(detach_17);  detach_17 = None
-            detach_19: "f32[1, 4]" = torch.ops.aten.detach.default(detach_18);  detach_18 = None
-            sigmoid_backward: "f32[1, 4]" = torch.ops.aten.sigmoid_backward.default(mul, detach_19);  mul = detach_19 = None
-            detach_20: "f32[1, 4]" = torch.ops.aten.detach.default(detach_3);  detach_3 = None
-            detach_21: "f32[1, 4]" = torch.ops.aten.detach.default(detach_20);  detach_20 = None
-            detach_22: "f32[1, 4]" = torch.ops.aten.detach.default(detach_21);  detach_21 = None
-            detach_23: "f32[1, 4]" = torch.ops.aten.detach.default(detach_22);  detach_22 = None
-            sigmoid_backward_1: "f32[1, 4]" = torch.ops.aten.sigmoid_backward.default(mul_2, detach_23);  mul_2 = detach_23 = None
-            cat: "f32[1, 12]" = torch.ops.aten.cat.default([sigmoid_backward_1, sigmoid_backward, mul_3], 1);  mul_3 = None
-            t_2: "f32[12, 1]" = torch.ops.aten.t.default(cat)
-            mm: "f32[12, 4]" = torch.ops.aten.mm.default(t_2, zeros);  t_2 = zeros = None
-            t_3: "f32[4, 12]" = torch.ops.aten.t.default(mm);  mm = None
-            sum_1: "f32[1, 12]" = torch.ops.aten.sum.dim_IntList(cat, [0], True);  cat = None
-            view: "f32[12]" = torch.ops.aten.view.default(sum_1, [12]);  sum_1 = None
-            t_4: "f32[12, 4]" = torch.ops.aten.t.default(t_3);  t_3 = None
-            cat_1: "f32[1, 12]" = torch.ops.aten.cat.default([sigmoid_backward_1, sigmoid_backward, tanh_backward], 1);  sigmoid_backward_1 = sigmoid_backward = tanh_backward = None
-            t_5: "f32[12, 4]" = torch.ops.aten.t.default(t);  t = None
-            mm_1: "f32[1, 4]" = torch.ops.aten.mm.default(cat_1, t_5);  t_5 = None
-            t_6: "f32[12, 1]" = torch.ops.aten.t.default(cat_1)
-            mm_2: "f32[12, 4]" = torch.ops.aten.mm.default(t_6, unsqueeze);  t_6 = unsqueeze = None
-            t_7: "f32[4, 12]" = torch.ops.aten.t.default(mm_2);  mm_2 = None
-            sum_2: "f32[1, 12]" = torch.ops.aten.sum.dim_IntList(cat_1, [0], True);  cat_1 = None
-            view_1: "f32[12]" = torch.ops.aten.view.default(sum_2, [12]);  sum_2 = None
-            t_8: "f32[12, 4]" = torch.ops.aten.t.default(t_7);  t_7 = None
-            squeeze_1: "f32[4]" = torch.ops.aten.squeeze.dim(mm_1, 0);  mm_1 = None
-            sin: "f32[4]" = torch.ops.aten.sin.default(add);  add = None
-            neg_1: "f32[4]" = torch.ops.aten.neg.default(sin);  sin = None
-            mul_4: "f32[4]" = torch.ops.aten.mul.Tensor(squeeze_1, neg_1);  squeeze_1 = neg_1 = None
-            return [mul_4, None, None, view, view_1, t_4, t_8]""",  # noqa: B950
+def forward(self, pred_1, x_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    _param_constant0 = self._param_constant0
+    _param_constant1 = self._param_constant1
+    _param_constant2 = self._param_constant2
+    _param_constant3 = self._param_constant3
+    _param_constant4 = self._param_constant4
+    _param_constant5 = self._param_constant5
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, _param_constant0, _param_constant1, _param_constant2, _param_constant3, _param_constant4, _param_constant5));  true_graph_0 = false_graph_0 = _param_constant0 = _param_constant1 = _param_constant2 = _param_constant3 = _param_constant4 = _param_constant5 = None
+    getitem = conditional[0];  conditional = None
+    ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    _param_constant0_1 = self._param_constant0
+    _param_constant1_1 = self._param_constant1
+    _param_constant2_1 = self._param_constant2
+    _param_constant3_1 = self._param_constant3
+    _param_constant4_1 = self._param_constant4
+    _param_constant5_1 = self._param_constant5
+    conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, _param_constant0_1, _param_constant1_1, _param_constant2_1, _param_constant3_1, _param_constant4_1, _param_constant5_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = _param_constant0_1 = _param_constant1_1 = _param_constant2_1 = _param_constant3_1 = _param_constant4_1 = _param_constant5_1 = None
+    getitem_1 = conditional_1[0]
+    getitem_2 = conditional_1[1]
+    getitem_3 = conditional_1[2]
+    getitem_4 = conditional_1[3]
+    getitem_5 = conditional_1[4]
+    getitem_6 = conditional_1[5]
+    getitem_7 = conditional_1[6];  conditional_1 = None
+    return (getitem_1,)""",  # noqa: B950
         )
 
     def test_cond_autograd_user_nn_module(self):
@@ -1474,79 +1110,19 @@ class f(torch.nn.Module):
 
         gm = make_fx(f)(pred, x)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.code.strip(),
             """\
-class f(torch.nn.Module):
-    def forward(self, pred_1: "b8[]", x_1: "f32[4]"):
-        # No stacktrace found for following nodes
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
-        getitem: "f32[4]" = conditional[0];  conditional = None
-        ones_like: "f32[4]" = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
-        true_graph_1 = self.true_graph_1
-        false_graph_1 = self.false_graph_1
-        conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
-        getitem_1: "f32[4]" = conditional_1[0];  conditional_1 = None
-        return (getitem_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            pow_1: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg0_1, 2);  arg0_1 = None
-            sin: "f32[4]" = torch.ops.aten.sin.default(pow_1);  pow_1 = None
-            abs_1: "f32[4]" = torch.ops.aten.abs.default(sin);  sin = None
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(abs_1, abs_1);  abs_1 = None
-            return (mul,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            add: "f32[4]" = torch.ops.aten.add.Tensor(arg0_1, 42);  arg0_1 = None
-            cos: "f32[4]" = torch.ops.aten.cos.default(add);  add = None
-            relu: "f32[4]" = torch.ops.aten.relu.default(cos);  cos = None
-            detach: "f32[4]" = torch.ops.aten.detach.default(relu)
-            detach_1: "f32[4]" = torch.ops.aten.detach.default(detach);  detach = None
-            return (relu,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            pow_1: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg1_1, 2)
-            sin: "f32[4]" = torch.ops.aten.sin.default(pow_1)
-            abs_1: "f32[4]" = torch.ops.aten.abs.default(sin)
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(abs_1, abs_1)
-            mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, abs_1)
-            mul_2: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, abs_1);  arg0_1 = abs_1 = None
-            add: "f32[4]" = torch.ops.aten.add.Tensor(mul_2, mul_1);  mul_2 = mul_1 = None
-            sgn: "f32[4]" = torch.ops.aten.sgn.default(sin);  sin = None
-            mul_3: "f32[4]" = torch.ops.aten.mul.Tensor(add, sgn);  add = sgn = None
-            cos: "f32[4]" = torch.ops.aten.cos.default(pow_1);  pow_1 = None
-            mul_4: "f32[4]" = torch.ops.aten.mul.Tensor(mul_3, cos);  mul_3 = cos = None
-            pow_2: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg1_1, 1.0);  arg1_1 = None
-            mul_5: "f32[4]" = torch.ops.aten.mul.Scalar(pow_2, 2.0);  pow_2 = None
-            mul_6: "f32[4]" = torch.ops.aten.mul.Tensor(mul_4, mul_5);  mul_4 = mul_5 = None
-            return [mul_6]
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            add: "f32[4]" = torch.ops.aten.add.Tensor(arg1_1, 42);  arg1_1 = None
-            cos: "f32[4]" = torch.ops.aten.cos.default(add)
-            relu: "f32[4]" = torch.ops.aten.relu.default(cos);  cos = None
-            detach: "f32[4]" = torch.ops.aten.detach.default(relu);  relu = None
-            detach_1: "f32[4]" = torch.ops.aten.detach.default(detach);  detach = None
-            detach_2: "f32[4]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-            detach_3: "f32[4]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
-            detach_4: "f32[4]" = torch.ops.aten.detach.default(detach_3);  detach_3 = None
-            detach_5: "f32[4]" = torch.ops.aten.detach.default(detach_4);  detach_4 = None
-            detach_6: "f32[4]" = torch.ops.aten.detach.default(detach_5);  detach_5 = None
-            detach_7: "f32[4]" = torch.ops.aten.detach.default(detach_6);  detach_6 = None
-            threshold_backward: "f32[4]" = torch.ops.aten.threshold_backward.default(arg0_1, detach_7, 0);  arg0_1 = detach_7 = None
-            sin: "f32[4]" = torch.ops.aten.sin.default(add);  add = None
-            neg: "f32[4]" = torch.ops.aten.neg.default(sin);  sin = None
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(threshold_backward, neg);  threshold_backward = neg = None
-            return [mul]""",  # noqa: B950
+def forward(self, pred_1, x_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
+    getitem = conditional[0];  conditional = None
+    ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
+    getitem_1 = conditional_1[0];  conditional_1 = None
+    return (getitem_1,)""",  # noqa: B950
         )
 
     def test_cond_autograd_inner_fn(self):
@@ -1589,67 +1165,19 @@ class f(torch.nn.Module):
 
         gm = make_fx(f)(pred, x)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.code.strip(),
             """\
-class f(torch.nn.Module):
-    def forward(self, pred_1: "b8[]", x_1: "f32[4]"):
-        # No stacktrace found for following nodes
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
-        getitem: "f32[4]" = conditional[0];  conditional = None
-        ones_like: "f32[4]" = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
-        true_graph_1 = self.true_graph_1
-        false_graph_1 = self.false_graph_1
-        conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
-        getitem_1: "f32[4]" = conditional_1[0];  conditional_1 = None
-        return (getitem_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            pow_1: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg0_1, 2);  arg0_1 = None
-            sin: "f32[4]" = torch.ops.aten.sin.default(pow_1);  pow_1 = None
-            abs_1: "f32[4]" = torch.ops.aten.abs.default(sin);  sin = None
-            return (abs_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            pow_1: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg0_1, 2);  arg0_1 = None
-            sin: "f32[4]" = torch.ops.aten.sin.default(pow_1);  pow_1 = None
-            abs_1: "f32[4]" = torch.ops.aten.abs.default(sin);  sin = None
-            return (abs_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            pow_1: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg1_1, 2)
-            sin: "f32[4]" = torch.ops.aten.sin.default(pow_1)
-            abs_1: "f32[4]" = torch.ops.aten.abs.default(sin)
-            sgn: "f32[4]" = torch.ops.aten.sgn.default(sin);  sin = None
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, sgn);  arg0_1 = sgn = None
-            cos: "f32[4]" = torch.ops.aten.cos.default(pow_1);  pow_1 = None
-            mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(mul, cos);  mul = cos = None
-            pow_2: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg1_1, 1.0);  arg1_1 = None
-            mul_2: "f32[4]" = torch.ops.aten.mul.Scalar(pow_2, 2.0);  pow_2 = None
-            mul_3: "f32[4]" = torch.ops.aten.mul.Tensor(mul_1, mul_2);  mul_1 = mul_2 = None
-            return [mul_3]
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            pow_1: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg1_1, 2)
-            sin: "f32[4]" = torch.ops.aten.sin.default(pow_1)
-            abs_1: "f32[4]" = torch.ops.aten.abs.default(sin)
-            sgn: "f32[4]" = torch.ops.aten.sgn.default(sin);  sin = None
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, sgn);  arg0_1 = sgn = None
-            cos: "f32[4]" = torch.ops.aten.cos.default(pow_1);  pow_1 = None
-            mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(mul, cos);  mul = cos = None
-            pow_2: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg1_1, 1.0);  arg1_1 = None
-            mul_2: "f32[4]" = torch.ops.aten.mul.Scalar(pow_2, 2.0);  pow_2 = None
-            mul_3: "f32[4]" = torch.ops.aten.mul.Tensor(mul_1, mul_2);  mul_1 = mul_2 = None
-            return [mul_3]""",  # noqa: B950
+def forward(self, pred_1, x_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
+    getitem = conditional[0];  conditional = None
+    ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
+    getitem_1 = conditional_1[0];  conditional_1 = None
+    return (getitem_1,)""",  # noqa: B950
         )
 
     def test_cond_autograd_inner_tensor(self):
@@ -1677,68 +1205,21 @@ class f(torch.nn.Module):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        gm = make_fx(f)(pred, x)
+        gm = make_fx(f, tracing_mode="symbolic")(pred, x)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.code.strip(),
             """\
-class f(torch.nn.Module):
-    def forward(self, pred_1: "b8[]", x_1: "f32[4]"):
-        # No stacktrace found for following nodes
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
-        getitem: "f32[4]" = conditional[0];  conditional = None
-        ones_like: "f32[4]" = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
-        true_graph_1 = self.true_graph_1
-        false_graph_1 = self.false_graph_1
-        conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
-        getitem_1: "f32[4]" = conditional_1[0];  conditional_1 = None
-        return (getitem_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            pow_1: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg0_1, 2);  arg0_1 = None
-            sin: "f32[4]" = torch.ops.aten.sin.default(pow_1);  pow_1 = None
-            abs_1: "f32[4]" = torch.ops.aten.abs.default(sin);  sin = None
-            return (abs_1,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            ones: "f32[4]" = torch.ops.aten.ones.default([4], device = device(type='cpu'), pin_memory = False)
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(ones, 42);  ones = None
-            mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, mul);  arg0_1 = mul = None
-            cos: "f32[4]" = torch.ops.aten.cos.default(mul_1);  mul_1 = None
-            return (cos,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            pow_1: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg1_1, 2)
-            sin: "f32[4]" = torch.ops.aten.sin.default(pow_1)
-            abs_1: "f32[4]" = torch.ops.aten.abs.default(sin)
-            sgn: "f32[4]" = torch.ops.aten.sgn.default(sin);  sin = None
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, sgn);  arg0_1 = sgn = None
-            cos: "f32[4]" = torch.ops.aten.cos.default(pow_1);  pow_1 = None
-            mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(mul, cos);  mul = cos = None
-            pow_2: "f32[4]" = torch.ops.aten.pow.Tensor_Scalar(arg1_1, 1.0);  arg1_1 = None
-            mul_2: "f32[4]" = torch.ops.aten.mul.Scalar(pow_2, 2.0);  pow_2 = None
-            mul_3: "f32[4]" = torch.ops.aten.mul.Tensor(mul_1, mul_2);  mul_1 = mul_2 = None
-            return [mul_3]
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]"):
-            # No stacktrace found for following nodes
-            ones: "f32[4]" = torch.ops.aten.ones.default([4], device = device(type='cpu'), pin_memory = False)
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(ones, 42);  ones = None
-            mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(arg1_1, mul);  arg1_1 = None
-            cos: "f32[4]" = torch.ops.aten.cos.default(mul_1)
-            sin: "f32[4]" = torch.ops.aten.sin.default(mul_1);  mul_1 = None
-            neg: "f32[4]" = torch.ops.aten.neg.default(sin);  sin = None
-            mul_2: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, neg);  arg0_1 = neg = None
-            mul_3: "f32[4]" = torch.ops.aten.mul.Tensor(mul_2, mul);  mul_2 = mul = None
-            return [mul_3]""",  # noqa: B950
+def forward(self, pred_1, x_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
+    getitem = conditional[0];  conditional = None
+    ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
+    getitem_1 = conditional_1[0];  conditional_1 = None
+    return (getitem_1,)""",  # noqa: B950
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
@@ -2493,7 +1974,7 @@ def forward(self, a_1, b_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [a_1, b_1]);  gt = true_graph_0 = false_graph_0 = a_1 = b_1 = None
+    conditional = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (a_1, b_1));  gt = true_graph_0 = false_graph_0 = a_1 = b_1 = None
     getitem = conditional[0];  conditional = None
     return getitem""",  # noqa: B950
         )
@@ -3835,7 +3316,7 @@ def forward(self, pred_1, x_1):
 def forward(self, arg0_1, arg1_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0, [arg0_1]);  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
+    conditional = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0, (arg0_1,));  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
     getitem = conditional[0];  conditional = None
     return [getitem]""",  # noqa: B950
         )
