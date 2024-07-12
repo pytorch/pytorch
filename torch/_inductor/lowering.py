@@ -4828,7 +4828,11 @@ def avg_pool2d_backward(
                             ),
                         ]
                     ),
-                    ops.to_dtype(scale, dtype),
+                    (
+                        ops.to_dtype(scale, dtype)
+                        if isinstance(scale, torch._inductor.virtualized.OpsValue)
+                        else scale  # scale might be constant int
+                    ),
                 )
 
                 mask = ops.and_(
@@ -5027,7 +5031,11 @@ def avg_pool3d_backward(
                                 ),
                             ]
                         ),
-                        ops.to_dtype(scale, dtype),
+                        (
+                            ops.to_dtype(scale, dtype)
+                            if isinstance(scale, torch._inductor.virtualized.OpsValue)
+                            else scale  # scale might be constant int
+                        ),
                     )
 
                     mask = ops.and_(
