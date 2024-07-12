@@ -1903,7 +1903,7 @@ class Kernel(CodeGen):
             @staticmethod
             def _update_store_cache(name: str, value: CSEVariable):
                 self.cse.store_cache[name] = value
-                if self.current_node and name in V.graph.buffers:
+                if self.current_node and name in V.graph.name_to_buffer:
                     buf = self.current_node.get_output(name)
                     for other_name in buf.get_mutations():
                         self.cse.store_cache[other_name] = value
