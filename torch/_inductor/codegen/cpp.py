@@ -48,6 +48,7 @@ from ..utils import (
 
 from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
+    _deduce_output_dtype_by_name,
     BackendFeature,
     BracesBuffer,
     CppWrapperKernelArgs,
@@ -120,9 +121,6 @@ DTYPE_LOWP_FP = [
     torch.bfloat16,
     torch.float16,
 ]
-
-
-BIN_CMP_OPS = ["eq", "ne", "le", "ge", "lt", "gt"]
 
 
 def reduction_init(reduction_type, dtype):
@@ -533,8 +531,8 @@ class CppCSEVariable(CSEVariable):
 
     def update_on_args(self, name, args, kwargs):
         if name == "load":
-            # args[1] is index
-            self._set_dependent_itervars(args[1])
+            # args[2] is index
+            self._set_dependent_itervars(args[2])
         else:
             # propagate relevant itervars and is_vec from args
             self.dependent_itervars.update(
@@ -548,31 +546,25 @@ class CppCSEVariable(CSEVariable):
                 self._set_dependent_itervars(args[0])
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
                 self.is_vec = True
-        # NOTE [dtype of CppCSEVariable]
-        # Deciding dtype according to the current optimization context is not
-        # always accurate since the dtypes are initialized during dtype propagation
-        # at the beginning of the codegen. It is possible that some ops are invoked
-        # during the codegen of the current op and take different dtypes from the
-        # current op.
-        # TODO(jgong5): A more accurate way of deciding the dtype of the variables is to
-        # propagate the dtypes here inside `update_on_args`.
-        if name == "index_expr":
-            self.dtype = args[1]
-        elif (
-            name == "add"
-            and len(args) == 2
-            and all(arg.dtype is not None for arg in args)
-        ):
-            # enough information to calculate the dtype at runtime
-            self.dtype = get_promote_dtype(args)
-        elif (
-            getattr(V.interpreter, "current_node", None) is not None
-            and get_current_node_opt_ctx() is not None
-        ):
-            self.dtype = get_current_node_opt_ctx().dtype
-
-        if name in BIN_CMP_OPS:
-            self.dtype = torch.bool
+        # NOTE [Deduce dtype of CppCSEVariable at runtime]
+        if (
+            output_dtype := _deduce_output_dtype_by_name(
+                name,
+                *args,
+                **kwargs,
+            )
+        ) is not None:
+            self.dtype = output_dtype
+        else:
+            # Induce output dtype by inputs' dtype
+            assert all(
+                arg.dtype is not None for arg in args if isinstance(arg, CppCSEVariable)
+            )
+            self.dtype = functools.reduce(
+                torch.promote_types,  # type: ignore[arg-type]
+                [arg.dtype for arg in args if isinstance(arg, CppCSEVariable)],
+            )
+            assert self.dtype is not None
 
     def _set_dependent_itervars(self, index: sympy.Expr):
         """
@@ -1063,36 +1055,37 @@ class CppVecOverrides(CppOverrides):
                         else:
                             new_args.append(arg)
                 if vectors:
-                    if len(new_args) == 2:
-                        # We have see several data type mismatch issue starting with lowering phase.
-                        # 1. int32 and int64 in test_torchinductor.py::test_max_pool2d_with_indices_backward3_cpu
-                        # 2. int8 and int32 in test_torchinductor.py::test_max_pool2d5_cpu
-                        # 3. fp32 and int32 in test_torchinductor_dynamic_shapes.py::test_avg_pool2d8_dynamic_shapes_cpu
-                        # Note: We limit the data type promotion to binary op since for ops like where
-                        # the first input is with bool type which should do data type promotion.
+
+                    def promote_args(new_args):
                         promote_type = get_promote_dtype(new_args)
-                        new_args = list(
-                            map(
-                                functools.partial(
-                                    promote_arg,
-                                    promote_type=promote_type,
-                                ),
-                                new_args,
+                        if (
+                            all(
+                                new_arg.dtype in [torch.int8, torch.int32, torch.int64]
+                                for new_arg in new_args
+                                if isinstance(new_arg, CppCSEVariable)
                             )
-                        )
+                            and promote_type
+                        ):
+                            new_args = list(
+                                map(
+                                    functools.partial(
+                                        promote_arg,
+                                        promote_type=promote_type,
+                                    ),
+                                    new_args,
+                                )
+                            )
+                        return new_args
+
+                    # We have saw several data type mismatch issues related with index_expr in
+                    # the lowering phase of torch.int8. torch.int32, torch.int64.
+                    # 1. int32 and int64 in test_torchinductor.py::test_max_pool2d_with_indices_backward3_cpu
+                    # 2. int8 and int32 in test_torchinductor.py::test_max_pool2d5_cpu
+                    if len(new_args) == 2:
+                        new_args = promote_args(new_args)
                     elif func == CppVecOverrides.where:
-                        # Refer to test_torchinductor_dynamic_shapes.py::test_index_select_dynamic_shapes_cpu
-                        args_to_promote = new_args[1:]
-                        promote_type = get_promote_dtype(args_to_promote)
-                        new_args[1:] = list(
-                            map(
-                                functools.partial(
-                                    promote_arg,
-                                    promote_type=promote_type,
-                                ),
-                                args_to_promote,
-                            )
-                        )
+                        new_args[1:] = promote_args(new_args[1:])
+
                     return func(*new_args, **kwargs)
                 else:
                     # fallback to scalar ops
@@ -1902,7 +1895,7 @@ class CppKernel(Kernel):
         if V.graph.get_dtype(name) in [torch.float16]:
             line = f"static_cast<float>({line})"
         csevar = self.cse.generate(self.loads, line)
-        csevar.update_on_args("load", (name, index), {})
+        csevar.update_on_args("load", (self, name, index), {})
         return csevar
 
     def store(self, name, index, value, mode=None):
@@ -2456,7 +2449,7 @@ class CppVecKernel(CppKernel):
         else:
             csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
-        csevar.update_on_args("load", (name, index), {})
+        csevar.update_on_args("load", (self, name, index), {})
         csevar.is_vec = True
         return csevar
 
@@ -2845,7 +2838,7 @@ class CppTile2DKernel(CppVecKernel):
             dtype = V.graph.get_dtype(name)
             line = self._get_vec_load_line(loadbuf, 0, dtype)  # type: ignore[arg-type]
             csevar = self.cse.generate(self.loads, line)
-            csevar.update_on_args("load", (name, index), {})
+            csevar.update_on_args("load", (self, name, index), {})
             assert isinstance(csevar, CppCSEVariable)
             csevar.is_vec = True
             return csevar
