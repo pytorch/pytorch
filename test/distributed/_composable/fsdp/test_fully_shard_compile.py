@@ -209,7 +209,7 @@ class TestFullyShardCompile(FSDPTest):
                 optim.step()
                 optim.zero_grad(set_to_none=True)
             code = None
-            if compiled_autograd_backend is not None:
+            if backend == "inductor" and compiled_autograd_backend is not None:
                 maybe_compiled_autograd_ctx = compiled_autograd.enable(
                     compiler_fn(compiled_autograd_backend)
                 )
