@@ -1719,7 +1719,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "placeholder":
                 self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_dynamic_shapes_builder_kwargs(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
@@ -1960,7 +1959,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         args = (torch.rand(3, 700, 700), 150, 150)
         self.assertEqual(ecrop.module()(*args), ecrop(*args))
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, kw1, kw2):
@@ -1971,7 +1969,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         kwargs = {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_pytree_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b):
@@ -1985,7 +1982,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_default_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b=1):
@@ -2016,7 +2012,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
         self._test_export_same_as_eager(kw_func, args)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_keyword_only_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2):
@@ -2027,7 +2022,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         kwargs = {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_var_keyword_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
@@ -2122,7 +2116,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_var_keyword_pytree_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
@@ -3625,8 +3618,6 @@ def forward(self, x):
         ):
             torch.export.export(exported_v2.module(), (torch.randn(2, 2),))
 
-    # https://github.com/pytorch/pytorch/issues/129939
-    @testing.expectedFailureNonStrict
     def test_export_cond(self):
         class A(torch.nn.Module):
             def __init__(self):
@@ -4351,7 +4342,7 @@ graph():
         self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
 
     # TODO Retracing a module with constant attrs don't work.(T193692674)
-    @testing.expectedFailureTrainingIRToRunDecomp
+    @unittest.skip("Test is only supposed to work with non-strict mode")
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
@@ -4987,8 +4978,6 @@ graph():
         )
 
     # Guard validation upsets the guard
-    # https://github.com/pytorch/pytorch/issues/129939
-    @unittest.expectedFailure
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
             def __init__(self):
