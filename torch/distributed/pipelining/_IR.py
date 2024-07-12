@@ -771,7 +771,7 @@ class Pipe(torch.nn.Module):
 
         # A list of param referrals for deferred deletion.
         # To be accumulated in `move_param_to_callee`.
-        to_delete = list()
+        to_delete = []
 
         def _recursive_getattr_with_parent(mod, fqn):
             # Returns getattr call given a nested FQN, and the last parent
