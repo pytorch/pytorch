@@ -71,6 +71,8 @@ def _vmap_for_bhqkv(
     suffix: Tuple[Optional[int], ...] = (),
     out_dims: Union[int, List[Optional[int]]] = 0,
 ):
+    # This function vmaps a function 4 times, broadcasting the [b, h, q_idx,
+    # kv_idx] dimensions
     fn = torch.vmap(
         fn, in_dims=prefix + (None, None, None, 0) + suffix, out_dims=out_dims
     )
@@ -172,38 +174,10 @@ class BlockMask:
         return s
 
     def __getitem__(self, index) -> "BlockMask":
-        if self.mask_fn is not None:
-            tensors = self.as_tuple()[:-3]
-            tensors = [x[index] for x in tensors]
-            return BlockMask(
-                tensors[0],
-                tensors[1],
-                tensors[2],
-                tensors[3],
-                tensors[4],
-                tensors[5],
-                tensors[6],
-                tensors[7],
-                KV_BLOCK_SIZE=self.KV_BLOCK_SIZE,
-                Q_BLOCK_SIZE=self.Q_BLOCK_SIZE,
-                mask_fn=self.mask_fn,
-            )
-        else:
-            tensors = self.as_tuple()[:4]
-            tensors = [x[index] for x in tensors]
-            return BlockMask(
-                tensors[0],
-                tensors[1],
-                tensors[2],
-                tensors[3],
-                self.full_kv_num_blocks,
-                self.full_kv_indices,
-                self.full_q_num_blocks,
-                self.full_q_indices,
-                KV_BLOCK_SIZE=self.KV_BLOCK_SIZE,
-                Q_BLOCK_SIZE=self.Q_BLOCK_SIZE,
-                mask_fn=self.mask_fn,
-            )
+        new_values = [
+            x[index] if isinstance(x, torch.Tensor) else x for x in self.as_tuple()
+        ]
+        return BlockMask(*new_values)
 
     @property
     def shape(self):
@@ -247,8 +221,6 @@ class BlockMask:
         num_cols = self.q_num_blocks.shape[-1]
         batch_dims = self.kv_num_blocks.shape[:-1]
         device = self.kv_num_blocks.device
-        kv_num_blocks = self.kv_num_blocks
-        kv_indices = self.kv_indices
 
         def create_dense_one(kv_num_blocks, kv_indices):
             dense_mask = kv_indices.new_zeros(num_rows, num_cols + 1, dtype=torch.int32)
@@ -272,7 +244,9 @@ class BlockMask:
         for _ in range(len(batch_dims)):
             create_dense_batched = torch.vmap(create_dense_batched, in_dims=(0, 0))
 
-        out = create_dense_batched(kv_num_blocks, kv_indices)
+        out = create_dense_batched(self.kv_num_blocks, self.kv_indices)
+        if self.full_kv_num_blocks is not None:
+            out |= create_dense_batched(self.full_kv_num_blocks, self.full_kv_indices)
         return out
 
     def to_string(self, grid_size=(20, 20), limit=4):
@@ -423,18 +397,11 @@ def _create_sparse_block_from_block_mask(
     if partial_blocks is not None:
         partial_bm = create_sparse_block_from_block_mask_inner(partial_blocks)
     else:
-        # Triton kernel would skip computation for these blocks.
         partial_bm = (None, None, None, None)
 
-    return BlockMask(
-        full_bm[0],
-        full_bm[1],
-        full_bm[2],
-        full_bm[3],
-        partial_bm[0],
-        partial_bm[1],
-        partial_bm[2],
-        partial_bm[3],
+    return BlockMask(  # type: ignore[call-arg]
+        *full_bm,
+        *partial_bm,
         KV_BLOCK_SIZE,
         Q_BLOCK_SIZE,
         mask_fn,
@@ -480,8 +447,7 @@ def create_mask(
     with ctx:
         if mod_type == ModificationType.SCORE_MOD:
             score_mod = mod_fn
-            # fn is a score_mod function
-            score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,))
+            score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,))  # first input is score
             out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
             mask = torch.where(torch.isneginf(out), False, True)
             return mask

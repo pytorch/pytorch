@@ -138,6 +138,7 @@ def _math_attention_inner(
     captured_buffers_in_dim = (None,) * len(score_mod_other_buffers)
     from torch.nn.attention._flex_attention import _vmap_for_bhqkv
 
+    # first input is score
     score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,), suffix=captured_buffers_in_dim)
 
     mask_fn = block_mask[-1]
@@ -690,6 +691,8 @@ def sdpa_dense_backward(
     out_dims = [0, None, None, None, None] + [None] * len(score_mod_other_buffers)
     from torch.nn.attention._flex_attention import _vmap_for_bhqkv
 
+    # inputs are [score, b, h, q_idx, kv_idx, gradOut, ...]
+    # score and gradOut are "fully" batched
     joint_score_mod = _vmap_for_bhqkv(
         joint_graph,
         prefix=(0,),
