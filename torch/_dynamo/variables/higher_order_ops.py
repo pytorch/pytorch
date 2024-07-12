@@ -1527,20 +1527,12 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         return all_args
 
     def create_wrapped_node(
-        self, tx, query: "VariableTracker", score_function: "VariableTracker"
+        self, tx, query: "VariableTracker", fn: "VariableTracker", fn_name: str
     ):
         from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
         from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx
-
-        scores_require_grad: bool = query.requires_grad
-        score = query.call_method(
-            tx,
-            "new_empty",
-            (SourcelessBuilder.create(tx, []),),
-            {"requires_grad": SourcelessBuilder.create(tx, scores_require_grad)},
-        )
 
         def create_scalar():
             return query.call_method(
@@ -1553,7 +1545,18 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         bhmn = [create_scalar() for _ in range(4)]
-        new_args = [score, *bhmn]
+        if fn_name == "score_mod":
+            scores_require_grad: bool = query.requires_grad
+            score = query.call_method(
+                tx,
+                "new_empty",
+                (SourcelessBuilder.create(tx, []),),
+                {"requires_grad": SourcelessBuilder.create(tx, scores_require_grad)},
+            )
+            new_args = [score, *bhmn]
+        else:
+            assert fn_name == "mask_fn", "Illegal function name: " + fn_name
+            new_args = [*bhmn]
 
         with TransformGetItemToIndex():
             (
@@ -1562,17 +1565,17 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 body_lifted_freevars,
             ) = speculate_subgraph(
                 tx,
-                score_function,
+                fn,
                 new_args,
                 {},  # expect only args no kwargs for now
-                description="flex_attention",
+                description=fn_name,
                 source_target=self.value,
                 set_subgraph_inputs="flatten_manual",
             )
 
         body_name = add_subgraph(
             tx,
-            "flex_attention",
+            fn_name,
             torch.fx.GraphModule(tx.output.nn_modules, body_graph),
         )
 
@@ -1584,7 +1587,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
 
-        proxy_args = (body_node,) + lifted_args
+        proxy_args = (body_node, lifted_args)
 
         return proxy_args
 
@@ -1602,12 +1605,21 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             scale,
         ) = self.normalize_to_args(args, kwargs)
 
-        p_args = self.create_wrapped_node(tx, query, score_mod)
+        score_mod_node, score_mod_lifted_args = self.create_wrapped_node(
+            tx, query, score_mod, "score_mod"
+        )
+        mask_fn = block_mask.items[-1]
+        if isinstance(mask_fn, ConstantVariable):
+            mask_fn = UserFunctionVariable(torch.nn.attention._flex_attention._no_mask)
+        mask_fn_node, mask_fn_lifted_args = self.create_wrapped_node(
+            tx, query, mask_fn, "mask_fn"
+        )
+
         proxied_args = [
             query,
             key,
             value,
-            block_mask,
+            TupleVariable(block_mask.items[:-1], source=block_mask.source),
             scale,
         ]
 
@@ -1625,15 +1637,25 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             lse_meta = query_meta.new_empty(logsumexp_shape, dtype=torch.float32)
         example_value = (out_meta, lse_meta)
 
-        # Compose the ordered HOO args from two parts:
+        # Compose the ordered HOO args:
         # - inp_args: [query, key, value, block_mask, scale]
-        # - p_args: [score_mod, *other_buffers]
+        # - subgraph node: [score_mod, mask_fn_node]
+        # - lifted args from tracing subgraph: [score_mod_other_buffers, mask_fn_other_buffers]
+        _, _, _, inp_arg_block_mask, inp_arg_scale = inp_args
+        block_mask = tuple(inp_arg_block_mask + (mask_fn_node,))
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
                 self.value,
-                args=inp_args[:3] + p_args[:1] + inp_args[3:] + p_args[1:],
+                args=inp_args[:3]
+                + (
+                    score_mod_node,
+                    block_mask,
+                    inp_arg_scale,
+                    score_mod_lifted_args,
+                    mask_fn_lifted_args,
+                ),
                 kwargs={},
             ),
             example_value=example_value,
