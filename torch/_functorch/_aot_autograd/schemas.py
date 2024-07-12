@@ -345,6 +345,11 @@ class ViewAndMutationMeta:
         default_factory=list
     )
 
+    # Indexes of saved tensors which are donated buffer.
+    # Donated buffer means the tensor is not alias of any forward user input, forward user output,
+    # and backward output.
+    bw_donated_idxs: Optional[List[int]] = None
+
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
@@ -481,12 +486,6 @@ class ViewAndMutationMeta:
         # this information.
         self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
 
-        # Indexes of saved tensors which are donated buffer.
-        # Donated buffer means the tensor is not alias of any forward user input, forward user output,
-        # and backward output.
-        # The index ranges from 0 to # saved tensors.
-        self.fw_donated_buffer: Optional[List[int]] = None
-
     def make_runtime_safe(self):
         """
         There are various fields in ViewAndMutationMeta that aren't serializable. This function is called after all tracing
@@ -550,16 +549,6 @@ class ViewAndMutationMeta:
             return slice(-self.num_symints_saved_for_bw, None)
         else:
             return slice(0, 0)  # empty slice
-
-    @property
-    def bw_donated_indices(self):
-        if self.fw_donated_buffer is None:
-            return []
-
-        # assuming backward input layout:
-        # [*symints, *saved_tensors, *flat_bw_args_with_grads, *rng_args].
-        assert self.num_symints_saved_for_bw is not None
-        return [self.num_symints_saved_for_bw + i for i in self.fw_donated_buffer]
 
     def __eq__(self, other):
         if not isinstance(other, ViewAndMutationMeta):

@@ -1503,6 +1503,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # (*tokens, *mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
                 # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
                 #   of the original view, and not the synthetic base
+                # - Note that donated buffer logic requires (*saved_tensors, *saved_symints) showing up last
+                #   in the fw output order.
                 fw_outs = call_func_at_runtime_with_args(
                     CompiledFunction.compiled_fw,
                     args,
@@ -1722,6 +1724,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     # Add the seed and offset to args
                     rng_args = CUDARngStateHelper.get_torch_state_as_tuple()
 
+                # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors) showing up first
+                #   in the bw output order.
                 all_args = [
                     *ctx.symints,
                     *ctx.saved_tensors,

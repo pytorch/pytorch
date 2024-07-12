@@ -1203,7 +1203,7 @@ SeqNr|OrigAten|SrcFn
             relu(torch.rand([3, 3], device="cuda", requires_grad=True)).sum().backward()
 
         # le is a donated buffer from relu
-        FileCheck().check("backward donated indices: [0]").run(
+        FileCheck().check("bw_donated_idxs=[0]").run(
             "\n".join(captured.output)
         )
 
@@ -1227,7 +1227,7 @@ SeqNr|OrigAten|SrcFn
         with self.assertLogs(logger_name, level="INFO") as captured:
             f(inp, param1, param2).sum().backward()
 
-        FileCheck().check("backward donated indices: []").run(
+        FileCheck().check("bw_donated_idxs=[]").run(
             "\n".join(captured.output)
         )
 
@@ -1252,7 +1252,7 @@ SeqNr|OrigAten|SrcFn
         with self.assertLogs(logger_name, level="INFO") as captured:
             f(inp, param1, param2).sum().backward()
 
-        FileCheck().check("backward donated indices: []").run(
+        FileCheck().check("bw_donated_idxs=[]").run(
             "\n".join(captured.output)
         )
 
@@ -1284,7 +1284,7 @@ SeqNr|OrigAten|SrcFn
         #        return [add, le]
         #
         # `le` is a donated buffer
-        FileCheck().check("backward donated indices: [0]").run(
+        FileCheck().check("bw_donated_idxs=[0]").run(
             "\n".join(captured.output)
         )
 
@@ -1316,7 +1316,7 @@ SeqNr|OrigAten|SrcFn
         #     return [add, primals_1, le]
         #
         # `le` is a donated buffer but primals_1 is not.
-        FileCheck().check("backward donated indices: [1]").run(
+        FileCheck().check("bw_donated_idxs=[1]").run(
             "\n".join(captured.output)
         )
 

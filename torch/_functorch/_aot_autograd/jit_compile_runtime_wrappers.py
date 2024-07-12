@@ -22,6 +22,7 @@ from torch import Tensor
 from torch._dynamo.utils import lazy_format_graph_code
 from torch._guards import CompileContext, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
+from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
@@ -245,70 +246,65 @@ def aot_dispatch_base(
     return compiled_fn
 
 
-def collect_donated_buffer_metadata_from_tensor(
-    fw_inputs: List[torch.Tensor],
-    fw_outputs: List[torch.Tensor],
-    bw_outputs: List[torch.Tensor],
-    fw_saved_tensor_range: Tuple[int, int],
+def collect_fw_donated_buffer_idxs(
+    fw_ins: List[FakeTensor],
+    user_fw_outs: List[FakeTensor],
+    bw_outs: List[FakeTensor],
+    saved_tensors: List[FakeTensor],
 ) -> List[int]:
     """
     Checks if the saved tensors are donated buffers, which means a saved tensor is not
-    an alias of any tensors in fw_inputs, bw_outputs, and fw_outputs (except other saved
-    tensors).
-
-    Layout of fw_outputs:
-        start, end = fw_saved_tensor_range
-        fw_outputs = [*inner_forward_out, *saved_tensors, *saved_symints]
-            where inner_forward_out = fw_outputs[:start]
-                saved_tensors = fw_outputs[start:end]
-                saved_symints = fw_outputs[end:]
+    an alias of any tensors in fw_ins, user_fw_outs, and bw_outs.
     """
-    fw_saved_tensor_begin, fw_saved_tensor_end = fw_saved_tensor_range
-    num_saved_tensor = fw_saved_tensor_end - fw_saved_tensor_begin
 
     storage_refs = set()
-    for t in itertools.chain(fw_inputs, fw_outputs[:fw_saved_tensor_begin], bw_outputs):
-        if isinstance(t, torch.Tensor):
+    for t in itertools.chain(fw_ins, user_fw_outs, bw_outs):
+        if isinstance(t, FakeTensor):
             storage_refs.add(StorageWeakRef(t.untyped_storage()))
 
+    num_saved_tensor = len(saved_tensors)
     donated_buffer_idxs = []
     for i in range(num_saved_tensor):
-        t = fw_outputs[fw_saved_tensor_begin + i]
+        t = saved_tensors[i]
         if StorageWeakRef(t.untyped_storage()) not in storage_refs:
             donated_buffer_idxs.append(i)
 
     return donated_buffer_idxs
 
 
-def collect_donated_buffer_metadata(
+def collect_bw_donated_buffer_idxs(
     fw_module: torch.fx.GraphModule,
     bw_module: torch.fx.GraphModule,
-    num_inner_fwd_outputs: int,
-    num_saved_tensor: int,
+    fw_metadata: ViewAndMutationMeta,
 ) -> List[int]:
     """
-    Collects donated buffer metadata from fw_module and bw_module.
+    Collects backward donated buffer indexes from fw_module and bw_module.
     """
 
-    fw_inputs = fw_module.graph.find_nodes(op="placeholder")
-    bw_outputs = next(reversed(bw_module.graph.find_nodes(op="output"))).args[0]
-    fw_outputs = next(reversed(fw_module.graph.find_nodes(op="output"))).args[0]
+    fw_ins = fw_module.graph.find_nodes(op="placeholder")
+    bw_outs = next(reversed(bw_module.graph.find_nodes(op="output"))).args[0]
+    fw_outs = next(reversed(fw_module.graph.find_nodes(op="output"))).args[0]
 
     # check if every node has meta["val"] since meta["val"] may be lost during
     # graph transformation.
     try:
-        fw_inputs = [n.meta["val"] for n in fw_inputs]
-        fw_outputs = [n.meta["val"] for n in fw_outputs]
-        bw_outputs = [n.meta["val"] for n in bw_outputs]
+        fw_ins = [n.meta["val"] for n in fw_ins]
+        fw_outs = [n.meta["val"] for n in fw_outs]
+        bw_outs = [n.meta["val"] for n in bw_outs]
     except KeyError:
         return []
 
-    return collect_donated_buffer_metadata_from_tensor(
-        fw_inputs,
-        fw_outputs,
-        bw_outputs,
-        (num_inner_fwd_outputs, num_inner_fwd_outputs + num_saved_tensor),
+    user_fw_outs = fw_outs[:fw_metadata.num_forward]
+    saved_tensors = fw_outs[fw_metadata.tensors_saved_for_backwards_slice]
+
+    fw_donated_buffer = collect_fw_donated_buffer_idxs(
+        fw_ins,
+        user_fw_outs,
+        bw_outs,
+        saved_tensors,
     )
+
+    return [fw_metadata.num_symints_saved_for_bw + i for i in fw_donated_buffer]
 
 
 def aot_dispatch_autograd(
@@ -404,16 +400,20 @@ def aot_dispatch_autograd(
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
             if torch._functorch.config.donated_buffer:
-                inner_meta.fw_donated_buffer = collect_donated_buffer_metadata(
+                fw_metadata.bw_donated_idxs = collect_bw_donated_buffer_idxs(
                     fw_module,
                     bw_module,
-                    num_inner_fwd_outputs,
-                    num_fw_outs_saved_for_bw - num_symints_saved_for_bw,
+                    inner_meta,
                 )
+                inner_meta.bw_donated_idxs = fw_metadata.bw_donated_idxs
 
-                if aot_config.enable_log:
-                    msg = f"backward donated indices: {inner_meta.bw_donated_indices}"
-                    log.info(msg)
+        if aot_config.enable_log:
+            aot_graphs_log.info(
+                "aot_config id: %s, fw_metadata=%s, inner_meta=%s",
+                str(aot_config.aot_id),
+                str(fw_metadata),
+                str(inner_meta),
+            )
 
         # Note [Detaching inputs that never need gradients]
         # See https://github.com/pytorch/pytorch/issues/97745
