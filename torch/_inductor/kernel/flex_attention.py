@@ -582,6 +582,9 @@ def flex_attention(*args, **kwargs):
         dtype=torch.float32,  # The logsumexp is always stored in fp32 regardless of the input dtype
         device=query.get_device(),
     )
+    # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
+    # partial_kv_num_blocks is torch.zeros([1, 1, 1]) if partial blocks are not computed.
+    use_partial_mask = sum(partial_kv_num_blocks.shape) != 3
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
     configs.append(_get_default_config_fwd(query))
@@ -640,7 +643,7 @@ def flex_attention(*args, **kwargs):
             # For now, we always assume the "sound" option
             ROWS_GUARANTEED_SAFE=False,
             PRESCALE_QK=False,
-            USE_PARTIAL_MASK=(sum(partial_kv_num_blocks.shape) != 3),
+            USE_PARTIAL_MASK=use_partial_mask,
         )
     inputs_for_autotuning = (
         [
@@ -1266,6 +1269,10 @@ def flex_attention_backward(*args, **kwargs):
         value.get_size(), value.get_stride(), dtype=dtype, device=device
     )
 
+    # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
+    # partial_kv_num_blocks is torch.zeros([1, 1, 1]) if partial blocks are not computed.
+    use_partial_mask = sum(partial_kv_num_blocks.shape) != 3
+
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
     configs.append(_get_default_config_bwd(query))
@@ -1325,7 +1332,7 @@ def flex_attention_backward(*args, **kwargs):
             SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
             # For now, we always assume the "sound" option
             PRESCALE_QK=False,
-            USE_PARTIAL_MASK=(sum(partial_kv_num_blocks.shape) != 3),
+            USE_PARTIAL_MASK=use_partial_mask,
         )
     inputs_for_autotuning = (
         [

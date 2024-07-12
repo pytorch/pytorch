@@ -91,9 +91,9 @@ class BlockMask:
         Q_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
         mask_fn=None,
     ):
-        if full_kv_indices.dim() < 2:
+        if full_kv_indices.dim() < 2 or partial_kv_indices.dim() < 2:
             raise RuntimeError(
-                "BlockMask full_kv_indices must have at least 2 dimensions"
+                "BlockMask full_kv_indices or partial_kv_indices must have at least 2 dimensions"
             )
         self.full_kv_num_blocks = full_kv_num_blocks
         self.full_kv_indices = full_kv_indices
@@ -130,21 +130,38 @@ class BlockMask:
         return s
 
     def __getitem__(self, index) -> "BlockMask":
-        tensors = self.as_tuple()[:-3]
-        tensors = [x[index] for x in tensors]
-        return BlockMask(
-            tensors[0],
-            tensors[1],
-            tensors[2],
-            tensors[3],
-            tensors[4],
-            tensors[5],
-            tensors[6],
-            tensors[7],
-            KV_BLOCK_SIZE=self.KV_BLOCK_SIZE,
-            Q_BLOCK_SIZE=self.Q_BLOCK_SIZE,
-            mask_fn=self.mask_fn,
-        )
+        if self.mask_fn is not None:
+            tensors = self.as_tuple()[:-3]
+            tensors = [x[index] for x in tensors]
+            return BlockMask(
+                tensors[0],
+                tensors[1],
+                tensors[2],
+                tensors[3],
+                tensors[4],
+                tensors[5],
+                tensors[6],
+                tensors[7],
+                KV_BLOCK_SIZE=self.KV_BLOCK_SIZE,
+                Q_BLOCK_SIZE=self.Q_BLOCK_SIZE,
+                mask_fn=self.mask_fn,
+            )
+        else:
+            tensors = self.as_tuple()[:4]
+            tensors = [x[index] for x in tensors]
+            return BlockMask(
+                tensors[0],
+                tensors[1],
+                tensors[2],
+                tensors[3],
+                self.partial_kv_num_blocks,
+                self.partial_kv_indices,
+                self.partial_q_num_blocks,
+                self.partial_q_indices,
+                KV_BLOCK_SIZE=self.KV_BLOCK_SIZE,
+                Q_BLOCK_SIZE=self.Q_BLOCK_SIZE,
+                mask_fn=self.mask_fn,
+            )
 
     @property
     def shape(self):
@@ -173,7 +190,10 @@ class BlockMask:
         """
         total_size = self.numel()
         computed_size = (
-            self.full_kv_num_blocks.sum().item()
+            (
+                self.full_kv_num_blocks.sum().item()
+                + self.partial_kv_num_blocks.sum().item()
+            )
             * self.KV_BLOCK_SIZE
             * self.Q_BLOCK_SIZE
         )
@@ -339,7 +359,7 @@ def _convert_block_mask_to_mask(
 
 def _create_sparse_block_from_block_mask(
     block_mask: Tuple[torch.Tensor, Optional[torch.Tensor]],
-    mask_fn: Callable,
+    mask_fn: Optional[Callable],
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
 ) -> BlockMask:
@@ -365,7 +385,6 @@ def _create_sparse_block_from_block_mask(
         partial_bm = create_sparse_block_from_block_mask_inner(partial_blocks)
     else:
         # Triton kernel would skip computation for these blocks.
-        z, h, m, k = full_blocks.shape
         partial_bm = (
             torch.zeros([1, 1, 1], dtype=torch.int32, device=full_blocks.device),
             torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=full_blocks.device),
