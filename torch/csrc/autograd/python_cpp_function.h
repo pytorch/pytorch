@@ -43,10 +43,6 @@ PyObject* CppFunction_pynew(
        METH_O,                                                                 \
        nullptr},                                                               \
       {(char*)"name", THPCppFunction_name, METH_NOARGS, nullptr},              \
-      {(char*)"_input_metadata",                                               \
-       THPCppFunction_input_metadata,                                          \
-       METH_O,                                                                 \
-       nullptr},                                                               \
       {(char*)"_sequence_nr",                                                  \
        THPCppFunction_sequence_nr,                                             \
        METH_NOARGS,                                                            \
@@ -55,19 +51,21 @@ PyObject* CppFunction_pynew(
     (char*)"_set_sequence_nr", THPCppFunction_set_sequence_nr, METH_O, nullptr \
   }
 
-#define THP_FUNCTION_DEFAULT_PROPERTIES                                   \
-  {(char*)"next_functions",                                               \
-   THPCppFunction_next_functions,                                         \
-   nullptr,                                                               \
-   nullptr,                                                               \
-   nullptr},                                                              \
-      {(char*)"requires_grad",                                            \
-       THPCppFunction_requires_grad,                                      \
-       nullptr,                                                           \
-       nullptr,                                                           \
-       nullptr},                                                          \
-  {                                                                       \
-    (char*)"metadata", THPCppFunction_metadata, nullptr, nullptr, nullptr \
+#define THP_FUNCTION_DEFAULT_PROPERTIES                                        \
+  {(char*)"next_functions",                                                    \
+   THPCppFunction_next_functions,                                              \
+   nullptr,                                                                    \
+   nullptr,                                                                    \
+   nullptr},                                                                   \
+      {(char*)"requires_grad",                                                 \
+       THPCppFunction_requires_grad,                                           \
+       nullptr,                                                                \
+       nullptr,                                                                \
+       nullptr},                                                               \
+      {(char*)"metadata", THPCppFunction_metadata, nullptr, nullptr, nullptr}, \
+  {                                                                            \
+    (char*)"_input_metadata", THPCppFunction_input_metadata, nullptr, nullptr, \
+        nullptr                                                                \
   }
 
 PyObject* THPCppFunction_next_functions(PyObject* self, void* _unused);
@@ -79,7 +77,7 @@ PyObject* THPCppFunction_register_prehook(PyObject* self, PyObject* hook);
 
 PyObject* THPCppFunction_name(PyObject* self, PyObject* noargs);
 PyObject* THPCppFunction_sequence_nr(PyObject* self, PyObject* noargs);
-PyObject* THPCppFunction_input_metadata(PyObject* self, PyObject* idx);
+PyObject* THPCppFunction_input_metadata(PyObject* self, void* _unused);
 
 PyTypeObject* _initFunctionPyTypeObject(
     PyTypeObject& type,

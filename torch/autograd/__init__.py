@@ -68,8 +68,8 @@ def _calculate_shape(
         # We have already checked that we are not a C++ NestedTensor
         if is_grads_batched:
             raise RuntimeError("Batched grads are not supported with GradientEdge")
-        out_metadata = output.node._input_metadata(output.output_nr)
-        return torch.Size(out_metadata.shape()), grad.shape
+        out_metadata = output.node._input_metadata[output.output_nr]
+        return torch.Size(out_metadata.shape), grad.shape
 
     if output.is_nested and not isinstance(output, NestedTensor):
         if is_grads_batched:
@@ -92,32 +92,35 @@ def _make_grads(
     new_grads: List[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
         out = cast(Union[torch.Tensor, graph.GradientEdge], out)
+        out_size = None
+        out_device = None
+
+        if isinstance(out, graph.GradientEdge):
+            out_metadata = out.node._input_metadata[out.output_nr]
+            out_size = torch.Size(out_metadata.shape)
+            out_dtype = out_metadata.dtype
+            out_device = out_metadata.device
+            out_is_nested = out_metadata.is_nested_tensor
+            if out_metadata.is_cpp_nested_tensor:
+                raise RuntimeError(
+                    "C++ NestedTensor are not supported with GradientEdge"
+                )
+            out_is_cpp_nested = False
+        else:
+            # circular import
+            from torch.nested._internal.nested_tensor import NestedTensor
+
+            assert isinstance(out, torch.Tensor)
+            out_dtype = out.dtype
+            out_is_nested = out.is_nested
+            out_is_cpp_nested = out_is_nested and not isinstance(out, NestedTensor)
+            if not out_is_cpp_nested:
+                out_size = out.shape
+
         if isinstance(grad, torch.Tensor):
             from torch.fx.experimental.symbolic_shapes import expect_true, sym_eq
 
             first_grad = grad if not is_grads_batched else grad[0]
-            out_size = None
-
-            if isinstance(out, graph.GradientEdge):
-                out_metadata = out.node._input_metadata(out.output_nr)
-                out_size = torch.Size(out_metadata.shape())
-                out_dtype = out_metadata.dtype()
-                out_is_nested = out_metadata.is_nested_tensor()
-                if out_metadata.is_cpp_nested_tensor():
-                    raise RuntimeError(
-                        "Cpp NestedTensor are not supported with GradientEdge"
-                    )
-                out_is_cpp_nested = False
-            else:
-                # circular import
-                from torch.nested._internal.nested_tensor import NestedTensor
-
-                assert isinstance(out, torch.Tensor)
-                out_dtype = out.dtype
-                out_is_nested = out.is_nested
-                out_is_cpp_nested = out_is_nested and not isinstance(out, NestedTensor)
-                if not out_is_cpp_nested:
-                    out_size = out.shape
 
             # TODO: We can remove this conditional once we uniformly use
             # singleton int to represent jagged dimension, so that size() call
@@ -183,24 +186,38 @@ def _make_grads(
                 )
             new_grads.append(grad)
         elif grad is None:
-            if isinstance(out, graph.GradientEdge):
-                raise RuntimeError(
-                    "grad cannot be implicitly created when output is a GradientEdge"
-                )
-            if out.requires_grad:
-                if out.numel() != 1:
+            if isinstance(out, graph.GradientEdge) or out.requires_grad:  # type: ignore[attr-defined]
+                if isinstance(out, graph.GradientEdge):
+                    assert out_size is not None
+                    out_numel_is_1 = all(o == 1 for o in out_size)
+                else:
+                    assert isinstance(out, torch.Tensor)
+                    out_numel_is_1 = out.numel() == 1
+                if not out_numel_is_1:
                     raise RuntimeError(
                         "grad can be implicitly created only for scalar outputs"
                     )
-                if not out.dtype.is_floating_point:
+                if not out_dtype.is_floating_point:
                     msg = (
                         "grad can be implicitly created only for real scalar outputs"
-                        f" but got {out.dtype}"
+                        f" but got {out_dtype}"
                     )
                     raise RuntimeError(msg)
-                new_grads.append(
-                    torch.ones_like(out, memory_format=torch.preserve_format)
-                )
+                if isinstance(out, graph.GradientEdge):
+                    assert out_size is not None
+                    assert out_device is not None
+                    new_grads.append(
+                        torch.ones(
+                            out_size,
+                            dtype=out_dtype,
+                            device=out_device,
+                        )
+                    )
+                else:
+                    assert isinstance(out, torch.Tensor)
+                    new_grads.append(
+                        torch.ones_like(out, memory_format=torch.preserve_format)
+                    )
             else:
                 new_grads.append(None)
         else:

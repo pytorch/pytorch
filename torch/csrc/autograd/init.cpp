@@ -186,17 +186,19 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("INFERENCE_MODE", CreationMeta::INFERENCE_MODE);
 
   py::class_<torch::autograd::InputMetadata>(m, "_InputMetadata")
-      .def(
+      .def_property_readonly(
           "dtype",
           [](const torch::autograd::InputMetadata& m) {
             PyObject* raw_obj =
                 (PyObject*)torch::getTHPDtype(m.dtype().toScalarType());
             return py::reinterpret_borrow<py::object>(raw_obj);
           })
-      .def("shape", &torch::autograd::InputMetadata::shape_as_dim_vector)
-      .def(
+      .def_property_readonly("device", &torch::autograd::InputMetadata::device)
+      .def_property_readonly(
+          "shape", &torch::autograd::InputMetadata::shape_as_dim_vector)
+      .def_property_readonly(
           "is_nested_tensor", &torch::autograd::InputMetadata::is_nested_tensor)
-      .def(
+      .def_property_readonly(
           "is_cpp_nested_tensor",
           &torch::autograd::InputMetadata::is_cpp_nested_tensor);
 
