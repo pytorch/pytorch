@@ -197,9 +197,10 @@ def set_logs(
     dynamic: Optional[int] = None,
     inductor: Optional[int] = None,
     distributed: Optional[int] = None,
-    dist_c10d: Optional[int] = None,
-    dist_ddp: Optional[int] = None,
-    dist_fsdp: Optional[int] = None,
+    c10d: Optional[int] = None,
+    ddp: Optional[int] = None,
+    fsdp: Optional[int] = None,
+    dtensor: Optional[int] = None,
     onnx: Optional[int] = None,
     bytecode: bool = False,
     aot_graphs: bool = False,
@@ -228,7 +229,6 @@ def set_logs(
     cudagraphs: bool = False,
     sym_node: bool = False,
     compiled_autograd_verbose: bool = False,
-    fsdp: Optional[int] = None,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -288,16 +288,20 @@ def set_logs(
             Whether to log c10d communication operations and other debug info from PyTorch Distributed components.
             Default: ``logging.WARN``
 
-        dist_c10d (:class:`Optional[int]`):
+        c10d (:class:`Optional[int]`):
             Whether to log c10d communication operations related debug info in PyTorch Distributed components.
             Default: ``logging.WARN``
 
-        dist_ddp (:class:`Optional[int]`):
+        ddp (:class:`Optional[int]`):
             Whether to log debug info related to ``DistributedDataParallel``(DDP) from PyTorch Distributed components.
             Default: ``logging.WARN``
 
-        dist_fsdp (:class:`Optional[int]`):
+        fsdp (:class:`Optional[int]`):
             Whether to log debug info related to ``FullyShardedDataParallel``(FSDP) in PyTorch Distributed components.
+            Default: ``logging.WARN``
+
+        dtensor (:class:`Optional[int]`):
+            Whether to log debug info related to ``DTensor``(DTensor) in PyTorch Distributed components.
             Default: ``logging.WARN``
 
         onnx (:class:`Optional[int]`):
@@ -388,9 +392,6 @@ def set_logs(
         export (:class:`Optional[int]`):
             The log level for export. Default: ``logging.WARN``
 
-        fsdp (:class:`Optional[int]`):
-            The log level for the FSDP component. Default: ``logging.WARN``
-
         modules (dict):
             This argument provides an alternate way to specify the above log
             component and artifact settings, in the format of a keyword args
@@ -469,9 +470,10 @@ def set_logs(
         aot_joint_graph=aot_joint_graph,
         ddp_graphs=ddp_graphs,
         distributed=distributed,
-        dist_c10d=dist_c10d,
-        dist_ddp=dist_ddp,
-        dist_fsdp=dist_fsdp,
+        c10d=c10d,
+        ddp=ddp,
+        fsdp=fsdp,
+        dtensor=dtensor,
         graph=graph,
         graph_code=graph_code,
         graph_breaks=graph_breaks,
@@ -495,7 +497,6 @@ def set_logs(
         export=export,
         cudagraphs=cudagraphs,
         compiled_autograd_verbose=compiled_autograd_verbose,
-        fsdp=fsdp,
     )
 
 
