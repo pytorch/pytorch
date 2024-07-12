@@ -9,8 +9,10 @@ import torch
 import torch._dynamo.testing
 import torch.distributed._composable.fsdp._fsdp_param
 from torch import nn
+from torch._C import FileCheck
 from torch._dynamo import compiled_autograd
 from torch._inductor import comms
+from torch._inductor.utils import run_and_get_triton_code
 
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
@@ -206,7 +208,14 @@ class TestFullyShardCompile(FSDPTest):
                     loss.backward()
                 optim.step()
                 optim.zero_grad(set_to_none=True)
-            return losses
+            code = None
+            if compiled_autograd_backend is not None:
+                maybe_compiled_autograd_ctx = compiled_autograd.enable(
+                    compiler_fn(compiled_autograd_backend)
+                )
+                with maybe_compiled_autograd_ctx:
+                    code = run_and_get_triton_code(model, input_creation_fn())
+            return losses, code
 
         def test_compiled():
             model, optim = model_init_fn()
@@ -214,18 +223,21 @@ class TestFullyShardCompile(FSDPTest):
             run_iters(model, optim, n_iter=1)
 
             model_compiled = torch.compile(model, backend=backend, fullgraph=True)
-            res = run_iters(model_compiled, optim, compiled_autograd_backend=backend)
-            return res
+            res, code = run_iters(
+                model_compiled, optim, compiled_autograd_backend=backend
+            )
+
+            return res, code
 
         def test_eager():
             model, optim = model_init_fn()
             # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
             run_iters(model, optim, n_iter=1)
 
-            res = run_iters(model, optim)
+            res, _ = run_iters(model, optim)
             return res
 
-        losses_compiled = test_compiled()
+        losses_compiled, code = test_compiled()
         losses_eager = test_eager()
         for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
             self.assertTrue(
@@ -237,6 +249,7 @@ class TestFullyShardCompile(FSDPTest):
                 ),
                 f"{loss_compiled} vs {loss_eager}",
             )
+        return code
 
     def _create_simple_mlp_factory_fns(self):
         hidden_dim = 16
@@ -338,9 +351,12 @@ class TestFullyShardCompile(FSDPTest):
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_fullgraph_backend_inductor(self):
         with self._patch_reinplace_fsdp_all_gather():
-            self._test_traceable_fsdp(
+            code = self._test_traceable_fsdp(
                 *self._create_transformer_factory_fns(), "inductor", fullgraph=True
             )
+        FileCheck().check("torch.ops._c10d_functional.all_gather_into_tensor_out.").run(
+            code
+        )
 
 
 if __name__ == "__main__":
