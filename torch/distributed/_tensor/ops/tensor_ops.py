@@ -408,7 +408,7 @@ def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # index has size 1 on the gather dimension
     if index_shape[dim] == 1:
         index_partial_placement = _MaskPartial(logical_dim_size=input_shape[dim])
-        input_sharding = [
+        input_sharding: PlacementList = [
             index_partial_placement,
             Shard(dim),
             index_partial_placement,
@@ -417,7 +417,7 @@ def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
     # index sharding, input replicated, index sharded, output follows index
     # this only works when the sharding dimension is the gather dimension
-    index_sharding = [Shard(dim), Replicate(), Shard(dim)]
+    index_sharding: PlacementList = [Shard(dim), Replicate(), Shard(dim)]
     single_mesh_dim_strategies.append(index_sharding)
 
     return expand_to_full_mesh_op_strategy(

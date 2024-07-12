@@ -203,7 +203,7 @@ def scaled_dot_product_flash_attention_strategy(
         # empty debug mask, replicated
         debug_attn_mask_sharding = Replicate()
 
-    num_heads_dim_sharding = [
+    num_heads_dim_sharding: PlacementList = [
         output_sharding,
         logsumexp_sharding,
         None,  # cum_seq_q
@@ -274,7 +274,7 @@ def scaled_dot_product_flash_attention_backward_strategy(
     logsumexp_sharding = Shard(1)  # num head dim
     grad_qkv_sharding = Shard(1)  # num head dim
 
-    num_heads_dim_sharding = [
+    num_heads_dim_sharding: PlacementList = [
         grad_qkv_sharding,
         grad_qkv_sharding,
         grad_qkv_sharding,
