@@ -696,6 +696,12 @@ class OpOverload(OperatorBase):
     def namespace(self):
         return self._schema.name.split("::")[0]
 
+    def _can_decompose(self):
+        dk = torch._C.DispatchKey.CompositeImplicitAutograd
+        return dk in self.py_kernels or torch._C._dispatch_has_kernel_for_dispatch_key(
+            self.name(), dk
+        )
+
     def decompose(self, *args, **kwargs):
         dk = torch._C.DispatchKey.CompositeImplicitAutograd
         if dk in self.py_kernels:
