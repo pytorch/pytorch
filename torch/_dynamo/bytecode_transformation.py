@@ -68,7 +68,10 @@ class Instruction:
 
 
 def convert_instruction(i: dis.Instruction) -> Instruction:
-    starts_line = i.line_number if sys.version_info >= (3, 13) else i.starts_line
+    if sys.version_info >= (3, 13):
+        starts_line = i.line_number
+    else:
+        starts_line = i.starts_line
     return Instruction(
         i.opcode,
         i.opname,
@@ -731,7 +734,9 @@ def devirtualize_jumps(instructions):
                     raise RuntimeError("Python 3.11+ should not have absolute jumps")
             else:  # relative jump
                 # byte offset between target and next instruction
-                inst.arg = abs(int(target.offset - inst.offset - instruction_size(inst)))
+                inst.arg = abs(
+                    int(target.offset - inst.offset - instruction_size(inst))
+                )
                 if sys.version_info >= (3, 10):
                     # see bytecode size comment in the absolute jump case above
                     inst.arg //= 2
@@ -997,6 +1002,8 @@ FUSED_INSTS = {
     "STORE_FAST_STORE_FAST": ("STORE_FAST", "STORE_FAST"),
     "STORE_FAST_LOAD_FAST": ("STORE_FAST", "LOAD_FAST"),
 }
+
+
 def remove_fused_load_store(instructions: List[Instruction]) -> None:
     new_insts = []
     for inst in instructions:
@@ -1217,7 +1224,10 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
             )
         elif instructions[i].opcode in HAS_LOCAL:
             if should_compute_arg():
-                if sys.version_info >= (3, 13) and instructions[i].argval not in varnames:
+                if (
+                    sys.version_info >= (3, 13)
+                    and instructions[i].argval not in varnames
+                ):
                     # instructions like LOAD_FAST used for both local and free vars
                     instructions[i].arg = freenames[instructions[i].argval]
                 else:

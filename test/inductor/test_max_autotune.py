@@ -316,7 +316,7 @@ class TestMaxAutotune(TestCase):
                 return None
 
             def hash_key(self) -> str:
-                return None
+                return str(hash(self))
 
             def output_node(self) -> "TensorBox":  # noqa: F821
                 return None

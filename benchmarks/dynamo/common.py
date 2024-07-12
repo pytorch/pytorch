@@ -4005,7 +4005,7 @@ def run(runner, args, original_dir=None):
         )
         experiment = speedup_experiment_onnx
         output_filename = "torch_onnx_patch.csv"
-        current_onnx_compiler = "torch_onnx_patch"
+        current_onnx_compiler = "dynamo"
     elif args.dynamo_onnx:
         optimize_ctx = functools.partial(
             optimize_onnx_ctx,

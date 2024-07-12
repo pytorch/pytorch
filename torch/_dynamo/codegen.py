@@ -377,7 +377,11 @@ class PyCodegen:
         return [
             self._create_load_const(lambda: None),
             # 3.13 swapped NULL and callable
-            *((create_instruction("SWAP", arg=2),) if sys.version_info >= (3, 13) else ()),
+            *(
+                (create_instruction("SWAP", arg=2),)
+                if sys.version_info >= (3, 13)
+                else ()
+            ),
             *create_call_function(0, False),
             create_instruction("POP_TOP"),
         ]
@@ -404,17 +408,21 @@ class PyCodegen:
         def gen_fn():
             for var in freevars:
                 assert var in self.cell_and_freevars()
-                inst_name = "LOAD_FAST" if sys.version_info >= (3, 13) else "LOAD_CLOSURE"
+                inst_name = (
+                    "LOAD_FAST" if sys.version_info >= (3, 13) else "LOAD_CLOSURE"
+                )
                 output.append(create_instruction(inst_name, argval=var))
             output.append(create_instruction("BUILD_TUPLE", arg=len(freevars)))
             output.append(self.create_load_const(code))
             if sys.version_info < (3, 11):
                 output.append(self.create_load_const(fn_name))
             if sys.version_info >= (3, 13):
-                output.extend([
-                    create_instruction("MAKE_FUNCTION"),
-                    create_instruction("SET_FUNCTION_ATTRIBUTE", arg=0x08),
-                ])
+                output.extend(
+                    [
+                        create_instruction("MAKE_FUNCTION"),
+                        create_instruction("SET_FUNCTION_ATTRIBUTE", arg=0x08),
+                    ]
+                )
             else:
                 output.append(create_instruction("MAKE_FUNCTION", arg=0x08))
 
