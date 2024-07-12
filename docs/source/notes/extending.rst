@@ -914,6 +914,29 @@ It is also possible to add `new` native functions using :mod:`torch.library`. Th
 
 You can find many examples of ``__torch_dispatch__``-based subclasses in the `subclass zoo <https://github.com/albanD/subclass_zoo>`_ repo.
 
+.. _torch-dispatch-calling-convention:
+
+``__torch_dispatch__`` calling convention
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        pass
+
+When a user calls an operator with inputs that have ``__torch_dispatch__``, that call
+may be forwarded to the ``__torch_dispatch__``. args and kwargs get normalized before
+the call to ``__torch_dispatch__``, that is:
+
+- the ``kwargs`` consist of keyword-only arguments in the operator's schema.
+  If a kwarg is equal to its default value (in the schema), it will not be passed.
+- the ``args`` consists of all other arguments, no matter how they were passed
+  to the operator (positional vs keyword).
+  If an arg is equal to its default value, and
+  it is the right-most positional arg or all the args to the right of it
+  are not passed, it will not be passed.
+
 Extending all :mod:`torch` API with Modes
 -----------------------------------------
 
