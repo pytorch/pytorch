@@ -825,13 +825,16 @@ class TestUnflatten(TestCase):
         inputs = (torch.ones(10), torch.ones(10))
         d_ = torch.export.Dim("foo", max=2048)
         d = 2 * d_
-        ep = torch.export.export(
-            M(),
-            inputs,
-            dynamic_shapes=((d,), (d,)),
-            strict=False,
-            preserve_module_call_signature=("m1",),
-        )
+        with torch._dynamo.config.patch(
+            do_not_emit_runtime_asserts=False
+        ):  # runtime asserts alter sym_size op count
+            ep = torch.export.export(
+                M(),
+                inputs,
+                dynamic_shapes=((d,), (d,)),
+                strict=False,
+                preserve_module_call_signature=("m1",),
+            )
         unflat = unflatten(ep)
         unflat(*inputs)
 

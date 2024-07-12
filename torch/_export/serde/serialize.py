@@ -172,12 +172,15 @@ _SYM_INT_OPS = {
     operator.sub,
     operator.floordiv,
     operator.mod,
+    operator.pow,
     torch.sym_int,
     torch.sym_float,
     torch.sym_ite,
     torch.sym_max,
     torch.sym_min,
     torch.sym_sqrt,
+    torch.ops.aten.sym_size.int,
+    torch.ops.aten.sym_stride.int,
 }
 
 
@@ -215,11 +218,11 @@ def deserialize_device(d: Device) -> torch.device:
 
 
 def serialize_sym_int(s: Union[int, torch.SymInt]) -> SymInt:
-    if isinstance(s, (torch.SymInt, int)):
+    if isinstance(s, (torch.SymInt, sympy.Symbol, int)):
         if symbolic_shapes.is_concrete_int(s):
             return SymInt.create(as_int=int(s))
         else:
-            assert isinstance(s, torch.SymInt)
+            assert isinstance(s, (torch.SymInt, sympy.Symbol))
             if s.node.hint is None:
                 return SymInt.create(as_expr=SymExpr(str(s)))
             else:
@@ -487,28 +490,24 @@ class GraphModuleSerializer(metaclass=Final):
         if node.target is operator.getitem:
             return
 
-        if node.target in _SYM_INT_OPS:
+        meta_val = node.meta.get("val")
+        if (
+            node.target in _SYM_INT_OPS
+            or node.target in _SYM_BOOL_OPS
+            or (meta_val is not None and isinstance(meta_val, (torch.SymInt, torch.SymBool)))
+        ):
             assert len(node.kwargs) == 0
-            meta_val = node.meta["val"]
-            ex_node = Node(
-                target=self.serialize_operator(node.target),
-                inputs=self.serialize_sym_op_inputs(node.target, node.args),
-                outputs=[
-                    Argument.create(
-                        as_sym_int=self.serialize_sym_int_output(node.name, meta_val)
-                    )
-                ],
-                metadata=self.serialize_metadata(node),
+            serialize_method = (
+                self.serialize_sym_int_output
+                if (node.target in _SYM_INT_OPS or isinstance(meta_val, torch.SymInt))
+                else self.serialize_sym_bool_output
             )
-        elif node.target in _SYM_BOOL_OPS:
-            assert len(node.kwargs) == 0
-            meta_val = node.meta["val"]
             ex_node = Node(
                 target=self.serialize_operator(node.target),
                 inputs=self.serialize_sym_op_inputs(node.target, node.args),
                 outputs=[
                     Argument.create(
-                        as_sym_bool=self.serialize_sym_bool_output(node.name, meta_val)
+                        as_sym_int=serialize_method(node.name, meta_val)
                     )
                 ],
                 metadata=self.serialize_metadata(node),
@@ -1528,6 +1527,15 @@ class GraphModuleDeserializer(metaclass=Final):
     def deserialize_sym_bool(self, s: SymBool) -> Union[bool, torch.SymBool]:
         val = s.value
         if s.type == "as_expr":
+            # first we sympify this just to access any untracked symbols
+            expr = sympy.sympify(val.expr_str)
+            for sym in expr.free_symbols:
+                if (
+                    not isinstance(sym, sympy.Number)
+                    and str(sym) not in self.symbol_name_to_symbol
+                ):
+                    self.deserialize_sym_int(SymInt.create(as_expr=SymExpr(str(sym))))
+            # then we sympify again using locals to correctly reify with the constructed symbols
             expr = sympy.sympify(val.expr_str, locals=self.symbol_name_to_symbol)
             return self.shape_env.create_symboolnode(expr)
         elif s.type == "as_bool":
@@ -1651,7 +1659,11 @@ class GraphModuleDeserializer(metaclass=Final):
         return self.graph
 
     def deserialize_node(self, serialized_node: Node, target: Callable) -> None:
-        if target in _SYM_BOOL_OPS or target in _SYM_INT_OPS:
+        if (
+            target in _SYM_BOOL_OPS
+            or target in _SYM_INT_OPS
+            or target == torch.ops.aten.item.default  # this can produce either SymInt or SymBool
+        ):
             name = serialized_node.outputs[0].value.as_name
             args = self.deserialize_sym_op_inputs(serialized_node.inputs)
 

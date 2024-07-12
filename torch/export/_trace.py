@@ -15,6 +15,7 @@ import torch.fx
 
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo import config as _dynamo_config
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._export.non_strict_utils import (
     _fakify_script_objects,
@@ -514,7 +515,6 @@ def _export_to_torch_ir(
     *,
     preserve_module_call_signature: Tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
-    allow_complex_guards_as_runtime_asserts: bool = False,
     restore_fqn: bool = True,
     _log_export_usage: bool = True,
     same_signature: bool = True,
@@ -540,17 +540,17 @@ def _export_to_torch_ir(
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
             with _wrap_submodules(
                 f, preserve_module_call_signature, module_call_specs
+            ), _dynamo_config.patch(
+                do_not_emit_runtime_asserts=True  # emit runtime asserts during AOTAutograd instead
             ), _ignore_backend_decomps():
                 gm_torch_level, _ = torch._dynamo.export(
                     f,
                     dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
-                    disable_constraint_solver=disable_constraint_solver,
-                    # currently the following 2 flags are tied together for export purposes,
-                    # but untangle for sake of dynamo export api
-                    prefer_deferred_runtime_asserts_over_guards=allow_complex_guards_as_runtime_asserts,
-                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+                    disable_constraint_solver=False,
+                    prefer_deferred_runtime_asserts_over_guards=True,
+                    allow_complex_guards_as_runtime_asserts=True,
                     _log_export_usage=_log_export_usage,
                     same_signature=same_signature,
                 )(
@@ -580,6 +580,7 @@ def _export_to_aten_ir(
     fake_kwargs,
     fake_params_buffers,
     constant_attrs: ConstantAttrMap,
+    produce_guards_callback=None,
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
@@ -625,15 +626,21 @@ def _export_to_aten_ir(
     if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
         gm.meta.update(mod.meta)
 
-    # Run this pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
-    # Overwrite output specs afterwards.
-    from torch._dynamo import config as _dynamo_config
     from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
     from torch._guards import detect_fake_mode
 
     flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
     fake_mode = detect_fake_mode(flat_fake_args)
 
+    # Run produce guards before we handle runtime asserts
+    if produce_guards_callback:
+        try:
+            produce_guards_callback(gm)
+        except (ConstraintViolationError, ValueRangeError) as e:
+            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
+
+    # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
+    # Overwrite output specs afterwards.
     if not _dynamo_config.do_not_emit_runtime_asserts:
         stack_trace = (
             'File "torch/fx/passes/runtime_assert.py", line 24, '
@@ -1099,7 +1106,6 @@ def _strict_export(
     pre_dispatch: bool,
     original_state_dict: Dict[str, Any],
     orig_in_spec: TreeSpec,
-    allow_complex_guards_as_runtime_asserts: bool,
     _disable_forced_specializations: Optional[bool],
     _is_torch_jit_trace: bool,
 ) -> ExportArtifact:
@@ -1113,7 +1119,6 @@ def _strict_export(
         pre_dispatch=pre_dispatch,
         original_state_dict=original_state_dict,
         orig_in_spec=orig_in_spec,
-        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
         _disable_forced_specializations=_disable_forced_specializations,
         _is_torch_jit_trace=_is_torch_jit_trace,
         lower_to_aten_callback=lower_to_aten,
@@ -1129,7 +1134,6 @@ def _strict_export_lower_to_aten_ir(
     pre_dispatch: bool,
     original_state_dict: Dict[str, Any],
     orig_in_spec: TreeSpec,
-    allow_complex_guards_as_runtime_asserts: bool,
     _disable_forced_specializations: Optional[bool],
     _is_torch_jit_trace: bool,
     lower_to_aten_callback: Callable,
@@ -1141,7 +1145,6 @@ def _strict_export_lower_to_aten_ir(
         dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         restore_fqn=False,  # don't need to restore because we will do it later
-        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
         _log_export_usage=False,
     )
 
@@ -1440,8 +1443,6 @@ def _export_to_aten_ir_make_fx(
 
     fake_mode = detect_fake_mode(flat_args)
 
-    from torch._dynamo import config as _dynamo_config
-
     if not _dynamo_config.do_not_emit_runtime_asserts:
         stack_trace = (
             'File "torch/fx/passes/runtime_assert.py", line 24, '
@@ -1500,7 +1501,6 @@ def _non_strict_export(
     pre_dispatch: bool,
     original_state_dict: Dict[str, Any],
     orig_in_spec: TreeSpec,
-    allow_complex_guards_as_runtime_asserts: bool,
     _disable_forced_specializations: Optional[bool],
     _is_torch_jit_trace: bool,
 ) -> ExportArtifact:
@@ -1574,10 +1574,18 @@ def _non_strict_export(
         kwargs,
         dynamic_shapes,
         _is_torch_jit_trace=_is_torch_jit_trace,
-        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,  # for shape env initialization
     )
 
     fake_params_buffers = make_fake_params_buffers(fake_mode, _get_params_buffers(mod))
+    _produce_guards_cb = lambda gm: produce_guards_and_solve_constraints(
+        fake_mode=fake_mode,
+        gm=gm,
+        dynamic_shapes=dynamic_shapes,
+        equalities_inputs=equalities_inputs,
+        original_signature=original_signature,
+        _disable_forced_specializations=_disable_forced_specializations,
+        _is_torch_jit_trace=_is_torch_jit_trace,
+    )
 
     with fake_mode:
         with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
@@ -1593,6 +1601,7 @@ def _non_strict_export(
                 new_fake_kwargs,
                 fake_params_buffers,
                 new_fake_constant_attrs,
+                produce_guards_callback=_produce_guards_cb,
                 pre_dispatch=pre_dispatch,
                 transform=_tuplify_outputs,
                 _is_torch_jit_trace=_is_torch_jit_trace,
@@ -1602,19 +1611,6 @@ def _non_strict_export(
                 fqn: map_fake_to_real[obj] if isinstance(obj, FakeScriptObject) else obj
                 for fqn, obj in aten_export_artifact.constants.items()
             }
-
-    try:
-        produce_guards_and_solve_constraints(
-            fake_mode,
-            aten_export_artifact.gm,
-            dynamic_shapes,
-            equalities_inputs,
-            original_signature,
-            _disable_forced_specializations=_disable_forced_specializations,
-            _is_torch_jit_trace=_is_torch_jit_trace,
-        )
-    except (ConstraintViolationError, ValueRangeError) as e:
-        raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
 
     _rewrite_non_persistent_buffers(
         mod, aten_export_artifact.sig, aten_export_artifact.constants
@@ -1671,7 +1667,6 @@ def _export_for_training(
         pre_dispatch=False,
         original_state_dict=original_state_dict,
         orig_in_spec=orig_in_spec,
-        allow_complex_guards_as_runtime_asserts=False,
         _disable_forced_specializations=False,
         _is_torch_jit_trace=False,
         lower_to_aten_callback=_export_to_aten_ir_make_fx,
@@ -1770,7 +1765,6 @@ def _export(
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
     pre_dispatch: bool = False,
-    allow_complex_guards_as_runtime_asserts: bool = False,
     _disable_forced_specializations: Optional[bool] = False,
     _is_torch_jit_trace: bool = False,
 ) -> ExportedProgram:
@@ -1803,23 +1797,12 @@ def _export(
         preserve_module_call_signature: A list of submodule paths for which the original
             calling conventions are preserved as metadata.
 
-        allow_complex_guards_as_runtime_asserts:
-         With the current dynamic shapes language for dims and derived dims, we can run into constraints
-         that are not expressible with the language. For example, flattening a matrix and adding to a vector,
-         both fully dynamic (i.e. x.reshape([-1]) + y) emits a guard s0 * s1 = s2, which is not expressible.
-         By default, we either raise a constraint violation error or specialize to static values.
-         If this flag is set to True, we avoid erroring out and instead allow complex constraints to exist as runtime
-         assertions in the graph. The sympy interpreter (torch/utils/_sympy/interp.py) will produce the math ops
-         required to compute and assert the value of the guard (e.g. sym_size_int, eq, _assert_scalar).
-         Additionally, if TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS=1 is specified, we will allow complex constraints
-         while not emitting runtime asserts, returning a cleaner graph with lesser guarantees around dynamic shapes.
-
         _disable_forced_specializations:
-         Similar to allow_complex_guards_as_runtime_asserts, but only avoids specializing to static values if set to True.
-         For complex guards that don't specialize, this flag doesn't have any effect. Ideally this would be subsumed by
-         allow_complex_guards_as_runtime_asserts, but this handles one additional case: single-variable equalities where
-         the symbol is solvable for a concrete value (e.g. Eq(s0 // 4, 400) -> s0 = 1600). If set to True, this flag will
-         avoid specializations. Direct equalities (e.g. s0 = 4), will still specialize.
+         Avoids specializing to static values if set to True. For complex guards that don't specialize,
+         this flag doesn't have any effect. Ideally this would be subsumed by allow_complex_guards_as_runtime_asserts,
+         but this handles one additional case: single-variable equalities where the symbol is solvable for a concrete value
+         (e.g. Eq(s0 // 4, 400) -> s0 = 1600). If set to True, this flag will avoid specializations.
+         Direct equalities (e.g. s0 = 4), will still specialize.
 
     Returns:
         An ExportedProgram containing the traced method.
@@ -1868,7 +1851,6 @@ def _export(
         pre_dispatch,
         original_state_dict,
         orig_in_spec,
-        allow_complex_guards_as_runtime_asserts,
         _disable_forced_specializations,
         _is_torch_jit_trace,
     )
