@@ -1554,8 +1554,7 @@ class GraphModule(torch.nn.Module):
             layout_opt: Optional[bool] = None,
             extern_node_serializer: Optional[Callable[[List[Any]], Any]] = None,
         ):
-            self.assertEqual(static_input_idxs[0], 1)
-            self.assertEqual(static_input_idxs[1], 2)
+            self.assertEqual(static_input_idxs, [1, 2])
             return gm
 
         compiler = functools.partial(compile_fx, inner_compile=inner_compile)
