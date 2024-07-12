@@ -951,7 +951,8 @@ class LeafGuard {
   // This is set while constructing the leaf guard. This is used for identifying
   // the cause of recompilation.
   py::list _verbose_code_parts;
-  // Skip this check if the dict tag matches.
+  // Marks the leaf guard as skippable if its a getitem on a dict and the dict
+  // tag matches.
   bool _skip_if_dict_tag_matches{false};
 };
 
@@ -1514,6 +1515,8 @@ class GuardAccessor {
     return _source;
   }
 
+  // matches_dict_tag is passed to child managers via DictGetItemGuardAccessor.
+  // All the other guard managers ignore the matches_dict_tag.
   virtual bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) = 0;
   virtual GuardDebugInfo check_verbose_nopybind(PyObject* obj) = 0;
   virtual std::string repr() const = 0;
@@ -1659,6 +1662,8 @@ class GuardManager {
 
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
+      // If the parent manager is a DictGuardManager and the dict tag matches,
+      // we can skip some of the guards.
       bool skip_guard =
           matches_dict_tag && guard->can_skip_if_dict_tag_matches();
       if (!skip_guard) {
@@ -1673,6 +1678,9 @@ class GuardManager {
     bool is_dict_tag_match = false;
     uint64_t new_tag = 0;
     if (_is_dict) {
+      // Check if the dict tag matches. If it does, propagate to the child
+      // accessors. This will pass to the child manager via
+      // DictGetItemGuardManager.
       new_tag = get_dict_version_unchecked(value);
       is_dict_tag_match = new_tag == _dict_tag;
     }
@@ -1714,6 +1722,9 @@ class GuardManager {
     }
 
     if (_is_dict && result) {
+      // If result is true, reset the _dict_tag. This is useful if there is a
+      // mutation on the dict but it does not change the attr values (like
+      // swapping).
       _dict_tag = new_tag;
     }
     return result;
