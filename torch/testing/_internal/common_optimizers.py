@@ -1826,13 +1826,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
             ),
             DecorateInfo(
-                unittest.skip(
-                    "SparseAdam does not support dense gradients, see #116507"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
                 "TestOptimRenewed",
                 "test_param_groups_lr",
@@ -1841,13 +1834,6 @@ optim_db: List[OptimizerInfo] = [
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
                 "TestOptimRenewed",
                 "test_tensor_lr",
-            ),
-            DecorateInfo(
-                unittest.skip(
-                    "SparseAdam does not support dense gradients, see #116507"
-                ),
-                "TestOptimRenewed",
-                "test_can_load_older_state_dict",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
