@@ -1,1 +1,1 @@
-from torch.nn.intrinsic.quantized.dynamic.modules import *  # noqa: F403
+from .modules import *  # noqa: F403
