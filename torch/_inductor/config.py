@@ -102,6 +102,7 @@ pattern_matcher = True
 b2b_gemm_pass = False
 
 # register custom graph optimization pass hook. so far, pre/post passes are
+# only applied before/after pattern_matcher in post_grad_passes.
 #
 # def my_custom_pre_pass(graph: torch.fx.graph.Graph):
 #     # my custom graph optimization pass
