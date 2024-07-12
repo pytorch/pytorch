@@ -280,7 +280,7 @@ void checkMutableFunctionDefault(
 FunctionSchema getSchemaWithNameAndDefaults(
     const SourceRange& range,
     const FunctionSchema& schema,
-    const at::optional<std::string>& new_name,
+    const std::optional<std::string>& new_name,
     const FunctionDefaults& default_args) {
   std::vector<Argument> new_args;
   for (auto& arg : schema.arguments()) {
@@ -1796,7 +1796,7 @@ void initJitScriptBindings(PyObject* module) {
           method.setSchema(getSchemaWithNameAndDefaults(
               defs_it->range(),
               method.getSchema(),
-              at::nullopt,
+              std::nullopt,
               default_it->second));
           ++defs_it;
         }
@@ -2277,7 +2277,7 @@ void initJitScriptBindings(PyObject* module) {
               method.setSchema(getSchemaWithNameAndDefaults(
                   defs_it->range(),
                   method.getSchema(),
-                  at::nullopt,
+                  std::nullopt,
                   *defaults_it));
               ++defs_it;
               ++defaults_it;
