@@ -932,7 +932,7 @@ class TritonHOPifier:
                 self.raise_unsupported("Grid can have at most rank 3")
 
         assert len(grids) != 0
-        if len(set(grids)) == 1:
+        if len(set(map(int, grids))) == 1:
             # If there's only one unique grid, lets simplify
             grids = [grids[0]]
 
