@@ -101,7 +101,12 @@ def set_proxy_slot(obj, tracer, proxy):
     if isinstance(obj, torch.Tensor):
         # We DO want to clobber proxies whenever we run an inplace operation
         # on a tensor, and it affects the metadata on the proxy.
-        tracer.tensor_tracker[obj] = proxy
+        if obj not in tracer.tensor_tracker:
+            # NB: Never clobber pre-existing proxies. For tensors, this only
+            # happens when a mutation op is traced into the graph (set_ or copy_).
+            # The DCE and compiler backend are already on the hook for preserving the mutation,
+            # and this also simplifies FSDP tracing.
+            tracer.tensor_tracker[obj] = proxy
     elif isinstance(obj, (torch.ScriptObject, FakeScriptObject)):
         # We DO want to clobber proxies, with a similar rationale as for tensors.
         tracer.script_object_tracker[obj] = proxy
