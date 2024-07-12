@@ -1504,7 +1504,7 @@ class InstructionTranslatorBase(
             # 3.13 swapped null and callable
             null = self.pop()
             assert isinstance(null, NullVariable)
-            
+
         fn = self.pop()
 
         if sys.version_info >= (3, 11) and sys.version_info < (3, 13):
