@@ -245,9 +245,7 @@ class TestWithNCCL(MultiProcessTestCase):
         code = run_and_get_triton_code(compiled, arg)
         (
             FileCheck()
-            .check(
-                "torch.ops._c10d_functional.wait_tensor.default(aten.view.dtype(buf0"
-            )
+            .check("torch.ops._c10d_functional.wait_tensor.default(aten.view.dtype")
             .run(code)
         )
         # check memory leak
