@@ -844,9 +844,7 @@ def fx_codegen_and_compile(
             const_code=const_code,
             const_module=const_graph,
         )
-
         metrics_helper = metrics.CachedMetricsHelper()
-
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
             output_strides: List[Optional[Tuple[_StrideExprStr, ...]]] = []
