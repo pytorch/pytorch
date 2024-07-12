@@ -95,8 +95,8 @@ Tensor qnnpack_clamp(Tensor input, const Scalar& min, const Scalar& max) {
 
 Tensor quantized_clamp_impl(
     const Tensor& qx,
-    const optional<Scalar>& min,
-    const optional<Scalar>& max) {
+    const std::optional<Scalar>& min,
+    const std::optional<Scalar>& max) {
   Tensor qy;
   if (min && max) {
 #ifdef USE_PYTORCH_QNNPACK
@@ -128,8 +128,8 @@ Tensor quantized_clamp_impl(
 // at::native functions for the native_functions.yaml
 Tensor clamp_quantized_cpu(
     const Tensor& qx,
-    const optional<Scalar>& min,
-    const optional<Scalar>& max) {
+    const std::optional<Scalar>& min,
+    const std::optional<Scalar>& max) {
   Tensor qy;
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "clamp", [&]() {
     qy = quantized_clamp_impl(qx, min, max);

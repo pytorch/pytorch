@@ -1719,7 +1719,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "placeholder":
                 self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_dynamic_shapes_builder_kwargs(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
@@ -1960,7 +1959,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         args = (torch.rand(3, 700, 700), 150, 150)
         self.assertEqual(ecrop.module()(*args), ecrop(*args))
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, kw1, kw2):
@@ -1971,7 +1969,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         kwargs = {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_pytree_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b):
@@ -1985,7 +1982,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_default_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b=1):
@@ -2016,7 +2012,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
         self._test_export_same_as_eager(kw_func, args)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_keyword_only_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2):
@@ -2027,7 +2022,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         kwargs = {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_var_keyword_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
@@ -2122,7 +2116,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193693183
     def test_export_func_with_var_keyword_pytree_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
@@ -2807,7 +2800,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(params[0].shape, [1, 10])  # weight
         self.assertEqual(params[1].shape, [1])  # bias
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193700631
     def test_buffer_util(self):
         ep = export(
             torch.nn.BatchNorm2d(100, affine=False), (torch.ones(20, 100, 35, 45),)
@@ -3515,7 +3507,6 @@ def forward(self, x):
             _ = exported.module()(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193701923
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
         class Bar(torch.nn.Module):
             def __init__(self):
@@ -3625,8 +3616,6 @@ def forward(self, x):
         ):
             torch.export.export(exported_v2.module(), (torch.randn(2, 2),))
 
-    # https://github.com/pytorch/pytorch/issues/129939
-    @testing.expectedFailureNonStrict
     def test_export_cond(self):
         class A(torch.nn.Module):
             def __init__(self):
@@ -4351,7 +4340,7 @@ graph():
         self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
 
     # TODO Retracing a module with constant attrs don't work.(T193692674)
-    @testing.expectedFailureTrainingIRToRunDecomp
+    @unittest.skip("Test is only supposed to work with non-strict mode")
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
@@ -4628,7 +4617,6 @@ graph():
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193701923
     def test_export_input_mutation_static_shape(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x, y):
@@ -4987,8 +4975,6 @@ graph():
         )
 
     # Guard validation upsets the guard
-    # https://github.com/pytorch/pytorch/issues/129939
-    @unittest.expectedFailure
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
             def __init__(self):
@@ -5743,7 +5729,7 @@ def forward(self, x, y):
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
     def test_disable_forced_specializations_ok(self):
-        # check that _disable_forced_specializations and _allow_complex_guards_as_runtime_asserts flags
+        # check that _disable_forced_specializations and allow_complex_guards_as_runtime_asserts flags
         # both behave correctly, avoiding forced specializations and deferring to runtime.
         # case 1: modulo guards
         from torch.export import dims
@@ -5777,7 +5763,7 @@ def forward(self, x, y):
             Mod4Reshape(),
             inputs,
             dynamic_shapes={"x": (dx, dy)},
-            _allow_complex_guards_as_runtime_asserts=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         out1 = ep.module()(torch.randn(8, 7))
         self.assertEqual(out1.shape, torch.ones(7, 4, 2).shape)
@@ -5826,7 +5812,7 @@ def forward(self, x, y):
             FreeReshape(),
             inputs,
             dynamic_shapes=dynamic_shapes,
-            _allow_complex_guards_as_runtime_asserts=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         out1 = ep.module()(torch.randn(48, 1), torch.randn(4, 12), torch.randn(48))
         self.assertEqual(out1.shape, torch.ones(48).shape)
@@ -5877,7 +5863,7 @@ def forward(self, x, y):
             Reshape3d(),
             inputs,
             dynamic_shapes=dynamic_shapes,
-            _allow_complex_guards_as_runtime_asserts=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         out1 = ep.module()(torch.randn(9, 7, 2), torch.randn(126))
         self.assertEqual(out1.shape, torch.ones(126).shape)
@@ -5979,7 +5965,7 @@ def forward(self, x, y):
             model,
             (x,),
             dynamic_shapes=dynamic_shapes,
-            _allow_complex_guards_as_runtime_asserts=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         with self.assertRaisesRegex(
             RuntimeError,
@@ -6011,7 +5997,7 @@ def forward(self, x, y):
             Foo(),
             inputs,
             dynamic_shapes=dynamic_shapes,
-            _allow_complex_guards_as_runtime_asserts=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         # check forward pass
         out0, out1 = ep.module()(torch.randn(9), torch.randn(27))
@@ -6046,7 +6032,7 @@ def forward(self, x, y):
                 Foo(),
                 inputs,
                 dynamic_shapes=dynamic_shapes,
-                _allow_complex_guards_as_runtime_asserts=True,
+                allow_complex_guards_as_runtime_asserts=True,
             ).run_decompositions()
 
         self.assertEqual(
@@ -6219,7 +6205,7 @@ def forward(self, x, y):
             Foo(),
             inputs,
             dynamic_shapes=shapes,
-            _allow_complex_guards_as_runtime_asserts=True,
+            allow_complex_guards_as_runtime_asserts=True,
         )
         # count 2 pow nodes, 2 sym_size.int nodes
         self.assertEqual(

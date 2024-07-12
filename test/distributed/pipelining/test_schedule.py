@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import logging
-import unittest
 
 import torch
 from torch.distributed.pipelining import (

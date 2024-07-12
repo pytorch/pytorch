@@ -668,7 +668,7 @@ class IterGraphModule(nn.Module):
 
         self._iter = 0
         self._max_iters = max_iters
-        self._previous_output: Tuple[Any, ...] = tuple()
+        self._previous_output: Tuple[Any, ...] = ()
         self._num_extra_output = 0
         self._is_frozen = False
         self._enable_inductor = enable_inductor
