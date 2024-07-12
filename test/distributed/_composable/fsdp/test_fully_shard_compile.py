@@ -25,10 +25,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.utils._triton import has_triton
 
 
-def _is_op_in_nodes(nodes, op):
-    return any(node.target is op for node in nodes)
-
-
 class TestFullyShardCompileCompute(FSDPTest):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
