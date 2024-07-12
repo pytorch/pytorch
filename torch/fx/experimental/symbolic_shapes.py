@@ -1019,6 +1019,8 @@ class DimDynamic(Enum):
     STATIC = 2
     # Treat the dimension as a size-like unbacked
     SIZE_LIKE_UNBACKED = 3
+    # Infer the strides from stride. If size is static, strides will be static as well.
+    INFER_STRIDE = 4
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -1230,7 +1232,7 @@ class StatelessSymbolicContext(SymbolicContext):
     This will cause fresh symbols to be allocated
     """
     dynamic_sizes: DimList[DimDynamic]
-    dynamic_strides: DimList[DimDynamic]
+    dynamic_strides: DimList[DimDynamic] = None
     constraint_sizes: DimList[DimConstraint] = None
     constraint_strides: DimList[DimConstraint] = None
     # If the tensor is a view, this should be populated for the base. It contains
@@ -1240,10 +1242,13 @@ class StatelessSymbolicContext(SymbolicContext):
     # TODO: add storage offset and stride symbolic_context
 
     def __post_init__(self):
+        if self.dynamic_strides is None:
+            object.__setattr__(self, 'dynamic_strides', [DimDynamic.INFER_STRIDE] * len(self.dynamic_sizes))
         if self.constraint_sizes is None:
             object.__setattr__(self, 'constraint_sizes', [None] * len(self.dynamic_sizes))
         if self.constraint_strides is None:
             object.__setattr__(self, 'constraint_strides', [None] * len(self.dynamic_sizes))
+        assert all(stride in (DimDynamic.INFER_STRIDE, DimDynamic.DYNAMIC, DimDynamic.DUCK) for stride in self.dynamic_strides)
 
 
 # note [Tensor Fakification and Symbol Caching]
@@ -1295,6 +1300,7 @@ class StatefulSymbolicContext(StatelessSymbolicContext):
     shape_env_to_source_to_symbol_cache : Dict[int, Dict["TensorPropertySource", "sympy.Expr"]] = None
 
     def __post_init__(self):
+        super().__post_init__()
         # The None default is annoying, but required because of dataclass limitations
         assert self.tensor_source is not None
         if not self.shape_env_to_source_to_symbol_cache:
@@ -3160,7 +3166,7 @@ class ShapeEnv:
                 dynamic_dims.append(r)
                 dynamic_strides.append(r)
             dynamic_dims = [DimDynamic.DUCK] * dim
-            dynamic_strides = [DimDynamic.STATIC] * dim
+            dynamic_strides = [DimDynamic.INFER_STRIDE] * dim
             # symbolic_context is None - set one
             symbolic_context = StatelessSymbolicContext(
                 dynamic_sizes=dynamic_dims,
@@ -3214,9 +3220,8 @@ class ShapeEnv:
                 key=_nested_int_aware_sort,
             )
             for _, i in val_list:
-                # Set stride to a candidate only for DimDynamic.STATIC. If DYNAMIC, the user wants to have a separate
-                # symbol for it.
-                if stride[i] is None and dynamic_strides[i] == DimDynamic.STATIC and ex_stride[i] in candidates:
+                # Set stride to a candidate only for DimDynamic.INFER_STRIDE
+                if stride[i] is None and dynamic_strides[i] == DimDynamic.INFER_STRIDE and ex_stride[i] in candidates:
                     stride[i] = candidates[ex_stride[i]]
                     candidates[ex_size[i] * ex_stride[i]] = size[i] * stride[i]
 
@@ -3229,10 +3234,14 @@ class ShapeEnv:
                         if stride[i] is None
                     ], key=_nested_int_aware_sort
                 )
+                # Set INFER_STRIDE to DUCK for BC
+                dyn_stride = dynamic_strides[i]
+                if dynamic_strides[i] != DimDynamic.DYNAMIC:
+                    dyn_stride = DimDynamic.DUCK
                 stride[i] = self.create_symbol(
                     val,
                     TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    dynamic_dim=dynamic_strides[i],
+                    dynamic_dim=dyn_stride,
                     constraint_dim=constraint_strides[i],
                     symbolic_context=symbolic_context,
                 )
@@ -3710,8 +3719,7 @@ class ShapeEnv:
             return StatelessSymbolicContext(
                 # Ignored; only the constraints part is relevant below.
                 dynamic_sizes=[DimDynamic.DYNAMIC] * t.dim(),
-                # STATIC stride means infer strides from size
-                dynamic_strides=[DimDynamic.STATIC] * t.dim(),
+                dynamic_strides=[DimDynamic.INFER_STRIDE] * t.dim(),
                 constraint_sizes=[None] * t.dim(),
                 constraint_strides=[None] * t.dim()
             )

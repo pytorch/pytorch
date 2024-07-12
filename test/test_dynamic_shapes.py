@@ -168,11 +168,8 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
     if source is None:
         source = ConstantSource(name)
     constraint_dims = [None] * arg.dim()
-    constraint_strides = [None] * arg.dim()
     if dynamic_dims is None:
         dynamic_dims = [DimDynamic.DUCK] * arg.dim()
-    # STATIC for strides means that symbolic shapes will try to infer strides from size.
-    dynamic_strides = [DimDynamic.STATIC] * arg.dim()
     (
         sym_shapes,
         sym_strides,
@@ -181,10 +178,7 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
         arg,
         source=source,
         symbolic_context=StatelessSymbolicContext(
-            dynamic_sizes=dynamic_dims,
-            dynamic_strides=dynamic_strides,
-            constraint_sizes=constraint_dims,
-            constraint_strides=constraint_strides,
+            dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims
         ),
     )
     return FakeSymbolicTensor(
@@ -1385,8 +1379,8 @@ class TestSymNumberMagicMethods(TestCase):
                 DimDynamic.STATIC,
             ],
             dynamic_strides=[
-                DimDynamic.STATIC,
-                DimDynamic.STATIC,
+                DimDynamic.INFER_STRIDE,
+                DimDynamic.INFER_STRIDE,
             ],
         )
         self.assertTrue(all(isinstance(size, int) for size in t.size()))
@@ -1400,8 +1394,8 @@ class TestSymNumberMagicMethods(TestCase):
                 DimDynamic.DYNAMIC,
             ],
             dynamic_strides=[
-                DimDynamic.STATIC,
-                DimDynamic.STATIC,
+                DimDynamic.INFER_STRIDE,
+                DimDynamic.INFER_STRIDE,
             ],
         )
         # Expect stride to be inferred
@@ -1422,7 +1416,7 @@ class TestSymNumberMagicMethods(TestCase):
             ],
             dynamic_strides=[
                 DimDynamic.DYNAMIC,
-                DimDynamic.STATIC,
+                DimDynamic.INFER_STRIDE,
             ],
         )
         s0, s1 = t.size()
@@ -1441,10 +1435,9 @@ class TestSymNumberMagicMethods(TestCase):
             ],
             dynamic_strides=[
                 DimDynamic.DYNAMIC,
-                DimDynamic.STATIC,
+                DimDynamic.INFER_STRIDE,
             ],
         )
-        print(t.size(), t.stride())
         s0, s1 = t.size()
         s2, s3 = t.stride()
         self.assertTrue(isinstance(s0, torch.SymInt))

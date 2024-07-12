@@ -80,18 +80,13 @@ def fakify(
     n_dims = len(t.shape)
     symbolic_context = StatelessSymbolicContext(
         dynamic_sizes=[DimDynamic.STATIC] * n_dims,
-        dynamic_strides=[DimDynamic.STATIC] * n_dims,
         constraint_sizes=[None] * n_dims,
-        constraint_strides=[None] * n_dims,
     )
     t_id = id(t)
     if t_id in t_constraints:
         for i, constraint in t_constraints[t_id].items():
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
-            symbolic_context.constraint_strides[i] = constraint.constraint_range
             symbolic_context.dynamic_sizes[i] = DimDynamic.DYNAMIC
-            # STATIC strides means inferred strides from size
-            symbolic_context.dynamic_strides[i] = DimDynamic.STATIC
             src = TensorPropertySource(base=source, prop=TensorProperty.SIZE, idx=i)
             sources[(t_id, i)].append(src)
             mode.shape_env.source_name_to_debug_name[src.name()] = constraint.debug_name  # type: ignore[assignment]

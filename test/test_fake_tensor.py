@@ -642,10 +642,7 @@ class FakeTensorTest(TestCase):
         t1 = mode1.from_tensor(
             torch.randn(10),
             symbolic_context=StatelessSymbolicContext(
-                dynamic_sizes=[DimDynamic.DYNAMIC],
-                dynamic_strides=[DimDynamic.STATIC],
-                constraint_sizes=[None],
-                constraint_strides=[None]
+                dynamic_sizes=[DimDynamic.DYNAMIC], constraint_sizes=[None]
             ),
         )
         mode2 = FakeTensorMode(shape_env=shape_env)
@@ -902,11 +899,6 @@ class FakeTensorTest(TestCase):
                         DimDynamic.STATIC,
                         DimDynamic.STATIC,
                     ],
-                    dynamic_strides=[
-                        DimDynamic.STATIC,
-                        DimDynamic.STATIC,
-                        DimDynamic.STATIC,
-                    ]
                 ),
             )
 

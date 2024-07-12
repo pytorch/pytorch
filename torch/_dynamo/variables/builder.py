@@ -2109,38 +2109,6 @@ class TrackedFake:
         return False
 
 
-def get_dynamic_dim(
-    size_or_stride_at_i,
-    constraint_size_or_stride,
-    marked_unbacked,
-    marked_dynamic,
-    marked_weak_dynamic,
-    static_shapes,
-    marked_static,
-    is_stride,
-):
-    from torch.fx.experimental.symbolic_shapes import is_nested_int
-
-    if marked_unbacked:
-        return DimDynamic.SIZE_LIKE_UNBACKED
-    elif (
-        constraint_size_or_stride is not None
-        or marked_dynamic
-        or marked_weak_dynamic
-        or (not is_stride and is_nested_int(size_or_stride_at_i))
-    ):
-        # NB: We could assert static_shapes is False here, but it
-        # seems better to allow the user to override symbolic_context in this
-        # case
-        return DimDynamic.DYNAMIC
-    elif static_shapes or config.assume_static_by_default or marked_static:
-        return DimDynamic.STATIC
-    elif is_stride:
-        return DimDynamic.STATIC
-    else:
-        return DimDynamic.DUCK
-
-
 # Performs automatic dynamic dim determination.
 # Returns a SymbolicContext
 def _automatic_dynamic(
@@ -2194,7 +2162,7 @@ def _automatic_dynamic(
     if static_shapes:
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
-            dynamic_strides=[DimDynamic.STATIC] * e.dim(),
+            dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
             constraint_sizes=[None] * e.dim(),
             constraint_strides=[None] * e.dim(),
             view_base_context=view_base_context,
@@ -2206,15 +2174,13 @@ def _automatic_dynamic(
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
     from torch.fx.experimental.symbolic_shapes import is_nested_int
 
-    if any(isinstance(s, SymInt) and not is_nested_int(s) for s in e.size()) or any(
-        isinstance(s, SymInt) and not is_nested_int(s) for s in e.stride()
-    ):
+    if any(isinstance(s, SymInt) and not is_nested_int(s) for s in e.size()):
         return StatefulSymbolicContext(
             dynamic_sizes=[
                 DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
                 for s in e.size()
             ],
-            dynamic_strides=[DimDynamic.STATIC] * e.dim(),
+            dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
             constraint_sizes=[None] * e.dim(),
             constraint_strides=[None] * e.dim(),
             view_base_context=view_base_context,
@@ -2263,7 +2229,7 @@ def _automatic_dynamic(
                         frame_state_entry.size[i] = None
 
                 # We want to trigger automatic dynamism when strides change, but we have to think whether stride should
-                # be STATIC or DYNAMIC. Stride marked as STATIC means that the stride will be INFERRED from the size.
+                # be INFER_STRIDE or DYNAMIC.
                 #
                 # Case 1: if strides change because of size changes, we might not want to allocate a new symbol for
                 # stride. Lets say we have a tensor (10, 20) and we mark the dim=1 dynamic for size. Resulting size will
@@ -2274,7 +2240,7 @@ def _automatic_dynamic(
                 # change. In this case, we definitely want to mark the changing stride to be DYNAMIC.
 
                 # Here, we use a hueristic to simplify determination of dynamic stride. For case 1, we will always
-                # assume that stride will be inferred (STATIC). This might be suboptimal, where user is doing something
+                # assume that stride will be inferred (INFER_STRIDE). This might be suboptimal, where user is doing something
                 # arbitrary size and stride resizing, and we fail to trigger dynamism, but we have not seen any cases
                 # yet. For case 2, we will mark the changing dimensions DYNAMIC.
                 if not has_size_changed:
@@ -2406,26 +2372,28 @@ def _automatic_dynamic(
         constraint_sizes.append(constraint_size)
         constraint_strides.append(constraint_stride)
 
-        dynamic_size = get_dynamic_dim(
-            e.shape[i],
-            constraint_size,
-            marked_unbacked,
-            marked_dynamic,
-            marked_weak_dynamic,
-            static_shapes,
-            marked_static,
-            is_stride=False,
-        )
-        dynamic_stride = get_dynamic_dim(
-            e.stride()[i],
-            constraint_stride,
-            False,
-            False,
-            False,
-            static_shapes,
-            False,
-            is_stride=True,
-        )
+        if marked_unbacked:
+            dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
+        elif (
+            constraint_size is not None
+            or marked_dynamic
+            or marked_weak_dynamic
+            or is_nested_int(e.size()[i])
+        ):
+            # NB: We could assert static_shapes is False here, but it
+            # seems better to allow the user to override symbolic_context in this
+            # case
+            dynamic_size = DimDynamic.DYNAMIC
+        elif static_shapes or config.assume_static_by_default or marked_static:
+            dynamic_size = DimDynamic.STATIC
+        else:
+            dynamic_size = DimDynamic.DUCK
+
+        if constraint_stride is not None:
+            dynamic_stride = DimDynamic.DYNAMIC
+        else:
+            dynamic_stride = DimDynamic.INFER_STRIDE
+
         dynamic_sizes.append(dynamic_size)
         dynamic_strides.append(dynamic_stride)
 
