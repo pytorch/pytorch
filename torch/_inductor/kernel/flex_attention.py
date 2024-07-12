@@ -140,21 +140,10 @@ flex_attention_template = TritonTemplate(
     tl.static_assert(SPARSE_Q_BLOCK_SIZE >= BLOCK_M and SPARSE_Q_BLOCK_SIZE % BLOCK_M == 0)
     tl.static_assert(SPARSE_KV_BLOCK_SIZE >= BLOCK_N and SPARSE_KV_BLOCK_SIZE % BLOCK_N == 0)
 
-    # Define Q Strides
-    stride_qz = {{stride("Q", 0)}}
-    stride_qh = {{stride("Q", 1)}}
-    stride_qm = {{stride("Q", 2)}}
-    stride_qk = {{stride("Q", 3)}}
-    # Define K Strides
-    stride_kz = {{stride("K", 0)}}
-    stride_kh = {{stride("K", 1)}}
-    stride_kn = {{stride("K", 2)}}
-    stride_kk = {{stride("K", 3)}}
-    # Define V Strides
-    stride_vz = {{stride("V", 0)}}
-    stride_vh = {{stride("V", 1)}}
-    stride_vn = {{stride("V", 2)}}
-    stride_vk = {{stride("V", 3)}}
+    # Define strides of inputs
+    stride_qz, stride_qh, stride_qm, stride_qk = {{stride("Q")}}
+    stride_kz, stride_kh, stride_kn, stride_kk = {{stride("K")}}
+    stride_vz, stride_vh, stride_vn, stride_vk = {{stride("V")}}
 
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
@@ -199,13 +188,6 @@ flex_attention_template = TritonTemplate(
     sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + q_start // SPARSE_Q_MULTIPLE
     sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (q_start // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
 
-    # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # We don't know anything "special" about these blocks, so we need to apply
-    # both score_mod and mask_fn to it
-    kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
-    kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
-    sparse_kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
-
     Q_block_ptr = tl.make_block_ptr(
         base=Q,
         shape=(Q_LEN, BLOCK_DMODEL),
@@ -214,7 +196,15 @@ flex_attention_template = TritonTemplate(
         block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0)
     )
+    # load q: it stays in SRAM throughout the inner loop.
     q = tl.load(Q_block_ptr)
+
+    # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # We don't know anything "special" about these blocks, so we need to apply
+    # both score_mod and mask_fn to it
+    kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
+    kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
+    sparse_kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
     K_block_ptr = tl.make_block_ptr(
         base=K,
@@ -755,26 +745,11 @@ flex_attention_backward_template = TritonTemplate(
     # PRESCALE_QK: Whether to pre-scale QK by 1/sqrt(d) and change of base. Has
     # about 20% more numerical error, but slightly faster.
 
-    # Define Q Strides
-    stride_qz = {{stride("Q", 0)}}
-    stride_qh = {{stride("Q", 1)}}
-    stride_qm = {{stride("Q", 2)}}
-    stride_qd = {{stride("Q", 3)}}
-    # Define K Strides
-    stride_kz = {{stride("K", 0)}}
-    stride_kh = {{stride("K", 1)}}
-    stride_kn = {{stride("K", 2)}}
-    stride_kd = {{stride("K", 3)}}
-    # Define V Strides
-    stride_vz = {{stride("V", 0)}}
-    stride_vh = {{stride("V", 1)}}
-    stride_vn = {{stride("V", 2)}}
-    stride_vd = {{stride("V", 3)}}
-
-    stride_doz = {{stride("DO", 0)}}
-    stride_doh = {{stride("DO", 1)}}
-    stride_dom = {{stride("DO", 2)}}
-    stride_dod = {{stride("DO", 3)}}
+    # Define strides of inputs
+    stride_qz, stride_qh, stride_qm, stride_qd = {{stride("Q")}}
+    stride_kz, stride_kh, stride_kn, stride_kd = {{stride("K")}}
+    stride_vz, stride_vh, stride_vn, stride_vd = {{stride("V")}}
+    stride_doz, stride_doh, stride_dom, stride_dod = {{stride("DO")}}
 
     stride_dqz, stride_dqh, stride_dqm, stride_dqd = {{stride("DQ")}}
     stride_dvz, stride_dvh, stride_dvm, stride_dvd = {{stride("DV")}}
@@ -798,6 +773,11 @@ flex_attention_backward_template = TritonTemplate(
 
     sparse_idx_z = off_z % SM_Z
     sparse_idx_h = off_h % SM_H
+
+    SPARSE_Q_BLOCK_CNT = Q_LEN // SPARSE_Q_BLOCK_SIZE
+    SPARSE_KV_BLOCK_CNT = KV_LEN // SPARSE_KV_BLOCK_SIZE
+
+    sparse_hz_offset = sparse_idx_z * SM_H + sparse_idx_h
 
     off_chz = (off_hz * Q_LEN).to(tl.int64)
     q_adj = (stride_qh * (off_hz % H) + stride_qz * (off_hz // H)).to(tl.int64)
@@ -824,36 +804,35 @@ flex_attention_backward_template = TritonTemplate(
     offs_k = tl.arange(0, BLOCK_DMODEL)
 
     if pid >= NUM_KV_BLOCKS:
-        # THIS BLOCK DOES DQ
         off_pid = pid - NUM_KV_BLOCKS
-
+        # THIS BLOCK DOES DQ
         SPARSE_Q_MULTIPLE = (SPARSE_Q_BLOCK_SIZE // BLOCK_M2)
         SPARSE_KV_MULTIPLE = (SPARSE_KV_BLOCK_SIZE // BLOCK_N2)
 
-        SPARSE_Q_BLOCK_CNT = Q_LEN // SPARSE_Q_BLOCK_SIZE
-        SPARSE_KV_BLOCK_CNT = KV_LEN // SPARSE_KV_BLOCK_SIZE
+        sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + off_pid // SPARSE_Q_MULTIPLE
+        sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (off_pid // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
 
         dq = tl.zeros([BLOCK_M2, BLOCK_DMODEL], dtype=tl.float32)
 
-        # ~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # FULL_KV_IDX and KV_NUM_BLKS are always contiguous.
-        sparse_hz_offset = sparse_idx_z * SM_H + sparse_idx_h
-        sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + off_pid // SPARSE_Q_MULTIPLE
-        sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (off_pid // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
-        kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
-        kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
-        sparse_kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
-
         start_m2 = off_pid * BLOCK_M2
-
         offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
 
+        # load Q and do: they stay in SRAM throughout the inner loop.
         q = tl.load(Q + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
         do = tl.load(DO + offs_m2[:, None] * stride_dom + offs_k[None, :] * stride_dod)
+
+        if PRESCALE_QK:
+            q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
         Di = tl.load(DELTA + offs_m2)
         lse = tl.load(LSE + offs_m2)
         lse = lse[:, None]
+
+        # ~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # FULL_KV_IDX and KV_NUM_BLKS are always contiguous.
+        kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
+        kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
+        sparse_kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
         dq = bwd_dq_inner(
             dq, q, K, V, do, Di, lse,
@@ -865,27 +844,12 @@ flex_attention_backward_template = TritonTemplate(
             IS_FULL_BLOCKS=False
         )
 
-
         if HAS_FULL_BLOCKS:
             # ~~~~~~~~~~~ partial unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             # PARTIAL_KV_IDX and PARTIAL_KV_NUM_BLKS are always contiguous.
-            sparse_hz_offset = sparse_idx_z * SM_H + sparse_idx_h
-            sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + off_pid // SPARSE_Q_MULTIPLE
-            sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (off_pid // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
             kv_indices = PARTIAL_KV_IDX + sparse_kv_idx_offset
             kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
             sparse_kv_num_blocks = tl.load(PARTIAL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
-
-            start_m2 = off_pid * BLOCK_M2
-
-            offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
-
-            q = tl.load(Q + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
-            do = tl.load(DO + offs_m2[:, None] * stride_dom + offs_k[None, :] * stride_dod)
-
-            Di = tl.load(DELTA + offs_m2)
-            lse = tl.load(LSE + offs_m2)
-            lse = lse[:, None]
 
             dq = bwd_dq_inner(
                 dq, q, K, V, do, Di, lse,
@@ -903,28 +867,16 @@ flex_attention_backward_template = TritonTemplate(
         tl.store(dq_ptrs, dq)
     else:
         # THIS BLOCK DOES DK & DV
-
         SPARSE_Q_MULTIPLE = (SPARSE_Q_BLOCK_SIZE // BLOCK_M1)
         SPARSE_KV_MULTIPLE = (SPARSE_KV_BLOCK_SIZE // BLOCK_N1)
 
-        SPARSE_Q_BLOCK_CNT = Q_LEN // SPARSE_Q_BLOCK_SIZE
-        SPARSE_KV_BLOCK_CNT = KV_LEN // SPARSE_KV_BLOCK_SIZE
+        sparse_q_num_blks_offset = sparse_hz_offset * SPARSE_KV_BLOCK_CNT + pid // SPARSE_KV_MULTIPLE
+        sparse_q_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (pid // SPARSE_KV_MULTIPLE) * SPARSE_Q_BLOCK_CNT  # noqa: B950
 
         dv = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
         dk = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
 
-        # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # FULL_Q_IDX and FULL_Q_NUM_BLKS are always contiguous.
-        sparse_hz_offset = sparse_idx_z * SM_H + sparse_idx_h
-        sparse_q_num_blks_offset = sparse_hz_offset * SPARSE_KV_BLOCK_CNT + pid // SPARSE_KV_MULTIPLE
-        sparse_q_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (pid // SPARSE_KV_MULTIPLE) * SPARSE_Q_BLOCK_CNT  # noqa: B950
-        q_indices = FULL_Q_IDX + sparse_q_idx_offset
-        q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
-        sparse_q_num_blocks = tl.load(FULL_Q_NUM_BLKS + sparse_q_num_blks_offset)
-
         start_n1 = pid * BLOCK_N1
-        start_m1 = q_start
-
         offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
 
         # load K and V: they stay in SRAM throughout the inner loop.
@@ -932,6 +884,14 @@ flex_attention_backward_template = TritonTemplate(
         if PRESCALE_QK:
             k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
         v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd)
+
+        # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # FULL_Q_IDX and FULL_Q_NUM_BLKS are always contiguous.
+        q_indices = FULL_Q_IDX + sparse_q_idx_offset
+        q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
+        sparse_q_num_blocks = tl.load(FULL_Q_NUM_BLKS + sparse_q_num_blks_offset)
+
+        start_m1 = q_start
 
         dk, dv = bwd_dkdv_inner(
             dk, dv, Q, k, v, DO, DELTA, LSE,
@@ -947,23 +907,11 @@ flex_attention_backward_template = TritonTemplate(
         if HAS_FULL_BLOCKS:
             # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             # PARTIAL_Q_IDX and PARTIAL_Q_NUM_BLKS are always contiguous.
-            sparse_hz_offset = sparse_idx_z * SM_H + sparse_idx_h
-            sparse_q_num_blks_offset = sparse_hz_offset * SPARSE_KV_BLOCK_CNT + pid // SPARSE_KV_MULTIPLE
-            sparse_q_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (pid // SPARSE_KV_MULTIPLE) * SPARSE_Q_BLOCK_CNT  # noqa: B950
             q_indices = PARTIAL_Q_IDX + sparse_q_idx_offset
             q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
             sparse_q_num_blocks = tl.load(PARTIAL_Q_NUM_BLKS + sparse_q_num_blks_offset)
 
-            start_n1 = pid * BLOCK_N1
             start_m1 = q_start
-
-            offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
-
-            # load K and V: they stay in SRAM throughout the inner loop.
-            k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd)
-            if PRESCALE_QK:
-                k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
-            v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd)
 
             dk, dv = bwd_dkdv_inner(
                 dk, dv, Q, k, v, DO, DELTA, LSE,
@@ -973,7 +921,6 @@ flex_attention_backward_template = TritonTemplate(
                 BLOCK_M1, BLOCK_N1, PRESCALE_QK, SM_SCALE, RCP_LN2, MATMUL_PRECISION,
                 {{gen_argdefs()}},
                 IS_FULL_BLOCKS=True
-
             )
 
         dv_ptrs = DV + offs_n1[:, None] * stride_dvm + offs_k[None, :] * stride_dvd
@@ -1005,8 +952,6 @@ def bwd_dq_inner(
 
     curr_n = start_n2
     hi = sparse_kv_num_blocks * SPARSE_KV_MULTIPLE
-    if PRESCALE_QK:
-        q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
     for start_n in range(0, hi):
         offs_n2 = curr_n + tl.arange(0, BLOCK_N2)
         kT = tl.load(kT_ptrs)
