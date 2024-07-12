@@ -78,7 +78,7 @@ def halide_philox(seed, c0, c1, c2, c3, n_rounds):
     return philox_impl(c0, c1, c2, c3, seed_lo, seed_hi, n_rounds)
 
 
-def randint4x(seed: hl.Expr, offsets: hl.Expr, n_rounds):
+def randint4x(seed, offsets, n_rounds):
     offsets = hl.cast(hl.UInt(32), offsets)
     _0 = hl.u32(0)
     return halide_philox(seed, offsets, _0, _0, _0, n_rounds)
@@ -111,7 +111,7 @@ def randn(seed, offset):
     return n1
 
 
-def randint64(seed: hl.Expr, offsets: hl.Expr, low, high):
+def randint64(seed, offsets, low, high):
     r0, r1, r2, r3 = randint4x(seed, offsets, PHILOX_N_ROUNDS_DEFAULT)
     r0 = hl.cast(hl.UInt(64), r0)
     r1 = hl.cast(hl.UInt(64), r1)
