@@ -4164,11 +4164,11 @@ class TestSerialization(TestCase, SerializationMixin):
             sd_loaded_ref = torch.load(f)
             self.assertEqual(sd_loaded, sd_loaded_ref)
 
-    @unittest.skipIf(not torch.cuda.is_available())
+    @unittest.skipIf(not torch.cuda.is_available(), "testing")
     def test_can_test_gds_in_ci(self):
         with TemporaryFileName() as f:
             gds_file = torch._C._CudaGdsFileBase(f, 'w')
-    
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)

@@ -175,18 +175,6 @@ PyTypeObject THCPGdsFileType = {
     THCPGdsFile_pynew, /* tp_new */
 };
 
-void THCPGdsFile_init(PyObject* module) {
-  THCPGdsFileClass = (PyObject*)&THCPGdsFileType;
-  if (PyType_Ready(&THCPGdsFileType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THCPGdsFileType);
-  if (PyModule_AddObject(
-          module, "_CudaGdsFileBase", (PyObject*)&THCPGdsFileType) < 0) {
-    throw python_error();
-  }
-}
-
 PyObject* THCPModule_gds_register_buffer(PyObject* _self, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject* t_ = PyTuple_GetItem(args, 0);
@@ -203,9 +191,7 @@ PyObject* THCPModule_gds_register_buffer(PyObject* _self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_gds_deregister_buffer(
-    PyObject* _self,
-    PyObject* args) {
+PyObject* THCPModule_gds_deregister_buffer(PyObject* _self, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject* t_ = PyTuple_GetItem(args, 0);
 
@@ -219,4 +205,16 @@ PyObject* THCPModule_gds_deregister_buffer(
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
+}
+
+void THCPGdsFile_init(PyObject* module) {
+  THCPGdsFileClass = (PyObject*)&THCPGdsFileType;
+  if (PyType_Ready(&THCPGdsFileType) < 0) {
+    throw python_error();
+  }
+  Py_INCREF(&THCPGdsFileType);
+  if (PyModule_AddObject(
+          module, "_CudaGdsFileBase", (PyObject*)&THCPGdsFileType) < 0) {
+    throw python_error();
+  }
 }

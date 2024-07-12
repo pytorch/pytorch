@@ -12,7 +12,6 @@
 // file io
 #include <unistd.h>
 #include <fcntl.h>
-#include <stdio.h>
 
 
 namespace at::cuda {
