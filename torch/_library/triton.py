@@ -1,9 +1,13 @@
+from typing import Callable, Iterable, Optional, Union
+
 from .custom_ops import custom_op
-from typing import Optional, Callable, Iterable, Union
+
 
 def triton_op(
     name: str,
-    fn: Optional[Callable]=None, /, *,
+    fn: Optional[Callable] = None,
+    /,
+    *,
     mutates_args: Union[str, Iterable[str]],
     schema: Optional[str] = None,
 ) -> Callable:
@@ -40,10 +44,10 @@ def triton_op(
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> import torch
         >>> from torch._library import triton_op, capture_triton
-        >>> 
+        >>>
         >>> import triton
         >>> from triton import language as tl
-        >>> 
+        >>>
         >>> @triton.jit
         >>> def add_kernel(
         >>>     in_ptr0,
@@ -60,39 +64,54 @@ def triton_op(
         >>>     y = tl.load(in_ptr1 + offsets, mask=mask)
         >>>     output = x + y
         >>>     tl.store(out_ptr + offsets, output, mask=mask)
-        >>> 
+        >>>
         >>> @triton_op("mylib::add", mutates_args={})
         >>> def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         >>>     output = torch.empty_like(x)
         >>>     n_elements = output.numel()
-        >>> 
+        >>>
         >>>     def grid(meta):
         >>>         return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-        >>> 
+        >>>
         >>>     # NB: we need to wrap the triton kernel in a call to capture_triton
         >>>     capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
         >>>     return output
-        >>> 
+        >>>
         >>> @torch.compile
         >>> def f(x, y):
         >>>     return add(x, y)
-        >>> 
+        >>>
         >>> x = torch.randn(3, device="cuda")
         >>> y = torch.randn(3, device="cuda")
-        >>> 
+        >>>
         >>> z = f(x, y)
         >>> assert torch.allclose(z, x + y)
-    
+
     """
-    def dec(fn):
+
+    def dec(fn: Callable) -> Callable:
         result = custom_op(name, fn, mutates_args=mutates_args)
         from .._subclasses.functional_tensor import FunctionalTensorMode
 
-        def functional_decomp(mode, _, types, args, kwargs):
+        # We require that the user pass us a function that is make_fx traceable,
+        # so we can just register it as the Fake/meta kernel.
+        result.register_fake(fn)
+
+        # We decompose the operator when FunctionalTensorMode is active.
+        # The goal is to decompose the operator in AOTDispatcher.
+        # - With torch.compile, this means that the backend (usually Inductor)
+        #   can see a call to the triton kernel(s) and so it can directly optimize
+        #   them by inlining them into the lowering process.
+        # - With post-dispatch torch.export, this means that there will
+        #   be a call(s) to the triton_kernel_wrapper_functional HOP in the
+        #   graph (that we have yet to figure out how to serialize).
+        def functional_decomp(  # type: ignore[no-untyped-def]
+            mode, _, types, args, kwargs
+        ):
             with mode:
                 return fn(*args, **kwargs)
+
         result.register_torch_dispatch(FunctionalTensorMode, functional_decomp)
-        result.register_fake(fn)
         return result
 
     if fn is None:
@@ -101,7 +120,7 @@ def triton_op(
         return dec(fn)
 
 
-def capture_triton(triton_kernel, /):
+def capture_triton(triton_kernel: Callable, /) -> Callable:
     """Allows capture of a triton kernel into a graph via make_fx or
     non-strict export (coming soon).
 
@@ -161,9 +180,10 @@ def capture_triton(triton_kernel, /):
         >>> #     return empty_like
 
     """
-    from torch._higher_order_ops.triton_kernel_wrap import TraceableTritonKernelWrapper
     from triton.runtime.autotuner import Autotuner
     from triton.runtime.jit import JITFunction
+
+    from torch._higher_order_ops.triton_kernel_wrap import TraceableTritonKernelWrapper
 
     if not isinstance(triton_kernel, (JITFunction, Autotuner)):
         raise RuntimeError(
