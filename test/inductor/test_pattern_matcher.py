@@ -1375,10 +1375,11 @@ class TestPatternMatcher(TestCase):
             assert type in ["call_function", "call_method"]
             graph = torch.fx.Graph()
             getattr(graph, type)(func_name, args, kwargs)
+            res = is_mutation_op(next(iter(graph.nodes)))
             if expect:
-                self.assertTrue(is_mutation_op(next(iter(graph.nodes))))
+                self.assertTrue(res)
             else:
-                self.assertFalse(is_mutation_op(next(iter(graph.nodes))))
+                self.assertFalse(res)
 
         t = torch.randn(1)
         check("call_function", torch._C._set_grad_enabled, (False,), {})
