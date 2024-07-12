@@ -41,7 +41,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_optimizers import optim_db, optims, TensorTracker
 from torch.testing._internal.common_utils import (
-    EXPANDABLE_SEGMENTS,
     freeze_rng_state,
     gcIfJetson,
     get_cycles_per_ms,
@@ -117,10 +116,6 @@ class TestCuda(TestCase):
     def tearDown(self):
         del self.autocast_lists
         super().tearDown()
-
-    @property
-    def expandable_segments(self):
-        return EXPANDABLE_SEGMENTS
 
     def test_pinned_memory_with_cudaregister(self):
         torch.cuda.memory._set_allocator_settings(
@@ -2912,21 +2907,6 @@ exit(2)
                 for stat, expected in zip(stats_to_check, expecteds):
                     stat = stat + pool_string + ".current"
                     current = postcapture_stats[stat] - precapture_stats[stat]
-
-                    # There will only ever be one expandable segment in each of the small and large pools. The way the
-                    # bookeeping is done in the allocator means that we never increment the number of segments.
-                    if self.expandable_segments and "segment" in stat:
-                        expected = 0
-                    # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an
-                    # expandable segment (and as a result reduce the number of reserved bytes) if the block to unmap is
-                    # smaller than the page size
-                    if (
-                        self.expandable_segments
-                        and "reserved" in stat
-                        and (numel == cases[3][0] or numel == cases[4][0])
-                    ):
-                        expected = 2 * kLargeBuffer
-
                     self.assertEqual(
                         current,
                         expected,
@@ -2953,27 +2933,6 @@ exit(2)
             for stat, expected in zip(stats_to_check, expecteds):
                 stat = stat + pool_string + ".current"
                 current = postdel_stats[stat] - precapture_stats[stat]
-
-                # There will only ever be one expandable segment in each of the small and large pools. The way the
-                # bookeeping is done in the allocator means that we never increment the number of segments.
-                if self.expandable_segments and "segment" in stat:
-                    expected = 0
-                # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an
-                # expandable segment (and as a result reduce the number of reserved bytes) if the block to unmap is
-                # smaller than the page size
-                if (
-                    self.expandable_segments
-                    and "reserved" in stat
-                    and numel == cases[3][0]
-                ):
-                    expected = 2 * kLargeBuffer
-                if (
-                    self.expandable_segments
-                    and "reserved" in stat
-                    and numel == cases[4][0]
-                ):
-                    expected = kLargeBuffer
-
                 self.assertEqual(
                     current,
                     expected,
@@ -4565,10 +4524,6 @@ def reconstruct_from_tensor_metadata(metadata):
 @unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "NYI")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBlockStateAbsorption(TestCase):
-    @property
-    def expandable_segments(self):
-        return EXPANDABLE_SEGMENTS
-
     def checkCheckpointedBlock(self, before_block, after_block):
         for field in ("size", "state"):
             self.assertEqual(before_block[field], after_block[field])
@@ -4896,9 +4851,7 @@ class TestBlockStateAbsorption(TestCase):
         graph_thread.join()
         no_graph_thread.join()
 
-        self.assertEqual(
-            len(get_cudagraph_segments(pool)), 2 if self.expandable_segments else 4
-        )
+        self.assertEqual(len(get_cudagraph_segments(pool)), 4)
 
         del graph
 

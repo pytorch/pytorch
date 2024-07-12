@@ -45,6 +45,9 @@ via PyTorch's C++ operator registration APIs).
 .. autofunction:: impl_abstract
 .. autofunction:: get_ctx
 .. autofunction:: infer_schema
+.. autoclass:: torch._library.custom_ops.CustomOpDef
+
+    .. automethod:: set_kernel_enabled
 
 Low-level APIs
 --------------

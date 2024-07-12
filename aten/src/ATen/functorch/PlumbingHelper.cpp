@@ -11,7 +11,7 @@
 
 namespace at::functorch {
 
-void vmap_check_escaped(const optional<DynamicLayer> &layer, const char* what) {
+void vmap_check_escaped(const std::optional<DynamicLayer> &layer, const char* what) {
   TORCH_CHECK(
     layer.has_value(),
     "Either your tensor may have escaped from inside a function being vmapped and this is a user error ",
@@ -22,7 +22,7 @@ void vmap_check_escaped(const optional<DynamicLayer> &layer, const char* what) {
   )
 }
 
-Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level) {
+Tensor makeBatched(const Tensor& tensor, std::optional<int64_t> bdim, int64_t level) {
   if (bdim.has_value()) {
     TORCH_INTERNAL_ASSERT(*bdim >= 0);
     TORCH_INTERNAL_ASSERT(*bdim < tensor.dim());
@@ -31,7 +31,7 @@ Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level) 
   return tensor;
 }
 
-std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, optional<int64_t> bdim, int64_t level) {
+std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, std::optional<int64_t> bdim, int64_t level) {
   std::vector<Tensor> res;
   res.reserve(tensors.size());
   for (const auto & tensor : tensors) {
