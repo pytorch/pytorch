@@ -256,6 +256,15 @@ class TestInductorDynamic(TestCase):
         res = f(tensor, xx, yy)
         self.assertEqual(res, torch.tensor([0, 0, 1, 3, 0, 4], device=device))
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_nonzero_numel_1(self, device):
+        @torch.compile(fullgraph=True, )
+        def f(x):
+            nz = torch.nonzero(x)
+            squared = nz * nz
+
+        f(torch.randn(1, 1, 1, 1))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_nobreak(self, device):
         @torch.compile(fullgraph=True)
