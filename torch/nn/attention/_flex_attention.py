@@ -121,7 +121,7 @@ class BlockMask:
     full_q_indices: Optional[torch.Tensor]
     KV_BLOCK_SIZE: int
     Q_BLOCK_SIZE: int
-    mask_fn: Optional[_mask_fn_signature]
+    mask_fn: _mask_fn_signature
 
     def __init__(
         self,
@@ -149,7 +149,8 @@ class BlockMask:
         self.full_q_indices = full_q_indices
         self.KV_BLOCK_SIZE = KV_BLOCK_SIZE
         self.Q_BLOCK_SIZE = Q_BLOCK_SIZE
-        self.mask_fn = mask_fn
+        if mask_fn is None:
+            self.mask_fn = _no_mask
 
     def as_tuple(self):
         return (

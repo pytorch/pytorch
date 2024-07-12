@@ -2800,7 +2800,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(params[0].shape, [1, 10])  # weight
         self.assertEqual(params[1].shape, [1])  # bias
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193700631
     def test_buffer_util(self):
         ep = export(
             torch.nn.BatchNorm2d(100, affine=False), (torch.ones(20, 100, 35, 45),)
@@ -3508,7 +3507,6 @@ def forward(self, x):
             _ = exported.module()(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193701923
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
         class Bar(torch.nn.Module):
             def __init__(self):
@@ -4619,7 +4617,6 @@ graph():
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193701923
     def test_export_input_mutation_static_shape(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x, y):
