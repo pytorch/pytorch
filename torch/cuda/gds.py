@@ -4,8 +4,15 @@ from typing import Union
 
 if not hasattr(torch._C, "_CudaGdsFileBase"):
     # Define dummy base classes
-    torch._C.__dict__["_CudaStreamBase"] = _dummy_type("_CudaStreamBase")
-    torch._C.__dict__["_CudaEventBase"] = _dummy_type("_CudaEventBase")
+    torch._C.__dict__["_CudaGdsFileBase"] = _dummy_type("_CudaGdsFileBase")
+
+if not hasattr(torch._C, "_gds_register_buffer"):
+    # Define dummy base classes
+    torch._C.__dict__["_gds_register_buffer"] = _dummy_type("_gds_register_buffer")
+
+if not hasattr(torch._C, "_gds_deregister_buffer"):
+    # Define dummy base classes
+    torch._C.__dict__["_gds_deregister_buffer"] = _dummy_type("_gds_deregister_buffer")
 
 
 def gds_register_buffer(t: Union[torch.Storage, torch.Tensor]):
