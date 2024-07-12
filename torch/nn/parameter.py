@@ -8,9 +8,12 @@ from torch._C import _disabled_torch_function_impl
 class _ParameterMeta(torch._C._TensorMeta):
     # Make `isinstance(t, Parameter)` return True for custom tensor instances that have the _is_param flag.
     def __instancecheck__(self, instance):
-        return super().__instancecheck__(instance) or (
-            isinstance(instance, torch.Tensor) and getattr(instance, "_is_param", False)
-        )
+        if self is Parameter:
+            if isinstance(instance, torch.Tensor) and getattr(
+                instance, "_is_param", False
+            ):
+                return True
+        return super().__instancecheck__(instance)
 
 
 class Parameter(torch.Tensor, metaclass=_ParameterMeta):
