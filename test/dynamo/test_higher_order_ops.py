@@ -1195,12 +1195,12 @@ def forward(self, L_xs_ : torch.Tensor, L_y_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem, l_y_):
-    getitem_1 = getitem[0]
+def forward(self, child, l_y_):
+    child_1 = child[0]
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, [getitem], [l_y_]);  map_body_0 = getitem = l_y_ = None
-    getitem_2 = map_impl[0];  map_impl = None
-    return (getitem_2,)""",
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, [child], [l_y_]);  map_body_0 = child = l_y_ = None
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
             )
 
     def test_map_multi_return(self):
@@ -1227,10 +1227,10 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem):
-    sin = getitem.sin()
-    sin_1 = getitem.sin();  getitem = None
-    return (sin, sin_1)""",
+def forward(self, child):
+    child_1 = child.sin()
+    child_2 = child.sin();  child = None
+    return (child_1, child_2)""",
             )
 
     def test_map_pytree_return(self):
@@ -1268,8 +1268,8 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem):
-    return (getitem, getitem, getitem, getitem, getitem, getitem, getitem)""",
+def forward(self, child):
+    return (child, child, child, child, child, child, child)""",
             )
 
     def test_map_kwargs(self):
@@ -1311,8 +1311,8 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem, const_unused):
-    add = getitem + 3;  getitem = None
+def forward(self, child, const_unused):
+    add = child + 3;  child = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
             )
@@ -1345,8 +1345,8 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem, const_unused):
-    add = getitem + 3;  getitem = None
+def forward(self, child, const_unused):
+    add = child + 3;  child = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
             )
@@ -1380,7 +1380,7 @@ def forward(self, getitem, const_unused):
             compiled_ret = torch.compile(
                 control_flow.map, backend=backend, fullgraph=True
             )(inner, x)
-            eager_sin, eager_transpose, eager_view = map_dense(inner, (x,), tuple())
+            eager_sin, eager_transpose, eager_view = map_dense(inner, (x,), ())
 
             map_node = next(
                 node
@@ -1580,7 +1580,7 @@ def forward(self, getitem, const_unused):
             def false_fn():
                 return torch.cos(x)
 
-            return control_flow.cond(x.sum() > 0, true_fn, false_fn, tuple())
+            return control_flow.cond(x.sum() > 0, true_fn, false_fn, ())
 
         graphs = self._check_cond_graph_and_extract(fn, (torch.randn(4, 5),))
         if graphs is not None:
@@ -1623,7 +1623,7 @@ def forward(self, l_x_):
             def false_fn():
                 return torch.ones(3, 4).sin()
 
-            return control_flow.cond(x.sum() > 0, true_fn, false_fn, tuple())
+            return control_flow.cond(x.sum() > 0, true_fn, false_fn, ())
 
         self._check_cond_graph_and_extract(fn, (torch.randn(4, 5),))
         graphs = self._check_cond_graph_and_extract(fn, (torch.randn(4, 5),))
@@ -1852,10 +1852,10 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_arg1_0_: "f32[3]", l_arg2_0_: "f32[3]"):
-            add: "f32[3]" = l_arg1_0_ + 1;  l_arg1_0_ = None
+            child: "f32[3]" = l_arg1_0_ + 1;  l_arg1_0_ = None
 
-            add_1: "f32[3]" = l_arg2_0_ + 1;  l_arg2_0_ = None
-            return (add, add_1)
+            child_1: "f32[3]" = l_arg2_0_ + 1;  l_arg2_0_ = None
+            return (child, child_1)
 """,
         )
 
@@ -2051,9 +2051,9 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[2, 3]"):
-            sin: "f32[2, 3]" = l_x_.sin()
-            cos: "f32[2, 3]" = l_x_.cos();  l_x_ = None
-            return (sin, cos)
+            child: "f32[2, 3]" = l_x_.sin()
+            child_1: "f32[2, 3]" = l_x_.cos();  l_x_ = None
+            return (child, child_1)
 """,
         )
 
@@ -2086,8 +2086,8 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3]"):
-            neg: "f32[3]" = -l_x_;  l_x_ = None
-            return (neg,)
+            child: "f32[3]" = -l_x_;  l_x_ = None
+            return (child,)
 """,
         )
 
@@ -2229,7 +2229,7 @@ class GraphModule(torch.nn.Module):
 
         model = ToyModel()
         forward_handles = {}
-        activations = dict()
+        activations = {}
 
         def save_activations(mod, inp, out):
             activations[name] = inp
