@@ -244,11 +244,11 @@ def embedding_dense_backward_strategy(
     # batch dim sharding, weight replicated, grad_out/input have same sharding
     # that can shard on any dim, weight grad partial
     for input_dim in range(len(indices_shape)):
-        batch_sharding = [Partial(), Shard(input_dim), Shard(input_dim)]
+        batch_sharding: PlacementList = [Partial(), Shard(input_dim), Shard(input_dim)]
         single_mesh_dim_strategies.append(batch_sharding)
 
     # grad_out partial, input replicate, weight grad keep partial
-    partial_sharding = [Partial(), Partial(), Replicate()]
+    partial_sharding: PlacementList = [Partial(), Partial(), Replicate()]
     single_mesh_dim_strategies.append(partial_sharding)
 
     return expand_to_full_mesh_op_strategy(mesh, op_schema, single_mesh_dim_strategies)
