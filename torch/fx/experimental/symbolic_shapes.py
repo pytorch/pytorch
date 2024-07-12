@@ -3188,6 +3188,7 @@ class ShapeEnv:
         # this is cheap.
         # TODO: This should be DYNAMIC, using DUCK for BC
         dynamic_offset = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_sizes) else DimDynamic.DUCK
+        are_sizes_static = all(r == DimDynamic.STATIC for r in dynamic_sizes)
 
         assert len(dynamic_sizes) == dim, f"{len(dynamic_sizes)} != {dim}"
         assert len(dynamic_strides) == dim, f"{len(dynamic_sizes)} != {dim}"
@@ -3234,10 +3235,10 @@ class ShapeEnv:
                         if stride[i] is None
                     ], key=_nested_int_aware_sort
                 )
-                # Set INFER_STRIDE to DUCK for BC
+                # Set INFER_STRIDE to STATIC or DUCK depending on sizes
                 dyn_stride = dynamic_strides[i]
-                if dynamic_strides[i] != DimDynamic.DYNAMIC:
-                    dyn_stride = DimDynamic.DUCK
+                if dynamic_strides[i] == DimDynamic.INFER_STRIDE:
+                    dyn_stride = DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
                 stride[i] = self.create_symbol(
                     val,
                     TensorPropertySource(source, TensorProperty.STRIDE, i),
