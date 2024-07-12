@@ -194,7 +194,7 @@ def _retrieve_or_adapt_input_to_graph_set(
             )
         return sequence_elements
     if isinstance(onnx_tensor, torch.dtype):
-        onnx_tensor = int(
+        onnx_tensor = int(  # type: ignore[call-overload]
             jit_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type()
         )
     # NOTE: if device is specified in kwargs (not consumed), it's free to ignored. But
@@ -226,7 +226,7 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
                 # default case.
                 continue
             else:
-                value = int(jit_type_utils.JitScalarType.from_dtype(value).onnx_type())
+                value = int(jit_type_utils.JitScalarType.from_dtype(value).onnx_type())  # type: ignore[call-overload]
         filtered[key] = value
     return filtered
 
