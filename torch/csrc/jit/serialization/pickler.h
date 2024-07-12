@@ -2,6 +2,7 @@
 
 #include <ATen/core/qualified_name.h>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -11,7 +12,6 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/intrusive_ptr.h>
-#include <c10/util/string_view.h>
 #include <torch/csrc/Export.h>
 
 namespace torch::jit {
@@ -192,7 +192,7 @@ class TORCH_API Pickler {
       const IValue& ivalue,
       const char* list_name,
       const std::function<void(const IValue&)>& item_pusher);
-  void pushGlobal(c10::string_view module_name, c10::string_view class_name);
+  void pushGlobal(std::string_view module_name, std::string_view class_name);
   // raw string data is appended directly to the byte stream
   void pushBytes(const std::string& string);
   void pushTensorData(const at::Tensor& tensor);

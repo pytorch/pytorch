@@ -67,11 +67,11 @@ void printValueRef(std::ostream& out, const Value* n) {
   out << "%" << n->debugName();
 }
 
-bool isNumber(c10::string_view str) {
+bool isNumber(std::string_view str) {
   return str.find_first_not_of("0123456789") == std::string::npos;
 }
 
-std::string normalizeAttrName(c10::string_view field) {
+std::string normalizeAttrName(std::string_view field) {
   if (isNumber(field)) {
     return "_" + std::string{field};
   }

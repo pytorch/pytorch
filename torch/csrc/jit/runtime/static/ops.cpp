@@ -1905,9 +1905,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
 
   return [te = createDiv()](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
-    std::optional<c10::string_view> rounding_mode = std::nullopt;
+    std::optional<std::string_view> rounding_mode = std::nullopt;
     if (p_node->num_inputs() > 2) {
-      rounding_mode = p_node->Input(2).toOptional<c10::string_view>();
+      rounding_mode = p_node->Input(2).toOptional<std::string_view>();
     }
     const auto& in1_t = p_node->Input(1).isTensor()
         ? p_node->Input(1).toTensor()

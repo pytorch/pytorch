@@ -657,13 +657,13 @@ void addInputs(
     const std::optional<at::Scalar>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
-void addInputs(Node* n, const char* name, const c10::string_view value) {
+void addInputs(Node* n, const char* name, const std::string_view value) {
   detail::genericAddInput(n, std::string(value));
 }
 void addInputs(
     Node* n,
     const char* name,
-    const std::optional<c10::string_view>& value) {
+    const std::optional<std::string_view>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(Node* n, const char* name, const at::Tensor& value) {

@@ -319,7 +319,7 @@ def ivalue_type_conversion_method(
         ),
         BaseTy.str: (
             (False, "toStringView()"),
-            (False, "toOptional<c10::string_view>()"),
+            (False, "toOptional<std::string_view>()"),
         ),
     }
 

@@ -71,10 +71,10 @@ static_assert(
 
 namespace {
 
-static constexpr c10::string_view kCustomClassPrefix =
+static constexpr std::string_view kCustomClassPrefix =
     "__torch__.torch.classes";
-static constexpr c10::string_view kTorchPrefix = "__torch__";
-static constexpr c10::string_view kJitPrefix = "torch.jit";
+static constexpr std::string_view kTorchPrefix = "__torch__";
+static constexpr std::string_view kJitPrefix = "torch.jit";
 
 class FlatbufferLoader final {
  public:

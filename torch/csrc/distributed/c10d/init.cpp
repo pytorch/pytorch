@@ -1,7 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
-#include <c10/util/string_view.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
@@ -9,6 +8,7 @@
 #include <torch/csrc/distributed/c10d/control_collectives/ControlCollectives.hpp>
 #include <torch/csrc/distributed/c10d/control_collectives/StoreCollectives.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
+#include <string_view>
 #include <vector>
 #ifndef _WIN32
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
@@ -393,8 +393,8 @@ static PyObject* reduceopmeta___instancecheck__(
   if (Py_TYPE(self) == Py_TYPE(args)) {
     Py_RETURN_TRUE;
   }
-  if (c10::string_view(args->ob_type->tp_name).find("RedOpType") !=
-      c10::string_view::npos) {
+  if (std::string_view(args->ob_type->tp_name).find("RedOpType") !=
+      std::string_view::npos) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;

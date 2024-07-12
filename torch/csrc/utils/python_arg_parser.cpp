@@ -46,6 +46,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"DeviceIndex", ParameterType::INT64},
     {"Stream", ParameterType::STREAM},
     {"std::string", ParameterType::STRING},
+    {"std::string_view", ParameterType::STRING},
     {"c10::string_view", ParameterType::STRING},
     {"Dimname", ParameterType::DIMNAME},
     {"DimnameList", ParameterType::DIMNAME_LIST},
@@ -1054,7 +1055,7 @@ static inline std::vector<int64_t> parse_intlist_args(
 }
 
 // Parse a string literal to remove quotes and escape sequences
-static std::string parse_string_literal(c10::string_view str) {
+static std::string parse_string_literal(std::string_view str) {
   TORCH_CHECK(str.length() >= 2, "String defaults must be quoted");
 
   if (str.front() == '"') {

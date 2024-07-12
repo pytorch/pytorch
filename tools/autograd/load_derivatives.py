@@ -780,7 +780,7 @@ def saved_variables(
                 "nctype": lambda name: NamedCType(
                     name, OptionalCType(BaseCType(symIntArrayRefT))
                 ),
-                "expr": lambda name: f"{name}.has_value() ? c10::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : c10::nullopt",
+                "expr": lambda name: f"{name}.has_value() ? ::std::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : ::std::nullopt",
             },
         ),
         # replace self.sym_blocksize() with self_sym_blocksize_opt
@@ -962,13 +962,13 @@ def saved_variables(
 
             formula = re.sub(regex.format(name), repl, formula)
 
-        # c10::optional<std::string> types stored in Backward nodes must be
-        # converted to c10::optional<c10::string_view> before being passed into
+        # std::optional<std::string> types stored in Backward nodes must be
+        # converted to std::optional<std::string_view> before being passed into
         # the backward function
         if nctype.type == OptionalCType(BaseCType(stringT)):
             formula = re.sub(
                 rf"\b{name}\b",
-                f"{name}.has_value() ? c10::optional<c10::string_view>({name}.value()) : c10::nullopt",
+                f"{name}.has_value() ? ::std::optional<::std::string_view>({name}.value()) : ::std::nullopt",
                 formula,
             )
 

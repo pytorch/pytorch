@@ -7,7 +7,7 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-#include <c10/util/string_view.h>
+#include <string_view>
 
 namespace torch {
 namespace jit {
@@ -116,7 +116,7 @@ MobileDebugTable::MobileDebugTable(
     const std::shared_ptr<CompilationUnit>& cu) {
   ska::flat_hash_map<int64_t, SourceRange> source_range_map;
   const std::vector<std::string>& record_names = reader->getAllRecords();
-  const c10::string_view suffix(".debug_pkl");
+  const std::string_view suffix(".debug_pkl");
   for (const auto& record_name : record_names) {
     if (c10::string_view_ext(record_name).ends_with(suffix)) {
       auto [debug_data, debug_size] = reader->getRecord(record_name);

@@ -25,7 +25,7 @@ namespace {
 struct SchemaParser {
   explicit SchemaParser(const std::string& str, bool allow_typevars)
       : L(std::make_shared<Source>(
-            c10::string_view(str),
+            std::string_view(str),
             std::nullopt,
             0,
             nullptr,

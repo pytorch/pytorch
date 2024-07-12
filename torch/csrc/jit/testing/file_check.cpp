@@ -48,7 +48,7 @@ struct Check {
 
   Check(
       CheckType type,
-      c10::string_view str,
+      std::string_view str,
       std::optional<size_t> count = std::nullopt)
       : Check(type, std::string(str.begin(), str.end()), count) {}
 

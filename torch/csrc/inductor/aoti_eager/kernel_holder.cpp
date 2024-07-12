@@ -163,8 +163,8 @@ std::vector<ParameterMetadata> unpack_input_parameters(
 
 AOTIPythonKernelHolder::AOTIPythonKernelHolder(
     c10::DispatchKey dispatch_key,
-    c10::string_view ns,
-    c10::string_view op_name_with_overload)
+    std::string_view ns,
+    std::string_view op_name_with_overload)
     : dispatch_key_(dispatch_key),
       ns_(std::string(ns)),
       op_name_with_overload_(std::string(op_name_with_overload)),

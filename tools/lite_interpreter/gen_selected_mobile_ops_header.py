@@ -27,13 +27,14 @@ selected_kernel_dtypes_h_template_str = """
 #include <c10/core/ScalarType.h>
 #include <c10/util/string_view.h>
 #include <c10/macros/Macros.h>
+#include <string_view>
 
 namespace at {
 inline constexpr bool should_include_kernel_dtype(
   const char *kernel_tag_str,
   at::ScalarType scalar_type
 ) {
-  c10::string_view kernel_tag_sv C10_UNUSED = c10::string_view(kernel_tag_str);
+  auto [[maybe_unused]] kernel_tag_sv = ::std::string_view(kernel_tag_str);
   $body
   return false;
 }

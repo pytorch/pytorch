@@ -126,7 +126,7 @@ Shape GetPromotedBinaryOpShape(const Shape& shape1, const Shape& shape2) {
       GetPromotedShape(shape1.sizes(), shape2.sizes()));
 }
 
-std::vector<std::string> StrSplit(c10::string_view text, char delim) {
+std::vector<std::string> StrSplit(std::string_view text, char delim) {
   size_t start = 0;
   size_t end = 0;
 

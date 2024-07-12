@@ -307,11 +307,11 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const c10::string_view value);
+    const std::string_view value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const std::optional<c10::string_view>& value);
+    const std::optional<std::string_view>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::Device value);
 TORCH_API void addInputs(Node* n, const char* name, c10::Stream stream);
 TORCH_API void addInputs(Node* n, const char* name, at::Layout value);

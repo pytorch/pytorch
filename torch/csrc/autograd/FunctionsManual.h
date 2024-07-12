@@ -154,12 +154,12 @@ at::Tensor div_tensor_self_backward(
     const Tensor& grad,
     T other,
     ScalarType self_st,
-    const std::optional<c10::string_view>& rounding_mode);
+    const std::optional<std::string_view>& rounding_mode);
 at::Tensor div_tensor_other_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& other,
-    const std::optional<c10::string_view>& rounding_mode);
+    const std::optional<std::string_view>& rounding_mode);
 at::Tensor mvlgamma_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
@@ -295,7 +295,7 @@ at::Tensor clamp_jvp(
     const Tensor& max_t);
 at::SymIntArrayRef strides_or_error(
     const Tensor& input,
-    c10::string_view const& input_name);
+    std::string_view const& input_name);
 at::Tensor mm_mat1_backward(
     const Tensor& grad,
     const Tensor& mat2,
@@ -683,13 +683,13 @@ std::tuple<Tensor, Tensor> linalg_qr_jvp(
     const Tensor& dA,
     const Tensor& Q,
     const Tensor& R,
-    const c10::string_view mode);
+    const std::string_view mode);
 Tensor linalg_qr_backward(
     const Tensor& gQ,
     const Tensor& gR,
     const Tensor& Q,
     const Tensor& R,
-    const c10::string_view mode);
+    const std::string_view mode);
 Tensor linalg_matrix_exp_differential(
     const Tensor& self,
     const Tensor& grad,
@@ -767,7 +767,7 @@ Tensor gelu_double_backward(
     const Tensor& ggI,
     const Tensor& gO,
     const Tensor& input,
-    c10::string_view approximate);
+    std::string_view approximate);
 Tensor as_strided_backward(
     Tensor grad,
     const TensorGeometry& input_geometry,
@@ -1036,7 +1036,7 @@ Tensor scatter_reduce_jvp(
     const Tensor& index,
     const Tensor& src_p,
     const Tensor& src_t,
-    c10::string_view reduce,
+    std::string_view reduce,
     bool include_self,
     const Tensor& result);
 
@@ -1046,7 +1046,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     int dim,
     const Tensor& index,
     const Tensor& src,
-    c10::string_view reduce,
+    std::string_view reduce,
     bool include_self,
     const Tensor& result);
 
@@ -1060,7 +1060,7 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     int dim,
     const Tensor& index,
     const Tensor& source,
-    c10::string_view reduce,
+    std::string_view reduce,
     bool include_self,
     const Tensor& result);
 

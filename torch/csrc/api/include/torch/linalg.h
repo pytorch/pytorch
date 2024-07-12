@@ -52,7 +52,7 @@ inline Tensor& eigvals_out(Tensor& result, const Tensor& self) {
 
 inline std::tuple<Tensor, Tensor> eigh(
     const Tensor& self,
-    c10::string_view uplo) {
+    std::string_view uplo) {
   return torch::linalg_eigh(self, uplo);
 }
 
@@ -60,18 +60,18 @@ inline std::tuple<Tensor&, Tensor&> eigh_out(
     Tensor& eigvals,
     Tensor& eigvecs,
     const Tensor& self,
-    c10::string_view uplo) {
+    std::string_view uplo) {
   return torch::linalg_eigh_out(eigvals, eigvecs, self, uplo);
 }
 
-inline Tensor eigvalsh(const Tensor& self, c10::string_view uplo) {
+inline Tensor eigvalsh(const Tensor& self, std::string_view uplo) {
   return torch::linalg_eigvalsh(self, uplo);
 }
 
 inline Tensor& eigvalsh_out(
     Tensor& result,
     const Tensor& self,
-    c10::string_view uplo) {
+    std::string_view uplo) {
   return torch::linalg_eigvalsh_out(result, self, uplo);
 }
 
@@ -119,7 +119,7 @@ inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(
     const Tensor& self,
     const Tensor& b,
     std::optional<double> cond,
-    std::optional<c10::string_view> driver) {
+    std::optional<std::string_view> driver) {
   return torch::linalg_lstsq(self, b, cond, driver);
 }
 
@@ -138,7 +138,7 @@ inline Tensor norm(
 
 inline Tensor norm(
     const Tensor& self,
-    c10::string_view ord,
+    std::string_view ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
@@ -159,7 +159,7 @@ inline Tensor& norm_out(
 inline Tensor& norm_out(
     Tensor& result,
     const Tensor& self,
-    c10::string_view ord,
+    std::string_view ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
@@ -315,7 +315,7 @@ inline Tensor& pinv_out(
 
 inline std::tuple<Tensor, Tensor> qr(
     const Tensor& input,
-    c10::string_view mode) {
+    std::string_view mode) {
   return torch::linalg_qr(input, mode);
 }
 
@@ -323,7 +323,7 @@ inline std::tuple<Tensor&, Tensor&> qr_out(
     Tensor& Q,
     Tensor& R,
     const Tensor& input,
-    c10::string_view mode) {
+    std::string_view mode) {
   return torch::linalg_qr_out(Q, R, input, mode);
 }
 
@@ -382,7 +382,7 @@ inline Tensor& solve_triangular_out(
 inline std::tuple<Tensor, Tensor, Tensor> svd(
     const Tensor& input,
     bool full_matrices,
-    std::optional<c10::string_view> driver) {
+    std::optional<std::string_view> driver) {
   return torch::linalg_svd(input, full_matrices, driver);
 }
 
@@ -392,20 +392,20 @@ inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(
     Tensor& Vh,
     const Tensor& input,
     bool full_matrices,
-    std::optional<c10::string_view> driver) {
+    std::optional<std::string_view> driver) {
   return torch::linalg_svd_out(U, S, Vh, input, full_matrices, driver);
 }
 
 inline Tensor svdvals(
     const Tensor& input,
-    std::optional<c10::string_view> driver) {
+    std::optional<std::string_view> driver) {
   return torch::linalg_svdvals(input, driver);
 }
 
 inline Tensor& svdvals_out(
     Tensor& result,
     const Tensor& input,
-    std::optional<c10::string_view> driver) {
+    std::optional<std::string_view> driver) {
   return torch::linalg_svdvals_out(result, input, driver);
 }
 
@@ -517,7 +517,7 @@ inline Tensor& eigvals_out(Tensor& result, const Tensor& self) {
 /// See https://pytorch.org/docs/main/linalg.html#torch.linalg.eigh
 inline std::tuple<Tensor, Tensor> eigh(
     const Tensor& self,
-    c10::string_view uplo) {
+    std::string_view uplo) {
   return detail::eigh(self, uplo);
 }
 
@@ -525,21 +525,21 @@ inline std::tuple<Tensor&, Tensor&> eigh_out(
     Tensor& eigvals,
     Tensor& eigvecs,
     const Tensor& self,
-    c10::string_view uplo) {
+    std::string_view uplo) {
   return detail::eigh_out(eigvals, eigvecs, self, uplo);
 }
 
 /// Computes eigenvalues
 ///
 /// See https://pytorch.org/docs/main/linalg.html#torch.linalg.eigvalsh
-inline Tensor eigvalsh(const Tensor& self, c10::string_view uplo) {
+inline Tensor eigvalsh(const Tensor& self, std::string_view uplo) {
   return detail::eigvalsh(self, uplo);
 }
 
 inline Tensor& eigvalsh_out(
     Tensor& result,
     const Tensor& self,
-    c10::string_view uplo) {
+    std::string_view uplo) {
   return detail::eigvalsh_out(result, self, uplo);
 }
 
@@ -562,7 +562,7 @@ inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(
     const Tensor& self,
     const Tensor& b,
     std::optional<double> cond,
-    std::optional<c10::string_view> driver) {
+    std::optional<std::string_view> driver) {
   return detail::lstsq(self, b, cond, driver);
 }
 
@@ -586,7 +586,7 @@ inline Tensor linalg_norm(
 // C10_DEPRECATED_MESSAGE("linalg_norm is deprecated, use norm instead.")
 inline Tensor linalg_norm(
     const Tensor& self,
-    c10::string_view ord,
+    std::string_view ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
@@ -610,7 +610,7 @@ inline Tensor& linalg_norm_out(
 inline Tensor& linalg_norm_out(
     Tensor& result,
     const Tensor& self,
-    c10::string_view ord,
+    std::string_view ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
@@ -853,7 +853,7 @@ inline Tensor& pinv_out(
 /// See https://pytorch.org/docs/main/linalg.html#torch.linalg.qr
 inline std::tuple<Tensor, Tensor> qr(
     const Tensor& input,
-    c10::string_view mode = "reduced") {
+    std::string_view mode = "reduced") {
   // C++17 Change the initialisation to "reduced"sv
   //       Same for qr_out
   return detail::qr(input, mode);
@@ -863,7 +863,7 @@ inline std::tuple<Tensor&, Tensor&> qr_out(
     Tensor& Q,
     Tensor& R,
     const Tensor& input,
-    c10::string_view mode = "reduced") {
+    std::string_view mode = "reduced") {
   return detail::qr_out(Q, R, input, mode);
 }
 
@@ -976,7 +976,7 @@ inline Tensor& solve_triangular_out(
 inline std::tuple<Tensor, Tensor, Tensor> svd(
     const Tensor& input,
     bool full_matrices,
-    std::optional<c10::string_view> driver) {
+    std::optional<std::string_view> driver) {
   return detail::svd(input, full_matrices, driver);
 }
 
@@ -986,7 +986,7 @@ inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(
     Tensor& Vh,
     const Tensor& input,
     bool full_matrices,
-    std::optional<c10::string_view> driver) {
+    std::optional<std::string_view> driver) {
   return detail::svd_out(U, S, Vh, input, full_matrices, driver);
 }
 
@@ -995,14 +995,14 @@ inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(
 /// See https://pytorch.org/docs/main/linalg.html#torch.linalg.svdvals
 inline Tensor svdvals(
     const Tensor& input,
-    std::optional<c10::string_view> driver) {
+    std::optional<std::string_view> driver) {
   return detail::svdvals(input, driver);
 }
 
 inline Tensor& svdvals_out(
     Tensor& result,
     const Tensor& input,
-    std::optional<c10::string_view> driver) {
+    std::optional<std::string_view> driver) {
   return detail::svdvals_out(result, input, driver);
 }
 
