@@ -2595,27 +2595,26 @@ class CppVecKernel(CppKernel):
         var_dtype = var.dtype
         lower_scalar = lower
         upper_scalar = upper
-        var_scalar = var
-        if not var.is_vec:
-            var = f"{self._get_vec_type(var_dtype)}({var})"
-        if mask and not mask.is_vec:
-            mask = f"{self._get_vec_type(var_dtype)}({mask})"
-        if lower:
-            lower = f"{self._get_vec_type(var_dtype)}({lower})"
-        if upper:
-            upper = f"{self._get_vec_type(var_dtype)}({upper})"
+        if var.is_vec:
+            if lower:
+                lower = f"{self._get_vec_type(var.dtype)}({lower})"
+            if upper:
+                upper = f"{self._get_vec_type(var.dtype)}({upper})"
         if lower and upper:
             cond = f"({lower} <= {var}) & ({var} < {upper})"
-            cond_print = f"{lower_scalar} <= {var_scalar} < {upper_scalar}"
+            cond_print = f"{lower_scalar} <= {var} < {upper_scalar}"
         elif lower:
             cond = f"{lower} <= {var}"
-            cond_print = f"{lower_scalar} <= {var_scalar}"
+            cond_print = f"{lower_scalar} <= {var}"
         else:
             assert upper
             cond = f"{var} < {upper}"
-            cond_print = f"{var_scalar} < {upper_scalar}"
-        cond = f"{self._get_mask_type(var_dtype)}({cond})"
-        if mask is not None:
+            cond_print = f"{var} < {upper_scalar}"
+        if not var.is_vec:
+            cond = f"{self._get_mask_type(var.dtype)}({cond})"
+        if mask:
+            if not mask.is_vec:
+                mask = f"{self._get_mask_type(var.dtype)}({mask})"
             # We need not check when the mask is False
             cond = f"({cond}) | ~({mask})"
         cond = f"({cond}).all_masked()"
