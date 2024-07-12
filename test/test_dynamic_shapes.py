@@ -7,7 +7,6 @@ import itertools
 import math
 import operator
 import re
-import unittest
 
 import numpy as np
 
@@ -1263,15 +1262,11 @@ class TestSymNumberMagicMethods(TestCase):
     def get_constant_bool(self, val):
         return SymBool(torch._C._get_constant_bool_symnode(val))
 
-    @unittest.expectedFailure
-    def test_symint_hashing(self):
-        shape_env = ShapeEnv()
-        hash(create_symint(shape_env, 3))
-
     def test_symnode_hashing(self):
         shape_env = ShapeEnv()
 
         # These all trigger specialization when hashed
+        hash(create_symint(shape_env, 3))
         hash(create_symbool(shape_env, True))
         # We should be passing in float here, but create_symbol currently
         # only supports int
