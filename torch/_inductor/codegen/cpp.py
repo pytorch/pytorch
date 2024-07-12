@@ -555,6 +555,13 @@ class CppCSEVariable(CSEVariable):
             )
         ) is not None:
             self.dtype = output_dtype
+        elif name == "masked":
+            assert (
+                hasattr(V.interpreter, "current_node")
+                and V.interpreter.current_node.target.startswith("masked_subblock")
+                and get_current_node_opt_ctx() is not None
+            )
+            self.dtype = get_current_node_opt_ctx().dtype
         else:
             # Induce output dtype by inputs' dtype
             assert all(
@@ -564,7 +571,7 @@ class CppCSEVariable(CSEVariable):
                 torch.promote_types,  # type: ignore[arg-type]
                 [arg.dtype for arg in args if isinstance(arg, CppCSEVariable)],
             )
-            assert self.dtype is not None
+        assert self.dtype is not None
 
     def _set_dependent_itervars(self, index: sympy.Expr):
         """
