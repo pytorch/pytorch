@@ -13,7 +13,7 @@ import torch.distributed._composable.fsdp._fsdp_param
 from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._inductor import comms
-from torch._inductor.graph import GraphLowering
+from torch._inductor.utils import run_and_get_code
 
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
@@ -328,7 +328,6 @@ class TestFullyShardCompile(FSDPTest):
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_fullgraph_backend_inductor(self):
-        triton_codes = []
         with mock.patch.object(
             comms,
             "reinplace_fsdp_all_gather",
@@ -336,11 +335,11 @@ class TestFullyShardCompile(FSDPTest):
                 self._reinplace_all_gather_with_checks,
                 orig_fn=comms.reinplace_fsdp_all_gather,
             ),
-        ), mock.patch.object(
-            GraphLowering, "save_output_code", lambda code: triton_codes.append(code)
         ):
-            self._test_traceable_fsdp(
-                *self._create_transformer_factory_fns(), "inductor", fullgraph=True
+            _, triton_codes = run_and_get_code(
+                lambda: self._test_traceable_fsdp(
+                    *self._create_transformer_factory_fns(), "inductor", fullgraph=True
+                )
             )
         self.assertTrue(
             len(triton_codes) == 2,
