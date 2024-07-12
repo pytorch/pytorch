@@ -285,8 +285,8 @@ def expand_to_full_mesh_op_strategy(
             if input_index > 1:
                 output_specs = tuple(spec_list[:input_index])
             else:
+                assert spec_list[0] is not None
                 output_specs = spec_list[0]
-            assert output_specs is not None
             strategy = PlacementStrategy(
                 output_specs=output_specs,
                 input_specs=input_specs,
