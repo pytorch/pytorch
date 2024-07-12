@@ -836,6 +836,13 @@ std::string get_exception_message() {
   return std::string(exc_message);
 }
 
+bool is_immutable_object(py::handle example_value) {
+  return PyTuple_CheckExact(example_value.ptr()) ||
+      PyLong_Check(example_value.ptr()) || PyFloat_Check(example_value.ptr()) ||
+      PyBool_Check(example_value.ptr()) ||
+      PyUnicode_Check(example_value.ptr()) ||
+      THPVariable_Check(example_value.ptr());
+}
 /**
  * Stores relevant guard debug information, e.g., failure str for a LeafGuard
  * failure. The data structure is also accessible in Python.
@@ -1492,7 +1499,9 @@ class GuardAccessor {
     return _source;
   }
 
-  virtual bool check_nopybind(PyObject* obj) = 0;
+  // matches_dict_tag is used by the DictGetItemGuardAccessor to skip the guard
+  // subtree on immutable dict getitems.
+  virtual bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) = 0;
   virtual GuardDebugInfo check_verbose_nopybind(PyObject* obj) = 0;
   virtual std::string repr() const = 0;
 
@@ -1562,7 +1571,20 @@ class GuardManager {
  public:
   GuardManager() = delete;
   GuardManager(RootGuardManager* root, std::string source)
-      : _root(root), _source(std::move(source)) {}
+      : _root(root), _source(std::move(source)), _is_dict(false) {}
+
+  GuardManager(
+      RootGuardManager* root,
+      std::string source,
+      py::handle example_value)
+      : _root(root),
+        _source(std::move(source)),
+        _is_dict(py::isinstance<py::dict>(example_value)) {
+    if (_is_dict) {
+      _dict_tag = get_dict_version_unchecked(example_value.ptr());
+    }
+  }
+
   GuardManager(const GuardManager& m) = delete;
   GuardManager& operator=(const GuardManager&) = delete;
   virtual ~GuardManager() = default;
@@ -1628,11 +1650,21 @@ class GuardManager {
       }
     }
 
+    bool matches_dict_tag = false;
+    uint64_t new_tag = 0;
+    if (_is_dict) {
+      // Check if the dict tag matches. If it does, propagate to the child
+      // accessors. This will pass to the child manager via
+      // DictGetItemGuardManager.
+      new_tag = get_dict_version_unchecked(value);
+      matches_dict_tag = new_tag == _dict_tag;
+    }
+
     // Iterate over accessors.
     bool result = true;
     bool failed_on_first = true;
     for (const auto& accessor : _accessors) {
-      if (!accessor->check_nopybind(value)) { // early exit
+      if (!accessor->check_nopybind(value, matches_dict_tag)) { // early exit
         _fail_count += 1;
         result = false;
         // need to sort, so break the loop.
@@ -1664,6 +1696,12 @@ class GuardManager {
           });
     }
 
+    if (_is_dict && result) {
+      // If result is true, reset the _dict_tag. This is useful if there is a
+      // mutation on the dict but it does not change the attr values (like
+      // swapping).
+      _dict_tag = new_tag;
+    }
     return result;
   }
 
@@ -1777,6 +1815,9 @@ class GuardManager {
   // shufflable. On a guard failure, they are sorted based on their fail count
   // to enable fail fast for the next check.
   std::vector<std::unique_ptr<GuardAccessor>> _accessors;
+
+  bool _is_dict;
+  uint64_t _dict_tag{0};
 };
 
 /**
@@ -1967,15 +2008,16 @@ class DictGuardManager : public GuardManager {
       : GuardManager(root, std::move(source)),
         _size(PyDict_Size(example_value.ptr())),
         _expected_type(Py_TYPE(example_value.ptr())),
-        _is_exact_dict_type(PyDict_CheckExact(example_value.ptr())) {}
+        _is_exact_dict_type(PyDict_CheckExact(example_value.ptr())),
+        _tag(get_dict_version_unchecked(example_value.ptr())) {}
 
   GuardManager* get_key_manager(
       py::object key_index,
       std::string source,
       py::handle example_value,
       py::handle guard_manager_enum) {
-    KeyValueManager& key_value_manager =
-        _get_index_manager(std::move(key_index));
+    Py_ssize_t index = py::cast<Py_ssize_t>(std::move(key_index));
+    KeyValueManager& key_value_manager = _get_index_manager(index);
     if (!key_value_manager.first) {
       key_value_manager.first = make_guard_manager(
           this->get_root(),
@@ -1983,6 +2025,7 @@ class DictGuardManager : public GuardManager {
           example_value,
           guard_manager_enum);
     };
+    _is_key_at_index_immutable[index] = is_immutable_object(example_value);
     return key_value_manager.first.get();
   }
 
@@ -1991,8 +2034,8 @@ class DictGuardManager : public GuardManager {
       std::string source,
       py::handle example_value,
       py::handle guard_manager_enum) {
-    KeyValueManager& key_value_manager =
-        _get_index_manager(std::move(key_index));
+    Py_ssize_t index = py::cast<Py_ssize_t>(std::move(key_index));
+    KeyValueManager& key_value_manager = _get_index_manager(index);
     if (!key_value_manager.second) {
       key_value_manager.second = make_guard_manager(
           this->get_root(),
@@ -2000,6 +2043,7 @@ class DictGuardManager : public GuardManager {
           example_value,
           guard_manager_enum);
     };
+    _is_value_at_index_immutable[index] = is_immutable_object(example_value);
     return key_value_manager.second.get();
   }
 
@@ -2035,6 +2079,9 @@ class DictGuardManager : public GuardManager {
       return false;
     }
 
+    uint64_t new_tag = get_dict_version_unchecked(obj);
+    bool matches_dict_tag = new_tag == _tag;
+
     PyObject *key = nullptr, *value = nullptr;
     Py_ssize_t pos = 0;
 
@@ -2050,16 +2097,31 @@ class DictGuardManager : public GuardManager {
         index_pointer += 1;
         KeyValueManager& key_value_manager = _key_value_managers[dict_pointer];
         std::unique_ptr<GuardManager>& key_manager = key_value_manager.first;
-        if (key_manager && !key_manager->check_nopybind(key)) {
-          return false;
+        // If dict tag matches and key is immutable, skip the key guard manager
+        bool skip_key_manager =
+            matches_dict_tag && _is_key_at_index_immutable[dict_pointer];
+        if (!skip_key_manager) {
+          if (key_manager && !key_manager->check_nopybind(key)) {
+            return false;
+          }
         }
+        // If dict tag matches and value is immutable, skip the value guard
+        // manager
         std::unique_ptr<GuardManager>& value_manager = key_value_manager.second;
-        if (value_manager && !value_manager->check_nopybind(value)) {
-          return false;
+        bool skip_value_manager =
+            matches_dict_tag && _is_value_at_index_immutable[dict_pointer];
+        if (!skip_value_manager) {
+          if (value_manager && !value_manager->check_nopybind(value)) {
+            return false;
+          }
         }
       }
       dict_pointer += 1;
     }
+
+    // It is possible that the tag changed but the contents of the dict is
+    // unchanged. Save the new tag to optimize the for next run.
+    _tag = new_tag;
     return true;
   }
 
@@ -2182,9 +2244,8 @@ class DictGuardManager : public GuardManager {
    * Adds a new KeyDictGuardAccessor. If the accessor is already present, we
    * just return the guard manager.
    */
-  KeyValueManager& _get_index_manager(py::object key_index) {
+  KeyValueManager& _get_index_manager(Py_ssize_t index) {
     // Check if the accessor is already present.
-    Py_ssize_t index = py::cast<Py_ssize_t>(std::move(key_index));
     auto it = _key_value_managers.find(index);
     if (it != _key_value_managers.end()) {
       return it->second;
@@ -2204,6 +2265,12 @@ class DictGuardManager : public GuardManager {
   bool _is_exact_dict_type; // Useful to check getattr_manager validity.
   std::vector<Py_ssize_t> _indices;
   std::unordered_map<Py_ssize_t, KeyValueManager> _key_value_managers;
+  std::unordered_map<Py_ssize_t, bool> _is_key_at_index_immutable;
+  std::unordered_map<Py_ssize_t, bool> _is_value_at_index_immutable;
+
+ private:
+  // Saved dict version.
+  uint64_t _tag;
 };
 
 /**
@@ -2416,7 +2483,8 @@ std::unique_ptr<GuardManager> make_guard_manager(
     if (guard_manager_enum.is(base_guard_manager_enum)) {
       // For dicts that don't need to guard on keys, we can just rely on the
       // base GuardManager.
-      return std::make_unique<GuardManager>(root, std::move(source));
+      return std::make_unique<GuardManager>(
+          root, std::move(source), example_value);
     } else if (guard_manager_enum.is(dict_guard_manager_enum)) {
       return std::make_unique<DictGuardManager>(
           root, std::move(source), example_value);
@@ -2530,7 +2598,8 @@ class GetAttrGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
     PyObject* x = PyObject_GetAttr(obj, _attr_name); // new ref
     if (x == nullptr) {
       // Attribute absent, clear the exception and return false.
@@ -2588,7 +2657,8 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
     PyObject* x = PyObject_GenericGetDict(obj, nullptr); // new ref
     if (x == nullptr) {
       // Attribute absent, clear the exception and return false.
@@ -2641,7 +2711,8 @@ class GetItemGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
     PyObject* x = PyObject_GetItem(obj, _attr_name); // new ref
     if (x == nullptr) {
       PyErr_Clear();
@@ -2696,11 +2767,17 @@ class DictGetItemGuardAccessor : public GuardAccessor {
             std::move(source),
             example_value,
             guard_manager_enum),
-        _key(key.ptr()) {}
+        _key(key.ptr()),
+        _is_immutable_object(is_immutable_object(example_value)) {}
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
+    if (matches_dict_tag && _is_immutable_object) {
+      // immutable object and dict tag matches, we can skip the guard subtree.
+      return true;
+    }
     PyObject* x = PyDict_GetItem(obj, _key); // borrowed ref
     if (x == nullptr) {
       PyErr_Clear();
@@ -2729,6 +2806,10 @@ class DictGetItemGuardAccessor : public GuardAccessor {
 
  private:
   PyObject* _key;
+
+  // If immutable object and dict tag matches, we can skip the guard subtree and
+  // return true.
+  bool _is_immutable_object;
 };
 
 /**
@@ -2753,7 +2834,8 @@ class ListGetItemGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
     PyObject* x = PyList_GetItem(obj, _index); // borrowed ref
     if (x == nullptr) {
       PyErr_Clear();
@@ -2805,7 +2887,8 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
     PyObject* x = PyTuple_GetItem(obj, _index); // borrowed ref
     if (x == nullptr) {
       PyErr_Clear();
@@ -2855,7 +2938,8 @@ class GradGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
     // check that its a tensor
     if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
       return false;
@@ -2911,7 +2995,8 @@ class FuncDefaultsGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
     PyObject* func = obj;
     if (PyMethod_Check(obj)) {
       func = PyMethod_GET_FUNCTION(obj); // borrowed ref
@@ -2971,7 +3056,8 @@ class FuncKwDefaultsGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
     PyObject* func = obj;
     if (PyMethod_Check(obj)) {
       func = PyMethod_GET_FUNCTION(obj); // borrowed ref
@@ -3033,7 +3119,8 @@ class GlobalsGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
     // Ignore the obj arg. This is required to satisfy the function signature.
     // Just pass on the globals dict to the child manager.
     return _guard_manager->check_nopybind(_globals_dict);
@@ -3077,7 +3164,8 @@ class TypeGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
     PyObject* x = (PyObject*)Py_TYPE(obj); // borrowed ref
     return _guard_manager->check_nopybind(x);
   }
@@ -3114,7 +3202,8 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
     _PyTupleIterObject* it = (_PyTupleIterObject*)obj;
     PyObject* x =
         PyTuple_GET_ITEM(it->it_seq, it->it_index + _index); // borrowed ref
@@ -3173,7 +3262,8 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
     // obj is globals dict because GlobalWeakRefGuardAccessor has to be a
     // child of GlobalsGuardAccessor.
     PyObject* weakref = PyDict_GetItem(obj, _global_name); // borrowed ref
@@ -3241,7 +3331,8 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
     if (!PyWeakref_Check(obj)) {
       return false;
     }
@@ -3288,7 +3379,8 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
     PyObject* x = PyObject_CallOneArg(_accessor_fn.ptr(), obj); // new ref
     if (x == nullptr) {
       // The accessor function failed.
