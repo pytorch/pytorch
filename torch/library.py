@@ -958,7 +958,6 @@ def register_vmap(
     func: Callable,
     /,
     *,
-    setup_context: Optional[Callable] = None,
     lib=None,
 ) -> None:
     if not isinstance(
@@ -969,19 +968,13 @@ def register_vmap(
         op = op._name
     opdef = _maybe_get_opdef(op)
     if opdef is not None and opdef._vmap_fn is not None:
-        opdef.register_vmap(func, setup_context=setup_context)
+        opdef.register_vmap(func)
         return
 
     assert isinstance(op, str)
     qualname = op
     op = torch._library.utils.lookup_op(qualname)
     schema = op._schema
-    if not _library.utils.is_functional_schema(schema):
-        raise RuntimeError(
-            f"Cannot register vmap formula for non-functional operator "
-            f"{op} with schema {schema}. Please create "
-            f"a functional operator and register a vmap formula for that."
-        )
     if _library.utils.has_kwarg_only_tensors(schema):
         raise NotImplementedError(
             f"register_vmap with kwarg-only Tensor args. In the original "
@@ -989,13 +982,19 @@ def register_vmap(
             f"Got: {schema}"
         )
 
-    info = _library.vmap.Info(func, setup_context)
-    vmap_kernel = _library.vmap.make_vmap_impl(op, info)
     namespace, opname = torch._library.utils.parse_namespace(qualname)
     if lib is None:
         lib = Library(namespace, "FRAGMENT")
         _keep_alive.append(lib)
-    lib.impl(opname, vmap_kernel, "FuncTorchDynamicLayerFrontMode", with_keyset=True)
+
+    from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
+    from torch._functorch.autograd_function import custom_function_call_vmap_helper
+
+    def wrapped_func(keyset, *args, **kwargs):
+        interpreter = retrieve_current_functorch_interpreter()
+        return custom_function_call_vmap_helper(interpreter, func, None, *args, **kwargs)
+
+    lib.impl(opname, wrapped_func, "FuncTorchBatched", with_keyset=True)
 
 # If the op was defined in C++, then we want to make sure there was an
 # m.set_python_module(module, ...) call and that the module is the

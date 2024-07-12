@@ -666,20 +666,8 @@ class CustomOpDef:
     def register_vmap(
         self,
         func: Callable,
-        /,
-        *,
-        setup_context: Optional[Callable] = None,
     ) -> None:
-        schema = self._opoverload._schema
-        if not _library.utils.is_functional_schema(schema):
-            raise RuntimeError(
-                f"Cannot register vmap formula for non-functional operator "
-                f"{self} with schema {schema}. Please create "
-                f"a functional operator and register a vmap formula for that."
-            )
-
         self._vmap_fn = func
-        self._setup_context_fn = setup_context
 
 
 # NOTE: [Supporting decorator and non-decorator usage]
