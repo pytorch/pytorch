@@ -377,8 +377,12 @@ def _decompose_and_get_gm_with_new_signature_constants(
         constant_attrs = _gather_constant_attrs(mod)
         aten_export_artifact = _export_to_aten_ir(
             mod,
-            fake_args_unwrapped[0],
-            fake_args_unwrapped[1],
+            # this requires empty kwargs, but not in pytree.flattened format
+            (
+                *fake_args_unwrapped[0],
+                *fake_args_unwrapped[1].values(),
+            ),
+            {},
             fake_params_buffers,
             constant_attrs,
         )
