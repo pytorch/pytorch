@@ -12,7 +12,7 @@ from torch.testing._internal.opinfo.core import (
 from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.opinfo.core import DecorateInfo
-from torch.nn.attention._flex_attention import flex_attention
+from torch.nn.attention._flex_attention import flex_attention, _create_empty_block_mask
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
@@ -120,11 +120,14 @@ def sample_inputs_flex_attention(opinfo, device, dtype, requires_grad, **kwargs)
     def score_mod(score, b, h, m, n):
         return score + h
 
+    q, k, v = (make_arg(2, 2, 128, 8, low=0.1, high=2) for _ in range(3))
+    block_mask = _create_empty_block_mask(q, k, v)
     yield SampleInput(
-        make_arg(2, 2, 128, 8, low=0.1, high=2),
-        make_arg(2, 2, 128, 8, low=0.1, high=2),
-        make_arg(2, 2, 128, 8, low=0.1, high=2),
+        q,
+        k,
+        v,
         score_mod,
+        block_mask
     )
 
 def sample_inputs_while_loop(opinfo, device, dtype, requires_grad, **kwargs):
