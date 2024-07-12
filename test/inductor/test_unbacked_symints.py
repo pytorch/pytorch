@@ -117,8 +117,7 @@ class TestUnbackedSymints(InductorTestCase):
                 :, 0
             ]  # make sure no unbacked symint in output's stride
 
-        # Make sure nonzero's input has numel > 1
-        example_inputs = (torch.randn(1, 2, 1, 1, device=device),)
+        example_inputs = (torch.randn(1, 1, 1, 1, device=device),)
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)

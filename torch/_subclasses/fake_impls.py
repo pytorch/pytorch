@@ -417,7 +417,8 @@ def nonzero(fake_mode, func, arg):
             maxval = sys.maxsize - 1
 
             if not has_free_symbols(arg.numel()):
-                maxval = int(arg.numel())
+                # Make sure we don't set upper bound to 1
+                maxval = max(2, int(arg.numel()))
 
             _constrain_range_for_size(nnz, max=maxval)
 
