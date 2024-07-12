@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import collections
 import contextlib
 import dataclasses
@@ -490,7 +492,7 @@ class DebugFormatter:
         self,
         name: str,
         input_nodes: List[ir.IRNode],
-        timings: Dict["ChoiceCaller", float],  # type: ignore[name-defined] # noqa: F821
+        timings: Dict[ChoiceCaller, float],  # type: ignore[name-defined] # noqa: F821
         elapse: float,
         precompile_elapse: float,
     ):

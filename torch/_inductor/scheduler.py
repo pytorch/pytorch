@@ -21,10 +21,10 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     Tuple,
     TypeVar,
     Union,
-    Set,
 )
 
 import sympy
@@ -2574,6 +2574,24 @@ class Scheduler:
         The first term in our fusion score that estimates number of saved
         memory operations.
         """
+        node1_dep_len = len(node1.read_writes.reads) + len(node1.read_writes.writes)
+        node2_dep_len = len(node1.read_writes.reads) + len(node2.read_writes.writes)
+
+        if max(node1_dep_len, node2_dep_len) * 4 > min(node1_dep_len, node2_dep_len):
+            if node1_dep_len > node2_dep_len:
+                tmp = node1
+                node1 = node2
+                node2 = tmp
+
+            deps = []
+            for dep in itertools.chain(
+                node1.read_writes.reads, node1.read_writes.writes
+            ):
+                if dep in node2.read_writes.reads or dep in node2.read_writes.writes:
+                    deps.append(dep)
+
+            return sum(self.dep_size_hint(dep) for dep in deps)
+
         common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
             node2.read_writes.reads | node2.read_writes.writes
         )
