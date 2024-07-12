@@ -3,18 +3,20 @@ from __future__ import annotations
 
 import contextlib
 
-from typing import Callable, Optional
+from typing import Callable, Optional, TYPE_CHECKING
 
 import torch
 import torch._ops
 import torch.func
 import torch.fx
-from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
-from torch.onnx._internal import _beartype
+
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.onnx._internal.fx.passes import _utils
 from torch.utils import _pytree as pytree
+
+if TYPE_CHECKING:
+    from torch._subclasses import fake_tensor
 
 
 class Functionalize(_pass.Transform):
@@ -62,7 +64,6 @@ class Functionalize(_pass.Transform):
     which are not needed for ONNX inference.
     """
 
-    @_beartype.beartype
     def __init__(
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
@@ -99,7 +100,6 @@ class Functionalize(_pass.Transform):
 
         return wrapped
 
-    @_beartype.beartype
     def _run(self, *args) -> torch.fx.GraphModule:
         # To preserve stack trace info after `make_fx`.
         module = _utils.wrap_graph_module_for_node_meta_preservation(self.module)
@@ -145,7 +145,6 @@ class RemoveInputMutation(_pass.Transform):
     for inference. They could be useful for training.
     """
 
-    @_beartype.beartype
     def _run(self, *args) -> torch.fx.GraphModule:
         for node in reversed(self.module.graph.nodes):
             if (
