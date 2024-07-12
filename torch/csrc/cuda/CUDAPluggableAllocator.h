@@ -43,14 +43,15 @@ using streamType = c10::hip::HIPStream;
 using streamType = c10::cuda::CUDAStream;
 #endif
 
-std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+TORCH_CUDA_CPP_API std::shared_ptr<
+    c10::cuda::CUDACachingAllocator::CUDAAllocator>
 getCurrentAllocator();
 TORCH_CUDA_CPP_API std::shared_ptr<
     c10::cuda::CUDACachingAllocator::CUDAAllocator>
 createCustomAllocator(
     std::function<MallocFuncType> alloc_fn,
     std::function<FreeFuncType> free_fn);
-void changeCurrentAllocator(
+TORCH_CUDA_CPP_API void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator);
 
@@ -65,7 +66,7 @@ struct _AllocationMetadata {
   cudaStream_t stream;
 };
 
-struct CUDAPluggableAllocator
+struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
     : public c10::cuda::CUDACachingAllocator::CUDAAllocator {
   CUDAPluggableAllocator(
       std::function<MallocFuncType> alloc_fn,
