@@ -1203,9 +1203,7 @@ SeqNr|OrigAten|SrcFn
             relu(torch.rand([3, 3], device="cuda", requires_grad=True)).sum().backward()
 
         # le is a donated buffer from relu
-        FileCheck().check("bw_donated_idxs=[0]").run(
-            "\n".join(captured.output)
-        )
+        FileCheck().check("bw_donated_idxs=[0]").run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer2(self):
@@ -1227,9 +1225,7 @@ SeqNr|OrigAten|SrcFn
         with self.assertLogs(logger_name, level="INFO") as captured:
             f(inp, param1, param2).sum().backward()
 
-        FileCheck().check("bw_donated_idxs=[]").run(
-            "\n".join(captured.output)
-        )
+        FileCheck().check("bw_donated_idxs=[]").run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer3(self):
@@ -1252,9 +1248,7 @@ SeqNr|OrigAten|SrcFn
         with self.assertLogs(logger_name, level="INFO") as captured:
             f(inp, param1, param2).sum().backward()
 
-        FileCheck().check("bw_donated_idxs=[]").run(
-            "\n".join(captured.output)
-        )
+        FileCheck().check("bw_donated_idxs=[]").run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer4(self):
@@ -1284,9 +1278,7 @@ SeqNr|OrigAten|SrcFn
         #        return [add, le]
         #
         # `le` is a donated buffer
-        FileCheck().check("bw_donated_idxs=[0]").run(
-            "\n".join(captured.output)
-        )
+        FileCheck().check("bw_donated_idxs=[0]").run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer5(self):
@@ -1316,9 +1308,7 @@ SeqNr|OrigAten|SrcFn
         #     return [add, primals_1, le]
         #
         # `le` is a donated buffer but primals_1 is not.
-        FileCheck().check("bw_donated_idxs=[1]").run(
-            "\n".join(captured.output)
-        )
+        FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
 
 
 if __name__ == "__main__":

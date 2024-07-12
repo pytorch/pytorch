@@ -294,7 +294,7 @@ def collect_bw_donated_buffer_idxs(
     except KeyError:
         return []
 
-    user_fw_outs = fw_outs[:fw_metadata.num_forward]
+    user_fw_outs = fw_outs[: fw_metadata.num_forward]
     saved_tensors = fw_outs[fw_metadata.tensors_saved_for_backwards_slice]
 
     fw_donated_buffer = collect_fw_donated_buffer_idxs(
