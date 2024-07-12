@@ -20,6 +20,7 @@ from .pt2e.numeric_debugger import generate_numeric_debug_handle  # noqa: F401
 from .pt2e.numeric_debugger import NUMERIC_DEBUG_HANDLE_KEY  # noqa: F401
 from .pt2e.numeric_debugger import prepare_for_propagation_comparison  # noqa: F401
 from .pt2e.numeric_debugger import extract_results_from_loggers  # noqa: F401
+from .pt2e.numeric_debugger import OutputLogger  # noqa: F401
 from typing import Union, List, Callable, Tuple, Optional
 from torch import Tensor
 import torch
@@ -149,6 +150,9 @@ __all__ = [
     "weight_observer_range_neg_127_to_127",
     "generate_numeric_debug_handle",
     "NUMERIC_DEBUG_HANDLE_KEY",
+    "prepare_for_propagation_comparison",
+    "extract_results_from_loggers",
+    "OutputLogger",
 ]
 
 def default_eval_fn(model, calib_data):

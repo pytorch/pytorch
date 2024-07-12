@@ -1,7 +1,7 @@
 import copy
 import logging
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Sequence, Tuple, Optional
 
 import torch
 from torch.fx import GraphModule, Node
@@ -13,7 +13,6 @@ __all__ = ["generate_numeric_debug_handle", "NUMERIC_DEBUG_HANDLE_KEY", "prepare
 
 NUMERIC_DEBUG_HANDLE_KEY = "_numeric_debug_handle"
 
-
 def generate_numeric_debug_handle(graph_module: GraphModule) -> None:
     unique_id = 0
     for node in graph_module.graph.nodes:
@@ -24,7 +23,8 @@ def generate_numeric_debug_handle(graph_module: GraphModule) -> None:
 
 class OutputLogger(torch.nn.Module):
     """
-    Base class for capturing output values.
+    Base class for capturing output values for nodes in a GraphModule, it only captures
+    Tensor output currently, but we can extend it to work for other types of inputs later if needed
     """
 
     # Mark as impure so that calls to it will not be removed during DCE.
@@ -32,9 +32,9 @@ class OutputLogger(torch.nn.Module):
 
     def __init__(
         self,
-        node_name: str,
-        nn_module_stack: object,
-        debug_handle: str,
+        debug_handle: int,
+        node_name: Optional[str] = None,
+        nn_module_stack: Optional[object] = None,
     ) -> None:
         super().__init__()
         self.node_name = node_name
@@ -47,17 +47,10 @@ class OutputLogger(torch.nn.Module):
             self.stats.append(x.detach())
         return x
 
-    def __repr__(self) -> str:
-        clean_dict = {
-            k: v
-            for k, v in self.__dict__.items()
-            # skip torch.nn.Module keys
-            if (k != "training") and not k.startswith("_")
-        }
-        return f"OutputLogger({clean_dict})"
+    def __extra_repr__(self) -> str:
+        return f"debug_handle={self.debug_handle}, node_name={self.node_name}, nn_module_stack={self.nn_module_stack}, num_stats={len(self.stats)})"
 
-
-def _insert_logger(model: GraphModule, node: Node, debug_handle: str) -> None:
+def _insert_logger(model: GraphModule, node: Node, debug_handle: str) -> Node:
     """For a given node, adds an OutputLogger that observes the output of that node,
     and all its users use the OutputLogger output instead.
     The OutputLogger will contain the debug_handle which can be used to compare
@@ -73,7 +66,7 @@ def _insert_logger(model: GraphModule, node: Node, debug_handle: str) -> None:
         setattr(
             model,
             logger_name,
-            OutputLogger(node.name, node.meta.get("nn_module_stack"), debug_handle),
+            OutputLogger(debug_handle, node.name, node.meta.get("nn_module_stack")),
         )
         logger_node = model.graph.call_module(logger_name, (node,), {})
 
@@ -82,6 +75,8 @@ def _insert_logger(model: GraphModule, node: Node, debug_handle: str) -> None:
         if user_node is logger_node:
             continue
         user_node.replace_input_with(node, logger_node)
+
+    return logger_node
 
 
 def prepare_for_propagation_comparison(model: GraphModule) -> GraphModule:
@@ -113,15 +108,19 @@ class QuantizationComparisonResult:
             self.actual.to(dtype=torch.float32), self.ref.to(dtype=torch.float32)
         )
 
-    def details(self) -> str:
-        return f"QuantizationComparisonResult(mse_loss={self.mse_loss}, sqnr={self.sqnr}, actual={self.actual}, ref={self.ref})"
-
     def __repr__(self) -> str:
         # Don't include the tensors themselves as they are quite large to print
         # out.
         return (
             f"QuantizationComparisonResult(mse_loss={self.mse_loss}, sqnr={self.sqnr})"
         )
+
+    def __post_init__(self):
+        if not isinstance(self.actual, torch.Tensor):
+            raise ValueError(f"`actual` value must be a Tensor, got: {actual}")
+
+        if not isinstance(self.ref, torch.Tensor):
+            raise ValueError(f"`ref` value must be a Tensor, got: {ref}")
 
 
 @dataclass(frozen=True)
@@ -133,17 +132,11 @@ class NodeAccuracySummary:
     ref_module_stack: str
     results: Sequence[QuantizationComparisonResult]
 
-    def details(self) -> str:
-        """Returns a very detailed string for the results including all tensors.
-        If you don't want to see this, just use str() or repr() on this object instead
-        to get a more concise summary."""
-        s = f"{repr(self)}\ndetails:\n"
-        for q in self.results:
-            s += q.details() + "\n"
-        return s
-
 
 def _module_stack_to_str(module_stack: object) -> str:
+    """Simplifies the stack from ("mod", "mod.foo", "mod.foo.0", "mod.foo.0.linear")
+    to "mod.foo.0.linear"
+    """
     if not isinstance(module_stack, dict):
         return str(module_stack)
     module_values_list = list(module_stack.values())
@@ -169,14 +162,14 @@ def extract_results_from_loggers(
     ref_handles: Dict[str, Tuple[str, object, List[torch.Tensor]]] = {}
     actual_handles: Dict[str, Tuple[str, object, List[torch.Tensor]]] = {}
     for _name, module in ref_model.named_children():
-        if isinstance(module, OutputLogger):
+        if isinstance(module, OutputLogger) and len(module.stats) > 0:
             ref_handles[module.debug_handle] = (
                 module.node_name,
                 module.nn_module_stack,
                 module.stats,
             )
     for _name, module in actual_model.named_children():
-        if isinstance(module, OutputLogger):
+        if isinstance(module, OutputLogger) and len(module.stats) > 0:
             actual_handles[module.debug_handle] = (
                 module.node_name,
                 module.nn_module_stack,

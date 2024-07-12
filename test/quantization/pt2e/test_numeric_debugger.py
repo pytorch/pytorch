@@ -134,8 +134,9 @@ class TestNumericDebugger(TestCase):
         res = m_logger(*example_inputs)
 
         from torch.ao.quantization.pt2e.numeric_debugger import OutputLogger
-        assert any(isinstance(m, OutputLogger) for m in m_logger.modules())
-
+        loggers = [m for m in m_logger.modules() if isinstance(m, OutputLogger)]
+        self.assertEqual(len(loggers), 8)
+        self.assertTrue("conv2d" in [logger.node_name for logger in loggers])
         self.assertEqual(res, ref)
 
     def test_extract_results_from_loggers(self):
@@ -159,4 +160,4 @@ class TestNumericDebugger(TestCase):
         results = extract_results_from_loggers(m_ref_logger, m_quant_logger)
         for node, node_summary in results.items():
             if len(node_summary.results) > 0:
-                self.assertTrue(node_summary.results[0].sqnr >= 35)
+                self.assertGreaterEqual(node_summary.results[0].sqnr, 35)

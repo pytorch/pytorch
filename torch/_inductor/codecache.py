@@ -1786,6 +1786,7 @@ class AotCodeCompiler:
                 else os.path.splitext(input_path)[0] + ".so"
             )
 
+            output_o = os.path.splitext(input_path)[0] + ".o"
             consts_size = sum(
                 torch.ops.mkldnn._nbytes(tensor)
                 if tensor.is_mkldnn
@@ -1797,25 +1798,16 @@ class AotCodeCompiler:
             use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
-            (
-                object_output_name,
-                object_output_dir,
-            ) = get_name_and_dir_from_output_file_path(input_path)
-            object_builder = CppBuilder(
-                name=object_output_name,
-                sources=input_path,
-                output_dir=object_output_dir,
-                BuildOption=CppTorchCudaOptions(
-                    vec_isa=picked_vec_isa,
-                    cuda=cuda,
-                    aot_mode=graph.aot_mode,
-                    compile_only=True,
-                    use_absolute_path=use_absolute_path,
-                    use_mmap_weights=use_mmap_weights,
-                ),
+            compile_cmd = cpp_compile_command(
+                input=input_path,
+                output=output_o,
+                vec_isa=picked_vec_isa,
+                cuda=cuda,
+                aot_mode=graph.aot_mode,
+                compile_only=True,
+                use_absolute_path=use_absolute_path,
+                use_mmap_weights=use_mmap_weights,
             )
-            compile_cmd = object_builder.get_command_line()
-            output_o = object_builder.get_target_file_path()
             log.debug("aot compilation command: %s", compile_cmd)
             if fbcode_aot_cpu_re:
                 compile_file(input_path, output_o, compile_cmd.split())
@@ -1875,20 +1867,14 @@ class AotCodeCompiler:
                 "linux": _compile_consts_linux,
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
-            output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
-            so_builder = CppBuilder(
-                name=output_name,
-                sources=[output_o, consts_o],
-                output_dir=output_dir,
-                BuildOption=CppTorchCudaOptions(
-                    vec_isa=picked_vec_isa,
-                    cuda=cuda,
-                    aot_mode=graph.aot_mode,
-                    use_absolute_path=use_absolute_path,
-                ),
+            link_cmd = cpp_compile_command(
+                input=[output_o, consts_o],
+                output=output_so,
+                vec_isa=picked_vec_isa,
+                cuda=cuda,
+                aot_mode=graph.aot_mode,
+                use_absolute_path=use_absolute_path,
             )
-            link_cmd = so_builder.get_command_line()
-            output_so = so_builder.get_target_file_path()
             log.debug("aot linkage command: %s", link_cmd)
             if fbcode_aot_cpu_re:
                 compile_file([output_o, consts_o], output_so, link_cmd.split())
