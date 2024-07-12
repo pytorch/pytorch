@@ -10655,6 +10655,18 @@ fn
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_iter_type(self):
+        @torch.compile(fullgraph=True)
+        def fn(y):
+            x = iter([])
+            if isinstance(x, list):
+                return y + 1
+            else:
+                return y + 2
+
+        res = fn(torch.ones(2))
+        self.assertEqual(torch.ones(2) + 2, res)
+
     def test_descriptor(self):
         class lazy_property:
             def __init__(self, wrapped):
