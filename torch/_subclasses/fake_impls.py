@@ -417,13 +417,15 @@ def nonzero(fake_mode, func, arg):
             maxval = sys.maxsize - 1
 
             if not has_free_symbols(arg.numel()):
-                maxval = int(arg.numel())
+                # Make sure we don't set upper bound to 1
+                maxval = max(2, int(arg.numel()))
 
             _constrain_range_for_size(nnz, max=maxval)
 
         arg.nonzero_memo = nnz
 
-    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
+    # nonzero always returns a non-contiguous tensor
+    return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)
 
 
 @register_op_impl(torch.ops.aten.masked_select.default)
