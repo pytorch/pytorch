@@ -554,6 +554,8 @@ class FxGraphCachePickler(pickle.Pickler):
         """
         with io.BytesIO() as stream:
             pickler = cls(stream)
+            # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
+            pickler.fast = True  # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
             try:
                 pickler.dump(obj)
             except (TypeError, AttributeError) as e:
@@ -1560,7 +1562,7 @@ def split_aot_inductor_output_path(path: str) -> Tuple[str, str]:
 
 @clear_on_fresh_inductor_cache
 class CudaKernelParamCache:
-    cache: Dict[str, Dict[str, str]] = dict()
+    cache: Dict[str, Dict[str, str]] = {}
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
@@ -1597,6 +1599,8 @@ class AotCodeCompiler:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> str:
+        _set_gpu_runtime_env()  # cpp_extension consults the env
+
         picked_vec_isa = pick_vec_isa()
         vec_isa_cmd_gen = CppBuilder(
             name="o",
@@ -1793,7 +1797,6 @@ class AotCodeCompiler:
             use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
-
             (
                 object_output_name,
                 object_output_dir,
@@ -1872,7 +1875,6 @@ class AotCodeCompiler:
                 "linux": _compile_consts_linux,
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
-
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
             so_builder = CppBuilder(
                 name=output_name,
@@ -2490,6 +2492,10 @@ def validate_new_cpp_commands():
     use_absolute_path = [True, False]
     aot_mode = [False, True]
 
+    # Try to pass it in fb_code.
+    if config.is_fbcode():
+        return
+
     for x in cuda:
         for y in use_mmap_weights:
             for z in compile_only:
@@ -2903,8 +2909,8 @@ def touch(filename):
 
 @clear_on_fresh_inductor_cache
 class PyCodeCache:
-    cache: Dict[str, ModuleType] = dict()
-    linemaps: Dict[str, List[Tuple[Any, ...]]] = dict()
+    cache: Dict[str, ModuleType] = {}
+    linemaps: Dict[str, List[Tuple[Any, ...]]] = {}
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
@@ -3194,7 +3200,7 @@ class CUDACodeCache:
         input_path: str
         output_path: str
 
-    cache: Dict[str, CacheEntry] = dict()
+    cache: Dict[str, CacheEntry] = {}
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cu"
 
@@ -3279,7 +3285,7 @@ class ROCmCodeCache:
         input_path: str
         output_path: str
 
-    cache: Dict[str, CacheEntry] = dict()
+    cache: Dict[str, CacheEntry] = {}
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cpp"
     _logged_compiler_version = False
