@@ -1325,8 +1325,6 @@ class TestOptimRenewed(TestCase):
 
         def fwd_bwd(optim, w, b, i):
             optim.zero_grad()
-            if optim.__class__.__name__ == "SparseAdam":
-                param.grad = param.grad.to_sparse()
             loss = (w.mv(i) + b).pow(2).sum()
             loss.backward()
             return loss
@@ -1338,7 +1336,10 @@ class TestOptimRenewed(TestCase):
             # Prime the optimizer
             for _ in range(10):
                 if optim_info.step_requires_closure:
-                    optimizer.step(closure)
+                    if optimizer.__class__.__name__ == "SparseAdam":
+                        optimizer.step(closure, sparse=True)
+                    else:
+                        optimizer.step(closure)
                 else:
                     closure()
                     optimizer.step()
