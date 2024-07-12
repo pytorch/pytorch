@@ -4,6 +4,7 @@
 
 // NOLINTBEGIN(modernize*, readability*, bugprone-string-constructor)
 using c10::string_view;
+using c10::string_view_ext;
 
 namespace {
 namespace testutils {
@@ -242,18 +243,18 @@ TEST(StringViewTest, whenRemovingValidSuffix_thenWorks) {
 } // namespace test_remove_suffix
 
 namespace test_swap_function {
-constexpr std::pair<string_view, string_view> get() {
-  string_view first = "first";
-  string_view second = "second";
+constexpr std::pair<string_view_ext, string_view_ext> get() {
+  string_view_ext first = "first";
+  string_view_ext second = "second";
   swap(first, second);
   return std::make_pair(first, second);
 }
 TEST(StringViewTest, testSwapFunction) {
-  static_assert(string_view("second") == get().first, "");
-  static_assert(string_view("first") == get().second, "");
+  static_assert(string_view_ext("second") == get().first, "");
+  static_assert(string_view_ext("first") == get().second, "");
 
-  EXPECT_EQ(string_view("second"), get().first);
-  EXPECT_EQ(string_view("first"), get().second);
+  EXPECT_EQ(string_view_ext("second"), get().first);
+  EXPECT_EQ(string_view_ext("first"), get().second);
 }
 } // namespace test_swap_function
 
@@ -517,71 +518,77 @@ static_assert(!(string_view("hello") > string_view("helloa")), "");
 } // namespace test_greater_than
 
 namespace test_greater_or_equals_than {
-static_assert(string_view("") >= string_view(""), "");
-static_assert(string_view("a") >= string_view("a"), "");
-static_assert(string_view("hello") >= string_view("hello"), "");
-static_assert(string_view("hello") >= string_view(""), "");
-static_assert(string_view("hello") >= string_view("aello"), "");
-static_assert(string_view("hello") >= string_view("a"), "");
-static_assert(string_view("hello") >= string_view("abcdefghijklmno"), "");
-static_assert(string_view("hello") >= string_view("hela"), "");
-static_assert(string_view("hello") >= string_view("helao"), "");
-static_assert(string_view("hello") >= string_view("helaobcdefgh"), "");
-static_assert(string_view("hello") >= string_view("hell"), "");
-static_assert(!(string_view("") >= string_view("hello")), "");
-static_assert(!(string_view("hello") >= string_view("zello")), "");
-static_assert(!(string_view("hello") >= string_view("z")), "");
-static_assert(!(string_view("hello") >= string_view("zabcdefghijklmno")), "");
-static_assert(!(string_view("hello") >= string_view("helz")), "");
-static_assert(!(string_view("hello") >= string_view("helzo")), "");
-static_assert(!(string_view("hello") >= string_view("helzobcdefgh")), "");
-static_assert(!(string_view("hello") >= string_view("helloa")), "");
+static_assert(string_view_ext("") >= string_view_ext(""), "");
+static_assert(string_view_ext("a") >= string_view_ext("a"), "");
+static_assert(string_view_ext("hello") >= string_view_ext("hello"), "");
+static_assert(string_view_ext("hello") >= string_view_ext(""), "");
+static_assert(string_view_ext("hello") >= string_view_ext("aello"), "");
+static_assert(string_view_ext("hello") >= string_view_ext("a"), "");
+static_assert(
+    string_view_ext("hello") >= string_view_ext("abcdefghijklmno"),
+    "");
+static_assert(string_view_ext("hello") >= string_view_ext("hela"), "");
+static_assert(string_view_ext("hello") >= string_view_ext("helao"), "");
+static_assert(string_view_ext("hello") >= string_view_ext("helaobcdefgh"), "");
+static_assert(string_view_ext("hello") >= string_view_ext("hell"), "");
+static_assert(!(string_view_ext("") >= string_view_ext("hello")), "");
+static_assert(!(string_view_ext("hello") >= string_view_ext("zello")), "");
+static_assert(!(string_view_ext("hello") >= string_view_ext("z")), "");
+static_assert(
+    !(string_view_ext("hello") >= string_view_ext("zabcdefghijklmno")),
+    "");
+static_assert(!(string_view_ext("hello") >= string_view_ext("helz")), "");
+static_assert(!(string_view_ext("hello") >= string_view_ext("helzo")), "");
+static_assert(
+    !(string_view_ext("hello") >= string_view_ext("helzobcdefgh")),
+    "");
+static_assert(!(string_view_ext("hello") >= string_view_ext("helloa")), "");
 } // namespace test_greater_or_equals_than
 
 namespace test_starts_with {
-static_assert(string_view("hi").starts_with(string_view("hi")), "");
-static_assert(string_view("").starts_with(string_view("")), "");
-static_assert(string_view("hi2").starts_with(string_view("")), "");
-static_assert(!string_view("").starts_with(string_view("hi")), "");
-static_assert(string_view("hi2").starts_with(string_view("hi")), "");
-static_assert(!string_view("hi").starts_with(string_view("hi2")), "");
-static_assert(!string_view("hi").starts_with(string_view("ha")), "");
+static_assert(string_view_ext("hi").starts_with(string_view_ext("hi")), "");
+static_assert(string_view_ext("").starts_with(string_view_ext("")), "");
+static_assert(string_view_ext("hi2").starts_with(string_view_ext("")), "");
+static_assert(!string_view_ext("").starts_with(string_view_ext("hi")), "");
+static_assert(string_view_ext("hi2").starts_with(string_view_ext("hi")), "");
+static_assert(!string_view_ext("hi").starts_with(string_view_ext("hi2")), "");
+static_assert(!string_view_ext("hi").starts_with(string_view_ext("ha")), "");
 
-static_assert(string_view("hi").starts_with("hi"), "");
-static_assert(string_view("").starts_with(""), "");
-static_assert(string_view("hi2").starts_with(""), "");
-static_assert(!string_view("").starts_with("hi"), "");
-static_assert(string_view("hi2").starts_with("hi"), "");
-static_assert(!string_view("hi").starts_with("hi2"), "");
-static_assert(!string_view("hi").starts_with("ha"), "");
+static_assert(string_view_ext("hi").starts_with("hi"), "");
+static_assert(string_view_ext("").starts_with(""), "");
+static_assert(string_view_ext("hi2").starts_with(""), "");
+static_assert(!string_view_ext("").starts_with("hi"), "");
+static_assert(string_view_ext("hi2").starts_with("hi"), "");
+static_assert(!string_view_ext("hi").starts_with("hi2"), "");
+static_assert(!string_view_ext("hi").starts_with("ha"), "");
 
-static_assert(!string_view("").starts_with('a'), "");
-static_assert(!string_view("").starts_with('\0'), "");
-static_assert(!string_view("hello").starts_with('a'), "");
-static_assert(string_view("hello").starts_with('h'), "");
+static_assert(!string_view_ext("").starts_with('a'), "");
+static_assert(!string_view_ext("").starts_with('\0'), "");
+static_assert(!string_view_ext("hello").starts_with('a'), "");
+static_assert(string_view_ext("hello").starts_with('h'), "");
 } // namespace test_starts_with
 
 namespace test_ends_with {
-static_assert(string_view("hi").ends_with(string_view("hi")), "");
-static_assert(string_view("").ends_with(string_view("")), "");
-static_assert(string_view("hi2").ends_with(string_view("")), "");
-static_assert(!string_view("").ends_with(string_view("hi")), "");
-static_assert(string_view("hi2").ends_with(string_view("i2")), "");
-static_assert(!string_view("i2").ends_with(string_view("hi2")), "");
-static_assert(!string_view("hi").ends_with(string_view("ha")), "");
+static_assert(string_view_ext("hi").ends_with(string_view_ext("hi")), "");
+static_assert(string_view_ext("").ends_with(string_view_ext("")), "");
+static_assert(string_view_ext("hi2").ends_with(string_view_ext("")), "");
+static_assert(!string_view_ext("").ends_with(string_view_ext("hi")), "");
+static_assert(string_view_ext("hi2").ends_with(string_view_ext("i2")), "");
+static_assert(!string_view_ext("i2").ends_with(string_view_ext("hi2")), "");
+static_assert(!string_view_ext("hi").ends_with(string_view_ext("ha")), "");
 
-static_assert(string_view("hi").ends_with("hi"), "");
-static_assert(string_view("").ends_with(""), "");
-static_assert(string_view("hi2").ends_with(""), "");
-static_assert(!string_view("").ends_with("hi"), "");
-static_assert(string_view("hi2").ends_with("i2"), "");
-static_assert(!string_view("i2").ends_with("hi2"), "");
-static_assert(!string_view("hi").ends_with("ha"), "");
+static_assert(string_view_ext("hi").ends_with("hi"), "");
+static_assert(string_view_ext("").ends_with(""), "");
+static_assert(string_view_ext("hi2").ends_with(""), "");
+static_assert(!string_view_ext("").ends_with("hi"), "");
+static_assert(string_view_ext("hi2").ends_with("i2"), "");
+static_assert(!string_view_ext("i2").ends_with("hi2"), "");
+static_assert(!string_view_ext("hi").ends_with("ha"), "");
 
-static_assert(!string_view("").ends_with('a'), "");
-static_assert(!string_view("").ends_with('\0'), "");
-static_assert(!string_view("hello").ends_with('a'), "");
-static_assert(string_view("hello").ends_with('o'), "");
+static_assert(!string_view_ext("").ends_with('a'), "");
+static_assert(!string_view_ext("").ends_with('\0'), "");
+static_assert(!string_view_ext("hello").ends_with('a'), "");
+static_assert(string_view_ext("hello").ends_with('o'), "");
 } // namespace test_ends_with
 
 namespace test_find_overload1 {
@@ -656,486 +663,6 @@ static_assert(3 == string_view("ababa").find("ba", 3, 2), "");
 static_assert(string_view::npos == string_view("ababa").find("ba", 4, 2), "");
 static_assert(string_view::npos == string_view("abc").find("abcd", 0, 4), "");
 } // namespace test_find_overload3
-
-namespace test_find_overload4 {
-static_assert(0 == string_view("").find(""), "");
-static_assert(string_view::npos == string_view("").find("a"), "");
-static_assert(string_view::npos == string_view("").find("", 1), "");
-static_assert(0 == string_view("abc").find(""), "");
-static_assert(2 == string_view("abc").find("", 2), "");
-static_assert(0 == string_view("abc").find("a"), "");
-static_assert(0 == string_view("abc").find("ab"), "");
-static_assert(0 == string_view("abc").find("abc"), "");
-static_assert(1 == string_view("abc").find("bc"), "");
-static_assert(1 == string_view("abc").find("b"), "");
-static_assert(2 == string_view("abc").find("c"), "");
-static_assert(0 == string_view("abc").find("a"), "");
-static_assert(0 == string_view("abc").find("ab"), "");
-static_assert(0 == string_view("abc").find("abc"), "");
-static_assert(1 == string_view("ababa").find("ba"), "");
-static_assert(3 == string_view("ababa").find("ba", 2), "");
-static_assert(3 == string_view("ababa").find("ba", 3), "");
-static_assert(string_view::npos == string_view("ababa").find("ba", 4), "");
-static_assert(string_view::npos == string_view("abc").find("abcd"), "");
-} // namespace test_find_overload4
-
-namespace test_rfind_overload1 {
-static_assert(0 == string_view("").rfind(string_view("")), "");
-static_assert(string_view::npos == string_view("").rfind(string_view("a")), "");
-static_assert(0 == string_view("").rfind(string_view(""), 1), "");
-static_assert(3 == string_view("abc").rfind(string_view("")), "");
-static_assert(0 == string_view("abc").rfind(string_view(""), 0), "");
-static_assert(0 == string_view("abc").rfind(string_view("a")), "");
-static_assert(0 == string_view("abc").rfind(string_view("ab")), "");
-static_assert(0 == string_view("abc").rfind(string_view("abc")), "");
-static_assert(1 == string_view("abc").rfind(string_view("bc")), "");
-static_assert(1 == string_view("abc").rfind(string_view("b")), "");
-static_assert(2 == string_view("abc").rfind(string_view("c")), "");
-static_assert(0 == string_view("abc").rfind(string_view("a")), "");
-static_assert(0 == string_view("abc").rfind(string_view("ab")), "");
-static_assert(0 == string_view("abc").rfind(string_view("abc")), "");
-static_assert(3 == string_view("ababa").rfind(string_view("ba")), "");
-static_assert(1 == string_view("ababa").rfind(string_view("ba"), 2), "");
-static_assert(1 == string_view("ababa").rfind(string_view("ba"), 1), "");
-static_assert(
-    string_view::npos == string_view("ababa").rfind(string_view("ba"), 0),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").rfind(string_view("abcd")),
-    "");
-} // namespace test_rfind_overload1
-
-namespace test_rfind_overload2 {
-static_assert(string_view::npos == string_view("").rfind('a'), "");
-static_assert(0 == string_view("a").rfind('a'), "");
-static_assert(0 == string_view("abc").rfind('a'), "");
-static_assert(0 == string_view("a").rfind('a', 0), "");
-static_assert(1 == string_view("abc").rfind('b'), "");
-static_assert(string_view::npos == string_view("abc").rfind('b', 0), "");
-static_assert(1 == string_view("abc").rfind('b', 1), "");
-static_assert(2 == string_view("abc").rfind('c'), "");
-static_assert(string_view::npos == string_view("abc").rfind('c', 0), "");
-static_assert(string_view::npos == string_view("abc").rfind('c', 1), "");
-static_assert(2 == string_view("abc").rfind('c', 2), "");
-static_assert(2 == string_view("abc").rfind('c', 3), "");
-static_assert(0 == string_view("abc").rfind('a', 100), "");
-static_assert(string_view::npos == string_view("abc").rfind('z'), "");
-static_assert(4 == string_view("ababa").rfind('a'), "");
-static_assert(0 == string_view("ababa").rfind('a', 0), "");
-static_assert(0 == string_view("ababa").rfind('a', 1), "");
-static_assert(2 == string_view("ababa").rfind('a', 2), "");
-static_assert(2 == string_view("ababa").rfind('a', 3), "");
-static_assert(4 == string_view("ababa").rfind('a', 4), "");
-static_assert(4 == string_view("ababa").rfind('a', 5), "");
-} // namespace test_rfind_overload2
-
-namespace test_rfind_overload3 {
-static_assert(0 == string_view("").rfind("", string_view::npos, 0), "");
-static_assert(
-    string_view::npos == string_view("").rfind("a", string_view::npos, 1),
-    "");
-static_assert(0 == string_view("").rfind("", 1, 0), "");
-static_assert(3 == string_view("abc").rfind("", string_view::npos, 0), "");
-static_assert(0 == string_view("abc").rfind("", 0, 0), "");
-static_assert(0 == string_view("abc").rfind("a", string_view::npos, 1), "");
-static_assert(0 == string_view("abc").rfind("ab", string_view::npos, 2), "");
-static_assert(0 == string_view("abc").rfind("abc", string_view::npos, 3), "");
-static_assert(1 == string_view("abc").rfind("bc", string_view::npos, 2), "");
-static_assert(1 == string_view("abc").rfind("b", string_view::npos, 1), "");
-static_assert(2 == string_view("abc").rfind("c", string_view::npos, 1), "");
-static_assert(0 == string_view("abc").rfind("a", string_view::npos, 1), "");
-static_assert(0 == string_view("abc").rfind("ab", string_view::npos, 2), "");
-static_assert(0 == string_view("abc").rfind("abc", string_view::npos, 3), "");
-static_assert(3 == string_view("ababa").rfind("ba", string_view::npos, 2), "");
-static_assert(1 == string_view("ababa").rfind("ba", 2, 2), "");
-static_assert(1 == string_view("ababa").rfind("ba", 1, 2), "");
-static_assert(string_view::npos == string_view("ababa").rfind("ba", 0, 2), "");
-static_assert(
-    string_view::npos == string_view("abc").rfind("abcd", string_view::npos, 4),
-    "");
-} // namespace test_rfind_overload3
-
-namespace test_rfind_overload4 {
-static_assert(0 == string_view("").rfind(""), "");
-static_assert(string_view::npos == string_view("").rfind("a"), "");
-static_assert(0 == string_view("").rfind("", 1), "");
-static_assert(3 == string_view("abc").rfind(""), "");
-static_assert(0 == string_view("abc").rfind("", 0), "");
-static_assert(0 == string_view("abc").rfind("a"), "");
-static_assert(0 == string_view("abc").rfind("ab"), "");
-static_assert(0 == string_view("abc").rfind("abc"), "");
-static_assert(1 == string_view("abc").rfind("bc"), "");
-static_assert(1 == string_view("abc").rfind("b"), "");
-static_assert(2 == string_view("abc").rfind("c"), "");
-static_assert(0 == string_view("abc").rfind("a"), "");
-static_assert(0 == string_view("abc").rfind("ab"), "");
-static_assert(0 == string_view("abc").rfind("abc"), "");
-static_assert(3 == string_view("ababa").rfind("ba"), "");
-static_assert(1 == string_view("ababa").rfind("ba", 2), "");
-static_assert(1 == string_view("ababa").rfind("ba", 1), "");
-static_assert(string_view::npos == string_view("ababa").rfind("ba", 0), "");
-static_assert(string_view::npos == string_view("abc").rfind("abcd"), "");
-} // namespace test_rfind_overload4
-
-namespace test_find_first_of_overload1 {
-static_assert(
-    string_view::npos == string_view("").find_first_of(string_view("")),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_first_of(string_view("a")),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_first_of(string_view("abc")),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of(string_view("")),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of(string_view("d")),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of(string_view("def")),
-    "");
-
-static_assert(0 == string_view("abcabc").find_first_of(string_view("a")), "");
-static_assert(1 == string_view("abcabc").find_first_of(string_view("b")), "");
-static_assert(2 == string_view("abcabc").find_first_of(string_view("c")), "");
-static_assert(1 == string_view("abcabc").find_first_of(string_view("bc")), "");
-static_assert(1 == string_view("abcabc").find_first_of(string_view("cbd")), "");
-
-static_assert(
-    string_view::npos == string_view("").find_first_of(string_view(""), 1),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_first_of(string_view("a"), 1),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_first_of(string_view("abc"), 100),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of(string_view(""), 1),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of(string_view("d"), 3),
-    "");
-static_assert(
-    string_view::npos ==
-        string_view("abc").find_first_of(string_view("def"), 2),
-    "");
-
-static_assert(
-    3 == string_view("abcabc").find_first_of(string_view("a"), 1),
-    "");
-static_assert(
-    4 == string_view("abcabc").find_first_of(string_view("b"), 3),
-    "");
-static_assert(
-    5 == string_view("abcabc").find_first_of(string_view("c"), 5),
-    "");
-static_assert(
-    4 == string_view("abcabc").find_first_of(string_view("bc"), 3),
-    "");
-static_assert(
-    4 == string_view("abcabc").find_first_of(string_view("cbd"), 4),
-    "");
-} // namespace test_find_first_of_overload1
-
-namespace test_find_first_of_overload2 {
-static_assert(string_view::npos == string_view("").find_first_of('a'), "");
-static_assert(0 == string_view("a").find_first_of('a'), "");
-static_assert(0 == string_view("abc").find_first_of('a'), "");
-static_assert(string_view::npos == string_view("a").find_first_of('a', 1), "");
-static_assert(1 == string_view("abc").find_first_of('b'), "");
-static_assert(1 == string_view("abc").find_first_of('b', 1), "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of('b', 2),
-    "");
-static_assert(2 == string_view("abc").find_first_of('c'), "");
-static_assert(2 == string_view("abc").find_first_of('c', 1), "");
-static_assert(2 == string_view("abc").find_first_of('c', 2), "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of('c', 3),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of('a', 100),
-    "");
-static_assert(string_view::npos == string_view("abc").find_first_of('z'), "");
-static_assert(0 == string_view("ababa").find_first_of('a'), "");
-static_assert(0 == string_view("ababa").find_first_of('a', 0), "");
-static_assert(2 == string_view("ababa").find_first_of('a', 1), "");
-static_assert(2 == string_view("ababa").find_first_of('a', 2), "");
-static_assert(4 == string_view("ababa").find_first_of('a', 3), "");
-static_assert(4 == string_view("ababa").find_first_of('a', 4), "");
-static_assert(
-    string_view::npos == string_view("ababa").find_first_of('a', 5),
-    "");
-} // namespace test_find_first_of_overload2
-
-namespace test_find_first_of_overload3 {
-static_assert(
-    string_view::npos == string_view("").find_first_of("ab", 0, 0),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_first_of("abc", 0, 1),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_first_of("abcdef", 0, 3),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of("abcdef", 0, 0),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of("defa", 0, 1),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of("defabc", 0, 3),
-    "");
-
-static_assert(0 == string_view("abcabc").find_first_of("abc", 0, 1), "");
-static_assert(1 == string_view("abcabc").find_first_of("bac", 0, 1), "");
-static_assert(2 == string_view("abcabc").find_first_of("cab", 0, 1), "");
-static_assert(1 == string_view("abcabc").find_first_of("bccda", 0, 2), "");
-static_assert(1 == string_view("abcabc").find_first_of("cbdab", 0, 3), "");
-
-static_assert(
-    string_view::npos == string_view("").find_first_of("ab", 1, 0),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_first_of("abc", 1, 1),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_first_of("abcdef", 100, 3),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of("abcdef", 1, 0),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of("defa", 3, 1),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of("defabc", 2, 3),
-    "");
-
-static_assert(3 == string_view("abcabc").find_first_of("abc", 1, 1), "");
-static_assert(4 == string_view("abcabc").find_first_of("bac", 3, 1), "");
-static_assert(5 == string_view("abcabc").find_first_of("cab", 5, 1), "");
-static_assert(4 == string_view("abcabc").find_first_of("bccda", 3, 2), "");
-static_assert(4 == string_view("abcabc").find_first_of("cbdab", 4, 3), "");
-} // namespace test_find_first_of_overload3
-
-namespace test_find_first_of_overload4 {
-static_assert(string_view::npos == string_view("").find_first_of(""), "");
-static_assert(string_view::npos == string_view("").find_first_of("a"), "");
-static_assert(string_view::npos == string_view("").find_first_of("abc"), "");
-static_assert(string_view::npos == string_view("abc").find_first_of(""), "");
-static_assert(string_view::npos == string_view("abc").find_first_of("d"), "");
-static_assert(string_view::npos == string_view("abc").find_first_of("def"), "");
-
-static_assert(0 == string_view("abcabc").find_first_of("a"), "");
-static_assert(1 == string_view("abcabc").find_first_of("b"), "");
-static_assert(2 == string_view("abcabc").find_first_of("c"), "");
-static_assert(1 == string_view("abcabc").find_first_of("bc"), "");
-static_assert(1 == string_view("abcabc").find_first_of("cbd"), "");
-
-static_assert(string_view::npos == string_view("").find_first_of("", 1), "");
-static_assert(string_view::npos == string_view("").find_first_of("a", 1), "");
-static_assert(
-    string_view::npos == string_view("").find_first_of("abc", 100),
-    "");
-static_assert(string_view::npos == string_view("abc").find_first_of("", 1), "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of("d", 3),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_of("def", 2),
-    "");
-
-static_assert(3 == string_view("abcabc").find_first_of("a", 1), "");
-static_assert(4 == string_view("abcabc").find_first_of("b", 3), "");
-static_assert(5 == string_view("abcabc").find_first_of("c", 5), "");
-static_assert(4 == string_view("abcabc").find_first_of("bc", 3), "");
-static_assert(4 == string_view("abcabc").find_first_of("cbd", 4), "");
-} // namespace test_find_first_of_overload4
-
-namespace test_find_last_of_overload1 {
-static_assert(
-    string_view::npos == string_view("").find_last_of(string_view("")),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_last_of(string_view("a")),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_last_of(string_view("abc")),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_of(string_view("")),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_of(string_view("d")),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_of(string_view("def")),
-    "");
-
-static_assert(3 == string_view("abcabc").find_last_of(string_view("a")), "");
-static_assert(4 == string_view("abcabc").find_last_of(string_view("b")), "");
-static_assert(5 == string_view("abcabc").find_last_of(string_view("c")), "");
-static_assert(5 == string_view("abcabc").find_last_of(string_view("bc")), "");
-static_assert(5 == string_view("abcabc").find_last_of(string_view("cbd")), "");
-
-static_assert(
-    string_view::npos == string_view("").find_last_of(string_view(""), 1),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_last_of(string_view("a"), 0),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_last_of(string_view("abc"), 100),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_of(string_view(""), 1),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_of(string_view("d"), 3),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_of(string_view("def"), 2),
-    "");
-
-static_assert(0 == string_view("abcabc").find_last_of(string_view("a"), 2), "");
-static_assert(1 == string_view("abcabc").find_last_of(string_view("b"), 3), "");
-static_assert(2 == string_view("abcabc").find_last_of(string_view("c"), 2), "");
-static_assert(
-    2 == string_view("abcabc").find_last_of(string_view("bc"), 3),
-    "");
-static_assert(
-    2 == string_view("abcabc").find_last_of(string_view("cbd"), 2),
-    "");
-} // namespace test_find_last_of_overload1
-
-namespace test_find_last_of_overload2 {
-static_assert(string_view::npos == string_view("").find_last_of('a'), "");
-static_assert(0 == string_view("a").find_last_of('a'), "");
-static_assert(0 == string_view("abc").find_last_of('a'), "");
-static_assert(0 == string_view("a").find_last_of('a', 0), "");
-static_assert(1 == string_view("abc").find_last_of('b'), "");
-static_assert(string_view::npos == string_view("abc").find_last_of('b', 0), "");
-static_assert(1 == string_view("abc").find_last_of('b', 1), "");
-static_assert(2 == string_view("abc").find_last_of('c'), "");
-static_assert(string_view::npos == string_view("abc").find_last_of('c', 0), "");
-static_assert(string_view::npos == string_view("abc").find_last_of('c', 1), "");
-static_assert(2 == string_view("abc").find_last_of('c', 2), "");
-static_assert(2 == string_view("abc").find_last_of('c', 3), "");
-static_assert(0 == string_view("abc").find_last_of('a', 100), "");
-static_assert(string_view::npos == string_view("abc").find_last_of('z'), "");
-static_assert(4 == string_view("ababa").find_last_of('a'), "");
-static_assert(0 == string_view("ababa").find_last_of('a', 0), "");
-static_assert(0 == string_view("ababa").find_last_of('a', 1), "");
-static_assert(2 == string_view("ababa").find_last_of('a', 2), "");
-static_assert(2 == string_view("ababa").find_last_of('a', 3), "");
-static_assert(4 == string_view("ababa").find_last_of('a', 4), "");
-static_assert(4 == string_view("ababa").find_last_of('a', 5), "");
-} // namespace test_find_last_of_overload2
-
-namespace test_find_last_of_overload3 {
-static_assert(
-    string_view::npos ==
-        string_view("").find_last_of("ab", string_view::npos, 0),
-    "");
-static_assert(
-    string_view::npos ==
-        string_view("").find_last_of("abc", string_view::npos, 1),
-    "");
-static_assert(
-    string_view::npos ==
-        string_view("").find_last_of("abcdef", string_view::npos, 3),
-    "");
-static_assert(
-    string_view::npos ==
-        string_view("abc").find_last_of("abcdef", string_view::npos, 0),
-    "");
-static_assert(
-    string_view::npos ==
-        string_view("abc").find_last_of("defa", string_view::npos, 1),
-    "");
-static_assert(
-    string_view::npos ==
-        string_view("abc").find_last_of("defcba", string_view::npos, 3),
-    "");
-
-static_assert(
-    3 == string_view("abcabc").find_last_of("abc", string_view::npos, 1),
-    "");
-static_assert(
-    4 == string_view("abcabc").find_last_of("bca", string_view::npos, 1),
-    "");
-static_assert(
-    5 == string_view("abcabc").find_last_of("cab", string_view::npos, 1),
-    "");
-static_assert(
-    5 == string_view("abcabc").find_last_of("bcab", string_view::npos, 2),
-    "");
-static_assert(
-    5 == string_view("abcabc").find_last_of("cbdac", string_view::npos, 3),
-    "");
-
-static_assert(
-    string_view::npos == string_view("").find_last_of("ab", 1, 0),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_last_of("abc", 0, 1),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_last_of("abcdef", 100, 3),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_of("abcdef", 1, 0),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_of("defa", 3, 1),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_of("defcba", 2, 3),
-    "");
-
-static_assert(0 == string_view("abcabc").find_last_of("abc", 2, 1), "");
-static_assert(1 == string_view("abcabc").find_last_of("bca", 3, 1), "");
-static_assert(2 == string_view("abcabc").find_last_of("cab", 2, 1), "");
-static_assert(2 == string_view("abcabc").find_last_of("bcab", 3, 2), "");
-static_assert(2 == string_view("abcabc").find_last_of("cbdac", 2, 2), "");
-} // namespace test_find_last_of_overload3
-
-namespace test_find_last_of_overload4 {
-static_assert(string_view::npos == string_view("").find_last_of(""), "");
-static_assert(string_view::npos == string_view("").find_last_of("a"), "");
-static_assert(string_view::npos == string_view("").find_last_of("abc"), "");
-static_assert(string_view::npos == string_view("abc").find_last_of(""), "");
-static_assert(string_view::npos == string_view("abc").find_last_of("d"), "");
-static_assert(string_view::npos == string_view("abc").find_last_of("def"), "");
-
-static_assert(3 == string_view("abcabc").find_last_of("a"), "");
-static_assert(4 == string_view("abcabc").find_last_of("b"), "");
-static_assert(5 == string_view("abcabc").find_last_of("c"), "");
-static_assert(5 == string_view("abcabc").find_last_of("bc"), "");
-static_assert(5 == string_view("abcabc").find_last_of("cbd"), "");
-
-static_assert(string_view::npos == string_view("").find_last_of("", 1), "");
-static_assert(string_view::npos == string_view("").find_last_of("a", 0), "");
-static_assert(
-    string_view::npos == string_view("").find_last_of("abc", 100),
-    "");
-static_assert(string_view::npos == string_view("abc").find_last_of("", 1), "");
-static_assert(string_view::npos == string_view("abc").find_last_of("d", 3), "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_of("def", 2),
-    "");
-
-static_assert(0 == string_view("abcabc").find_last_of("a", 2), "");
-static_assert(1 == string_view("abcabc").find_last_of("b", 3), "");
-static_assert(2 == string_view("abcabc").find_last_of("c", 2), "");
-static_assert(2 == string_view("abcabc").find_last_of("bc", 3), "");
-static_assert(2 == string_view("abcabc").find_last_of("cbd", 2), "");
-} // namespace test_find_last_of_overload4
 
 namespace test_find_first_not_of_overload1 {
 static_assert(
@@ -1313,139 +840,6 @@ static_assert(4 == string_view("abcabc").find_first_not_of("abac", 3, 1), "");
 static_assert(4 == string_view("abcabc").find_first_not_of("dadab", 4, 2), "");
 } // namespace test_find_first_not_of_overload3
 
-namespace test_find_first_not_of_overload4 {
-static_assert(string_view::npos == string_view("").find_first_not_of(""), "");
-static_assert(string_view::npos == string_view("").find_first_not_of("a"), "");
-static_assert(
-    string_view::npos == string_view("").find_first_not_of("abc"),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_not_of("abc"),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_not_of("acdb"),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_not_of("defabc"),
-    "");
-
-static_assert(0 == string_view("abcabc").find_first_not_of(""), "");
-static_assert(0 == string_view("abcabc").find_first_not_of("bc"), "");
-static_assert(1 == string_view("abcabc").find_first_not_of("ac"), "");
-static_assert(2 == string_view("abcabc").find_first_not_of("ab"), "");
-static_assert(1 == string_view("abcabc").find_first_not_of("a"), "");
-static_assert(1 == string_view("abcabc").find_first_not_of("da"), "");
-
-static_assert(
-    string_view::npos == string_view("").find_first_not_of("", 1),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_first_not_of("a", 1),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_first_not_of("abc", 100),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_not_of("abc", 1),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_not_of("acdb", 3),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_first_not_of("defabc", 2),
-    "");
-
-static_assert(1 == string_view("abcabc").find_first_not_of("", 1), "");
-static_assert(3 == string_view("abcabc").find_first_not_of("bc", 1), "");
-static_assert(4 == string_view("abcabc").find_first_not_of("ac", 4), "");
-static_assert(5 == string_view("abcabc").find_first_not_of("ab", 5), "");
-static_assert(4 == string_view("abcabc").find_first_not_of("a", 3), "");
-static_assert(4 == string_view("abcabc").find_first_not_of("da", 4), "");
-} // namespace test_find_first_not_of_overload4
-
-namespace test_find_last_not_of_overload1 {
-static_assert(
-    string_view::npos == string_view("").find_last_not_of(string_view("")),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_last_not_of(string_view("a")),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_last_not_of(string_view("abc")),
-    "");
-static_assert(
-    string_view::npos ==
-        string_view("abc").find_last_not_of(string_view("abc")),
-    "");
-static_assert(
-    string_view::npos ==
-        string_view("abc").find_last_not_of(string_view("acdb")),
-    "");
-static_assert(
-    string_view::npos ==
-        string_view("abc").find_last_not_of(string_view("defabc")),
-    "");
-
-static_assert(5 == string_view("abcabc").find_last_not_of(string_view("")), "");
-static_assert(
-    3 == string_view("abcabc").find_last_not_of(string_view("bc")),
-    "");
-static_assert(
-    4 == string_view("abcabc").find_last_not_of(string_view("ac")),
-    "");
-static_assert(
-    5 == string_view("abcabc").find_last_not_of(string_view("ab")),
-    "");
-static_assert(
-    4 == string_view("abcabc").find_last_not_of(string_view("c")),
-    "");
-static_assert(
-    4 == string_view("abcabc").find_last_not_of(string_view("ca")),
-    "");
-
-static_assert(
-    string_view::npos == string_view("").find_last_not_of(string_view(""), 1),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_last_not_of(string_view("a"), 0),
-    "");
-static_assert(
-    string_view::npos ==
-        string_view("").find_last_not_of(string_view("abc"), 100),
-    "");
-static_assert(
-    string_view::npos ==
-        string_view("abc").find_last_not_of(string_view("abc"), 1),
-    "");
-static_assert(
-    string_view::npos ==
-        string_view("abc").find_last_not_of(string_view("acdb"), 3),
-    "");
-static_assert(
-    string_view::npos ==
-        string_view("abc").find_last_not_of(string_view("defabc"), 2),
-    "");
-
-static_assert(
-    4 == string_view("abcabc").find_last_not_of(string_view(""), 4),
-    "");
-static_assert(
-    0 == string_view("abcabc").find_last_not_of(string_view("bc"), 2),
-    "");
-static_assert(
-    1 == string_view("abcabc").find_last_not_of(string_view("ac"), 2),
-    "");
-static_assert(
-    2 == string_view("abcabc").find_last_not_of(string_view("ab"), 2),
-    "");
-static_assert(
-    4 == string_view("abcabc").find_last_not_of(string_view("c"), 4),
-    "");
-static_assert(
-    1 == string_view("abcabc").find_last_not_of(string_view("ca"), 2),
-    "");
-} // namespace test_find_last_not_of_overload1
-
 namespace test_find_last_not_of_overload2 {
 static_assert(string_view::npos == string_view("").find_last_not_of('a'), "");
 static_assert(string_view::npos == string_view("a").find_last_not_of('a'), "");
@@ -1546,52 +940,6 @@ static_assert(2 == string_view("abcabc").find_last_not_of("abc", 2, 2), "");
 static_assert(4 == string_view("abcabc").find_last_not_of("caba", 4, 1), "");
 static_assert(1 == string_view("abcabc").find_last_not_of("cacab", 2, 2), "");
 } // namespace test_find_last_not_of_overload3
-
-namespace test_find_last_not_of_overload4 {
-static_assert(string_view::npos == string_view("").find_last_not_of(""), "");
-static_assert(string_view::npos == string_view("").find_last_not_of("a"), "");
-static_assert(string_view::npos == string_view("").find_last_not_of("abc"), "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_not_of("abc"),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_not_of("acdb"),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_not_of("defabc"),
-    "");
-
-static_assert(5 == string_view("abcabc").find_last_not_of(""), "");
-static_assert(3 == string_view("abcabc").find_last_not_of("bc"), "");
-static_assert(4 == string_view("abcabc").find_last_not_of("ac"), "");
-static_assert(5 == string_view("abcabc").find_last_not_of("ab"), "");
-static_assert(4 == string_view("abcabc").find_last_not_of("c"), "");
-static_assert(4 == string_view("abcabc").find_last_not_of("ca"), "");
-
-static_assert(string_view::npos == string_view("").find_last_not_of("", 1), "");
-static_assert(
-    string_view::npos == string_view("").find_last_not_of("a", 0),
-    "");
-static_assert(
-    string_view::npos == string_view("").find_last_not_of("abc", 100),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_not_of("abc", 1),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_not_of("acdb", 3),
-    "");
-static_assert(
-    string_view::npos == string_view("abc").find_last_not_of("defabc", 2),
-    "");
-
-static_assert(4 == string_view("abcabc").find_last_not_of("", 4), "");
-static_assert(0 == string_view("abcabc").find_last_not_of("bc", 2), "");
-static_assert(1 == string_view("abcabc").find_last_not_of("ac", 2), "");
-static_assert(2 == string_view("abcabc").find_last_not_of("ab", 2), "");
-static_assert(4 == string_view("abcabc").find_last_not_of("c", 4), "");
-static_assert(1 == string_view("abcabc").find_last_not_of("ca", 2), "");
-} // namespace test_find_last_not_of_overload4
 
 namespace test_output_operator {
 void testOutputIterator(const std::string& str) {
