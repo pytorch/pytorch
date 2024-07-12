@@ -968,7 +968,7 @@ def register_vmap(
     if isinstance(op, torch._ops.OpOverload):
         op = op._name
     opdef = _maybe_get_opdef(op)
-    if opdef is not None and opdef._vmap_fn is not None:
+    if opdef is not None:
         opdef.register_vmap(func)
         return
 
