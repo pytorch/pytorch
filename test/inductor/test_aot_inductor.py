@@ -1511,7 +1511,15 @@ class AOTInductorTestsTemplate:
 
                 return [add_, mul_]
 
-        self.check_model(M(), ({"x": torch.ones(5, device=self.device), "y": torch.ones(5, device=self.device)},))
+        self.check_model(
+            M(),
+            (
+                {
+                    "x": torch.ones(5, device=self.device),
+                    "y": torch.ones(5, device=self.device),
+                },
+            ),
+        )
 
     @requires_multigpu()
     def test_non_default_cuda_device(self):
