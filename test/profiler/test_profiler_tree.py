@@ -715,6 +715,10 @@ class TestProfilerTree(TestCase):
         x = TorchDispatchTensor(torch.ones((1,)))
         y = torch.ones((1,))
 
+        # warmup round
+        with torch.profiler.profile(with_stack=True):
+            x + y
+
         with torch.profiler.profile(with_stack=True) as p:
             x + y
 
@@ -725,6 +729,10 @@ class TestProfilerTree(TestCase):
               torch/profiler/profiler.py(...): __enter__
                 ...
               aten::add
+                torch/_library/simple_registry.py(...): find_torch_dispatch_rule
+                  torch/_library/simple_registry.py(...): find
+                  torch/_library/simple_registry.py(...): find
+                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
                 test_profiler_tree.py(...): __torch_dispatch__
                   torch/utils/_pytree.py(...): tree_map
                     ...
