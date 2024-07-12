@@ -1960,6 +1960,14 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cuda_tunableop_get_validators,
      METH_NOARGS,
      nullptr},
+    {"_gds_register_buffer",
+     THCPModule_gds_register_buffer,
+     METH_VARARGS,
+     nullptr},
+    {"_gds_deregister_buffer",
+     THCPModule_gds_deregister_buffer,
+     METH_VARARGS,
+     nullptr},
     {nullptr}};
 
 PyMethodDef* THCPModule_methods() {
