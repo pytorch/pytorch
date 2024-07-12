@@ -197,7 +197,7 @@ class HalideTests(TestCase):
         fn(a, b, c)
         self.assertEqual(c, a + b)
 
-    @unittest.skipUnless(has_triton, "requires triton")
+    @unittest.skipUnless(has_triton(), "requires triton")
     def test_random_consistency(self):
         seed = 1234
         shape = (3, 3)

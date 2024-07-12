@@ -5,10 +5,17 @@ except ImportError:
     hl = None
 
 PHILOX_N_ROUNDS_DEFAULT = 10  # Default number of rounds for philox
-PHILOX_KEY_A_U32 = hl.u32(0x9E3779B9)
-PHILOX_KEY_B_U32 = hl.u32(0xBB67AE85)
-PHILOX_ROUND_A_U32 = hl.u32(0xD2511F53)
-PHILOX_ROUND_B_U32 = hl.u32(0xCD9E8D57)
+
+if hl is not None:
+    PHILOX_KEY_A_U32 = hl.u32(0x9E3779B9)
+    PHILOX_KEY_B_U32 = hl.u32(0xBB67AE85)
+    PHILOX_ROUND_A_U32 = hl.u32(0xD2511F53)
+    PHILOX_ROUND_B_U32 = hl.u32(0xCD9E8D57)
+else:
+    PHILOX_KEY_A_U32 = None
+    PHILOX_KEY_B_U32 = None
+    PHILOX_ROUND_A_U32 = None
+    PHILOX_ROUND_B_U32 = None
 
 
 def _pair_uniform_to_normal(u1, u2):
@@ -114,35 +121,3 @@ def randint64(seed: hl.Expr, offsets: hl.Expr, low, high):
     result = result % hl.cast(hl.UInt(64), size)
     result = hl.cast(hl.Int(64), result) + low
     return result
-
-
-def main(seed: int, offsets: list[int]):
-    import numpy as np
-
-    seed_var = hl.Var("seed")
-    offset_var = hl.Var("offset")
-
-    seed_input = hl.Buffer(np.array([seed], dtype=np.uint32))
-    offset_input = hl.Buffer(np.array(offsets, dtype=np.uint32))
-
-    seed_input = seed_input[seed_var]
-    offset_input = offset_input[offset_var]
-
-    randints = hl.Func("randints")
-
-    y = randint4x(seed_input, offset_input, PHILOX_N_ROUNDS_DEFAULT)
-    # y = rand4x(seed_input, offset_input, PHILOX_N_ROUNDS_DEFAULT) ok
-    # y = randint64(seed_input, offset_input, 0, 1000) ok
-    # y = randint(seed_input, offset_input, n_rounds)
-    # y = rand(seed_input, offset_input, n_rounds)
-    # y = randn(seed_input, offset_input)
-
-    randints[seed_var, offset_var] = y
-
-    out = randints.realize([1, len(offsets)])
-    return np.asanyarray(out)
-
-
-if __name__ == "__main__":
-    out = main(5123, [0, 1, 2, 100])
-    print(out)
