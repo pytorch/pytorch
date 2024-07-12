@@ -1404,11 +1404,6 @@ class TestOptimRenewed(TestCase):
                 optim.zero_grad()
                 loss = mod(i).sum()
                 loss.backward()
-                if optim.__class__.__name__ == "SparseAdam":
-                    if w.grad is not None:
-                        w.grad = w.grad.to_sparse()
-                    if b.grad is not None:
-                        b.grad = b.grad.to_sparse()
                 return loss
 
             for _ in range(3):
