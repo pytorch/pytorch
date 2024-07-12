@@ -726,6 +726,8 @@ def fx_codegen_and_compile(
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
 
+    inductor_counters = counters["inductor"].copy()
+
     # lift the maximum depth of the Python interpreter stack
     # to adapt large/deep models
     sys.setrecursionlimit(max(sys.getrecursionlimit(), 2000))
@@ -912,6 +914,7 @@ def fx_codegen_and_compile(
                 output_strides,
                 V.graph.disable_cudagraphs_reason,
                 metrics_helper.get_deltas(),
+                counters["inductor"] - inductor_counters,
             )
 
     return compiled_graph
