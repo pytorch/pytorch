@@ -823,6 +823,9 @@ class ListIteratorVariable(VariableTracker):
 
         return super().call_method(tx, name, args, kwargs)
 
+    def python_type(self):
+        return type(iter([]))
+
     def as_python_constant(self):
         if self.index > 0:
             raise NotImplementedError
