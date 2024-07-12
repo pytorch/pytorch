@@ -206,6 +206,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
+  virtual std::string _graph_repr() {
+    return str();
+  };
   virtual std::optional<int64_t> nested_int() {
     return std::nullopt;
   }
