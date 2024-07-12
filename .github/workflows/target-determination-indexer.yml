@@ -58,7 +58,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           repository: clee2000/llm-target-determinator
-          ref: main
+          ref: 6d9ed7b2c1ba11aa44f90f6f248a5edbc8f8e3e1
           path: llm-target-determinator
 
       - name: Configure AWS credentials
