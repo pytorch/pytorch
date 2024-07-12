@@ -1,5 +1,4 @@
 import logging
-import typing
 from typing import Any, Dict, Optional, Tuple
 
 import sympy
@@ -17,10 +16,6 @@ from ..select_algorithm import (
 from ..utils import use_aten_gemm_kernels, use_triton_template
 from .mm import _is_static_problem  # TODO(yangsiyu) move to mm_common
 from .mm_common import mm_args, mm_grid, scaled_mm_configs
-
-if typing.TYPE_CHECKING:
-    from triton import Config  # noqa: TCH004
-
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -194,8 +189,8 @@ scaled_mm_bias_template = TritonTemplate(
 aten__fp8_mm = ExternKernelChoice(torch._scaled_mm, "at::_scaled_mm")
 
 
-def scaled_mm_options(
-    config: Config,
+def scaled_mm_options(  # type: ignore[no-untyped-def]
+    config,  # triton.Config
     sym_m: sympy.core.numbers.Integer,
     sym_n: sympy.core.numbers.Integer,
     sym_k: sympy.core.numbers.Integer,
