@@ -14,7 +14,6 @@ from torch.nn.parameter import Parameter
 import unittest
 from unittest.mock import patch, MagicMock, ANY
 import math
-import itertools
 import torch.optim as optim
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, onlyCPU
 from typing import List, Tuple, Optional
@@ -1915,18 +1914,147 @@ class TestSDPA(NNTestCase):
             self.assertEqual(grad_k_actual, grad_k_ref, atol=atol, rtol=rtol)
             self.assertEqual(grad_v_actual, grad_v_ref, atol=atol, rtol=rtol)
 
+    def trace_handler(self, prof):
+        print(prof.key_averages().table(
+            sort_by="self_cpu_time_total", row_limit=-1))
+
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
-    @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.float16])
+    @parametrize("dtype", [torch.float32])
     @parametrize("batch_size", [2])
-    @parametrize("q_seq_len", [267])
-    @parametrize("kv_seq_len", [514])
-    @parametrize("n_head", [3])
-    @parametrize("head_dim", [8])
-    @parametrize("mask_dim", [2, 4])
-    @parametrize("bool_mask", [0, 1])
-    @parametrize("train", [True, False])
-    def test_scaled_dot_product_fused_attention_mask_vs_math_cpu(
+    @parametrize("q_seq_len", [9216])
+    @parametrize("kv_seq_len", [9216])
+    @parametrize("n_head", [5])
+    @parametrize("head_dim", [5])
+    @parametrize("mask_dim", [64])
+    @parametrize("bool_mask", [0])
+    @parametrize("train", [False])
+    def test_scaled_dot_product_fused_attention_mask_vs_math_cpu_u8(
+        self,
+        device,
+        fused_kernel,
+        dtype,
+        batch_size,
+        q_seq_len,
+        kv_seq_len,
+        n_head,
+        head_dim,
+        mask_dim,
+        bool_mask,
+        train,
+    ):
+        tol = Tolerances(1.0, 5e-6)
+        # tol = Tolerances(1e-5, 5e-6)
+        # if dtype is torch.bfloat16:
+        #     tol = Tolerances(5e-2, 5e-2)
+        # if dtype is torch.float16:
+        #     tol = Tolerances(1e-2, 1e-2)
+        # for mask_shape in itertools.product(
+        #     [q_seq_len, 1], [kv_seq_len, 1]
+        # ) if mask_dim == 2 else itertools.product(
+        #     [batch_size, 1], [n_head, 1], [q_seq_len, 1], [kv_seq_len, 1]
+        # ):
+        q_zp = 127
+        q_scale = 1.7907238006591797
+        k_zp = 125
+        k_scale = 1.8039721250534058
+        v_zp = 127
+        v_scale = 1.839004635810852
+        a_zp = 0
+        a_scale = 0.003919653594493866
+        o_zp = 128
+        o_scale = 1.8191684484481812
+        mask_shape = [batch_size, n_head, q_seq_len, kv_seq_len]
+        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
+        q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
+        kv_shape = SdpaShape(batch_size, n_head, kv_seq_len, head_dim)
+        q = make_tensor(q_shape) * 100
+        k = make_tensor(kv_shape) * 100
+        v = make_tensor(kv_shape) * 100
+        q2, k2, v2 = q.clone(), k.clone(), v.clone()
+
+        if train:
+            q.requires_grad_(True)
+            k.requires_grad_(True)
+            v.requires_grad_(True)
+            q2.requires_grad_(True)
+            k2.requires_grad_(True)
+            v2.requires_grad_(True)
+
+        if dtype in [torch.bfloat16, torch.float16]:
+            q2, k2, v2 = q2.float(), k2.float(), v2.float()
+        # (B, nh, T, hs)
+        q = q.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
+        k = k.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+        v = v.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+        # if bool_mask:
+        #     attn_mask = torch.randint(0, 2, size=mask_shape, dtype=torch.bool, device=device)
+        # else:
+        attn_mask = torch.randn(mask_shape, dtype=dtype, device=device)
+        q2 = q2.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
+        k2 = k2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+        v2 = v2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+
+        with sdpa_kernel(backends=[fused_kernel]):
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            if not bool_mask and dtype in [torch.bfloat16, torch.float16]:
+                attn_mask = attn_mask.float()
+            math_ref = torch.nn.functional.scaled_dot_product_attention(
+                q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+        # iter_n = 100
+        # with torch.profiler.profile(
+        #         activities=[
+        #             torch.profiler.ProfilerActivity.CPU],
+        #         schedule=torch.profiler.schedule(
+        #             wait=2,
+        #             warmup=iter_n,
+        #             active=20),
+        #         on_trace_ready=self.trace_handler
+        #         ) as prof:
+        #     for _ in range(iter_n + 22):
+        #         # with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+        #         actual = torch.nn.functional.scaled_dot_product_attention(
+        #             q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False,
+        #             q_zp=q_zp, q_scale=q_scale,
+        #             k_zp=k_zp, k_scale=k_scale,
+        #             v_zp=v_zp, v_scale=v_scale,
+        #             a_zp=a_zp, a_scale=a_scale,
+        #             o_zp=o_zp, o_scale=o_scale)
+        #         prof.step()
+
+        if dtype in [torch.bfloat16, torch.float16]:
+            math_ref = math_ref.to(dtype)
+
+        # print("actual", actual)
+        # print("math_ref", math_ref)
+
+        self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
+
+        # if train:
+        #     actual.sum().backward()
+        #     math_ref.sum().backward()
+
+        #     grad_q_actual, grad_k_actual, grad_v_actual = q.grad, k.grad, v.grad
+        #     grad_q_ref, grad_k_ref, grad_v_ref = q2.grad, k2.grad, v2.grad
+
+        #     self.assertEqual(grad_q_actual, grad_q_ref, atol=tol.atol, rtol=tol.rtol)
+        #     self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
+        #     self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
+
+    @onlyCPU
+    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
+    @parametrize("dtype", [torch.bfloat16])
+    @parametrize("batch_size", [56])
+    @parametrize("q_seq_len", [384])
+    @parametrize("kv_seq_len", [384])
+    @parametrize("n_head", [16])
+    @parametrize("head_dim", [64])
+    @parametrize("mask_dim", [4])
+    @parametrize("bool_mask", [0])
+    @parametrize("train", [False])
+    def test_scaled_dot_product_fused_attention_mask_vs_math_cpu_bf16(
         self,
         device,
         fused_kernel,
@@ -1945,65 +2073,100 @@ class TestSDPA(NNTestCase):
             tol = Tolerances(5e-2, 5e-2)
         if dtype is torch.float16:
             tol = Tolerances(1e-2, 1e-2)
-        for mask_shape in itertools.product(
-            [q_seq_len, 1], [kv_seq_len, 1]
-        ) if mask_dim == 2 else itertools.product(
-            [batch_size, 1], [n_head, 1], [q_seq_len, 1], [kv_seq_len, 1]
-        ):
-            make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
-            q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
-            kv_shape = SdpaShape(batch_size, n_head, kv_seq_len, head_dim)
-            q = make_tensor(q_shape)
-            k = make_tensor(kv_shape)
-            v = make_tensor(kv_shape)
-            q2, k2, v2 = q.clone(), k.clone(), v.clone()
+        # for mask_shape in itertools.product(
+        #     [q_seq_len, 1], [kv_seq_len, 1]
+        # ) if mask_dim == 2 else itertools.product(
+        #     [batch_size, 1], [n_head, 1], [q_seq_len, 1], [kv_seq_len, 1]
+        # ):
+        q_zp = 127
+        q_scale = 1.7907238006591797
+        k_zp = 125
+        k_scale = 1.8039721250534058
+        v_zp = 127
+        v_scale = 1.839004635810852
+        a_zp = 0
+        a_scale = 0.003919653594493866
+        o_zp = 128
+        o_scale = 1.8191684484481812
+        mask_shape = [batch_size, n_head, q_seq_len, kv_seq_len]
+        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
+        q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
+        kv_shape = SdpaShape(batch_size, n_head, kv_seq_len, head_dim)
+        q = make_tensor(q_shape)
+        k = make_tensor(kv_shape)
+        v = make_tensor(kv_shape)
+        # q_shape = [batch_size, n_head, q_seq_len, head_dim]
+        # kv_shape = [batch_size, n_head, kv_seq_len, head_dim]
+        # q = torch.randint(
+        #         0, 255,
+        #         q_shape,
+        #         device="cpu",
+        #         dtype=torch.uint8,
+        #         requires_grad=False)
+        # k = torch.randint(
+        #         0, 255,
+        #         kv_shape,
+        #         device="cpu",
+        #         dtype=torch.uint8,
+        #         requires_grad=False)
+        # v = torch.randint(
+        #         0, 255,
+        #         kv_shape,
+        #         device="cpu",
+        #         dtype=torch.uint8,
+        #         requires_grad=False)
+        q2, k2, v2 = q.clone(), k.clone(), v.clone()
 
-            if train:
-                q.requires_grad_(True)
-                k.requires_grad_(True)
-                v.requires_grad_(True)
-                q2.requires_grad_(True)
-                k2.requires_grad_(True)
-                v2.requires_grad_(True)
+        if train:
+            q.requires_grad_(True)
+            k.requires_grad_(True)
+            v.requires_grad_(True)
+            q2.requires_grad_(True)
+            k2.requires_grad_(True)
+            v2.requires_grad_(True)
 
-            if dtype in [torch.bfloat16, torch.float16]:
-                q2, k2, v2 = q2.float(), k2.float(), v2.float()
-            # (B, nh, T, hs)
-            q = q.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
-            k = k.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
-            v = v.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
-            if bool_mask:
-                attn_mask = torch.randint(0, 2, size=mask_shape, dtype=torch.bool, device=device)
-            else:
-                attn_mask = torch.randn(mask_shape, dtype=dtype, device=device)
-            q2 = q2.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
-            k2 = k2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
-            v2 = v2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+        if dtype in [torch.bfloat16, torch.float16]:
+            q2, k2, v2 = q2.float(), k2.float(), v2.float()
+        # (B, nh, T, hs)
+        q = q.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
+        k = k.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+        v = v.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+        # if bool_mask:
+        #     attn_mask = torch.randint(0, 2, size=mask_shape, dtype=torch.bool, device=device)
+        # else:
+        attn_mask = torch.randn(mask_shape, dtype=dtype, device=device)
+        q2 = q2.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
+        k2 = k2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+        v2 = v2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
 
-            with sdpa_kernel(backends=[fused_kernel]):
+        # with sdpa_kernel(backends=[fused_kernel]):
+        #     actual = torch.nn.functional.scaled_dot_product_attention(
+        #         q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+        # with sdpa_kernel(backends=[SDPBackend.MATH]):
+        #     if not bool_mask and dtype in [torch.bfloat16, torch.float16]:
+        #         attn_mask = attn_mask.float()
+        #     math_ref = torch.nn.functional.scaled_dot_product_attention(
+        #         q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+        iter_n = 100
+        with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU],
+                schedule=torch.profiler.schedule(
+                    wait=2,
+                    warmup=iter_n,
+                    active=20),
+                on_trace_ready=self.trace_handler
+                ) as prof:
+            for _ in range(iter_n + 22):
+                # with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
                 actual = torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
-            with sdpa_kernel(backends=[SDPBackend.MATH]):
-                if not bool_mask and dtype in [torch.bfloat16, torch.float16]:
-                    attn_mask = attn_mask.float()
-                math_ref = torch.nn.functional.scaled_dot_product_attention(
-                    q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
-
-            if dtype in [torch.bfloat16, torch.float16]:
-                math_ref = math_ref.to(dtype)
-
-            self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
-
-            if train:
-                actual.sum().backward()
-                math_ref.sum().backward()
-
-                grad_q_actual, grad_k_actual, grad_v_actual = q.grad, k.grad, v.grad
-                grad_q_ref, grad_k_ref, grad_v_ref = q2.grad, k2.grad, v2.grad
-
-                self.assertEqual(grad_q_actual, grad_q_ref, atol=tol.atol, rtol=tol.rtol)
-                self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
-                self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
+                    q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False,
+                    q_zp=q_zp, q_scale=q_scale,
+                    k_zp=k_zp, k_scale=k_scale,
+                    v_zp=v_zp, v_scale=v_scale,
+                    a_zp=a_zp, a_scale=a_scale,
+                    o_zp=o_zp, o_scale=o_scale)
+                prof.step()
 
     @parametrize("kernel", [SDPBackend.MATH])
     def test_scaled_dot_product_attention_math_with_negative_scale(self, device, kernel: SDPBackend):

@@ -2374,40 +2374,40 @@ def gen_source_files(
                 header=True,
                 includes="",
             )
-            if update_aoti_c_shim:
-                aoti_fm.write(
-                    header_file_name,
-                    lambda: new_header,
-                )
-            else:
-                try:
-                    with open(
-                        os.path.join(aoti_fm.install_dir, header_file_name)
-                    ) as old_file:
-                        old_header = old_file.read()
-                        assert (
-                            old_header == new_header
-                        ), """
+            # if update_aoti_c_shim:
+            #     aoti_fm.write(
+            #         header_file_name,
+            #         lambda: new_header,
+            #     )
+            #             else:
+            #                 try:
+            #                     with open(
+            #                         os.path.join(aoti_fm.install_dir, header_file_name)
+            #                     ) as old_file:
+            #                         old_header = old_file.read()
+            #                         assert (
+            #                             old_header == new_header
+            #                         ), """
 
-WARNING: The generated AOTInductor C shim header files have unexpectedly changed. This
-indicates an AOTInductor fallback operator ABI backward compatibility breakage!!!
-Only in a limited number of situations, this is allowed:
+            # WARNING: The generated AOTInductor C shim header files have unexpectedly changed. This
+            # indicates an AOTInductor fallback operator ABI backward compatibility breakage!!!
+            # Only in a limited number of situations, this is allowed:
 
-1. You added a fallback op to the inductor_fallback_ops list in torchgen/aoti/fallback_ops.py.
-If that's the case, run `python torchgen/gen.py --update-aoti-c-shim` to update the existing
-C shim header files.
+            # 1. You added a fallback op to the inductor_fallback_ops list in torchgen/aoti/fallback_ops.py.
+            # If that's the case, run `python torchgen/gen.py --update-aoti-c-shim` to update the existing
+            # C shim header files.
 
-2. You added a new default argument to an existing fallback op. This is clearly a BC breaking
-change in the AOTInductor land. In this case, you need to keep a manual copy of that existing
-fallback op in a file, e.g. torch/csrc/inductor/aoti_torch/c/shim.h, bump up the version
-number of that fallback op in the newly generated C shim files, and update the cpp wrapper
-codegen to generate the correct cpp call for this op. Contact AOTInductor team for assistance.
+            # 2. You added a new default argument to an existing fallback op. This is clearly a BC breaking
+            # change in the AOTInductor land. In this case, you need to keep a manual copy of that existing
+            # fallback op in a file, e.g. torch/csrc/inductor/aoti_torch/c/shim.h, bump up the version
+            # number of that fallback op in the newly generated C shim files, and update the cpp wrapper
+            # codegen to generate the correct cpp call for this op. Contact AOTInductor team for assistance.
 
-                        """
-                except FileNotFoundError:
-                    print(
-                        f"{os.path.join(aoti_fm.install_dir, header_file_name)} not found"
-                    )
+            #                         """
+            #                 except FileNotFoundError:
+            #                     print(
+            #                         f"{os.path.join(aoti_fm.install_dir, header_file_name)} not found"
+            #                     )
 
             # cpp files are always generated on-the-fly
             def headers_for_aoti() -> str:

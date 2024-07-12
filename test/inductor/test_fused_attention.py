@@ -4,10 +4,10 @@ import itertools
 import math
 
 import torch
-import torch._inductor.config
 import torch.utils.checkpoint
 from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.utils import counters
+from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import (
@@ -72,10 +72,12 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
             dropout_arg = [training] if has_dropout else []
             torch.manual_seed(1234)
+            # breakpoint()
             result1 = dot_prod_attention(*(args1 + dropout_arg))
 
             counters.clear()
             torch.manual_seed(1234)
+            # with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]): #FLASH_ATTENTION, MATH
             result2, source_code = run_and_get_code(
                 torch.compile(dot_prod_attention, fullgraph=True),
                 *(args2 + dropout_arg),
@@ -92,6 +94,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
             # some tests configured with very low dropout where we still want to check equality
             if not has_dropout or override_check_equal:
+                # print("result1: ", result1)
+                # print("result2: ", result2)
                 self.assertEqual(result1, result2, atol=atol, rtol=1.3e-6)
 
             if training:
@@ -960,6 +964,98 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=False,
         )
 
+    @skipIfRocm
+    @config.patch({"freezing": True})
+    def _test_sdpa_rewriter_20(self):
+        if not self.use_static_shapes:
+            self.skipTest("Causes IndexError. TODO: investigate")
+
+        # uint8 sdpa
+        import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
+        from torch._export import capture_pre_autograd_graph
+        from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
+        from torch.ao.quantization.quantizer.x86_inductor_quantizer import (
+            X86InductorQuantizer,
+        )
+
+        # torch.set_printoptions(threshold=10_000)
+        # torch.manual_seed(37)
+
+        class SelfAttnLikeModule(torch.nn.Module):
+            def __init__(
+                self,
+                input_dim,
+                num_attention_heads=None,
+                attention_head_size=None,
+            ) -> None:
+                super().__init__()
+                self.input_dim = input_dim
+                self.q_proj = torch.nn.Linear(input_dim, input_dim, bias=False)
+                self.k_proj = torch.nn.Linear(input_dim, input_dim, bias=False)
+                self.v_proj = torch.nn.Linear(input_dim, input_dim, bias=False)
+                self.softmax = torch.nn.Softmax(dim=-1)
+                assert num_attention_heads is not None
+                assert attention_head_size is not None
+                self.num_attention_heads = num_attention_heads
+                self.attention_head_size = attention_head_size
+                self.all_head_size = self.num_attention_heads * self.attention_head_size
+                self.dense = torch.nn.Linear(self.all_head_size, self.all_head_size)
+                self.dropout = torch.nn.Dropout(0)
+
+            def transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
+                new_x_shape = x.size()[:-1] + (
+                    self.num_attention_heads,
+                    self.attention_head_size,
+                )
+                x = x.view(new_x_shape)
+                return x.permute([0, 2, 1, 3])
+
+            def forward(self, x, mask):
+                q = self.q_proj(x)
+                k = self.k_proj(x)
+                v = self.v_proj(x)
+                q = self.transpose_for_scores(q)
+                k = self.transpose_for_scores(k)
+                v = self.transpose_for_scores(v)
+                scores = torch.matmul(q, k.transpose(-1, -2)) / (self.input_dim**0.5)
+                scores = scores + mask
+                attention = self.softmax(scores)
+                attention = self.dropout(attention)
+                context_layer = torch.matmul(attention, v)
+                context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+                context_layer = context_layer.view(
+                    context_layer.size()[:-2] + (self.all_head_size,)
+                )
+                return self.dense(context_layer)
+
+        def _generate_qdq_quantized_model(mod, inputs, quantizer):
+            with torch.no_grad():
+                export_model = capture_pre_autograd_graph(mod, inputs)
+                prepare_model = prepare_pt2e(export_model, quantizer)
+                prepare_model(*inputs)
+                convert_model = convert_pt2e(prepare_model)
+                torch.ao.quantization.move_exported_model_to_eval(convert_model)
+                return convert_model
+
+        mod = SelfAttnLikeModule(
+            input_dim=64 * 16,
+            num_attention_heads=16,
+            attention_head_size=64,
+        ).eval()
+        inputs = [
+            torch.randn((56, 384, 64 * 16), device=self.device) * 100,
+            torch.randn((56, 1, 1, 384), device=self.device),
+        ]
+
+        quantizer = X86InductorQuantizer()
+        quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
+        quantizer.set_function_type_qconfig(
+            torch.matmul, quantizer.get_global_quantization_config()
+        )
+        convert_model = _generate_qdq_quantized_model(mod, inputs, quantizer)
+
+        self._check_common(convert_model, args1=inputs, check_train=False, atol=1.0)
+
 
 if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
 
@@ -1087,6 +1183,9 @@ if HAS_CPU:
         )
         test_sdpa_rewriter_19_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_19
+        )
+        test_sdpa_rewriter_20_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_20
         )
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):
