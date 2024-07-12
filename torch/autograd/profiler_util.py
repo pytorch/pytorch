@@ -580,7 +580,11 @@ class FunctionEvent(FormattedTimesMixin):
                 # each legacy cpu events has a single (fake) kernel
                 return sum(kinfo.duration for kinfo in self.kernels)
         else:
-            assert self.device_type in [DeviceType.CUDA, DeviceType.PrivateUse1]
+            assert self.device_type in [
+                DeviceType.CUDA,
+                DeviceType.PrivateUse1,
+                DeviceType.MTIA,
+            ]
             return self.time_range.elapsed_us()
 
     @property
@@ -600,7 +604,11 @@ class FunctionEvent(FormattedTimesMixin):
                 [child.device_time_total for child in self.cpu_children]
             )
         else:
-            assert self.device_type in [DeviceType.CUDA, DeviceType.PrivateUse1]
+            assert self.device_type in [
+                DeviceType.CUDA,
+                DeviceType.PrivateUse1,
+                DeviceType.MTIA,
+            ]
             return self.device_time_total
 
     @property
@@ -961,7 +969,11 @@ def _build_table(
         if evt.device_type == DeviceType.CPU and evt.is_legacy:
             # in legacy profiler, kernel info is stored in cpu events
             sum_self_device_time_total += evt.self_device_time_total
-        elif evt.device_type in [DeviceType.CUDA, DeviceType.PrivateUse1]:
+        elif evt.device_type in [
+            DeviceType.CUDA,
+            DeviceType.PrivateUse1,
+            DeviceType.MTIA,
+        ]:
             # in kineto profiler, there're events with the correct device type (e.g. CUDA)
             sum_self_device_time_total += evt.self_device_time_total
 
