@@ -377,7 +377,11 @@ class PyCodegen:
         return [
             self._create_load_const(lambda: None),
             # 3.13 swapped NULL and callable
-            *((create_instruction("SWAP", arg=2),) if sys.version_info >= (3, 13) else ()),
+            *(
+                (create_instruction("SWAP", arg=2),)
+                if sys.version_info >= (3, 13)
+                else ()
+            ),
             *create_call_function(0, False),
             create_instruction("POP_TOP"),
         ]
@@ -410,10 +414,12 @@ class PyCodegen:
             if sys.version_info < (3, 11):
                 output.append(self.create_load_const(fn_name))
             if sys.version_info >= (3, 13):
-                output.extend([
-                    create_instruction("MAKE_FUNCTION"),
-                    create_instruction("SET_FUNCTION_ATTRIBUTE", arg=0x08),
-                ])
+                output.extend(
+                    [
+                        create_instruction("MAKE_FUNCTION"),
+                        create_instruction("SET_FUNCTION_ATTRIBUTE", arg=0x08),
+                    ]
+                )
             else:
                 output.append(create_instruction("MAKE_FUNCTION", arg=0x08))
 
