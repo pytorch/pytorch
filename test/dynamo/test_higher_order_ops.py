@@ -541,6 +541,67 @@ class GraphModule(torch.nn.Module):
         # be the input.
         self._test_wrap_simple(f, default_args_generator((x,)), 2, 3)
 
+    def test_register_subclass(self):
+        from torch._higher_order_ops.cond import cond_op
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        a = torch.tensor([1.0, 0.0, 1.0])
+        b = torch.randn(3)
+        t = TwoTensor(a, b)
+        res = cond_op(a.sum() > 0, torch.sin, torch.cos, (t,))
+        self.assertEqual(res.a, torch.sin(a))
+        self.assertEqual(res.b, torch.sin(b))
+
+        called = 0
+
+        # Using cond.py_impl
+        @cond_op.py_impl(TwoTensor)
+        def _(pred, true_fn, false_fn, operands):
+            nonlocal called
+            called += 1
+            assert len(operands) == 1
+            a = cond_op(pred, true_fn, false_fn, (operands[0].a,))
+            b = cond_op(pred, true_fn, false_fn, (operands[0].b,))
+            return TwoTensor(a, b)
+
+        res = cond_op(a.sum() > 0, torch.sin, torch.cos, (t,))
+        self.assertEqual(res.a, torch.sin(a))
+        self.assertEqual(res.b, torch.sin(b))
+        self.assertEqual(called, 1)
+
+    def test_register_mode(self):
+        from torch._higher_order_ops.cond import cond_op
+
+        torch_dispatch_called = 0
+
+        class MyMode(torch.utils._python_dispatch.TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                nonlocal torch_dispatch_called
+                torch_dispatch_called += 1
+                return func(*args, **kwargs)
+
+        a = torch.tensor([1.0, 0.1, 1.0])
+        pred = a.sum() > 0
+        with MyMode():
+            res = cond_op(pred, torch.sin, torch.cos, (a,))
+        self.assertEqual(res, a.sin())
+        self.assertEqual(torch_dispatch_called, 1)
+
+        py_impl_called = 0
+
+        # Using cond.py_impl
+        @cond_op.py_impl(MyMode)
+        def _(mode, pred, true_fn, false_fn, operands):
+            nonlocal py_impl_called
+            py_impl_called += 1
+            return cond_op(pred, true_fn, false_fn, operands)
+
+        a = torch.tensor([1.0, 0.1, 1.0])
+        pred = a.sum() > 0
+        with MyMode():
+            res = cond_op(pred, torch.sin, torch.cos, (a,))
+        self.assertEqual(res, a.sin())
+
     def test_capture_value_created_in_subgraph(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
