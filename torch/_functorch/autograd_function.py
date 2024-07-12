@@ -302,9 +302,14 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
             f"https://pytorch.org/docs/main/notes/extending.func.html"
         )
 
-    return custom_function_call_vmap_helper(interpreter, autograd_function.vmap, autograd_function, *operands)
+    return custom_function_call_vmap_helper(
+        interpreter, autograd_function.vmap, autograd_function, *operands
+    )
 
-def custom_function_call_vmap_helper(interpreter, vmap_function, autograd_function, *operands):
+
+def custom_function_call_vmap_helper(
+    interpreter, vmap_function, autograd_function, *operands
+):
     current_level = interpreter.level()
     info = VmapInfo(
         batch_size=interpreter.batch_size(),
@@ -335,6 +340,7 @@ def custom_function_call_vmap_helper(interpreter, vmap_function, autograd_functi
     return wrap_outputs_maintaining_identity(
         unwrapped_output, unwrapped_operands, operands, wrap_fn, out_dims=out_dims
     )
+
 
 def custom_function_call_vmap_generate_rule(interpreter, autograd_function, *operands):
     unwrapped_operands, in_dims = unwrap_batched(operands, interpreter.level())
