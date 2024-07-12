@@ -714,7 +714,7 @@ class AOTInductorTestsTemplate:
 
             def forward(self, x, weight, bias, scale_a, scale_b):
                 weight = weight.to(torch.float8_e4m3fn)
-                output, updated_amax = torch._scaled_mm(
+                output = torch._scaled_mm(
                     x,
                     weight,
                     bias=input_bias,
