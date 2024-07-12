@@ -746,6 +746,42 @@ graph():
                 actual_result.append(node.meta.get("torch_fn"))
         self.assertEqual(actual_result, expected_result)
 
+    def test_export_predispatch_custom_ops_warnings(self):
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        @foo.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return foo(x)
+
+        x = torch.randn(3)
+
+        # Assert no warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            torch.export.export(Foo(), (x,))
+
+        # Assert warning for CompositeImplictAutograd op
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("foo123(Tensor x) -> Tensor")
+            lib.impl("foo123", lambda x: x.sin(), "CompositeImplicitAutograd")
+
+            class Bar(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.mylib.foo123(x)
+
+            with self.assertWarnsRegex(
+                UserWarning, "CompositeImplicitAutograd and have functional schema"
+            ):
+                with warnings.catch_warnings():
+                    warnings.simplefilter("always")
+                    torch.export.export(Bar(), (x,))
+
     def test_export_preserve_linear_at_aot_level(self):
         class Foo(torch.nn.Module):
             def __init__(self):
