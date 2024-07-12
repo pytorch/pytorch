@@ -125,6 +125,7 @@ def run_functionalized_fw_and_collect_metadata(
     keep_input_mutations: bool,
     # TODO: refactor to kill this flag
     is_train: bool = False,
+    # Note: this is guaranteed to be set when running under dynamo
     static_input_indices: Optional[List[int]] = None,
     pre_dispatch: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:

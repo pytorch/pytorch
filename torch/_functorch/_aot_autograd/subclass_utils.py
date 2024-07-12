@@ -106,54 +106,47 @@ def create_subclass_meta(
 # a list of tensors that we would then need to concat together.
 # Instead, we specialize the logic for the inference vs. joint graph case.
 # NOTE: this function is hot, since we unwrap tensor subclass inputs at runtime
-def unwrap_tensor_subclasses(
-    wrapped_args, *, is_joint_structure: bool, return_indices: bool = False
-):
+def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
     def concat_inner_tensors_from_subclasses(xs):
         xs_inner = []
-        index_remap = []
-        for i, x in enumerate(xs):
-            num_indices = 1
+        for x in xs:
             if is_traceable_wrapper_subclass(x):
-                tensors = get_plain_tensors(x)
-                num_indices = len(tensors)
-                xs_inner.extend(tensors)
+                xs_inner.extend(get_plain_tensors(x))
             else:
                 xs_inner.append(x)
-
-            index_remap.extend([i] * num_indices)
-
-        return xs_inner, index_remap
+        return xs_inner
 
     if is_joint_structure:
         assert isinstance(wrapped_args, tuple) and len(wrapped_args) == 2
         assert isinstance(wrapped_args[0], (tuple, list)) and isinstance(
             wrapped_args[1], (tuple, list)
         )
-        unwrapped_args_fw, index_remap_0 = concat_inner_tensors_from_subclasses(
-            wrapped_args[0]
-        )
-        unwrapped_args_tangents, index_remap_1 = concat_inner_tensors_from_subclasses(
-            wrapped_args[1]
-        )
-        if return_indices:
-            unwrapped_args = (
-                (unwrapped_args_fw, index_remap_0),
-                (unwrapped_args_tangents, index_remap_1),
-            )
-        else:
-            unwrapped_args = (unwrapped_args_fw, unwrapped_args_tangents)
+        unwrapped_args_fw = concat_inner_tensors_from_subclasses(wrapped_args[0])
+        unwrapped_args_tangents = concat_inner_tensors_from_subclasses(wrapped_args[1])
+        unwrapped_args = (unwrapped_args_fw, unwrapped_args_tangents)
     else:
         assert isinstance(wrapped_args, (list, tuple))
-        unwrapped_args_fw, index_remap = concat_inner_tensors_from_subclasses(
-            wrapped_args
-        )
-        if return_indices:
-            unwrapped_args = unwrapped_args_fw, index_remap
-        else:
-            unwrapped_args = unwrapped_args_fw
-
+        unwrapped_args_fw = concat_inner_tensors_from_subclasses(wrapped_args)
+        unwrapped_args = unwrapped_args_fw
     return unwrapped_args
+
+
+def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
+    static_input_indices = set(static_input_indices)
+    new_ind = 0
+    remapped_static_indices = []
+    for i, arg in enumerate(wrapped_args):
+        num_indices = 1
+        if is_traceable_wrapper_subclass(arg):
+            num_indices = len(get_plain_tensors(arg))
+
+        for _ in range(num_indices):
+            if i in static_input_indices:
+                remapped_static_indices.append(new_ind)
+
+            new_ind += 1
+
+    return remapped_static_indices
 
 
 # Turns a flattened list of tensor arguments into (maybe) subclass tensors.
