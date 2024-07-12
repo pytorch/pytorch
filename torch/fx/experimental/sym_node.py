@@ -247,6 +247,19 @@ class SymNode:
         return self.str()
 
     def __repr__(self):
+        rep = [
+            f"SymNode({self.expr}, shape_env={self.shape_env}, pytype={self.pytype}",
+        ]
+        if self._hint is not None:
+            rep.append(f"hint={self._hint}")
+        if self.constant is not None:
+            rep.append(f"constant={self.constant}")
+        if self.fx_node is not None:
+            rep.append(f"fx_node={self.fx_node}")
+        return ", ".join(rep) + ")"
+
+    def _graph_repr(self) -> builtins.str:
+        # Representation used by GraphModule to create a pythonic version of a graph
         return self.str()
 
     # These methods call the metaprogrammed methods, they're hand written
