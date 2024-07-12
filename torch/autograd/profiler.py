@@ -639,6 +639,7 @@ class profile:
 
 class record_function(_ContextDecorator):
     """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
+    Label will only appear if CPU activity tracing is enabled.
 
     It is useful when tracing the code profile.
 
