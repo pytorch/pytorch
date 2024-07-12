@@ -1642,7 +1642,7 @@ def compute_mutation_region_ids(graph: torch.fx.GraphModule) -> None:
 class PatternMatcherPass:
     def __init__(
         self,
-        prevent_match_across_mutations: bool = True,  # tmp comment to trigger CI
+        prevent_match_across_mutations: bool = True,
         pass_name: Optional[str] = None,
     ) -> None:
         super().__init__()
