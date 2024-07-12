@@ -1504,7 +1504,7 @@ class InstructionTranslatorBase(
             # 3.13 swapped null and callable
             null = self.pop()
             assert isinstance(null, NullVariable)
-            
+
         fn = self.pop()
 
         if sys.version_info >= (3, 11) and sys.version_info < (3, 13):
@@ -2262,13 +2262,15 @@ class InstructionTranslatorBase(
     def CALL_KW(self, inst):
         self._call(inst, call_kw=True)
 
-    @break_graph_if_unsupported(push=1)
     def TO_BOOL(self, inst):
-        value = self.pop()
-        if value.is_python_constant():
-            self.push(ConstantVariable(bool(value.as_python_constant())))
-        else:
-            self.push(BuiltinVariable(bool).call_function(self, [value], {}))
+        # TO_BOOL only precedes a conditional jump or UNARY_NOT (see compile.c in CPython)
+        # So we can skip this instruction as long as we remember to codegen a TO_BOOL
+        # before conditional jumps/UNARY_NOT.
+        assert self.next_instruction.opname in (
+            "POP_JUMP_IF_TRUE",
+            "POP_JUMP_IF_FALSE",
+            "UNARY_NOT",
+        )
 
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
