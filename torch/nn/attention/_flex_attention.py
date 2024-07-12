@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Callable, List, Optional, Tuple, Union
 
 import torch
+from torch import Tensor
 from torch._higher_order_ops.flex_attention import (
     flex_attention as flex_attention_hop,
     TransformGetItemToIndex,
@@ -35,11 +36,11 @@ def _compose(*fs):
 
 
 _score_mod_signature = Callable[
-    [torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor
+    [Tensor, Tensor, Tensor, Tensor, Tensor], Tensor
 ]
 
 _mask_fn_signature = Callable[
-    [torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor
+    [Tensor, Tensor, Tensor, Tensor], Tensor
 ]
 
 
@@ -89,21 +90,21 @@ def _vmap_for_bhqkv(
 
 
 def _identity(
-    score: torch.Tensor,
-    batch: torch.Tensor,
-    head: torch.Tensor,
-    token_q: torch.Tensor,
-    token_kv: torch.Tensor,
-) -> torch.Tensor:
+    score: Tensor,
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
     return score
 
 
 def _no_mask(
-    batch: torch.Tensor,
-    head: torch.Tensor,
-    token_q: torch.Tensor,
-    token_kv: torch.Tensor,
-) -> torch.Tensor:
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
     return token_q.new_ones(size=(), dtype=torch.bool, device=batch.device)
 
 
@@ -111,28 +112,32 @@ _DEFAULT_SPARSE_BLOCK_SIZE = 128
 
 
 class BlockMask:
-    kv_num_blocks: torch.Tensor
-    kv_indices: torch.Tensor
-    q_num_blocks: torch.Tensor
-    q_indices: torch.Tensor
-    full_kv_num_blocks: Optional[torch.Tensor]
-    full_kv_indices: Optional[torch.Tensor]
-    full_q_num_blocks: Optional[torch.Tensor]
-    full_q_indices: Optional[torch.Tensor]
+    """
+    BlockMask is our format for representing a block-sparse attention mask.
+    It is a variation of 
+    """
+    kv_num_blocks: Tensor
+    kv_indices: Tensor
+    q_num_blocks: Tensor
+    q_indices: Tensor
+    full_kv_num_blocks: Optional[Tensor]
+    full_kv_indices: Optional[Tensor]
+    full_q_num_blocks: Optional[Tensor]
+    full_q_indices: Optional[Tensor]
     KV_BLOCK_SIZE: int
     Q_BLOCK_SIZE: int
     mask_fn: _mask_fn_signature
 
     def __init__(
         self,
-        kv_num_blocks,
-        kv_indices,
-        q_num_blocks,
-        q_indices,
-        full_kv_num_blocks,
-        full_kv_indices,
-        full_q_num_blocks,
-        full_q_indices,
+        kv_num_blocks: Tensor,
+        kv_indices: Tensor,
+        q_num_blocks: Tensor,
+        q_indices: Tensor,
+        full_kv_num_blocks: Optional[Tensor],
+        full_kv_indices: Optional[Tensor],
+        full_q_num_blocks: Optional[Tensor],
+        full_q_indices: Optional[Tensor],
         KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
         Q_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
         mask_fn=None,
@@ -177,7 +182,7 @@ class BlockMask:
 
     def __getitem__(self, index) -> "BlockMask":
         new_values = [
-            x[index] if isinstance(x, torch.Tensor) else x for x in self.as_tuple()
+            x[index] if isinstance(x, Tensor) else x for x in self.as_tuple()
         ]
         return BlockMask(*new_values)
 
@@ -215,7 +220,7 @@ class BlockMask:
         dense_ratio = computed_size / total_size
         return 100 * (1 - dense_ratio)
 
-    def to_dense(self) -> torch.Tensor:
+    def to_dense(self) -> Tensor:
         """
         Returns a dense block that is equivalent to the block mask.
         """
@@ -237,7 +242,7 @@ class BlockMask:
             valid_indices = torch.where(index_mask, kv_indices, num_cols)
 
             # set the values in 'a' to 1 where the indices are valid
-            dense_mask[row_indices, valid_indices] = torch.tensor(
+            dense_mask[row_indices, valid_indices] = Tensor(
                 1, device=dense_mask.device, dtype=dense_mask.dtype
             )
             return dense_mask[:, :num_cols]
@@ -326,11 +331,11 @@ def _broadcast_to_dim(x, dim):
 
 
 def _convert_mask_to_block_mask(
-    mask: torch.Tensor,
+    mask: Tensor,
     KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
     separate_full_blocks: bool = False,
-) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+) -> Tuple[Tensor, Optional[Tensor]]:
     assert mask.dtype == torch.bool
     mask = _broadcast_to_dim(mask, 4)
     B, H, Q, KV = mask.shape
@@ -362,7 +367,7 @@ def _convert_block_mask_to_mask(
     block_mask,
     KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
-) -> torch.Tensor:
+) -> Tensor:
     assert block_mask.dim() == 4
     B, H, Q, KV = block_mask.shape
     block_mask = block_mask.expand(Q_BLOCK_SIZE, KV_BLOCK_SIZE, *block_mask.shape)
@@ -373,7 +378,7 @@ def _convert_block_mask_to_mask(
 
 
 def _create_sparse_block_from_block_mask(
-    block_mask: Tuple[torch.Tensor, Optional[torch.Tensor]],
+    block_mask: Tuple[Tensor, Optional[Tensor]],
     mask_fn: Optional[Callable],
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
@@ -418,7 +423,7 @@ def create_mask(
     N: int,
     device: str = "cuda",
     _compile: bool = False,
-) -> torch.Tensor:
+) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
     Args:
@@ -550,13 +555,13 @@ def _create_empty_block_mask(query, key, value) -> BlockMask:
 
 
 def flex_attention(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
     score_mod: Optional[_score_mod_signature] = None,
     block_mask: Optional[BlockMask] = None,
     scale: Optional[float] = None,
-) -> torch.Tensor:
+) -> Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
     This function computes the scaled dot product attention between query, key, and value tensors with a user-defined
@@ -568,12 +573,12 @@ def flex_attention(
     .. code-block:: python
 
         def score_mod(
-            score: torch.Tensor,
-            batch: torch.Tensor,
-            head: torch.Tensor,
-            token_q: torch.Tensor,
-            token_kv: torch.Tensor
-        ) -> torch.Tensor:
+            score: Tensor,
+            batch: Tensor,
+            head: Tensor,
+            token_q: Tensor,
+            token_kv: Tensor
+        ) -> Tensor:
 
     Where:
         - ``score``: A scalar tensor representing the attention score,
@@ -648,43 +653,43 @@ _create_block_mask = create_block_mask
 
 
 def _causal(
-    score: torch.Tensor,
-    batch: torch.Tensor,
-    head: torch.Tensor,
-    token_q: torch.Tensor,
-    token_kv: torch.Tensor,
-) -> torch.Tensor:
+    score: Tensor,
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
     return torch.where(token_q >= token_kv, score, float("-inf"))
 
 
 def _rel_bias(
-    score: torch.Tensor,
-    batch: torch.Tensor,
-    head: torch.Tensor,
-    token_q: torch.Tensor,
-    token_kv: torch.Tensor,
-) -> torch.Tensor:
+    score: Tensor,
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
     return score + (token_q - token_kv)
 
 
 def _rel_causal(
-    score: torch.Tensor,
-    batch: torch.Tensor,
-    head: torch.Tensor,
-    token_q: torch.Tensor,
-    token_kv: torch.Tensor,
-) -> torch.Tensor:
+    score: Tensor,
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
     return torch.where(token_q >= token_kv, score + (token_q - token_kv), float("-inf"))
 
 
 def _generate_alibi_bias(num_heads: int):
     def _alibi_bias(
-        score: torch.Tensor,
-        batch: torch.Tensor,
-        head: torch.Tensor,
-        token_q: torch.Tensor,
-        token_kv: torch.Tensor,
-    ) -> torch.Tensor:
+        score: Tensor,
+        batch: Tensor,
+        head: Tensor,
+        token_q: Tensor,
+        token_kv: Tensor,
+    ) -> Tensor:
         scale = torch.exp2(-((head + 1) * 8.0 / num_heads))
         return score + (token_kv - token_q) * scale
 
