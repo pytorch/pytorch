@@ -113,10 +113,10 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
     """
 
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
-    torch_object_ids = dict()
+    torch_object_ids = {}
     c_binding_in_graph_functions = set()
     non_c_binding_in_graph_functions = set()
-    torch_name_rule_map = dict()
+    torch_name_rule_map = {}
 
     # In some platforms, these functions were loaded as classes instead of functions.
     # To mitigate these weired cases, we need this special check.
