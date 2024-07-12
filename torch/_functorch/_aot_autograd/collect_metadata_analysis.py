@@ -625,25 +625,21 @@ from a multi-output view call"
             output_info.append(out_info)
 
         # See Note [AOT Autograd: Views to avoid tangents aliasing inputs]
-        def view_avoid_dupes_with_primals(t, parent_cls, attr):
+        def view_avoid_dupes_with_primals(t):
             if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
                 return transform_subclass(
-                    t,
-                    lambda attr, inner_t: view_avoid_dupes_with_primals(
-                        inner_t, type(t), attr
-                    ),
+                    t, lambda _, inner_t: view_avoid_dupes_with_primals(inner_t)
                 )
             if isinstance(t, Tensor):
                 out = t.view(t.shape)
-                if (
-                    parent_cls is torch.nested._internal.nested_tensor.NestedTensor
-                    and (attr == "_offsets" or attr == "_lengths")
-                ):
-                    from torch.nested._internal.nested_tensor import (
-                        _tensor_symint_registry,
-                    )
 
+                # indicate that the viewed tensor has the same associated nested int
+                # as the source tensor within the nested int registry
+                from torch.nested._internal.nested_tensor import _tensor_symint_registry
+
+                if t in _tensor_symint_registry:
                     _tensor_symint_registry[out] = _tensor_symint_registry[t]
+
                 return out
             return t
 
@@ -673,7 +669,7 @@ from a multi-output view call"
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
         traced_tangents = pytree.tree_map(from_fun, f_tangents)
         traced_tangents = pytree.tree_map(
-            lambda t: view_avoid_dupes_with_primals(t, None, None), traced_tangents
+            view_avoid_dupes_with_primals, traced_tangents
         )
         # See Note [Tangents must be contiguous]
         traced_tangents = pytree.tree_map(

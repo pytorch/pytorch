@@ -420,7 +420,10 @@ def _create_symbolic_nested_int(nested_int, base_source, shape_env):
 
     # check if the nested int is already symbolic
     if is_symbolic(nested_int):
-        return nested_int
+        if nested_int.node.shape_env is shape_env:
+            return nested_int
+        else:
+            nested_int = nested_int.node.hint
 
     nested_source: Source = (
         EphemeralSource("intermediate_offsets_or_lengths")

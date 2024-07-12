@@ -1854,9 +1854,12 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             # varies based on the type of view
             guard_str = "\n".join(guards)
             if nt_view_name == "subclass_dense":
-                self.assertExpectedInline(guard_str, """\
+                self.assertExpectedInline(
+                    guard_str,
+                    """\
 Eq(s3 - 1, s0)
-Eq(s4, s1)""")
+Eq(s4, s1)""",
+                )
             elif nt_view_name == "dense_subclass_dense_subclass":
                 self.assertExpectedInline(
                     guard_str,

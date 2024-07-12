@@ -465,7 +465,7 @@ class MetaTensorDesc:
     is_gradtrackingtensor: bool = False
     is_view: bool = False
     is_nested: bool = False
-    # associated nested int for NJT metadata
+    # associated nested int for e.g. offsets / lengths metadata
     nested_int: Optional[int] = None
     is_traceable_wrapper_subclass: bool = False
     is_functional: bool = False
@@ -506,6 +506,7 @@ class MetaTensorDesc:
         "functorch_stack",
         "autograd_meta_from",
         "data",
+        "nested_int",
     ]
 
     ctx: Optional[object] = None  # is_traceable_wrapper_subclass
@@ -840,6 +841,8 @@ class MetaConverter:
 
                     if t.nested_int is not None:
                         update_nested_int_registry(r, t.nested_int, source, shape_env)
+
+                    self.set_tensor_memo(t, r)
 
                     return r
 
