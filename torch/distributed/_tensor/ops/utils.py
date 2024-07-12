@@ -10,6 +10,7 @@ from torch.distributed._tensor._collective_utils import redistribute_cost
 from torch.distributed._tensor._op_schema import (
     OpSchema,
     OpStrategy,
+    PlacementList,
     PlacementStrategy,
     RuntimeSchemaInfo,
 )
@@ -237,7 +238,7 @@ def generate_redistribute_costs(
 def expand_to_full_mesh_op_strategy(
     mesh: DeviceMesh,
     op_schema: OpSchema,
-    single_mesh_dim_strategies: List[List[Optional[Placement]]],
+    single_mesh_dim_strategies: List[PlacementList],
     *,
     input_index: int = 1,
     inplace_op: bool = False,
@@ -256,10 +257,14 @@ def expand_to_full_mesh_op_strategy(
             else:
                 spec_list.append(None)
 
-        input_specs = spec_list[input_index:]
+        input_specs: List[DTensorSpec] = [
+            s for s in spec_list[input_index:] if isinstance(s, DTensorSpec)
+        ]
+
         input_args_strategy = op_schema.args_strategy
         assert len(input_specs) == len(input_args_strategy)
         self_spec = input_args_strategy[0].strategies[0].output_spec
+
         if inplace_op and self_spec.placements != input_specs[0].placements:
             # if it's inplace op, we would only allow the placement strategy to be added when the
             # input_spec matches the first argument's runtime sharding, otherwise we skip

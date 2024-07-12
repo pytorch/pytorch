@@ -1,9 +1,13 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
-from typing import List, Optional
 
 import torch
-from torch.distributed._tensor._op_schema import OpSchema, OpStrategy, PlacementStrategy
+from torch.distributed._tensor._op_schema import (
+    OpSchema,
+    OpStrategy,
+    PlacementList,
+    PlacementStrategy,
+)
 from torch.distributed._tensor.ops.basic_strategy import gen_einsum_strategies
 from torch.distributed._tensor.ops.utils import (
     expand_to_full_mesh_op_strategy,
@@ -172,7 +176,7 @@ def scaled_dot_product_flash_attention_strategy(
     # placement list stores placements of [outputs, inputs]
     # in the spda case, we have 3 valid tensor outputs and 3 tensor inputs
     # first we can always accept full replication for both inputs and outputs
-    all_replicate: List[Optional[Placement]] = [
+    all_replicate: PlacementList = [
         Replicate(),
         Replicate(),
         None,  # cum_seq_q
@@ -258,7 +262,7 @@ def scaled_dot_product_flash_attention_backward_strategy(
     # placement list stores placements of [outputs, inputs]
     # in the spda backward case, we have 3 tensor outputs and 6 to 10 tensor inputs
     # first we can always accept full replication for both inputs and outputs
-    all_replicate: List[Optional[Placement]] = [Replicate()] * (3 + num_tensor_inputs)
+    all_replicate: PlacementList = [Replicate()] * (3 + num_tensor_inputs)
 
     single_mesh_dim_strategies.append(all_replicate)
 
@@ -288,7 +292,7 @@ def scaled_dot_product_flash_attention_backward_strategy(
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
     # Context Parallelism: shards on the sequence dim
-    seq_dim_sharding: List[Placement] = [
+    seq_dim_sharding: PlacementList = [
         Shard(2),  # grad_q
         Shard(2),  # grad_k
         Shard(2),  # grad_v
@@ -344,7 +348,7 @@ def scaled_dot_product_efficient_attention_strategy(
     # placement list stores placements of [outputs, inputs]
     # in the spda case, we have 2 valid tensor outputs and 3 or 4 tensor inputs
     # first we can always accept full replication for both inputs and outputs
-    all_replicate: List[Optional[Placement]] = [
+    all_replicate: PlacementList = [
         Replicate(),
         Replicate(),
         None,
@@ -411,7 +415,7 @@ def scaled_dot_product_efficient_attention_backward_strategy(
     # NOTE: Output sharding of grad_bias on heads dim if attn_bias is present;
     #       otherwise grad_bias will be empty and its DTensorSpec will be removed.
     # first we can always accept full replication for both inputs and outputs
-    all_replicate: List[Optional[Placement]] = [Replicate()] * (12 + has_attn_bias)
+    all_replicate: PlacementList = [Replicate()] * (12 + has_attn_bias)
 
     if not has_attn_bias:
         all_replicate[3] = None  # grad bias is None if attn_bias is not present
@@ -427,7 +431,7 @@ def scaled_dot_product_efficient_attention_backward_strategy(
     grad_qkv_sharding = Shard(1)
     grad_bias_sharding = Shard(1) if has_attn_bias else None
 
-    num_heads_dim_sharding: List[Optional[Placement]] = [
+    num_heads_dim_sharding: PlacementList = [
         grad_qkv_sharding,
         grad_qkv_sharding,
         grad_qkv_sharding,
