@@ -282,10 +282,13 @@ def expand_to_full_mesh_op_strategy(
                 generate_redistribute_costs(input_strategy, input_spec)
                 for input_strategy, input_spec in zip(input_args_strategy, input_specs)
             ]
+            if input_index > 1:
+                output_specs = tuple(spec_list[:input_index])
+            else:
+                output_specs = spec_list[0]
+            assert output_specs is not None
             strategy = PlacementStrategy(
-                output_specs=tuple(spec_list[:input_index])
-                if input_index > 1
-                else spec_list[0],
+                output_specs=output_specs,
                 input_specs=input_specs,
                 redistribute_cost=redistribute_cost,
             )
