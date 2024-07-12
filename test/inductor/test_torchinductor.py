@@ -11190,6 +11190,48 @@ if HAS_GPU and not TEST_WITH_ASAN:
             out[0].sum().backward()
             self.assertEqual(inp.grad, inp_ref.grad)
 
+        @requires_gpu()
+        @unittest.skipIf(
+            not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+            "Does not support mem_eff_attention",
+        )
+        def test_sdpa_inference_mode_aot_compile(self):
+            class TestSDPA(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(
+                    self,
+                    q: torch.Tensor,
+                    k: torch.Tensor,
+                    v: torch.Tensor,
+                    attn_mask: torch.Tensor,
+                ):
+                    return torch.nn.functional.scaled_dot_product_attention(
+                        q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False
+                    )
+
+            q = torch.rand([10, 4, 128, 64], device=GPU_TYPE, dtype=torch.bfloat16)
+            k = torch.rand([10, 4, 128, 64], device=GPU_TYPE, dtype=torch.bfloat16)
+            v = torch.rand([10, 4, 128, 64], device=GPU_TYPE, dtype=torch.bfloat16)
+            attn_mask = (
+                torch.rand([10, 4, 128, 128], device=GPU_TYPE, dtype=torch.bfloat16)
+                < 0.9
+            )
+
+            inputs = (q, k, v, attn_mask)
+
+            import torch.export._trace as export_trace
+
+            with torch.inference_mode():
+                traced = export_trace._export_to_torch_ir(
+                    TestSDPA(),
+                    inputs,
+                    disable_constraint_solver=True,
+                    restore_fqn=False,
+                )
+                torch._inductor.aot_compile(traced, inputs)
+
         def test_optimize_indexing_assert(self):
             def has_indirect(code, tl_fn: str):
                 self.assertTrue(
