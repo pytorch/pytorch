@@ -1,6 +1,9 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import warnings
+from typing import Any
+from typing_extensions import TypeGuard
 
 import torch
 from torch.overrides import get_default_nowrap_functions
@@ -12,7 +15,7 @@ __all__ = [
 ]
 
 
-def is_masked_tensor(a):
+def is_masked_tensor(obj: Any, /) -> TypeGuard["MaskedTensor"]:
     r"""Returns True if the input is a MaskedTensor, else False
 
     Args:
@@ -28,7 +31,7 @@ def is_masked_tensor(a):
         >>> is_masked_tensor(mt)
         True
     """
-    return isinstance(a, MaskedTensor)
+    return isinstance(obj, MaskedTensor)
 
 
 def _tensors_match(a, b, exact=True, rtol=1e-05, atol=1e-08):
@@ -146,13 +149,14 @@ class MaskedTensor(torch.Tensor):
         if is_masked_tensor(mask) or not torch.is_tensor(mask):
             raise TypeError("mask must be a Tensor")
         # Use a Tensor that of the give size for the wrapper.
-        kwargs = {}
-        kwargs["device"] = data.device
-        kwargs["dtype"] = data.dtype
-        kwargs["layout"] = data.layout
-        kwargs["requires_grad"] = requires_grad
-        kwargs["dispatch_sizes_strides_policy"] = "strides"
-        kwargs["dispatch_layout"] = True
+        kwargs = {
+            "device": data.device,
+            "dtype": data.dtype,
+            "layout": data.layout,
+            "requires_grad": requires_grad,
+            "dispatch_sizes_strides_policy": "strides",
+            "dispatch_layout": True,
+        }
         warnings.warn(
             (
                 "The PyTorch API of MaskedTensors is in prototype stage "
@@ -161,12 +165,14 @@ class MaskedTensor(torch.Tensor):
                 "module for further information about the project."
             ),
             UserWarning,
+            stacklevel=2,
         )
         if data.requires_grad:
             warnings.warn(
                 "It is not recommended to create a MaskedTensor with a tensor that requires_grad. "
                 "To avoid this, you can use data.clone().detach()",
                 UserWarning,
+                stacklevel=2,
             )
         return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
 

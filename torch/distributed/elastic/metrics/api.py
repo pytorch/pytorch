@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -13,9 +14,22 @@ from functools import wraps
 from typing import Dict, Optional
 from typing_extensions import deprecated
 
-__all__ = ['MetricsConfig', 'MetricHandler', 'ConsoleMetricHandler', 'NullMetricHandler', 'MetricStream',
-           'configure', 'getStream', 'prof', 'profile', 'put_metric', 'publish_metric', 'get_elapsed_time_ms',
-           'MetricData']
+
+__all__ = [
+    "MetricsConfig",
+    "MetricHandler",
+    "ConsoleMetricHandler",
+    "NullMetricHandler",
+    "MetricStream",
+    "configure",
+    "getStream",
+    "prof",
+    "profile",
+    "put_metric",
+    "publish_metric",
+    "get_elapsed_time_ms",
+    "MetricData",
+]
 
 MetricData = namedtuple("MetricData", ["timestamp", "group_name", "name", "value"])
 
@@ -149,6 +163,7 @@ def profile(group=None):
      @metrics.profile("my_metric_group")
      def some_function(<arguments>):
     """
+
     def wrap(func):
         @wraps(func)
         def wrapper(*args, **kwargs):

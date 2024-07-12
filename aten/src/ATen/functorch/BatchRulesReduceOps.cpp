@@ -18,27 +18,27 @@ static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
 }
 
 static Tensor sum_decomp(
-    const Tensor& self, optional<ScalarType> dtype) {
+    const Tensor& self, std::optional<ScalarType> dtype) {
   return at::sum(self, range(0, self.dim()), false, dtype);
 }
 
-static std::tuple<Tensor, optional<int64_t>> _is_all_true_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim) {
+static std::tuple<Tensor, std::optional<int64_t>> _is_all_true_batch_rule(
+    const Tensor& self, std::optional<int64_t> self_bdim) {
   return std::make_tuple(at::_is_all_true(self), nullopt);
 }
 
-static std::tuple<Tensor, optional<int64_t>> _is_any_true_batch_rule(
-     const Tensor& self, optional<int64_t> self_bdim) {
+static std::tuple<Tensor, std::optional<int64_t>> _is_any_true_batch_rule(
+     const Tensor& self, std::optional<int64_t> self_bdim) {
    return std::make_tuple(at::_is_any_true(self), nullopt);
  }
 
 static Tensor mean_decomp(
-    const Tensor& self, optional<ScalarType> dtype) {
+    const Tensor& self, std::optional<ScalarType> dtype) {
   return at::mean(self, range(0, self.dim()), false, dtype);
 }
 
 static Tensor prod_decomp(
-    const Tensor& self, optional<ScalarType> dtype) {
+    const Tensor& self, std::optional<ScalarType> dtype) {
   return at::prod(self.flatten(), 0, false, dtype);
 }
 
@@ -257,8 +257,8 @@ static std::tuple<Tensor, Tensor> expand_bdims(
 }
 
 static std::tuple<Tensor,optional<int64_t>> _softmax_backward_batch_rule(
-    const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-    const Tensor& output, optional<int64_t> output_bdim,
+    const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
+    const Tensor& output, std::optional<int64_t> output_bdim,
     int64_t dim,
     ScalarType input_dtype) {
   // softmax_backward's decomposition is y * gy - y * (y * gy).sum(dim, keepdim=True)
@@ -287,8 +287,8 @@ static std::tuple<Tensor,optional<int64_t>> _softmax_backward_batch_rule(
 }
 
 static std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
-    const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-    const Tensor& output, optional<int64_t> output_bdim,
+    const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
+    const Tensor& output, std::optional<int64_t> output_bdim,
     int64_t dim,
     c10::ScalarType input_dtype) {
   // NB: It turns out that expanding + calling log_softmax_backward is generally
@@ -316,9 +316,9 @@ static std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
 
 static std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
     const Tensor& sorted_sequence,
-    optional<int64_t> sorted_sequence_bdim,
+    std::optional<int64_t> sorted_sequence_bdim,
     const Tensor& self,
-    optional<int64_t> self_bdim,
+    std::optional<int64_t> self_bdim,
     bool out_int32,
     bool right,
     std::optional<c10::string_view> side,
@@ -331,12 +331,12 @@ static std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
   // If they both exist, and only one has a bdim, then we need to make sure both do.
   // After this step, we can forget about sorter for a bit.
   auto buckets = moveBatchDimToFront(sorted_sequence, sorted_sequence_bdim);
-  optional<int64_t> buckets_bdim;
+  std::optional<int64_t> buckets_bdim;
   if (sorted_sequence_bdim.has_value()) {
     buckets_bdim = 0;
   }
 
-  optional<Tensor> sorter_;
+  std::optional<Tensor> sorter_;
   if (sorter.has_value() && sorter->defined()) {
     auto sorter__ = moveBatchDimToFront(*sorter, sorter_bdim);
     if (sorted_sequence_bdim.has_value() != sorter_bdim.has_value()) {

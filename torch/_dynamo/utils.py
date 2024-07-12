@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import atexit
 import collections
 import contextlib
@@ -22,6 +23,7 @@ import threading
 import time
 import types
 import typing
+import warnings
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
@@ -76,7 +78,7 @@ try:
             np.random: tnp.random,
         }
     else:
-        NP_SUPPORTED_MODULES = tuple()
+        NP_SUPPORTED_MODULES = ()
 
         NP_TO_TNP_MODULE = {}
     from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -87,6 +89,7 @@ import importlib
 
 import torch
 import torch._functorch.config
+import torch._inductor.config as inductor_config
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
@@ -99,6 +102,8 @@ from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 
+
+unpatched_nn_module_getattr = torch.nn.Module.__getattr__
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
 optimus_scuba_log: Dict[str, Any] = {}
@@ -214,9 +219,6 @@ def _add_time_spent(key, phase_name, time_spent):
 
 def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
     def dynamo_timed_inner(func):
-        if config.cprofile:
-            return func
-
         @wraps(func)
         def time_wrapper(*args, **kwargs):
             key = func.__qualname__
@@ -461,8 +463,8 @@ class ExactWeakKeyDictionary:
     """Similar to weakref.WeakKeyDictionary, but use `is`/`id` rather than `==` to compare equality"""
 
     def __init__(self):
-        self.values = dict()
-        self.refs = dict()
+        self.values = {}
+        self.refs = {}
 
     def __getitem__(self, key):
         return self.values[id(key)]
@@ -557,12 +559,15 @@ def is_numpy_float_type(value):
     )
 
 
+def is_lru_cache_wrapped_function(value):
+    return isinstance(value, functools._lru_cache_wrapper) and is_function(
+        inspect.getattr_static(value, "__wrapped__")
+    )
+
+
 def is_function_or_wrapper(value):
-    return (
-        is_function(value)
-        or isinstance(value, functools._lru_cache_wrapper)
-        and is_function(inspect.getattr_static(value, "__wrapped__"))
-        or isinstance(value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload))
+    return is_function(value) or isinstance(
+        value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
     )
 
 
@@ -574,7 +579,24 @@ def is_function(value):
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
-            torch.jit.ScriptFunction,
+        ),
+    )
+
+
+def is_wrapper_or_member_descriptor(value):
+    return isinstance(
+        value,
+        (
+            # set up by PyGetSetDef
+            types.GetSetDescriptorType,
+            # set by PyMethodDef, e.g. list.append
+            types.MethodDescriptorType,
+            # slots - list.__add__
+            types.WrapperDescriptorType,
+            # set up by PyMemberDef
+            types.MemberDescriptorType,
+            # wrapper over C functions
+            types.MethodWrapperType,
         ),
     )
 
@@ -584,20 +606,11 @@ def unwrap_if_wrapper(fn):
 
 
 def unwrap_with_attr_name_if_wrapper(fn):
-    # unpack @functools.lru_cache wrapped function
-    if isinstance(fn, functools._lru_cache_wrapper):
-        fn = inspect.getattr_static(fn, "__wrapped__")
-        attr_name = "__wrapped__"
+    # TODO(anijain2305) - Investigate if we can get rid of this function
     # unpack @torch._dynamo.optimize()(fn) wrapped function
-    elif is_function(fn) and inspect.getattr_static(fn, "_torchdynamo_inline", False):
+    if is_function(fn) and inspect.getattr_static(fn, "_torchdynamo_inline", False):
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         attr_name = "_torchdynamo_inline"
-    # unpack torch.jit.script_if_tracing
-    elif is_function(fn) and inspect.getattr_static(
-        fn, "__script_if_tracing_wrapper", False
-    ):
-        fn = inspect.getattr_static(fn, "__original_fn", fn)
-        attr_name = "__original_fn"
     else:
         attr_name = None
     return fn, attr_name
@@ -715,18 +728,15 @@ def record_compilation_metrics(
         name = "compilation_metrics"
     else:
         name = "bwd_compilation_metrics"
-    # Currently only record fwd compilation metrics, will add bwd compilation metrics
-    # after the internal Scuba logging changes finish.
-    if isinstance(compilation_metrics, CompilationMetrics):
-        torch._logging.trace_structured(
-            name,
-            lambda: {
-                k: list(v) if isinstance(v, set) else v
-                for k, v in dataclasses.asdict(compilation_metrics).items()
-            },
-        )
-        if config.log_compilation_metrics:
-            log_compilation_event(compilation_metrics)
+    torch._logging.trace_structured(
+        name,
+        lambda: {
+            k: list(v) if isinstance(v, set) else v
+            for k, v in dataclasses.asdict(compilation_metrics).items()
+        },
+    )
+    if config.log_compilation_metrics:
+        log_compilation_event(compilation_metrics)
 
 
 def set_compilation_metrics_limit(new_size: int) -> None:
@@ -1134,10 +1144,10 @@ def check_numpy_ndarray_args(args, kwargs):
     )
 
 
-dict_keys: Type[KeysView[Any]] = type(dict().keys())
-dict_values: Type[ValuesView[Any]] = type(dict().values())
+dict_keys: Type[KeysView[Any]] = type({}.keys())
+dict_values: Type[ValuesView[Any]] = type({}.values())
 odict_values: Type[ValuesView[Any]] = type(collections.OrderedDict().values())
-tuple_iterator: Type[Iterator[Any]] = type(iter(tuple()))
+tuple_iterator: Type[Iterator[Any]] = type(iter(()))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
 
@@ -1330,6 +1340,7 @@ def same(
     relax_numpy_equality=False,
     ignore_non_fp=False,
     log_error=log.error,
+    use_larger_multiplier_for_smaller_tensor=False,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -1463,7 +1474,15 @@ def same(
                 # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
                 multiplier = 3.0 if res.dtype == torch.bfloat16 else 2.0
 
-                if (
+                if use_larger_multiplier_for_smaller_tensor and (
+                    fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
+                ):
+                    multiplier = 10.0
+                elif use_larger_multiplier_for_smaller_tensor and (
+                    fp64_ref.numel() <= 500 and tol >= 4 * 1e-2
+                ):
+                    multiplier = 5.0
+                elif (
                     fp64_ref.numel() < 1000
                     or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
                     # large tol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE
@@ -1475,6 +1494,16 @@ def same(
                     multiplier = 3.0
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
+                if (
+                    not passes_test
+                    and equal_nan
+                    and math.isnan(ref_error)
+                    and math.isnan(res_error)
+                    # Some unit test for the accuracy minifier relies on
+                    # returning false in this case.
+                    and not inductor_config.cpp.inject_relu_bug_TESTING_ONLY
+                ):
+                    passes_test = True
                 if not passes_test:
                     log_error(
                         "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, tol: %f",
@@ -1581,7 +1610,7 @@ orig_code_map = ExactWeakKeyDictionary()
 guard_failures: DefaultDict[Any, List[Any]] = collections.defaultdict(list)
 
 # Keep a record of graph break reasons for logging
-graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReason"] = list()
+graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReason"] = []
 
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
@@ -1908,7 +1937,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
                 assert nnmodule is not None
                 return nnmodule(*args, **kwargs)
             elif op == "get_attr":
-                return tracer.get_submodule(node.target)
+                return tracer.output_graph.get_submodule(node.target)
             elif op == "placeholder":
                 assert "example_value" in node.meta
                 return node.meta["example_value"]
@@ -1942,6 +1971,9 @@ def get_real_value(node, tracer):
         (node.args, node.kwargs),
         lambda n: get_real_value(n, tracer),
     )
+
+    if op == "placeholder" and "grapharg" in node.meta:
+        return node.meta["grapharg"].example
 
     if op == "call_module":
         nn_module = tracer.output_graph.nn_modules[node.target]
@@ -2018,12 +2050,12 @@ def object_has_getattribute(value: Any):
     return False
 
 
-def get_custom_getattr(value: Any):
+def get_custom_getattr(value: Any, ignore_nn_module_getattr: bool = False):
     try:
         getattr_fn = inspect.getattr_static(type(value), "__getattr__")
     except AttributeError:
         getattr_fn = None
-    if getattr_fn is torch.nn.Module.__getattr__:
+    if ignore_nn_module_getattr and getattr_fn is torch.nn.Module.__getattr__:
         # ignore this case of getattr
         getattr_fn = None
     return getattr_fn
@@ -2656,19 +2688,22 @@ def get_first_attr(obj, *attrs):
 
 
 @contextlib.contextmanager
-def maybe_enable_compiled_autograd(should_enable):
-    def compiler_fn(gm):
-        def inner_compiler(gm_, example_inputs_):
-            torch._dynamo.utils.counters["compiled_autograd"]["compiles"] += 1
-            return torch._inductor.compile(gm_, example_inputs_)
+def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
+    if not should_enable:
+        yield
+    else:
 
-        return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
+        def compiler_fn(gm):
+            def inner_compiler(gm_, example_inputs_):
+                torch._dynamo.utils.counters["compiled_autograd"]["compiles"] += 1
+                return torch._inductor.compile(gm_, example_inputs_)
 
-    if should_enable:
+            return torch.compile(
+                gm, backend=inner_compiler, fullgraph=fullgraph, dynamic=dynamic
+            )
+
         with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
             yield ctx
-    else:
-        yield
 
 
 def invalid_removeable_handle():
@@ -2695,14 +2730,14 @@ def nn_module_proxy(mod):
 
 
 class GmWrapper(torch.nn.Module):
-    def __init__(self, gm, spec):
+    def __init__(self, gm, unflatten_fn):
         super().__init__()
         self.gm = gm
-        self.spec = spec
+        self.unflatten_fn = unflatten_fn
 
     def forward(self, *args):
         args: List[Any] = list(args)
-        return self.gm(*pytree.tree_unflatten(args, self.spec))
+        return self.gm(*self.unflatten_fn(args))
 
 
 def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
@@ -2711,21 +2746,39 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
     accepts those inputs.  This is needed for graphs that take
     bumpy inputs.
     """
-    inputs, spec = pytree.tree_flatten(inputs)
-    compiled_fn = compile_gm(GmWrapper(gm, spec), inputs)
-
-    idx_to_steal = [
+    inputs_idx_to_clear = [
         i
         for i, node in enumerate(gm.graph.nodes)
         if node.op == "placeholder" and node.meta.get("steal_arg", False)
     ]
 
-    def wrapper(*args):
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+        # fast path, avoid pytree overhead
+        # compiled autograd inputs are always a list of tensors, maybe followed by symints
+        assert inputs_idx_to_clear == [0]
+        assert isinstance(inputs[0], list)
+        boxed_inputs_count = len(inputs[0])
+
+        def flatten_fn(args):
+            return args[0] + list(args[1:])
+
+        def unflatten_fn(flat_args):
+            return (flat_args[:boxed_inputs_count], *flat_args[boxed_inputs_count:])
+
+        compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flatten_fn(inputs))
+    else:
+        # slow path, don't know inputs structure
+        flat_inputs, spec = pytree.tree_flatten(inputs)
+        unflatten_fn = functools.partial(pytree.tree_unflatten, treespec=spec)
+        compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flat_inputs)
         # note this doesn't check the spec, assuming it is the same
-        flat_args = pytree.arg_tree_leaves(*args)
+        flatten_fn = pytree.arg_tree_leaves
+
+    def wrapper(*args):
+        flat_args = flatten_fn(args)
 
         # flat_args is a new list, so we need to clear references from the old list
-        for i in idx_to_steal:
+        for i in inputs_idx_to_clear:
             args[i].clear()
 
         # this call is boxed to avoid increasing refcount until we reach aot_module_simplified forward
@@ -2750,3 +2803,34 @@ class Lit:
 
     def __repr__(self):
         return self.s
+
+
+warn_once_cache: Set[str] = set()
+
+
+def warn_once(msg, stacklevel=1):
+    # Dynamo causes all warnings.warn (in user code and in Dynamo code) to print all the time.
+    # https://github.com/pytorch/pytorch/issues/128427.
+    # warn_once is a workaround: if the msg has been warned on before, then we will not
+    # warn again.
+    # NB: it's totally ok to store a cache of all the strings: this is what warnings.warn does as well.
+    if msg in warn_once_cache:
+        return
+    warn_once_cache.add(msg)
+    warnings.warn(msg, stacklevel=stacklevel + 1)
+
+
+def strip_color_from_string(text):
+    # This regular expression matches ANSI escape codes
+    ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
+    return ansi_escape.sub("", text)
+
+
+@contextlib.contextmanager
+def _disable_saved_tensors_hooks_during_tracing():
+    # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
+    try:
+        prior = torch._C._autograd._saved_tensors_hooks_set_tracing(True)
+        yield
+    finally:
+        torch._C._autograd._saved_tensors_hooks_set_tracing(prior)

@@ -114,9 +114,9 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
       mtl_setBuffer(computeEncoder, other, 1);
       mtl_setBuffer(computeEncoder, out, 2);
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
-      [computeEncoder setBytes:&out_dim_stride length:sizeof(int64_t) atIndex:4];
-      [computeEncoder setBytes:&input_dim_stride length:sizeof(int64_t) atIndex:5];
-      [computeEncoder setBytes:&other_dim_stride length:sizeof(int64_t) atIndex:6];
+      mtl_setBytes(computeEncoder, out_dim_stride, 4);
+      mtl_setBytes(computeEncoder, input_dim_stride, 5);
+      mtl_setBytes(computeEncoder, other_dim_stride, 6);
       mtl_dispatch1DJob(computeEncoder, crossPSO, numThreads);
 
       getMPSProfiler().endProfileKernel(crossPSO);

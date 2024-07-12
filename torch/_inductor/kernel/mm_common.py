@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -27,10 +28,14 @@ def filtered_configs(
     n: int,
     k: int,
     configs: List[Tuple[int, int, int, int, int]],
+    has_int8_tensor=False,
 ):
     """Heuristic to shrink configs when they are bigger than the input size"""
 
     min_block_size = 16
+    # block_k=16 seems to be causing issues
+    # see: https://github.com/triton-lang/triton/issues/2156#issuecomment-1695897424
+    min_block_size_k = 32 if has_int8_tensor else 16
     m = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
@@ -53,14 +58,14 @@ def filtered_configs(
                 k, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
             )
         ),
-        min_block_size,
+        min_block_size_k,
     )
     used = set()
     for block_m, block_n, block_k, num_stages, num_warps in configs:
         # shrink configs for small sizes
         block_m = max(min(block_m, m), min_block_size)
         block_n = max(min(block_n, n), min_block_size)
-        block_k = max(min(block_k, k), min_block_size)
+        block_k = max(min(block_k, k), min_block_size_k)
         # each warp computes 16x16 tile = 256
         num_warps = min(num_warps, block_m * block_n // 256)
         if torch.version.hip:

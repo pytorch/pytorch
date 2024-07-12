@@ -4,12 +4,16 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
 namespace c10d::intra_node_comm {
 
+using namespace c10d::symmetric_memory;
+
 constexpr size_t kMaxDevices = 8;
 constexpr size_t kDefaultBufferSize = 10ull * 1024 * 1024;
+constexpr size_t kP2pStateSize = 2048;
 
 using NvlMesh = std::array<std::array<size_t, kMaxDevices>, kMaxDevices>;
 using HybridCubeMesh = std::array<std::array<int, 4>, kMaxDevices>;
@@ -27,13 +31,14 @@ enum class AllReduceAlgo : uint8_t {
   HCM = 3
 };
 
+// NOTE: this class will be be removed soon in favor of SymmetricMemory
 class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
  public:
   IntraNodeComm(
       c10::intrusive_ptr<c10d::Store> store,
       size_t rank,
       size_t worldSize,
-      std::optional<size_t> bufferSize = c10::nullopt);
+      std::optional<size_t> bufferSize = std::nullopt);
 
   ~IntraNodeComm() override;
 
@@ -65,7 +70,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   /**
    * Perform a barrier among the specified ranks.
    */
-  void barrier(std::optional<std::vector<int64_t>> ranks = c10::nullopt);
+  void barrier(std::optional<std::vector<int64_t>> ranks = std::nullopt);
 
   at::Tensor getBuffer(
       size_t rank,
@@ -96,9 +101,10 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
    * Members initialized after rendezvous
    */
   bool isInitialized_ = false;
+  int deviceIdx_;
   Topology topology_ = Topology::UNKNOWN;
-  std::array<void*, kMaxDevices> p2pStates_{};
-  std::array<void*, kMaxDevices> buffers_{};
+  void* symmetricMemoryPtr_ = nullptr;
+  c10::intrusive_ptr<SymmetricMemory> symmetricMemory_ = nullptr;
   void* p2pStatesDev_{};
   void* buffersDev_{};
   void* topoInfo_{};

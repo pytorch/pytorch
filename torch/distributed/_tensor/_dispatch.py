@@ -1,12 +1,12 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import functools
+import logging
 import operator
 import warnings
 from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
 import torch
-
 import torch.distributed as dist
 import torch.distributed._tensor.api as dtensor
 import torch.distributed._tensor.random as random
@@ -27,6 +27,7 @@ from torch.distributed._tensor._utils import try_find_mesh_from_args
 from torch.distributed._tensor.placement_types import DTensorSpec, Replicate, TensorMeta
 from torch.distributed._tensor.random import is_rng_supported_mesh
 
+
 if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
 
@@ -36,6 +37,7 @@ except ImportError:
     from torch.utils import _pytree as pytree  # type: ignore[no-redef]
 
 aten = torch.ops.aten
+logger = logging.getLogger(__name__)
 
 
 def decompose_handler(
@@ -113,9 +115,11 @@ class OpDispatcher:
 
         # extract local tensor and sharding infos to a OpInfo
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
+        logger.debug("Dispatching op_call: %s", op_info.schema)
 
         self.sharding_propagator.propagate(op_info)
         output_sharding = op_info.output_sharding
+        logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
 
         mesh = op_info.mesh
@@ -340,6 +344,7 @@ class OpDispatcher:
                     if mesh != arg.device_mesh:
                         raise NotImplementedError(
                             f"{op_call}: DTensor does not support cross-mesh operation yet!"
+                            f"Got meshes: {mesh} {arg.device_mesh}"
                         )
                 else:
                     mesh = arg.device_mesh
@@ -395,16 +400,7 @@ class OpDispatcher:
                 assert isinstance(
                     spec, DTensorSpec
                 ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
-                assert spec.tensor_meta is not None
-                return dtensor.DTensor(
-                    res,
-                    spec.mesh,
-                    spec.placements,
-                    shape=spec.tensor_meta.shape,
-                    dtype=spec.tensor_meta.dtype,
-                    requires_grad=res.requires_grad,
-                    stride=spec.tensor_meta.stride,
-                )
+                return dtensor.DTensor(res, spec, requires_grad=res.requires_grad)
             else:
                 # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor
                 assert res.ndim == 0, "output tensor should be scalar!"

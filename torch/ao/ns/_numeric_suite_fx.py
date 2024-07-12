@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This module contains tooling to compare weights and activations
 across models. Example usage::
