@@ -4932,7 +4932,7 @@ def forward(self, a_1, b_1) -> torch.Tensor:
 def forward(self, x_1):
     resize = torch.ops.aten.resize.default(x_1, [10])
     fill = torch.ops.aten.fill.Scalar(resize, 2);  resize = None
-    x_1 = torch.ops.aten.resize_.default(x_1, [10])
+    resize_ = torch.ops.aten.resize_.default(x_1, [10])
     copy_ = torch.ops.aten.copy_.default(x_1, fill);  x_1 = fill = None
     return None
     """,
