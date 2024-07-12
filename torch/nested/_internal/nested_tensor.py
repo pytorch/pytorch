@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from contextlib import contextmanager
 from typing import Tuple
 
 import torch
@@ -9,6 +10,16 @@ from typing import *  # noqa: F403
 
 _tensor_id_counter = 0
 _tensor_symint_registry = WeakTensorKeyDictionary()
+
+
+@contextmanager
+def freeze_nested_int_id_counter():
+    global _tensor_id_counter
+    orig_counter = _tensor_id_counter
+    try:
+        yield
+    finally:
+        _tensor_id_counter = orig_counter
 
 
 def get_tensor_symint(tensor, *, coeff=1):
@@ -29,7 +40,7 @@ def get_tensor_symint(tensor, *, coeff=1):
 
         if isinstance(tensor, FakeTensor):
             tensor_symint = _create_symbolic_nested_int(
-                tensor_symint, tensor.source, tensor.fake_mode.shape_env
+                tensor_symint, base_source=None, shape_env=tensor.fake_mode.shape_env
             )
 
         # associate (possibly symbolic) nested int with this tensor in the registry

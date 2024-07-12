@@ -564,10 +564,6 @@ class FakeTensor(torch.Tensor):
     # this is an "infra" mode with lower dispatching precedence.
     _mode_key = torch._C._TorchDispatchModeKey.FAKE
 
-    # This is set when an tensor input is fakified. It is used when constructing
-    # a NestedIntSource from an offsets Tensor.
-    source: Optional[Source] = None
-
     @property
     def device(self):
         if self.fake_mode.in_kernel_invocation:

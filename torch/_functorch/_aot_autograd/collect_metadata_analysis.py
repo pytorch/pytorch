@@ -157,13 +157,15 @@ def run_functionalized_fw_and_collect_metadata(
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
         mode = FunctionalTensorMode(_allow_token_discovery=True)
-        with disable_above, mode:
+
+        # NB: emulate idempotence during metadata collection by preventing the nested
+        # int ID counter from advancing.
+        from torch.nested._internal.nested_tensor import freeze_nested_int_id_counter
+
+        with disable_above, mode, freeze_nested_int_id_counter():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
-
-            tmp_counter = torch.nested._internal.nested_tensor._tensor_id_counter
             flat_f_outs = f(*flat_f_args)
-            torch.nested._internal.nested_tensor._tensor_id_counter = tmp_counter
             # We didn't do any tracing, so we don't need to process the
             # unbacked symbols, they will just disappear into the ether.
             # Also, prevent memoization from applying.

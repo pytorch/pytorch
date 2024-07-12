@@ -141,17 +141,6 @@ def is_sparse_any(t):
     return is_sparse_coo(t) or is_sparse_compressed(t)
 
 
-def update_nested_int_registry(r, nested_int, source, shape_env):
-    from torch.fx.experimental.symbolic_shapes import _create_symbolic_nested_int
-    from torch.nested._internal.nested_tensor import _tensor_symint_registry
-
-    if r in _tensor_symint_registry:
-        return
-
-    sym_nested_int = _create_symbolic_nested_int(nested_int, source, shape_env)
-    _tensor_symint_registry[r] = sym_nested_int
-
-
 # Don't use id() directly, because those can get reallocated over time.
 MetaStorageId: TypeAlias = int
 MetaTensorId: TypeAlias = int
@@ -818,16 +807,13 @@ class MetaConverter:
                 # We are hitting plain meta_desc tensor so actually
                 # create a tensor here.
                 if t.attrs is None:
-                    # NB: prefer using a cached memo entry if one exists
-                    r = self.get_tensor_memo(t)
-                    if r is None:
-                        r = callback(
-                            lambda: empty_create(
-                                t,
-                                source,
-                                symbolic_context,
-                            )
+                    r = callback(
+                        lambda: empty_create(
+                            t,
+                            source,
+                            symbolic_context,
                         )
+                    )
                     if self.copy_data:
                         with torch.no_grad(), no_dispatch():
                             r.real_tensor = torch.empty_strided(
@@ -840,9 +826,20 @@ class MetaConverter:
                             _safe_copy(r.real_tensor, t.data)
 
                     if t.nested_int is not None:
-                        update_nested_int_registry(r, t.nested_int, source, shape_env)
+                        # Symbolicize the associated nested int and associate it with the fake
+                        # tensor in the nested int registry.
+                        # TODO: De-duplicate this by recursively calling meta_tensor() for inner
+                        # tensor fake-ification?
+                        from torch.fx.experimental.symbolic_shapes import (
+                            _create_symbolic_nested_int,
+                        )
+                        from torch.nested._internal.nested_tensor import (
+                            _tensor_symint_registry,
+                        )
 
-                    self.set_tensor_memo(t, r)
+                        _tensor_symint_registry[r] = _create_symbolic_nested_int(
+                            t.nested_int, source, shape_env
+                        )
 
                     return r
 
@@ -1587,7 +1584,16 @@ class MetaConverter:
                 r._is_param = True
 
             if t.nested_int is not None:
-                update_nested_int_registry(r, t.nested_int, source, shape_env)
+                # Symbolicize the associated nested int and associate it with the fake
+                # tensor in the nested int registry.
+                from torch.fx.experimental.symbolic_shapes import (
+                    _create_symbolic_nested_int,
+                )
+                from torch.nested._internal.nested_tensor import _tensor_symint_registry
+
+                _tensor_symint_registry[r] = _create_symbolic_nested_int(
+                    t.nested_int, source, shape_env
+                )
 
             self.set_tensor_memo(t, r)
 

@@ -411,12 +411,12 @@ def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
 def is_nested_int(s):
     return isinstance(s, torch.SymInt) and s.node.is_nested_int()
 
-# helper function for constructing a symbolic nested int
+# helper function for constructing a symbolic nested int from a nested int
 def _create_symbolic_nested_int(nested_int, base_source, shape_env):
     # Base source is None in two cases:
     # (1) tensor._base is _dummy_instance OR
     # (2) tensor is an intermediate
-    from torch._dynamo.source import EphemeralSource, NestedIntSource
+    from torch._dynamo.source import EphemeralSource
 
     # check if the nested int is already symbolic
     if is_symbolic(nested_int):
@@ -425,12 +425,7 @@ def _create_symbolic_nested_int(nested_int, base_source, shape_env):
         else:
             nested_int = nested_int.node.hint
 
-    nested_source: Source = (
-        EphemeralSource("intermediate_offsets_or_lengths")
-        if base_source is None
-        else NestedIntSource(base_source)
-    )
-
+    nested_source: Source = EphemeralSource("intermediate_offsets_or_lengths")
     sym_nested_int = shape_env.create_symintnode(
         sym=shape_env.create_symbol(
             val=nested_int,
