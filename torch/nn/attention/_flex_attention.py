@@ -22,6 +22,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.nn.attention._utils import _validate_sdpa_input
 
+__all__ = ["BlockMask", "flex_attention", "create_block_mask", "create_mask"]
 
 def _compose(*fs):
     """Compose a sequence of score_mod functions."""
@@ -112,9 +113,48 @@ _DEFAULT_SPARSE_BLOCK_SIZE = 128
 
 
 class BlockMask:
-    """
+    r"""
     BlockMask is our format for representing a block-sparse attention mask.
-    It is a variation of 
+    It is somewhat of a cross in-between BCSR and a non-sparse format.
+
+    ## Basics
+    A block-sparse mask means that instead of representing the sparsity of
+    individual elements in the mask, we only consider a block sparse if an
+    entire KV_BLOCK_SIZE x Q_BLOCK_SIZE is sparse. This aligns well with
+    hardware, which generally expects to perform contiguous loads and
+    computation.
+    
+    This format is primarily optimized for 1. simplicity, and 2. kernel
+    efficiency. Notably, it is *not* optimized for size, as we believe the mask
+    is sufficiently small that its size is not a concern.
+
+    The essentials of our format are:
+    num_blocks_in_row: Tensor[ROWS]  # Describes the number of blocks present in
+    each row.
+    col_indices: Tensor[ROWS, MAX_BLOCKS_IN_COL]  # col_indices[i] is the
+    position of the blocks in index i. The values of this row after
+    col_indices[i][num_blocks_in_row[i]] are undefined.
+
+    For example, to reconstruct the original tensor from this format.
+    ```
+    dense_mask = torch.zeros(ROWS, COLS)
+    for row in range(ROWS):
+        for block_idx in range(num_blocks_in_row[row]):
+            dense_mask[row, col_indices[row, block_idx]] = 1
+    ```
+
+    Notably, this format makes it easier to implement a reduction along the
+    *rows* of the mask.
+
+    ## Details
+    The basics of our format require only kv_num_blocks and kv_indices. But, we have up to 8 tensors on this object. This represents 4 pairs:
+
+    (kv_num_blocks, kv_indices): This is used for the forwards pass of
+    attention, as we reduce along the KV dimension.
+    (q_num_blocks, q_indices): This is required for the backwards pass, as computing dQ requires
+    (full_kv_num_blocks, full_kv_indices)
+    (full_q_num_blocks, full_q_indices)
+
     """
     kv_num_blocks: Tensor
     kv_indices: Tensor
@@ -242,7 +282,7 @@ class BlockMask:
             valid_indices = torch.where(index_mask, kv_indices, num_cols)
 
             # set the values in 'a' to 1 where the indices are valid
-            dense_mask[row_indices, valid_indices] = Tensor(
+            dense_mask[row_indices, valid_indices] = torch.tensor(
                 1, device=dense_mask.device, dtype=dense_mask.dtype
             )
             return dense_mask[:, :num_cols]
