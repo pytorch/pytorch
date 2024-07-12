@@ -3,7 +3,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._functorch.aot_autograd import AOTConfig, create_joint, from_fun
+from torch._functorch.aot_autograd import AOTConfig, create_joint
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -12,16 +12,20 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch._subclasses.functional_tensor import (
-    disable_functional_mode,
-)
+from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     make_fx,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from .utils import _from_fun, clone_outputs_aliasing_inputs, prepare_fw_with_masks, _unstack_pytree, _stack_pytree
+from .utils import (
+    _from_fun,
+    _stack_pytree,
+    _unstack_pytree,
+    clone_outputs_aliasing_inputs,
+    prepare_fw_with_masks,
+)
 
 
 # TODO: We add this to prevent dymamo from tracing into map_wrapper,
@@ -53,7 +57,6 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
 
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
-
             unwrapped_mapped_xs = pytree.tree_map(_from_fun, mapped_xs)
             example_xs = _unstack_pytree(unwrapped_mapped_xs)[0]
 
@@ -194,6 +197,7 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
     return track_tensor_tree(
         expanded_outs, out_proxy, constant=None, tracer=proxy_mode.tracer
     )
+
 
 @map_impl.py_impl(DispatchKey.CompositeExplicitAutograd)
 def map_dense(f, xs, pos_args):

@@ -216,27 +216,22 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     if len(flat_true_outs) != len(flat_false_outs):
         raise torch._dynamo.exc.CondOpArgsMismatchError(
             f"Expected to return same number of outputs but got:"
-            f"\n  {true_fn.__name__} returns {len(flat_true_outs)} item(s)"
-            f"\n  {false_fn.__name__} returns {len(flat_false_outs)} item(s)"
+            f"\n  true branch returns {len(flat_true_outs)} item(s)"
+            f"\n  false branch returns {len(flat_false_outs)} item(s)"
         )
 
     for i in range(0, len(flat_true_outs)):
         true_out = flat_true_outs[i]
         false_out = flat_false_outs[i]
-        # TODO: If a torch nn module such as Linear or GRUCell is used, then the
-        # meta data of the output is None and cannot be compared
-        # TODO: If inside the dictionary, inside the list, the first element
-        # is composed of the multiplication, then the requires_grad attribute is
-        # set to False and thus the tracing of the cond errors out.
-    
+
         def _same_meta_except_requires_grad(true_out, false_out):
             if true_out is None and false_out is None:
                 return True
             elif true_out is None or false_out is None:
                 # Consider the following case:
                 # def true_fn(x, y):
-                #   return x * y 
-                # 
+                #   return x * y
+                #
                 # def false_fn(x, y):
                 #   return x.sin()
                 #
@@ -250,7 +245,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
                 # This suggests that when we make_fx into the backward graph,
                 # the output graph would produce outputs with metadata, this is undesirable.
                 #
-                # Ideally, we should provide an optional type to indicate that one of the branches might 
+                # Ideally, we should provide an optional type to indicate that one of the branches might
                 # return None. But we'll just let it pass for now and let downstream/runtime handle.
                 #
                 # Note that this corner case should **only** happen when user want to trace backward graph because
@@ -258,7 +253,11 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
                 return True
             true_meta = true_out.meta.get("tensor_meta", None)
             false_meta = false_out.meta.get("tensor_meta", None)
-            return true_meta.shape == false_meta.shape and true_meta.dtype == false_meta.dtype and true_meta.stride == false_meta.stride
+            return (
+                true_meta.shape == false_meta.shape
+                and true_meta.dtype == false_meta.dtype
+                and true_meta.stride == false_meta.stride
+            )
 
         if not _same_meta_except_requires_grad(true_out, false_out):
             raise torch._dynamo.exc.CondOpArgsMismatchError(

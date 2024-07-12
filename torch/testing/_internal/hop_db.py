@@ -90,7 +90,7 @@ def foo_impl_abstract(x, z):
 
 def sample_inputs_cond(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
-        make_tensor, device=device, dtype=dtype, requires_grad=False
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
     )
     yield SampleInput(make_arg(2, 2, 2, low=0.1, high=2))
 

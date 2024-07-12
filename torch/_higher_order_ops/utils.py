@@ -93,6 +93,15 @@ def reenter_make_fx(fn):
     return wrapped
 
 
+def _maybe_reenter_make_fx(fn):
+    from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
+
+    if _CURRENT_MAKE_FX_TRACER is not None:
+        return reenter_make_fx(fn)
+    else:
+        return make_fx(fn)
+
+
 @contextmanager
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
@@ -302,7 +311,7 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
 
     example_grad = [_from_fun(out) for out in fw_outputs]
     num_grads = len(example_grad)
-    fw_graph = make_fx(fn)(*fw_inputs)
+    fw_graph = _maybe_reenter_make_fx(fn)(*fw_inputs)
 
     def joint_fn(*joint_operands_grads):
         if use_output_and_grad_bw:
@@ -326,10 +335,14 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
 
     if use_output_and_grad_bw:
         example_xs_out = list(fw_inputs) + list(fw_outputs)
-        joint_graph = make_fx(joint_fn)((list(example_grad), list(example_xs_out)))
+        joint_graph = _maybe_reenter_make_fx(joint_fn)(
+            (list(example_grad), list(example_xs_out))
+        )
     else:
         example_xs_out = list(fw_inputs)
-        joint_graph = make_fx(joint_fn)(*(list(example_grad) + list(example_xs_out)))
+        joint_graph = _maybe_reenter_make_fx(joint_fn)(
+            *(list(example_grad) + list(example_xs_out))
+        )
 
     return fw_graph, joint_graph
 
