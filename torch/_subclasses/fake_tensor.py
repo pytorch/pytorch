@@ -21,6 +21,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import TypeGuard
 from weakref import ReferenceType
 
 import torch
@@ -165,7 +166,7 @@ def get_plain_tensors(subclass):
     return plain_tensors
 
 
-def is_fake(x):
+def is_fake(x: object) -> TypeGuard[torch.Tensor]:
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
@@ -449,8 +450,10 @@ class FakeTensorConverter:
 def init_cuda_context():
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available():
-        torch.empty(1, device="cuda") if torch.version.hip is None else torch.zeros(
-            1, device="cuda"
+        (
+            torch.empty(1, device="cuda")
+            if torch.version.hip is None
+            else torch.zeros(1, device="cuda")
         )
 
 
