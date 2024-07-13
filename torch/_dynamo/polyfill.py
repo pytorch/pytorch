@@ -71,6 +71,23 @@ def set_intersection(set1, set2):
     return intersection_set
 
 
+def set_union(set1, set2):
+    union_set = set()
+    for s in (set1, set2):
+        for x in s:
+            if x not in union_set:
+                union_set.add(x)
+    return union_set
+
+
+def set_difference(set1, set2):
+    difference_set = set()
+    for x in set1:
+        if x not in set2:
+            difference_set.add(x)
+    return difference_set
+
+
 def dropwhile(predicate, iterable):
     # dropwhile(lambda x: x<5, [1,4,6,4,1]) -> 6 4 1
     iterable = iter(iterable)
