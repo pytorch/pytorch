@@ -1649,6 +1649,7 @@ class _MakefxTracer:
                     return self.fake_tensor_mode.from_tensor(x, source=source)
                 # NB: don't match on bools
                 elif type(x) is int and self.tracing_mode == "symbolic":
+                    assert self.fake_tensor_mode.shape_env is not None, "shape_env should be set if tracing with 'symbolic'"
                     return self.fake_tensor_mode.shape_env.create_symintnode(
                         self.fake_tensor_mode.shape_env.create_symbol(x, source, positive=None),
                         hint=x,
