@@ -17,6 +17,7 @@ from torch._library.custom_ops import (
     CustomOpDef,
     device_types_t,
 )
+from torch._library.infer_schema import infer_schema  # noqa: F401
 from torch._ops import OpOverload
 
 
@@ -30,6 +31,7 @@ __all__ = [
     "register_torch_dispatch",
     "get_ctx",
     "custom_op",
+    "infer_schema",
 ]
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
