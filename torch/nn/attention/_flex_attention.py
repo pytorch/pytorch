@@ -89,7 +89,6 @@ def _vmap_for_bhqkv(
     )
     return fn
 
-
 def _identity(
     score: Tensor,
     batch: Tensor,
@@ -150,10 +149,15 @@ class BlockMask:
     The basics of our format require only kv_num_blocks and kv_indices. But, we have up to 8 tensors on this object. This represents 4 pairs:
 
     (kv_num_blocks, kv_indices): This is used for the forwards pass of
-    attention, as we reduce along the KV dimension.
-    (q_num_blocks, q_indices): This is required for the backwards pass, as computing dQ requires
-    (full_kv_num_blocks, full_kv_indices)
-    (full_q_num_blocks, full_q_indices)
+        attention, as we reduce along the KV dimension.
+    (q_num_blocks, q_indices): This is required for the backwards pass, as
+        computing dKV requires iterating along the mask along the Q dimension.
+    (full_kv_num_blocks, full_kv_indices): This is for a constant-factor
+        optimization. As it turns out, applying masking to every block is quite
+        expensive! If we specifically know which blocks are "full" and don't require
+        masking at all, then we can skip applying mask_mod to these blocks. This
+        requires the user to split out a separate mask_mod from the score_mod.
+    (full_q_num_blocks, full_q_indices): Same as above, but for the backwards.
 
     """
     kv_num_blocks: Tensor
