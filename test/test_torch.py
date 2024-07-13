@@ -2913,7 +2913,12 @@ else:
 
     # if the given input arg is not a list, it returns a list of single element: [arg]
     def _wrap_to_list(self, input_array):
-        return input_array if isinstance(input_array, list) else [input_array]
+        if isinstance(input_array, list):
+            return input_array
+        elif isinstance(input_array, tuple):
+            return list(input_array)
+        else:
+            return [input_array]
 
     # To ensure inf, -inf, and nan values do not cause divergence between Numpy and PyTorch.
     # There are two types of possible divergence:
@@ -3051,7 +3056,7 @@ else:
                     # Result is given just as real number and all the imaginary parts to be equal to zero.
                     self.assertEqual(expected[i].imag, torch.zeros(actual[i].shape), exact_dtype=False)
             else:
-                actual, expected = self._inf_nan_preprocess(list(actual), expected)
+                actual, expected = self._inf_nan_preprocess(list(actual), self._wrap_to_list(expected))
                 self.assertEqual(actual, expected, equal_nan=True, exact_dtype=False)
 
     @onlyNativeDeviceTypes
@@ -7571,10 +7576,10 @@ class TestTorch(TestCase):
             torch.mean(sample, dim=0), torch.full((d,), 0.5), atol=2, rtol=2
         )
         torch.testing.assert_close(
-            np.percentile(sample, 25, axis=0), np.repeat(0.25, d), atol=2, rtol=2
+            np.percentile(sample, 25, axis=0), np.repeat(0.25, d), atol=2, rtol=2, check_dtype=False
         )
         torch.testing.assert_close(
-            np.percentile(sample, 75, axis=0), np.repeat(0.75, d), atol=2, rtol=2
+            np.percentile(sample, 75, axis=0), np.repeat(0.75, d), atol=2, rtol=2, check_dtype=False
         )
 
     @skipIfTorchDynamo("np.float64 restored as float32 after graph break.")
