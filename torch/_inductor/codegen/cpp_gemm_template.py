@@ -508,6 +508,12 @@ class CppPackedGemmTemplate(CppTemplate):
         if self.epilogue_creator is not None:
             epilogue_creators.append(self.epilogue_creator)
 
+        # NOTE [How CPP GEMM template epilogues are organized]
+        #   gemm_output_buffer
+        #     --> zero or more in-template epilogues (created by `epilogue_creators`) -->
+        #   template_buffer
+        #     --> zero or more out-of-template epilogues (`epilogue_nodes`) -->
+        #   Y
         if epilogue_creators:
             gemm_output_name = "buf_GemmOut"
             gemm_output_buffer = ir.Buffer(gemm_output_name, template_buffer.layout)
@@ -516,7 +522,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 if i == len(epilogue_creators) - 1:
                     buffer_name = template_buffer.get_name()
                 else:
-                    buffer_name = f"buf_GemmOut_{i}"
+                    buffer_name = f"buf_GemmOut_epilogue_{i}"
                 epilogues.append(
                     ir.ComputedBuffer(
                         name=buffer_name,
@@ -539,7 +545,7 @@ class CppPackedGemmTemplate(CppTemplate):
             epilogues.extend(epilogue_nodes)
             assert Y.get_numel() == epilogues[-1].get_numel()
             Y = cast(ir.Buffer, epilogues[-1])
-            Y_aliases.add(gemm_output_buffer.get_name())
+            Y_aliases.add(template_buffer.get_name())
             if (
                 Y.get_size() == template_buffer.get_size()
                 and Y.get_stride() == template_buffer.get_stride()
