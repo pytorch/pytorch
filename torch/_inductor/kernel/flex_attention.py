@@ -4,7 +4,10 @@
 import logging
 from typing import Any, List, Tuple
 
+import sympy
+
 import torch
+from torch._inductor.virtualized import V
 from torch.utils._pytree import tree_map
 from .. import config
 from ..ir import (
@@ -312,6 +315,11 @@ flex_attention_template = TritonTemplate(
 )
 
 
+def _use_flex_decoding(query):
+    # Decide which kernel to use, return true if use flex decoding kernel.
+    return V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 128))
+
+
 _h100_default_config = {
     (torch.float32, 64): (128, 32, 4, 3),
     (torch.float32, 128): (32, 64, 4, 3),
@@ -418,6 +426,9 @@ def create_indices_fake(x) -> torch.Tensor:
     return indices
 
 
+from torch._inductor.kernel.flex_decoding import create_flex_decoding_kernel
+
+
 # TODO: We probably also need a layout constraint?
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
 def flex_attention(*args, **kwargs):
@@ -459,6 +470,11 @@ def flex_attention(*args, **kwargs):
         ]
     ]
     subgraph_buffer = build_subgraph_buffer(placeholder_inps + other_buffers, subgraph)
+
+    if _use_flex_decoding(query):
+        return create_flex_decoding_kernel(
+            subgraph_buffer, query, key, value, subgraph, scale, *other_buffers
+        )
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
@@ -932,6 +948,9 @@ def flex_attention_backward(*args, **kwargs):
         sparse_q_indices,
     ]:
         buf.realize()
+
+    if _use_flex_decoding(query):
+        raise NotImplementedError("Flex decoding backward pass is not implemented. ")
 
     device = query.get_device()
     dtype = query.get_dtype()
