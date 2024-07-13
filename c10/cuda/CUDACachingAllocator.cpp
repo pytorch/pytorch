@@ -1543,16 +1543,6 @@ class DeviceCachingAllocator {
 
     // allocate all blocks in the segment
     for (size_t i = 0; i < segment_len; ++i) {
-      // The last block in every expandable segment is the remaining amount of
-      // available unmapped virtual address space. We shouldn't change it but
-      // instead check it is correctly formed then skip over allocating it.
-      if (i == segment_len - 1 && curr_block->expandable_segment_) {
-        TORCH_CHECK(curr_block->next == nullptr);
-        TORCH_CHECK(!curr_block->mapped);
-        TORCH_CHECK(curr_block->allocated == false);
-        continue;
-      }
-
       auto& block_state = segment.blocks.at(i);
       AllocParams params(
           block_state.device,
@@ -1567,11 +1557,8 @@ class DeviceCachingAllocator {
 
       // splitting a block depends on `max_split_size`, which may have changed
       // between whe checkpoint was taken and now, so we make sure to recreate
-      // the behavior from the checkpoint. Keep splitting as long as there is
-      // space left in the block because the block is already the size of how it
-      // appears in the segment, so any leftover space belongs to the next
-      // block.
-      bool split = curr_block->size - block_state.size > 0;
+      // the behavior from the checkpoint.
+      bool split = (i + 1) < segment.blocks.size();
 
       // curr_block will become next pointer if it is split, so reassign with
       // the returned value
@@ -1594,13 +1581,6 @@ class DeviceCachingAllocator {
     curr_block = last_block;
 
     for (size_t i = 0; i < segment_len; ++i, curr_block = curr_block->next) {
-      if (i == segment_len - 1 && curr_block->expandable_segment_) {
-        TORCH_CHECK(curr_block->next == nullptr);
-        TORCH_CHECK(!curr_block->mapped);
-        TORCH_CHECK(curr_block->allocated == false);
-        continue;
-      }
-
       auto& block_state = segment.blocks.at(i);
       TORCH_INTERNAL_ASSERT(curr_block != nullptr);
 
@@ -2450,15 +2430,15 @@ class DeviceCachingAllocator {
         total_allocated_memory + size > allowed_memory_maximum) {
       p.err = cudaErrorMemoryAllocation;
       return false;
-    } else if (CUDAAllocatorConfig::expandable_segments()) {
+    } else if (
+        CUDAAllocatorConfig::expandable_segments() &&
+        // our checkpointing logic for private pools doesn't support
+        // the expandable_segments_ structure yet
+        !p.pool->owner_PrivatePool) {
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
       if (p.block) {
         p.err = cudaSuccess;
-        if (p.pool->owner_PrivatePool) {
-          // The block is for a CUDA graph's PrivatePool.
-          p.pool->owner_PrivatePool->cudaMalloc_count++;
-        }
       } else {
         p.err = cudaErrorMemoryAllocation;
       }
@@ -2700,13 +2680,6 @@ class DeviceCachingAllocator {
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       decrease_stat(stats.reserved_bytes[stat_type], unmapped.size);
     });
-
-    if (block->pool->owner_PrivatePool) {
-      // The cudaFreed block belonged to a CUDA graph's PrivatePool.
-      TORCH_INTERNAL_ASSERT(
-          block->pool->owner_PrivatePool->cudaMalloc_count > 0);
-      block->pool->owner_PrivatePool->cudaMalloc_count--;
-    }
 
     stats.num_device_free++;
     record_trace(
