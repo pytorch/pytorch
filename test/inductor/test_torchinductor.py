@@ -8368,7 +8368,7 @@ class CommonTemplate:
         )
 
         if is_halide_backend(self.device):
-            self.assertEqual(fw_code.count("halide_helpers.rand"), 2)
+            self.assertEqual(fw_code.count("halide_helpers.rand"), 1)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
         elif self.device == GPU_TYPE:
             self.assertEqual(fw_code.count("tl.rand"), 2)
