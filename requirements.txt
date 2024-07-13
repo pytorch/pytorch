@@ -2,7 +2,8 @@
 astunparse
 expecttest>=0.2.1
 hypothesis
-numpy
+numpy ; python_version < "3.13"
+http://pypi.anaconda.org/scientific-python-nightly-wheels/simple/numpy/2.1.0.dev0/numpy-2.1.0.dev0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl ; python_version >= "3.13"
 psutil
 pyyaml
 requests
