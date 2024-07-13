@@ -50,7 +50,7 @@ static void resize_storage_bytes__functionalize(
 
 TORCH_LIBRARY_FRAGMENT(inductor, m) {
   m.def(
-      "resize_storage_bytes_(Tensor(a!) variable, SymInt new_size) -> ()",
+      "resize_storage_bytes_(Tensor variable, SymInt new_size) -> ()",
       dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, resize_storage_bytes_),
       {at::Tag::pt2_compliant_tag});
