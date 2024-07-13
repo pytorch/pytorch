@@ -449,7 +449,7 @@ def forward(self, pred_1, x_1, y_1, z_1):
     getitem_2 = conditional_1[1];  conditional_1 = None
     return (getitem_1,)""",  # noqa: B950
         )
-
+    
     def test_cond_autograd_grad_through_cond(self):
         nn_module = torch.nn.Linear(4, 4)
 
@@ -483,7 +483,7 @@ def forward(self, pred_1, x_1, y_1, z_1):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (nn_module.weight,), grad_out)
 
-        # need to set _allow_non_fake_inputs = True because model parameters don't
+        # need to set _allow_non_fake_inputs = True because model parameters don't 
         # get fakified.
         gm = make_fx(f, tracing_mode="symbolic", _allow_non_fake_inputs=True)(pred, x)
         self.assertExpectedInline(
@@ -724,19 +724,80 @@ def forward(self, x_1):
             self.assertEqual(result, fn({"t": [a, {"b": b}, (c,)]}))
 
             grad_out = torch.ones_like(result)
-            grads = torch.autograd.grad(result, (a, b), grad_out)
-            expected_grads = torch.autograd.grad(
-                fn({"t": [a, {"b": b}, (c,)]}), (a, b), grad_out
-            )
-            self.assertEqual(expected_grads, grads)
+            if pred == True:
+                with self.assertRaisesRegex(Exception, r"."):
+                    grads = torch.autograd.grad(result, (a, b, c), grad_out)
+                    expected_grads = torch.autograd.grad(
+                        fn({"t": [a, {"b": b}, (c,)]}), (a, b, c), grad_out
+                    )
+                    self.assertEqual(expected_grads, grads)
+                
+                def f(pred):
+                    result = cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
+                    grad_out = torch.ones_like(result)
+                    return torch.autograd.grad(result, (a, b, c), grad_out)
 
-        def f(pred):
-            result = cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
-            grad_out = torch.ones_like(result)
-            return torch.autograd.grad(result, (a, b), grad_out)
+                #with self.assertRaisesRegex(Exception, r"."):
+                gm = make_fx(f)(pred)
+                self.assertExpectedInline(
+                gm.code.strip(),
+                """\
+def forward(self, pred_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    _tensor_constant0 = self._tensor_constant0
+    _tensor_constant1 = self._tensor_constant1
+    _tensor_constant2 = self._tensor_constant2
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_tensor_constant0, _tensor_constant1, _tensor_constant2));  true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
+    getitem = conditional[0];  conditional = None
+    ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    _tensor_constant0_1 = self._tensor_constant0
+    _tensor_constant1_1 = self._tensor_constant1
+    _tensor_constant2_1 = self._tensor_constant2
+    conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, _tensor_constant0_1, _tensor_constant1_1, _tensor_constant2_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = _tensor_constant0_1 = _tensor_constant1_1 = _tensor_constant2_1 = None
+    getitem_1 = conditional_1[0]
+    getitem_2 = conditional_1[1]
+    getitem_3 = conditional_1[2];  conditional_1 = None
+    return (getitem_1, getitem_2, getitem_3)""")
+                
+            else:
+                grads = torch.autograd.grad(result, (a, b, c), grad_out)
+                expected_grads = torch.autograd.grad(
+                    fn({"t": [a, {"b": b}, (c,)]}), (a, b, c), grad_out
+                )
+                self.assertEqual(expected_grads, grads)
 
-        with self.assertRaisesRegex(Exception, r"."):
-            gm = make_fx(f)(pred)
+                def f(pred):
+                    result = cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
+                    grad_out = torch.ones_like(result)
+                    return torch.autograd.grad(result, (a, b, c), grad_out)
+
+                #with self.assertRaisesRegex(Exception, r"."):
+                gm = make_fx(f)(pred)
+                self.assertExpectedInline(
+                gm.code.strip(),
+                """\
+def forward(self, pred_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    _tensor_constant0 = self._tensor_constant0
+    _tensor_constant1 = self._tensor_constant1
+    _tensor_constant2 = self._tensor_constant2
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_tensor_constant0, _tensor_constant1, _tensor_constant2));  true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
+    getitem = conditional[0];  conditional = None
+    ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    _tensor_constant0_1 = self._tensor_constant0
+    _tensor_constant1_1 = self._tensor_constant1
+    _tensor_constant2_1 = self._tensor_constant2
+    conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, _tensor_constant0_1, _tensor_constant1_1, _tensor_constant2_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = _tensor_constant0_1 = _tensor_constant1_1 = _tensor_constant2_1 = None
+    getitem_1 = conditional_1[0]
+    getitem_2 = conditional_1[1]
+    getitem_3 = conditional_1[2];  conditional_1 = None
+    return (getitem_1, getitem_2, getitem_3)""")
 
     def test_cond_autograd_pytree_input(self):
         def true_fn(x):
@@ -767,7 +828,7 @@ def forward(self, x_1):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (a, b), grad_out)
 
-        # need to set _allow_non_fake_inputs = True because model parameters don't
+        # need to set _allow_non_fake_inputs = True because model parameters don't 
         # get fakified.
         gm = make_fx(f, tracing_mode="symbolic", _allow_non_fake_inputs=True)(pred)
         self.assertExpectedInline(
@@ -810,7 +871,7 @@ def forward(self, pred_1):
         ):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile.",
+                "Cond doesn't work unless it is captured completely with torch.compile. Scroll up to find out what causes the graph break.",
             ):
                 cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
 
@@ -953,7 +1014,7 @@ def forward(self, pred_1):
 
             graph = make_fx(false_fn)(x)
             if "detach" in graph._code:
-                raise Exception("Failed")  # noqa: TRY002
+                raise Exception("Failed")
 
         for nn_module_false in nn_module_false_not_working:
 
@@ -962,7 +1023,7 @@ def forward(self, pred_1):
 
             graph = make_fx(false_fn)(x)
             if "detach" not in graph._code:
-                raise Exception("Failed")  # noqa: TRY002
+                raise Exception("Failed")
 
         nn_module_false = torch.nn.Linear(4, 4)
 

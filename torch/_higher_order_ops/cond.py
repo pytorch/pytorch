@@ -228,15 +228,15 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         # TODO: If inside the dictionary, inside the list, the first element
         # is composed of the multiplication, then the requires_grad attribute is
         # set to False and thus the tracing of the cond errors out.
-
+    
         def _same_meta_except_requires_grad(true_out, false_out):
             if true_out is None and false_out is None:
                 return True
             elif true_out is None or false_out is None:
                 # Consider the following case:
                 # def true_fn(x, y):
-                #   return x * y
-                #
+                #   return x * y 
+                # 
                 # def false_fn(x, y):
                 #   return x.sin()
                 #
@@ -250,7 +250,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
                 # This suggests that when we make_fx into the backward graph,
                 # the output graph would produce outputs with metadata, this is undesirable.
                 #
-                # Ideally, we should provide an optional type to indicate that one of the branches might
+                # Ideally, we should provide an optional type to indicate that one of the branches might 
                 # return None. But we'll just let it pass for now and let downstream/runtime handle.
                 #
                 # Note that this corner case should **only** happen when user want to trace backward graph because
