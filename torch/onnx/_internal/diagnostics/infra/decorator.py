@@ -6,6 +6,7 @@ import logging
 import traceback
 from typing import Any, Callable, Dict, Optional, Tuple, Type
 
+from torch.onnx._internal import _beartype
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, utils
 
@@ -13,10 +14,12 @@ from torch.onnx._internal.diagnostics.infra import formatter, utils
 MessageFormatterType = Callable[..., str]
 
 
+@_beartype.beartype
 def format_message_in_text(fn: Callable, *args: Any, **kwargs: Any) -> str:
     return f"{formatter.display_name(fn)}. "
 
 
+@_beartype.beartype
 def format_exception_in_markdown(exception: Exception) -> str:
     msg_list = ["### Exception log", "```"]
     msg_list.extend(
@@ -26,6 +29,7 @@ def format_exception_in_markdown(exception: Exception) -> str:
     return "\n".join(msg_list)
 
 
+@_beartype.beartype
 def format_function_signature_in_markdown(
     fn: Callable,
     args: Tuple[Any, ...],
@@ -42,6 +46,7 @@ def format_function_signature_in_markdown(
     return "\n".join(msg_list)
 
 
+@_beartype.beartype
 def format_return_values_in_markdown(
     return_values: Any,
     format_argument: Callable[[Any], str] = formatter.format_argument,
@@ -54,6 +59,7 @@ ModifierCallableType = Callable[
 ]
 
 
+@_beartype.beartype
 def diagnose_call(
     rule: infra.Rule,
     *,
