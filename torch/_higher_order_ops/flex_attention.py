@@ -265,6 +265,7 @@ def trace_flex_attention(
         mask_graph = reenter_make_fx(mask_fn)(
             *mask_example_vals, *mask_fn_other_buffers
         )
+    assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
     block_mask = block_mask[:-1] + (mask_graph,)
     qualname = proxy_mode.tracer.get_fresh_qualname("sdpa_score")
     proxy_mode.tracer.root.register_module(qualname, score_graph)
@@ -761,6 +762,7 @@ def trace_flex_attention_backward(
         mask_graph = reenter_make_fx(mask_graph)(
             *mask_example_vals, *mask_fn_other_buffers
         )
+    assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
     block_mask = block_mask[:-1] + (mask_graph,)
     proxy_mode.tracer.root.register_module("fw_graph", fw_graph)
     proxy_mode.tracer.root.register_module("joint_graph", joint_graph)
