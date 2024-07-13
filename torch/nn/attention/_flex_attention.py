@@ -476,6 +476,13 @@ def flex_attention(
         Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
     """
+    # Some basic input validation
+    _validate_sdpa_input(query, key, value)
+    if query.size(-2) >= 32:  # use Attention Kernel
+        if query.size(-2) >= 128 & query.size(-2) % 128 != 0:
+            raise NotImplementedError("NYI: S must be <128 or a multiple of 128")
+    if key.size(-2) % 128 != 0:
+        raise NotImplementedError("NYI: L must be a multiple of 128")
 
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key, value)
@@ -489,14 +496,6 @@ def flex_attention(
             query, key, value, score_mod, block_mask.as_tuple(), scale=scale
         )
         return out
-
-    # Some basic input validation
-    _validate_sdpa_input(query, key, value)
-    if query.size(-2) >= 32:  # use Attention Kernel
-        if query.size(-2) >= 128 & query.size(-2) % 128 != 0:
-            raise ValueError("NYI: S must be <128 or a multiple of 128")
-    if key.size(-2) % 128 != 0:
-        raise ValueError("NYI: L must be a multiple of 128")
 
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support.")
