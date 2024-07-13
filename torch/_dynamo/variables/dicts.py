@@ -444,6 +444,12 @@ class SetVariable(ConstDictVariable):
             return variables.UserFunctionVariable(
                 polyfill.set_isdisjoint
             ).call_function(tx, [self, args[0]], {})
+        elif name == "intersection":
+            assert not kwargs
+            assert len(args) == 1
+            return variables.UserFunctionVariable(
+                polyfill.set_isdisjoint
+            ).call_function(tx, [self, args[0]], {})
         elif (
             name == "update"
             and len(args) == 1

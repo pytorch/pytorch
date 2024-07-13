@@ -63,6 +63,14 @@ def set_isdisjoint(set1, set2):
     return True
 
 
+def set_intersection(set1, set2):
+    intersection_set = set()
+    for x in set1:
+        if x in set2:
+            intersection_set.add(x)
+    return intersection_set
+
+
 def dropwhile(predicate, iterable):
     # dropwhile(lambda x: x<5, [1,4,6,4,1]) -> 6 4 1
     iterable = iter(iterable)
