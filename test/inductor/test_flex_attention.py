@@ -1371,8 +1371,8 @@ class GraphModule(torch.nn.Module):
         child_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         child_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (ones, zeros, ones_1, zeros_1, None, None, None, None, 8, 8, mask_fn_0), 0.5, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = ones = zeros = ones_1 = zeros_1 = mask_fn_0 = None
-        out: "f64[2, 2, 8, 4]" = flex_attention[0];  flex_attention = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (ones, zeros, ones_1, zeros_1, None, None, None, None, 128, 128, mask_fn_0), 0.5, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = ones = zeros = ones_1 = zeros_1 = mask_fn_0 = None
+        out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
     class GraphModule(torch.nn.Module):
@@ -1411,10 +1411,10 @@ class GraphModule(torch.nn.Module):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
         mask_graph = self.mask_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, (full_default, full_default_1, full_default, full_default_1, None, None, None, None, 8, 8, mask_graph), 0.5, (), ());  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = mask_graph = None
-        getitem_2: "f64[2, 2, 8, 4]" = flex_attention_backward[0]
-        getitem_3: "f64[2, 2, 8, 4]" = flex_attention_backward[1]
-        getitem_4: "f64[2, 2, 8, 4]" = flex_attention_backward[2];  flex_attention_backward = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, (full_default, full_default_1, full_default, full_default_1, None, None, None, None, 128, 128, mask_graph), 0.5, (), ());  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = mask_graph = None
+        getitem_2: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
+        getitem_3: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
+        getitem_4: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
         return [getitem_2, getitem_3, getitem_4]
 
     class <lambda>(torch.nn.Module):
