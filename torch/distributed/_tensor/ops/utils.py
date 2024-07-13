@@ -286,7 +286,7 @@ def expand_to_full_mesh_op_strategy(
                 output_specs = tuple(spec_list[:input_index])
             else:
                 if spec_list[0] is not None:
-                    output_specs = spec_list[0]
+                    output_specs = cast(DTensorSpec, spec_list[0])
                 else:
                     raise RuntimeError("output spec is None")
             strategy = PlacementStrategy(
