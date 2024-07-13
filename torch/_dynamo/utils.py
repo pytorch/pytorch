@@ -78,7 +78,7 @@ try:
             np.random: tnp.random,
         }
     else:
-        NP_SUPPORTED_MODULES = tuple()
+        NP_SUPPORTED_MODULES = ()
 
         NP_TO_TNP_MODULE = {}
     from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -463,8 +463,8 @@ class ExactWeakKeyDictionary:
     """Similar to weakref.WeakKeyDictionary, but use `is`/`id` rather than `==` to compare equality"""
 
     def __init__(self):
-        self.values = dict()
-        self.refs = dict()
+        self.values = {}
+        self.refs = {}
 
     def __getitem__(self, key):
         return self.values[id(key)]
@@ -1144,10 +1144,10 @@ def check_numpy_ndarray_args(args, kwargs):
     )
 
 
-dict_keys: Type[KeysView[Any]] = type(dict().keys())
-dict_values: Type[ValuesView[Any]] = type(dict().values())
+dict_keys: Type[KeysView[Any]] = type({}.keys())
+dict_values: Type[ValuesView[Any]] = type({}.values())
 odict_values: Type[ValuesView[Any]] = type(collections.OrderedDict().values())
-tuple_iterator: Type[Iterator[Any]] = type(iter(tuple()))
+tuple_iterator: Type[Iterator[Any]] = type(iter(()))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
 
@@ -1610,7 +1610,7 @@ orig_code_map = ExactWeakKeyDictionary()
 guard_failures: DefaultDict[Any, List[Any]] = collections.defaultdict(list)
 
 # Keep a record of graph break reasons for logging
-graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReason"] = list()
+graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReason"] = []
 
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
