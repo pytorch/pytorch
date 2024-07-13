@@ -4,7 +4,10 @@
 import logging
 from typing import Any, List, Tuple
 
+import sympy
+
 import torch
+from torch._inductor.virtualized import V
 from torch.utils._pytree import tree_map
 from .. import config
 from ..ir import (
@@ -280,7 +283,7 @@ flex_attention_template = TritonTemplate(
         indices_idx = start_n // SPARSE_KV_MULTIPLE
 
         cur_block = tl.load(kv_indices + indices_idx, eviction_policy="evict_last")
-        next_block = tl.load(kv_indices + indices_idx + 1, eviction_policy="evict_last")
+        next_block = tl.load(kv_indices + indices_idx + 1, eviction_policy="evict_last", mask=indices_idx + 1 < sparse_kv_num_blocks)
         needs_jump = (start_n + 1) % SPARSE_KV_MULTIPLE == 0
         jump_to_block = (next_block - cur_block ) * SPARSE_KV_BLOCK_SIZE - (SPARSE_KV_MULTIPLE - 1) * BLOCK_N
 
@@ -310,6 +313,11 @@ flex_attention_template = TritonTemplate(
         tl.store(l_ptrs, lse)
  """,
 )
+
+
+def _use_flex_decoding(query):
+    # Decide which kernel to use, return true if use flex decoding kernel.
+    return V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 128))
 
 
 _h100_default_config = {
@@ -418,6 +426,9 @@ def create_indices_fake(x) -> torch.Tensor:
     return indices
 
 
+from torch._inductor.kernel.flex_decoding import create_flex_decoding_kernel
+
+
 # TODO: We probably also need a layout constraint?
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
 def flex_attention(*args, **kwargs):
@@ -459,6 +470,11 @@ def flex_attention(*args, **kwargs):
         ]
     ]
     subgraph_buffer = build_subgraph_buffer(placeholder_inps + other_buffers, subgraph)
+
+    if _use_flex_decoding(query):
+        return create_flex_decoding_kernel(
+            subgraph_buffer, query, key, value, subgraph, scale, *other_buffers
+        )
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
@@ -538,8 +554,8 @@ def flex_attention(*args, **kwargs):
         sparse_kv_indices,
     ] + list(other_buffers)
     input_gen_fns = {
-        4: create_num_blocks_fake_generator(sparse_kv_indices),  # sparse_kv_num_blocks
-        5: create_indices_fake,  # sparse_kv_indices
+        4: create_num_blocks_fake_generator(sparse_kv_indices),
+        5: create_indices_fake,
     }
     return (
         autotune_select_algorithm(
@@ -763,7 +779,7 @@ flex_attention_backward_template = TritonTemplate(
             # Increment pointers.
             indices_idx = start_n // SPARSE_KV_MULTIPLE
             cur_block = tl.load(kv_indices + indices_idx)
-            next_block = tl.load(kv_indices + indices_idx + 1)
+            next_block = tl.load(kv_indices + indices_idx + 1, mask=indices_idx + 1 < sparse_kv_num_blocks)
             needs_jump = (start_n + 1) % SPARSE_KV_MULTIPLE == 0
             jump_to_block = (next_block - cur_block ) * SPARSE_KV_BLOCK_SIZE - (SPARSE_KV_MULTIPLE - 1) * BLOCK_N2
             offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_N2
@@ -870,7 +886,7 @@ flex_attention_backward_template = TritonTemplate(
             # Increment pointers.
             indices_idx = start_m // SPARSE_Q_MULTIPLE
             cur_block = tl.load(q_indices + indices_idx)
-            next_block = tl.load(q_indices + indices_idx + 1)
+            next_block = tl.load(q_indices + indices_idx + 1, mask=indices_idx + 1 < sparse_q_num_blocks)
             needs_jump = (start_m + 1) % SPARSE_Q_MULTIPLE == 0
             jump_to_block = (next_block - cur_block ) * SPARSE_Q_BLOCK_SIZE - (SPARSE_Q_MULTIPLE - 1) * BLOCK_M1
             offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_M1
@@ -933,6 +949,9 @@ def flex_attention_backward(*args, **kwargs):
     ]:
         buf.realize()
 
+    if _use_flex_decoding(query):
+        raise NotImplementedError("Flex decoding backward pass is not implemented. ")
+
     device = query.get_device()
     dtype = query.get_dtype()
 
@@ -980,13 +999,16 @@ def flex_attention_backward(*args, **kwargs):
     configs: List[Tuple[int, int, int, int]] = []
     configs.append(_get_default_config_bwd(query))
     if config.max_autotune:
-        for BLOCK1 in [32, 64]:
-            for BLOCK2 in [32, 64, 128]:
-                if BLOCK2 % BLOCK1 != 0:
-                    continue
-                for w in [4, 8]:
-                    for s in [1, 3, 4, 5]:
-                        configs.append((BLOCK1, BLOCK2, w, s))
+        configs.extend(
+            [
+                (BLOCK1, BLOCK2, w, s)
+                for BLOCK1 in [32, 64]
+                for BLOCK2 in [32, 64, 128]
+                for w in [4, 8]
+                for s in [1, 3, 4, 5]
+                if BLOCK2 % BLOCK1 == 0
+            ]
+        )
 
     for BLOCK1, BLOCK2, num_warps, num_stages in configs:
         if (
@@ -1047,10 +1069,10 @@ def flex_attention_backward(*args, **kwargs):
         sparse_q_indices,
     ] + list(other_buffers)
     input_gen_fns = {
-        9: create_num_blocks_fake_generator(sparse_kv_indices),  # sparse_kv_num_blocks
-        10: create_indices_fake,
-        11: create_num_blocks_fake_generator(sparse_q_indices),  # sparse_q_num_blocks
-        12: create_indices_fake,
+        8: create_num_blocks_fake_generator(sparse_kv_indices),
+        9: create_indices_fake,
+        10: create_num_blocks_fake_generator(sparse_q_indices),
+        11: create_indices_fake,
     }
 
     grad_key = autotune_select_algorithm(
