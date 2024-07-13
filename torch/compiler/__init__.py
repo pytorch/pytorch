@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
-import torch
 from typing import List
+
+import torch
 
 __all__ = [
     "compile",
@@ -15,11 +16,13 @@ __all__ = [
     "is_dynamo_compiling",
 ]
 
+
 def compile(*args, **kwargs):
     """
     See :func:`torch.compile` for details on the arguments for this function.
     """
     return torch.compile(*args, **kwargs)
+
 
 def reset() -> None:
     """
@@ -30,6 +33,7 @@ def reset() -> None:
     import torch._dynamo
 
     torch._dynamo.reset()
+
 
 def allow_in_graph(fn):
     """
@@ -122,6 +126,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
 
     return torch._dynamo.list_backends(exclude_tags)
 
+
 def assume_constant_result(fn):
     """
     This function is used to mark a function `fn` as having a constant result.
@@ -140,6 +145,7 @@ def assume_constant_result(fn):
 
     return torch._dynamo.assume_constant_result(fn)
 
+
 def disable(fn=None, recursive=True):
     """
     This function provides both a decorator and a context manager to disable compilation on a function
@@ -152,6 +158,7 @@ def disable(fn=None, recursive=True):
     import torch._dynamo
 
     return torch._dynamo.disable(fn, recursive)
+
 
 def cudagraph_mark_step_begin():
     """
@@ -177,6 +184,7 @@ def cudagraph_mark_step_begin():
     from torch._inductor import cudagraph_trees
 
     cudagraph_trees.mark_step_begin()
+
 
 def wrap_numpy(fn):
     r"""Decorator that turns a function from ``np.ndarray``s to ``np.ndarray``s into a function
@@ -206,9 +214,12 @@ def wrap_numpy(fn):
         tensor([ 0.,  2.,  4.,  6.,  8., 10.], device='cuda:0')
     """
     from torch._dynamo.external_utils import wrap_numpy as wrap
+
     return wrap(fn)
 
+
 _is_compiling_flag: bool = False
+
 
 def is_compiling() -> bool:
     """
@@ -230,6 +241,7 @@ def is_compiling() -> bool:
         return False
     else:
         return _is_compiling_flag
+
 
 def is_dynamo_compiling() -> bool:
     """
