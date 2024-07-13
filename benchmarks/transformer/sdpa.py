@@ -2,20 +2,22 @@ import itertools
 from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
+from enum import Enum
 from typing import Callable, List, Tuple
 
 from tabulate import tabulate
 from tqdm import tqdm
-from enum import Enum
 
 import torch
 import torch.utils.benchmark as benchmark
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.functional import scaled_dot_product_attention
 
+
 class ExperimentName(Enum):
     SDPA = 1
     GQA = 2
+
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
     # warmup
@@ -155,7 +157,13 @@ def generate_experiment_configs(experiment: ExperimentName) -> List[ExperimentCo
             dtype,
             backend,
         ) in itertools.product(
-            batch_sizes, num_heads, q_kv_seq_lens, embed_dims, is_causal, dtypes, backends
+            batch_sizes,
+            num_heads,
+            q_kv_seq_lens,
+            embed_dims,
+            is_causal,
+            dtypes,
+            backends,
         ):
             all_configs.append(
                 ExperimentConfig(
@@ -184,7 +192,12 @@ def generate_experiment_configs(experiment: ExperimentName) -> List[ExperimentCo
             dtype,
             backend,
         ) in itertools.product(
-            gqa_num_heads, gqa_q_kv_seq_lens, embed_dims, is_causal, dtypes, gqa_backends
+            gqa_num_heads,
+            gqa_q_kv_seq_lens,
+            embed_dims,
+            is_causal,
+            dtypes,
+            gqa_backends,
         ):
             all_configs.append(
                 ExperimentConfig(
