@@ -7797,6 +7797,7 @@ class TestMPS(TestCaseMPS):
         mps_x = torch.randn(5, device='mps', generator=g_mps)
         self.assertEqual(mps_x, mps_y)
 
+    @serialTest()
     def test_default_mps_generator(self):
         # manual seeding on the "default" MPS generator using
         # the global torch.manual_seed()
