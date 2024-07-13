@@ -7806,21 +7806,33 @@ class TestMPS(TestCaseMPS):
         # which should set the "default" MPS generator
         # like the global torch.manual_seed()
         torch.mps.manual_seed(230)
+        # generate random numbers with offset `0`
         mps_y = torch.randn(5, device='mps')
         # seed values were the same, so the random tensor contents should match
         self.assertEqual(mps_x, mps_y)
 
-        # save the default generator's state to restore it later
+        # save the default generator's state (offset = 1) to restore it later
         g_state = torch.mps.get_rng_state()
 
-        # generate random numbers without seeding
+        # generate random numbers with offset `1`
         mps_x = torch.randn(5, device='mps')
         # in this case, the random results must differ from the last generated random results
         self.assertNotEqual(mps_x, mps_y)
+        # since we called randn twice after seeding, the offset should be 2
+        self.assertEqual(torch.mps._get_default_mps_generator().get_offset(), 2)
 
-        # restore the previously saved state, and the results should match again
+        # mps_x was produced by g_state, we use it as our reference mps_y.
+        mps_y = mps_x
+
+        # restore the previously saved state to the "default" MPS generator, and the results should match again
         torch.mps.set_rng_state(g_state)
         mps_x = torch.randn(5, device='mps')
+        self.assertEqual(mps_x, mps_y)
+
+        # restore the previously saved state to a new MPS generator
+        gen = torch.Generator(device='mps')
+        gen.set_state(g_state)
+        mps_x = torch.randn(5, device='mps', generator=gen)
         self.assertEqual(mps_x, mps_y)
 
     def test_device_synchronize(self):
