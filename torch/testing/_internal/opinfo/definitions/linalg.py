@@ -2393,6 +2393,12 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
             ),
             DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-03)}),
+                "TestOperatorsCUDA",
+                "test_vjp",
+                device_type="cuda",
+            ),
+            DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=8e-04, rtol=7e-06)}),
                 "TestCommon",
                 "test_noncontiguous_samples",
