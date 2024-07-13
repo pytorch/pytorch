@@ -50,6 +50,12 @@ def numpy_cube_backward(ctx, grad_out, grad_dx):
 
 numpy_cube.register_autograd(numpy_cube_backward, setup_context=numpy_cube_setup_context)
 
+def numpy_cube_vmap(info, in_dims, x):
+    result = numpy_cube(x)
+    return result, (in_dims[0], in_dims[0])
+
+numpy_cube.register_vmap(numpy_cube_vmap)
+
 @torch.library.custom_op("_torch_testing::numpy_mul", mutates_args=())
 def numpy_mul(x: Tensor, y: Tensor) -> Tensor:
     return torch.tensor(to_numpy(x) * to_numpy(y), device=x.device)
@@ -70,6 +76,16 @@ def numpy_mul_backward(ctx, grad_out):
 
 numpy_mul.register_autograd(numpy_mul_backward, setup_context=numpy_mul_setup_context)
 
+def numpy_mul_vmap(info, in_dims, x, y):
+    x_bdim, y_bdim = in_dims
+    x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+    y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+    result = x * y
+    result = result.movedim(-1, 0)
+    return result, 0
+
+numpy_mul.register_vmap(numpy_mul_vmap)
+
 @torch.library.custom_op("_torch_testing::numpy_mul_scalar", mutates_args=())
 def numpy_mul_scalar(x: Tensor, *, scalar: float) -> Tensor:
     return torch.tensor(to_numpy(x) * scalar, device=x.device)
@@ -86,6 +102,15 @@ def numpy_mul_scalar_backward(ctx, grad_out):
     return grad_x
 
 numpy_mul_scalar.register_autograd(numpy_mul_scalar_backward, setup_context=numpy_mul_scalar_setup_context)
+
+def numpy_mul_scalar_vmap(info, in_dims, x, *, scalar):
+    x_bdim, = in_dims
+    x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+    result = x * scalar
+    result = result.movedim(-1, 0)
+    return result, 0
+
+numpy_mul_scalar.register_vmap(numpy_mul_scalar_vmap)
 
 @torch.library.custom_op("_torch_testing::numpy_sort", mutates_args=())
 def numpy_sort(x: Tensor, dim: int) -> Tuple[Tensor, Tensor, Tensor]:
@@ -117,6 +142,15 @@ def numpy_sort_backward(ctx, grad_out, grad_ind, grad_ind_inv):
 numpy_sort.register_autograd(numpy_sort_backward, setup_context=numpy_sort_setup_context)
 
 
+def numpy_sort_vmap(info, in_dims, x, dim):
+    x_bdim, _ = in_dims
+    x = x.movedim(x_bdim, 0)
+    dim = dim if dim >= 0 else dim + x.dim() - 1
+    result = numpy_sort(x, dim + 1)
+    return result, (0, 0, 0)
+
+numpy_sort.register_vmap(numpy_sort_vmap)
+
 @torch.library.custom_op("_torch_testing::numpy_take", mutates_args=())
 def numpy_take(x: Tensor, ind: Tensor, ind_inv: Tensor, dim: int) -> Tensor:
     device = x.device
@@ -144,6 +178,26 @@ def numpy_take_backward(ctx, grad_out):
 
 numpy_take.register_autograd(numpy_take_backward, setup_context=numpy_take_setup_context)
 
+def numpy_take_vmap(info, in_dims, x, ind, ind_inv, dim):
+    x_bdim, ind_bdim, ind_inv_bdim, _ = in_dims
+
+    # wrap dim
+    logical_dim = x.dim() if x_bdim is None else x_bdim - 1
+    dim = dim if dim >= 0 else dim + logical_dim
+
+    def expand_bdim(x, x_bdim):
+        if x_bdim is None:
+            return x.expand(info.batch_size, *x.shape)
+        return x.movedim(x_bdim, 0)
+
+    x = expand_bdim(x, x_bdim)
+    ind = expand_bdim(ind, ind_bdim)
+    ind_inv = expand_bdim(ind_inv, ind_inv_bdim)
+
+    return numpy_take(x, ind, ind_inv, dim + 1), 0
+
+numpy_take.register_vmap(numpy_take_vmap)
+
 @torch.library.custom_op("_torch_testing::numpy_nonzero", mutates_args=())
 def numpy_nonzero(x: Tensor) -> Tensor:
     x_np = to_numpy(x)
@@ -169,6 +223,11 @@ def sample_inputs_numpy_nonzero(opinfo, device, dtype, requires_grad, **kwargs):
         result *= mask
 
     yield SampleInput(result, args=())
+
+def numpy_nonzero_vmap(info, in_dims, x):
+    return numpy_nonzero(x), in_dims[0]
+
+numpy_nonzero.register_vmap(numpy_nonzero_vmap)
 
 @torch.library.custom_op("_torch_testing::numpy_view_copy", mutates_args=())
 def numpy_view_copy(x: Tensor, shape: Sequence[int]) -> Tensor:
