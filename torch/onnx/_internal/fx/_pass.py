@@ -11,14 +11,16 @@ import io
 import logging
 import sys
 
-from typing import Any, Callable, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.fx
-from torch._subclasses import fake_tensor
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
-from torch.onnx._internal import _beartype
+
 from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher
+
+if TYPE_CHECKING:
+    from torch._subclasses import fake_tensor
 
 
 @dataclasses.dataclass
@@ -128,7 +130,6 @@ def _unified_diff(a: str, b: str) -> str:
     return diff
 
 
-@_beartype.beartype
 def _transform_diagnose_call_message_formatter(
     run: Callable,
     self: Transform,
@@ -312,7 +313,6 @@ class AnalysisResult(abc.ABC):  # noqa: B024
 
 
 class Analysis(abc.ABC):
-    @_beartype.beartype
     def __init__(
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
