@@ -416,7 +416,7 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def load_seed(name, offset):
-        return ops.load(name, offset)
+        return f"{ops.load(name, 0)} + {V.kernel.args.seed_offset('load_seed_offset', offset)}"
 
     @staticmethod
     def rsqrt(x):

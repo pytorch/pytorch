@@ -34,15 +34,10 @@ def _uint_to_uniform_float(x):
     # TODO:
     # conditions can be simplified
     # scale is ((2**23 - 1) / 2**23) * 2**(N_BITS - 1)
-    if x.type() == hl.UInt(32) or x.type() == hl.Int(32):
-        # maximum value such that `MAX_INT * scale < 1.0` (with float rounding)
-        x = hl.cast(hl.Int(32), x)
-        scale = hl.f64(4.6566127342e-10)
-    elif x.type() in (hl.UInt(64), hl.Int(64)):
-        x = hl.cast(hl.Int(64), x)
-        scale = hl.f64(1.0842020432385337e-19)
-    else:
-        raise TypeError(f"Unsupported type {x.type()} in philox")
+    # https://github.com/triton-lang/triton/blob/e4a0d93ff1a367c7d4eeebbcd7079ed267e6b06f/python/triton/language/random.py#L116-L132.
+    assert x.type() == hl.UInt(32) or x.type() == hl.Int(32)
+    x = hl.cast(hl.Int(32), x)
+    scale = hl.f64(4.6566127342e-10)
     x = hl.select(x < 0, -x - 1, x)
     return x * scale
 
@@ -78,14 +73,14 @@ def halide_philox(seed, c0, c1, c2, c3, n_rounds):
     return philox_impl(c0, c1, c2, c3, seed_lo, seed_hi, n_rounds)
 
 
-def randint4x(seed, offsets, n_rounds):
-    offsets = hl.cast(hl.UInt(32), offsets)
+def randint4x(seed, offset, n_rounds):
+    offset = hl.cast(hl.UInt(32), offset)
     _0 = hl.u32(0)
-    return halide_philox(seed, offsets, _0, _0, _0, n_rounds)
+    return halide_philox(seed, offset, _0, _0, _0, n_rounds)
 
 
-def rand4x(seed, offsets, n_rounds=PHILOX_N_ROUNDS_DEFAULT):
-    i1, i2, i3, i4 = randint4x(seed, offsets, n_rounds)
+def rand4x(seed, offset, n_rounds=PHILOX_N_ROUNDS_DEFAULT):
+    i1, i2, i3, i4 = randint4x(seed, offset, n_rounds)
     u1 = _uint_to_uniform_float(i1)
     u2 = _uint_to_uniform_float(i2)
     u3 = _uint_to_uniform_float(i3)
@@ -111,8 +106,8 @@ def randn(seed, offset):
     return n1
 
 
-def randint64(seed, offsets, low, high):
-    r0, r1, r2, r3 = randint4x(seed, offsets, PHILOX_N_ROUNDS_DEFAULT)
+def randint64(seed, offset, low, high):
+    r0, r1, r2, r3 = randint4x(seed, offset, PHILOX_N_ROUNDS_DEFAULT)
     r0 = hl.cast(hl.UInt(64), r0)
     r1 = hl.cast(hl.UInt(64), r1)
 
