@@ -868,7 +868,7 @@ flex_attention_backward_template = TritonTemplate(
             # PARTIAL_KV_IDX and PARTIAL_KV_NUM_BLKS are always contiguous.
             kv_indices = PARTIAL_KV_IDX + sparse_kv_idx_offset
             kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
-            sparse_kv_num_blocks = tl.load(PARTIAL_KV_NUM_BLKS + sparse_kv_num_blks_offset, mask=indices_idx + 1 < sparse_kv_num_blocks)
+            sparse_kv_num_blocks = tl.load(PARTIAL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
             dq = bwd_dq_inner(
                 dq, q, K, V, do, Di, lse,
@@ -910,28 +910,29 @@ flex_attention_backward_template = TritonTemplate(
         q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
         sparse_q_num_blocks = tl.load(FULL_Q_NUM_BLKS + sparse_q_num_blks_offset)
 
-<<<<<<< HEAD
-        curr_m = start_m1
-        hi = sparse_q_num_blocks * SPARSE_Q_MULTIPLE
-        for start_m in range(0, hi):
-            qT = tl.load(qT_ptrs)
-            # Load LSE before computing qk to reduce pipeline stall.
-            offs_m1 = curr_m + tl.arange(0, BLOCK_M1)
-            lse = tl.load(LSE + offs_m1)
-            qkT = tl.dot(k, qT)
-            if not PRESCALE_QK:
-                qkT *= SM_SCALE
-            # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-            m = offs_m1[None, :]
-            n = offs_n1[:, None]
-            pre_mod_scores = qkT
-            {{ modification(
-                subgraph_number=0,
-                output_name="post_mod_scores",
-                score="qkT",
-                b="off_z",
-                h="off_h",
-                m="m",
+        start_m1 = q_start
+
+        dk, dv = bwd_dkdv_inner(
+            dk, dv, Q, k, v, DO, DELTA, LSE,
+            off_z, off_h, offs_n1, offs_k, start_n1, start_m1,
+            stride_qm, stride_qd, stride_dom, stride_dod,
+            q_start, q_indices, sparse_q_num_blocks, SPARSE_Q_MULTIPLE, SPARSE_Q_BLOCK_SIZE,
+            BLOCK_M1, BLOCK_N1, PRESCALE_QK, SM_SCALE, RCP_LN2, MATMUL_PRECISION,
+            {{gen_argdefs()}},
+            IS_FULL_BLOCKS=False
+        )
+
+
+        if HAS_FULL_BLOCKS:
+            # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            # PARTIAL_Q_IDX and PARTIAL_Q_NUM_BLKS are always contiguous.
+            q_indices = PARTIAL_Q_IDX + sparse_q_idx_offset
+            q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
+            sparse_q_num_blocks = tl.load(PARTIAL_Q_NUM_BLKS + sparse_q_num_blks_offset)
+
+            start_m1 = q_start
+
+            dk, dv = bwd_dkdv_inner(
                 dk, dv, Q, k, v, DO, DELTA, LSE,
                 off_z, off_h, offs_n1, offs_k, start_n1, start_m1,
                 stride_qm, stride_qd, stride_dom, stride_dod,
