@@ -48,14 +48,17 @@ def create_subclass_metadata(a, start_idx):
         )
         attrs[key] = new_subclass_meta
 
+    # It *must* be because is_traceable_wrapper_subclass() - but mypy is not smart.
+    assert isinstance(a, Tensor)
+
     return (
         SubclassCreationMeta(
             flat_tensor_start_idx=start_idx,
             arg_count=new_start_idx - start_idx,
             attrs=attrs,
             meta=metadata,
-            outer_size=a.size(),
-            outer_stride=a.stride(),
+            outer_size=a.size(),  # type: ignore[attr-defined, arg-type]
+            outer_stride=a.stride(),  # type: ignore[arg-type]
             original_subclass=a,
         ),
         new_start_idx,
@@ -83,7 +86,8 @@ def create_subclass_meta(
     idx = 0
     infos: List[Union[int, SubclassCreationMeta]] = []
     for a in curr_args:
-        if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a):
+        if is_traceable_wrapper_subclass(a):
+            assert isinstance(a, Tensor)
             start_idx = idx
             subclass_meta, _ = create_subclass_metadata(a, start_idx)
             infos.append(subclass_meta)
