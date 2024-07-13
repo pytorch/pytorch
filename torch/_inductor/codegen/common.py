@@ -223,6 +223,27 @@ def init_backend_registration():
     if get_scheduling_for_device("xpu") is None:
         register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
 
+    private_backend = torch._C._get_privateuse1_backend_name()
+    if (
+        private_backend != "privateuseone"
+        and get_scheduling_for_device(private_backend) is None
+    ):
+        from torch.utils.backend_registration import _get_custom_mod_func
+
+        try:
+            device_scheduling = _get_custom_mod_func("Scheduling")
+            wrapper_codegen = _get_custom_mod_func("WrapperCodeGen")
+            cpp_wrapper_codegen = _get_custom_mod_func("CppWrapperCodeGen")
+            if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:
+                register_backend_for_device(
+                    private_backend,
+                    device_scheduling,
+                    wrapper_codegen,
+                    cpp_wrapper_codegen,
+                )
+        except RuntimeError:
+            pass
+
 
 def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
     from ..ir import FlexibleLayout
@@ -1163,10 +1184,10 @@ class KernelArgs:
         return odict[name]
 
     def __init__(self, sizevars=None):
-        self.input_buffers = dict()
-        self.output_buffers = dict()
-        self.inplace_buffers = dict()
-        self.sizevars = sizevars or dict()
+        self.input_buffers = {}
+        self.output_buffers = {}
+        self.inplace_buffers = {}
+        self.sizevars = sizevars or {}
         self.workspace_arg = None
 
     def __repr__(self):
@@ -1594,7 +1615,7 @@ class Kernel(CodeGen):
         # key: the buffer to write
         # value: the buffer to read and whose memory can be reused for
         #   the buffer specified by key
-        self.inplace_update_buffers = dict()
+        self.inplace_update_buffers = {}
         # Set minimum number of elements processed per thread.
         self.min_elem_per_thread = 1
         self.kernel_name = None
@@ -1880,20 +1901,15 @@ class Kernel(CodeGen):
                 return out
 
             @staticmethod
-            def _update_store_cache(name: str, value: CSEVariable):
-                self.cse.store_cache[name] = value
-                if self.current_node:
-                    buf = self.current_node.get_output(name)
-                    for other_name in buf.get_mutations():
-                        self.cse.store_cache[other_name] = value
-
-            @staticmethod
             def store(
                 name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
             ) -> None:
                 self.store_buffer_names.add(name)
                 if mode is None:
-                    CSEProxy._update_store_cache(name, value)
+                    self.cse.store_cache[name] = value
+                    if self.current_node:
+                        for other_name in self.current_node.get_mutations():
+                            self.cse.store_cache[other_name] = value
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
                 else:
@@ -1902,7 +1918,10 @@ class Kernel(CodeGen):
             @staticmethod
             def store_reduction(name: str, index: sympy.Expr, value: CSEVariable):
                 self.store_buffer_names.add(name)
-                CSEProxy._update_store_cache(name, value)
+                self.cse.store_cache[name] = value
+                if self.current_node:
+                    for other_name in self.current_node.get_mutations():
+                        self.cse.store_cache[other_name] = value
 
                 if name not in V.graph.removed_buffers:
                     return self.store_reduction(name, index, value)
@@ -2076,7 +2095,7 @@ class KernelTemplate:
 
         try:
             choices.append(self.generate(**kwargs))
-        except NotImplementedError:
+        except NotImplementedError as e:
             pass
 
     def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":

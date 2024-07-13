@@ -22,6 +22,7 @@ from torch import (  # noqa: F401
     layout as _layout,
     qscheme as _qscheme,
     Size as Size,
+    SymInt as SymInt,
     Tensor as Tensor,
 )
 
@@ -29,6 +30,8 @@ from torch import (  # noqa: F401
 if TYPE_CHECKING:
     from torch.autograd.graph import GradientEdge
 
+
+__all__ = ["Number", "Device", "Storage"]
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
@@ -42,6 +45,9 @@ _TensorOrTensorsOrGradEdge: TypeAlias = Union[  # noqa: PYI047
 
 _size: TypeAlias = Union[Size, List[int], Tuple[int, ...]]  # noqa: PYI042,PYI047
 _dispatchkey: TypeAlias = Union[str, DispatchKey]  # noqa: PYI042,PYI047
+
+# int or SymInt
+IntLikeType = Union[int, SymInt]
 
 # Meta-type for "numeric" things; matches our docs
 Number: TypeAlias = Union[int, float, bool]
