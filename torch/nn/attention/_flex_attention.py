@@ -661,7 +661,7 @@ def flex_attention(
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
     if query.size(-2) >= 32:  # use Attention Kernel
-        if query.size(-2) >= 128 & query.size(-2) % 128 != 0:
+        if query.size(-2) >= 128 and query.size(-2) % 128 != 0:
             raise NotImplementedError("NYI: S must be <128 or a multiple of 128")
     if key.size(-2) % 128 != 0:
         raise NotImplementedError("NYI: L must be a multiple of 128")
