@@ -61,7 +61,7 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 # correctness checks struggle with fp16/tf32
-VERIFY: Dict[str, Any] = dict()
+VERIFY: Dict[str, Any] = {}
 PRINT_AUTOTUNE = True
 DEBUG = False
 
@@ -154,7 +154,7 @@ class TritonTemplateKernel(TritonKernel):
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
         self.epilogue_fn = epilogue_fn
-        self.render_hooks = dict()  # type: ignore[var-annotated]
+        self.render_hooks = {}  # type: ignore[var-annotated]
         self.triton_meta: Optional[Dict[str, object]] = None
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: Optional[List[ir.ComputedBuffer]] = subgraphs
@@ -575,7 +575,7 @@ def _jinja2_env():
 
 class TritonTemplate(KernelTemplate):
     index_counter = itertools.count()
-    all_templates: Dict[str, "TritonTemplate"] = dict()
+    all_templates: Dict[str, "TritonTemplate"] = {}
 
     def __init__(self, name: str, grid: Any, source: str, debug=False):
         super().__init__(name)
@@ -1204,8 +1204,13 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
-            precompile_key = (
-                f"{name}: {inputs_key} : {torch.get_float32_matmul_precision()}"
+            precompile_key = ":".join(
+                [
+                    name,
+                    inputs_key,
+                    torch.get_float32_matmul_precision(),
+                ]
+                + [choice.hash_key() for choice in choices]
             )
             if precompile_func := self.precompile_cache.get(precompile_key):
                 return precompile_func

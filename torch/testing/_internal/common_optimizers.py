@@ -1027,7 +1027,7 @@ def optim_error_inputs_func_sparseadam(device, dtype):
             ErrorOptimizerInput(
                 OptimizerInput(
                     params=[torch.rand(2, 3, device=device, dtype=torch.complex64)],
-                    kwargs=dict(),
+                    kwargs={},
                     desc="complex not supported",
                 ),
                 error_type=ValueError,
