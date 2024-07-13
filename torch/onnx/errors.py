@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import textwrap
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
-from torch import _C
 from torch.onnx import _constants
 from torch.onnx._internal import diagnostics
+
+if TYPE_CHECKING:
+    from torch import _C
 
 __all__ = [
     "OnnxExporterError",

@@ -13,10 +13,8 @@ from typing import Callable, Dict, Optional, Tuple
 
 import torch.fx
 import torch.fx.traceback as fx_traceback
-from torch.onnx._internal import _beartype
 
 
-@_beartype.beartype
 def wrap_graph_module_for_node_meta_preservation(
     graph_module: torch.fx.GraphModule,
 ) -> Callable:
@@ -42,7 +40,6 @@ def _get_node_base_name(node_name: str) -> Tuple[str, Optional[int]]:
     return node_name, None
 
 
-@_beartype.beartype
 def set_node_name(
     node: torch.fx.Node,
     new_name: str,
@@ -81,7 +78,6 @@ def set_node_name(
         name_to_node_cache[new_name] = node
 
 
-@_beartype.beartype
 def replace_placeholder_name_and_target(
     module: torch.fx.GraphModule, reference_module: torch.fx.GraphModule
 ):
