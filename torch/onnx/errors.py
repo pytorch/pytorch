@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import textwrap
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torch.onnx import _constants
 from torch.onnx._internal import diagnostics
@@ -40,7 +40,7 @@ class CheckerError(OnnxExporterError):
 class UnsupportedOperatorError(OnnxExporterError):
     """Raised when an operator is unsupported by the exporter."""
 
-    def __init__(self, name: str, version: int, supported_version: Optional[int]):
+    def __init__(self, name: str, version: int, supported_version: int | None):
         if supported_version is not None:
             diagnostic_rule: diagnostics.infra.Rule = (
                 diagnostics.rules.operator_supported_in_newer_opset_version

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, Dict, Set, Union
+from typing import Callable
 
 import torch
 import torch._ops
@@ -14,7 +14,7 @@ from torch.onnx._internal.fx import registration
 
 def _create_onnx_supports_op_overload_table(
     registry,
-) -> Set[Union[torch._ops.OperatorBase, Callable]]:
+) -> set[torch._ops.OperatorBase | Callable]:
     """
     Creates a set of OperatorBase and Callable objects that represent ONNX-supported PyTorch operations.
 
@@ -24,7 +24,7 @@ def _create_onnx_supports_op_overload_table(
     Returns:
         A collection of OperatorBase and Callable objects representing ONNX-supported PyTorch operations.
     """
-    table: Set[Union[torch._ops.OperatorBase, Callable]] = set()
+    table: set[torch._ops.OperatorBase | Callable] = set()
 
     # Some ops in `torch.ops.aten` are not discoverable through `dir(torch.ops.aten)`,
     # but retrievable via explicit lookup.
@@ -73,7 +73,7 @@ def _create_onnx_supports_op_overload_table(
 
 def create_onnx_friendly_decomposition_table(
     registry,
-) -> Dict[torch._ops.OperatorBase, Callable]:
+) -> dict[torch._ops.OperatorBase, Callable]:
     """
     This function creates a dictionary of op overloads and their decomposition functions
     for ops that do not have ONNX symbolic functions. If an op already has an ONNX symbolic function,
@@ -87,7 +87,7 @@ def create_onnx_friendly_decomposition_table(
         Dict[torch._ops.OperatorBase, Callable]: A dictionary that maps op overloads to their corresponding
         decomposition functions.
     """
-    decomposition_table: Dict[torch._ops.OperatorBase, Callable] = {}
+    decomposition_table: dict[torch._ops.OperatorBase, Callable] = {}
     # Dictionary that maps torch.ops.aten.* to exporter look up key; e.g.,
     # _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[torch.add.Tensor] is "aten::add".
     _ONNX_SUPPORT_OP_OVERLOADS = _create_onnx_supports_op_overload_table(registry)

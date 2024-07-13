@@ -16,19 +16,13 @@ from collections import defaultdict
 from typing import (
     Any,
     Callable,
-    Dict,
     Final,
-    List,
     Mapping,
-    Optional,
     Protocol,
     runtime_checkable,
     Sequence,
-    Set,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
-    Union,
 )
 from typing_extensions import Self
 
@@ -97,7 +91,7 @@ class ONNXFakeContext:
     fake_mode: fake_tensor.FakeTensorMode
     """The fake tensor mode used for tracing model using fake tensors and parameters."""
 
-    state_dict_paths: Optional[Tuple[Union[str, io.BytesIO, Dict[str, Any]]]] = None
+    state_dict_paths: tuple[str | io.BytesIO | dict[str, Any]] | None = None
     """List of paths of files that contain the model :meth:`state_dict`"""
 
 
@@ -116,8 +110,8 @@ class OnnxRegistry:
         # NOTE: _registry is the registry maps OpNameto a list of ONNXFunctions. It is important
         # not to directly modify this variable. Instead, access to it should be done through
         # the public methods: register_custom_op, get_ops, and is_registered_op.
-        self._registry: Dict[
-            registration.OpName, List[registration.ONNXFunction]
+        self._registry: dict[
+            registration.OpName, list[registration.ONNXFunction]
         ] = defaultdict(list)
         # FIXME: Avoid importing onnxscript into torch
         from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
@@ -186,10 +180,10 @@ class OnnxRegistry:
 
     def register_op(
         self,
-        function: Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction],
+        function: onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction,
         namespace: str,
         op_name: str,
-        overload: Optional[str] = None,
+        overload: str | None = None,
         is_complex: bool = False,
     ) -> None:
         """Registers a custom operator: torch.ops.<namespace>.<op_name>.<overload>.
@@ -217,8 +211,8 @@ class OnnxRegistry:
         self._register(internal_name_instance, symbolic_function)
 
     def get_op_functions(
-        self, namespace: str, op_name: str, overload: Optional[str] = None
-    ) -> Optional[List[registration.ONNXFunction]]:
+        self, namespace: str, op_name: str, overload: str | None = None
+    ) -> list[registration.ONNXFunction] | None:
         """Returns a list of ONNXFunctions for the given op: torch.ops.<namespace>.<op_name>.<overload>.
 
         The list is ordered by the time of registration. The custom operators should be
@@ -239,7 +233,7 @@ class OnnxRegistry:
         return self._registry.get(internal_name_instance)
 
     def is_registered_op(
-        self, namespace: str, op_name: str, overload: Optional[str] = None
+        self, namespace: str, op_name: str, overload: str | None = None
     ) -> bool:
         """Returns whether the given op is registered: torch.ops.<namespace>.<op_name>.<overload>.
 
@@ -257,7 +251,7 @@ class OnnxRegistry:
         )
         return functions is not None
 
-    def _all_registered_ops(self) -> Set[str]:
+    def _all_registered_ops(self) -> set[str]:
         """Returns the set of all registered function names."""
         return {
             op_name_class.qualified_name() for op_name_class in self._registry.keys()
@@ -278,7 +272,7 @@ class ExportOptions:
         onnx_registry: The ONNX registry used to register ATen operators to ONNX functions.
     """
 
-    dynamic_shapes: Optional[bool] = None
+    dynamic_shapes: bool | None = None
     """Shape information hint for input/output tensors.
 
     - ``None``: the exporter determines the most compatible setting.
@@ -286,26 +280,26 @@ class ExportOptions:
     - ``False``: all input shapes are considered static.
     """
 
-    op_level_debug: Optional[bool] = None
+    op_level_debug: bool | None = None
     """When True export the model with op-level debug running ops through ONNX Runtime."""
 
     diagnostic_options: DiagnosticOptions
     """The diagnostic options for the exporter."""
 
-    fake_context: Optional[ONNXFakeContext] = None
+    fake_context: ONNXFakeContext | None = None
     """The fake context used for symbolic tracing."""
 
-    onnx_registry: Optional[OnnxRegistry] = None
+    onnx_registry: OnnxRegistry | None = None
     """The ONNX registry used to register ATen operators to ONNX functions."""
 
     def __init__(
         self,
         *,
-        dynamic_shapes: Optional[bool] = None,
-        op_level_debug: Optional[bool] = None,
-        fake_context: Optional[ONNXFakeContext] = None,
-        onnx_registry: Optional[OnnxRegistry] = None,
-        diagnostic_options: Optional[DiagnosticOptions] = None,
+        dynamic_shapes: bool | None = None,
+        op_level_debug: bool | None = None,
+        fake_context: ONNXFakeContext | None = None,
+        onnx_registry: OnnxRegistry | None = None,
+        diagnostic_options: DiagnosticOptions | None = None,
     ):
         self.dynamic_shapes = dynamic_shapes
         self.op_level_debug = op_level_debug
@@ -328,7 +322,7 @@ class ResolvedExportOptions(ExportOptions):
     onnx_registry: OnnxRegistry
 
     # Private only attributes
-    decomposition_table: Dict[torch._ops.OpOverload, Callable]
+    decomposition_table: dict[torch._ops.OpOverload, Callable]
     """A dictionary that maps operators to their decomposition functions."""
 
     onnxfunction_dispatcher: (
@@ -345,8 +339,8 @@ class ResolvedExportOptions(ExportOptions):
 
     def __init__(
         self,
-        options: Union[ExportOptions, ResolvedExportOptions],
-        model: Optional[Union[torch.nn.Module, Callable, torch_export.ExportedProgram]] = None,  # type: ignore[name-defined]
+        options: ExportOptions | ResolvedExportOptions,
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,  # type: ignore[name-defined]
     ):
         from torch.onnx._internal.fx import (  # TODO: Prevent circular dep
             diagnostics,
@@ -376,7 +370,7 @@ class ResolvedExportOptions(ExportOptions):
         else:
             T = TypeVar("T")
 
-            def resolve(value: Optional[T], fallback: Union[T, Callable[[], T]]) -> T:
+            def resolve(value: T | None, fallback: T | Callable[[], T]) -> T:
                 if value is not None:
                     return value
                 if callable(fallback):
@@ -594,25 +588,21 @@ class ONNXRuntimeOptions:
         execution_provider_options: ONNX Runtime execution provider options.
     """
 
-    session_options: Optional[Sequence[onnxruntime.SessionOptions]] = None
+    session_options: Sequence[onnxruntime.SessionOptions] | None = None
     """ONNX Runtime session options."""
 
-    execution_providers: Optional[
-        Sequence[Union[str, Tuple[str, Dict[Any, Any]]]]
-    ] = None
+    execution_providers: Sequence[str | tuple[str, dict[Any, Any]]] | None = None
     """ONNX Runtime execution providers to use during model execution."""
 
-    execution_provider_options: Optional[Sequence[Dict[Any, Any]]] = None
+    execution_provider_options: Sequence[dict[Any, Any]] | None = None
     """ONNX Runtime execution provider options."""
 
     def __init__(
         self,
         *,
-        session_options: Optional[Sequence[onnxruntime.SessionOptions]] = None,
-        execution_providers: Optional[
-            Sequence[Union[str, Tuple[str, Dict[Any, Any]]]]
-        ] = None,
-        execution_provider_options: Optional[Sequence[Dict[Any, Any]]] = None,
+        session_options: Sequence[onnxruntime.SessionOptions] | None = None,
+        execution_providers: Sequence[str | tuple[str, dict[Any, Any]]] | None = None,
+        execution_provider_options: Sequence[dict[Any, Any]] | None = None,
     ):
         self.session_options = session_options
         self.execution_providers = execution_providers
@@ -636,11 +626,11 @@ class ONNXProgram:
     _input_adapter: Final[io_adapter.InputAdapter]  # type: ignore[misc]
     _output_adapter: Final[io_adapter.OutputAdapter]  # type: ignore[misc]
     _diagnostic_context: Final[diagnostics.DiagnosticContext]  # type: ignore[misc]
-    _fake_context: Final[Optional[ONNXFakeContext]]  # type: ignore[misc]
-    _export_exception: Final[Optional[Exception]]  # type: ignore[misc]
-    _model_signature: Final[Optional[torch.export.ExportGraphSignature]]  # type: ignore[misc]
+    _fake_context: Final[ONNXFakeContext | None]  # type: ignore[misc]
+    _export_exception: Final[Exception | None]  # type: ignore[misc]
+    _model_signature: Final[torch.export.ExportGraphSignature | None]  # type: ignore[misc]
     _model_torch: Final[  # type: ignore[misc]
-        Optional[Union[torch.nn.Module, Callable, torch_export.ExportedProgram]]
+        torch.nn.Module | Callable | torch_export.ExportedProgram | None
     ]
 
     def __init__(
@@ -650,12 +640,13 @@ class ONNXProgram:
         output_adapter: io_adapter.OutputAdapter,
         diagnostic_context: diagnostics.DiagnosticContext,
         *,
-        fake_context: Optional[ONNXFakeContext] = None,
-        export_exception: Optional[Exception] = None,
-        model_signature: Optional[torch.export.ExportGraphSignature] = None,
-        model_torch: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        fake_context: ONNXFakeContext | None = None,
+        export_exception: Exception | None = None,
+        model_signature: torch.export.ExportGraphSignature | None = None,
+        model_torch: torch.nn.Module
+        | Callable
+        | torch_export.ExportedProgram
+        | None = None,
     ):
         self._model_proto = model_proto
         self._model_signature = model_signature
@@ -669,10 +660,11 @@ class ONNXProgram:
     def __call__(
         self,
         *args: Any,
-        model_with_state_dict: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
-        options: Optional[ONNXRuntimeOptions] = None,
+        model_with_state_dict: torch.nn.Module
+        | Callable
+        | torch_export.ExportedProgram
+        | None = None,
+        options: ONNXRuntimeOptions | None = None,
         **kwargs: Any,
     ) -> Any:
         """Runs the ONNX model using ONNX Runtime
@@ -744,7 +736,7 @@ class ONNXProgram:
         return self._model_proto
 
     @property
-    def model_signature(self) -> Optional[torch.export.ExportGraphSignature]:
+    def model_signature(self) -> torch.export.ExportGraphSignature | None:
         """The model signature for the exported ONNX graph.
 
         This information is relevant because ONNX specification often differs from PyTorch's, resulting
@@ -845,7 +837,7 @@ class ONNXProgram:
         return self._diagnostic_context
 
     @property
-    def fake_context(self) -> Optional[ONNXFakeContext]:
+    def fake_context(self) -> ONNXFakeContext | None:
         """The fake context associated with the export."""
 
         return self._fake_context
@@ -853,11 +845,12 @@ class ONNXProgram:
     def adapt_torch_inputs_to_onnx(
         self,
         *model_args,
-        model_with_state_dict: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model_with_state_dict: torch.nn.Module
+        | Callable
+        | torch_export.ExportedProgram
+        | None = None,
         **model_kwargs,
-    ) -> Sequence[Union[torch.Tensor, int, float, bool, torch.dtype]]:
+    ) -> Sequence[torch.Tensor | int | float | bool | torch.dtype]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
         Due to design differences, input/output format between PyTorch model and exported
@@ -925,10 +918,11 @@ class ONNXProgram:
     def adapt_torch_outputs_to_onnx(
         self,
         model_outputs: Any,
-        model_with_state_dict: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
-    ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
+        model_with_state_dict: torch.nn.Module
+        | Callable
+        | torch_export.ExportedProgram
+        | None = None,
+    ) -> Sequence[torch.Tensor | int | float | bool]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
         Due to design differences, input/output format between PyTorch model and exported
@@ -984,11 +978,11 @@ class ONNXProgram:
 
     def save(
         self,
-        destination: Union[str, io.BufferedIOBase],
+        destination: str | io.BufferedIOBase,
         *,
         include_initializers: bool = True,
-        model_state: Optional[Union[Dict[str, Any], str]] = None,
-        serializer: Optional[ONNXProgramSerializer] = None,
+        model_state: dict[str, Any] | str | None = None,
+        serializer: ONNXProgramSerializer | None = None,
     ) -> None:
         """Saves the in-memory ONNX model to ``destination`` using specified ``serializer``.
 
@@ -1017,7 +1011,7 @@ class ONNXProgram:
                 serializer = ProtobufONNXProgramSerializer()
 
         # Add initializers when symbolic tracing is enabled
-        _model_state_files: List[Union[str, io.BytesIO, Dict[str, Any]]] = []
+        _model_state_files: list[str | io.BytesIO | dict[str, Any]] = []
         if include_initializers:
             if model_state is not None:
                 assert isinstance(
@@ -1134,7 +1128,7 @@ class FXGraphExtractor(abc.ABC):
     def generate_fx(
         self,
         options: ResolvedExportOptions,
-        model: Union[torch.nn.Module, Callable],
+        model: torch.nn.Module | Callable,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> torch.fx.GraphModule:
@@ -1154,7 +1148,7 @@ class FXGraphExtractor(abc.ABC):
     def pre_export_passes(
         self,
         options: ResolvedExportOptions,
-        original_model: Union[torch.nn.Module, Callable],
+        original_model: torch.nn.Module | Callable,
         fx_module: torch.fx.GraphModule,
         fx_module_args: Sequence[Any],
     ):
@@ -1172,7 +1166,7 @@ class Exporter:
     def __init__(
         self,
         options: ResolvedExportOptions,
-        model: Union[torch.nn.Module, Callable, torch_export.ExportedProgram],
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ):
@@ -1227,7 +1221,7 @@ class Exporter:
             # not valid.
             # Concrete data is expected to be filled for those initializers later during `ONNXProgram.save`.
             if self.options.fake_context is not None:
-                initializers_with_real_tensors: Dict[str, torch.Tensor] = {}
+                initializers_with_real_tensors: dict[str, torch.Tensor] = {}
                 for (
                     initializer_name,
                     initializer,
@@ -1388,10 +1382,10 @@ def _assert_dependencies(export_options: ResolvedExportOptions):
 
 
 def dynamo_export(
-    model: Union[torch.nn.Module, Callable, torch_export.ExportedProgram],  # type: ignore[name-defined]
+    model: torch.nn.Module | Callable | torch_export.ExportedProgram,  # type: ignore[name-defined]
     /,
     *model_args,
-    export_options: Optional[ExportOptions] = None,
+    export_options: ExportOptions | None = None,
     **model_kwargs,
 ) -> ONNXProgram:
     """Export a torch.nn.Module to an ONNX graph.
@@ -1499,7 +1493,7 @@ def dynamo_export(
 
 def common_pre_export_passes(
     options: ResolvedExportOptions,
-    original_model: Union[torch.nn.Module, Callable],
+    original_model: torch.nn.Module | Callable,
     fx_module: torch.fx.GraphModule,
     fx_module_args: Sequence[Any],
 ):

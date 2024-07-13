@@ -18,20 +18,7 @@ import itertools
 import os
 import tempfile
 import warnings
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    Dict,
-    FrozenSet,
-    List,
-    Mapping,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Collection, Mapping, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -95,8 +82,8 @@ class VerificationOptions:
     backend: OnnxBackend = OnnxBackend.ONNX_RUNTIME_CPU
     rtol: float = 1e-3
     atol: float = 1e-7
-    remained_onnx_input_idx: Optional[Sequence[int]] = None
-    acceptable_error_percentage: Optional[float] = None
+    remained_onnx_input_idx: Sequence[int] | None = None
+    acceptable_error_percentage: float | None = None
 
 
 def _flatten_tuples(elem):
@@ -110,7 +97,7 @@ def _flatten_tuples(elem):
 
 
 # TODO(justinchuby): Add type checking by narrowing down the return type when input is None
-def _to_numpy(elem) -> Union[list, np.ndarray]:
+def _to_numpy(elem) -> list | np.ndarray:
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
             return elem.detach().cpu().numpy()
@@ -176,7 +163,7 @@ def _run_onnx(onnx_session, inputs) -> _OutputsType:
 
 
 def _ort_session(
-    model: Union[str, io.BytesIO], ort_providers: Sequence[str] = _ORT_PROVIDERS
+    model: str | io.BytesIO, ort_providers: Sequence[str] = _ORT_PROVIDERS
 ):
     try:
         import onnxruntime  # type: ignore[import]
@@ -198,7 +185,7 @@ def _ort_session(
     return ort_session
 
 
-def _onnx_reference_evaluator_session(model: Union[str, io.BytesIO]):
+def _onnx_reference_evaluator_session(model: str | io.BytesIO):
     try:
         import onnx
         from onnx import reference as onnx_reference  # type: ignore[attr-defined]
@@ -214,7 +201,7 @@ def _onnx_reference_evaluator_session(model: Union[str, io.BytesIO]):
     return onnx_session
 
 
-def _onnx_backend_session(model: Union[str, io.BytesIO], backend: OnnxBackend):
+def _onnx_backend_session(model: str | io.BytesIO, backend: OnnxBackend):
     if backend == OnnxBackend.REFERENCE:
         onnx_session = _onnx_reference_evaluator_session(model)
     elif backend in {OnnxBackend.ONNX_RUNTIME_CPU, OnnxBackend.ONNX_RUNTIME_CUDA}:
@@ -352,7 +339,7 @@ def _prepare_input_for_export(args, kwargs):
 
 
 def _prepare_input_for_onnx(
-    args, kwargs, remained_onnx_input_idx: Optional[Sequence[int]], flatten: bool
+    args, kwargs, remained_onnx_input_idx: Sequence[int] | None, flatten: bool
 ):
     """Prepare input for ONNX model execution in ONNX backend.
 
@@ -393,10 +380,10 @@ def _try_clone_model(model):
 
 def _compare_onnx_pytorch_model(
     pt_model: _ModelType,
-    onnx_model_f: Union[str, io.BytesIO],
+    onnx_model_f: str | io.BytesIO,
     input_args: _InputArgsType,
-    input_kwargs: Optional[_InputKwargsType],
-    additional_test_inputs: Optional[Sequence[_InputArgsType]],
+    input_kwargs: _InputKwargsType | None,
+    additional_test_inputs: Sequence[_InputArgsType] | None,
     options: VerificationOptions,
 ):
     """Compare outputs from ONNX model runs with outputs from PyTorch model runs.
@@ -511,13 +498,13 @@ class _GraphDiff:
 
 
 def _check_graph_diff(
-    model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    test_input_groups: Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]],
+    model: torch.nn.Module | torch.jit.ScriptModule,
+    test_input_groups: Sequence[tuple[tuple[Any, ...], Mapping[str, Any]]],
     export_options: _experimental.ExportOptions,
     model_to_graph_func: Callable[
         [
             torch.nn.Module,
-            Tuple[Any, ...],
+            tuple[Any, ...],
             Mapping[str, Any],
             _experimental.ExportOptions,
         ],
@@ -552,8 +539,8 @@ def _check_graph_diff(
 
 
 def _traced_graph_from_model(
-    model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    args: Tuple[Any, ...],
+    model: torch.nn.Module | torch.jit.ScriptModule,
+    args: tuple[Any, ...],
     kwargs: Mapping[str, Any],
     export_options: _experimental.ExportOptions,
 ) -> _C.Graph:
@@ -579,8 +566,8 @@ def _traced_graph_from_model(
 
 
 def _onnx_graph_from_model(
-    model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    args: Tuple[Any, ...],
+    model: torch.nn.Module | torch.jit.ScriptModule,
+    args: tuple[Any, ...],
     kwargs: Mapping[str, Any],
     export_options: _experimental.ExportOptions,
 ) -> _C.Graph:
@@ -645,8 +632,8 @@ def _onnx_graph_from_model(
 def _onnx_graph_from_aten_graph(
     graph: torch.Graph,
     export_options: _experimental.ExportOptions,
-    params_dict: Optional[Dict[str, Any]] = None,
-) -> Tuple[torch.Graph, Dict[str, Any]]:
+    params_dict: dict[str, Any] | None = None,
+) -> tuple[torch.Graph, dict[str, Any]]:
     if params_dict is None:
         params_dict = {}
     operator_export_type = export_options.operator_export_type
@@ -708,8 +695,8 @@ def _onnx_graph_from_aten_graph(
 def _onnx_proto_from_onnx_graph(
     onnx_graph: torch.Graph,
     export_options: _experimental.ExportOptions,
-    params_dict: Dict[str, Any],
-) -> Tuple[bytes, Mapping[str, bytes]]:
+    params_dict: dict[str, Any],
+) -> tuple[bytes, Mapping[str, bytes]]:
     opset_version = export_options.opset_version or _constants.ONNX_DEFAULT_OPSET
     dynamic_axes = export_options.dynamic_axes or {}
     operator_export_type = export_options.operator_export_type
@@ -739,9 +726,9 @@ def _onnx_proto_from_onnx_graph(
 
 
 def check_export_model_diff(
-    model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    test_input_groups: Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]],
-    export_options: Optional[_experimental.ExportOptions] = None,
+    model: torch.nn.Module | torch.jit.ScriptModule,
+    test_input_groups: Sequence[tuple[tuple[Any, ...], Mapping[str, Any]]],
+    export_options: _experimental.ExportOptions | None = None,
 ) -> str:
     """Verify exported model discrepancy between different groups of inputs.
 
@@ -784,21 +771,20 @@ def check_export_model_diff(
 def verify(
     model: _ModelType,
     input_args: _InputArgsType,
-    input_kwargs: Optional[_InputKwargsType] = None,
+    input_kwargs: _InputKwargsType | None = None,
     do_constant_folding: bool = True,
-    dynamic_axes: Optional[
-        Mapping[str, Union[Mapping[int, str], Mapping[str, Sequence[int]]]]
-    ] = None,
-    input_names: Optional[Sequence[str]] = None,
-    output_names: Optional[Sequence[str]] = None,
+    dynamic_axes: Mapping[str, Mapping[int, str] | Mapping[str, Sequence[int]]]
+    | None = None,
+    input_names: Sequence[str] | None = None,
+    output_names: Sequence[str] | None = None,
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
-    opset_version: Optional[int] = None,
+    opset_version: int | None = None,
     keep_initializers_as_inputs: bool = True,
     verbose: bool = False,
     fixed_batch_size: bool = False,
     use_external_data: bool = False,
-    additional_test_inputs: Optional[Sequence[_InputArgsType]] = None,
-    options: Optional[VerificationOptions] = None,
+    additional_test_inputs: Sequence[_InputArgsType] | None = None,
+    options: VerificationOptions | None = None,
 ):
     """Verify model export to ONNX against original PyTorch model.
 
@@ -835,7 +821,7 @@ def verify(
     elif training == torch.onnx.TrainingMode.EVAL:
         model.eval()
     with torch.no_grad(), contextlib.ExitStack() as stack:
-        model_f: Union[str, io.BytesIO] = io.BytesIO()
+        model_f: str | io.BytesIO = io.BytesIO()
         if use_external_data:
             tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
             model_f = os.path.join(tmpdir_path, "model.onnx")
@@ -871,11 +857,11 @@ def verify(
 
 def verify_aten_graph(
     graph: torch.Graph,
-    input_args: Tuple[Any, ...],
+    input_args: tuple[Any, ...],
     export_options: _experimental.ExportOptions,
-    params_dict: Optional[Dict[str, Any]] = None,
-    verification_options: Optional[VerificationOptions] = None,
-) -> Tuple[Optional[AssertionError], torch.Graph, _OutputsType, _OutputsType]:
+    params_dict: dict[str, Any] | None = None,
+    verification_options: VerificationOptions | None = None,
+) -> tuple[AssertionError | None, torch.Graph, _OutputsType, _OutputsType]:
     if verification_options is None:
         verification_options = VerificationOptions()
     if params_dict is None:
@@ -904,7 +890,7 @@ def verify_aten_graph(
     proto, export_map = _onnx_proto_from_onnx_graph(
         graph, export_options, onnx_params_dict
     )
-    model_f: Union[str, io.BytesIO] = io.BytesIO()
+    model_f: str | io.BytesIO = io.BytesIO()
     export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
     onnx_proto_utils._export_file(proto, model_f, export_type, export_map)
 
@@ -948,15 +934,15 @@ def verify_aten_graph(
 
 
 class GraphInfoPrettyPrinter:
-    graph_info: Optional[GraphInfo]
-    upper_printer: Optional[GraphInfoPrettyPrinter]
-    lower_printer: Optional[GraphInfoPrettyPrinter]
+    graph_info: GraphInfo | None
+    upper_printer: GraphInfoPrettyPrinter | None
+    lower_printer: GraphInfoPrettyPrinter | None
 
     graph_str_lambdas: Mapping[int, str]
     connector_str_lambdas: Mapping[int, str]
     children_str_lambdas: Mapping[int, str]
 
-    def __init__(self, graph_info: Optional[GraphInfo]):
+    def __init__(self, graph_info: GraphInfo | None):
         self.graph_info = graph_info
         if (
             graph_info is not None
@@ -1079,7 +1065,7 @@ class GraphInfoPrettyPrinter:
                 ]
             )
             # Summarize node kinds with mismatch.
-            mismatch_node_kinds: Dict[str, int] = {}
+            mismatch_node_kinds: dict[str, int] = {}
             for graph_info in self.graph_info.all_mismatch_leaf_graph_info():
                 node_kinds = graph_info.essential_node_kinds()
                 if len(node_kinds) == 1:
@@ -1102,7 +1088,7 @@ class OnnxTestCaseRepro:
 
     @classmethod
     def create_test_case_repro(
-        cls, proto: bytes, inputs, outputs, dir: str, name: Optional[str] = None
+        cls, proto: bytes, inputs, outputs, dir: str, name: str | None = None
     ):
         """Create a repro under "{dir}/test_{name}" for an ONNX test case.
 
@@ -1165,23 +1151,19 @@ class GraphInfo:
     """GraphInfo contains validation information of a TorchScript graph and its converted ONNX graph."""
 
     graph: torch.Graph
-    input_args: Tuple[Any, ...]
-    params_dict: Dict[str, Any]
+    input_args: tuple[Any, ...]
+    params_dict: dict[str, Any]
     export_options: _experimental.ExportOptions = dataclasses.field(
         default_factory=_experimental.ExportOptions
     )
-    mismatch_error: Optional[AssertionError] = dataclasses.field(
-        default=None, init=False
-    )
-    pt_outs: Optional[Sequence[_NumericType]] = dataclasses.field(
-        default=None, init=False
-    )
-    upper_graph_info: Optional[GraphInfo] = dataclasses.field(default=None, init=False)
-    lower_graph_info: Optional[GraphInfo] = dataclasses.field(default=None, init=False)
+    mismatch_error: AssertionError | None = dataclasses.field(default=None, init=False)
+    pt_outs: Sequence[_NumericType] | None = dataclasses.field(default=None, init=False)
+    upper_graph_info: GraphInfo | None = dataclasses.field(default=None, init=False)
+    lower_graph_info: GraphInfo | None = dataclasses.field(default=None, init=False)
     id: str = dataclasses.field(default="")
-    _onnx_graph: Optional[torch.Graph] = dataclasses.field(init=False, default=None)
+    _onnx_graph: torch.Graph | None = dataclasses.field(init=False, default=None)
 
-    _EXCLUDED_NODE_KINDS: FrozenSet[str] = frozenset(
+    _EXCLUDED_NODE_KINDS: frozenset[str] = frozenset(
         {"prim::Constant", "prim::ListConstruct", "aten::ScalarImplicit"}
     )
 
@@ -1259,7 +1241,7 @@ class GraphInfo:
             1 for n in self.graph.nodes() if n.kind() not in self._EXCLUDED_NODE_KINDS
         )
 
-    def essential_node_kinds(self) -> Set[str]:
+    def essential_node_kinds(self) -> set[str]:
         """Return the set of node kinds in the subgraph excluding those in `_EXCLUDED_NODE_KINDS`."""
         return {
             n.kind()
@@ -1267,7 +1249,7 @@ class GraphInfo:
             if n.kind() not in self._EXCLUDED_NODE_KINDS
         }
 
-    def all_mismatch_leaf_graph_info(self) -> List[GraphInfo]:
+    def all_mismatch_leaf_graph_info(self) -> list[GraphInfo]:
         """Return a list of all leaf `GraphInfo` objects that have mismatch."""
         if not self.has_mismatch():
             return []
@@ -1289,7 +1271,7 @@ class GraphInfo:
 
         return results
 
-    def find_partition(self, id: str) -> Optional[GraphInfo]:
+    def find_partition(self, id: str) -> GraphInfo | None:
         """Find the `GraphInfo` object with the given id."""
         if id == self.id:
             return self
@@ -1302,7 +1284,7 @@ class GraphInfo:
         return None
 
     def export_repro(
-        self, repro_dir: Optional[str] = None, name: Optional[str] = None
+        self, repro_dir: str | None = None, name: str | None = None
     ) -> str:
         """Export the subgraph to ONNX along with the input/output data for repro.
 
@@ -1371,13 +1353,13 @@ class GraphInfo:
         original_outputs = list(graph.outputs())
 
         def _process_bridge_value_for_upper(
-            new_outputs: List[torch.Value], bridge_value: torch.Value
+            new_outputs: list[torch.Value], bridge_value: torch.Value
         ) -> torch.Value:
             # Add bridge values as upper graph outputs.
             new_outputs.append(bridge_value)
             return bridge_value
 
-        new_outputs: List[torch.Value] = []
+        new_outputs: list[torch.Value] = []
         process_bridge_value_for_upper = functools.partial(
             _process_bridge_value_for_upper, new_outputs
         )
@@ -1463,10 +1445,10 @@ class GraphInfo:
     def _partition_node(
         self,
         node: torch.Node,
-        complete_upper_nodes_set: Set[torch.Node],
-        complete_lower_nodes_set: Set[torch.Node],
-        original_graph_outputs: Set[torch.Value],
-        covered_bridge_values: Set[torch.Value],
+        complete_upper_nodes_set: set[torch.Node],
+        complete_lower_nodes_set: set[torch.Node],
+        original_graph_outputs: set[torch.Value],
+        covered_bridge_values: set[torch.Value],
         process_bridge_value: Callable[[torch.Value], torch.Value],
     ):
         if node in complete_lower_nodes_set:
@@ -1503,7 +1485,7 @@ class GraphInfo:
         graph: torch.Graph,
         pivot: int,
         process_bridge_value: Callable[[torch.Value], torch.Value],
-    ) -> Tuple[List[torch.Node], List[torch.Node], Set[torch.Node], Set[torch.Node]]:
+    ) -> tuple[list[torch.Node], list[torch.Node], set[torch.Node], set[torch.Node]]:
         nodes = list(graph.nodes())
         upper_nodes = nodes[:pivot]
         lower_nodes = nodes[pivot:]
@@ -1549,7 +1531,7 @@ class GraphInfo:
     def _args_and_params_for_partition_graph(
         self,
         graph: torch.Graph,
-        bridge_kwargs: Mapping[str, Union[_NumericType, Sequence[_NumericType]]],
+        bridge_kwargs: Mapping[str, _NumericType | Sequence[_NumericType]],
         full_kwargs: Mapping[str, torch.Tensor],
         full_params: Mapping[str, torch.Tensor],
     ):
@@ -1564,7 +1546,7 @@ class GraphInfo:
 
     def verify_export(
         self, options: VerificationOptions
-    ) -> Tuple[Optional[AssertionError], torch.Graph, _OutputsType, _OutputsType]:
+    ) -> tuple[AssertionError | None, torch.Graph, _OutputsType, _OutputsType]:
         """
         Verify the export from TorchScript IR graph to ONNX.
 
@@ -1593,7 +1575,7 @@ class GraphInfo:
 
     def find_mismatch(
         self,
-        options: Optional[VerificationOptions] = None,
+        options: VerificationOptions | None = None,
     ):
         """
         Find all mismatches between the TorchScript IR graph and the exported onnx model.
@@ -1670,7 +1652,7 @@ class GraphInfo:
         self.lower_graph_info.find_mismatch(options)
 
 
-def _all_nodes(nodes: Collection[torch.Node]) -> Set[torch.Node]:
+def _all_nodes(nodes: Collection[torch.Node]) -> set[torch.Node]:
     all_nodes = set(nodes)
     for n in nodes:
         for b in n.blocks():
@@ -1696,14 +1678,14 @@ def _produced_by(value: torch.Value, nodes: Collection[torch.Node]) -> bool:
 
 
 def find_mismatch(
-    model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    input_args: Tuple[Any, ...],
+    model: torch.nn.Module | torch.jit.ScriptModule,
+    input_args: tuple[Any, ...],
     do_constant_folding: bool = True,
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
-    opset_version: Optional[int] = None,
+    opset_version: int | None = None,
     keep_initializers_as_inputs: bool = True,
     verbose: bool = False,
-    options: Optional[VerificationOptions] = None,
+    options: VerificationOptions | None = None,
 ) -> GraphInfo:
     r"""Find all mismatches between the original model and the exported model.
 

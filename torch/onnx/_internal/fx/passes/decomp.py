@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import contextlib
 
-from typing import Callable, Mapping, Optional, TYPE_CHECKING
+from typing import Callable, Mapping, TYPE_CHECKING
 
 import torch
 import torch._ops
@@ -25,7 +25,7 @@ class Decompose(_pass.Transform):
         module: torch.fx.GraphModule,
         decomposition_table: Mapping[torch._ops.OpOverload, Callable],
         enable_dynamic_axes: bool,
-        allow_fake_constant: Optional[bool] = False,
+        allow_fake_constant: bool | None = False,
     ):
         super().__init__(diagnostic_context, module)
         self.decomposition_table = decomposition_table
@@ -54,7 +54,7 @@ class Decompose(_pass.Transform):
 
         # Mimic `torch._dynamo.export(aten_graph=True)` behavior in invoking `make_fx`.
         # TODO: May need revisit for user fake mode export + dynamic shape scenario.
-        fake_mode: Optional[fake_tensor.FakeTensorMode] = self.fake_mode
+        fake_mode: fake_tensor.FakeTensorMode | None = self.fake_mode
         maybe_fake_args = self._maybe_fakefy_args(fake_mode, *args)
         if fake_mode is not None:
             # Using existing fake mode as context, signal `make_fx` that it does not need

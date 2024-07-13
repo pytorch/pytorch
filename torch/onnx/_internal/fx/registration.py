@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 
 # We can only import onnx from this module in a type-checking context to ensure that
@@ -28,7 +28,7 @@ class ONNXFunction:
 
     """
 
-    onnx_function: Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction]
+    onnx_function: onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction
     op_full_name: str
     is_custom: bool = False
     is_complex: bool = False
@@ -44,7 +44,7 @@ class OpName:
 
     @classmethod
     def from_name_parts(
-        cls, namespace: str, op_name: str, overload: Optional[str] = None
+        cls, namespace: str, op_name: str, overload: str | None = None
     ) -> OpName:
         # NOTE: in PyTorch, the overload could be unprovided to indicate the
         # default overload
