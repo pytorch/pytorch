@@ -985,7 +985,7 @@ def remove_binary_store_slice(instructions: List[Instruction]) -> None:
 
 def explicit_super(code: types.CodeType, instructions: List[Instruction]) -> None:
     """convert super() with no args into explicit arg form"""
-    cell_and_free = (code.co_cellvars or tuple()) + (code.co_freevars or tuple())
+    cell_and_free = (code.co_cellvars or ()) + (code.co_freevars or ())
     if not len(code.co_varnames):
         # A function with no argument cannot contain a valid "super()" call
         return

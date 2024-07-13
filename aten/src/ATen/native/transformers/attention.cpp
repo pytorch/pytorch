@@ -65,6 +65,7 @@
 #include <ATen/ops/softmax.h>
 #include <ATen/ops/split_native.h>
 #include <ATen/ops/split_with_sizes_native.h>
+#include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #endif
@@ -526,11 +527,8 @@ std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& att
   // Convert boolean mask to additive mask; need to invert mask to indicate what
   // to mask *out*.
   if (attn_mask->dtype() == at::kBool) {
-    auto new_attn_mask = at::zeros_like(attn_mask.value(), dtype);
     // TODO Use the max type of the input and output
-    new_attn_mask.masked_fill_(
-        attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
-    return new_attn_mask;
+    return at::where(attn_mask->logical_not(), -std::numeric_limits<double>::infinity(), at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype)));
   }
   // Otherwise, attn_mask represents an additive attention tensor
   return attn_mask;
