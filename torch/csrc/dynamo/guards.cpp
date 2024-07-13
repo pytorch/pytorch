@@ -18,7 +18,6 @@
 #endif
 
 #include <sstream>
-#include <tuple>
 #include <utility>
 
 // For TupleIteratorGetItemAccessor, we need a fast way to retrieve the
@@ -74,16 +73,17 @@ TensorCheck::TensorCheck(
 TensorCheck::TensorCheck(
     const LocalState& state,
     PyTypeObject* pt,
-    uint64_t dispatch_key,
+    c10::DispatchKeySet dispatch_key_set,
     at::ScalarType dtype,
     at::DeviceIndex device_index,
+    bool requires_grad,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_strides)
     : pytype(pt),
-      dispatch_key_(dispatch_key),
+      dispatch_key_(state.apply(dispatch_key_set).raw_repr()),
       dtype_(dtype),
       device_index_(device_index),
-      requires_grad_(false),
+      requires_grad_(requires_grad),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {}
@@ -91,18 +91,46 @@ TensorCheck::TensorCheck(
 // See note in guards.py [Note - On Export Tensor Guards]
 // Logic parallel to here must be maintained in python
 bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
-  if (dispatch_key_ != state.apply(v.key_set()).raw_repr() ||
-      dtype_ != v.dtype().toScalarType() ||
-      device_index_ != v.device().index() ||
-      requires_grad_ != v.requires_grad()) {
+  // In terms of a sparse_csr tensor, it does not support strides informatio
+  c10::SymIntArrayRef sym_strides(std::vector<SymInt>(v.ndimension(), -1));
+  bool does_not_support_stride = v.layout() == c10::kSparseCsr ||
+      v.layout() == c10::kSparseCsc || v.layout() == c10::kSparseBsc ||
+      v.layout() == c10::kSparseBsr;
+  if (!does_not_support_stride) {
+    sym_strides = v.sym_strides();
+  }
+
+  return check(
+      state,
+      v.key_set(),
+      v.dtype().toScalarType(),
+      v.device(),
+      v.sym_sizes(),
+      sym_strides,
+      v.requires_grad());
+}
+
+bool TensorCheck::check(
+    const LocalState& state,
+    const c10::DispatchKeySet& dispatch_key_set,
+    const at::ScalarType& dtype,
+    const c10::Device& device,
+    const c10::SymIntArrayRef& sym_sizes,
+    const c10::SymIntArrayRef& sym_strides,
+    const bool& requires_grad) {
+  if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
+      dtype_ != dtype || device_index_ != device.index() ||
+      requires_grad_ != requires_grad) {
     return false;
   }
-  auto ndim = v.ndimension();
-  if (ndim != dim_) {
+
+  auto ndim = sym_sizes.size();
+  if (ndim != static_cast<size_t>(dim_)) {
     return false;
   }
-  const auto& sizes = v.sym_sizes();
-  const auto& strides = v.sym_strides();
+
+  const auto& sizes = sym_sizes;
+  const auto& strides = sym_strides;
   for (auto i : c10::irange(ndim)) {
     auto known_size = sizes_[i];
     auto known_stride = strides_[i];
@@ -2342,24 +2370,14 @@ std::unique_ptr<GuardManager> make_guard_manager(
     std::string source,
     py::handle example_value,
     py::handle guard_manager_enum) {
-  using fourobjects =
-      std::tuple<py::object, py::object, py::object, py::object>;
-  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<fourobjects>
-      storage;
-
-  auto& [guard_manager_enum_class, base_guard_manager_enum, dict_guard_manager_enum, dict_subclass_guard_manager_enum] =
-      storage
-          .call_once_and_store_result([]() -> fourobjects {
-            py::object guard_manager_enum_class =
-                py::module_::import("torch._dynamo.guards")
-                    .attr("GuardManagerType");
-            return {
-                guard_manager_enum_class,
-                guard_manager_enum_class.attr("GUARD_MANAGER"),
-                guard_manager_enum_class.attr("DICT_GUARD_MANAGER"),
-                guard_manager_enum_class.attr("DICT_SUBCLASS_GUARD_MANAGER")};
-          })
-          .get_stored();
+  static py::object guard_manager_enum_class =
+      py::module_::import("torch._dynamo.guards").attr("GuardManagerType");
+  static py::object base_guard_manager_enum =
+      guard_manager_enum_class.attr("GUARD_MANAGER");
+  static py::object dict_guard_manager_enum =
+      guard_manager_enum_class.attr("DICT_GUARD_MANAGER");
+  static py::object dict_subclass_guard_manager_enum =
+      guard_manager_enum_class.attr("DICT_SUBCLASS_GUARD_MANAGER");
   if (py::isinstance<py::dict>(example_value)) {
     // The purpose of having both DictGuardManager and DictSubclassGuardManager
     // is to handle the variability in how dictionaries and their subclasses
