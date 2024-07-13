@@ -9,6 +9,7 @@ import torch
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch._dynamo.eval_frame import is_dynamo_supported
+from torch.fx.passes.tools_common import legalize_graph
 from torch.fx.passes.utils.source_matcher_utils import (
     check_subgraphs_connected,
     get_source_partitions,
@@ -205,3 +206,23 @@ class TestSourceMatcher(JitTestCase):
         self.assertEqual(len(module_partitions), 2)
         self.assertEqual(len(module_partitions[torch.nn.functional.linear]), 4)
         self.assertEqual(len(module_partitions[torch.nn.functional.relu]), 2)
+
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    def test_legalize_slice(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                b = x.item()
+                torch._check_is_size(b)
+                torch._check(b + 1 < y.size(0))
+                return y[: b + 1]
+
+        ep = torch.export.export(M(), (torch.tensor(4), torch.randn(10)))
+        fake_inputs = [
+            node.meta["val"] for node in ep.graph.nodes if node.op == "placeholder"
+        ]
+        gm = ep.module()
+        with fake_inputs[0].fake_mode:
+            torch.fx.Interpreter(gm).run(*fake_inputs)
+        legalized_gm = legalize_graph(gm)
+        with fake_inputs[0].fake_mode:
+            torch.fx.Interpreter(legalized_gm).run(*fake_inputs)

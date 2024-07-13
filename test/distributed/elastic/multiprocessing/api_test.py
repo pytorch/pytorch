@@ -22,13 +22,13 @@ import torch
 import torch.multiprocessing as mp
 from torch.distributed.elastic.multiprocessing import ProcessFailure, start_processes
 from torch.distributed.elastic.multiprocessing.api import (
+    _validate_full_rank,
+    _wrap,
     DefaultLogsSpecs,
     MultiprocessContext,
     RunProcsResult,
     SignalException,
     Std,
-    _validate_full_rank,
-    _wrap,
     to_map,
 )
 from torch.distributed.elastic.multiprocessing.errors import ErrorHandler
@@ -37,13 +37,13 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     NO_MULTIPROCESSING_SPAWN,
+    run_tests,
+    skip_but_pass_in_sandcastle_if,
+    skip_if_pytest,
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
     TestCase,
-    run_tests,
-    skip_but_pass_in_sandcastle_if,
-    skip_if_pytest,
 )
 
 
@@ -67,7 +67,6 @@ class RunProcResultsTest(TestCase):
         self.assertTrue(pr_fail.is_failed())
 
     def test_get_failures(self):
-
         error_file0 = os.path.join(self.test_dir, "error0.json")
         error_file1 = os.path.join(self.test_dir, "error1.json")
         eh = ErrorHandler()
@@ -276,7 +275,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     not_a_dir.name: NotADirectoryError,
                 }
 
-                for (log_dir, expected_error) in cases.items():
+                for log_dir, expected_error in cases.items():
                     with self.subTest(log_dir=log_dir, expected_error=expected_error):
                         with self.assertRaises(expected_error):
                             pc = None
@@ -291,7 +290,6 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                             finally:
                                 if pc:
                                     pc.close()
-
 
         def test_args_env_len_mismatch(self):
             cases = [
@@ -396,7 +394,9 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     results = pc.wait(period=0.1)
                     self.assertEqual({0: None, 1: None}, results.return_values)
 
-        @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "tests incompatible with asan")
+        @skip_but_pass_in_sandcastle_if(
+            TEST_WITH_DEV_DBG_ASAN, "tests incompatible with asan"
+        )
         def test_function_large_ret_val(self):
             # python multiprocessing.queue module uses pipes and actually PipedQueues
             # This means that if a single object is greater than a pipe size
@@ -435,7 +435,8 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                         args={0: ("hello", RAISE), 1: ("world",)},
                         envs={
                             0: {"TORCHELASTIC_RUN_ID": "run_id"},
-                            1: {"TORCHELASTIC_RUN_ID": "run_id"}},
+                            1: {"TORCHELASTIC_RUN_ID": "run_id"},
+                        },
                         logs_specs=DefaultLogsSpecs(log_dir=log_dir),
                         start_method=start_method,
                     )
@@ -453,7 +454,9 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     self.assertEqual(1, failure.exitcode)
                     self.assertEqual("<N/A>", failure.signal_name())
                     self.assertEqual(pc.pids()[0], failure.pid)
-                    self.assertTrue(error_file.startswith(os.path.join(log_dir, "run_id_")))
+                    self.assertTrue(
+                        error_file.startswith(os.path.join(log_dir, "run_id_"))
+                    )
                     self.assertTrue(error_file.endswith("attempt_0/0/error.json"))
                     self.assertEqual(
                         int(error_file_data["message"]["extraInfo"]["timestamp"]),
@@ -461,6 +464,30 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     )
                     self.assertTrue(pc._stderr_tail.stopped())
                     self.assertTrue(pc._stdout_tail.stopped())
+
+        def test_wait_for_all_child_procs_to_exit(self):
+            """
+            Tests that MultiprocessingContext actually waits for
+            the child process to exit (not just that the entrypoint fn has
+            finished running).
+            """
+
+            mpc = MultiprocessContext(
+                name="echo",
+                entrypoint=echo0,
+                args={},
+                envs={},
+                start_method="spawn",
+                logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
+            )
+
+            with mock.patch.object(
+                mpc, "_is_done", return_value=True
+            ), mock.patch.object(mpc, "_pc"), mock.patch.object(
+                mpc._pc, "join", side_effect=[True, False, False, True]
+            ) as mock_join:
+                mpc._poll()
+                self.assertEqual(4, mock_join.call_count)
 
         ########################################
         # start_processes as binary tests
@@ -541,9 +568,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 args={0: (0, 1)},
                 envs={0: {}},
                 logs_specs=DefaultLogsSpecs(
-                    log_dir=self.log_dir(),
-                    redirects=Std.ALL,
-                    tee=Std.ALL
+                    log_dir=self.log_dir(), redirects=Std.ALL, tee=Std.ALL
                 ),
                 start_method="spawn",
             )

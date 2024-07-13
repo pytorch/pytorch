@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass
@@ -5,9 +6,8 @@ from typing import Dict, List, Tuple
 
 from sympy import Integer
 
-import torch
-
 from .. import metrics
+from ..runtime.hints import DeviceProperties
 from ..scheduler import SchedulerNode
 from ..utils import ceildiv, Placeholder
 from ..virtualized import V
@@ -156,17 +156,18 @@ class ForeachKernel(Kernel):
     def jit_lines(self):
         can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
         size_dtype = "tl.int32" if can_use_32bit else "tl.int64"
-        _, _, signature = self.args.python_argdefs()
+        _, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=size_dtype),
-            "device": V.graph.scheduler.current_device.index,
-            "device_type": V.graph.scheduler.current_device.type,
+            "device": DeviceProperties.create(
+                V.graph.scheduler.get_current_device_or_throw()
+            ),
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
-            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
+            **TritonKernel.inductor_meta_common(),
         }
         return f"""
             @triton_heuristics.foreach(
@@ -190,7 +191,7 @@ class ForeachKernel(Kernel):
         code = IndentedBuffer()
 
         code.splice(gen_common_triton_imports())
-        argdefs, _, _ = self.args.python_argdefs()
+        argdefs, _, _, _ = self.args.python_argdefs()
         code.splice(self.jit_lines())
         code.writeline(
             f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(argdefs)}):"
@@ -227,24 +228,11 @@ class ForeachKernel(Kernel):
         return code.getvalue()
 
     def call_kernel(self, code, name: str):
-        _, call_args, _ = self.args.python_argdefs()
-        # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
-        for i in range(len(call_args)):
-            if V.graph.is_unspec_arg(call_args[i]):
-                call_args[i] = call_args[i] + ".item()"
-        if V.graph.cpp_wrapper:
-            V.graph.wrapper_code.generate_kernel_call(
-                name,
-                call_args,
-                device_index=V.graph.scheduler.current_device.index,
-                grid=self.grid(),
-            )
-        else:
-            # TODO: refactor generate_kernel_call
-            call_args_str = ", ".join(call_args)
-            stream_name = code.write_get_raw_stream(
-                V.graph.scheduler.current_device.index
-            )
-            code.writeline(
-                f"{name}.run({call_args_str}, grid=({self.grid()}), stream={stream_name})"
-            )
+        _, call_args, _, arg_types = self.args.python_argdefs()
+        V.graph.wrapper_code.generate_kernel_call(
+            name,
+            call_args,
+            grid=self.grid(),
+            arg_types=arg_types,
+            grid_fn="",
+        )

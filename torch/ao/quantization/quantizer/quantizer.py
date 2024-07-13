@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple, Union

@@ -1,7 +1,7 @@
 #include <c10/core/Allocator.h>
-#include <c10/util/Optional.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/llvmMathExtras.h>
+#include <optional>
 
 #include <deque>
 #include <mutex>
@@ -152,7 +152,7 @@ struct CachingHostAllocatorImpl {
     // do not need to look up the ctx in blocks_.
     auto* block = reinterpret_cast<B*>(ctx);
 
-    c10::optional<std::vector<E>> events;
+    std::optional<std::vector<E>> events;
     {
       std::lock_guard<std::mutex> g(block->mutex_);
       block->allocated_ = false;
@@ -258,12 +258,11 @@ struct CachingHostAllocatorImpl {
   }
 
   virtual void process_events() {
-
     while (true) {
       // Avoid calling cudaEventDestroy while holding a mutex, so move
       // intermediate events out of the lock into this object.
       // process the last event
-      c10::optional<std::pair<E, B*>> processed;
+      std::optional<std::pair<E, B*>> processed;
       {
         std::lock_guard<std::mutex> g(events_mutex_);
         if (!events_.empty()) {
@@ -324,7 +323,7 @@ struct CachingHostAllocatorImpl {
   }
 
   // Record an event on stream and store event into events.
-  virtual void record_stream(c10::optional<std::vector<E>>& events, S stream) {
+  virtual void record_stream(std::optional<std::vector<E>>& events, S stream) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for record_stream");
   }
 
@@ -350,7 +349,7 @@ struct CachingHostAllocatorImpl {
 
 template <typename T>
 struct CachingHostAllocatorInterface : public at::Allocator {
-  CachingHostAllocatorInterface() :impl_(std::make_unique<T>()) {}
+  CachingHostAllocatorInterface() : impl_(std::make_unique<T>()) {}
 
   at::DataPtr allocate(size_t size) override {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for allocate");

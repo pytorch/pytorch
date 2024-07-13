@@ -2,9 +2,9 @@ import functools
 import time
 from abc import ABC, abstractmethod
 
-import torch
-
 from metrics.MetricsLogger import MetricsLogger
+
+import torch
 
 
 class TrainerBase(ABC):

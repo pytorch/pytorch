@@ -1,10 +1,10 @@
 #pragma once
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/serialization/pickler.h>
+#include <optional>
 #include <vector>
 
 namespace torch {
@@ -58,10 +58,10 @@ class TORCH_API ScriptCall : public RpcCommandBase {
 
   // This field has value if this ScriptCall represents invocation of a builtin
   // operator.
-  c10::optional<std::shared_ptr<Operator>> op_;
+  std::optional<std::shared_ptr<Operator>> op_;
   // This field has non empty string if this ScriptCall represents invocation of
   // an annotated torchscript function defined by users.
-  c10::optional<const c10::QualifiedName> qualifiedName_;
+  std::optional<const c10::QualifiedName> qualifiedName_;
   std::vector<at::IValue> stack_;
   const bool isAsyncExecution_;
 };

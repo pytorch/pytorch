@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import importlib
 import logging
@@ -16,7 +17,6 @@ from typing import (
     Tuple,
     Union,
 )
-
 from typing_extensions import TypeAlias
 
 import torch
@@ -145,7 +145,7 @@ def _get_ort_device_type(device_type: str):
     if device_type == "cpu":
         return ORTC.OrtDevice.cpu()
     # ort pytorch device is mapped to NPU OrtDevice type
-    if device_type == "ort":
+    if device_type == "maia":
         return ORTC.OrtDevice.npu()
     raise ValueError("Unsupported device type: " + device_type)
 
@@ -804,7 +804,7 @@ class OrtBackend:
     def _select_eps(
         self, graph_module: torch.fx.GraphModule, *args
     ) -> Sequence[Tuple[str, Mapping[str, Any]]]:
-        inferred_eps: Tuple[str, ...] = tuple()
+        inferred_eps: Tuple[str, ...] = ()
         if self._options.infer_execution_providers:
             if eps_from_args := _infer_ep_from_device(*args):
                 # If user feeds CUDA tensor as input argument,

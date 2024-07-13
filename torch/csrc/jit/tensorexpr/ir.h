@@ -4,7 +4,6 @@
 #include <utility>
 #include <vector>
 
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
@@ -361,17 +360,17 @@ ExprPtr immLike(const ExprHandle& e, T v) {
   return immLike(e.node(), v);
 }
 
-inline c10::optional<int64_t> intValue(const ExprPtr& e) {
+inline std::optional<int64_t> intValue(const ExprPtr& e) {
 #define TYPE_CASE(Type, Name)      \
   if (auto v = to<Name##Imm>(e)) { \
     return v->value();             \
   }
   AT_FORALL_INT_TYPES(TYPE_CASE);
 #undef TYPE_CASE
-  return c10::nullopt;
+  return std::nullopt;
 }
 
-inline c10::optional<int64_t> intValue(const ExprHandle& e) {
+inline std::optional<int64_t> intValue(const ExprHandle& e) {
   return intValue(e.node());
 }
 
@@ -827,7 +826,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
         return "isnan";
       default:
         throw std::runtime_error(
-            "invalid op_type: " + c10::to_string(op_type()));
+            "invalid op_type: " + std::to_string(op_type()));
     }
   }
 

@@ -2,17 +2,19 @@
 # implement matrix related ops for distributed tensor
 from typing import List
 
+import torch
+from torch.distributed._tensor._op_schema import OpSchema, OutputSharding
+from torch.distributed._tensor.ops.utils import register_prop_rule
+from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
+
+
+aten = torch.ops.aten
+
+
 try:
     import numpy as np
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
-
-import torch
-from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
-from torch.distributed._tensor.ops.utils import register_prop_rule
-from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
-
-aten = torch.ops.aten
 
 
 @register_prop_rule(aten.slice_backward.default)
@@ -39,11 +41,3 @@ def slice_backward_rules(op_schema: OpSchema) -> OutputSharding:
     )
 
     return OutputSharding(grad_input_spec)
-
-
-@register_prop_rule(aten.bernoulli.default)
-@register_prop_rule(aten.bernoulli_.float)
-def bernoulli_rules(op_schema: OpSchema) -> OutputSharding:
-    input_spec = op_schema.args_schema[0]
-    assert isinstance(input_spec, DTensorSpec)
-    return OutputSharding(input_spec)

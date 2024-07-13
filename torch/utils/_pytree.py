@@ -16,6 +16,7 @@ To improve the performance we can move parts of the implementation to C++.
 """
 
 import dataclasses
+import functools
 import importlib
 import json
 import sys
@@ -47,6 +48,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import deprecated
 
 
 __all__ = [
@@ -65,6 +67,7 @@ __all__ = [
     "tree_flatten",
     "tree_flatten_with_path",
     "tree_unflatten",
+    "tree_iter",
     "tree_leaves",
     "tree_leaves_with_path",
     "tree_structure",
@@ -249,6 +252,11 @@ def _register_namedtuple(
     )
 
 
+@deprecated(
+    "`torch.utils._pytree._register_pytree_node` is deprecated. "
+    "Please use `torch.utils._pytree.register_pytree_node` instead.",
+    category=FutureWarning,
+)
 def _register_pytree_node(
     cls: Type[Any],
     flatten_fn: FlattenFunc,
@@ -285,16 +293,12 @@ def _register_pytree_node(
             Like ``flatten_fn``, but in place of a List[leaf], it should return
             a List[(keypath, leaf)].
     """
-    warnings.warn(
-        "torch.utils._pytree._register_pytree_node is deprecated. "
-        "Please use torch.utils._pytree.register_pytree_node instead.",
-        stacklevel=2,
-    )
-
     if to_str_fn is not None or maybe_from_str_fn is not None:
         warnings.warn(
-            "to_str_fn and maybe_from_str_fn is deprecated. "
-            "Please use to_dumpable_context and from_dumpable_context instead."
+            "`to_str_fn` and `maybe_from_str_fn` is deprecated. "
+            "Please use `to_dumpable_context` and `from_dumpable_context` instead.",
+            FutureWarning,
+            stacklevel=2,
         )
 
     _private_register_pytree_node(
@@ -660,7 +664,7 @@ def _is_leaf(tree: PyTree, is_leaf: Optional[Callable[[PyTree], bool]] = None) -
 # context: some context that is useful in unflattening the pytree
 # children_specs: specs for each child of the root Node
 # num_leaves: the number of leaves
-@dataclasses.dataclass
+@dataclasses.dataclass(init=True, frozen=True, eq=True, repr=False)
 class TreeSpec:
     type: Any
     context: Context
@@ -671,9 +675,12 @@ class TreeSpec:
     num_children: int = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
-        self.num_nodes = 1 + sum(spec.num_nodes for spec in self.children_specs)
-        self.num_leaves = sum(spec.num_leaves for spec in self.children_specs)
-        self.num_children = len(self.children_specs)
+        num_nodes = sum((spec.num_nodes for spec in self.children_specs), start=1)
+        num_leaves = sum(spec.num_leaves for spec in self.children_specs)
+        num_children = len(self.children_specs)
+        object.__setattr__(self, "num_nodes", num_nodes)
+        object.__setattr__(self, "num_leaves", num_leaves)
+        object.__setattr__(self, "num_children", num_children)
 
     def __repr__(self, indent: int = 0) -> str:
         repr_prefix: str = f"TreeSpec({self.type.__name__}, {self.context}, ["
@@ -806,9 +813,9 @@ class LeafSpec(TreeSpec):
         super().__init__(None, None, [])
 
     def __post_init__(self) -> None:
-        self.num_nodes = 1
-        self.num_leaves = 1
-        self.num_children = 0
+        object.__setattr__(self, "num_nodes", 1)
+        object.__setattr__(self, "num_leaves", 1)
+        object.__setattr__(self, "num_children", 0)
 
     def __repr__(self, indent: int = 0) -> str:
         return "*"
@@ -864,22 +871,21 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
     return treespec.unflatten(leaves)
 
 
-def _tree_leaves_helper(
+def tree_iter(
     tree: PyTree,
-    leaves: List[Any],
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> None:
+) -> Iterable[Any]:
+    """Get an iterator over the leaves of a pytree."""
     if _is_leaf(tree, is_leaf=is_leaf):
-        leaves.append(tree)
-        return
+        yield tree
+    else:
+        node_type = _get_node_type(tree)
+        flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
+        child_pytrees, _ = flatten_fn(tree)
 
-    node_type = _get_node_type(tree)
-    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-    child_pytrees, _ = flatten_fn(tree)
-
-    # Recursively flatten the children
-    for child in child_pytrees:
-        _tree_leaves_helper(child, leaves, is_leaf=is_leaf)
+        # Recursively flatten the children
+        for child in child_pytrees:
+            yield from tree_iter(child, is_leaf=is_leaf)
 
 
 def tree_leaves(
@@ -887,9 +893,7 @@ def tree_leaves(
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> List[Any]:
     """Get a list of leaves of a pytree."""
-    leaves: List[Any] = []
-    _tree_leaves_helper(tree, leaves, is_leaf=is_leaf)
-    return leaves
+    return list(tree_iter(tree, is_leaf=is_leaf))
 
 
 def tree_structure(
@@ -1056,7 +1060,7 @@ def map_only(
         raise TypeError("Argument must be a type, a tuple of types, or a callable.")
 
     def wrapper(func: Callable[[T], Any]) -> Callable[[Any], Any]:
-        # @functools.wraps(func)  # torch dynamo doesn't support this yet
+        @functools.wraps(func)
         def wrapped(x: T) -> Any:
             if pred(x):
                 return func(x)
@@ -1170,7 +1174,7 @@ def tree_all(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return all(map(pred, flat_args))
 
 
@@ -1179,7 +1183,7 @@ def tree_any(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return any(map(pred, flat_args))
 
 
@@ -1219,7 +1223,7 @@ def tree_all_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return all(pred(x) for x in flat_args if isinstance(x, __type_or_types))
 
 
@@ -1259,7 +1263,7 @@ def tree_any_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return any(pred(x) for x in flat_args if isinstance(x, __type_or_types))
 
 
@@ -1449,14 +1453,20 @@ def treespec_pprint(treespec: TreeSpec) -> str:
 
 
 # TODO(angelayi): remove this function after OSS/internal stabilize
+@deprecated(
+    "`pytree_to_str` is deprecated. Please use `treespec_dumps` instead.",
+    category=FutureWarning,
+)
 def pytree_to_str(treespec: TreeSpec) -> str:
-    warnings.warn("pytree_to_str is deprecated. Please use treespec_dumps")
     return treespec_dumps(treespec)
 
 
 # TODO(angelayi): remove this function after OSS/internal stabilize
+@deprecated(
+    "`str_to_pytree` is deprecated. Please use `treespec_loads` instead.",
+    category=FutureWarning,
+)
 def str_to_pytree(json: str) -> TreeSpec:
-    warnings.warn("str_to_pytree is deprecated. Please use treespec_loads")
     return treespec_loads(json)
 
 
@@ -1467,9 +1477,9 @@ def arg_tree_leaves(*args: PyTree, **kwargs: PyTree) -> List[Any]:
     """
     leaves: List[Any] = []
     for a in args:
-        _tree_leaves_helper(a, leaves)
+        leaves.extend(tree_iter(a))
     for a in kwargs.values():
-        _tree_leaves_helper(a, leaves)
+        leaves.extend(tree_iter(a))
     return leaves
 
 

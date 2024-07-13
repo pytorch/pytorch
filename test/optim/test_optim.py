@@ -2,15 +2,24 @@
 
 import torch
 from torch.optim import (
-    Adadelta, Adagrad, Adam, Adamax, AdamW, ASGD, NAdam, RAdam, RMSprop, Rprop, SGD
+    Adadelta,
+    Adagrad,
+    Adam,
+    Adamax,
+    AdamW,
+    ASGD,
+    NAdam,
+    RAdam,
+    RMSprop,
+    Rprop,
+    SGD,
 )
 from torch.testing._internal.common_utils import (
-    TestCase,
-    load_tests,
     gradcheck,
-    skipIfTorchDynamo
+    load_tests,
+    skipIfTorchDynamo,
+    TestCase,
 )
-
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -41,7 +50,6 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
 
 @skipIfTorchDynamo("Differentiable optimizers not supported")
 class TestDifferentiableOptimizer(TestCase):
-
     def test_sgd(self):
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -58,7 +66,6 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
-
 
     def test_adam(self):
         state = {}
@@ -84,7 +91,6 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
-
 
     def test_rmsprop(self):
         state = {}
@@ -118,7 +124,6 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
-
     def test_adadelta(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -140,7 +145,6 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
-
     def test_adagrad(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -160,7 +164,6 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
-
 
     def test_adamax(self):
         state = {}
@@ -183,9 +186,10 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
-
-    @skipIfTorchDynamo("The inplace mu update fails with dynamo, "
-                       "since this is only happening when differentiable is enabled, skipping for now")
+    @skipIfTorchDynamo(
+        "The inplace mu update fails with dynamo, "
+        "since this is only happening when differentiable is enabled, skipping for now"
+    )
     def test_asgd(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -319,7 +323,12 @@ class TestDifferentiableOptimizer(TestCase):
                 grad,
                 state,
                 RAdam,
-                {"lr": 0.9, "weight_decay": 0.1, "decoupled_weight_decay": True, "differentiable": True},
+                {
+                    "lr": 0.9,
+                    "weight_decay": 0.1,
+                    "decoupled_weight_decay": True,
+                    "differentiable": True,
+                },
                 *state.values(),
             ),
         )

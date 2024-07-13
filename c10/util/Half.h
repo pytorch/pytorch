@@ -12,11 +12,12 @@
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeSafeSignMath.h>
+#include <c10/util/bit_cast.h>
 #include <c10/util/complex.h>
 #include <c10/util/floating_point_utils.h>
 #include <type_traits>
 
-#if defined(__cplusplus) && (__cplusplus >= 201103L)
+#if defined(__cplusplus)
 #include <cmath>
 #elif !defined(__OPENCL_VERSION__)
 #include <math.h>
@@ -30,6 +31,7 @@
 #include <cstring>
 #include <iosfwd>
 #include <limits>
+#include <ostream>
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
@@ -45,7 +47,7 @@
 #include <sycl/sycl.hpp> // for SYCL 2020
 #endif
 
-#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+#if defined(__aarch64__) && !defined(__CUDACC__)
 #include <arm_neon.h>
 #endif
 
@@ -328,24 +330,16 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
       (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign));
 }
 
-#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
-constexpr inline float16_t fp16_from_bits(uint16_t h) {
-  union {
-    uint16_t as_bits;
-    float16_t as_value;
-  } fp16 = {h};
-  return fp16.as_value;
+#if defined(__aarch64__) && !defined(__CUDACC__)
+inline float16_t fp16_from_bits(uint16_t h) {
+  return c10::bit_cast<float16_t>(h);
 }
 
-constexpr inline uint16_t fp16_to_bits(float16_t f) {
-  union {
-    float16_t as_value;
-    uint16_t as_bits;
-  } fp16 = {.as_value = f};
-  return fp16.as_bits;
+inline uint16_t fp16_to_bits(float16_t f) {
+  return c10::bit_cast<uint16_t>(f);
 }
 
-// According to https://godbolt.org/z/8s14GvEjo it would translate to single
+// According to https://godbolt.org/z/frExdbsWG it would translate to single
 // fcvt s0, h0
 inline float native_fp16_to_fp32_value(uint16_t h) {
   return static_cast<float>(fp16_from_bits(h));
@@ -374,7 +368,7 @@ struct alignas(2) Half {
 #endif
 
   constexpr C10_HOST_DEVICE Half(unsigned short bits, from_bits_t) : x(bits) {}
-#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+#if defined(__aarch64__) && !defined(__CUDACC__)
   inline Half(float16_t value);
   inline operator float16_t() const;
 #else
@@ -531,7 +525,10 @@ std::enable_if_t<is_complex<From>::value, bool> overflows(
              typename From::value_type>(f.imag());
 }
 
-C10_API std::ostream& operator<<(std::ostream& out, const Half& value);
+C10_API inline std::ostream& operator<<(std::ostream& out, const Half& value) {
+  out << (float)value;
+  return out;
+}
 
 } // namespace c10
 

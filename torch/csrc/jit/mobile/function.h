@@ -21,7 +21,7 @@ class TORCH_API Function : public torch::jit::Function {
   Function(
       c10::QualifiedName name,
       Code code,
-      at::optional<c10::FunctionSchema> schema);
+      std::optional<c10::FunctionSchema> schema);
   void run(Stack& stack) override;
   at::IValue operator()(Stack& stack);
   void ensure_defined() override {}
@@ -37,7 +37,7 @@ class TORCH_API Function : public torch::jit::Function {
   void append_operator(
       const std::string& name,
       const std::string& overload_name,
-      const c10::optional<int>& num_specified_args);
+      const std::optional<int>& num_specified_args);
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
   void append_function(mobile::Function& func);
@@ -72,12 +72,12 @@ class TORCH_API Function : public torch::jit::Function {
  private:
   c10::QualifiedName name_;
   Code code_;
-  at::optional<c10::FunctionSchema> schema_; // (byte-code version 4+)
+  std::optional<c10::FunctionSchema> schema_; // (byte-code version 4+)
 };
 
-c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
+std::optional<std::function<void(Stack&)>> makeOperatorFunction(
     c10::OperatorName opname,
-    c10::optional<int> num_specified_args);
+    std::optional<int> num_specified_args);
 
 TORCH_API std::string operator_str(const c10::OperatorName& opname);
 

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import hashlib
 import itertools
@@ -178,6 +179,7 @@ DEFAULT_LOGGING = {
     "dynamo": logging.DEBUG,
     "aot": logging.DEBUG,
     "inductor": logging.DEBUG,
+    "fsdp": logging.DEBUG,
     "ddp_graphs": True,
     "graph_breaks": True,
     "guards": True,
@@ -195,9 +197,10 @@ def set_logs(
     dynamic: Optional[int] = None,
     inductor: Optional[int] = None,
     distributed: Optional[int] = None,
-    dist_c10d: Optional[int] = None,
-    dist_ddp: Optional[int] = None,
-    dist_fsdp: Optional[int] = None,
+    c10d: Optional[int] = None,
+    ddp: Optional[int] = None,
+    fsdp: Optional[int] = None,
+    dtensor: Optional[int] = None,
     onnx: Optional[int] = None,
     bytecode: bool = False,
     aot_graphs: bool = False,
@@ -212,7 +215,9 @@ def set_logs(
     recompiles_verbose: bool = False,
     trace_source: bool = False,
     trace_call: bool = False,
+    trace_bytecode: bool = False,
     output_code: bool = False,
+    kernel_code: bool = False,
     schedule: bool = False,
     perf_hints: bool = False,
     post_grad_graphs: bool = False,
@@ -223,6 +228,7 @@ def set_logs(
     modules: Optional[Dict[str, Union[int, bool]]] = None,
     cudagraphs: bool = False,
     sym_node: bool = False,
+    compiled_autograd_verbose: bool = False,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -282,16 +288,20 @@ def set_logs(
             Whether to log c10d communication operations and other debug info from PyTorch Distributed components.
             Default: ``logging.WARN``
 
-        dist_c10d (:class:`Optional[int]`):
+        c10d (:class:`Optional[int]`):
             Whether to log c10d communication operations related debug info in PyTorch Distributed components.
             Default: ``logging.WARN``
 
-        dist_ddp (:class:`Optional[int]`):
+        ddp (:class:`Optional[int]`):
             Whether to log debug info related to ``DistributedDataParallel``(DDP) from PyTorch Distributed components.
             Default: ``logging.WARN``
 
-        dist_fsdp (:class:`Optional[int]`):
+        fsdp (:class:`Optional[int]`):
             Whether to log debug info related to ``FullyShardedDataParallel``(FSDP) in PyTorch Distributed components.
+            Default: ``logging.WARN``
+
+        dtensor (:class:`Optional[int]`):
+            Whether to log debug info related to ``DTensor``(DTensor) in PyTorch Distributed components.
             Default: ``logging.WARN``
 
         onnx (:class:`Optional[int]`):
@@ -348,8 +358,15 @@ def set_logs(
             Whether to emit detailed line location when TorchDynamo creates an FX node
             corresponding to function call. Python 3.11+ only. Default: ``False``
 
+        trace_bytecode (:class:`bool`):
+            Whether to emit bytecode instructions and traced stack state as TorchDynamo
+            traces bytecode. Default: ``False``
+
         output_code (:class:`bool`):
-            Whether to emit the TorchInductor output code. Default: ``False``
+            Whether to emit the TorchInductor output code on a per-graph basis. Default: ``False``
+
+        kernel_code (:class:`bool`):
+            Whether to emit the TorchInductor output code on a per-kernel bases. Default: ``False``
 
         schedule (:class:`bool`):
             Whether to emit the TorchInductor schedule. Default: ``False``
@@ -453,9 +470,10 @@ def set_logs(
         aot_joint_graph=aot_joint_graph,
         ddp_graphs=ddp_graphs,
         distributed=distributed,
-        dist_c10d=dist_c10d,
-        dist_ddp=dist_ddp,
-        dist_fsdp=dist_fsdp,
+        c10d=c10d,
+        ddp=ddp,
+        fsdp=fsdp,
+        dtensor=dtensor,
         graph=graph,
         graph_code=graph_code,
         graph_breaks=graph_breaks,
@@ -465,7 +483,9 @@ def set_logs(
         recompiles_verbose=recompiles_verbose,
         trace_source=trace_source,
         trace_call=trace_call,
+        trace_bytecode=trace_bytecode,
         output_code=output_code,
+        kernel_code=kernel_code,
         schedule=schedule,
         perf_hints=perf_hints,
         post_grad_graphs=post_grad_graphs,
@@ -476,6 +496,7 @@ def set_logs(
         sym_node=sym_node,
         export=export,
         cudagraphs=cudagraphs,
+        compiled_autograd_verbose=compiled_autograd_verbose,
     )
 
 
@@ -636,7 +657,7 @@ Valid settings:
 @functools.lru_cache
 def _parse_log_settings(settings):
     if settings == "":
-        return dict()
+        return {}
 
     if settings == "help":
         raise ValueError(help_message(verbose=False))
@@ -782,7 +803,11 @@ class TorchLogsFormatter(logging.Formatter):
         )
         if self._is_trace:
             assert s == ""
-            r = f"{prefix} {json.dumps(record.metadata)}"
+            try:
+                r = f"{prefix} {json.dumps(record.metadata)}"
+            except TypeError:
+                log.warning("failing metadata: %r", record.metadata)
+                raise
             if record.payload is not None:
                 r += "".join(f"\n\t{l}" for l in record.payload.split("\n"))
             return r
@@ -965,8 +990,13 @@ class LazyTraceHandler(logging.StreamHandler):
 
                 import torch.version as torch_version
 
-                if hasattr(torch_version, "git_version"):
-                    log.info("LazyTraceHandler: disabled because not fbcode")
+                if (
+                    hasattr(torch_version, "git_version")
+                    and os.getenv("MAST_HPC_JOB_NAME") is None
+                ):
+                    log.info(
+                        "LazyTraceHandler: disabled because not fbcode or conda on mast"
+                    )
                 elif not torch._utils_internal.justknobs_check("pytorch/trace:enable"):
                     log.info(
                         "LazyTraceHandler: disabled because justknobs_check('pytorch/trace:enable') returned False"

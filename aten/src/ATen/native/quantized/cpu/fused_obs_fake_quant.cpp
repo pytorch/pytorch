@@ -41,8 +41,8 @@ void calculate_moving_average(
   } else {
     std::tie(x_min, x_max) = at::aminmax(x);
   }
-  const float* min_curr_val = x_min.data_ptr<float>();
-  const float* max_curr_val = x_max.data_ptr<float>();
+  const float* min_curr_val = x_min.const_data_ptr<float>();
+  const float* max_curr_val = x_max.const_data_ptr<float>();
   // Moving Average Min/Max observer for input tensor
   float* running_min_val = running_min.data_ptr<float>();
   float* running_max_val = running_max.data_ptr<float>();

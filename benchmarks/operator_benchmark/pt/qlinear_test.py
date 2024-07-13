@@ -1,10 +1,9 @@
-import torch
-import torch.ao.nn.quantized as nnq
-import torch.ao.nn.quantized.dynamic as nnqd
-
 from pt import configs
 
 import operator_benchmark as op_bench
+import torch
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
 
 """
 Microbenchmarks for Quantized Linear operators.

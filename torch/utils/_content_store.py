@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # This module provides a FAST (on GPU) content addressable store for storages
 # (and tensors on top of them) with VERY WEAK portability guarantees (e.g.,
 # don't expect CPU/CUDA to address to the same hash, don't expect it to be

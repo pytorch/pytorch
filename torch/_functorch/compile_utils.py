@@ -1,6 +1,8 @@
 # mypy: ignore-errors
 
 
+from typing import Callable
+
 import torch
 import torch.fx as fx
 from torch.utils import _pytree as pytree
@@ -9,7 +11,7 @@ from torch.utils._pytree import tree_flatten
 aten = torch.ops.aten
 
 
-def get_aten_target(node):
+def get_aten_target(node: fx.Node) -> Callable:
     if hasattr(node.target, "overloadpacket"):
         return node.target.overloadpacket
     return node.target

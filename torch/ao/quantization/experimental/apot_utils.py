@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""
 This file contains utility functions to convert values
 using APoT nonuniform quantization methods.

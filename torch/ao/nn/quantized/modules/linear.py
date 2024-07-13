@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from collections.abc import Iterable
 import torch
 
@@ -157,9 +158,8 @@ class Linear(WeightedQuantizedModule):
         return 'QuantizedLinear'
 
     def extra_repr(self):
-        return 'in_features={}, out_features={}, scale={}, zero_point={}, qscheme={}'.format(
-            self.in_features, self.out_features, self.scale, self.zero_point, self.weight().qscheme()
-        )
+        return f'in_features={self.in_features}, out_features={self.out_features}, scale={self.scale}, ' \
+               f'zero_point={self.zero_point}, qscheme={self.weight().qscheme()}'
 
     def __repr__(self):
         return _hide_packed_params_repr(self, LinearPackedParams)
@@ -241,12 +241,14 @@ class Linear(WeightedQuantizedModule):
         self._packed_params.set_weight_bias(w, b)
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a quantized module from an observed float module
 
         Args:
             mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by the user
+            use_precomputed_fake_quant (bool): if True, the module will reuse min/max
+                          values from the precomputed fake quant module.
         """
         if hasattr(mod, 'weight_fake_quant'):
             if type_before_parametrizations(mod) == nniqat.LinearBn1d:
@@ -268,8 +270,12 @@ class Linear(WeightedQuantizedModule):
             activation_post_process = mod.activation_post_process
             if type_before_parametrizations(mod) == nni.LinearReLU:
                 mod = mod[0]
-            weight_post_process = mod.qconfig.weight()
-        weight_post_process(mod.weight)
+            weight_post_process = mod.qconfig.weight() if not hasattr(mod, "weight_fake_quant") else mod.weight_fake_quant
+
+        if not use_precomputed_fake_quant:
+            # Observer may not have been called yet
+            # Observer might have been called in the previous stage via PTQ algorithm e.g. AdaRound
+            weight_post_process(mod.weight)
         dtype = weight_post_process.dtype
         act_scale, act_zp = activation_post_process.calculate_qparams()
         assert dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'

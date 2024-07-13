@@ -16,7 +16,7 @@ example_kernel = """
     triton_meta={
         'signature': {0: '*fp32', 1: '*fp32', 2: 'i32', 3: 'i32'},
         'device': 0,
-        'device_type': 'cuda',
+        'device_type': 'GPU_TYPE',
         'constants': {},
         'configs': [AttrsDescriptor(divisible_by_16=(0, 1, 2, 3), equal_to_1=(), ids_of_folded_args=(), divisible_by_8=(2, 3))]},
     inductor_meta={
@@ -50,7 +50,9 @@ def triton_red_fused_add_sum_2(in_out_ptr0, in_ptr0, xnumel, rnumel, XBLOCK : tl
     tmp5 = tmp4 + tmp2
     tl.debug_barrier()
     tl.store(in_out_ptr0 + (x0), tmp5, xmask)
-"""
+""".replace(
+    "GPU_TYPE", GPU_TYPE
+)
 
 
 class TestMetrics(TestCase):

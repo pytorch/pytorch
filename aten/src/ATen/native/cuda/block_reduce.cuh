@@ -103,7 +103,7 @@ __inline__ __device__ T BlockReduceMax(T val, T* shared) {
     shared[wid] = val;
   }
   __syncthreads();
-  val = (tid < B::Warps()) ? shared[lid] : T(0);
+  val = (tid < B::Warps()) ? shared[lid] : T(std::numeric_limits<T>::lowest());
   if (wid == 0) {
     val = WarpReduceMax(val);
   }

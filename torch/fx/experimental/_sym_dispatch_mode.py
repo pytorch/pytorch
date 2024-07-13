@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import List, Optional, Type
 
 __all__ = ["SymDispatchMode", "handle_sym_dispatch", "sym_function_mode"]
@@ -22,7 +23,7 @@ SYM_FUNCTION_MODE: Optional["SymDispatchMode"] = None
 #
 class SymDispatchMode:
     def __sym_dispatch__(self, func, types, args, kwargs):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def __enter__(self):
         global SYM_FUNCTION_MODE

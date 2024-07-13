@@ -60,8 +60,8 @@ struct TORCH_API VariableHooksInterface {
   virtual void _backward(
       const Tensor&,
       TensorList,
-      const c10::optional<Tensor>&,
-      c10::optional<bool>,
+      const std::optional<Tensor>&,
+      std::optional<bool>,
       bool) const = 0;
   virtual void requires_grad_(const TensorBase&, bool) const = 0;
   virtual void basic_autograd_not_implemented_fallback(

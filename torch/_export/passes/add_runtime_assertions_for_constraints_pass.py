@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 import operator
 import traceback
@@ -8,10 +9,10 @@ import sympy
 
 import torch
 import torch.fx
-from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse, ProxyValue, PassResult
 from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.numbers import int_oo
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
-
+from torch.fx.passes.infra.pass_base import PassBase, PassResult
 
 __all__ = ["InputDim"]
 
@@ -23,9 +24,9 @@ class InputDim(NamedTuple):
 
 def _convert_to_int(val):
     # Convert simple sympy Integers into concrete int
-    if val == sympy.oo:
+    if val in (sympy.oo, int_oo):
         return math.inf
-    if val == -sympy.oo:
+    if val in (-sympy.oo, -int_oo):
         return -math.inf
     if isinstance(val, sympy.Integer):
         return int(val)
@@ -41,7 +42,7 @@ def _convert_range_to_int(range: ValueRanges):
     return min_val, max_val
 
 
-class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBaseDeprecatedDoNotUse):
+class _AddRuntimeAssertionsForInlineConstraintsPass(PassBase):
     def __init__(
         self,
         range_constraints: Dict[sympy.Symbol, ValueRanges],
@@ -51,96 +52,100 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBaseDeprecatedDoN
         self._asserts_generated_unbacked_symbols: Set[sympy.Symbol] = set()
         self.counter = 0
 
-    def _assert_range_constraint(self, proxy, lower, upper, assert_msg):
+    def _assert_range_constraint(self, node, lower, upper, assert_msg):
+        last_node = node
         if lower > -math.inf:
-            self._insert_assert_async(operator.ge, proxy, lower, assert_msg)
+            last_node = self._insert_assert_async(last_node, operator.ge, node, lower, assert_msg)
 
         if upper < math.inf:
-            self._insert_assert_async(operator.le, proxy, upper, assert_msg)
+            last_node = self._insert_assert_async(last_node, operator.le, node, upper, assert_msg)
 
-    def _insert_assert_async(self, operator, lower, upper, assert_msg):
+    def _insert_assert_async(self, last_node, op, lower, upper, assert_msg):
         """
         Inserts assert_async call_function nodes in the graph. This function is
         called **during** the interpreter-based pass.
         """
         self.counter += 1
-        cmp = super().call_operator(operator, (lower, upper), {}, self._create_dummy_node_metadata())
-        cmp_tensor = super().call_operator(torch.ops.aten.scalar_tensor.default, (cmp,), {}, self._create_dummy_node_metadata())
-        super().call_operator(
-            torch.ops.aten._assert_async.msg,
-            (cmp_tensor, assert_msg),
-            {},
-            self._create_dummy_node_metadata(),
-        )
+        graph = last_node.graph
+        with graph.inserting_after(last_node):
+            cmp = graph.call_function(op, (lower, upper), {})
+        with graph.inserting_after(cmp):
+            cmp_tensor = graph.call_function(torch.ops.aten.scalar_tensor.default, (cmp,), {})
+        with graph.inserting_after(cmp_tensor):
+            assert_async = graph.call_function(
+                torch.ops.aten._assert_async.msg,
+                (cmp_tensor, assert_msg),
+                {},
+            )
+        return assert_async
 
-    def call_operator(self, op, args, kwargs, meta) -> ProxyValue:
-        ret = super().call_operator(op, args, kwargs, meta)
-        if "val" not in meta:
-            return ret
-
-        val = meta["val"]
-
-        # In general, we may have to deal the case such as: ret[1].shape[0].
-        # We need first find out what symbols require assertion, then we need to follow the path
-        # from ret to the symbol, construct the proxies along the way and construct the messages
-        # piece-wise at the same time.
-        #
-        # We use post-order traversal to collect all the proxies callbacks needed, construct
-        # the error message callbacks, and at the top-level traversal tree we execute all the callbacks.
-        # We need the callbacks because, in order to call the function to create a proxy for shape[0], we
-        # need the proxy for shape, which further requires the proxy for ret[1], etc.
-        def add_assertions(val):
-            call_backs: List[Callable] = []
-            messages: List[str] = []
-            if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-                symbol = val.node.expr
-                if symbol in self.existing_inline_assertions:
-                    return call_backs, messages
-                if isinstance(symbol, sympy.Symbol) and free_unbacked_symbols(symbol):
-                    if symbol in self._asserts_generated_unbacked_symbols:
-                        return call_backs, messages
-                    # We only care about unbacked symints for these inline
-                    # constraints, which are prefixed with 'u'
-                    constraint = self.range_constraints[symbol]
-                    min_val, max_val = _convert_range_to_int(constraint)
-                    assert_msg = f" is outside of inline constraint [{min_val}, {max_val}]."
-                    call_backs.append(
-                        partial(self._assert_range_constraint, lower=min_val, upper=max_val)
-                    )
-                    messages.append(assert_msg)
-                    self._asserts_generated_unbacked_symbols.add(symbol)
-
-            elif isinstance(val, torch.Tensor):
-                for i, sym in enumerate(val.shape):
-                    cbs, msgs = add_assertions(sym)
-                    for cb, msg in zip(cbs, msgs):
-                        def sym_size_cb(proxy, assert_msg, dim):
-                            dim_proxy = super(
-                                _AddRuntimeAssertionsForInlineConstraintsPass,
-                                self
-                            ).call_operator(
-                                torch.ops.aten.sym_size.int,
-                                (proxy, dim),
-                                {},
-                                self._create_dummy_node_metadata(),
-                            )
-                            cb(proxy=dim_proxy, assert_msg=assert_msg)
-                        call_backs.append(partial(sym_size_cb, dim=i))
-                        messages.append(f".shape[{i}]" + msg)
-            return call_backs, messages
-
-        callbacks, messages = add_assertions(val)
-        for cb, msg in zip(callbacks, messages):
-            cb(proxy=ret, assert_msg=f"{ret.node}" + msg)
-        return ret
-
-    def call(self, graph_module):
+    def call(self, graph_module) -> PassResult:
         self.existing_inline_assertions = _get_existing_inline_assertions(
             graph_module, self.range_constraints
         )
 
-        # Add runtime asserts for inline constraints
-        val = super().call(graph_module)
+        for module in graph_module.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                if node.op != "call_function":
+                    continue
+                if "val" not in node.meta:
+                    continue
+
+                val = node.meta["val"]
+                # In general, we may have to deal the case such as: ret[1].shape[0].
+                # We need first find out what symbols require assertion, then we need to follow the path
+                # from ret to the symbol, construct the proxies along the way and construct the messages
+                # piece-wise at the same time.
+                #
+                # We use post-order traversal to collect all the proxies callbacks needed, construct
+                # the error message callbacks, and at the top-level traversal tree we execute all the callbacks.
+                # We need the callbacks because, in order to call the function to create a proxy for shape[0], we
+                # need the proxy for shape, which further requires the proxy for ret[1], etc.
+
+                def add_assertions(val):
+                    call_backs: List[Callable] = []
+                    messages: List[str] = []
+                    if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+                        symbol = val.node.expr
+                        if symbol in self.existing_inline_assertions:
+                            return call_backs, messages
+                        if isinstance(symbol, sympy.Symbol) and free_unbacked_symbols(symbol):
+                            if symbol in self._asserts_generated_unbacked_symbols:
+                                return call_backs, messages
+                            # We only care about unbacked symints for these inline
+                            # constraints, which are prefixed with 'u'
+                            constraint = self.range_constraints[symbol]
+                            min_val, max_val = _convert_range_to_int(constraint)
+                            assert_msg = f" is outside of inline constraint [{min_val}, {max_val}]."
+                            call_backs.append(
+                                partial(self._assert_range_constraint, lower=min_val, upper=max_val)
+                            )
+                            messages.append(assert_msg)
+                            self._asserts_generated_unbacked_symbols.add(symbol)
+
+                    elif isinstance(val, torch.Tensor):
+                        for i, sym in enumerate(val.shape):
+                            cbs, msgs = add_assertions(sym)
+                            for cb, msg in zip(cbs, msgs):
+                                def sym_size_cb(node, assert_msg, dim):
+                                    with node.graph.inserting_after(node):
+                                        dim_node = module.graph.call_function(
+                                            torch.ops.aten.sym_size.int,
+                                            (node, dim),
+                                            {},
+                                        )
+                                    cb(node=dim_node, assert_msg=assert_msg)
+                                call_backs.append(partial(sym_size_cb, dim=i))
+                                messages.append(f".shape[{i}]" + msg)
+                    return call_backs, messages
+
+                callbacks, messages = add_assertions(val)
+                for cb, msg in zip(callbacks, messages):
+                    cb(node=node, assert_msg=f"{node}" + msg)
+
+            module.recompile()
 
         # Sometimes this pass would return a wrong graph where we have mismatched
         # node names in signature. Before we fix it, let's just skip it.
@@ -148,11 +153,10 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBaseDeprecatedDoN
             return PassResult(graph_module, False)
 
         # Populate the stack trace with dummy vals to respect IR
-        for node in val.graph_module.graph.nodes:
+        for node in graph_module.graph.nodes:
             if not node.meta.get("stack_trace", None) and node.op not in ["placeholder", "output"]:
                 node.meta["stack_trace"] = "".join(traceback.format_stack(limit=1))
-
-        return PassResult(val.graph_module, val.modified)
+        return PassResult(graph_module, True)
 
 
 def _get_existing_inline_assertions(
@@ -168,21 +172,14 @@ def _get_existing_inline_assertions(
         # Find all the existing inline assertions. They will look something like:
         # %_local_scalar_dense = call_function[target=torch.ops.aten._local_scalar_dense.default](args = (%arg1_1,), kwargs = {})
         # %ge = call_function[target=operator.ge](args = (%_local_scalar_dense, 0), kwargs = {})
-        # %scalar_tensor = call_function[target=torch.ops.aten.scalar_tensor.default](args = (%ge,), kwargs = {})
-        # %_assert_async = call_function[target=torch.ops.aten._assert_async.msg](args = (%scalar_tensor, "..."), kwargs = {})
+        # %_assert_scalar = call_function[target=torch.ops.aten._assert_scalar.default](args = (%scalar_tensor, "..."), kwargs = {})
         for node in module.graph.nodes:
-            if node.target != torch.ops.aten._assert_async.msg:
+            if node.target != torch.ops.aten._assert_scalar.default:
                 continue
 
-            scalar_tensor_arg = node.args[0]
+            compare_arg = node.args[0]
             if not (
-                scalar_tensor_arg.op == "call_function" and
-                scalar_tensor_arg.target == torch.ops.aten.scalar_tensor.default
-            ):
-                continue
-
-            compare_arg = scalar_tensor_arg.args[0]
-            if not (
+                isinstance(compare_arg, torch.fx.Node) and
                 compare_arg.op == "call_function" and
                 compare_arg.target in (operator.le, operator.ge) and
                 len(compare_arg.args) == 2
@@ -190,42 +187,41 @@ def _get_existing_inline_assertions(
                 continue
 
             compare_op = compare_arg.target
-            maybe_symint_arg, compare_int = compare_arg.args
+            lhs, rhs = compare_arg.args
 
-            # x >= 0 will sometimes be canonicalized to -x <= 0, so in some
-            # cases the operation before the comparison is to multiply by -1. We
-            # can undo the canonicalization here
-            if (
-                maybe_symint_arg.op == "call_function" and
-                maybe_symint_arg.target == operator.mul and
-                maybe_symint_arg.args[0] == -1
-            ):
-                maybe_symint_arg = maybe_symint_arg.args[1]
-                compare_op = operator.ge
-                compare_int = -1 * compare_int
+            def maybe_get_symint(x):
+                if (
+                    isinstance(x, torch.fx.Node) and
+                    "val" in x.meta and
+                    isinstance(x.meta["val"], torch.SymInt)
+                ):
+                    return x.meta["val"].node.expr
+                return x
 
-            if not (
-                "val" in maybe_symint_arg.meta and
-                isinstance(maybe_symint_arg.meta["val"], torch.SymInt)
-            ):
-                continue
+            lhs = maybe_get_symint(lhs)
+            rhs = maybe_get_symint(rhs)
 
-            symint = maybe_symint_arg.meta["val"].node.expr
-            if not isinstance(symint, sympy.Symbol):
+            if compare_op == operator.ge:
+                lhs, rhs = rhs, lhs
+
+            if isinstance(lhs, sympy.Symbol) and isinstance(rhs, int):
+                symint = lhs
+                scalar = rhs
+            elif isinstance(rhs, sympy.Symbol) and isinstance(lhs, int):
+                symint = rhs
+                scalar = lhs
+            else:
                 continue
 
             if symint not in range_constraints:
                 raise RuntimeError(f"Unable to find symint {symint} in {range_constraints}")
 
-            found_range = existing_inline_assertions.get(symint, ValueRanges(-math.inf, math.inf))
+            previous_range = existing_inline_assertions.get(symint, ValueRanges(-math.inf, math.inf))
 
-            if compare_arg.target == operator.le:
-                existing_inline_assertions[symint] = ValueRanges(
-                    lower=found_range.lower, upper=compare_int
-                )
-            elif compare_arg.target == operator.ge:
-                existing_inline_assertions[symint] = ValueRanges(
-                    lower=compare_int, upper=found_range.upper
-                )
+            if symint is lhs:
+                bounds = ValueRanges(-math.inf, scalar)
+            else:
+                bounds = ValueRanges(scalar, math.inf)
+            existing_inline_assertions[symint] = previous_range & bounds
 
     return existing_inline_assertions

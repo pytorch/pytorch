@@ -325,6 +325,6 @@ C10_API c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
     c10::DataPtr data_ptr,
     c10::Allocator* allocator,
     bool resizable,
-    c10::optional<at::Device> device_opt);
+    std::optional<at::Device> device_opt);
 
 } // namespace c10

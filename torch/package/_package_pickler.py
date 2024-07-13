@@ -1,4 +1,4 @@
-"""isort:skip_file"""
+# mypy: allow-untyped-defs
 from pickle import (  # type: ignore[attr-defined]
     _compat_pickle,
     _extension_registry,

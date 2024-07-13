@@ -182,13 +182,14 @@ class BackendWorker:
         self.h2d_stream = torch.cuda.Stream()
         self.d2h_stream = torch.cuda.Stream()
         # maps thread_id to the cuda.Stream associated with that worker thread
-        self.stream_map = dict()
+        self.stream_map = {}
 
     def _setup(self):
         import time
 
-        import torch
         from torchvision.models.resnet import BasicBlock, ResNet
+
+        import torch
 
         # Create ResNet18 on meta device
         with torch.device("meta"):

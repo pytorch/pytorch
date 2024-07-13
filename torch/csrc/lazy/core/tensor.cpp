@@ -143,13 +143,13 @@ void LazyTensor::SetDataHandle(BackendDataPtr handle, bool sync) {
   // trimming.
   AssignIrValue(Value());
   if (sync) {
-    data()->tensor_data = c10::nullopt;
+    data()->tensor_data = std::nullopt;
   }
 }
 
 void LazyTensor::SetIrValue(Value ir_value) {
   data()->handle = nullptr;
-  data()->tensor_data = c10::nullopt;
+  data()->tensor_data = std::nullopt;
   AssignIrValue(std::move(ir_value));
   TryLimitGraphSize();
 }
@@ -158,7 +158,7 @@ void LazyTensor::SetInPlaceIrValue(Value ir_value) {
   auto tensor_shape = shape();
   if (tensor_shape.Get().scalar_type() != ir_value.shape().scalar_type()) {
     ir_value =
-        MakeCast(ir_value, tensor_shape.Get().scalar_type(), c10::nullopt);
+        MakeCast(ir_value, tensor_shape.Get().scalar_type(), std::nullopt);
   }
   SetIrValue(std::move(ir_value));
 }
@@ -197,7 +197,7 @@ Value LazyTensor::GetIrValue() const {
     AssignIrValue(CreateTensorNode(handle, /*read_only=*/false));
     return data()->ir_value;
   }
-  c10::optional<at::Tensor> tensor_data = CurrentTensorData();
+  std::optional<at::Tensor> tensor_data = CurrentTensorData();
   TORCH_CHECK(tensor_data);
   AssignIrValue(GetIrValueForTensor(*tensor_data, GetDevice()));
   return data()->ir_value;
@@ -211,7 +211,7 @@ void LazyTensor::SetTensorData(at::Tensor tensor_data) {
   data()->tensor_data = std::move(tensor_data);
 }
 
-c10::optional<at::Tensor> LazyTensor::CurrentTensorData() const {
+std::optional<at::Tensor> LazyTensor::CurrentTensorData() const {
   return data()->tensor_data;
 }
 
@@ -236,7 +236,7 @@ Value LazyTensor::GetIrValueForTensor(
 
 at::Tensor LazyTensor::ToTensor(bool detached) {
   at::Tensor tensor;
-  c10::optional<at::Tensor> tensor_data = CurrentTensorData();
+  std::optional<at::Tensor> tensor_data = CurrentTensorData();
   if (!tensor_data) {
     LazyGraphExecutor::Get()->DeviceBarrier(GetDevice());
     // The GetDataHandle() call will trigger an ApplyPendingGraph() if an IR
@@ -253,7 +253,7 @@ at::Tensor LazyTensor::ToTensor(bool detached) {
       if (data()->ir_value || data()->handle != nullptr) {
         // If we have other authoritive sources, just drop our reference and
         // transfer it to the caller.
-        data()->tensor_data = c10::nullopt;
+        data()->tensor_data = std::nullopt;
       } else {
         // Otherwise we need to make a copy to prevent the caller changing our
         // version.
@@ -373,7 +373,7 @@ std::vector<LazyTensorPtr> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors) {
 }
 
 LazyTensorPtr GetOrCreateLtcTensor(
-    const c10::optional<at::Tensor>& tensor,
+    const std::optional<at::Tensor>& tensor,
     const BackendDevice& device) {
   return GetOrCreateLtcTensor(tensor.value_or(at::Tensor()), device);
 }

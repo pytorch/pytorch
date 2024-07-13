@@ -1,8 +1,10 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/GradMode.h>
+#include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
 #include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
@@ -90,6 +92,14 @@ AOTI_TORCH_DTYPE_IMPL(complex64, ComplexFloat)
 AOTI_TORCH_DTYPE_IMPL(complex128, ComplexDouble)
 #undef AOTI_TORCH_DTYPE_IMPL
 
+int32_t aoti_torch_layout_strided() {
+  return (int32_t)at::kStrided;
+}
+
+int32_t aoti_torch_layout__mkldnn() {
+  return (int32_t)at::kMkldnn;
+}
+
 #define AOTI_TORCH_ITEM_IMPL(dtype, ctype)                     \
   AOTITorchError aoti_torch_item_##dtype(                      \
       AtenTensorHandle tensor, ctype* ret_value) {             \
@@ -154,7 +164,11 @@ AOTITorchError aoti_torch_get_data_ptr(
     void** ret_data_ptr) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
-    *ret_data_ptr = t->data_ptr();
+    if (t->is_mkldnn()) {
+      *ret_data_ptr = data_ptr_from_mkldnn(t);
+    } else {
+      *ret_data_ptr = t->data_ptr();
+    }
   });
 }
 
@@ -322,6 +336,48 @@ AOTITorchError aoti_torch_create_tensor_from_blob(
                                 .options(options)
                                 .make_tensor()
                           : at::empty_strided(sizes, strides, options));
+  });
+}
+
+AOTITorchError aoti_torch_create_tensor_from_blob_v2(
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret_new_tensor,
+    int32_t layout,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    if (layout == static_cast<int32_t>(at::kMkldnn)) {
+      c10::IntArrayRef sizes(sizes_ptr, ndim);
+      c10::IntArrayRef strides(strides_ptr, ndim);
+      c10::Device device = c10_device(device_type, device_index);
+      // get a mkldnn tensor wrapped by a torch Tensor(OpaqueTensorImpl),
+      // which used by later mkldnn op.
+      *ret_new_tensor = new_tensor_handle(mkldnn_tensor_from_data_ptr(
+          data,
+          sizes,
+          static_cast<c10::ScalarType>(dtype),
+          device,
+          opaque_metadata,
+          opaque_metadata_size));
+    } else {
+      aoti_torch_create_tensor_from_blob(
+          data,
+          ndim,
+          sizes_ptr,
+          strides_ptr,
+          storage_offset,
+          dtype,
+          device_type,
+          device_index,
+          ret_new_tensor);
+    }
   });
 }
 
@@ -565,17 +621,16 @@ AOTITorchError aoti_torch__scaled_mm(
     at::Tensor* scale_b_tensor = tensor_handle_to_tensor_pointer(scale_b);
     at::Tensor* scale_result_tensor =
         tensor_handle_to_tensor_pointer(scale_result);
-    auto [r0, r1] = at::_scaled_mm(
+    auto r0 = at::_scaled_mm(
         *self_tensor,
         *mat2_tensor,
+        *scale_a_tensor,
+        *scale_b_tensor,
         pointer_to_optional(bias_tensor),
-        pointer_to_optional<c10::ScalarType>(out_dtype),
-        pointer_to_optional(scale_a_tensor),
-        pointer_to_optional(scale_b_tensor),
         pointer_to_optional(scale_result_tensor),
+        pointer_to_optional<c10::ScalarType>(out_dtype),
         use_fast_accum);
     *ret0 = new_tensor_handle(std::move(r0));
-    *ret1 = new_tensor_handle(std::move(r1));
   });
 }
 
@@ -714,17 +769,13 @@ AOTITorchError aoti_torch_repeat_interleave_Tensor(
 }
 
 // Function to check existence of inf and NaN
-AOTITorchError aoti_check_inf_and_nan(AtenTensorHandle tensor) {
+AOTITorchError aoti_torch_check_inf_and_nan(
+    const char* tensor_name,
+    AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* check_tensor = tensor_handle_to_tensor_pointer(tensor);
-    auto flattened = check_tensor->view({-1});
 
-    for (int64_t i = 0; i < flattened.numel(); i++) {
-      auto value = flattened[i].item<float>();
-      if (std::isinf(value) || std::isnan(value)) {
-        assert(false);
-      }
-    }
+    assert_inf_and_nan(tensor_name, *check_tensor);
   });
 }
 
@@ -775,7 +826,7 @@ AOTITorchError aoti_torch_index_put_out(
     const AtenTensorHandle values,
     bool accumulate) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::List<c10::optional<at::Tensor>> indices_;
+    c10::List<std::optional<at::Tensor>> indices_;
     indices_.reserve(num_indices);
     for (size_t i = 0; i < num_indices; i++) {
       indices_.emplace_back(

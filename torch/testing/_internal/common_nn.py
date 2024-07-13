@@ -3016,7 +3016,7 @@ def marginrankingloss_reference(input1, input2, target, margin=0, reduction='mea
     return output
 
 
-# this directly follows Graves et al's paper, in contrast to the production implementation, it does not use log-space
+# this directly follows Graves et al.'s paper, in contrast to the production implementation, it does not use log-space
 def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0, reduction='mean'):
     input_lengths = torch.as_tensor(input_lengths, dtype=torch.long)
     target_lengths = torch.as_tensor(target_lengths, dtype=torch.long)
@@ -3278,7 +3278,7 @@ class NNTestCase(TestCase):
             if jacobian_parameters:
                 jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
 
-        res: Tuple[torch.Tensor, ...] = tuple()
+        res: Tuple[torch.Tensor, ...] = ()
         if jacobian_input:
             res += jacobian_inp,
         if jacobian_parameters:
@@ -3290,7 +3290,7 @@ class NNTestCase(TestCase):
         def fw(*input):
             return self._forward(module, input).detach()
 
-        res: Tuple[torch.Tensor, ...] = tuple()
+        res: Tuple[torch.Tensor, ...] = ()
         if jacobian_input:
             res += _get_numerical_jacobian(fw, input, eps=1e-6),
         if jacobian_parameters:
@@ -3331,10 +3331,9 @@ class TestBase:
         for name in self._required_arg_names:
             if name not in kwargs and name + '_fn' not in kwargs and name + '_size' not in kwargs:
                 if name in {'constructor_args', 'extra_args'}:
-                    kwargs[name] = tuple()
+                    kwargs[name] = ()
                 else:
-                    raise ValueError("{}: Specify {} by a value, a function to generate it, or it's size!"
-                                     .format(self.get_name(), name))
+                    raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or it's size!")
         self._extra_kwargs = kwargs
         self._arg_cache = {}
 
