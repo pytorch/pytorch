@@ -632,6 +632,18 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Expected 4 arguments but got {len(args)}.\n"
                 f"Usage: cond(pred, true_fn, false_fn, operands)",
             )
+
+        # Specialize into one of the branches since pred is constant
+        if type(args[0]) is ConstantVariable:
+            log.warning(
+                "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
+                " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool."
+            )
+            if args[0].as_python_constant():
+                return args[1].call_function(tx, args[3].unpack_var_sequence(tx), {})
+            else:
+                return args[2].call_function(tx, args[3].unpack_var_sequence(tx), {})
+
         # predicate
         if type(args[0]) not in (ConstantVariable, TensorVariable, SymNodeVariable):
             unimplemented(
@@ -1599,6 +1611,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             value,
             score_mod,
             block_mask,
+            scale,
         ) = self.normalize_to_args(args, kwargs)
 
         p_args = self.create_wrapped_node(tx, query, score_mod)
@@ -1607,6 +1620,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             key,
             value,
             block_mask,
+            scale,
         ]
 
         # Store the invocation as a call
@@ -1624,7 +1638,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         example_value = (out_meta, lse_meta)
 
         # Compose the ordered HOO args from two parts:
-        # - inp_args: [query, key, value, block_mask]
+        # - inp_args: [query, key, value, block_mask, scale]
         # - p_args: [score_mod, *other_buffers]
         return wrap_fx_proxy(
             tx=tx,
