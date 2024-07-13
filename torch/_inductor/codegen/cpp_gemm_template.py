@@ -477,7 +477,7 @@ class CppPackedGemmTemplate(CppTemplate):
         reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
         epilogue_creators: List[Callable[[ir.Buffer], ir.Pointwise]] = []
         fake_buffers: List[ir.Buffer] = []
-        buffer_aliases: Set[str] = set()  # all buffers that are aliased with Y
+        Y_aliases: Set[str] = set()
         # TODO(jgong5): for int8 gemm, bias-add is handled outside of gemm template,
         # but we'd better move it here to align with fp.
         if inp is not None and self.beta != 0 and not int8_gemm:
@@ -525,7 +525,7 @@ class CppPackedGemmTemplate(CppTemplate):
                     )
                 )
                 fake_buffers.append(current_input_buffer)
-                buffer_aliases.add(current_input_buffer.get_name())
+                Y_aliases.add(current_input_buffer.get_name())
                 reindexers.append(None)
                 if i < len(epilogue_creators) - 1:
                     current_input_buffer = ir.Buffer(
@@ -539,7 +539,7 @@ class CppPackedGemmTemplate(CppTemplate):
             epilogues.extend(epilogue_nodes)
             assert Y.get_numel() == epilogues[-1].get_numel()
             Y = cast(ir.Buffer, epilogues[-1])
-            buffer_aliases.add(gemm_output_buffer.get_name())
+            Y_aliases.add(gemm_output_buffer.get_name())
             if (
                 Y.get_size() == template_buffer.get_size()
                 and Y.get_stride() == template_buffer.get_stride()
@@ -590,7 +590,7 @@ class CppPackedGemmTemplate(CppTemplate):
             inp=inp,
             Y=Y,
             GemmOut=gemm_output_buffer,
-            aliases={alias: Y.get_name() for alias in buffer_aliases},
+            aliases={alias: Y.get_name() for alias in Y_aliases},
             beta=self.beta,
             alpha=self.alpha,
             num_threads=self.num_threads,
