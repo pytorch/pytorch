@@ -974,18 +974,39 @@ def get_promote_dtype(args):
     )
 
 
-def promote_arg(arg, promote_type):
+def promote_vec_args(new_args):
+    def promote_vec_arg(arg, promote_type):
+        if (
+            isinstance(arg, CppCSEVariable)
+            and arg.dtype
+            and promote_type
+            and arg.dtype != promote_type
+        ):
+            assert arg.is_vec, "expect vec arg"
+            arg = ops.to_dtype(arg, promote_type)
+            arg = arg.value if isinstance(arg, OpsValue) else arg
+            arg.dtype = promote_type
+        return arg
+
+    promote_type = get_promote_dtype(new_args)
     if (
-        isinstance(arg, CppCSEVariable)
-        and arg.dtype
+        all(
+            new_arg.dtype is not None
+            for new_arg in new_args
+            if isinstance(new_arg, CppCSEVariable)
+        )
         and promote_type
-        and arg.dtype != promote_type
     ):
-        assert arg.is_vec, "expect vec arg"
-        arg = ops.to_dtype(arg, promote_type)
-        arg = arg.value if isinstance(arg, OpsValue) else arg
-        arg.dtype = promote_type
-    return arg
+        new_args = list(
+            map(
+                functools.partial(
+                    promote_vec_arg,
+                    promote_type=promote_type,
+                ),
+                new_args,
+            )
+        )
+    return new_args
 
 
 class CppVecOverrides(CppOverrides):
@@ -1059,37 +1080,15 @@ class CppVecOverrides(CppOverrides):
                         else:
                             new_args.append(arg)
                 if vectors:
-
-                    def promote_args(new_args):
-                        promote_type = get_promote_dtype(new_args)
-                        if (
-                            all(
-                                new_arg.dtype in [torch.int8, torch.int32, torch.int64]
-                                for new_arg in new_args
-                                if isinstance(new_arg, CppCSEVariable)
-                            )
-                            and promote_type
-                        ):
-                            new_args = list(
-                                map(
-                                    functools.partial(
-                                        promote_arg,
-                                        promote_type=promote_type,
-                                    ),
-                                    new_args,
-                                )
-                            )
-                        return new_args
-
                     # We have saw several data type mismatch issues related with index_expr in
                     # the lowering phase of torch.int8. torch.int32, torch.int64.
                     # 1. int32 and int64 in test_torchinductor.py::test_max_pool2d_with_indices_backward3_cpu
                     # 2. int8 and int32 in test_torchinductor.py::test_max_pool2d5_cpu
+                    # 3. int32 and fp32 in test_torchinductor_dynamic_shapes.py::test_avg_pool2d8_dynamic_shapes_cpu
                     if len(new_args) == 2:
-                        new_args = promote_args(new_args)
+                        new_args = promote_vec_args(new_args)
                     elif func == CppVecOverrides.where:
-                        new_args[1:] = promote_args(new_args[1:])
-
+                        new_args[1:] = promote_vec_args(new_args[1:])
                     return func(*new_args, **kwargs)
                 else:
                     # fallback to scalar ops
