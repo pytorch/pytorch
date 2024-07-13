@@ -15,7 +15,7 @@ class CUDAStream final : public CustomClassHolder {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CUDAStream(
-      c10::optional<c10::Device> device = c10::nullopt,
+      std::optional<c10::Device> device = std::nullopt,
       int64_t priority = 0) {
     c10::DeviceIndex device_index =
         device.has_value() ? device->index() : c10::cuda::current_device();
@@ -155,9 +155,9 @@ void CUDAEvent::wait(c10::intrusive_ptr<CUDAStream> stream) {
 
 TORCH_LIBRARY(cuda, m) {
   auto stream_class = m.class_<torch::jit::CUDAStream>("Stream").def(
-      torch::init<c10::optional<c10::Device>, int64_t>(),
+      torch::init<std::optional<c10::Device>, int64_t>(),
       "",
-      {torch::arg("device") = c10::nullopt, torch::arg("priority") = 0});
+      {torch::arg("device") = std::nullopt, torch::arg("priority") = 0});
   auto event_class = m.class_<torch::jit::CUDAEvent>("Event").def(
       torch::init<bool, bool, bool>(),
       "",

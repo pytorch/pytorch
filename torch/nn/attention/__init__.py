@@ -1,11 +1,15 @@
+# mypy: allow-untyped-defs
 """ This module contains functions and classes that alter the behavior of torch.nn.functional.scaled_dot_product_attention """
 import contextlib
 from typing import List, Union
 from warnings import warn
 
+from torch._C import _SDPBackend as SDPBackend
 from torch.backends.cuda import (
     can_use_efficient_attention,
     can_use_flash_attention,
+    cudnn_sdp_enabled,
+    enable_cudnn_sdp,
     enable_flash_sdp,
     enable_math_sdp,
     enable_mem_efficient_sdp,
@@ -14,6 +18,7 @@ from torch.backends.cuda import (
     mem_efficient_sdp_enabled,
     SDPAParams,
 )
+
 
 __all__: List[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
 
@@ -26,8 +31,6 @@ __all__: List[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
 # torch.nn.attention.WARN_FOR_UNFUSED_KERNELS = True
 WARN_FOR_UNFUSED_KERNELS = False
 
-
-from torch._C import _SDPBackend as SDPBackend
 
 # Hacks for Sphinx documentation:
 # https://stackoverflow.com/questions/38765577/overriding-sphinx-autodoc-alias-of-for-import-of-private-class
@@ -99,19 +102,28 @@ def sdpa_kernel(backends: Union[List[SDPBackend], SDPBackend]):
         backends = [backends]
 
     backends = set(backends)
+    previous_cudnn: bool = cudnn_sdp_enabled()
     previous_flash: bool = flash_sdp_enabled()
     previous_mem_efficient: bool = mem_efficient_sdp_enabled()
     previous_math: bool = math_sdp_enabled()
     try:
+        enable_cudnn = SDPBackend.CUDNN_ATTENTION in backends
         enable_flash = SDPBackend.FLASH_ATTENTION in backends
         enable_mem_efficient = SDPBackend.EFFICIENT_ATTENTION in backends
         enable_math = SDPBackend.MATH in backends
 
+        enable_cudnn_sdp(enable_cudnn)
         enable_flash_sdp(enable_flash)
         enable_mem_efficient_sdp(enable_mem_efficient)
         enable_math_sdp(enable_math)
         yield {}
     finally:
+        enable_cudnn_sdp(previous_cudnn)
         enable_flash_sdp(previous_flash)
         enable_mem_efficient_sdp(previous_mem_efficient)
         enable_math_sdp(previous_math)
+
+
+def _get_flash_version() -> str:
+    """This returns the closest matching tag for the flash attention backend"""
+    return "2.5.6"

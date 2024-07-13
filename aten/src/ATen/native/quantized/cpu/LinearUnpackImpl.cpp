@@ -22,7 +22,7 @@
 int register_linear_params();
 
 #ifdef USE_FBGEMM
-std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeight::unpack() {
+std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeight::unpack() {
   auto packB = w.get();
 
   int64_t N = static_cast<int64_t>(packB->numCols());
@@ -53,16 +53,16 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeight::unpack() {
   // (QLinearUnpackWeightInt8): ");
   packB->unpack(weight_ptr_int8);
 
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+  return std::tuple<at::Tensor, std::optional<at::Tensor>>(
       weight_origin, bias_);
 }
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
-std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsQnnp::
+std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightsQnnp::
     unpack() {
   if (orig_weight.defined()) {
-    return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+    return std::tuple<at::Tensor, std::optional<at::Tensor>>(
         orig_weight, bias_);
   } else {
     // Unpacking requires reverting *make_zero_points_and_scales_tensor*
@@ -110,14 +110,14 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsQnnp::
       weight_ptr_int8[i] = (int8_t)(weight_ptr_int8[i] - 128);
     }
 
-    return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+    return std::tuple<at::Tensor, std::optional<at::Tensor>>(
         weight_origin, bias_);
   }
 }
 #endif // USE_PYTORCH_QNNPACK
 
 #ifdef USE_FBGEMM
-std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightFp16::
+std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightFp16::
     unpack() {
   auto& packed_weight_ptr = w;
 
@@ -135,8 +135,8 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightFp16::
 #endif // USE_FBGEMM
 
 #if AT_MKLDNN_ENABLED()
-std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsOnednn::unpack() {
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightsOnednn::unpack() {
+  return std::tuple<at::Tensor, std::optional<at::Tensor>>(
       orig_weight_, orig_bias_);
 }
 #endif // #if AT_MKLDNN_ENABLED()

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 Contains various utils for AOTAutograd, including those for handling collections.
 """
@@ -11,6 +12,7 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch._library.fake_class_registry import FakeScriptObject
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
@@ -23,6 +25,8 @@ KNOWN_TYPES = [
     bool,
     type(None),
     *py_sym_types,
+    FakeScriptObject,
+    torch.ScriptObject,
 ]
 
 original_zip = zip
@@ -32,9 +36,9 @@ def strict_zip(*iterables, strict=True, **kwargs):
     if not strict:
         return original_zip(*iterables, **kwargs)
 
-    shortest_length = min(len(it) for it in iterables)
-    for iterable in iterables:
-        if len(iterable) != shortest_length:
+    length = len(iterables[0])
+    for iterable in iterables[1:]:
+        if len(iterable) != length:
             raise ValueError(
                 "The iterables have different lengths and strict mode is enabled."
             )
@@ -77,10 +81,10 @@ def normalize_as_list(x):
 
 def _get_autocast_states():
     return [
-        torch.is_autocast_enabled(),
-        torch.is_autocast_cpu_enabled(),
-        torch.get_autocast_gpu_dtype(),
-        torch.get_autocast_cpu_dtype(),
+        torch.is_autocast_enabled("cuda"),
+        torch.is_autocast_enabled("cpu"),
+        torch.get_autocast_dtype("cuda"),
+        torch.get_autocast_dtype("cpu"),
         torch.is_autocast_cache_enabled(),
     ]
 

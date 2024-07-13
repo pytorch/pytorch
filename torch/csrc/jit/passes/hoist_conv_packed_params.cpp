@@ -64,10 +64,10 @@ static void hoistConvPackedParams(
   }
   std::string newNameBase = prefix + "." + suffix + "_packed_params";
   nameUniqueCounter++;
-  std::string newName = newNameBase + "." + c10::to_string(nameUniqueCounter);
+  std::string newName = newNameBase + "." + std::to_string(nameUniqueCounter);
   while (rootModule.hasattr(newName)) {
     nameUniqueCounter++;
-    newName = newNameBase + "." + c10::to_string(nameUniqueCounter);
+    newName = newNameBase + "." + std::to_string(nameUniqueCounter);
   }
 
   // copy the packed params
@@ -100,7 +100,7 @@ void HoistConvPackedParams(script::Module& m) {
           n->kind() == prim::GetAttr && n->s(attr::name) == "_packed_params";
       if (isGetPackedParamsNode) {
         // make sure the foo in {foo}.{_packed_params} is a quantized conv
-        c10::optional<std::string> moduleName = getModuleName(n->inputs()[0]);
+        std::optional<std::string> moduleName = getModuleName(n->inputs()[0]);
         bool moduleNameIsQuantizedConv = moduleName.has_value() &&
             (moduleName.value() ==
                  "__torch__.torch.ao.nn.quantized.modules.conv.Conv1d" ||

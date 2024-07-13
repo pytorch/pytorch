@@ -20,8 +20,7 @@
 
 using namespace torch::autograd;
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 namespace {
 
@@ -176,9 +175,8 @@ PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var) {
   }
   auto var = (THPVariable*)_var;
   auto& fn = *((THPCppFunction*)self)->cdata;
-  std::unique_ptr<FunctionPreHook> hook(new PyFunctionTensorPreHook(
+  fn.add_tensor_pre_hook(std::make_unique<PyFunctionTensorPreHook>(
       var->backward_hooks, THPVariable_Unpack(var).output_nr()));
-  fn.add_tensor_pre_hook(std::move(hook));
   Py_RETURN_NONE;
 }
 
@@ -227,6 +225,7 @@ PyTypeObject* _initFunctionPyTypeObject(
     const char* name,
     PyGetSetDef* function_properties,
     PyMethodDef* function_methods) {
+  type.ob_base = {PyObject_HEAD_INIT(nullptr) 0};
   // NOLINTNEXTLINE(misc-redundant-expression)
   type.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
   type.tp_name = name;
@@ -251,15 +250,17 @@ static std::unordered_set<PyTypeObject*> cpp_function_types_set;
 struct DefaultFunctionType {
   DefaultFunctionType() : type() {
     _initFunctionPyTypeObject(type, "CppFunction", nullptr, nullptr);
-    Py_INCREF(&type);
   }
 
   PyTypeObject type;
 };
 
-PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
+PyTypeObject* get_default_type() {
   static DefaultFunctionType default_type;
+  return &(default_type.type);
+}
 
+PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
   if (!cdata) {
     Py_RETURN_NONE;
   }
@@ -278,7 +279,7 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyTypeObject* type;
     if (it == cpp_function_types_map.end()) {
-      type = &default_type.type;
+      type = get_default_type();
     } else {
       type = (PyTypeObject*)it->second.get();
     }
@@ -305,6 +306,9 @@ void registerCppFunction(const std::type_info& type, PyTypeObject* pytype) {
 
 bool THPCppFunction_Check(PyObject* obj) {
   THPObjectPtr type = THPObjectPtr(PyObject_Type(obj));
+  if ((PyTypeObject*)type.get() == get_default_type()) {
+    return true;
+  }
   if (cpp_function_types_set.find((PyTypeObject*)type.get()) ==
       cpp_function_types_set.end()) {
     return false;
@@ -341,8 +345,7 @@ PyObject* registerFunctionHook(Node& fn, PyObject* hook) {
   }
   if (dict == Py_None) {
     dict = PyTuple_GET_ITEM(res.get(), 0);
-    std::unique_ptr<FunctionPostHook> hook(new PyFunctionPostHook(dict));
-    fn.add_post_hook(std::move(hook));
+    fn.add_post_hook(std::make_unique<PyFunctionPostHook>(dict));
   }
 
   PyObject* handle = PyTuple_GET_ITEM(res.get(), 1);
@@ -365,8 +368,7 @@ PyObject* registerFunctionPreHook(Node& fn, PyObject* hook) {
   }
   if (dict == Py_None) {
     dict = PyTuple_GET_ITEM(res.get(), 0);
-    std::unique_ptr<FunctionPreHook> hook(new PyFunctionPreHook(dict));
-    fn.add_pre_hook(std::move(hook));
+    fn.add_pre_hook(std::make_unique<PyFunctionPreHook>(dict));
   }
 
   PyObject* handle = PyTuple_GET_ITEM(res.get(), 1);
@@ -374,5 +376,4 @@ PyObject* registerFunctionPreHook(Node& fn, PyObject* hook) {
   return handle;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

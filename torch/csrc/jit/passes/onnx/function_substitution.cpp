@@ -12,7 +12,7 @@ namespace {
 const std::string kTopModuleVariableName = "";
 
 std::string TidyClassNameFromTorchScript(
-    const c10::optional<c10::QualifiedName>& class_name) {
+    const std::optional<c10::QualifiedName>& class_name) {
   if (!class_name) {
     return "UNKNOWN_CLASS";
   }

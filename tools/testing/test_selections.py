@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 import math
 import os
 import subprocess
 from pathlib import Path
-
-from typing import Callable, Dict, FrozenSet, List, Optional, Sequence, Tuple
+from typing import Callable, Sequence
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 from tools.testing.test_run import ShardedTest, TestRun
@@ -11,13 +12,15 @@ from tools.testing.test_run import ShardedTest, TestRun
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
+BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
+USE_3_PROCS = "sm86" in BUILD_ENVIRONMENT or "cuda" not in BUILD_ENVIRONMENT
 
 # NUM_PROCS_FOR_SHARDING_CALC must remain consistent across all shards of a job
 # to ensure that sharding is consistent, NUM_PROCS is the actual number of procs
 # used to run tests.  If they are not equal, the only consequence should be
 # unequal shards.
 IS_ROCM = os.path.exists("/opt/rocm")
-NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 2
+NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 3 if USE_3_PROCS else 2
 NUM_PROCS_FOR_SHARDING_CALC = NUM_PROCS if not IS_ROCM or IS_MEM_LEAK_CHECK else 2
 THRESHOLD = 60 * 10  # 10 minutes
 
@@ -45,8 +48,8 @@ if IS_ROCM and not IS_MEM_LEAK_CHECK:
 
 class ShardJob:
     def __init__(self) -> None:
-        self.serial: List[ShardedTest] = []
-        self.parallel: List[ShardedTest] = []
+        self.serial: list[ShardedTest] = []
+        self.parallel: list[ShardedTest] = []
 
     def get_total_time(self) -> float:
         """Default is the value for which to substitute if a test has no time"""
@@ -57,16 +60,16 @@ class ShardJob:
         time = max(procs) + sum(test.get_time() for test in self.serial)
         return time
 
-    def convert_to_tuple(self) -> Tuple[float, List[ShardedTest]]:
+    def convert_to_tuple(self) -> tuple[float, list[ShardedTest]]:
         return (self.get_total_time(), self.serial + self.parallel)
 
 
 def get_with_pytest_shard(
     tests: Sequence[TestRun],
-    test_file_times: Dict[str, float],
-    test_class_times: Optional[Dict[str, Dict[str, float]]],
-) -> List[ShardedTest]:
-    sharded_tests: List[ShardedTest] = []
+    test_file_times: dict[str, float],
+    test_class_times: dict[str, dict[str, float]] | None,
+) -> list[ShardedTest]:
+    sharded_tests: list[ShardedTest] = []
 
     for test in tests:
         duration = get_duration(test, test_file_times, test_class_times or {})
@@ -84,9 +87,9 @@ def get_with_pytest_shard(
 
 def get_duration(
     test: TestRun,
-    test_file_times: Dict[str, float],
-    test_class_times: Dict[str, Dict[str, float]],
-) -> Optional[float]:
+    test_file_times: dict[str, float],
+    test_class_times: dict[str, dict[str, float]],
+) -> float | None:
     """Calculate the time for a TestRun based on the given test_file_times and
     test_class_times.  Returns None if the time is unknown."""
     file_duration = test_file_times.get(test.test_file, None)
@@ -94,8 +97,8 @@ def get_duration(
         return file_duration
 
     def get_duration_for_classes(
-        test_file: str, test_classes: FrozenSet[str]
-    ) -> Optional[float]:
+        test_file: str, test_classes: frozenset[str]
+    ) -> float | None:
         duration: float = 0
 
         for test_class in test_classes:
@@ -125,9 +128,9 @@ def get_duration(
 
 
 def shard(
-    sharded_jobs: List[ShardJob],
+    sharded_jobs: list[ShardJob],
     pytest_sharded_tests: Sequence[ShardedTest],
-    estimated_time_limit: Optional[float] = None,
+    estimated_time_limit: float | None = None,
     serial: bool = False,
 ) -> None:
     # Modifies sharded_jobs in place
@@ -140,7 +143,7 @@ def shard(
     round_robin_index = 0
 
     def _get_min_sharded_job(
-        sharded_jobs: List[ShardJob], test: ShardedTest
+        sharded_jobs: list[ShardJob], test: ShardedTest
     ) -> ShardJob:
         if test.time is None:
             nonlocal round_robin_index
@@ -150,7 +153,7 @@ def shard(
         return min(sharded_jobs, key=lambda j: j.get_total_time())
 
     def _shard_serial(
-        tests: Sequence[ShardedTest], sharded_jobs: List[ShardJob]
+        tests: Sequence[ShardedTest], sharded_jobs: list[ShardJob]
     ) -> None:
         assert estimated_time_limit is not None, "Estimated time limit must be provided"
         new_sharded_jobs = sharded_jobs
@@ -164,7 +167,7 @@ def shard(
             min_sharded_job.serial.append(test)
 
     def _shard_parallel(
-        tests: Sequence[ShardedTest], sharded_jobs: List[ShardJob]
+        tests: Sequence[ShardedTest], sharded_jobs: list[ShardJob]
     ) -> None:
         for test in tests:
             min_sharded_job = _get_min_sharded_job(sharded_jobs, test)
@@ -181,11 +184,11 @@ def shard(
 def calculate_shards(
     num_shards: int,
     tests: Sequence[TestRun],
-    test_file_times: Dict[str, float],
-    test_class_times: Optional[Dict[str, Dict[str, float]]],
-    must_serial: Optional[Callable[[str], bool]] = None,
+    test_file_times: dict[str, float],
+    test_class_times: dict[str, dict[str, float]] | None,
+    must_serial: Callable[[str], bool] | None = None,
     sort_by_time: bool = True,
-) -> List[Tuple[float, List[ShardedTest]]]:
+) -> list[tuple[float, list[ShardedTest]]]:
     must_serial = must_serial or (lambda x: True)
     test_class_times = test_class_times or {}
 

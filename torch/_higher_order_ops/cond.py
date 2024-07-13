@@ -1,8 +1,11 @@
+# mypy: allow-untyped-defs
+import contextlib
+
+import logging
+
 import torch
 import torch._subclasses.functional_tensor
-
 import torch.utils._pytree as pytree
-
 from torch._C import DispatchKey
 from torch._C._functorch import (
     _add_batch_dim,
@@ -11,26 +14,27 @@ from torch._C._functorch import (
     maybe_get_bdim,
 )
 from torch._functorch.utils import exposed_in
-
+from torch._guards import detect_fake_mode
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
     _set_compilation_env,
     autograd_not_implemented,
     reenter_make_fx,
+    unique_graph_id,
     UnsupportedAliasMutationException,
 )
-
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
-    disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import _get_current_dispatch_mode
+
+log = logging.getLogger(__name__)
 
 
 @exposed_in("torch")
@@ -103,9 +107,18 @@ def cond(pred, true_fn, false_fn, operands):
         - The **output** of branches must be a **single Tensor**. Pytree of tensors will be supported in the future.
 
     """
-
     if torch.compiler.is_dynamo_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
+
+    if isinstance(pred, (bool, int, float)):
+        log.warning(
+            "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
+            " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool."
+        )
+        if pred:
+            return true_fn(*operands)
+        else:
+            return false_fn(*operands)
 
     def _validate_input(pred, true_fn, false_fn, operands):
         if not isinstance(pred, (bool, torch.Tensor, torch.SymBool)):
@@ -155,11 +168,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         isinstance(o, torch.Tensor) for o in operands
     ), "Cond operands must be a list of tensors"
 
-    pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
-
-    with disable_proxy_modes_tracing():
-        true_graph = reenter_make_fx(true_fn, pre_dispatch)(*operands)
-        false_graph = reenter_make_fx(false_fn, pre_dispatch)(*operands)
+    true_graph = reenter_make_fx(true_fn)(*operands)
+    false_graph = reenter_make_fx(false_fn)(*operands)
 
     true_outs = []
     false_outs = []
@@ -190,19 +200,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
                 f"\n  {false_fn.__name__} returns {false_out.meta['tensor_meta']}"
             )
 
-    # There are probably better ways - I know that create_arg has some self incrementing name
-    # magic to it, but since we explicitly have to get the name for register_module,
-    # I was not sure how to do that. This kinda simulates it.
-    next_name = None
-    i = 0
-    while not next_name:
-        candidate = f"true_graph_{i}"
-        if hasattr(proxy_mode.tracer.root, candidate):
-            i += 1
-        else:
-            next_name = candidate
+    i, true_name = unique_graph_id(proxy_mode, prefix="true_graph")
 
-    true_name = next_name
     false_name = f"false_graph_{i}"
     assert not hasattr(proxy_mode.tracer.root, false_name)
 
@@ -214,19 +213,32 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
 
     out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", func_overload, proxy_args, {}, name="conditional"
+        "call_function", func_overload, proxy_args, {}
     )
 
     # At this point, we're *guaranteed* that whether an output came from the
     # true or false branch is indistinguishable. So, as this is just for tracing
     # purposes, choose the true branch.
 
+    # TODO: the unbacked symbol allocations MUST NOT leak out, if you want to
+    # support this we need to arrange for the reenter_make_fx unbacked SymInts
+    # to be used, AND we need to arrange for some sort of unification between
+    # the two branches (but not really unification; e.g., if one branch
+    # returns [u0] and the other returns [5] this is OK but you MUST NOT
+    # conclude the result is 5.  Also if one branch returns [3] and another
+    # branch returns [5] you can make it work by immediately allocating a new
+    # unbacked SymInt here).
+    ignore_fresh_unbacked = contextlib.nullcontext()
+    if (fake_mode := detect_fake_mode()) and fake_mode.shape_env:
+        ignore_fresh_unbacked = fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+
     # TODO: Uhh.... it shouldn't matter, but changing this to true_fn results in
     # a FakeTensorMode error :
     # `Current active mode <class 'torch._subclasses.fake_tensor.FakeTensorMode'> not registered`
     # TODO Sometimes the operands are not completely FakeTensor, something seems went wrong in
     # dynamo? Because of that it runs real computation sometimes and re-triggering downstream dispatch keys.
-    out = false_fn(*operands)
+    with ignore_fresh_unbacked:
+        out = false_fn(*operands)
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
@@ -256,7 +268,15 @@ def inner(mode, pred, true_fn, false_fn, operands):
 
 @cond_op.py_impl(FakeTensorMode)
 def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
-    with mode:
+    # Ignore here, because if you've gotten here but you're not manually
+    # tracing the inner graphs, that means that you intend to reuse the graph
+    # directly.  Which means the old unbacked symbol bindings are appropriate.
+    # This strategy will not work if unbacked symbols can escape.
+    ignore_fresh_unbacked = contextlib.nullcontext()
+    if mode.shape_env:
+        ignore_fresh_unbacked = mode.shape_env.ignore_fresh_unbacked_symbols()
+
+    with mode, ignore_fresh_unbacked:
         true_outs = true_fn(*operands)
         flat_true_outs = pytree.tree_leaves(true_outs)
         flat_false_outs = pytree.tree_leaves(false_fn(*operands))

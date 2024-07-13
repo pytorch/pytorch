@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 from abc import ABC, abstractmethod
 from typing import Any, List, Tuple
@@ -72,7 +73,7 @@ class FuncTorchInterpreter(ABC):
         return self._cptr.key()
 
     def get_state(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def check_state(self, state):
         return state == self.get_state()

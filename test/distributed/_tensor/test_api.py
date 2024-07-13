@@ -237,7 +237,7 @@ class DTensorAPITest(DTensorTestBase):
             assert isinstance(outputs, DTensor)
             return outputs.to_local()
 
-        with self.assertWarnsRegex(UserWarning, "Deprecating"):
+        with self.assertWarnsRegex(FutureWarning, "Deprecating"):
             replica_module = distribute_module(
                 module_to_replicate,
                 device_mesh,

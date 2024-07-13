@@ -9,11 +9,11 @@ namespace c10 {
 
 TEST(TypeCustomPrinter, Basic) {
   TypePrinter printer =
-      [](const Type& t) -> c10::optional<std::string> {
+      [](const Type& t) -> std::optional<std::string> {
     if (auto tensorType = t.cast<TensorType>()) {
       return "CustomTensor";
     }
-    return c10::nullopt;
+    return std::nullopt;
   };
 
   // Tensor types should be rewritten
@@ -29,11 +29,11 @@ TEST(TypeCustomPrinter, Basic) {
 
 TEST(TypeCustomPrinter, ContainedTypes) {
   TypePrinter printer =
-      [](const Type& t) -> c10::optional<std::string> {
+      [](const Type& t) -> std::optional<std::string> {
     if (auto tensorType = t.cast<TensorType>()) {
       return "CustomTensor";
     }
-    return c10::nullopt;
+    return std::nullopt;
   };
   torch::Tensor iv = torch::rand({2, 3});
   const auto type = TensorType::create(iv);
@@ -53,14 +53,14 @@ TEST(TypeCustomPrinter, ContainedTypes) {
 
 TEST(TypeCustomPrinter, NamedTuples) {
   TypePrinter printer =
-      [](const Type& t) -> c10::optional<std::string> {
+      [](const Type& t) -> std::optional<std::string> {
     if (auto tupleType = t.cast<TupleType>()) {
       // Rewrite only NamedTuples
       if (tupleType->name()) {
         return "Rewritten";
       }
     }
-    return c10::nullopt;
+    return std::nullopt;
   };
   torch::Tensor iv = torch::rand({2, 3});
   const auto type = TensorType::create(iv);

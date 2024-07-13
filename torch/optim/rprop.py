@@ -1,25 +1,40 @@
+# mypy: allow-untyped-defs
+r"""Implementation for the Resilient backpropagation."""
+from typing import List, Optional, Tuple
+
 import torch
 from torch import Tensor
-from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach, _get_scalar_dtype,
-                        _differentiable_doc, _foreach_doc, _maximize_doc, _capturable_doc, _view_as_real)
-from typing import List, Optional
+from .optimizer import (
+    _capturable_doc,
+    _default_to_fused_or_foreach,
+    _differentiable_doc,
+    _disable_dynamo_if_unsupported,
+    _foreach_doc,
+    _get_capturable_supported_devices,
+    _get_scalar_dtype,
+    _maximize_doc,
+    _use_grad_for_differentiable,
+    _view_as_real,
+    Optimizer,
+    ParamsT,
+)
 
 __all__ = ["Rprop", "rprop"]
 
 
-class Rprop(Optimizer):
+class Rprop(Optimizer):  # noqa: D101
     def __init__(
         self,
-        params,
-        lr=1e-2,
-        etas=(0.5, 1.2),
-        step_sizes=(1e-6, 50),
+        params: ParamsT,
+        lr: float = 1e-2,
+        etas: Tuple[float, float] = (0.5, 1.2),
+        step_sizes: Tuple[float, float] = (1e-6, 50),
         *,
         capturable: bool = False,
         foreach: Optional[bool] = None,
         maximize: bool = False,
         differentiable: bool = False,
-    ):
+    ):  # noqa: D107
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 < etas[0] < 1.0 < etas[1]:
@@ -36,7 +51,7 @@ class Rprop(Optimizer):
         )
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("foreach", None)
@@ -45,11 +60,15 @@ class Rprop(Optimizer):
             group.setdefault("capturable", False)
             for p in group["params"]:
                 p_state = self.state.get(p, [])
-                if len(p_state) != 0 and not torch.is_tensor(p_state['step']):
+                if len(p_state) != 0 and not torch.is_tensor(p_state["step"]):
                     step_val = float(p_state["step"])
-                    p_state["step"] = (torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device)
-                                       if group['capturable']
-                                       else torch.tensor(step_val, dtype=_get_scalar_dtype()))
+                    p_state["step"] = (
+                        torch.tensor(
+                            step_val, dtype=_get_scalar_dtype(), device=p.device
+                        )
+                        if group["capturable"]
+                        else torch.tensor(step_val, dtype=_get_scalar_dtype())
+                    )
 
     def _init_group(self, group, params, grads, prevs, step_sizes, state_steps):
         has_complex = False
@@ -67,17 +86,18 @@ class Rprop(Optimizer):
 
             # State initialization
             if len(state) == 0:
-                state["step"] = (torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
-                                 if group["capturable"] else torch.zeros((), dtype=_get_scalar_dtype()))
-
-                state["prev"] = torch.zeros_like(
-                    p, memory_format=torch.preserve_format
+                state["step"] = (
+                    torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
+                    if group["capturable"]
+                    else torch.zeros((), dtype=_get_scalar_dtype())
                 )
+
+                state["prev"] = torch.zeros_like(p, memory_format=torch.preserve_format)
                 if p.dtype.is_complex:
                     # Complex Number should be as if they are two independent real numbers.
                     # Hence the step_size shouldn't be zero for imaginary part.
-                    state["step_size"] = (
-                        torch.full_like(grad, complex(group["lr"], group["lr"]))
+                    state["step_size"] = torch.full_like(
+                        grad, complex(group["lr"], group["lr"])
                     )
                 else:
                     state["step_size"] = torch.full_like(grad, group["lr"])
@@ -90,7 +110,7 @@ class Rprop(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -104,18 +124,20 @@ class Rprop(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params = []
-            grads = []
-            prevs = []
-            step_sizes = []
-            state_steps = []
+            params: List[Tensor] = []
+            grads: List[Tensor] = []
+            prevs: List[Tensor] = []
+            step_sizes: List[Tensor] = []
+            state_steps: List[Tensor] = []
 
             etaminus, etaplus = group["etas"]
             step_size_min, step_size_max = group["step_sizes"]
             foreach = group["foreach"]
             maximize = group["maximize"]
 
-            has_complex = self._init_group(group, params, grads, prevs, step_sizes, state_steps)
+            has_complex = self._init_group(
+                group, params, grads, prevs, step_sizes, state_steps
+            )
 
             rprop(
                 params,
@@ -137,7 +159,8 @@ class Rprop(Optimizer):
         return loss
 
 
-Rprop.__doc__ = r"""Implements the resilient backpropagation algorithm.
+Rprop.__doc__ = (
+    r"""Implements the resilient backpropagation algorithm.
 
     .. math::
        \begin{aligned}
@@ -171,7 +194,8 @@ Rprop.__doc__ = r"""Implements the resilient backpropagation algorithm.
     For further details regarding the algorithm we refer to the paper
     `A Direct Adaptive Method for Faster Backpropagation Learning: The RPROP Algorithm
     <http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.21.1417>`_.
-    """ + fr"""
+    """
+    + rf"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -187,61 +211,7 @@ Rprop.__doc__ = r"""Implements the resilient backpropagation algorithm.
         {_differentiable_doc}
 
     """
-
-def rprop(
-    params: List[Tensor],
-    grads: List[Tensor],
-    prevs: List[Tensor],
-    step_sizes: List[Tensor],
-    state_steps: List[Tensor],
-    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
-    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
-    capturable: bool = False,
-    maximize: bool = False,
-    differentiable: bool = False,
-    has_complex: bool = False,
-    *,
-    step_size_min: float,
-    step_size_max: float,
-    etaminus: float,
-    etaplus: float,
-):
-    r"""Functional API that performs rprop algorithm computation.
-
-    See :class:`~torch.optim.Rprop` for details.
-    """
-    # this check is slow during compilation, so we skip it
-    # if it's strictly needed we can add this check back in dynamo
-    if not torch._utils.is_compiling() and not all(isinstance(t, torch.Tensor) for t in state_steps):
-        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
-
-    if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
-
-    if foreach and torch.jit.is_scripting():
-        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
-
-    if foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_rprop
-    else:
-        func = _single_tensor_rprop
-
-    func(
-        params,
-        grads,
-        prevs,
-        step_sizes,
-        state_steps,
-        step_size_min=step_size_min,
-        step_size_max=step_size_max,
-        etaminus=etaminus,
-        etaplus=etaplus,
-        capturable=capturable,
-        maximize=maximize,
-        differentiable=differentiable,
-        has_complex=has_complex,
-    )
+)
 
 
 def _single_tensor_rprop(
@@ -269,9 +239,11 @@ def _single_tensor_rprop(
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
+            capturable_supported_devices = _get_capturable_supported_devices()
             assert (
-                (param.is_cuda and step.is_cuda) or (param.is_xla and step.is_xla)
-            ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
+                param.device.type == step.device.type
+                and param.device.type in capturable_supported_devices
+            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
         step += 1
 
@@ -326,7 +298,6 @@ def _multi_tensor_rprop(
     differentiable: bool,
     has_complex: bool,
 ):
-
     if len(params) == 0:
         return
 
@@ -334,24 +305,39 @@ def _multi_tensor_rprop(
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
-        assert all((p.is_cuda and step.is_cuda) or (p.is_xla and step.is_xla) for p, step in zip(params, state_steps)), \
-            "If capturable=True, params and state_steps must be CUDA or XLA tensors."
+        capturable_supported_devices = _get_capturable_supported_devices()
+        assert all(
+            p.device.type == step.device.type
+            and p.device.type in capturable_supported_devices
+            for p, step in zip(params, state_steps)
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
-    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, prevs, step_sizes, state_steps])
-    for ((grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes, grouped_state_steps), _) in grouped_tensors.values():
-
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        [params, grads, prevs, step_sizes, state_steps]
+    )
+    for (
+        grouped_params,
+        grouped_grads,
+        grouped_prevs,
+        grouped_step_sizes,
+        grouped_state_steps,
+    ), _ in grouped_tensors.values():
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
         if grouped_state_steps[0].is_cpu:
-            torch._foreach_add_(grouped_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
+            torch._foreach_add_(
+                grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
+            )
         else:
             torch._foreach_add_(grouped_state_steps, 1)
 
         # Handle complex params
         if has_complex:
-            _view_as_real(grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes)
+            _view_as_real(
+                grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes
+            )
 
         signs = torch._foreach_mul(grouped_grads, grouped_prevs)
         if maximize:
@@ -386,15 +372,82 @@ def _multi_tensor_rprop(
         # for dir>=0 dfdx=dfdx
         grouped_grads = list(grouped_grads)
         for i in range(len(grouped_grads)):
-            grouped_grads[i].copy_(torch.where(signs[i].eq(etaminus), 0, grouped_grads[i]))
+            grouped_grads[i].copy_(
+                torch.where(signs[i].eq(etaminus), 0, grouped_grads[i])
+            )
 
         # explicitly del signs as it's not used after here to save memory
         del signs
 
         # update parameters
         grad_signs = [grad.sign() for grad in grouped_grads]
-        torch._foreach_addcmul_(grouped_params, grad_signs, grouped_step_sizes, value=-1)
+        torch._foreach_addcmul_(
+            grouped_params, grad_signs, grouped_step_sizes, value=-1
+        )
 
         # Logically, you may expect grouped_prevs to get updated to grouped_grads, but that's
         # basically already happened since we've been using grouped_prevs' memory to store
         # updated grouped_grads!
+
+
+@_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_rprop)
+def rprop(
+    params: List[Tensor],
+    grads: List[Tensor],
+    prevs: List[Tensor],
+    step_sizes: List[Tensor],
+    state_steps: List[Tensor],
+    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    foreach: Optional[bool] = None,
+    capturable: bool = False,
+    maximize: bool = False,
+    differentiable: bool = False,
+    has_complex: bool = False,
+    *,
+    step_size_min: float,
+    step_size_max: float,
+    etaminus: float,
+    etaplus: float,
+):
+    r"""Functional API that performs rprop algorithm computation.
+
+    See :class:`~torch.optim.Rprop` for details.
+    """
+    # this check is slow during compilation, so we skip it
+    # if it's strictly needed we can add this check back in dynamo
+    if not torch._utils.is_compiling() and not all(
+        isinstance(t, torch.Tensor) for t in state_steps
+    ):
+        raise RuntimeError(
+            "API has changed, `state_steps` argument must contain a list of singleton tensors"
+        )
+
+    if foreach is None:
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=False
+        )
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_rprop
+    else:
+        func = _single_tensor_rprop
+
+    func(
+        params,
+        grads,
+        prevs,
+        step_sizes,
+        state_steps,
+        step_size_min=step_size_min,
+        step_size_max=step_size_max,
+        etaminus=etaminus,
+        etaplus=etaplus,
+        capturable=capturable,
+        maximize=maximize,
+        differentiable=differentiable,
+        has_complex=has_complex,
+    )

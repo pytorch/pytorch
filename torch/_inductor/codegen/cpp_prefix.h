@@ -5,11 +5,17 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <memory>
 #include <omp.h>
+
+// WARNING: be extra careful when including more ATen/c10 header files here!
+// Because AOTInductor generated code will copy-paste this cpp_prefix.h for
+// the CPU backend, we have to make sure the used headers are implemented
+// in a header-only way, i.e. all the function and class definitions are
+// in .h files instead of .cpp files, to avoid ABI backward-compatiblity breakage.
 
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
-#include <ATen/native/Math.h>
 
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e5m2.h>
@@ -28,6 +34,9 @@
 #if INDUCTOR_USE_VECTOR_TYPES()
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
+#else
+// For calc_erfinv
+#include <ATen/native/Math.h>
 #endif
 
 typedef at::Half half;
@@ -40,7 +49,7 @@ template <typename T>
 struct Welford {
   T mean = T(0);
   T m2 = T(0);
-  T weight = T(0);
+  int64_t index = 0;
 };
 
 
@@ -53,41 +62,57 @@ struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
 #endif
 
 template <typename T>
+struct WeightRecp {
+  using scalar_t = typename T::value_type;
+  int64_t N;
+  std::vector<scalar_t> weight_recps;
+  WeightRecp(int64_t N) : N(N) {
+    weight_recps.reserve(N);
+    for (const auto i : c10::irange(N)) {
+      weight_recps.push_back(
+          scalar_t(static_cast<double>(1) / static_cast<double>(i + 1)));
+    }
+  }
+};
+
+template <typename T>
 Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
-  if constexpr (!IsVecType<T>::value) {
-    if (a.weight == 0) {
-      return b;
-    }
-    if (b.weight == 0) {
-      return a;
-    }
+  if (a.index == 0) {
+    return b;
+  }
+  if (b.index == 0) {
+    return a;
   }
   auto delta = b.mean - a.mean;
-  auto new_weight = a.weight + b.weight;
-  auto wb_over_w = b.weight / new_weight;
-  if constexpr (IsVecType<T>::value) {
-    // Guard against division by zero
-    wb_over_w = T::blendv(wb_over_w, T(0), new_weight == T(0));
-  }
+  auto new_index = a.index + b.index;
+  auto wb_over_w = T(b.index) / T(new_index);
   auto result = Welford<T>{
     a.mean + delta * wb_over_w,
-    a.m2 + b.m2 + delta * delta * a.weight * wb_over_w,
-    new_weight
+    a.m2 + b.m2 + delta * delta * T(a.index) * wb_over_w,
+    new_index,
   };
   return result;
 }
 
 template <typename T>
-Welford<T> welford_combine(const Welford<T> &acc, T data) {
+Welford<T> welford_combine(const Welford<T> &acc, T data, const WeightRecp<T>* w=nullptr) {
   // Add a single data point
+  int64_t index = acc.index + 1;
   auto delta = data - acc.mean;
-  auto new_weight = acc.weight + T(1);
-  auto new_mean = acc.mean + delta / new_weight;
+  T new_mean;
+  if constexpr (!IsVecType<T>::value) {
+    new_mean = acc.mean + delta / T(index);
+  } else {
+    new_mean = acc.mean +
+      ((w == nullptr || acc.index >= w->weight_recps.size())
+            ? delta / T(index)
+            : delta * T(w->weight_recps[acc.index]));
+  }
   auto new_delta = data - new_mean;
   auto result = Welford<T>{
     new_mean,
     acc.m2 + delta * new_delta,
-    new_weight
+    index
   };
   return result;
 }
@@ -146,14 +171,37 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
 }
 #endif
 
+#ifdef CPU_CAPABILITY_AVX512
+inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x, size_t n) {
+  using vec_t = at::vec::Vectorized<float>;
+#define SHUFFLE_MASK(z, y, x, w) ((z << 6) | (y << 4) | (x << 2) | w)
+  switch (n) {
+    case 1:
+      return vec_t(_mm512_permute_ps(x, SHUFFLE_MASK(1, 1, 3, 3)));
+    case 2:
+      return vec_t(_mm512_permute_ps(x, SHUFFLE_MASK(2, 2, 2, 2)));
+    case 4:
+      return vec_t(_mm512_permutexvar_ps(
+          _mm512_set_epi32(
+              12, 12, 12, 12, 12, 12, 12, 12, 4, 4, 4, 4, 4, 4, 4, 4),
+          x));
+    case 8:
+      return vec_t(_mm512_permutexvar_ps(
+          _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
+  }
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+}
+#endif
+
 template <typename scalar_t>
 Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc) {
   using Vec = at::vec::Vectorized<scalar_t>;
   for (size_t n = 1; n < Vec::size(); n *= 2) {
+    auto index = acc.index;
     auto shuffled = Welford<Vec>{
       vec_shuffle_down(acc.mean, n),
       vec_shuffle_down(acc.m2, n),
-      vec_shuffle_down(acc.weight, n)
+      index,
     };
     acc = welford_combine(acc, shuffled);
   }
@@ -166,8 +214,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
   acc.m2.store(array);
   result.m2 = array[0];
 
-  acc.weight.store(array);
-  result.weight = array[0];
+  result.index = acc.index;
 
   return result;
 }
@@ -266,3 +313,168 @@ atomic_add(volatile T *addr, T offset) {
   std::atomic<T> *atomic_addr = (std::atomic<T> *)addr;
   atomic_addr->fetch_add(offset, std::memory_order_relaxed);
 }
+
+void mm_get_thread_blocking(
+    int num_threads,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t M0,
+    int64_t N0,
+    int64_t K0,
+    int64_t& Mt,
+    int64_t& Nt,
+    int64_t& Kt) {
+  auto get_factors = [](int64_t number) {
+    int count = 0;
+    for (int64_t i = std::sqrt(number); i > 0; --i) {
+      if (number % i == 0) {
+        count += 2;
+      }
+    }
+    auto factors = std::make_unique<int64_t[]>(count);
+    int index = 0;
+    for (int64_t i = std::sqrt(number); i > 0; --i) {
+      if (number % i == 0) {
+        factors[index++] = number / i;
+        factors[index++] = i;
+      }
+    }
+    return std::make_tuple(std::move(factors), count);
+  };
+
+  auto get_blocking = [](int64_t num_threads,
+                         int64_t factor,
+                         int64_t m_blocks,
+                         int64_t n_blocks,
+                         int64_t k_blocks) {
+    int64_t thread_block_n = (n_blocks + factor - 1) / factor;
+    int64_t cofactor = num_threads / factor;
+    int64_t thread_block_m = (m_blocks + cofactor - 1) / cofactor;
+    return std::make_tuple(thread_block_m, thread_block_n, k_blocks);
+  };
+
+  int64_t m_blocks = (M + M0 - 1) / M0;
+  int64_t n_blocks = (N + N0 - 1) / N0;
+  int64_t k_blocks = (K + K0 - 1) / K0;
+
+  auto [factors, count] = get_factors(num_threads);
+  assert(count > 0);
+
+  for (int i = 0; i < count; ++i) {
+    int64_t factor = factors[i];
+    if (n_blocks % factor == 0 &&
+        m_blocks % (num_threads / factor) == 0) {
+      std::tie(Mt, Nt, Kt) = get_blocking(
+          num_threads, factor, m_blocks, n_blocks, k_blocks);
+      return;
+    }
+  }
+
+  for (int i = 0; i < count; ++i) {
+    int64_t factor = factors[i];
+    if (n_blocks % factor == 0) {
+      std::tie(Mt, Nt, Kt) = get_blocking(
+          num_threads, factor, m_blocks, n_blocks, k_blocks);
+      return;
+    }
+    int64_t cofactor = num_threads / factor;
+    if (m_blocks % cofactor == 0) {
+      std::tie(Mt, Nt, Kt) = get_blocking(
+          num_threads, factor, m_blocks, n_blocks, k_blocks);
+      return;
+    }
+  }
+
+  assert(false && "Should not reach here.");
+  // Dummy return to avoid compiler warning
+  return;
+}
+
+inline void mm_get_thread_blocks(
+    int thread_id,
+    int64_t M_blocks,
+    int64_t N_blocks,
+    int64_t K_blocks,
+    int64_t Mt_blocks,
+    int64_t Nt_blocks,
+    int64_t Kt_blocks,
+    int64_t& m_block_start,
+    int64_t& m_block_end,
+    int64_t& n_block_start,
+    int64_t& n_block_end,
+    int64_t& k_block_start,
+    int64_t& k_block_end) {
+  int64_t num_Kt = (K_blocks + Kt_blocks - 1) / Kt_blocks;
+  k_block_start = (thread_id % num_Kt) * Kt_blocks;
+  k_block_end = std::min(k_block_start + Kt_blocks, K_blocks);
+  thread_id /= num_Kt;
+  int64_t num_Nt = (N_blocks + Nt_blocks - 1) / Nt_blocks;
+  n_block_start = (thread_id % num_Nt) * Nt_blocks;
+  n_block_end = std::min(n_block_start + Nt_blocks, N_blocks);
+  thread_id /= num_Nt;
+  m_block_start = std::min(thread_id * Mt_blocks, M_blocks);
+  m_block_end = std::min(m_block_start + Mt_blocks, M_blocks);
+}
+
+struct amx_tilecfg {
+  uint8_t palette_id;
+  uint8_t start_row;
+  uint8_t reserved_0[14];
+  uint16_t colsb[16];
+  uint8_t rows[16];
+};
+
+class AMXState {
+ private:
+  amx_tilecfg tilecfg_;
+  uint8_t rows_;
+  uint16_t colsb_;
+  uint8_t num_tile_rows_;
+  uint8_t num_tile_columns_;
+
+ public:
+  AMXState() : rows_(0), colsb_(0), num_tile_rows_(0), num_tile_columns_(0) {
+    memset(&tilecfg_, 0, sizeof(tilecfg_));
+  }
+
+  inline void configure(
+      uint8_t rows,
+      uint16_t colsb,
+      uint8_t num_tile_rows,
+      uint8_t num_tile_columns,
+      void (*loadconfig)(const amx_tilecfg&)) {
+    if (tilecfg_.palette_id == 1 && rows_ == rows && colsb_ == colsb &&
+        num_tile_rows_ == num_tile_rows &&
+        num_tile_columns_ == num_tile_columns) {
+      return;
+    }
+    tilecfg_.palette_id = 1;
+    rows_ = rows;
+    colsb_ = colsb;
+    num_tile_rows_ = num_tile_rows;
+    num_tile_columns_ = num_tile_columns;
+    const auto num_c_tiles = num_tile_rows * num_tile_columns;
+    // For C
+    for (int i = 0; i < num_c_tiles; i++) {
+      tilecfg_.rows[i] = rows;
+      tilecfg_.colsb[i] = 64;
+    }
+    // For A
+    for (int i = 0; i < num_tile_rows; i++) {
+      tilecfg_.rows[i + num_c_tiles] = rows;
+      tilecfg_.colsb[i + num_c_tiles] = colsb;
+    }
+    // For B
+    for (int i = 0; i < num_tile_columns; i++) {
+      tilecfg_.rows[i + num_c_tiles + num_tile_rows] = colsb / 4;
+      tilecfg_.colsb[i + num_c_tiles + num_tile_rows] = 64;
+    }
+    loadconfig(tilecfg_);
+  }
+
+  inline void release(void (*tile_release)()) {
+    tilecfg_.palette_id = 0;
+    tile_release();
+  }
+};

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Any, Dict, Set, Tuple, Callable, List
 
 import torch
@@ -988,9 +989,8 @@ class InputWeightEqualizationDetector(DetectorBase):
         if global_range == 0:
             range_zero_explanation = "We recommend removing this channel as it doesn't provide any useful information."
             raise ValueError(
-                "The range of the {} data for module {} is 0, which means you have a constant value channel. {}".format(
-                    info_str, module_fqn, range_zero_explanation
-                )
+                f"The range of the {info_str} data for module {module_fqn} is 0, "
+                f"which means you have a constant value channel. {range_zero_explanation}"
             )
 
         ratio = per_channel_range / global_range

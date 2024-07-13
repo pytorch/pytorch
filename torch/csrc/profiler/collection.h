@@ -24,9 +24,7 @@
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/utils/python_stub.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 enum class EventType : uint8_t {
   TorchOp = 0,
@@ -61,9 +59,9 @@ struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
   RawTensorMetadata& operator=(RawTensorMetadata&&) noexcept = default;
   explicit RawTensorMetadata(const at::Tensor& t);
 
-  // Wrap `weak_self_` in `c10::optional` and split device into components to
+  // Wrap `weak_self_` in `std::optional` and split device into components to
   // keep struct default constructable. (which the std::array initializer needs)
-  c10::optional<WeakTensor> weak_self_;
+  std::optional<WeakTensor> weak_self_;
   c10::DeviceType device_type_{c10::DeviceType::CPU};
   c10::DeviceIndex device_index_{-1};
 };
@@ -85,15 +83,26 @@ struct TORCH_API TensorMetadata : public RawTensorMetadataBase {
   std::vector<int64_t> strides_;
 
   // Set during `calculateUniqueTensorIDs`.
-  c10::optional<TensorID> id_;
-  c10::optional<AllocationID> allocation_id_;
+  std::optional<TensorID> id_;
+  std::optional<AllocationID> allocation_id_;
+};
+
+// Used during post processing.
+struct TORCH_API ProfilerStepInfo {
+  int64_t start_time_ns; // start time of the profiler step
+  int64_t end_time_ns; // end time of the profiler step
+  uint64_t out_idx; // index of the profiler step in the profiler "out" var in
+                    // getRecords
+
+  ProfilerStepInfo(int64_t start, int64_t end, uint64_t out_idx)
+      : start_time_ns(start), end_time_ns(end), out_idx(out_idx) {}
 };
 
 using op_input_t = std::variant<
     TensorMetadata,
     std::vector<TensorMetadata>,
     c10::IValue,
-    c10::nullopt_t>;
+    std::nullopt_t>;
 
 // ============================================================================
 // == ExtraFields =============================================================
@@ -207,8 +216,8 @@ struct ExtraFields<EventType::Allocation> : RawAllocation {
     return {device_type_, device_index_};
   }
 
-  c10::optional<TensorID> id_;
-  c10::optional<AllocationID> allocation_id_;
+  std::optional<TensorID> id_;
+  std::optional<AllocationID> allocation_id_;
 };
 
 template <>
@@ -246,7 +255,7 @@ struct NNModuleInfo {
   struct ParameterInfo {
     std::string name_;
     TensorMetadata metadata_;
-    c10::optional<TensorMetadata> grad_metadata_;
+    std::optional<TensorMetadata> grad_metadata_;
   };
 
   PyModuleSelf self_;
@@ -261,7 +270,7 @@ struct NNModuleInfo {
 struct OptimizerInfo {
   struct ParameterInfo {
     TensorMetadata metadata_;
-    c10::optional<TensorMetadata> grad_metadata_;
+    std::optional<TensorMetadata> grad_metadata_;
     std::vector<std::pair<std::string, TensorMetadata>> state_;
   };
 
@@ -293,8 +302,8 @@ template <>
 struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
   struct args_t {
     PyFrameState frame_state_;
-    c10::optional<NNModuleInfo> module_info_;
-    c10::optional<OptimizerInfo> optimizer_info_;
+    std::optional<NNModuleInfo> module_info_;
+    std::optional<OptimizerInfo> optimizer_info_;
   };
 
   ExtraFields(
@@ -308,8 +317,8 @@ struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
         optimizer_{std::move(args.optimizer_info_)} {}
 
   PyFrameState callsite_;
-  c10::optional<NNModuleInfo> module_;
-  c10::optional<OptimizerInfo> optimizer_;
+  std::optional<NNModuleInfo> module_;
+  std::optional<OptimizerInfo> optimizer_;
 };
 
 template <>
@@ -556,6 +565,7 @@ class TORCH_API ThreadLocalSubqueue {
     // NB: This is a destructive operation.
     void materialize(
         std::vector<std::shared_ptr<Result>>& out,
+        std::vector<ProfilerStepInfo>& step_info,
         const std::function<c10::time_t(c10::approx_time_t)>& time_converter,
         const uint64_t tid,
         const kineto::DeviceAndResource& kineto_info);
@@ -657,6 +667,4 @@ TORCH_API bool get_cuda_sync_enabled();
 TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()>);
 TORCH_API void set_cuda_sync_enabled_val(bool);
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

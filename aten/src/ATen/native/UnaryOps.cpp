@@ -772,23 +772,23 @@ Tensor square(const Tensor& self) { return at::pow(self, 2); }
 Tensor& square_(Tensor& self) { return self.pow_(2); }
 
 Tensor& logit_out(const Tensor& self,
-    c10::optional<double> eps,
+    std::optional<double> eps,
     Tensor& result) {
   return unary_op_impl_float_out(
       result, self, logit_stub, Scalar(eps ? eps.value() : -1.0));
 }
-Tensor logit(const Tensor& self, c10::optional<double> eps) {
+Tensor logit(const Tensor& self, std::optional<double> eps) {
   return unary_op_impl_float(
       self, logit_stub, Scalar(eps ? eps.value() : -1.0));
 }
-Tensor& logit_(Tensor& self, c10::optional<double> eps) {
+Tensor& logit_(Tensor& self, std::optional<double> eps) {
   return at::logit_out(self, self, eps);
 }
 
-Tensor& special_logit_out(const Tensor& self, c10::optional<double> eps, Tensor& result) {
+Tensor& special_logit_out(const Tensor& self, std::optional<double> eps, Tensor& result) {
   return at::logit_out(result, self, eps);
 }
-Tensor special_logit(const Tensor& self, c10::optional<double> eps) {
+Tensor special_logit(const Tensor& self, std::optional<double> eps) {
   return self.logit(eps);
 }
 
@@ -801,9 +801,9 @@ Tensor special_expit(const Tensor& self) {
 }
 
 Tensor& nan_to_num_out(const Tensor& self,
-    c10::optional<double> nan,
-    c10::optional<double> pos_inf,
-    c10::optional<double> neg_inf,
+    std::optional<double> nan,
+    std::optional<double> pos_inf,
+    std::optional<double> neg_inf,
     Tensor& result) {
   TORCH_CHECK(
       self.scalar_type() == result.scalar_type(),
@@ -825,18 +825,18 @@ Tensor& nan_to_num_out(const Tensor& self,
 
 Tensor nan_to_num(
     const Tensor& self,
-    c10::optional<double> nan,
-    c10::optional<double> pos_inf,
-    c10::optional<double> neg_inf) {
+    std::optional<double> nan,
+    std::optional<double> pos_inf,
+    std::optional<double> neg_inf) {
   auto result = at::empty_like(self);
   return at::nan_to_num_out(result, self, nan, pos_inf, neg_inf);
 }
 
 Tensor& nan_to_num_(
     Tensor& self,
-    c10::optional<double> nan,
-    c10::optional<double> pos_inf,
-    c10::optional<double> neg_inf) {
+    std::optional<double> nan,
+    std::optional<double> pos_inf,
+    std::optional<double> neg_inf) {
   return at::nan_to_num_out(self, self, nan, pos_inf, neg_inf);
 }
 

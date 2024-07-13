@@ -1,5 +1,6 @@
-import torch
 from torchvision import models
+
+import torch
 
 print(torch.version.__version__)
 

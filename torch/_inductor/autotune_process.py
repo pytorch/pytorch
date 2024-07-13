@@ -1,6 +1,8 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import dataclasses
 import functools
 import logging
@@ -9,9 +11,7 @@ import queue
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from ctypes import byref, c_size_t, c_void_p
-from multiprocessing.process import BaseProcess
-from multiprocessing.queues import Queue
+from ctypes import byref, c_size_t, c_void_p, CDLL
 from typing import (
     Any,
     Callable,
@@ -25,17 +25,28 @@ from typing import (
 )
 
 import torch
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
 
 from torch._inductor import ir
-from torch._inductor.codecache import CUDACodeCache, DLLWrapper, PyCodeCache
+from torch._inductor.codecache import (
+    CppCodeCache,
+    CUDACodeCache,
+    DLLWrapper,
+    get_hash,
+    PyCodeCache,
+)
 
 if TYPE_CHECKING:
+    from multiprocessing.process import BaseProcess
+    from multiprocessing.queues import Queue
+    from types import ModuleType
+
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
-from .utils import do_bench
+from .runtime.runtime_utils import do_bench_cpu, do_bench_gpu
 from .virtualized import V
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
@@ -50,6 +61,10 @@ class Ping:
 
 
 class Pong:
+    pass
+
+
+class NonzeroWorkspaceNotSupportedError(Exception):
     pass
 
 
@@ -102,7 +117,7 @@ class TuningProcess:
         try:
             TuningProcess.workloop(request_queue, response_queue)
         except Exception as ex:
-            log.exception("Exception in TuningProcess: %s", ex)
+            log.exception("Exception in TuningProcess")
 
     @staticmethod
     def workloop(request_queue: Queue[Any], response_queue: Queue[Any]) -> None:
@@ -171,22 +186,55 @@ class TuningProcess:
         assert self.request_queue is not None
         self.request_queue.put(obj)
 
-    def get(self) -> Any:
+    def get(
+        self, result_timeout=120.0, graceful_timeout=3.0, terminate_timeout=1.0
+    ) -> Any:
         """
-        Get a response from the child process.
+        Get a response from the child process. Raises queue.Empty on timeout
+        or if the process dies.
+
+        This method is (so far) only used by TuningProcessPool, where torch._inductor.config entries are being used
+        to populate the timeouts:
+
+        Arguments:
+
+            @param result_timeout: Timeout in seconds, defaults to 120.0 or to
+                                   config.max_autotune_subproc_result_timeout_seconds when called by TuningProcessPool
+            @param graceful_timeout: Timeout in seconds to allow graceful shutdown (SIGTERM is sent after this time).
+                                    Defaults to 3.0 or to config.max_autotune_subproc_graceful_timeout_seconds
+            @param terminate_timeout: Timeout in seconds after SIGTERM, until we send SIGKILL if the process
+                                      remains alive. Defaults to 1.0 or to
+                                      config.max_autotune_subproc_terminate_timeout_seconds.
+        Returns:
+            A response from the child process (Any type)
         """
         assert self.process is not None
         assert self.response_queue is not None
         while True:
             try:
-                return self.response_queue.get(timeout=1.0)
+                remaining_timeout = result_timeout
+                res = None
+                while remaining_timeout is not None and remaining_timeout >= 1.0:
+                    remaining_timeout -= 0.5
+                    try:
+                        res = self.response_queue.get(timeout=0.5)
+                        break
+                    except queue.Empty:
+                        if not self.process.is_alive():
+                            raise  # is being caught a few lines below
+                if res is None:
+                    res = self.response_queue.get(timeout=remaining_timeout)
+                return res
             except queue.Empty:
                 status = self.process.exitcode
                 if status is None:
-                    # child process is still running
-                    continue
-                # child process crashed
-                self.clear()
+                    self.kill(
+                        graceful_timeout=graceful_timeout,
+                        terminate_timeout=terminate_timeout,
+                    )
+                else:
+                    # child process crashed
+                    self.clear()
                 raise
 
     def terminate(self) -> None:
@@ -204,6 +252,29 @@ class TuningProcess:
         """
         if self.process is not None:
             self.process.join()
+            self.clear()
+
+    def kill(self, graceful_timeout=5.0, terminate_timeout=1.0) -> None:
+        # Tries to kill the process, using a graceful_timeout in which the process
+        # is allowed to exit gracefully. If the process is still alive,
+        # it will be terminated. If that is not sufficient to end it
+        # within terminate_timeout seconds, it will be killed.
+        if self.process is not None:
+            self.terminate()
+            self.process.join(timeout=graceful_timeout)
+            if self.process.is_alive():
+                log.warning(
+                    "Sending SIGTERM to process with PID %d",
+                    self.process.pid,
+                )
+                self.process.terminate()
+                self.process.join(timeout=terminate_timeout)
+                if self.process.is_alive():
+                    log.error(
+                        "Sending SIGKILL to process with PID %d",
+                        self.process.pid,
+                    )
+                    self.process.kill()  # This should definitely end the process
             self.clear()
 
 
@@ -239,7 +310,7 @@ class TuningProcessPool:
 
         # Wait for the initialization to finish
         for p in self.processes.queue:
-            assert isinstance(p.get(), Pong)
+            assert isinstance(p.get(result_timeout=None), Pong)
 
         # Use a thread pool to manage distributing work to the subprocesses.
         # Threads block on an available process, so it makes sense to match
@@ -300,7 +371,11 @@ class TuningProcessPool:
         process = self.processes.get()
         process.put(choice.bmreq)
         try:
-            return process.get()
+            return process.get(
+                config.max_autotune_subproc_result_timeout_seconds,
+                config.max_autotune_subproc_graceful_timeout_seconds,
+                config.max_autotune_subproc_terminate_timeout_seconds,
+            )
         except queue.Empty:
             warnings.warn(
                 f"Failed to benchmark choice '{choice}'. It will be ignored. "
@@ -344,6 +419,7 @@ class TensorMeta:
     sizes: torch._prims_common.ShapeType
     strides: torch._prims_common.StrideType
     offset: int
+    name: Optional[str] = None
 
     @classmethod
     def from_irnodes(
@@ -376,6 +452,7 @@ class TensorMeta:
                 node.get_layout().offset,
                 fallback=config.unbacked_symint_fallback,
             ),
+            name=node.get_name(),
         )
 
     def to_tensor(self) -> torch.Tensor:
@@ -422,10 +499,18 @@ class BenchmarkRequest:
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def cleanup_run_fn(self) -> None:
         pass
+
+    def do_bench(
+        self,
+        fn,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+    ) -> float:
+        raise NotImplementedError
 
     def benchmark(
         self,
@@ -445,29 +530,18 @@ class BenchmarkRequest:
         if debug:
             create_tensor_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
-
-        fn = self.make_run_fn(*input_tensors, output_tensor=output_tensor)
+        try:
+            fn = self.make_run_fn(*input_tensors, output_tensor=output_tensor)
+        except NonzeroWorkspaceNotSupportedError:
+            # Skipping all ops with nonzero workspace requirements
+            log.info("Skipping op due to nonzero workspace requirement")
+            return float("inf")
 
         if debug:
             load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
-        device_idx_set = {
-            tensor.device.index
-            for tensor in [*input_tensors, output_tensor]
-            if isinstance(tensor, torch.Tensor)
-            and tensor.is_cuda
-            and tensor.device.index is not None
-        }
-        assert len(device_idx_set) <= 1, f"Can not mix devices {device_idx_set}"
-        if len(device_idx_set) == 1:
-            device_idx = next(iter(device_idx_set))
-        else:
-            device_idx = torch.cuda.current_device()
-
-        with torch.cuda.device(device_idx):
-            out = do_bench(fn)
-            torch.cuda.synchronize()  # shake out any CUDA errors
+        out = self.do_bench(fn, *input_tensors, output_tensor)
 
         if debug:
             bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
@@ -495,14 +569,40 @@ class TestBenchmarkRequest(BenchmarkRequest):
         self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
     ) -> float:
         if self.value is None:
-            raise Exception("Failed to run")
+            raise Exception("Failed to run")  # noqa: TRY002
         return self.value
 
 
-class TritonBenchmarkRequest(BenchmarkRequest):
+class GPUDeviceBenchmarkRequest(BenchmarkRequest):
+    def do_bench(
+        self,
+        fn,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+    ) -> float:
+        device_idx_set = {
+            tensor.device.index
+            for tensor in [*input_tensors, output_tensor]
+            if isinstance(tensor, torch.Tensor)
+            and tensor.is_cuda
+            and tensor.device.index is not None
+        }
+        assert len(device_idx_set) <= 1, f"Can not mix devices {device_idx_set}"
+        if len(device_idx_set) == 1:
+            device_idx = next(iter(device_idx_set))
+        else:
+            device_idx = torch.cuda.current_device()
+
+        with torch.cuda.device(device_idx):
+            out = do_bench_gpu(fn)
+            torch.cuda.synchronize()  # shake out any CUDA errors
+
+        return out
+
+
+class TritonBenchmarkRequest(GPUDeviceBenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
-
     def __init__(
         self,
         kernel_name: str,
@@ -545,6 +645,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         if "warmup" in inspect.signature(run_method).parameters:
             warmup_arg["warmup"] = False
 
+        from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+
         if torch.version.hip and self.matrix_instr_nonkdim != 0:
             return functools.partial(
                 run_method,
@@ -553,9 +655,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 *self.extra_args,
                 grid=self.grid,
                 **warmup_arg,
-                num_stages=self.num_stages,
-                num_warps=self.num_warps,
-                matrix_instr_nonkdim=self.matrix_instr_nonkdim,
+                stream=get_raw_stream(self.output_tensor_meta.device.index),
             )
         else:
             return functools.partial(
@@ -565,15 +665,18 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 *self.extra_args,
                 grid=self.grid,
                 **warmup_arg,
-                num_stages=self.num_stages,
-                num_warps=self.num_warps,
+                stream=get_raw_stream(self.output_tensor_meta.device.index),
             )
+
+    def precompile(self):
+        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+        getattr(mod, self.kernel_name).precompile()
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
 
 
-class CUDABenchmarkRequest(BenchmarkRequest):
+class CUDABenchmarkRequest(GPUDeviceBenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
 
@@ -590,6 +693,7 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         self.workspace_size: int = 0
         self.workspace: Optional[torch.Tensor] = None
         self.DLL: Optional[DLLWrapper] = None
+        self._workspace_size_updated = False
         self.hash_key: str = ""
         self.source_file: str = ""
         self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
@@ -598,15 +702,14 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         # Prepopulate CUDACodeCache
         # may happen in separate Threadpool
         log.debug("Precompiling %s", self)
-        CUDACodeCache.load(self.source_code, "so")
+        CUDACodeCache.compile(self.source_code, "so")
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
-        self.DLL, self.hash_key, self.source_file = CUDACodeCache.load(
-            self.source_code, "so"
-        )
+        self.ensure_dll_loaded()
+        self.update_workspace_size()
         args = [
             c_void_p(tensor.data_ptr())
             for tensor in list(input_tensors) + [output_tensor]
@@ -620,9 +723,36 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             args,
             self.extra_args,
         )
+        stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
         run_method = getattr(self.DLL, self.kernel_name)
+        workspace_ptr = c_void_p(0)
+        if self.workspace_size > 0:
+            self.workspace = torch.zeros(
+                (self.workspace_size + 7) // 8,
+                dtype=torch.float64,
+                device=output_tensor.device,
+            )
+            workspace_ptr = c_void_p(self.workspace.data_ptr())
+
+        # Generate partial function.
+        return functools.partial(
+            run_method,
+            *args,
+            *self.extra_args,
+            None,  # null workspace size ptr
+            workspace_ptr,  # set workspace ptr,
+            stream_ptr,
+        )
+
+    def update_workspace_size(self) -> None:
+        if self._workspace_size_updated:
+            return
+        self.ensure_dll_loaded()
+        unique_input_count = len({meta.name for meta in self.input_tensor_meta})
+        args = [c_void_p(None) for _ in range(unique_input_count + 1)]
         stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
 
+        run_method = getattr(self.DLL, self.kernel_name)
         # Retrieve workspace_size and initialize workspace.
         c_workspace_size = c_size_t()
         run_method(
@@ -634,23 +764,25 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             None,  # null workspace ptr
             stream_ptr,
         )
+        torch.cuda.synchronize()  # shake out any CUDA errors
         self.workspace_size = c_workspace_size.value
-        # TODO: Support non-zero workspace_size.
-        assert self.workspace_size == 0, (
-            "Things need to be fixed to support non-zero workspace_size: "
-            "1) max autotune cache needs to store workspace size; "
-            "2) memory allocation needs to allocate / deallocate workspace correctly; "
+        log.debug(
+            "update_workspace_size called: new workspace size=%d, self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",  # noqa: B950
+            self.workspace_size,
+            self.kernel_name,
+            self.source_file,
+            self.hash_key,
+            self.DLL,
+            args,
+            self.extra_args,
         )
+        self._workspace_size_updated = True
 
-        # Generate partial function.
-        return functools.partial(
-            run_method,
-            *args,
-            *self.extra_args,
-            None,  # null workspace size ptr
-            None,  # set workspace ptr, TODO: update it to a real ptr if workspace_size > 0
-            stream_ptr,
-        )
+    def ensure_dll_loaded(self):
+        if self.DLL is None:
+            self.DLL, self.hash_key, self.source_file = CUDACodeCache.load(
+                self.source_code, "so"
+            )
 
     def cleanup_run_fn(self) -> None:
         if self.DLL is not None:
@@ -659,6 +791,75 @@ class CUDABenchmarkRequest(BenchmarkRequest):
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.source_file=}, {self.hash_key=}"
+
+
+class CPUDeviceBenchmarkRequest(BenchmarkRequest):
+    def do_bench(
+        self,
+        fn,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+    ) -> float:
+        return do_bench_cpu(fn)
+
+
+class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
+    # Important: Instances of this class have to be serializable
+    # across process boundaries. Do not put Tensors in here!
+
+    def __init__(
+        self,
+        kernel_name: str,
+        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        extra_args: Iterable[Any],
+        source_code: str,
+    ):
+        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
+        self.source_code = source_code
+        self.hash_key = get_hash(source_code)
+        self.DLL: Optional[Union[CDLL, ModuleType]] = None
+
+    def precompile(self):
+        # Prepopulate CppCodeCache
+        # may happen in separate Threadpool
+        log.debug("Precompiling %s", self)
+        CppCodeCache.load(self.source_code, cuda=False)
+        log.debug("Done precompiling %s", self)
+
+    def make_run_fn(
+        self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
+    ) -> Callable[[], None]:
+        # TODO(jgong5): use CppPythonBindingsCodeCache for better binding perf
+        self.DLL = CppCodeCache.load(self.source_code, cuda=False)
+        args = [tensor.data_ptr() for tensor in list(input_tensors) + [output_tensor]]
+        log.debug(
+            "make_run_fn: self.kernel_name=%s, self.DLL=%s, args=%s, self.extra_args=%s",
+            self.kernel_name,
+            self.DLL,
+            args,
+            self.extra_args,
+        )
+        run_method = getattr(self.DLL, self.kernel_name)
+        # Assume only size with type ctypes.c_ulonglong in extra_args
+        assert all(isinstance(arg, ctypes.c_ulonglong) for arg in self.extra_args)
+        run_method.argtypes = [ctypes.c_ulonglong] * (
+            len(args) + len(list(self.extra_args))
+        )
+
+        # Generate partial function.
+        return functools.partial(
+            run_method,
+            *args,
+            *self.extra_args,
+        )
+
+    def cleanup_run_fn(self) -> None:
+        if self.DLL is not None:
+            self.DLL.close()
+
+    def __str__(self) -> str:
+        return f"{self.kernel_name=}"
 
 
 def benchmark_in_sub_process(

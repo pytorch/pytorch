@@ -117,7 +117,7 @@ class TestJit(JitCommonTestCase):
                         with inputs {sample}:
                     """
                     )
-                    raise Exception(variant_error_info) from e
+                    raise Exception(variant_error_info) from e  # noqa: TRY002
 
         assert tested, "JIT Test does not execute any logic"
 

@@ -1,6 +1,5 @@
-import torch
-
 import operator_benchmark as op_bench
+import torch
 
 # 2D pooling will have input matrix of rank 3 or 4
 qpool2d_long_configs = op_bench.config_list(

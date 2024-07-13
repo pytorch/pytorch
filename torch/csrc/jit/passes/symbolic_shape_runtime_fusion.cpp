@@ -178,7 +178,7 @@ static StrideInput summarizeOutputStrides(const TensorType& tt) {
 // Also summarize input striding behavior. The Size information is stored on the
 // type, The striding is returned. See StrideInput for description of stride
 // specializations
-static c10::optional<std::vector<std::vector<StrideInput>>>
+static std::optional<std::vector<std::vector<StrideInput>>>
 TryGeneralizeInputDimensionsToSymbolicShapes(
     std::shared_ptr<Graph> tensorexpr_graph) {
   std::map<size_t, int64_t> shape_to_sym_shape;
@@ -190,7 +190,7 @@ TryGeneralizeInputDimensionsToSymbolicShapes(
     }
     auto tt = v->type()->expectRef<TensorType>();
     if (!tt.sizes().isComplete() || !tt.strides().isComplete()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     input_striding.push_back(summarizeInputStrides(tt));
     std::vector<at::ShapeSymbol> shape_vec = *tt.symbolic_sizes().sizes();

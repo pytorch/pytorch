@@ -7,11 +7,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
-#include <array>
 #include <cmath>
 #include <cstdint>
-#include <functional>
-#include <memory>
 #include <regex>
 #include <string>
 #include <tuple>
@@ -157,13 +154,11 @@ void RNNImplBase<Derived>::reset() {
       }
 
       for (const auto i : c10::irange(param_names.size())) {
-        auto name = param_names[i];
-        auto param = layer_params[i];
-        this->register_parameter(name, param);
+        this->register_parameter(param_names[i], std::move(layer_params[i]));
       }
       flat_weights_names_.insert(
           flat_weights_names_.end(), param_names.begin(), param_names.end());
-      all_weights_.emplace_back(param_names);
+      all_weights_.emplace_back(std::move(param_names));
     }
   }
 
@@ -866,7 +861,7 @@ void RNNCellImplBase<Derived>::pretty_print(std::ostream& stream) const {
 template <typename Derived>
 void RNNCellImplBase<Derived>::check_forward_input(
     const Tensor& input,
-    const string name) const {
+    const string& name) const {
   TORCH_CHECK(
       input.dim() == 1 || input.dim() == 2,
       "Expected ",

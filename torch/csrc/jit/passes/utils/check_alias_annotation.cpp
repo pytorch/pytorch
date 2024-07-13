@@ -188,7 +188,7 @@ const Node* findNodeForOp(
 // Handle a few special cases where we need to propagate constants
 // manually
 // TODO(suo): we should be able to move this stuff to constant prop
-c10::optional<IValue> toIValueProp(const Value* v) {
+std::optional<IValue> toIValueProp(const Value* v) {
   if (v->node()->kind() == prim::ListConstruct) {
     std::vector<IValue> genericList;
     for (auto input : v->node()->inputs()) {
@@ -196,7 +196,7 @@ c10::optional<IValue> toIValueProp(const Value* v) {
         genericList.push_back(*elem);
       } else {
         // One of the list elements isn't constant.
-        return c10::nullopt;
+        return std::nullopt;
       }
     }
 
@@ -213,7 +213,7 @@ c10::optional<IValue> toIValueProp(const Value* v) {
       return IValue(
           fmap(genericList, [](const IValue& v) { return v.toTensor(); }));
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
 
@@ -222,7 +222,7 @@ c10::optional<IValue> toIValueProp(const Value* v) {
       return maybe_stack->at(0);
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 // batch_norm and instance_norm have incorrect annotations, because

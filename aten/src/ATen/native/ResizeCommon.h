@@ -32,7 +32,7 @@ inline T storage_size_for(ArrayRef<T> size, ArrayRef<T> stride) {
 inline const Tensor& resize_named_tensor_(
     const Tensor& self,
     IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   TORCH_INTERNAL_ASSERT(self.has_names());
   TORCH_CHECK(
       self.sizes() == size,

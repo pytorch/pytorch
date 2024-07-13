@@ -11,7 +11,6 @@ from torch.distributed._spmd.data_parallel import (
 )
 from torch.distributed._spmd.distribute import _convert_to_distributed, Schema
 from torch.distributed._tensor import DeviceMesh, Placement, Replicate, Shard
-
 from torch.fx import GraphModule
 
 
@@ -39,7 +38,7 @@ class ParallelMode(ABC):
         TODO(@wanchaol): some of these arguments are not necessary for
         partitioning, remove the unnecessary ones later.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abstractmethod
     def transform_and_compile(self, gm: GraphModule) -> GraphModule:
@@ -51,7 +50,7 @@ class ParallelMode(ABC):
         the distributed environment.
         """
         # TODO: add more necessary arguments to this interface.
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class DataParallel(ParallelMode):

@@ -102,7 +102,9 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                         # each rank within a TP group has the same initial weights
                         self.assertEqual(tensor1, tensor2)
 
-                self.check_gathered_tensors(tp_rank, tp_size, tensor_gather, tp_weights_assert)
+                self.check_gathered_tensors(
+                    tp_rank, tp_size, tensor_gather, tp_weights_assert
+                )
 
                 # check across TP groups
                 # all-gather local shards
@@ -123,7 +125,9 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                         # random seeds set in data loading.
                         self.assertNotEqual(tensor1, tensor2)
 
-                self.check_gathered_tensors(dp_rank, dp_size, tensor_gather, dp_weights_assert)
+                self.check_gathered_tensors(
+                    dp_rank, dp_size, tensor_gather, dp_weights_assert
+                )
 
 
 if __name__ == "__main__":

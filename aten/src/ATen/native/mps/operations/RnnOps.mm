@@ -340,9 +340,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
   }
 }
 
-std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(const c10::optional<Tensor>& grad_y_opt,
-                                                                               const c10::optional<Tensor>& grad_hy_opt,
-                                                                               const c10::optional<Tensor>& grad_cy_opt,
+std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(const std::optional<Tensor>& grad_y_opt,
+                                                                               const std::optional<Tensor>& grad_hy_opt,
+                                                                               const std::optional<Tensor>& grad_cy_opt,
                                                                                const Tensor& z_state,
                                                                                const Tensor& cell_state_fwd,
                                                                                const Tensor& input,

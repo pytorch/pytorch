@@ -1,10 +1,9 @@
+# mypy: allow-untyped-defs
 from typing import Callable, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
-
 from torch._C import DispatchKey
-
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -15,11 +14,7 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.fx.experimental.proxy_tensor import (
-    disable_proxy_modes_tracing,
-    ProxyTorchDispatchMode,
-    track_tensor_tree,
-)
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 
 class WhileLoopOp(HigherOrderOperator):
@@ -123,7 +118,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
     # Currently, additional_inputs is not a user-facing input. It will be automatically set in dynamo.
     # parameters and buffers accessed in cond_fn or body_fn or tensor closures will become additional_inputs.
-    additional_inputs: Tuple = tuple()
+    additional_inputs: Tuple = ()
     if torch.compiler.is_dynamo_compiling():
         return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
 
@@ -189,14 +184,8 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
     def _trace_while_loop(
         proxy_mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
     ):
-        pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
-        with disable_proxy_modes_tracing():
-            cond_graph = reenter_make_fx(cond_fn, pre_dispatch)(
-                *carried_inputs, *additional_inputs
-            )
-            body_graph = reenter_make_fx(body_fn, pre_dispatch)(
-                *carried_inputs, *additional_inputs
-            )
+        cond_graph = reenter_make_fx(cond_fn)(*carried_inputs, *additional_inputs)
+        body_graph = reenter_make_fx(body_fn)(*carried_inputs, *additional_inputs)
 
         next_name = None
         i = 0

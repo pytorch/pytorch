@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 from functools import wraps
 from typing import Callable, Optional, Union
@@ -600,7 +601,7 @@ def margin_ranking_loss(
     margin: float = 0.0,
     reduction: str = "mean",
 ) -> TensorLikeType:
-    # loss_without_reduction = max(0, −target * (input1 − input2) + margin)
+    # loss_without_reduction = max(0, -target * (input1 - input2) + margin)
     if input1.ndim != input2.ndim or input1.ndim != target.ndim:
         raise RuntimeError(
             "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
@@ -1101,7 +1102,7 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
         weight = weight[0] if weight.ndim == 1 else weight
     else:
         weight = prims.broadcast_in_dim(
-            weight, a.shape, tuple() if weight.ndim == 0 else (0 if a.ndim == 1 else 1,)
+            weight, a.shape, () if weight.ndim == 0 else (0 if a.ndim == 1 else 1,)
         )
 
     return torch.where(a > 0, a, a * weight)

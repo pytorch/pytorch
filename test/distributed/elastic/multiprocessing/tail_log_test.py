@@ -53,7 +53,9 @@ class TailLogTest(unittest.TestCase):
         }
 
         dst = io.StringIO()
-        tail = TailLog(name="writer", log_files=log_files, dst=dst, interval_sec=interval_sec).start()
+        tail = TailLog(
+            name="writer", log_files=log_files, dst=dst, interval_sec=interval_sec
+        ).start()
         # sleep here is intentional to ensure that the log tail
         # can gracefully handle and wait for non-existent log files
         time.sleep(interval_sec * 10)
@@ -129,7 +131,6 @@ class TailLogTest(unittest.TestCase):
         for i in range(nprocs):
             self.assertIn(f"[worker{i}][{i}]", headers)
         self.assertTrue(tail.stopped())
-
 
     def test_tail_no_files(self):
         """
