@@ -220,7 +220,7 @@ class HalideTests(TestCase):
 
             @torch.compile(
                 backend="inductor",
-                options={"cuda_backend": "halide", "halide.scheduler_cuda": "Li2018"},
+                options={"cuda_backend": "halide"},
             )
             def get_rand_halide():
                 return rand_fn()
