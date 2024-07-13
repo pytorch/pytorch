@@ -1176,7 +1176,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_aot_eager_gradcheck(self, score_mod):
         make_tensor = functools.partial(
             torch.randn,
-            (2, 2, 8, 4),
+            (2, 2, 128, 4),
             device="cuda",
             dtype=torch.float64,
             requires_grad=True,
@@ -1199,7 +1199,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     ):
         make_tensor = functools.partial(
             torch.randn,
-            (2, 2, 8, 4),
+            (2, 2, 128, 4),
             device="cuda",
             dtype=torch.float64,
             requires_grad=True,
@@ -1336,7 +1336,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         cnt = CompileCounterWithBackend("aot_eager")
         make_tensor = functools.partial(
             torch.randn,
-            (2, 2, 8, 4),
+            (2, 2, 128, 4),
             device="cuda",
             dtype=torch.float64,
             requires_grad=True,
@@ -1355,7 +1355,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             norm_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_args_0_: "f64[2, 2, 8, 4]", L_args_1_: "f64[2, 2, 8, 4]", L_args_2_: "f64[2, 2, 8, 4]"):
+    def forward(self, L_args_0_: "f64[2, 2, 128, 4]", L_args_1_: "f64[2, 2, 128, 4]", L_args_2_: "f64[2, 2, 128, 4]"):
         l_args_0_ = L_args_0_
         l_args_1_ = L_args_1_
         l_args_2_ = L_args_2_
@@ -1374,8 +1374,8 @@ class GraphModule(torch.nn.Module):
         child_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         child_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         flex_attention_0 = self.flex_attention_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, flex_attention_0, (ones, zeros, ones_1, zeros_1, 8, 8), 0.5);  l_args_0_ = l_args_1_ = l_args_2_ = flex_attention_0 = ones = zeros = ones_1 = zeros_1 = None
-        out: "f64[2, 2, 8, 4]" = flex_attention[0];  flex_attention = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, flex_attention_0, (ones, zeros, ones_1, zeros_1, 128, 128), 0.5);  l_args_0_ = l_args_1_ = l_args_2_ = flex_attention_0 = ones = zeros = ones_1 = zeros_1 = None
+        out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
     class GraphModule(torch.nn.Module):
@@ -1405,13 +1405,13 @@ class GraphModule(torch.nn.Module):
             joint_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", full_default: "i32[1, 1, 1]", full_default_1: "i32[1, 1, 1, 1]", getitem: "f64[2, 2, 8, 4]", getitem_1: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
+    def forward(self, primals_1: "f64[2, 2, 128, 4]", primals_2: "f64[2, 2, 128, 4]", primals_3: "f64[2, 2, 128, 4]", full_default: "i32[1, 1, 1]", full_default_1: "i32[1, 1, 1, 1]", getitem: "f64[2, 2, 128, 4]", getitem_1: "f32[2, 2, 128]", tangents_1: "f64[2, 2, 128, 4]"):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, (full_default, full_default_1, full_default, full_default_1, 8, 8), 0.5);  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = None
-        getitem_2: "f64[2, 2, 8, 4]" = flex_attention_backward[0]
-        getitem_3: "f64[2, 2, 8, 4]" = flex_attention_backward[1]
-        getitem_4: "f64[2, 2, 8, 4]" = flex_attention_backward[2];  flex_attention_backward = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, (full_default, full_default_1, full_default, full_default_1, 128, 128), 0.5);  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = None
+        getitem_2: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
+        getitem_3: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
+        getitem_4: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
         return [getitem_2, getitem_3, getitem_4]
 
     class <lambda>(torch.nn.Module):
@@ -1428,6 +1428,29 @@ class GraphModule(torch.nn.Module):
             return [add, None, None, None, None]
 """,  # noqa: B950
         )
+
+    @supported_platform
+    def test_nyi_for_non_divisible_seq_lens(self):
+        with self.assertRaisesRegex(
+            NotImplementedError, "NYI: L must be a multiple of 128"
+        ):
+            flex_attention(
+                torch.randn((2, 3, 4)),
+                torch.randn((2, 10, 5)),
+                torch.randn((2, 10, 5)),
+                score_mod=_identity,
+            )
+
+        with self.assertRaisesRegex(
+            NotImplementedError, "NYI: L must be a multiple of 128"
+        ):
+            compiled_flex = torch.compile(flex_attention)
+            compiled_flex(
+                torch.randn((2, 3, 4)),
+                torch.randn((2, 10, 5)),
+                torch.randn((2, 10, 5)),
+                score_mod=_identity,
+            )
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
