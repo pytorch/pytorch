@@ -114,7 +114,9 @@ static void multilabel_margin_loss_forward_out_cpu_template(
     Tensor& output,
     Tensor& is_target,
     int64_t reduction) {
+#ifndef STRIP_ERROR_MESSAGES
   auto target_arg = TensorArg(target, "target", 2);
+#endif
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t nframe, dim;
   const int64_t ndims = input.dim();
@@ -161,7 +163,9 @@ static void multilabel_margin_loss_backward_out_frame(
     const Tensor& is_target_contiguous,
     int64_t nframe,
     int64_t dim) {
+#ifndef STRIP_ERROR_MESSAGES
   auto is_target_arg = TensorArg(is_target_contiguous, "is_target", 5);
+#endif
 
   TORCH_CHECK(
       is_target_contiguous.min().item<scalar_t>() >= 0, is_target_arg, " is out of range");

@@ -9,6 +9,7 @@ from torch._inductor.ir import Pointwise
 from torch._inductor.lowering import make_pointwise, register_lowering
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import ops
+from torch.testing._internal.common_utils import skipIfRocm
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
@@ -179,6 +180,7 @@ class TestCustomLowering(InductorTestCase):
         )
 
     @unittest.skipIf(not HAS_CUDA, "CUDA needed")
+    @skipIfRocm
     def test_tanh_approx(self):
         def fn(inp):
             return torch.ops.test_inductor_ops.tanh_approx(inp)
@@ -191,6 +193,7 @@ class TestCustomLowering(InductorTestCase):
         self.assertEqual(a, b)
 
     @unittest.skipIf(not HAS_CUDA, "CUDA needed")
+    @skipIfRocm
     def test_multi_inp_asm(self):
         def fn(a, b):
             return torch.ops.test_inductor_ops.add_custom(a, b)

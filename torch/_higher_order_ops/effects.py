@@ -162,7 +162,8 @@ def with_effects_proxy(
 
     from torch.fx.node import has_side_effect
 
-    # To aoivd being DCEed.
+    # To avoid the being DCEed by graph.eliminate_dead_code if they.
+    # don't have output or their outputs are not used.
     has_side_effect(op)
 
     out_proxy = mode.tracer.create_proxy(
