@@ -342,6 +342,7 @@ def forward(self, pred_1, x_1):
     return (getitem_1,)""",  # noqa: B950
         )
 
+    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_nested(self):
         class Nested(torch.nn.Module):
             def forward(self, p0, p1, p2, a, b, c):
@@ -406,6 +407,7 @@ def forward(self, pred_1, x_1):
             expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
             self.assertEqual(expected_grads, grads)
 
+    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_mixed_require_grad(self):
         def true_fn(x, y, z):
             return x * y * z
@@ -450,6 +452,7 @@ def forward(self, pred_1, x_1, y_1, z_1):
     return (getitem_1,)""",  # noqa: B950
         )
 
+    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_grad_through_cond(self):
         nn_module = torch.nn.Linear(4, 4)
 
@@ -693,6 +696,7 @@ def forward(self, x_1):
     return (getitem_5,)""",  # noqa: B950
         )
 
+    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_pytree_not_all_inputs_used(self):
         def true_fn(x):
             return x["t"][0] + x["t"][1]["b"]
@@ -837,6 +841,7 @@ def forward(self, pred_1):
             ):
                 cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
 
+    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_same_pytree_output(self):
         # TODO: If inside the dictionary, inside the list, the first element
         # is composed of the multiplication, then the requires_grad attribute is
@@ -889,6 +894,7 @@ def forward(self, pred_1):
     return {'res': [view, (view_1,)]}""",  # noqa: B950
         )
 
+    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_torch_nn_module(self):
         nn_module_true = torch.nn.Linear(4, 4)
 
