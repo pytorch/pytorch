@@ -448,7 +448,7 @@ class SetVariable(ConstDictVariable):
             assert not kwargs
             assert len(args) == 1
             return variables.UserFunctionVariable(
-                polyfill.set_isdisjoint
+                polyfill.set_intersection
             ).call_function(tx, [self, args[0]], {})
         elif (
             name == "update"
