@@ -2,7 +2,7 @@
 
 import unittest
 from functools import partial
-from typing import Optional, Tuple
+from typing import Optional
 from itertools import product
 
 import torch
