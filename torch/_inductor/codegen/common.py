@@ -1184,10 +1184,10 @@ class KernelArgs:
         return odict[name]
 
     def __init__(self, sizevars=None):
-        self.input_buffers = dict()
-        self.output_buffers = dict()
-        self.inplace_buffers = dict()
-        self.sizevars = sizevars or dict()
+        self.input_buffers = {}
+        self.output_buffers = {}
+        self.inplace_buffers = {}
+        self.sizevars = sizevars or {}
         self.workspace_arg = None
 
     def __repr__(self):
@@ -1615,7 +1615,7 @@ class Kernel(CodeGen):
         # key: the buffer to write
         # value: the buffer to read and whose memory can be reused for
         #   the buffer specified by key
-        self.inplace_update_buffers = dict()
+        self.inplace_update_buffers = {}
         # Set minimum number of elements processed per thread.
         self.min_elem_per_thread = 1
         self.kernel_name = None
