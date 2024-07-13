@@ -777,7 +777,7 @@ def saved_variables(
                 "nctype": lambda name: NamedCType(
                     name, OptionalCType(BaseCType(symIntArrayRefT))
                 ),
-                "expr": lambda name: f"{name}.has_value() ? c10::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : c10::nullopt",
+                "expr": lambda name: f"{name}.has_value() ? c10::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : ::std::nullopt",
             },
         ),
         # replace self.sym_blocksize() with self_sym_blocksize_opt
@@ -965,7 +965,7 @@ def saved_variables(
         if nctype.type == OptionalCType(BaseCType(stringT)):
             formula = re.sub(
                 rf"\b{name}\b",
-                f"{name}.has_value() ? c10::optional<c10::string_view>({name}.value()) : c10::nullopt",
+                f"{name}.has_value() ? c10::optional<c10::string_view>({name}.value()) : ::std::nullopt",
                 formula,
             )
 
