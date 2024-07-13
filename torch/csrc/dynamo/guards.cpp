@@ -2008,16 +2008,15 @@ class DictGuardManager : public GuardManager {
       : GuardManager(root, std::move(source)),
         _size(PyDict_Size(example_value.ptr())),
         _expected_type(Py_TYPE(example_value.ptr())),
-        _is_exact_dict_type(PyDict_CheckExact(example_value.ptr())),
-        _tag(get_dict_version_unchecked(example_value.ptr())) {}
+        _is_exact_dict_type(PyDict_CheckExact(example_value.ptr())) {}
 
   GuardManager* get_key_manager(
       py::object key_index,
       std::string source,
       py::handle example_value,
       py::handle guard_manager_enum) {
-    Py_ssize_t index = py::cast<Py_ssize_t>(std::move(key_index));
-    KeyValueManager& key_value_manager = _get_index_manager(index);
+    KeyValueManager& key_value_manager =
+        _get_index_manager(std::move(key_index));
     if (!key_value_manager.first) {
       key_value_manager.first = make_guard_manager(
           this->get_root(),
@@ -2025,7 +2024,6 @@ class DictGuardManager : public GuardManager {
           example_value,
           guard_manager_enum);
     };
-    _is_key_at_index_immutable[index] = is_immutable_object(example_value);
     return key_value_manager.first.get();
   }
 
@@ -2034,8 +2032,8 @@ class DictGuardManager : public GuardManager {
       std::string source,
       py::handle example_value,
       py::handle guard_manager_enum) {
-    Py_ssize_t index = py::cast<Py_ssize_t>(std::move(key_index));
-    KeyValueManager& key_value_manager = _get_index_manager(index);
+    KeyValueManager& key_value_manager =
+        _get_index_manager(std::move(key_index));
     if (!key_value_manager.second) {
       key_value_manager.second = make_guard_manager(
           this->get_root(),
@@ -2043,7 +2041,6 @@ class DictGuardManager : public GuardManager {
           example_value,
           guard_manager_enum);
     };
-    _is_value_at_index_immutable[index] = is_immutable_object(example_value);
     return key_value_manager.second.get();
   }
 
@@ -2079,9 +2076,6 @@ class DictGuardManager : public GuardManager {
       return false;
     }
 
-    uint64_t new_tag = get_dict_version_unchecked(obj);
-    bool matches_dict_tag = new_tag == _tag;
-
     PyObject *key = nullptr, *value = nullptr;
     Py_ssize_t pos = 0;
 
@@ -2097,31 +2091,16 @@ class DictGuardManager : public GuardManager {
         index_pointer += 1;
         KeyValueManager& key_value_manager = _key_value_managers[dict_pointer];
         std::unique_ptr<GuardManager>& key_manager = key_value_manager.first;
-        // If dict tag matches and key is immutable, skip the key guard manager
-        bool skip_key_manager = !key_manager ||
-            (matches_dict_tag && _is_key_at_index_immutable[dict_pointer]);
-        if (!skip_key_manager) {
-          if (key_manager->check_nopybind(key)) {
-            return false;
-          }
+        if (key_manager && !key_manager->check_nopybind(key)) {
+          return false;
         }
-        // If dict tag matches and value is immutable, skip the value guard
-        // manager
         std::unique_ptr<GuardManager>& value_manager = key_value_manager.second;
-        bool skip_value_manager = !value_manager ||
-            (matches_dict_tag && _is_value_at_index_immutable[dict_pointer]);
-        if (!skip_value_manager) {
-          if (!value_manager->check_nopybind(value)) {
-            return false;
-          }
+        if (value_manager && !value_manager->check_nopybind(value)) {
+          return false;
         }
       }
       dict_pointer += 1;
     }
-
-    // It is possible that the tag changed but the contents of the dict is
-    // unchanged. Save the new tag to optimize the for next run.
-    _tag = new_tag;
     return true;
   }
 
@@ -2244,8 +2223,9 @@ class DictGuardManager : public GuardManager {
    * Adds a new KeyDictGuardAccessor. If the accessor is already present, we
    * just return the guard manager.
    */
-  KeyValueManager& _get_index_manager(Py_ssize_t index) {
+  KeyValueManager& _get_index_manager(py::object key_index) {
     // Check if the accessor is already present.
+    Py_ssize_t index = py::cast<Py_ssize_t>(std::move(key_index));
     auto it = _key_value_managers.find(index);
     if (it != _key_value_managers.end()) {
       return it->second;
@@ -2265,12 +2245,6 @@ class DictGuardManager : public GuardManager {
   bool _is_exact_dict_type; // Useful to check getattr_manager validity.
   std::vector<Py_ssize_t> _indices;
   std::unordered_map<Py_ssize_t, KeyValueManager> _key_value_managers;
-  std::unordered_map<Py_ssize_t, bool> _is_key_at_index_immutable;
-  std::unordered_map<Py_ssize_t, bool> _is_value_at_index_immutable;
-
- private:
-  // Saved dict version.
-  uint64_t _tag;
 };
 
 /**
