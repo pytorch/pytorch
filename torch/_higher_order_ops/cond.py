@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
 import contextlib
 
+import logging
+
 import torch
 import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
@@ -34,6 +36,8 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 from .utils import _from_fun, create_fw_bw_graph
+
+log = logging.getLogger(__name__)
 
 
 @exposed_in("torch")
@@ -104,9 +108,18 @@ def cond(pred, true_fn, false_fn, operands):
         - The **output** of branches must be a **single Tensor**. Pytree of tensors will be supported in the future.
 
     """
-
     if torch.compiler.is_dynamo_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
+
+    if isinstance(pred, (bool, int, float)):
+        log.warning(
+            "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
+            " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool."
+        )
+        if pred:
+            return true_fn(*operands)
+        else:
+            return false_fn(*operands)
 
     def _validate_input(pred, true_fn, false_fn, operands):
         if not isinstance(pred, (bool, torch.Tensor, torch.SymBool)):
@@ -224,6 +237,9 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         true_out = flat_true_outs[i]
         false_out = flat_false_outs[i]
 
+        # Note that we need skip the check for requires_grad because we're after
+        # after autograd key during tracing, so the rquires_grad attribute of the tensors
+        # are no longer. See Note [invariants for node meta 'val']
         def _same_meta_except_requires_grad(true_out, false_out):
             if true_out is None and false_out is None:
                 return True
@@ -279,7 +295,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
 
     out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", func_overload, proxy_args, {}, name="conditional"
+        "call_function", func_overload, proxy_args, {}
     )
 
     # At this point, we're *guaranteed* that whether an output came from the
@@ -353,6 +369,16 @@ class CondAutogradOp(torch.autograd.Function):
 
 @cond_op.py_impl(DispatchKey.Autograd)
 def cond_autograd(pred, true_fn, false_fn, operands):
+    # A shortcut for the case where all inputs don't require gradient,
+    # we skip tracing the forward and backward graph.
+    if all(
+        not t.requires_grad
+        for t in pytree.tree_flatten((pred, operands))[0]
+        if isinstance(t, torch.Tensor)
+    ):
+        with torch._C._AutoDispatchBelowAutograd():
+            return cond_op(pred, true_fn, false_fn, operands)
+
     (
         fw_true_graph,
         fw_false_graph,

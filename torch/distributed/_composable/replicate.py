@@ -66,7 +66,7 @@ class _ReplicateState(_State):
             assert self._init_args is not None
             self.init(*self._init_args, **self._init_kwargs)
             self.register_comm_hook()
-            self._init_args = tuple()
+            self._init_args = ()
             self._init_kwargs = {}
 
         _lazy_init()
