@@ -245,12 +245,12 @@ def print_results(experiments: List[Experiment]):
 def main():
     seed = 123
     torch.manual_seed(seed)
-    print('Experiment 1: SDPA experiments')
+    print("Experiment 1: SDPA experiments")
     results_exp1 = []
     for config in tqdm(generate_experiment_configs(ExperimentName.SDPA)):
         results_exp1.append(Experiment(config, run_single_experiment(config)))
     print_results(results_exp1)
-    print('Experiment 2: GQA experiments')
+    print("Experiment 2: GQA experiments")
     results_exp2 = []
     for config in tqdm(generate_experiment_configs(ExperimentName.GQA)):
         results_exp2.append(Experiment(config, run_single_experiment(config)))
