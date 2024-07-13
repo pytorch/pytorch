@@ -4668,9 +4668,7 @@ def _avg_poolnd(
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             divide_factor = functools.reduce(ops.mul, divide_factors)
-            return ops.truediv(
-                fn_sum(idx, x_loader), ops.to_dtype(divide_factor, dtype)
-            )
+            return ops.truediv(fn_sum(idx, x_loader), divide_factor)
 
     rv = Pointwise.create(
         device=x.get_device(),
@@ -4802,9 +4800,9 @@ def avg_pool2d_backward(
                 pw = ops.add(pwstart, ops.constant(pw_, torch.int32))
 
                 if divisor_override is not None:
-                    scale = ops.constant(divisor_override, torch.int32)
+                    scale = divisor_override
                 elif count_include_pad or not had_padding:
-                    scale = ops.constant(kernel_size[0] * kernel_size[1], torch.int32)
+                    scale = kernel_size[0] * kernel_size[1]
                 else:
                     scale = compute_pool_size_without_padding(ph, pw)
 
@@ -4828,7 +4826,7 @@ def avg_pool2d_backward(
                             ),
                         ]
                     ),
-                    ops.to_dtype(scale, dtype),
+                    scale,
                 )
 
                 mask = ops.and_(
@@ -4994,12 +4992,9 @@ def avg_pool3d_backward(
                     )
 
                     if divisor_override is not None:
-                        scale = ops.constant(divisor_override, torch.int32)
+                        scale = divisor_override
                     elif count_include_pad or not had_padding:
-                        scale = ops.constant(
-                            kernel_size[0] * kernel_size[1] * kernel_size[2],
-                            torch.int32,
-                        )
+                        scale = kernel_size[0] * kernel_size[1] * kernel_size[2]
                     else:
                         scale = compute_pool_size_without_padding(pd, ph, pw)
 
@@ -5030,7 +5025,7 @@ def avg_pool3d_backward(
                                 ),
                             ]
                         ),
-                        ops.to_dtype(scale, dtype),
+                        scale,
                     )
 
                     mask = ops.and_(
