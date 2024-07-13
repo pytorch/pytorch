@@ -652,7 +652,11 @@ class Node(_NodeBase):
 
         # Check if an impure function.
         if self.op == "call_function":
-            return self.target in _side_effectful_functions
+            if self.target in _side_effectful_functions:
+                return True
+            if isinstance(self.target, torch._ops.OpOverload) and self.target._schema.is_mutable:
+                return True
+            return False
 
         # Check if an impure module.
         if self.op == "call_module":

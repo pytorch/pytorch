@@ -85,7 +85,7 @@ class SubgraphMatcher:
 
         for node in pattern.nodes:
             if node.op != "output":
-                assert len(node.users) > 0, \
+                assert node.is_impure() or len(node.users) > 0, \
                        "SubgraphMatcher cannot be initialized with an pattern with dead code"
 
         # TODO: assert pattern is a connected graph
