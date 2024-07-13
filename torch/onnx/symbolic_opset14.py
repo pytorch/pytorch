@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+# mypy: disable-error-code=arg-type
 """This file exports ONNX ops for opset 14.
 
 Note [ONNX operators that are added/updated in opset 14]
@@ -23,7 +24,7 @@ from typing import Optional
 import torch
 from torch.onnx import _constants, _type_utils, symbolic_helper
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, jit_utils, registration
+from torch.onnx._internal import jit_utils, registration
 
 __all__ = [
     "hardswish",
@@ -40,19 +41,16 @@ _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=14)
 
 @_onnx_symbolic("aten::hardswish")
 @symbolic_helper.parse_args("v")
-@_beartype.beartype
 def hardswish(g: jit_utils.GraphContext, self):
     return g.op("HardSwish", self)
 
 
 @_onnx_symbolic("aten::tril")
-@_beartype.beartype
 def tril(g: jit_utils.GraphContext, self, diagonal, out=None):
     return g.op("Trilu", self, diagonal, upper_i=0)
 
 
 @_onnx_symbolic("aten::triu")
-@_beartype.beartype
 def triu(g: jit_utils.GraphContext, self, diagonal, out=None):
     return g.op("Trilu", self, diagonal, upper_i=1)
 
@@ -60,7 +58,6 @@ def triu(g: jit_utils.GraphContext, self, diagonal, out=None):
 @_onnx_symbolic("aten::reshape")
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "v")
-@_beartype.beartype
 def reshape(g: jit_utils.GraphContext, self, shape):
     # NOTE: Due to bug in ORT https://github.com/microsoft/onnxruntime/issues/10664
     #       Reshape export cannot utilize the new allowzero attribute introduced in opset 14.
@@ -69,7 +66,6 @@ def reshape(g: jit_utils.GraphContext, self, shape):
 
 @_onnx_symbolic("aten::batch_norm")
 @symbolic_helper.parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
-@_beartype.beartype
 def batch_norm(
     g: jit_utils.GraphContext,
     input,
@@ -124,7 +120,6 @@ def batch_norm(
 
 
 @_onnx_symbolic("quantized::hardswish")
-@_beartype.beartype
 def quantized_hardswish(g: jit_utils.GraphContext, x, op_scale, op_zero_point):
     x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
@@ -139,7 +134,6 @@ def quantized_hardswish(g: jit_utils.GraphContext, x, op_scale, op_zero_point):
 # NOTE: Need op.Trilu
 @_onnx_symbolic("aten::scaled_dot_product_attention")
 @symbolic_helper.parse_args("v", "v", "v", "v", "f", "b", "v")
-@_beartype.beartype
 def scaled_dot_product_attention(
     g: jit_utils.GraphContext,
     query: torch._C.Value,
@@ -212,7 +206,6 @@ def scaled_dot_product_attention(
     return g.op("MatMul", attn_weight, value)
 
 
-@_beartype.beartype
 def _attention_scale(
     g: jit_utils.GraphContext, query: torch._C.Value
 ) -> torch._C.Value:
@@ -249,7 +242,6 @@ def _attention_scale(
     return scale
 
 
-@_beartype.beartype
 def _causal_attention_mask(
     g: jit_utils.GraphContext, query: torch._C.Value, key: torch._C.Value
 ) -> torch._C.Value:
