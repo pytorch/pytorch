@@ -603,6 +603,8 @@ def compile_fx_inner(
         compiled_graph.cudagraph_info = cudagraph_info
         compiled_graph.inputs_to_check = inputs_to_check
         compiled_graph.fx_kwargs = fx_kwargs
+        # TODO: should this be part of fx_kwargs
+        compiled_graph.boxed_forward_device_index = boxed_forward_device_index
         return compiled_graph
 
     if (

@@ -80,6 +80,7 @@ from torch._inductor.cpp_builder import (
 )
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, pick_vec_isa, VecISA
 from torch._inductor.cudagraph_utils import (
+    BoxedDeviceIndex,
     CudagraphCachedInfo,
     log_cudagraph_skip_and_bump_counter,
 )
@@ -796,7 +797,7 @@ def cudagraph_post_compile(
     cached_info = compiled_graph.cudagraph_info
     cudagraph_fail_reasons = cached_info.cudagraph_fail_reasons
     inputs_to_check = compiled_graph.inputs_to_check
-    boxed_forward_device_index = compiled_graph.fx_kwargs["boxed_forward_device_index"]
+    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
 
@@ -1316,6 +1317,7 @@ class CompiledFxGraph:
     cudagraph_info: Optional[CudagraphCachedInfo]
     fx_kwargs: Dict[str, Any]
     inputs_to_check: Sequence[int]
+    boxed_forward_device_index: Optional[BoxedDeviceIndex]
 
     _boxed_call: Optional[bool] = None
     _fx_graph_cache_key: Optional[str] = None
