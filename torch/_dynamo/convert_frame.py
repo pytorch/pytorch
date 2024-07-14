@@ -461,6 +461,7 @@ class ConvertFrameAssert:
             "dynamo",
             "_convert_frame_assert._compile",
             {
+                "compile_id": compile_id,
                 "co_name": code.co_name,
                 "co_filename": code.co_filename,
                 "co_firstlineno": code.co_firstlineno,
