@@ -153,7 +153,6 @@ class SymNode:
         # Purposely don't include the shape_env in the eq.
         return (
             self._expr == other._expr
-            and self.shape_env == other.shape_env
             and self.pytype == other.pytype
             and self._hint == other._hint
             and self.constant == other.constant
@@ -161,9 +160,7 @@ class SymNode:
 
     def _value_hash(self) -> int:
         # Purposely don't include the shape_env in the hash.
-        return hash(
-            (self._expr, self.shape_env, self.pytype, self._hint, self.constant)
-        )
+        return hash((self._expr, self.pytype, self._hint, self.constant))
 
     @property
     def expr(self):
