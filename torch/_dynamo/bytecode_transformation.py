@@ -694,9 +694,28 @@ def _get_instruction_front(instructions: List[Instruction], idx: int):
 
 def devirtualize_jumps(instructions):
     """Fill in args for virtualized jump target after instructions may have moved"""
-    indexof = get_indexof(instructions)
     jumps = set(dis.hasjabs).union(set(dis.hasjrel))
 
+    # check for negative jump args and fix them
+    for inst in instructions:
+        if inst.opcode in jumps:
+            if inst.opcode not in dis.hasjabs:
+                if inst.target.offset < inst.offset:
+                    if sys.version_info < (3, 11):
+                        raise RuntimeError("Got negative jump offset for Python < 3.11")
+                    # forward jumps become backward
+                    if "FORWARD" in inst.opname:
+                        flip_jump_direction(inst)
+                else:
+                    # backward jumps become forward
+                    if sys.version_info >= (3, 11) and "BACKWARD" in inst.opname:
+                        flip_jump_direction(inst)
+
+    # jump instruction size may have changed due to flips
+    update_offsets(instructions)
+    indexof = get_indexof(instructions)
+
+    # compute jump instruction arg
     for inst in instructions:
         if inst.opcode in jumps:
             target = _get_instruction_front(instructions, indexof[inst.target])
@@ -711,18 +730,9 @@ def devirtualize_jumps(instructions):
                     raise RuntimeError("Python 3.11+ should not have absolute jumps")
             else:  # relative jump
                 # byte offset between target and next instruction
-                inst.arg = int(target.offset - inst.offset - instruction_size(inst))
-                if inst.arg < 0:
-                    if sys.version_info < (3, 11):
-                        raise RuntimeError("Got negative jump offset for Python < 3.11")
-                    inst.arg = -inst.arg
-                    # forward jumps become backward
-                    if "FORWARD" in inst.opname:
-                        flip_jump_direction(inst)
-                elif inst.arg > 0:
-                    # backward jumps become forward
-                    if sys.version_info >= (3, 11) and "BACKWARD" in inst.opname:
-                        flip_jump_direction(inst)
+                inst.arg = abs(
+                    int(target.offset - inst.offset - instruction_size(inst))
+                )
                 if sys.version_info >= (3, 10):
                     # see bytecode size comment in the absolute jump case above
                     inst.arg //= 2
