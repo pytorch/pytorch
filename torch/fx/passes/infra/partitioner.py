@@ -18,7 +18,7 @@ logger.setLevel(logging.WARNING)
 class Partition:
     def __init__(self, id: Optional[int] = None, nodes: Optional[Iterable[Node]] = None):
         self.id = id
-        self.nodes = {node: None for node in nodes} if nodes is not None else {}
+        self.nodes = dict.fromkeys(nodes) if nodes is not None else {}
 
     def __repr__(self) -> str:
         return str(self.nodes)
