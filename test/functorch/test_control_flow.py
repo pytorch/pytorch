@@ -555,9 +555,9 @@ def forward(self, x_1):
                 """\
 def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-    add_ = torch.ops.aten.add_.Tensor(clone, 1);  clone = None
-    add__1 = torch.ops.aten.add_.Tensor(add_, -1);  add_ = None
-    sum_1 = torch.ops.aten.sum.default(add__1);  add__1 = None
+    add_ = torch.ops.aten.add_.Tensor(clone, 1)
+    add__1 = torch.ops.aten.add_.Tensor(clone, -1)
+    sum_1 = torch.ops.aten.sum.default(clone);  clone = None
     lt = torch.ops.aten.lt.Scalar(sum_1, 10);  sum_1 = None
     return lt
     """,
@@ -567,9 +567,9 @@ def forward(self, arg0_1):
                 """\
 def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-    add_ = torch.ops.aten.add_.Tensor(clone, 1);  clone = None
-    add__1 = torch.ops.aten.add_.Tensor(add_, -1);  add_ = None
-    add = torch.ops.aten.add.Tensor(add__1, 1);  add__1 = None
+    add_ = torch.ops.aten.add_.Tensor(clone, 1)
+    add__1 = torch.ops.aten.add_.Tensor(clone, -1)
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
     return (add,)
     """,
             )
