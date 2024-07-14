@@ -72,11 +72,10 @@ def set_intersection(set1, set2):
 
 
 def set_union(set1, set2):
-    union_set = set()
-    for s in (set1, set2):
-        for x in s:
-            if x not in union_set:
-                union_set.add(x)
+    union_set = set1.copy()
+    for x in set2:
+        if x not in union_set:
+            union_set.add(x)
     return union_set
 
 
