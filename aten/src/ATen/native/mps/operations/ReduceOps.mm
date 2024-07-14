@@ -1179,19 +1179,27 @@ Tensor std_mps(const Tensor& input_t,
   return std_var_common_impl_mps(input_t, dim, correction, keepdim, STANDARD_DEVIATION);
 }
 
-TORCH_IMPL_FUNC(any_out_mps)
-(const Tensor& input_t, int64_t dim, bool keepdim, const Tensor& output_t) {
+typedef MPSGraphTensor* (^ReductionOpBlock)(MPSGraph*, MPSGraphTensor*, int64_t);
+static void all_any_common_impl_mps(const Tensor& input_t,
+                                    int64_t dim,
+                                    bool keepdim,
+                                    const Tensor& output_t,
+                                    ReductionOpBlock reduction_op,
+                                    const std::string& op_name) {
   using CachedGraph = MPSUnaryCachedGraph;
-
   if (output_t.numel() == 0 || input_t.numel() == 0) {
+    return;
+  }
+  if (input_t.numel() == 1) {
+    output_t.copy_(input_t.view_as(output_t).to(at::kBool));
     return;
   }
 
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "any_out");
+  MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, op_name);
 
   int64_t dim_ = maybe_wrap_dim(dim, input_t.dim());
-  native::zero_numel_check_dims(input_t, dim_, "any()");
+  native::zero_numel_check_dims(input_t, dim_, op_name.c_str());
 
   // Calculate the output shape according to keepdim=True
   // If there is no dim argument, the input shape is flattened
@@ -1204,16 +1212,39 @@ TORCH_IMPL_FUNC(any_out_mps)
   }
 
   @autoreleasepool {
-    string key = string("any_out_mps:") + getTensorsStringKey(input_t) + ":" + std::to_string(dim_);
+    string key = op_name + "_out_mps:" + getTensorsStringKey(input_t) + ":" + std::to_string(dim_);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
+      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
 
-      MPSGraphTensor* castInputTensor =
-          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
-      MPSGraphTensor* castOutputTensor = [mpsGraph reductionOrWithTensor:castInputTensor axis:dim_ name:nil];
-      MPSGraphTensor* outputTensor = castOutputTensor;
-      if (MPSDataTypeBool != [castOutputTensor dataType]) {
-        outputTensor = [mpsGraph castTensor:castOutputTensor toType:MPSDataTypeBool name:@"outputTensor"];
+      auto castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+      // reductionOrWithTensor:axis: will throw an internal assert if number of dimentions is more than 4
+      // See https://github.com/pytorch/pytorch/issues/95538
+      MPSGraphTensor* outputTensor = nil;
+      if (input_t.ndimension() > 4) {
+        auto reduceDimLen = input_t.size(dim_);
+        if (dim_ == 0) {
+          castInputTensor = [mpsGraph reshapeTensor:castInputTensor withShape:@[ @(reduceDimLen), @-1 ] name:nil];
+          outputTensor = reduction_op(mpsGraph, castInputTensor, 0);
+        } else {
+          if (dim_ == input_t.dim() - 1) {
+            castInputTensor = [mpsGraph reshapeTensor:castInputTensor withShape:@[ @-1, @(reduceDimLen) ] name:nil];
+          } else {
+            auto beforeNumel = 1;
+            for (auto i : c10::irange(dim_)) {
+              beforeNumel *= input_t.size(i);
+            }
+            castInputTensor = [mpsGraph reshapeTensor:castInputTensor
+                                            withShape:@[ @(beforeNumel), @(reduceDimLen), @-1 ]
+                                                 name:nil];
+          }
+          outputTensor = reduction_op(mpsGraph, castInputTensor, 1);
+        }
+        outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:apparent_out_shape name:nil];
+      } else {
+        outputTensor = reduction_op(mpsGraph, castInputTensor, dim_);
+      }
+      if (MPSDataTypeBool != [outputTensor dataType]) {
+        outputTensor = castMPSTensor(mpsGraph, outputTensor, MPSDataTypeBool);
       }
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->outputTensor_ = outputTensor;
@@ -1224,6 +1255,19 @@ TORCH_IMPL_FUNC(any_out_mps)
     auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
+}
+
+TORCH_IMPL_FUNC(any_out_mps)
+(const Tensor& input_t, int64_t dim, bool keepdim, const Tensor& output_t) {
+  all_any_common_impl_mps(
+      input_t,
+      dim,
+      keepdim,
+      output_t,
+      ^MPSGraphTensor*(MPSGraph* graph, MPSGraphTensor* tensor, int64_t dim_) {
+        return [graph reductionOrWithTensor:tensor axis:dim_ name:nil];
+      },
+      "any");
 }
 
 TORCH_IMPL_FUNC(any_all_out_mps)(const Tensor& input_t, const Tensor& output_t) {
@@ -1244,14 +1288,17 @@ TORCH_IMPL_FUNC(any_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
   @autoreleasepool {
     string key = string("any_all_out_mps:") + getTensorsStringKey(input_t);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-      MPSGraphTensor* castInputTensor =
-          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
-      MPSGraphTensor* castOutputTensor = [mpsGraph reductionOrWithTensor:castInputTensor axes:nil name:nil];
+      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
+      auto castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+      // reductionOrWithTensor:axes: will throw an internal assert if number of dimentions is more than 4
+      // See https://github.com/pytorch/pytorch/issues/95538
+      if (input_t.dim() > 4) {
+        castInputTensor = [mpsGraph reshapeTensor:castInputTensor withShape:@[ @-1 ] name:nil];
+      }
+      auto outputTensor = [mpsGraph reductionOrWithTensor:castInputTensor axes:nil name:nil];
 
-      MPSGraphTensor* outputTensor = castOutputTensor;
-      if (getMPSDataType(output_t) != [castOutputTensor dataType]) {
-        outputTensor = castMPSTensor(mpsGraph, castOutputTensor, output_t.scalar_type());
+      if (getMPSDataType(output_t) != [outputTensor dataType]) {
+        outputTensor = castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type());
       }
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->outputTensor_ = outputTensor;
@@ -1266,48 +1313,15 @@ TORCH_IMPL_FUNC(any_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
 
 TORCH_IMPL_FUNC(all_out_mps)
 (const Tensor& input_t, int64_t dim, bool keepdim, const Tensor& output_t) {
-  using CachedGraph = MPSUnaryCachedGraph;
-
-  if (output_t.numel() == 0 || input_t.numel() == 0) {
-    return;
-  }
-
-  bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "all_out");
-
-  int64_t dim_ = maybe_wrap_dim(dim, input_t.dim());
-  native::zero_numel_check_dims(input_t, dim_, "all()");
-
-  // Calculate the output shape according to keepdim=True
-  // If there is no dim argument, the input shape is flattened
-  IntArrayRef input_shape = input_t.sizes();
-  int64_t num_input_dims = input_shape.size();
-  NSMutableArray<NSNumber*>* apparent_out_shape = nil;
-  apparent_out_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
-  for (const auto i : c10::irange(num_input_dims)) {
-    apparent_out_shape[i] = dim_ == i ? @1 : [NSNumber numberWithInt:input_shape[i]];
-  }
-
-  @autoreleasepool {
-    string key = string("all_out_mps:") + getTensorsStringKey(input_t) + ":" + std::to_string(dim_);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-      MPSGraphTensor* castInputTensor =
-          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
-      MPSGraphTensor* castOutputTensor = [mpsGraph reductionAndWithTensor:castInputTensor axis:dim_ name:nil];
-      MPSGraphTensor* outputTensor = castOutputTensor;
-      if (MPSDataTypeBool != [castOutputTensor dataType]) {
-        outputTensor = castMPSTensor(mpsGraph, castOutputTensor, MPSDataTypeBool);
-      }
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
-  }
+  all_any_common_impl_mps(
+      input_t,
+      dim,
+      keepdim,
+      output_t,
+      ^MPSGraphTensor*(MPSGraph* graph, MPSGraphTensor* tensor, int64_t dim_) {
+        return [graph reductionAndWithTensor:tensor axis:dim_ name:nil];
+      },
+      "all");
 }
 
 TORCH_IMPL_FUNC(all_all_out_mps)(const Tensor& input_t, const Tensor& output_t) {
@@ -1325,13 +1339,16 @@ TORCH_IMPL_FUNC(all_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
   @autoreleasepool {
     string key = string("all_all_out_mps:") + getTensorsStringKey(input_t);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-      MPSGraphTensor* castInputTensor =
-          castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
-      MPSGraphTensor* castOutputTensor = [mpsGraph reductionAndWithTensor:castInputTensor axes:nil name:nil];
-      MPSGraphTensor* outputTensor = castOutputTensor;
-      if (MPSDataTypeBool != [castOutputTensor dataType]) {
-        outputTensor = castMPSTensor(mpsGraph, castOutputTensor, MPSDataTypeBool);
+      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
+      auto castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
+      // reductionAndWithTensor:axes: will throw an internal assert if number of dimentions is more than 4
+      // See https://github.com/pytorch/pytorch/issues/95538
+      if (input_t.ndimension() > 4) {
+        castInputTensor = [mpsGraph reshapeTensor:castInputTensor withShape:@[ @-1 ] name:nil];
+      }
+      auto outputTensor = [mpsGraph reductionAndWithTensor:castInputTensor axes:nil name:nil];
+      if (MPSDataTypeBool != [outputTensor dataType]) {
+        outputTensor = castMPSTensor(mpsGraph, outputTensor, MPSDataTypeBool);
       }
 
       newCachedGraph->inputTensor_ = inputTensor;
