@@ -12,8 +12,6 @@ import sympy
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from .. import ir
-
-from ..scheduler import SchedulerBuffer
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import V
 
@@ -311,9 +309,7 @@ def rewrite_index_for_function(
     global_buf_name: str,
 ):
     # Local buffer at the inner dimensions
-    sbuffer = V.graph.scheduler.name_to_buf.get(global_buf_name)
-    assert isinstance(sbuffer, SchedulerBuffer)
-    snode = sbuffer.defining_op
+    snode = V.graph.scheduler.name_to_node.get(global_buf_name)
     local_buf = localize_buffer_handler.global_to_local[global_buf_name]
     assert snode is not None
     scheduler_nodes = snode.get_nodes()

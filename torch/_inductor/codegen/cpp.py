@@ -16,7 +16,7 @@ import sympy
 import torch
 import torch.fx
 from torch._inductor import dependencies
-from torch._prims_common import is_float_dtype
+from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -1231,6 +1231,13 @@ class CppVecOverrides(CppOverrides):
         return f"{a} >> {b}"
 
     @staticmethod
+    def remainder(a, b):
+        assert (
+            a.dtype == b.dtype
+        ), "remainder vec implementation expect the same inputs' dtype."
+        return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
+
+    @staticmethod
     def tan(a):
         return f"{a}.tan()"
 
@@ -1333,16 +1340,30 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def floordiv(a, b):
-        # a and b are integer type
-        _t = f"decltype({a})"
-        quot = f"{a} / {b}"
-        has_rem = f"({a} % {b} != {_t}(0))"
-        is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
-        return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
+        if is_float_dtype(a.dtype):
+            assert (
+                a.dtype == b.dtype
+            ), "div_floor_floating_vec implementation expect the same inputs' dtype."
+            return f"at::vec::div_floor_floating_vec({a}, {b})"
+        else:
+            assert all(is_integer_dtype(item.dtype) for item in [a, b])
+            # a and b are integer type
+            _t = f"decltype({a})"
+            if V.kernel._get_raw_num_vectors(b.dtype) < 1:
+                # Doing blend to set the remaining bits of b to non-zero
+                b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
+            quot = f"{a} / {b}"
+            has_rem = f"({a} % {b} != {_t}(0))"
+            is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
+            return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
 
     @staticmethod
     def truncdiv(a, b):
         # a and b are integer type
+        if V.kernel._get_raw_num_vectors(b.dtype) < 1:
+            # Doing blend to set the remaining bits of b to non-zero
+            _t = f"decltype({b})"
+            b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
         return f"{a} / {b}"
 
     @staticmethod
@@ -2167,6 +2188,11 @@ class CppVecKernel(CppKernel):
         )
         assert num_vectors >= 1
         return num_vectors
+
+    def _get_raw_num_vectors(self, dtype: torch.dtype) -> float:
+        # This utility function is used to check if the vector lanes has been
+        # fully utilized. For example, uint8 will only use 1/4 of the vector lanes.
+        return self.tiling_factor * dtype.itemsize * 8 / self.vec_isa.bit_width()
 
     def _get_vec_type(self, dtype: torch.dtype) -> str:
         num_vectors = self._get_num_vectors(dtype)
@@ -3820,7 +3846,7 @@ class CppScheduling(BaseScheduling):
         return (
             not node1.is_template()
             and not node2.is_template()
-            and node1.get_operation_names() & node2.ancestors
+            and node1.get_names() & node2.ancestors
             and not (
                 self._can_fuse_horizontal_impl(node1, node2)
                 and not node1.is_reduction()
@@ -3893,26 +3919,18 @@ class CppScheduling(BaseScheduling):
                 visited_scheduler_nodes: Set[str] = set()
                 for scheduler_node in node.get_nodes():
                     # all users inside same OuterLoopFusedSchedulerNode
-                    if len(scheduler_node.get_outputs()) > 1:
-                        # <TODO> Leslie supports single operator with Multi Outputs after
-                        # https://github.com/pytorch/pytorch/pull/128893
-                        continue
-                    scheduler_buffer = scheduler_node.get_outputs()[0]
                     visited_scheduler_nodes.add(scheduler_node.get_name())
                     if not scheduler_node.is_reduction() and all(
-                        user.node in node.get_nodes() for user in scheduler_buffer.users
+                        user.node in node.get_nodes() for user in scheduler_node.users
                     ):
-                        global_buffer = scheduler_buffer.node
+                        global_buffer = scheduler_node.node
                         assert isinstance(global_buffer, ir.ComputedBuffer)
                         global_buffer_layout = global_buffer.get_layout()
                         size_offset = node.outer_loop_fusion_depth - len(
                             get_call_ranges(scheduler_node)
                         )
 
-                        def is_all_write_read_contiguous(
-                            scheduler_node,
-                            scheduler_buffer,
-                        ):
+                        def is_all_write_read_contiguous(scheduler_node):
                             contiguous_index_expr = 0
                             stride = 1
                             for var, range in reversed(
@@ -3921,7 +3939,7 @@ class CppScheduling(BaseScheduling):
                                 contiguous_index_expr += stride * var
                                 stride *= range
                             write_index_expr = scheduler_node._body.writes_name2expr[
-                                scheduler_buffer.get_name()
+                                scheduler_node.get_name()
                             ]
 
                             def is_contiguous_index(x):
@@ -3930,19 +3948,16 @@ class CppScheduling(BaseScheduling):
                             return is_contiguous_index(write_index_expr) and all(
                                 is_contiguous_index(
                                     user.node._body.reads_name2expr[
-                                        scheduler_buffer.get_name()
+                                        scheduler_node.get_name()
                                     ],
                                 )
-                                for user in scheduler_buffer.users
+                                for user in scheduler_node.users
                             )
 
                         if not (
                             global_buffer_layout.is_contiguous()
                             and not scheduler_node.is_reduction()
-                            and is_all_write_read_contiguous(
-                                scheduler_node,
-                                scheduler_buffer,
-                            )
+                            and is_all_write_read_contiguous(scheduler_node)
                         ):
                             continue
                         # Local Buffer is a view of global buffer
@@ -3958,7 +3973,7 @@ class CppScheduling(BaseScheduling):
                                 if local_buffer_layout == local_buf.layout and all(
                                     all(
                                         user.node.get_name() in visited_scheduler_nodes
-                                        for user in V.graph.scheduler.name_to_buf[
+                                        for user in V.graph.scheduler.name_to_node[
                                             global_buffer.name
                                         ].users
                                     )
@@ -4079,9 +4094,7 @@ class CppScheduling(BaseScheduling):
         _, (_, rnumel) = template_node.group
         assert rnumel == ()
         ctb: ir.CppTemplateBuffer = cast(ir.CppTemplateBuffer, template_node.node)
-        epilogue_ir_nodes: List[Optional[ir.Operation]] = [
-            n.node for n in epilogue_nodes
-        ]
+        epilogue_ir_nodes: List[Optional[ir.Buffer]] = [n.node for n in epilogue_nodes]
         assert all(
             isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
         ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
