@@ -4454,6 +4454,20 @@ class TestNestedTensorSubclass(TestCase):
         ):
             torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
 
+    @onlyCPU
+    def test_nested_tensor_from_jagged_fx_trace(self, device):
+        def fn(x, y):
+            return torch.nested.nested_tensor_from_jagged(x, y)
+
+        def user_unwrapped(x, y):
+            return fn(x, y)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "torch.nested.nested_tensor_from_jagged does not support tracing with fx.symbolic_trace",
+        ):
+            torch.fx.symbolic_trace(user_unwrapped)
+
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("dim", range(5))
     @parametrize(

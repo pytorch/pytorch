@@ -383,6 +383,13 @@ Example::
     >>> torch.equal(c, values[3:5, :])
     True
     """
+    from torch.fx._symbolic_trace import is_fx_tracing
+    if is_fx_tracing():
+        raise RuntimeError(
+            "torch.nested.nested_tensor_from_jagged does not support tracing with fx.symbolic_trace. "
+            "Use fx.wrap to wrap the function that calls nested_tensor_from_jagged."
+        )
+
     if offsets is None:
         if lengths is None:
             raise RuntimeError(
