@@ -262,6 +262,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("out_features", (128, 129))
     @parametrize("bias", (True, False))
     @parametrize(
         "epilogue",
@@ -274,10 +275,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
-    def test_linear_with_transpose(self, bias, epilogue, dtype):
+    def test_linear_with_transpose(self, out_features, bias, epilogue, dtype):
         batch_size = 384
         in_features = 196
-        out_features = 128
 
         class M(torch.nn.Module):
             def __init__(self, bias, epilogue, other):
@@ -302,6 +302,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("out_features", (384, 385))
     @parametrize("bias", (True, False))
     @parametrize(
         "unary",
@@ -317,10 +318,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
-    def test_linear_with_unary_binary(self, bias, unary, binary, dtype):
+    def test_linear_with_unary_binary(self, out_features, bias, unary, binary, dtype):
         batch_size = 384
         in_features = 196
-        out_features = 384
 
         class M(torch.nn.Module):
             def __init__(self, bias, unary, binary, other):
@@ -344,11 +344,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @parametrize("out_features", (1024, 1025))
     @parametrize("bias", (True, False))
-    def test_linear_amx(self, bias):
+    def test_linear_amx(self, out_features, bias):
         batch_size = 1024
         in_features = 1024
-        out_features = 1024
         dtype = torch.bfloat16
 
         class M(torch.nn.Module):

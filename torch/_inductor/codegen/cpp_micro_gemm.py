@@ -257,8 +257,8 @@ class CppMicroGemmRef(CppMicroGemm):
 
 
 def check_fp32_vec_extra(config, m, n, k, alpha, num_threads):
-    # TODO(jgong5): support n % n_block_size != 0
-    return n % config.register_blocking.block_n == 0
+    # TODO: remove me
+    return True
 
 
 @register_micro_gemm(
@@ -444,9 +444,7 @@ inline void {{kernel_name}}_kernel(
 # extra check for CppMicroGemmAMX
 def check_amx_extra(config, m, n, k, alpha, num_threads):
     vnni_size = 4 if config.input_dtype == torch.uint8 else 2
-    return (
-        n % config.register_blocking.block_n == 0 and k % vnni_size == 0 and alpha == 1
-    )
+    return k % vnni_size == 0 and alpha == 1
 
 
 @register_micro_gemm(
