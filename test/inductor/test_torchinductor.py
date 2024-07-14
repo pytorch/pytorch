@@ -979,18 +979,18 @@ class CommonTemplate:
         self.assertTrue(isinstance(op_info, dict))
         self.assertTrue("meta_info" in op_info)
         self.assertTrue(len(op_info["meta_info"]) == 3)
+        # Scalar Tensor
+        self.assertTrue("scalar_value" not in op_info["meta_info"][0])
         self.assertTrue(op_info["meta_info"][0]["sizes"] == [])
         self.assertTrue(op_info["meta_info"][0]["strides"] == [])
         # Scalar Tensor
-        self.assertTrue("scalar_value" not in op_info["meta_info"][0])
+        self.assertTrue("scalar_value" not in op_info["meta_info"][1])
         self.assertTrue(op_info["meta_info"][1]["sizes"] == [])
         self.assertTrue(op_info["meta_info"][1]["strides"] == [])
-        # Scalar Tensor
-        self.assertTrue("scalar_value" not in op_info["meta_info"][1])
-        self.assertTrue(op_info["meta_info"][2]["sizes"] == [])
-        self.assertTrue(op_info["meta_info"][2]["strides"] == [])
         # Scalar
         self.assertTrue("scalar_value" in op_info["meta_info"][2])
+        self.assertTrue("sizes" not in op_info["meta_info"][2])
+        self.assertTrue("strides" not in op_info["meta_info"][2])
 
         with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
             a = torch.randn(128, device=device)
@@ -5153,7 +5153,7 @@ class CommonTemplate:
         def fn(x, y):
             z = y.item()
             torch._check(z // 2 == 3)
-            return x + x.new_zeros(z)
+            return x + x.new_ones(z)
 
         self.common(
             fn,
@@ -11173,7 +11173,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 UniformValueConstantFolder(mod).run()
 
             # there are a couple extra tensors created in `insertable_tensor_check`
-            self.assertTrue(max_live_tensors == 4)
+            self.assertTrue(max_live_tensors == 3)
 
         # See https://github.com/pytorch/pytorch/issues/100348
         def test_inductor_detach_view(self):
@@ -11189,6 +11189,48 @@ if HAS_GPU and not TEST_WITH_ASAN:
             out_ref[0].sum().backward()
             out[0].sum().backward()
             self.assertEqual(inp.grad, inp_ref.grad)
+
+        @requires_gpu()
+        @unittest.skipIf(
+            not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+            "Does not support mem_eff_attention",
+        )
+        def test_sdpa_inference_mode_aot_compile(self):
+            class TestSDPA(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(
+                    self,
+                    q: torch.Tensor,
+                    k: torch.Tensor,
+                    v: torch.Tensor,
+                    attn_mask: torch.Tensor,
+                ):
+                    return torch.nn.functional.scaled_dot_product_attention(
+                        q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False
+                    )
+
+            q = torch.rand([10, 4, 128, 64], device=GPU_TYPE, dtype=torch.bfloat16)
+            k = torch.rand([10, 4, 128, 64], device=GPU_TYPE, dtype=torch.bfloat16)
+            v = torch.rand([10, 4, 128, 64], device=GPU_TYPE, dtype=torch.bfloat16)
+            attn_mask = (
+                torch.rand([10, 4, 128, 128], device=GPU_TYPE, dtype=torch.bfloat16)
+                < 0.9
+            )
+
+            inputs = (q, k, v, attn_mask)
+
+            import torch.export._trace as export_trace
+
+            with torch.inference_mode():
+                traced = export_trace._export_to_torch_ir(
+                    TestSDPA(),
+                    inputs,
+                    disable_constraint_solver=True,
+                    restore_fqn=False,
+                )
+                torch._inductor.aot_compile(traced, inputs)
 
         def test_optimize_indexing_assert(self):
             def has_indirect(code, tl_fn: str):
