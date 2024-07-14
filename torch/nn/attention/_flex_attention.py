@@ -24,6 +24,7 @@ from torch.nn.attention._utils import _validate_sdpa_input
 
 __all__ = ["BlockMask", "flex_attention", "create_block_mask", "create_mask"]
 
+
 def _compose(*fs):
     """Compose a sequence of score_mod functions."""
 
@@ -36,13 +37,9 @@ def _compose(*fs):
     return functools.reduce(compose2, fs)
 
 
-_score_mod_signature = Callable[
-    [Tensor, Tensor, Tensor, Tensor, Tensor], Tensor
-]
+_score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 
-_mask_fn_signature = Callable[
-    [Tensor, Tensor, Tensor, Tensor], Tensor
-]
+_mask_fn_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
 
 
 class ModificationType(Enum):
@@ -89,6 +86,7 @@ def _vmap_for_bhqkv(
     )
     return fn
 
+
 def _identity(
     score: Tensor,
     batch: Tensor,
@@ -122,7 +120,7 @@ class BlockMask:
     entire KV_BLOCK_SIZE x Q_BLOCK_SIZE is sparse. This aligns well with
     hardware, which generally expects to perform contiguous loads and
     computation.
-    
+
     This format is primarily optimized for 1. simplicity, and 2. kernel
     efficiency. Notably, it is *not* optimized for size, as we believe the mask
     is sufficiently small that its size is not a concern.
@@ -227,9 +225,7 @@ class BlockMask:
         return s
 
     def __getitem__(self, index) -> "BlockMask":
-        new_values = [
-            x[index] if isinstance(x, Tensor) else x for x in self.as_tuple()
-        ]
+        new_values = [x[index] if isinstance(x, Tensor) else x for x in self.as_tuple()]
         return BlockMask(*new_values)
 
     @property
