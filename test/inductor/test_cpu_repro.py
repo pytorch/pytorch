@@ -2610,6 +2610,98 @@ class CPUReproTests(TestCase):
             )
             self.assertEqual(code.count("empty_strided_cpu("), 3)
 
+    @config.patch(fx_graph_cache=False)
+    def test_two_local_buffers_in_outer_loop_fusion(self):
+        def fn(x):
+            softmax = torch.nn.functional.softmax(x, dim=-1)
+            sum = torch.sum(softmax, dim=-1)
+            sum_broadcast = torch.broadcast_to(
+                sum.unsqueeze(-1), [*(sum.size()[0:3]), 256]
+            )
+            sum_exp = torch.exp(sum_broadcast)
+            sum2 = torch.sum(sum_exp, dim=-1)
+            sub = sum_exp - sum2.unsqueeze(-1)
+            return x[:, :, :, 0:256] - sub
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                5,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                2,
+            )
+
+    @config.patch(fx_graph_cache=False)
+    def test_share_local_buffers_in_outer_loop_fusion(self):
+        def fn(x):
+            max = torch.nn.functional.softmax(x, dim=-1)
+            max = torch.nn.functional.softmax(max, dim=-1)
+            return x - max
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                5,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                1,  # 2 global bufs share 1 local buf
+            )
+
+    @config.patch(fx_graph_cache=False)
+    def test_two_local_buffers_in_outer_loop_fusion_case2(self):
+        # exp and exp2 should be replaced by local buffer
+        # since exp will be used after exp2, exp2 can't share the same
+        # local buffer as exp
+        def fn(x):
+            a_max = torch.amax(x, -1, keepdim=True)
+            exp = torch.exp(x - a_max)
+            sum = torch.sum(exp, -1, keepdim=True)
+            exp2 = torch.exp(exp - sum)
+            sum2 = torch.sum(exp2, -1, keepdim=True)
+            sub = exp2 - sum2
+            sub2 = exp - sub
+            return sub2
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                4,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                2,
+            )
+
     def test_argmin(self):
         def fn(x):
             return torch.argmin(x, -1)
