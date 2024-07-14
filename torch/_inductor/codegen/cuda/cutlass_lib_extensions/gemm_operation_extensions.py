@@ -79,7 +79,6 @@ if try_import_cutlass():
 
         """
 
-        #
         def instance_template(self):
             return """
         ${compile_guard_start}
@@ -89,7 +88,6 @@ if try_import_cutlass():
         ${compile_guard_end}
         """
 
-        #
         def emit(self, operation):
             tile_shape = operation.tile_description.tile_shape
             warp_count = operation.tile_description.warp_count
@@ -132,7 +130,6 @@ if try_import_cutlass():
                 )
             else:
                 epilogue_functor = str(operation.epilogue_functor)
-            #
 
             values = {
                 "operation_name": operation.procedural_name(),

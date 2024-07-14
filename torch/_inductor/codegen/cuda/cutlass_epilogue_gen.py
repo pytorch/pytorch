@@ -238,7 +238,7 @@ class CutlassEVTEpilogueArgumentFormatter:
             accumulator_node_name (str): The name of the accumulator node which should contain
                                           the Matmul result before fusion according to the IR graph.
         """
-        self.accumulator_node_name: str = accumulator_node_name  #
+        self.accumulator_node_name: str = accumulator_node_name
         self.output: IndentedBuffer = IndentedBuffer(0)  # The output buffer for codegen
         self.var_counter: int = (
             0  # used to generate variable names, incremented for each new variable

@@ -117,6 +117,7 @@ select = [
     "PLR0206", # property with params
     "PLR1722", # use sys exit
     "PLR1736", # unnecessary list index
+    "PLR2044", # no empty comment
     "PLW0129", # assert on string literal
     "PLW0133", # useless exception statement
     "PLW0406", # import self
