@@ -1668,9 +1668,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
                 loss.backward()
                 yield x.grad
 
-        # can bring this down to 2 if we support dynamic shapes
-        # instead of collecting the saved_data's tensor hash
-        self.check_output_and_recompiles(fn, 5)
+        # compiles for 10 (static) and 100 (dynamic)
+        self.check_output_and_recompiles(fn, 2)
 
     def test_autograd_cpp_node_data_dependent(self):
         cpp_source = """
