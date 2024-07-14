@@ -124,7 +124,7 @@ extern "C"
                     {%- set tile_acc = acc %}
                 {%- else %}
                     {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-                    {%- set tile_acc = kernel.slice_nd(acc, [(), ("n_start", "n_end")]) %}
+                    {%- set tile_acc = kernel.slice_nd(acc, [(), ("0", "n_end - n_start")]) %}
                 {%- endif %}
                 {{ kernel.store_output(
                       tile_Y, tile_acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
