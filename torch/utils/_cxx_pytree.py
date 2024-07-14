@@ -24,21 +24,14 @@ from typing import (
     overload,
     Tuple,
     Type,
+    TYPE_CHECKING,
     TypeVar,
     Union,
 )
 from typing_extensions import deprecated
 
 import optree
-from optree import (
-    GetAttrEntry,
-    MappingEntry,
-    NamedTupleEntry,
-    PyTreeAccessor,
-    PyTreeSpec as TreeSpec,
-    SequenceEntry,
-    StructSequenceEntry,
-)
+from optree import PyTreeSpec  # direct import for type annotations
 
 from torch.utils._pytree import (
     GetAttrKey,
@@ -48,6 +41,10 @@ from torch.utils._pytree import (
     MappingKey,
     SequenceKey,
 )
+
+
+if TYPE_CHECKING:
+    from optree import PyTreeAccessor
 
 
 __all__ = [
@@ -93,6 +90,7 @@ R = TypeVar("R")
 
 Context = Any
 PyTree = Any
+TreeSpec = PyTreeSpec
 FlattenFunc = Callable[[PyTree], Tuple[List[Any], Context]]
 UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
 OpTreeUnflattenFunc = Callable[[Context, Iterable[Any]], PyTree]
@@ -929,18 +927,18 @@ class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):
         return optree.treespec_leaf(none_is_leaf=True)  # type: ignore[return-value]
 
 
-def _accessor_to_key_path(accessor: PyTreeAccessor) -> KeyPath:
+def _accessor_to_key_path(accessor: "PyTreeAccessor") -> KeyPath:
     key_path: List[KeyEntry] = []
     for entry in accessor:
-        if isinstance(entry, GetAttrEntry):
+        if isinstance(entry, optree.GetAttrEntry):
             key_path.append(GetAttrKey(entry.name))
-        elif isinstance(entry, StructSequenceEntry):
+        elif isinstance(entry, optree.StructSequenceEntry):
             key_path.append(SequenceKey(entry.index))
-        elif isinstance(entry, NamedTupleEntry):
+        elif isinstance(entry, optree.NamedTupleEntry):
             key_path.append(GetAttrKey(entry.field))
-        elif isinstance(entry, SequenceEntry):
+        elif isinstance(entry, optree.SequenceEntry):
             key_path.append(SequenceKey(entry.index))
-        elif isinstance(entry, MappingEntry):
+        elif isinstance(entry, optree.MappingEntry):
             key_path.append(MappingKey(entry.key))
         else:
             raise ValueError(f"Unsupported accessor entry: {entry}")
