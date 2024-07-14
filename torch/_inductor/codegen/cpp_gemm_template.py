@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, cast, List, Optional, Union
+import contextlib
+from typing import Any, Callable, cast, List, Optional, Set, Union
+from unittest.mock import patch
 
 import torch
 import torch.utils
@@ -9,7 +11,7 @@ from .. import ir, lowering as L
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
-from ..virtualized import V
+from ..virtualized import ops, V
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
 
@@ -28,7 +30,7 @@ GEMM_TEMPLATE = r"""
 {%- endif %}
 
 extern "C"
-{{kernel.def_kernel(inputs=kernel_args, outputs={"Y": Y}, aliases=buffer_aliases)}}
+{{kernel.def_kernel(inputs=kernel_args, outputs={"Y": Y}, aliases=aliases)}}
 {
     {{kernel.maybe_codegen_profile()}}
     constexpr int64_t num_threads = {{num_threads}};
@@ -107,30 +109,17 @@ extern "C"
                 {%- else %}
                 {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
                 {%- endif %}
-                {%- if inp is not none and beta != 0 and x_scale is none %}
-                // For int8, bias should add after convert Y to FP32
-                for (int64_t m = 0; m < m_size; ++m) {
-                    #pragma omp simd
-                    for (int64_t n = 0; n < n_size; ++n) {
-                        {{kernel.index(acc, ["m", "n"])}} = {{beta}} * {{kernel.index(inp, ["m + m_start", "n + n_start"])}};
-                    }
-                }
-                {%- endif %}
                 for (int64_t kc = k_block_start; kc < k_block_end; kc += Kc_blocks) {
                     int64_t k_start = kc * K0;
                     int64_t k_end = std::min((kc + Kc_blocks) * K0, K);
                     {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
                     {%- set tile_W_3d = kernel.slice_nd(W, [("nc", "nc + 1"), ("k_start", "k_end"), ()]) %}
                     {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
-                    {%- if inp is not none and beta != 0 and x_scale is none %}
-                    {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(20, false) }}
-                    {%- else %}
                     if (kc == k_block_start) {
                         {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=False)|indent(24, false) }}
                     } else {
                         {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(24, false) }}
                     }
-                    {%- endif %}
                 }
                 {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
                 {{ kernel.store_output(
@@ -447,7 +436,7 @@ class CppPackedGemmTemplate(CppTemplate):
         template.maybe_append_choice(choices)
         return template
 
-    def render(  # type: ignore[override]
+    def render(  # type: ignore[override,return]
         self,
         kernel: CppTemplateKernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
@@ -486,17 +475,68 @@ class CppPackedGemmTemplate(CppTemplate):
 
         epilogues: List[ir.IRNode] = []
         reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
-        if self.epilogue_creator is not None:
-            gemm_output_name = "GemmOut"
-            gemm_output_buffer = ir.Buffer(gemm_output_name, template_buffer.layout)
-            epilogues.append(
-                ir.ComputedBuffer(
-                    name=template_buffer.get_name(),
-                    layout=template_buffer.layout,
-                    data=self.epilogue_creator(gemm_output_buffer),
+        epilogue_creators: List[Callable[[ir.Buffer], ir.Pointwise]] = []
+        fake_buffers: List[ir.Buffer] = []
+        Y_aliases: Set[str] = set()
+        # TODO(jgong5): for int8 gemm, bias-add is handled outside of gemm template,
+        # but we'd better move it here to align with fp.
+        if inp is not None and self.beta != 0 and not int8_gemm:
+
+            def bias_epilogue(input_buffer: ir.Buffer):
+                dtype = self.layout.dtype
+                bias_loader = inp.make_loader()
+                input_loader = input_buffer.make_loader()
+
+                def bias_add_inner(index):
+                    bias = bias_loader(index)
+                    input = input_loader(index)
+                    if self.beta != 1:
+                        result = ops.constant(self.beta, torch.float) * bias + input
+                    else:
+                        result = bias + input
+                    return result
+
+                return ir.Pointwise(
+                    device=input_buffer.get_device(),
+                    dtype=dtype,
+                    inner_fn=bias_add_inner,
+                    ranges=input_buffer.get_size(),
                 )
-            )
-            reindexers.append(None)
+
+            epilogue_creators.append(bias_epilogue)
+
+        if self.epilogue_creator is not None:
+            epilogue_creators.append(self.epilogue_creator)
+
+        # NOTE [How CPP GEMM template epilogues are organized]
+        #   gemm_output_buffer
+        #     --> zero or more in-template epilogues (created by `epilogue_creators`) -->
+        #   template_buffer
+        #     --> zero or more out-of-template epilogues (`epilogue_nodes`) -->
+        #   Y
+        if epilogue_creators:
+            gemm_output_name = "buf_GemmOut"
+            gemm_output_buffer = ir.Buffer(gemm_output_name, template_buffer.layout)
+            current_input_buffer = gemm_output_buffer
+            for i, creator in enumerate(epilogue_creators):
+                if i == len(epilogue_creators) - 1:
+                    buffer_name = template_buffer.get_name()
+                else:
+                    buffer_name = f"buf_GemmOut_epilogue_{i}"
+                epilogues.append(
+                    ir.ComputedBuffer(
+                        name=buffer_name,
+                        layout=template_buffer.layout,
+                        data=creator(current_input_buffer),
+                    )
+                )
+                fake_buffers.append(current_input_buffer)
+                Y_aliases.add(current_input_buffer.get_name())
+                reindexers.append(None)
+                if i < len(epilogue_creators) - 1:
+                    current_input_buffer = ir.Buffer(
+                        buffer_name, template_buffer.layout
+                    )
 
         Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
         use_local_acc = self.layout.dtype != torch.float or int8_gemm
@@ -505,6 +545,7 @@ class CppPackedGemmTemplate(CppTemplate):
             epilogues.extend(epilogue_nodes)
             assert Y.get_numel() == epilogues[-1].get_numel()
             Y = cast(ir.Buffer, epilogues[-1])
+            Y_aliases.add(template_buffer.get_name())
             if (
                 Y.get_size() == template_buffer.get_size()
                 and Y.get_stride() == template_buffer.get_stride()
@@ -555,9 +596,7 @@ class CppPackedGemmTemplate(CppTemplate):
             inp=inp,
             Y=Y,
             GemmOut=gemm_output_buffer,
-            buffer_aliases=[(gemm_output_buffer, Y)]
-            if gemm_output_buffer is not Y
-            else None,
+            aliases={alias: Y.get_name() for alias in Y_aliases},
             beta=self.beta,
             alpha=self.alpha,
             num_threads=self.num_threads,
@@ -576,4 +615,9 @@ class CppPackedGemmTemplate(CppTemplate):
             w_zp=w_zp,
             acc_buf_dtype=torch.int32 if int8_gemm else torch.float,
         )
-        return self._template_from_string(GEMM_TEMPLATE).render(**options)
+        with contextlib.ExitStack() as stack:
+            for buf in fake_buffers:
+                stack.enter_context(
+                    patch.object(V.graph, "get_dtype", self._fake_get_dtype(buf))
+                )
+            return self._template_from_string(GEMM_TEMPLATE).render(**options)

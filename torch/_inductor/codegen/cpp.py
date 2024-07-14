@@ -3370,11 +3370,14 @@ class CppKernelProxy(CppKernel):
                         fn(vars, ())
 
         scalar_kernel = codegen_kernel(CppKernel)
-        V.graph.removed_buffers |= scalar_kernel.removed_buffers
-        V.graph.inplaced_to_remove |= scalar_kernel.inplaced_to_remove
         self.loop_nest = LoopNestWithSplit.build(scalar_kernel)
 
+        def update_remove_buffers():
+            V.graph.removed_buffers |= scalar_kernel.removed_buffers
+            V.graph.inplaced_to_remove |= scalar_kernel.inplaced_to_remove
+
         if not self.picked_vec_isa:
+            update_remove_buffers()
             return
 
         def select_tiling_indices(tiling_factor):
@@ -3493,6 +3496,8 @@ class CppKernelProxy(CppKernel):
                 )
                 inner_main_loop.set_kernel(tile2d_kernel)
                 inner_tail_loop.set_kernel(vec_kernel)
+
+        update_remove_buffers()
 
     def codegen_loop_bodies(self, loop_bodies, var_sizes_list):
         for body in loop_bodies:
