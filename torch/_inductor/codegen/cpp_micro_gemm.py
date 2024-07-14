@@ -256,51 +256,40 @@ class CppMicroGemmRef(CppMicroGemm):
         return KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(options)
 
 
-def check_fp32_vec_extra(config, m, n, k, alpha, num_threads):
-    # TODO: remove me
-    return True
-
-
 @register_micro_gemm(
     *generate_gemm_config(
         VecAVX512,
         [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
         input_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX512,
         [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
         input_dtype=torch.bfloat16,
         output_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX512,
         [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
         input_dtype=torch.half,
         output_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX2,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX2,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.bfloat16,
         output_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX2,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.half,
         output_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
 )
 class CppMicroGemmFP32Vec(CppMicroGemm):

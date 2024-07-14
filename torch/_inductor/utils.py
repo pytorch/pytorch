@@ -1174,7 +1174,6 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
     )
-    # TODO(jgong5): support n % n_block_size != 0
     return (
         layout.dtype in layout_dtypes
         and micro_gemm is not None
