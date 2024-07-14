@@ -15,6 +15,7 @@ from torch.distributed.tensor.parallel.style import ParallelStyle
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
+_rerun_forward = False
 
 
 def sdpa_handler(
@@ -232,6 +233,11 @@ def _templated_ring_attention(
 
     chunks = []
     logsumexps = []
+    # Without making key and value contiguous(), the lose curve is bad.
+    # TODO(fegin): figure out why this is a requirement since SDPA does not have
+    # this requirement.
+    key = key.contiguous()
+    value = value.contiguous()
     for i in range(size):
         # overlap communication with compute
         if next_kv is not None:
@@ -413,39 +419,43 @@ def _scaled_dot_product_ring_flash_attention_backward(
         )
 
         if is_causal_behavior != _CausalBehavior.SKIP:
-            # we rerun the forwards pass since we don't have a good way to save the
-            # output/logsumexp
-            (
-                output,
-                logsumexp,
-                cum_seq_q,
-                cum_seq_k,
-                max_q,
-                max_k,
-                philox_seed,
-                philox_offset,
-                _,
-            ) = torch.ops.aten._scaled_dot_product_flash_attention(
-                query,
-                key,
-                value,
-                dropout_p=dropout_p,
-                is_causal=is_causal_behavior.value,
-                scale=scale,
-            )
-
-            softmax_lse_corrected = torch.exp(logsumexp - softmax_lse)
-
-            chunk_grad = grad_out * softmax_lse_corrected.conj().unsqueeze(-1).to(
-                grad_out.dtype
-            )
+            if _rerun_forward:
+                # Keep this implementation for verification purpose.
+                # TODO(chienchin): remove this implementation after more E2E
+                # verification.
+                (
+                    output,
+                    logsumexp,
+                    cum_seq_q,
+                    cum_seq_k,
+                    max_q,
+                    max_k,
+                    philox_seed,
+                    philox_offset,
+                    _,
+                ) = torch.ops.aten._scaled_dot_product_flash_attention(
+                    query,
+                    key,
+                    value,
+                    dropout_p=dropout_p,
+                    is_causal=is_causal_behavior.value,
+                    scale=scale,
+                )
+                softmax_lse_corrected = torch.exp(logsumexp - softmax_lse)
+                grad_out_ = grad_out * softmax_lse_corrected.conj().unsqueeze(-1).to(
+                    grad_out.dtype
+                )
+            else:
+                grad_out_ = grad_out
+                logsumexp = softmax_lse
+                output = out
 
             (
                 grad_query,
                 grad_key,
                 grad_value,
             ) = torch.ops.aten._scaled_dot_product_flash_attention_backward(
-                grad_out=chunk_grad,
+                grad_out=grad_out_,
                 query=query,
                 key=key,
                 value=value,
