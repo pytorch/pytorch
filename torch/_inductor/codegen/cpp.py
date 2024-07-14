@@ -7,7 +7,6 @@ import logging
 import math
 import re
 import sys
-from collections import namedtuple
 from copy import copy, deepcopy
 from enum import Enum
 from typing import Any, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
@@ -2055,24 +2054,23 @@ class CppKernel(Kernel):
                 ):
                     # Allocate local buffer
                     local_buffers = V.local_buffer_context.local_buffers
-                    assert len(local_buffers.items()) == 1
-                    local_buffer = next(iter(local_buffers.items()))[1]
-                    # For dynamic size, rename s to ks
-                    local_buf_size = sympy_product(
-                        [
-                            self.rename_indexing(size_val)
-                            for size_val in local_buffer.get_layout().size
-                        ]
-                    )
-                    local_buf_dtype = DTYPE_TO_CPP[local_buffer.get_layout().dtype]
-                    allocate = f"std::make_unique<{local_buf_dtype} []>({cexpr(local_buf_size)})"
-                    code.splice(
-                        f"std::unique_ptr<{local_buf_dtype} []> local_buffer = {allocate};"
-                    )
-                    local_buffer_name = local_buffer.get_name()
-                    code.splice(
-                        f"{local_buf_dtype}* {local_buffer_name} = local_buffer.get();"
-                    )
+                    for local_buffer in local_buffers.values():
+                        # For dynamic size, rename s to ks
+                        local_buf_size = sympy_product(
+                            [
+                                self.rename_indexing(size_val)
+                                for size_val in local_buffer.get_layout().size
+                            ]
+                        )
+                        local_buf_dtype = DTYPE_TO_CPP[local_buffer.get_layout().dtype]
+                        allocate = f"std::make_unique<{local_buf_dtype} []>({cexpr(local_buf_size)})"
+                        local_buffer_name = local_buffer.get_name()
+                        code.splice(
+                            f"std::unique_ptr<{local_buf_dtype} []> buf_{local_buffer_name} = {allocate};"
+                        )
+                        code.splice(
+                            f"{local_buf_dtype}* {local_buffer_name} = buf_{local_buffer_name}.get();"
+                        )
                 gen_loops(loop_nest.root)
             else:
                 gen_kernel(loop_nest.kernel)
@@ -3880,8 +3878,9 @@ class CppScheduling(BaseScheduling):
                 call_ranges = tuple(group) + tuple(reduction_group)
                 return call_ranges
 
-            LocalBuffer = namedtuple("LocalBuffer", ["local_buf", "global_buf"])
-            local_buffers: List[LocalBuffer] = []
+            local_buffers: List[ir.Buffer] = []
+            # Map local buffer name to a list of global buffers
+            local_to_global_buffers: Dict[str, List[ir.Buffer]] = {}
             if all(
                 len(get_call_ranges(_node)) == node.outer_loop_fusion_depth + 1
                 for _node in node.get_outer_nodes()
@@ -3891,8 +3890,10 @@ class CppScheduling(BaseScheduling):
                 # 1115a25c36340554442f28f9570abd42f0aface2/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L159
                 # where the buffer is with size of last dim and contiguous.
                 # Only support this typical case at first.
+                visited_scheduler_nodes: Set[str] = set()
                 for scheduler_node in node.get_nodes():
                     # all users inside same OuterLoopFusedSchedulerNode
+                    visited_scheduler_nodes.add(scheduler_node.get_name())
                     if not scheduler_node.is_reduction() and all(
                         user.node in node.get_nodes() for user in scheduler_node.users
                     ):
@@ -3940,23 +3941,48 @@ class CppScheduling(BaseScheduling):
                             global_buffer_layout.size[size_offset:],
                             global_buffer_layout.stride[size_offset:],
                         )
-                        local_buffers.append(
-                            LocalBuffer(
-                                local_buf=ir.Buffer(
-                                    "local_buffer_data", local_buffer_layout
-                                ),
-                                global_buf=global_buffer,
-                            )
+
+                        def try_share_local_buffer(local_buffer_layout, local_buffers):
+                            for local_buf in local_buffers:
+                                if local_buffer_layout == local_buf.layout and all(
+                                    all(
+                                        user.node.get_name() in visited_scheduler_nodes
+                                        for user in V.graph.scheduler.name_to_node[
+                                            global_buffer.name
+                                        ].users
+                                    )
+                                    for global_buffer in local_to_global_buffers[
+                                        local_buf.name
+                                    ]
+                                    if global_buffer.name is not None
+                                ):
+                                    return local_buf
+                            return None
+
+                        local_buf_prefix = "local_buffer_data"
+                        # Share existing local buffer
+                        local_buffer_used = try_share_local_buffer(
+                            local_buffer_layout, local_buffers
                         )
-                        # At most 1 node with local buf for each OuterLoopFusedSchedulerNode
-                        break
-            assert len(local_buffers) in [0, 1]
+                        if not local_buffer_used:
+                            # Create new local buffer
+                            local_buffer_used = ir.Buffer(
+                                f"{local_buf_prefix}_{len(local_buffers)}",
+                                local_buffer_layout,
+                            )
+                            local_buffers.append(local_buffer_used)
+                            local_to_global_buffers[local_buffer_used.name] = []
+                        local_to_global_buffers[local_buffer_used.name].append(
+                            global_buffer,
+                        )
 
             with LocalBufferContext(kernel_group.args) as scope:
                 if len(local_buffers) > 0:
-                    scope.add_local_buffer(
-                        local_buffers[0].local_buf, local_buffers[0].global_buf
-                    )
+                    for local_buffer in local_buffers:
+                        assert local_buffer.name is not None
+                        scope.add_local_buffer(
+                            local_buffer, local_to_global_buffers[local_buffer.name]
+                        )
                 for _node in node.get_outer_nodes():
                     assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
                     cpp_kernel_proxy = CppKernelProxy(kernel_group)
@@ -3971,7 +3997,7 @@ class CppScheduling(BaseScheduling):
                 metrics.cpp_outer_loop_fused_inner_counts.append(
                     metrics.CppOuterLoopFusedCount(
                         len(cpp_kernel_proxy_list),
-                        local_buffer_number=len(local_buffers),
+                        local_buffer_number=len(scope.local_buffers),
                     )
                 )
                 outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
