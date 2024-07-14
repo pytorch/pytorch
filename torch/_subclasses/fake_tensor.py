@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 
-import copy
 import functools
 import logging
 import math
@@ -48,6 +47,7 @@ from torch._subclasses.meta_utils import (
     MetaConverter,
 )
 from torch._utils import render_call
+from torch.fx.experimental.sym_node import SymNode
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -64,6 +64,8 @@ from torch.utils._traceback import CapturedTraceback
 
 if TYPE_CHECKING:
     from types import TracebackType
+
+    import sympy
 
     from torch._guards import Source
     from torch._ops import OpOverload
@@ -989,6 +991,17 @@ class _DispatchCacheKey:
     def __hash__(self) -> int:
         return self.hashvalue
 
+    def strip_shape_env(self) -> None:
+        # We need to strip the ShapeEnv from any values before we store in the
+        # cache so the cache doesn't keep our ShapeEnvs alive.
+        def strip_shape_env(v: object) -> object:
+            if isinstance(v, _PySymInputStub):
+                return v.strip_shape_env()
+            else:
+                return v
+
+        self.key = tuple(strip_shape_env(v) for v in self.key)
+
 
 @dataclass
 class _PySymInputStub:
@@ -999,7 +1012,20 @@ class _PySymInputStub:
 
     value: PySymType
 
+    def __init__(self, value: PySymType) -> None:
+        # For inputs (values in the `key`) we need to keep the PySymType intact
+        # - this way if we need to reuse it as an output we can properly copy
+        # the original value.
+        self.value = value
+
+    def strip_shape_env(self) -> _PySymInputStub:
+        return _PySymInputStub(type(self.value)(self.value.node.with_shape_env(None)))
+
+    def __str__(self) -> str:
+        return "_PySymInputStub:str"
+
     def __repr__(self) -> str:
+        return "_PySymInputStub:repr"
         return f"_PySymInputStub({self.value!r})"
 
     def __eq__(self, other: object) -> bool:
@@ -1021,21 +1047,47 @@ class _SymIntOutputStub:
     from.
     """
 
-    value: SymInt
     key_path: Optional[int]
+    node: Optional[Tuple[sympy.Expr, type, Optional[int], Optional[int], Optional[int]]]
+
+    def __init__(self, value: SymInt, key_path: Optional[int]) -> None:
+        self.key_path = key_path
+        if key_path is None:
+            node = value.node
+            self.node = (
+                node._expr,
+                node.pytype,
+                node._hint,
+                node.constant,
+                node.fx_node,
+            )
+
+    def extract(self, key: _DispatchCacheKey, shape_env: Optional[ShapeEnv]) -> SymInt:
+        if self.key_path is None:
+            node = self.node
+            assert node is not None
+            node = SymNode(node[0], shape_env, node[1], node[2], node[3], node[4])
+            return SymInt(node)
+        else:
+            src = key.key[self.key_path]
+            assert isinstance(src, _PySymInputStub) and isinstance(src.value, SymInt)
+            return src.value
 
     def __repr__(self) -> str:
-        return f"_SymIntOutputStub({self.value}, {self.key_path})"
+        if self.key_path is not None:
+            return f"_SymIntOutputStub(key_path={self.key_path})"
+        else:
+            node = self.node
+            assert node is not None
+            return (
+                f"_SymIntOutputStub(node=({node[0]}, {node[1]}, {node[2]}, {node[3]}))"
+            )
 
     def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, _SymIntOutputStub)
-            and type(self.value) == type(other.value)
-            and self.value.node._value_eq(other.value.node)
-        )
+        raise NotImplementedError
 
     def __hash__(self) -> int:
-        return self.value.node._value_hash()
+        raise NotImplementedError
 
 
 @dataclass(frozen=True)
@@ -1363,6 +1415,7 @@ class FakeTensorMode(TorchDispatchMode):
                 self._validate_cache_key(func, args, kwargs)
                 output = self._dispatch_impl(func, types, args, kwargs)
                 entry = self._make_cache_entry(state, key, func, args, kwargs, output)
+                key.strip_shape_env()
                 cache[key] = entry
                 FakeTensorMode.cache_misses += 1
         except _BypassDispatchCache as e:
@@ -1618,17 +1671,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         def check_value(value: _MetadataIntLike) -> Union[IntLikeType]:
             if isinstance(value, _SymIntOutputStub):
-                if value.key_path is None:
-                    # It's important for this to not return the cached SymNode -
-                    # so that observers won't see a shared node.
-                    res = value.value
-                    return type(res)(copy.copy(res.node))
-                else:
-                    src = key.key[value.key_path]
-                    assert isinstance(src, _PySymInputStub) and isinstance(
-                        src.value, SymInt
-                    )
-                    return src.value
+                return value.extract(key, self.shape_env)
             else:
                 assert not isinstance(value, _PySymInputStub)
                 return value

@@ -124,7 +124,7 @@ class SymNode:
                 "Cannot create SymNode of type "
                 f"{pytype} with incompatible hint of type {type(hint)}"
             )
-            if self.shape_env._translation_validation_enabled:
+            if self.shape_env and self.shape_env._translation_validation_enabled:
                 # This is technically not TV, but this assert is expensive so
                 # let's only do it when we're already doing expensive things
                 computed_hint = compute_hint()
@@ -139,9 +139,10 @@ class SymNode:
         # Record the FX node of the current node if we are doing translation
         # validation. They will be used for building the input assertions for
         # the translation validation problem.
-        self.fx_node = (
-            fx_node if self.shape_env._translation_validation_enabled else None
+        tx_validation_en = (
+            self.shape_env and self.shape_env._translation_validation_enabled
         )
+        self.fx_node = tx_validation_en and fx_node
 
     def with_shape_env(self, shape_env: ShapeEnv) -> SymNode:
         return SymNode(
@@ -149,14 +150,20 @@ class SymNode:
         )
 
     def _value_eq(self, other: SymNode) -> bool:
+        # Purposely don't include the shape_env in the eq.
         return (
             self._expr == other._expr
             and self.shape_env == other.shape_env
             and self.pytype == other.pytype
+            and self._hint == other._hint
+            and self.constant == other.constant
         )
 
     def _value_hash(self) -> int:
-        return hash((self._expr, self.shape_env, self.pytype))
+        # Purposely don't include the shape_env in the hash.
+        return hash(
+            (self._expr, self.shape_env, self.pytype, self._hint, self.constant)
+        )
 
     @property
     def expr(self):
@@ -258,6 +265,21 @@ class SymNode:
         return self.str()
 
     def __repr__(self):
+        shape_env = self.shape_env
+        expr = self.expr if shape_env else self._expr
+        rep = [
+            f"SymNode({expr}, shape_env={shape_env}, pytype={self.pytype}",
+        ]
+        if self._hint is not None:
+            rep.append(f"hint={self._hint}")
+        if self.constant is not None:
+            rep.append(f"constant={self.constant}")
+        if self.fx_node is not None:
+            rep.append(f"fx_node={self.fx_node}")
+        return ", ".join(rep) + ")"
+
+    def _graph_repr(self) -> builtins.str:
+        # Representation used by GraphModule to create a pythonic version of a graph
         return self.str()
 
     # These methods call the metaprogrammed methods, they're hand written
