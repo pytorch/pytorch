@@ -428,6 +428,7 @@ class TensorVariable(VariableTracker):
         if _input_associated_real_value is None:
             raise NotImplementedError
 
+        install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
         id_value = id(_input_associated_real_value)
         return ConstantVariable.create(id_value)
 
