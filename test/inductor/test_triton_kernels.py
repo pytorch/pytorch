@@ -48,7 +48,6 @@ if HAS_GPU:
 
 class KernelTests(torch._inductor.test_case.TestCase):
     @requires_gpu
-    @common_utils.parametrize("dynamic", [False, True])
     def test_triton_kernel_with_kernel_param(self):
         @triton.jit
         def pass_kernel(kernel):
