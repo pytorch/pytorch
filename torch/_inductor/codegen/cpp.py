@@ -2770,9 +2770,23 @@ class CppTile2DKernel(CppVecKernel):
 
     overrides = CppTile2DOverrides  # type: ignore[assignment]
 
-    def __init__(self, args, num_threads, tiling_factor, tiling_indices, tiling_dtype, inner_tail_size=None, outer_tail_size=None):
+    def __init__(
+        self,
+        args,
+        num_threads,
+        tiling_factor,
+        tiling_indices,
+        tiling_dtype,
+        inner_tail_size=None,
+        outer_tail_size=None,
+    ):
         super().__init__(
-            args, num_threads, tiling_factor, tiling_indices[1], tiling_dtype, inner_tail_size
+            args,
+            num_threads,
+            tiling_factor,
+            tiling_indices[1],
+            tiling_dtype,
+            inner_tail_size,
         )
         self.tiling_indices = tiling_indices
         self.outer_num_elems = outer_tail_size if outer_tail_size else tiling_factor
@@ -3633,9 +3647,15 @@ class CppKernelProxy(CppKernel):
                 )
                 inner_main_loop.set_kernel(tile2d_kernel)
                 if could_masked_vec:
-                    inner_tail_loop.steps = inner_tail_loop.size - inner_tail_loop.offset
+                    inner_tail_loop.steps = (
+                        inner_tail_loop.size - inner_tail_loop.offset
+                    )
                     masked_tile2d_kernel1 = codegen_kernel(
-                        CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype, inner_tail_loop.steps
+                        CppTile2DKernel,
+                        tiling_factors[0],
+                        tiling_indices,
+                        vec_dtype,
+                        inner_tail_loop.steps,
                     )
                     inner_tail_loop.set_kernel(masked_tile2d_kernel1)
                 else:
@@ -3645,7 +3665,9 @@ class CppKernelProxy(CppKernel):
                     inner_tail_loop.set_kernel(vec_kernel)
 
                 if could_masked_vec:
-                    outer_tail_loop.steps = outer_tail_loop.size - outer_tail_loop.offset
+                    outer_tail_loop.steps = (
+                        outer_tail_loop.size - outer_tail_loop.offset
+                    )
                     (
                         inner_main_loop_for_outer_tail_loop,
                         inner_tail_loop_for_outer_tail_loop,
@@ -3653,14 +3675,31 @@ class CppKernelProxy(CppKernel):
                         tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                     )
                     masked_tile2d_kernel2 = codegen_kernel(
-                        CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype, None, outer_tail_loop.steps
+                        CppTile2DKernel,
+                        tiling_factors[0],
+                        tiling_indices,
+                        vec_dtype,
+                        None,
+                        outer_tail_loop.steps,
                     )
-                    inner_main_loop_for_outer_tail_loop.set_kernel(masked_tile2d_kernel2)
-                    inner_tail_loop_for_outer_tail_loop.steps = inner_tail_loop_for_outer_tail_loop.size - inner_tail_loop_for_outer_tail_loop.offset
+                    inner_main_loop_for_outer_tail_loop.set_kernel(
+                        masked_tile2d_kernel2
+                    )
+                    inner_tail_loop_for_outer_tail_loop.steps = (
+                        inner_tail_loop_for_outer_tail_loop.size
+                        - inner_tail_loop_for_outer_tail_loop.offset
+                    )
                     masked_tile2d_kernel3 = codegen_kernel(
-                        CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype, inner_tail_loop_for_outer_tail_loop.steps, outer_tail_loop.steps
+                        CppTile2DKernel,
+                        tiling_factors[0],
+                        tiling_indices,
+                        vec_dtype,
+                        inner_tail_loop_for_outer_tail_loop.steps,
+                        outer_tail_loop.steps,
                     )
-                    inner_tail_loop_for_outer_tail_loop.set_kernel(masked_tile2d_kernel3)
+                    inner_tail_loop_for_outer_tail_loop.set_kernel(
+                        masked_tile2d_kernel3
+                    )
                 else:
                     outer_tail_loop.set_kernel(scalar_kernel)
 
