@@ -1200,7 +1200,7 @@ SeqNr|OrigAten|SrcFn
             return torch.nn.functional.relu(x)
 
         with self.assertLogs(logger_name, level="INFO") as captured:
-            relu(torch.rand([3, 3], device="cuda", requires_grad=True)).sum().backward()
+            relu(torch.rand([3, 3], requires_grad=True)).sum().backward()
 
         # le is a donated buffer from relu
         FileCheck().check("bw_donated_idxs=[0]").run("\n".join(captured.output))
@@ -1257,7 +1257,7 @@ SeqNr|OrigAten|SrcFn
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.param = torch.nn.Parameter(torch.zeros([2, 2], device="cuda"))
+                self.param = torch.nn.Parameter(torch.zeros([2, 2]))
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return torch.nn.functional.relu(x) + self.param
@@ -1265,17 +1265,18 @@ SeqNr|OrigAten|SrcFn
         mod = Mod()
         mod = torch.compile(mod)
 
-        inp = torch.ones([2, 2], device="cuda", requires_grad=True)
+        inp = torch.ones([2, 2], requires_grad=True)
 
         with self.assertLogs(logger_name, level="INFO") as captured:
             mod(inp).sum().backward()
 
         # Forward graph:
-        #    def forward(self, primals_1: "f32[2, 2][2, 1]cuda:0", primals_2: "f32[2, 2][2, 1]cuda:0"):
-        #        relu: "f32[2, 2][2, 1]cuda:0" = torch.ops.aten.relu.default(primals_2);  primals_2 = None
-        #        add: "f32[2, 2][2, 1]cuda:0" = torch.ops.aten.add.Tensor(relu, primals_1);  primals_1 = None
-        #        le: "b8[2, 2][2, 1]cuda:0" = torch.ops.aten.le.Scalar(relu, 0);  relu = None
-        #        return [add, le]
+        #   %primals_1 : [num_users=1] = placeholder[target=primals_1]
+        #   %primals_2 : [num_users=1] = placeholder[target=primals_2]
+        #   %relu : [num_users=2] = call_function[target=torch.ops.aten.relu.default](args = (%primals_2,), kwargs = {})
+        #   %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%relu, %primals_1), kwargs = {})
+        #   %le : [num_users=1] = call_function[target=torch.ops.aten.le.Scalar](args = (%relu, 0), kwargs = {})
+        #   return [add, le]
         #
         # `le` is a donated buffer
         FileCheck().check("bw_donated_idxs=[0]").run("\n".join(captured.output))
@@ -1291,21 +1292,22 @@ SeqNr|OrigAten|SrcFn
             return torch.mm(y, x) + z
 
         inp = [
-            torch.rand([3, 2], device="cuda", requires_grad=True),
-            torch.rand([2, 2], device="cuda", requires_grad=True),
+            torch.rand([3, 2], requires_grad=True),
+            torch.rand([2, 2], requires_grad=True),
         ]
 
         with self.assertLogs(logger_name, level="INFO") as captured:
             f(*inp).sum().backward()
 
         # Forward graph:
-        # def forward(self, primals_1: "f32[3, 2][2, 1]cuda:0", primals_2: "f32[2, 2][2, 1]cuda:0"):
-        #     view: "f32[2, 3][3, 1]cuda:0" = torch.ops.aten.view.default(primals_1, [2, 3])
-        #     relu: "f32[2, 2][2, 1]cuda:0" = torch.ops.aten.relu.default(primals_2);  primals_2 = None
-        #     mm: "f32[2, 2][2, 1]cuda:0" = torch.ops.aten.mm.default(view, primals_1);  view = None
-        #     add: "f32[2, 2][2, 1]cuda:0" = torch.ops.aten.add.Tensor(mm, relu);  mm = None
-        #     le: "b8[2, 2][2, 1]cuda:0" = torch.ops.aten.le.Scalar(relu, 0);  relu = None
-        #     return [add, primals_1, le]
+        #   %primals_1 : [num_users=3] = placeholder[target=primals_1]
+        #   %primals_2 : [num_users=1] = placeholder[target=primals_2]
+        #   %view : [num_users=1] = call_function[target=torch.ops.aten.view.default](args = (%primals_1, [2, 3]), kwargs = {})
+        #   %relu : [num_users=2] = call_function[target=torch.ops.aten.relu.default](args = (%primals_2,), kwargs = {})
+        #   %mm : [num_users=1] = call_function[target=torch.ops.aten.mm.default](args = (%view, %primals_1), kwargs = {})
+        #   %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mm, %relu), kwargs = {})
+        #   %le : [num_users=1] = call_function[target=torch.ops.aten.le.Scalar](args = (%relu, 0), kwargs = {})
+        #   return [add, primals_1, le]
         #
         # `le` is a donated buffer but primals_1 is not.
         FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
