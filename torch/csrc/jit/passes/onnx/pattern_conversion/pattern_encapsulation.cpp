@@ -84,7 +84,7 @@ std::optional<Node*> EncapsulatePatternIntoSubblock(Node* n) {
       return EncapsulateInplaceIndexPutForONNX(n);
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 } // namespace jit

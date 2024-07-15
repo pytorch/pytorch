@@ -256,7 +256,6 @@ class PythonArgument:
         if self.default is not None:
             default = {
                 "nullptr": "None",
-                "c10::nullopt": "None",
                 "::std::nullopt": "None",
                 "std::nullopt": "None",
                 "{}": "None",
@@ -305,7 +304,6 @@ class PythonArgument:
             else:
                 default = {
                     "nullptr": "None",
-                    "c10::nullopt": "None",
                     "::std::nullopt": "None",
                     "std::nullopt": "None",
                     "{}": "None",
@@ -1250,7 +1248,7 @@ def cpp_dispatch_exprs(
 ) -> tuple[str, ...]:
     cpp_args: Sequence[Binding] = _cpp_signature(f, method=False).arguments()
 
-    exprs: tuple[str, ...] = tuple()
+    exprs: tuple[str, ...] = ()
     if not isinstance(python_signature, PythonSignatureDeprecated):
         # By default the exprs are consistent with the C++ signature.
         exprs = tuple(a.name for a in cpp_args)
@@ -1340,7 +1338,6 @@ def arg_parser_unpack_method(
         elif not has_default_init and default in (
             None,
             "None",
-            "c10::nullopt",
             "::std::nullopt",
             "std::nullopt",
         ):
