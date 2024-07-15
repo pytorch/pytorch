@@ -1856,7 +1856,7 @@ def aoti_compile_with_persistent_cache(
                 metadata["sizes"] = list(input.size())
                 metadata["strides"] = list(input.stride())
                 metadata["requires_grad"] = input.requires_grad
-                metadata["dispatch_key_set"] = torch._C._dispatch_keys(input).raw_repr()
+                metadata["dispatch_key_set"] = torch._C._dispatch_keys(input).raw_repr()  # type: ignore[attr-defined]
                 return metadata
 
             def extract_scalar_metadata(
