@@ -485,35 +485,33 @@ class Work(_Work):
         return True
 
 
-# NOTE [low-contention collectives]
-# When a collective is overlapped with abundant compute, it makes sense to
-# prioritize reducing the contention between the collective and the overlapped
-# compute, even at the cost of a slightly slower collective.
-#
-# Common collective implementations (e.g., NCCL without user buffer
-# registration) optimize for throughput with no ambient compute. However, such
-# implementations may not be optimal when they are overlapped with compute:
-# - These impls typically fuse the entire collective into a single kernel and
-# reserve SM resources based on the most demanding portion of the collective,
-# even when a large portion of the collective does not require this much
-# resource.
-# - These implementations typically fuse the entire collective into a single
-# kernel and reserve SM resources based on the most demanding portion of the
-# collective, even when a large portion of the collective does not require this
-# much resource.
-# - These implementations often use SM-based P2P copy as opposed to copy
-# engine-based P2P copy. Copy engine-based P2P copy may not have a significant
-# advantage when there's no ambient compute. However, it may significantly
-# improve overall resource utilization in the presence of ambient compute.
-#
-# When overlapped with intensive compute (e.g., persistent matmul kernels), the
-# SM-usage of a collective can lead to inefficient overlapping.
-#
-# Low-contention collectives achieve their goals with the following strategies:
-# - Use copy engine-based copy whenever possible.
-# - Break down portions of a collective with different resource requirements
-# into multiple kernels. This improves the overlapping efficiency at the cost
-# of additional launching overhead.
+"""
+NOTE [low-contention collectives]
+When a collective is overlapped with abundant compute, it makes sense to
+prioritize reducing the contention between the collective and the overlapped
+compute, even at the cost of a slightly slower collective.
+
+Common collective implementations (e.g., NCCL without user buffer
+registration) optimize for throughput with no ambient compute. However, such
+implementations may not be optimal when they are overlapped with compute:
+- These implementations typically fuse the entire collective into a single
+kernel and reserve SM resources based on the most demanding portion of the
+collective, even when a large portion of the collective does not require this
+much resource.
+- These implementations often use SM-based P2P copy as opposed to copy
+engine-based P2P copy. Copy engine-based P2P copy may not have a significant
+advantage when there's no ambient compute. However, it may significantly
+improve overall resource utilization in the presence of ambient compute.
+
+When overlapped with intensive compute (e.g., persistent matmul kernels), the
+SM-usage of a collective can lead to inefficient overlapping.
+
+Low-contention collectives achieve their goals with the following strategies:
+- Use copy engine-based copy whenever possible.
+- Break down portions of a collective with different resource requirements
+into multiple kernels. This improves the overlapping efficiency at the cost
+of additional launching overhead.
+"""
 @torch.library.impl(lib, "_low_contention_all_gather", "Meta")
 def _low_contention_all_gather_meta(
     tensor: torch.Tensor,
