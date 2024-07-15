@@ -58,6 +58,10 @@ linear_pointwise_ops = [
 
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
+    aten.__lshift__.Scalar,
+    aten.__lshift__.Tensor,
+    aten.__ilshift__.Scalar,
+    aten.__ilshift__.Tensor,
     aten._conj.default,
     aten.abs.default,
     aten.abs.out,
