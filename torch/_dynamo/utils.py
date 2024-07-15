@@ -1410,6 +1410,10 @@ def same(
                 log_error("Accuracy failed for key name %s", k)
                 return False
         return True
+    elif isinstance(ref, set):
+        assert isinstance(res, set)
+        assert set(ref) == set(res), f"elements mismatch {set(ref)} == {set(res)}"
+        return True
     elif isinstance(ref, (torch.Tensor, float)):
         assert not isinstance(ref, torch._subclasses.FakeTensor)
         assert not isinstance(res, torch._subclasses.FakeTensor)
