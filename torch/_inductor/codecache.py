@@ -1087,6 +1087,15 @@ class FxGraphCache:
         compiled_graph: CompiledFxGraph,
         example_inputs: List[torch.Tensor],
     ):
+        """
+        Run a set of post processing steps after loading from the cache. These involve:
+         - Setting the tracing context output strides
+         - Running cudagraphs if enabled
+         - Realigning inputs
+
+        This runs whether or not we have a cache hit, and always runs directly after we get a CompiledFxGraph.
+        The results of this function are *not* saved in the cache itself.
+        """
         set_tracing_context_output_strides(example_inputs, compiled_graph)
         cudagraphs = compiled_graph.fx_kwargs["cudagraphs"]
         if cudagraphs:

@@ -78,7 +78,6 @@ from .utils import (
     maybe_get_suppress_shape_guards_ctx,
     output_node,
     remove_unaligned_input_idxs,
-    set_tracing_context_output_strides,
     shape_env_from_inputs,
 )
 from .virtualized import V
@@ -530,6 +529,10 @@ def compile_fx_inner(
         inputs_to_check,
         fx_kwargs,
     ):
+        """
+        This function calls fx_codegen_and_compile and also adds some extra metadata to the resulting
+        compiled fx graph. The metadata is saved to FXGraphCache.
+        """
         compiled_graph = fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
         if isinstance(compiled_graph, str):
             # No need to do any postprocessing if we return a string
@@ -632,7 +635,9 @@ def compile_fx_inner(
             gm, example_inputs, inputs_to_check, graph_kwargs  # type: ignore[arg-type]
         )
         if aot_mode:
-            set_tracing_context_output_strides(example_inputs, compiled_graph)
+            # AOT mode is special because codegen_and_compile returns a string.
+            # In that case, we don't need to run all post compilation steps, we just need
+            # to return the string directly.
             return compiled_graph
         compiled_graph = FxGraphCache.post_compile(compiled_graph, example_inputs)
 
