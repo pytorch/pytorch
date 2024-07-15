@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs, disable-error-code="attr-defined, valid-type"
+import copy
+from dataclasses import asdict, dataclass
 import logging
 import random
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import sympy
 
@@ -47,28 +49,29 @@ class CKGemmTemplate(CKTemplate):
         constexpr auto M = {{M}};
         constexpr auto N = {{N}};
         constexpr auto K = {{K}};
-        constexpr auto StrideA = std::is_same_v<{{a_layout}}, Row> ? K : M;
-        constexpr auto StrideB = std::is_same_v<{{b_layout}}, Row> ? N : K;
-        constexpr auto StrideC = std::is_same_v<{{c_layout}}, Row> ? N : M;
-        constexpr auto KBatch = 1; // split k into batches
+        constexpr auto StrideA = {{a_stride}};
+        constexpr auto StrideB = {{b_stride}};
+        constexpr auto StrideC = {{c_stride}};
+        constexpr auto StrideD = {{d_stride}};
 
         auto argument = gemm.MakeArgument(
             reinterpret_cast<const {{a_element_dtype}}*>(X),
             reinterpret_cast<const {{b_element_dtype}}*>(W),
+            std::array<const void*, {{1 if has_bias else 0}}>{ {{'Bias' if has_bias else ''}} },
             reinterpret_cast<{{c_element_dtype}}*>(Y),
             M,
             N,
             K,
             StrideA,
             StrideB,
-            StrideC,
-            KBatch,
-            {{a_elementwise_op}} {},
-            {{b_elementwise_op}} {},
-            {{c_elementwise_op}} {}
+            std::array<ck::index_t, {{1 if has_bias else 0}}>{ {{'StrideD' if has_bias else ''}} },
+            StrideC, // == StrideE
+            PassThrough {}, // a_elementwise_op
+            PassThrough {}, // b_elementwise_op
+            {{epilogue}} // c_elementwise_op
         );
         if (!gemm.IsSupportedArgument(argument)) {
-            // we do our best to statically avoid this case in `CKGemmTemplate.filter_op`
+            // we do our best to statically avoid this case in `filter_op`
             std::cerr << "invalid argument for gemm instance " << gemm.GetTypeString() << std::endl;
             argument.Print();
             return -23;
@@ -108,7 +111,7 @@ class CKGemmTemplate(CKTemplate):
             """
                 // CK GEMM header(s)
 
-                #include "ck/tensor_operation/gpu/device/impl/device_gemm_xdl_cshuffle_v3.hpp"
+                #include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle_v3.hpp"
             """
         )
         return res
@@ -127,6 +130,24 @@ class CKGemmTemplate(CKTemplate):
                 using BlockGemmPipelineVersion = ck::BlockGemmPipelineVersion;
             """
         )
+        if 3 == len(self.input_nodes):
+            # inputs contain bias; add epilogue op definition
+            res.splice(
+                """
+                struct ScaledAdd {
+                    ScaledAdd(F32 alpha, F32 beta) : alpha(alpha), beta(beta) {}
+
+                    template <typename E, typename C, typename D>
+                    __host__ __device__ constexpr void
+                    operator()(E& e, const C& c, const D& d) const {
+                        e = ck::type_convert<E>(alpha * ck::type_convert<F32>(c) + beta * ck::type_convert<F32>(d));
+                    }
+
+                    F32 alpha;
+                    F32 beta;
+                }; // ScaledAdd
+                """
+            )
         return res
 
     def filter_op(self, op: "CKGemmOperation"):
@@ -138,9 +159,12 @@ class CKGemmTemplate(CKTemplate):
 
         Returns None if the op is not suitable, otherwise returns the op to be used.
         """
-        X_meta, W_meta, Y_meta = (
+        metas = [
             T.get_layout() for T in [*self.input_nodes, self.output_node]
-        )
+        ]
+        X_meta = metas[0]
+        W_meta = metas[1]
+        Y_meta = metas[-1]
         # disable the instance if dtypes don't match
         if op.a_element_dtype != self._TORCH_DTYPE_TO_CK[X_meta.dtype]:
             return None
@@ -221,7 +245,7 @@ class CKGemmTemplate(CKTemplate):
         template_definition = r"""
     // Gemm operator {{operation_name}}
     using Operation_{{operation_name}} =
-        ck::tensor_operation::device::DeviceGemm_Xdl_CShuffleV3<
+        ck::tensor_operation::device::DeviceGemmMultiD_Xdl_CShuffle_V3<
             {{template_params}}>;
 
 """
@@ -232,9 +256,14 @@ class CKGemmTemplate(CKTemplate):
         template_params = []
         for field_name, field_value in op.dict_items():
             if isinstance(field_value, tuple):
-                template_params.append(
-                    f"/* {field_name} */ S<{', '.join(map(str, iter(field_value)))}>"
-                )
+                if "ds" in field_name:  # element type and layout for bias
+                    template_params.append(
+                        f"/* {field_name} */ Tuple<{', '.join(map(str, iter(field_value)))}>"
+                    )
+                else:  # tile shape
+                    template_params.append(
+                        f"/* {field_name} */ S<{', '.join(map(str, iter(field_value)))}>"
+                    )
             else:
                 if field_value is not None:
                     template_params.append(f"/* {field_name} */ {field_value}")
@@ -252,10 +281,20 @@ class CKGemmTemplate(CKTemplate):
         template_buffer_node = kwargs.get("template_buffer_node", None)
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
-        instance_definition, instance_type = self.emit_ck_instance(op)
         X, W = self.input_nodes[0], self.input_nodes[1]
         Y = self.output_node
-        Bias = None  # TBD support gemm_bias
+        Bias = self.input_nodes[2] if 3 == len(self.input_nodes) else None
+
+        op = copy.deepcopy(op)
+
+        if Bias:
+            op.ds_layouts = (torch_layout_to_ck_layout(Bias.get_layout()),)
+            op.ds_element_dtypes = ((self._TORCH_DTYPE_TO_CK[Bias.get_layout().dtype]),)
+            op.c_elementwise_op = "ScaledAdd"
+
+        op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,) * (2 if Bias else 1)
+
+        instance_definition, instance_type = self.emit_ck_instance(op)
 
         version_comment = rf"""/**
 * Generated code for CK inductor backend
@@ -283,16 +322,19 @@ class CKGemmTemplate(CKTemplate):
             M=kernel.size(X, -2),
             K=kernel.size(X, -1),
             N=kernel.size(W, -1),
-            a_elementwise_op=op.a_elementwise_op,
-            b_elementwise_op=op.b_elementwise_op,
-            c_elementwise_op=op.c_elementwise_op,
             a_element_dtype=op.a_element_dtype,
             b_element_dtype=op.b_element_dtype,
             c_element_dtype=op.c_element_dtype,
-            a_layout=op.a_layout,
-            b_layout=op.b_layout,
-            c_layout=op.c_layout,
-            null_checks="".join(kernel.check_not_null(node) for node in (X, W, Y)),
+            bias_element_dtype=op.ds_element_dtypes[0] if Bias else '',
+            a_stride=kernel.contiguous_stride(X),
+            b_stride=kernel.contiguous_stride(W),
+            c_stride=kernel.contiguous_stride(Y),
+            d_stride=kernel.contiguous_stride(Bias),
+            alpha=self.alpha,
+            beta=self.beta,
+            epilogue=f"ScaledAdd {{ {self.alpha}, {self.beta} }}" if Bias else "PassThrough {}",
+            has_bias=Bias is not None,
+            null_checks="".join(kernel.check_not_null(node) for node in (X, W, Y) + ((Bias,) if Bias else ())),
             version_comment=version_comment,
         )
 

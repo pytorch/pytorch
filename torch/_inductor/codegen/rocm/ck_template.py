@@ -60,6 +60,9 @@ class CKTemplate(ROCmTemplate):
                 template <ck::index_t... Is>
                 using S = ck::Sequence<Is...>;
 
+                template<typename... Ts>
+                using Tuple = ck::Tuple<Ts...>;
+
                 using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 
                 // see "composable_kernel/include/ck/utility/data_type.hpp"

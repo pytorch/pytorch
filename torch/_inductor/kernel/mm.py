@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional
 
 import torch
 from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
-from torch._inductor.codegen.rocm.ck_addmm_template import CKAddMMTemplate
 from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
@@ -343,7 +342,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             )
 
     if use_ck_template(layout, m, n, k):
-        CKAddMMTemplate.add_ck_gemm_choices(
+        CKGemmTemplate.add_ck_gemm_choices(
             choices,
             layout,
             [mat1, mat2, inp_expanded],

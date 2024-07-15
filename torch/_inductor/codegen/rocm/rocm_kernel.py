@@ -1,6 +1,9 @@
 # mypy: allow-untyped-defs
+import functools
 import logging
 from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
+
+import sympy
 
 from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
 from ...utils import sympy_product
@@ -210,24 +213,21 @@ class ROCmTemplateKernel(ROCmKernel):
         val = sympy_product(sizes)
         return cexpr(self.rename_indexing(val))
 
-    def stride(self, node: IRNode, index: int, default_value: int = 0) -> str:
+    def contiguous_stride(self, node: IRNode, default_value: int = 0) -> str:
         """
-        Hook called from template code to get the stride of an arg.
-        Generates code which represents stride of a given node at index.
-        If node is None, returns default_value.
-
-        TODO: Will add needed args to pass it in if it is dynamic.
+        Hook called from template call to get the contiguous stride of an arg.
         """
-
+        # strides: in torch, stride measures how many positions to advance the data pointer when the dimension index is incremented
+        # in CK, the stride is the size of the contiguous dimension
+        # so depending whether input is regular or transposed,
+        # the CK stride is either in -2 or -1 position of the strides list
+        # the below should do the job for 2D inputs
         if node is None:
             return str(default_value)
 
-        index = _normalize_idx(index, len(node.get_size()))
-        if index < 0:
-            return str(default_value)
+        contiguous_stride = functools.reduce(lambda a, b: max(b, a), node.get_stride(), sympy.Integer(0))
+        return cexpr(self.rename_indexing(contiguous_stride))
 
-        stride = node.get_stride()[index]
-        return cexpr(self.rename_indexing(stride))
 
 class ROCmTemplateCaller(ChoiceCaller):
     """
