@@ -957,10 +957,18 @@ class InstructionTranslatorBase(
         try:
             self.push(self.symbolic_locals[name].unwrap(), name=name)
         except KeyError:
-            if name.startswith("."):
+            if sys.version_info >= (3, 13) and name in self.cell_and_freevars():
+                # 3.13 merged LOAD_CLOSURE into LOAD_FAST
+                # If we fail to LOAD_FAST, then we probably should have done LOAD_CLOSURE.
+                # Closure variable creation is actually done in SET_FUNCTION_ATTRIBUTE,
+                # but we'll do it again here so that we don't need to push a dummy variable.
+                # We shouldn't actually be doing anything with this variable anyway.
+                self.push(self._load_closure(name), name=name)
+            elif name.startswith("."):
                 try:
                     # This happens in dict/list comprehensions
-                    self.push(self.symbolic_locals[name.replace(".", "implicit")])
+                    new_name = name.replace(".", "implicit")
+                    self.push(self.symbolic_locals[new_name], name=new_name)
                 except KeyError:
                     unimplemented("undefined LOAD_FAST (implicit)")
             else:
