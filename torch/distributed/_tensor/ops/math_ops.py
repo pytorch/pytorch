@@ -9,6 +9,7 @@ import torch
 from torch.distributed._tensor._op_schema import (
     OpSchema,
     OpStrategy,
+    PlacementList,
     PlacementStrategy,
     RuntimeSchemaInfo,
     TupleStrategy,
@@ -1024,13 +1025,13 @@ def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
 
     # two outputs (values, indices), 1 input
     # replicate always works
-    all_replicate: List[Placement] = [Replicate()] * 3
+    all_replicate: PlacementList = [Replicate()] * 3
     single_mesh_dim_strategies.append(all_replicate)
 
     # every dim except topk dim should work
     for dim in range(input_strategy.ndim):
         if dim != topk_dim:
-            dim_shardings: List[Placement] = [Shard(dim)] * 3
+            dim_shardings: PlacementList = [Shard(dim)] * 3
             single_mesh_dim_strategies.append(dim_shardings)
     # TODO: topk on sharded dim requries non-trival reduction, address it later
 

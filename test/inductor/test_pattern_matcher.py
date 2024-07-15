@@ -16,6 +16,7 @@ from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
     gen_pattern,
+    is_mutation_op,
     KeywordArg,
     Match,
     PatternMatcherPass,
@@ -1000,9 +1001,7 @@ class TestPatternMatcher(TestCase):
 
     def test_match_with_mutation(self):
         counter = 0
-        test_pass = PatternMatcherPass(
-            prevent_match_across_mutations=True, pass_name="test"
-        )
+        test_pass = PatternMatcherPass(pass_name="test")
 
         @register_graph_pattern(
             CallFunction(
@@ -1159,7 +1158,7 @@ class TestPatternMatcher(TestCase):
 
     def test_match_equivalent_function_invocations1(self):
         counter = 0
-        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+        test_pass = PatternMatcherPass()
 
         args = [
             torch.randn(20, device="cuda"),
@@ -1215,7 +1214,7 @@ class TestPatternMatcher(TestCase):
 
     def test_match_equivalent_function_invocations2(self):
         counter = 0
-        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+        test_pass = PatternMatcherPass()
 
         args = [
             torch.randn(20, device="cuda"),
@@ -1260,7 +1259,7 @@ class TestPatternMatcher(TestCase):
 
     def test_match_equivalent_function_invocations3(self):
         counter = 0
-        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+        test_pass = PatternMatcherPass()
 
         args = [
             torch.randn(20, device="cuda"),
@@ -1370,6 +1369,61 @@ class TestPatternMatcher(TestCase):
         self.common(mul_softmax, (x, scale), 0, 0)
         self.common(mul_softmax, (scale, x), 0, 0)
         self.common(div_softmax, (x, scale), 0, 0)
+
+    def test_mutation_op_matching(self):
+        def check(type, func_name, args, kwargs, expect=True):
+            assert type in ["call_function", "call_method"]
+            graph = torch.fx.Graph()
+            getattr(graph, type)(func_name, args, kwargs)
+            res = is_mutation_op(next(iter(graph.nodes)))
+            if expect:
+                self.assertTrue(res)
+            else:
+                self.assertFalse(res)
+
+        t = torch.randn(1)
+        check("call_function", torch._C._set_grad_enabled, (False,), {})
+        check("call_method", "copy_", (t, t), {})
+        check("call_method", "relu_", (t,), {})
+        check("call_function", torch.manual_seed, (0,), {})
+        check("call_function", torch.ops.aten.set_.source_Tensor, (t, t), {})
+        check(
+            "call_function",
+            torch.amp.autocast_mode._enter_autocast,
+            ("cuda", None, True, None),
+            {},
+        )
+        check("call_function", torch.amp.autocast_mode._exit_autocast, (None,), {})
+        check(
+            "call_function",
+            torch.ops._c10d_functional.all_gather_into_tensor_out,
+            (t, 2, "0"),
+            {"out": t},
+        )
+        check("call_function", torch.ops.inductor.resize_storage_bytes_, (t, 0), {})
+        check(
+            "call_function",
+            torch.ops.inductor.resize_storage_bytes_.default,
+            (t, 0),
+            {},
+        )
+        check(
+            "call_function",
+            torch.ops.fsdp.split_with_sizes_copy,
+            (t, [64, 128, 8, 8]),
+            {"dim": 1, "out": [t, t, t, t]},
+        )
+        check("call_function", torch.ops.fsdp.set_, (t, t), {})
+        check(
+            "call_function", torch.ops.aten.__rshift__.Scalar, (t, 2), {}, expect=False
+        )
+        check(
+            "call_function",
+            torch.ops._c10d_functional.all_gather_into_tensor,
+            (t, 2, "0"),
+            {},
+            expect=False,
+        )
 
 
 if __name__ == "__main__":
