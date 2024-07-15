@@ -4,10 +4,10 @@
 #include <ATen/core/List.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
-#include <c10/util/Optional.h>
 #include <pybind11/detail/common.h>
 #include <torch/csrc/utils/pybind.h>
 #include <cstddef>
+#include <optional>
 #include <stdexcept>
 
 namespace torch::jit {
@@ -175,7 +175,7 @@ class ScriptList final {
 
   // Remove and return the element at the specified index from the list. If no
   // index is passed, the last element is removed and returned.
-  IValue pop(std::optional<size_type> idx = c10::nullopt) {
+  IValue pop(std::optional<size_type> idx = std::nullopt) {
     IValue ret;
 
     if (idx) {
