@@ -93,7 +93,7 @@ torch::jit::Stack boxArgs(Args... args) {
 }
 
 template <class T>
-inline constexpr size_t boxed_size_one() {
+static inline constexpr size_t boxed_size_one() {
   static_assert(!std::is_same<std::decay_t<T>, c10::TensorOptions>::value, "need to patch this path to support TensorOptions passed by reference");
   return 1;
 }
