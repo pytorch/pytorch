@@ -100,7 +100,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
 
   // default generator is always registered
   auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
-      c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
+      std::nullopt, cuda::detail::getDefaultCUDAGenerator());
   gen->register_graph(this);
 
   for (auto& [generator_state, wholegraph_increments] :
@@ -270,6 +270,7 @@ void CUDAGraph::debug_dump(const std::string& debug_path) {
       TORCH_WARN("DEBUG: calling cudaGraphDebugDotPrint() with ", debug_path);
       C10_CUDA_CHECK_WARN(cudaGraphDebugDotPrint(graph_, debug_path.c_str(), cudaGraphDebugDotFlagsVerbose)); // most verbose output
       AT_CUDA_CHECK(cudaGraphDestroy(graph_));
+      has_graph_ = false;
     }
   } else {
     TORCH_WARN("CUDA Graphs debug not enabled, set with torch._C._cuda_enable_graphs_debug_mode");

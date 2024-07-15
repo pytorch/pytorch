@@ -38,7 +38,6 @@ from torch.utils.weak import WeakIdKeyDictionary, weakref
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
 
-
 # This value is hard-coded here:
 # https://github.com/pytorch/pytorch/blob/5fba5d83f0703ff8077ab65448a998e9ad6598fd/c10/cuda/CUDACachingAllocator.cpp#L117
 _PYTORCH_MIN_ALLOCATE = (
@@ -636,7 +635,7 @@ class MemTracker(TorchDispatchMode):
             ):
                 grad_hook_handle = param.register_hook(_grad_hook)
                 post_acc_grad_hook_handle = param.register_post_accumulate_grad_hook(
-                    lambda param: (_grad_hook(param.grad))
+                    lambda p: (_grad_hook(p.grad))
                 )
                 self._param_to_grad_hook_handles[param] = (
                     grad_hook_handle,

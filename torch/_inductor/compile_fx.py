@@ -43,8 +43,8 @@ from torch._inductor.cudagraph_utils import (
     get_placeholders,
     log_cudagraph_skip_and_bump_counter,
 )
-
 from torch._inductor.debug import save_args_for_compile_fx_inner
+from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
@@ -55,7 +55,6 @@ from torch._inductor.utils import (
 from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -401,17 +400,16 @@ def should_use_remote_fx_graph_cache():
         return config.fx_graph_remote_cache
     if not config.is_fbcode():
         return False
-    if torch.version.hip is not None:
-        return False
-
     try:
         from triton.fb.fb_memcache import MEMCACHE_VERSION
     except ModuleNotFoundError:
         return False
 
-    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
-        "pytorch/remote_cache:fx_graph_memcache_version"
-    )
+    jk_name = "pytorch/remote_cache:fx_graph_memcache_version"
+    if torch.version.hip is not None:
+        jk_name = "pytorch/remote_cache:fx_graph_memcache_version_amd"
+
+    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)
 
 
 # pass config dict back to user
@@ -420,13 +418,19 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
         return config.get_config_copy()
 
 
-@functools.wraps
-def with_fresh_cache_if_config(f):
-    if config.force_disable_caches:
-        with fresh_inductor_cache():
-            return f
-    else:
-        return f
+def with_fresh_cache_if_config(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if config.force_disable_caches:
+            # Don't delete the cache dir because it has to survive beyond the
+            # compile_fx call. Let's put the temp dirs under the default cache
+            # dir so they're easier to locate.
+            with fresh_inductor_cache(dir=cache_dir(), delete=False):
+                return fn(*args, **kwargs)
+        else:
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 @DebugContext.wrap
@@ -1478,7 +1482,6 @@ def compile_fx(
             graph, joint_inputs, **kwargs, compiler="inductor"
         )
 
-    @compile_time_strobelight_meta(phase_name="bw_compiler")
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         user_visible_outputs = {}

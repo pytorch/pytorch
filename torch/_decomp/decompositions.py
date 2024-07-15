@@ -784,6 +784,70 @@ def slice_forward(
         return self.as_strided(sizes, strides, storage_offset)
 
 
+def _normalize_start_end(
+    x: Tensor, dim: int, start: Optional[int], end: Optional[int]
+) -> Tuple[int, int]:
+    """
+    Normalize start and end such that both are in the range
+    [0, x.get_size()[dim]] and start <= end.
+    """
+    dim_size = x.shape[dim]
+
+    def clamp_wrap(val, lower, upper, default) -> int:
+        if val is None:
+            return default
+        if val < 0:
+            val = val + dim_size
+        return min(max(val, lower), upper)
+
+    start = clamp_wrap(start, 0, dim_size, 0)
+    end = clamp_wrap(end, start, dim_size, dim_size)
+    return start, end
+
+
+# This is not in torch._refs because aten.index used by
+# aten._unsafe_masked_index does not have a decomposition.
+@register_decomposition(aten.slice_scatter)
+@out_wrapper()
+def slice_scatter(
+    input: Tensor,
+    src: Tensor,
+    dim: int = 0,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    step: int = 1,
+):
+    dim = utils.canonicalize_dim(input.ndim, dim)
+    dim_size = input.shape[dim]
+    start, end = _normalize_start_end(input, dim, start, end)
+
+    src_size = list(input.shape)
+    src_size[dim] = (end - start + (step - 1)) // step
+    src = src.expand(src_size)
+
+    if start == 0 and end == dim_size and step == 1:
+        return src.clone()
+
+    indices = [None] * input.dim()
+    idx = torch.arange(dim_size, device=input.device)
+    indices[dim] = (idx - start) // step
+
+    mask = torch.ones(dim_size, device=input.device, dtype=torch.bool)
+    if start != 0:
+        mask = torch.logical_and(mask, idx >= start)
+
+    if end != dim_size:
+        mask = torch.logical_and(mask, idx < end)
+
+    if step != 1:
+        mask = torch.logical_and(mask, (idx - start) % step == 0)
+
+    mask_shape = [1] * input.dim()
+    mask_shape[dim] = -1
+    mask = mask.view(mask_shape)
+    return aten.where(mask, aten._unsafe_masked_index(src, mask, indices, 0), input)
+
+
 @register_decomposition(aten.select_backward)
 @out_wrapper()
 def select_backward(grad_output: Tensor, input_sizes: List[int], dim: int, index: int):
@@ -2078,7 +2142,7 @@ def _fused_dropout_decomposition(input, p, generator=None):
 @register_decomposition(aten._to_copy)
 @out_wrapper()
 def _to_copy(
-    x: Tensor,
+    x: Union[Tensor, NumberType],
     *,
     dtype: Optional[torch.dtype] = None,
     layout=None,
@@ -2089,24 +2153,33 @@ def _to_copy(
 ):
     assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
+    assert isinstance(x, (torch.Tensor, int, float, bool, complex))
     if device is None and dtype is None and memory_format is None:
-        return x.clone()
+        if isinstance(x, torch.Tensor):
+            return x.clone()
+        else:
+            return x
     dtype_converted = False
 
-    if device is not None and device != x.device:
+    if isinstance(x, torch.Tensor):
+        x_tensor = x
+    else:
+        x_tensor = torch.scalar_tensor(x)
+
+    if device is not None and device != x_tensor.device:
         # avoid conversions on cpu
         if dtype is not None and device.type == "cpu":
-            x = torch._prims.convert_element_type(x, dtype)
+            x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
             dtype_converted = True
-        x = torch._prims.device_put(x, device)
+        x_tensor = torch._prims.device_put(x_tensor, device)
 
     if dtype is not None and not dtype_converted:
-        x = torch._prims.convert_element_type(x, dtype)
+        x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
         dtype_converted = True
 
     if memory_format is not None:  # no ref/prim for memory format
-        return torch.clone(x, memory_format=memory_format)
-    return x
+        return torch.clone(x_tensor, memory_format=memory_format)
+    return x_tensor
 
 
 # Questionable decompositions
