@@ -4768,7 +4768,7 @@ Done""",
         self.assertEqual(avg.device_time_total, 0)
 
     def test_profiler_shapes(self):
-        print("")
+        print()
         layer1 = torch.nn.Linear(20, 30)
         layer2 = torch.nn.Linear(30, 40)
         input = torch.randn(128, 20)
@@ -4790,7 +4790,7 @@ Done""",
         self.assertEqual(len(found_indices), len(linear_expected_shapes))
 
     def test_profiler_aggregation_lstm(self):
-        print("")
+        print()
         rnn = torch.nn.LSTM(10, 20, 2)
         total_time_s = 0
         with profile(record_shapes=True, use_kineto=kineto_available()) as prof:
@@ -7089,6 +7089,31 @@ for shape in [(1,), ()]:
                 out += a
                 out.sum().backward()
 
+    def test_checkpointing_without_reentrant_saved_object_identity(self):
+        x_backward = None
+
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(y)
+                return x
+
+            @staticmethod
+            def backward(ctx, x):
+                nonlocal x_backward
+                (x_backward,) = ctx.saved_tensors
+                return x, None
+
+        a = torch.tensor(1.0, requires_grad=True)
+        b = torch.tensor(1.0, requires_grad=False)
+
+        Test.apply(a, b).backward()
+        self.assertIs(b, x_backward)
+
+        x_backward = None
+        checkpoint(Test.apply, a, b, use_reentrant=False).backward()
+        self.assertIs(b, x_backward)
+
     def test_checkpointing_without_reentrant_correct_grad(self):
         """
         Verifies that correct gradients are calculated for checkpoint
@@ -7456,7 +7481,7 @@ for shape in [(1,), ()]:
             out.grad_fn._saved_bias_sym_sizes_opt, (1,)
         )  # c10::optional<SymIntArrayRef> -> SymInt[]?
         out = nn.Conv2d(1, 1, 3, bias=False)(a)
-        # TODO: This is BAD! we converted a c10::nullopt into a (0,)
+        # TODO: This is BAD! we converted a std::nullopt into a (0,)
         self.assertEqual(out.grad_fn._saved_bias_sym_sizes_opt, (0,))
 
         a = torch.ones(1, 3, 3, requires_grad=True)
@@ -13317,7 +13342,7 @@ class TestNestedCheckpoint(TestCase):
 
         # With early stopping (enabled by default)
         a = torch.tensor(1.0, requires_grad=True)
-        with SinCounterMode() as python_dispatch_counter:
+        with SinCounterMode() as python_dispatch_counter:  # noqa: F811
             out = checkpoint(fn, a, use_reentrant=False)
             out.backward()
         self.assertEqual(counter[0], 2)

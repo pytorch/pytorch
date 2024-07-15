@@ -441,6 +441,9 @@ class TestProfilerTree(TestCase):
     )
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_memory_and_stack(self):
+        # Do lazy imports ahead of time to avoid it showing up in the tree
+        import torch.nested._internal.nested_tensor
+
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
             z = torch.add(t1, t2)
@@ -478,8 +481,17 @@ class TestProfilerTree(TestCase):
                   <built-in function len>
                   torch/autograd/__init__.py(...): _tensor_or_tensors_to_tuple
                   torch/autograd/__init__.py(...): _make_grads
+                    typing.py(...): inner
+                    typing.py(...): cast
+                    <built-in function isinstance>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
                     <built-in function isinstance>
                     <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
                     <built-in method ones_like of type object at 0xXXXXXXXXXXXX>
                       aten::ones_like
                         aten::empty_like
@@ -715,6 +727,10 @@ class TestProfilerTree(TestCase):
         x = TorchDispatchTensor(torch.ones((1,)))
         y = torch.ones((1,))
 
+        # warmup round
+        with torch.profiler.profile(with_stack=True):
+            x + y
+
         with torch.profiler.profile(with_stack=True) as p:
             x + y
 
@@ -725,6 +741,10 @@ class TestProfilerTree(TestCase):
               torch/profiler/profiler.py(...): __enter__
                 ...
               aten::add
+                torch/_library/simple_registry.py(...): find_torch_dispatch_rule
+                  torch/_library/simple_registry.py(...): find
+                  torch/_library/simple_registry.py(...): find
+                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
                 test_profiler_tree.py(...): __torch_dispatch__
                   torch/utils/_pytree.py(...): tree_map
                     ...
@@ -902,6 +922,9 @@ class TestProfilerTree(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda_detailed(self):
+        # Do lazy imports ahead of time to avoid it showing up in the tree
+        import torch.nested._internal.nested_tensor
+
         model = torch.nn.modules.Linear(1, 1, device="cuda")
         model.train()
         opt = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
@@ -959,8 +982,17 @@ class TestProfilerTree(TestCase):
                     <built-in function len>
                     torch/autograd/__init__.py(...): _tensor_or_tensors_to_tuple
                     torch/autograd/__init__.py(...): _make_grads
+                      typing.py(...): inner
+                      typing.py(...): cast
+                      <built-in function isinstance>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
                       <built-in function isinstance>
                       <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
                       <built-in method ones_like of type object at 0xXXXXXXXXXXXX>
                         aten::ones_like
                           aten::empty_like
