@@ -177,9 +177,7 @@ DONT_REQUIRE_DERIVATIVE = {
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "fill",
     "t",
-    "t_copy",
     "view",
-    "view_copy",
     "reshape",
     "reshape_as",
     "view_as",
@@ -189,7 +187,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "diag_embed",
     "repeat",
     "expand",
-    "expand_copy",
     "flip",
     "fliplr",
     "flipud",
@@ -197,13 +194,9 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "nanmean",
     "nansum",
     "transpose",
-    "transpose_copy",
     "permute",
-    "permute_copy",
     "squeeze",
-    "squeeze_copy",
     "unsqueeze",
-    "unsqueeze_copy",
     "resize",
     "resize_as",
     "tril",
@@ -234,7 +227,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "neg",
     "complex",
     "select",
-    "select_copy",
     "where",
     "as_strided",
     "as_strided_copy",
@@ -424,7 +416,7 @@ RESET_GRAD_ACCUMULATOR = {"set_", "resize_"}
 SAVE_TENSOR_STORAGE = CodeTemplate(
     """\
 c10::optional<Storage> ${tensor_name}_storage_saved =
-  ${tensor_name}.has_storage() ? c10::optional<Storage>(${tensor_name}.storage()) : c10::nullopt;
+  ${tensor_name}.has_storage() ? c10::optional<Storage>(${tensor_name}.storage()) : ::std::nullopt;
 """
 )
 
@@ -445,7 +437,7 @@ SAVE_TENSORLIST_STORAGE = CodeTemplate(
 std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
 for (const Tensor& tensor : ${tensorlist_name})
   ${tensorlist_name}_storage_saved.push_back(
-    tensor.has_storage() ? c10::optional<Storage>(tensor.storage()) : c10::nullopt);
+    tensor.has_storage() ? c10::optional<Storage>(tensor.storage()) : ::std::nullopt);
 """
 )
 
@@ -463,7 +455,7 @@ SAVE_OPTIONALTENSORLIST_STORAGE = CodeTemplate(
 std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
 for (const c10::optional<Tensor>& tensor : ${tensorlist_name})
   ${tensorlist_name}_storage_saved.push_back(
-    tensor.has_value() && tensor->has_storage() ? c10::optional<Storage>(tensor->storage()) : c10::nullopt);
+    tensor.has_value() && tensor->has_storage() ? c10::optional<Storage>(tensor->storage()) : ::std::nullopt);
 """
 )
 
@@ -1507,7 +1499,7 @@ def emit_body(
             elif type == BaseCType(stringT):
                 expr = f"std::string({expr})"
             elif type == OptionalCType(BaseCType(stringT)):
-                expr = f"{expr}.has_value() ? c10::optional<std::string>(std::string({expr}.value())) : c10::nullopt"
+                expr = f"{expr}.has_value() ? c10::optional<std::string>(std::string({expr}.value())) : ::std::nullopt"
             elif type == ArrayRefCType(
                 elem=BaseCType(type=BaseCppType(ns="at", name="Scalar"))
             ):
@@ -1997,7 +1989,7 @@ def emit_body(
                 raise RuntimeError("Unsupported output type for forward derivative")
 
             if not is_foreach:
-                fw_grad_opt_definition = f"{opt_res_grad_type} {'_'.join(res)}_new_fw_grad_opt = c10::nullopt;"
+                fw_grad_opt_definition = f"{opt_res_grad_type} {'_'.join(res)}_new_fw_grad_opt = ::std::nullopt;"
                 # View ops create fw_grad that already is a view of the base's fw_grad so just use that
                 content.append(
                     FW_DERIVATIVE_TEMPLATE.substitute(
@@ -2012,7 +2004,7 @@ def emit_body(
                 # note(crcrpar): Assuming `self` is TensorList.
                 fw_grad_opt_definition = (
                     f"std::vector<{opt_res_grad_type}> {'_'.join(res)}_new_fw_grad_opts"
-                    "(self.size(), c10::nullopt);"
+                    "(self.size(), ::std::nullopt);"
                 )
                 foreach_forward_grad_formula = derivative.formula
                 _foreach_arg: Argument | DifferentiableInput
