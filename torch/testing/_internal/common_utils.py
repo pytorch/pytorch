@@ -14,6 +14,7 @@ import ctypes
 import errno
 import functools
 import gc
+import hashlib
 import inspect
 import io
 import json
@@ -162,6 +163,40 @@ class TestEnvironment:
         assert name not in globals(), f"duplicate definition of flag '{name}'"
         globals()[name] = enabled
 
+    # Defines a setting usable throughout the test suite, determining its value by querying
+    # the specified environment variable. This differs from a flag in that it's not restricted
+    # to a boolean value.
+    #
+    # Args:
+    #     name (str): The name of the setting. A global variable with this name will be set
+    #         for convenient access throughout the test suite.
+    #     env_var (str): The name of the primary environment variable from which to
+    #         determine the value of this setting. If this is None or the environment variable
+    #         is unset, the default value will be used. Default: None
+    #     default (Any): The default value to use for the setting if unset by the environment
+    #         variable. Default: None
+    #     include_in_repro (bool): Indicates whether this setting should be included in the
+    #         repro command that is output on test failure (i.e. whether it is possibly
+    #         relevant to reproducing the test failure). Default: True
+    #     parse_fn (Callable): Callable parsing the env var string. Default value just uses
+    #         the string itself.
+    @staticmethod
+    def def_setting(
+        name,
+        env_var=None,
+        default=None,
+        include_in_repro=True,
+        parse_fn=lambda maybe_val_str: maybe_val_str,
+    ):
+        value = default if env_var is None else os.getenv(env_var)
+        value = parse_fn(value)
+        if include_in_repro and (value != default):
+            TestEnvironment.repro_env_vars[env_var] = value
+
+        # export setting globally for convenience
+        assert name not in globals(), f"duplicate definition of setting '{name}'"
+        globals()[name] = value
+
     # Returns a string prefix usable to set environment variables for any test
     # settings that should be explicitly set to match this instantiation of the
     # test suite.
@@ -210,6 +245,17 @@ TestEnvironment.def_flag(
 # NB: enabled by default unless in an fbcode context.
 TestEnvironment.def_flag("PRINT_REPRO_ON_FAILURE", env_var="PYTORCH_PRINT_REPRO_ON_FAILURE",
                          default=(not IS_FBCODE), include_in_repro=False)  # noqa: F821
+
+# possibly restrict OpInfo tests to a single sample input
+TestEnvironment.def_setting(
+    "OPINFO_SAMPLE_INPUT_INDEX",
+    env_var="PYTORCH_OPINFO_SAMPLE_INPUT_INDEX",
+    default=None,
+    # Don't include the env var value in the repro command because the info will
+    # be queried from the tracked sample input instead
+    include_in_repro=False,
+    parse_fn=lambda val: None if val is None else int(val),
+)
 
 DEFAULT_DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 DEFAULT_SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
@@ -292,20 +338,39 @@ def clear_tracked_input():
 # Wraps an iterator and tracks the most recent value the iterator produces
 # for debugging purposes. Tracked values are stored on the test function.
 class TrackedInputIter:
-    def __init__(self, child_iter, input_type_desc, callback=lambda x: x):
+    def __init__(self, child_iter, input_type_desc,
+                 callback=lambda x: x, set_seed=True, restrict_to_index=None):
         self.child_iter = enumerate(child_iter)
         # Input type describes the things we're tracking (e.g. "sample input", "error input").
         self.input_type_desc = input_type_desc
         # Callback is run on each iterated thing to get the thing to track.
         self.callback = callback
         self.test_fn = extract_test_fn()
+        # Indicates whether the random seed should be set before each call to the iterator
+        self.set_seed = set_seed
+        # Indicates that iteration should be restricted to only the provided index.
+        # If None, no restriction is done
+        self.restrict_to_index = restrict_to_index
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        # allow StopIteration to bubble up
-        input_idx, input_val = next(self.child_iter)
+        while True:
+            if self.set_seed:
+                # use a test-name-specific hash for the seed if possible
+                seed = (
+                    int.from_bytes(hashlib.sha256(
+                        self.test_fn.__qualname__.encode("utf-8")).digest()[:4], 'little')
+                    if self.test_fn is not None else SEED
+                )
+                set_rng_seed(seed)
+
+            # allow StopIteration to bubble up
+            input_idx, input_val = next(self.child_iter)
+            if (self.restrict_to_index is None) or (input_idx == self.restrict_to_index):
+                break
+
         self._set_tracked_input(
             TrackedInput(
                 index=input_idx, val=self.callback(input_val), type_desc=self.input_type_desc
@@ -2186,16 +2251,29 @@ def skip_exception_type(exc_type):
         raise unittest.SkipTest(f"not implemented: {e}") from e
 
 @contextmanager
-def print_repro_on_failure(repro_str):
+def print_repro_on_failure(repro_parts):
     try:
         yield
     except unittest.SkipTest:
         raise
     except Exception as e:
+        # Get the index of the sample input that failed the test if possible.
+        sample_isolation_prefix = ""
+        tracked_input = getattr(e, "_tracked_input", None)
+        if tracked_input is not None:
+            sample_isolation_prefix = f"PYTORCH_OPINFO_SAMPLE_INPUT_INDEX={tracked_input.index}"
+
+        repro_str = " ".join(filter(None, (sample_isolation_prefix, *repro_parts)))
+        repro_msg = f"""
+To execute this test, run the following from the base repo dir:
+    {repro_str}
+
+This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
+
         # NB: Hacking the exception args is the cleanest way I've found to append
         # failure reproduction info without poisoning the stack trace.
         if len(e.args) >= 1:
-            e.args = (f"{e.args[0]}\n{repro_str}", *e.args[1:])
+            e.args = (f"{e.args[0]}\n{repro_msg}", *e.args[1:])
         raise
 
 #  "min_satisfying_examples" setting has been deprecated in hypothesis
@@ -2641,7 +2719,6 @@ class TestCase(expecttest.TestCase):
                 self.wrap_with_policy(method_name, lambda: skip_exception_type(NotImplementedError))
 
             if PRINT_REPRO_ON_FAILURE:  # noqa: F821
-                env_var_prefix = TestEnvironment.repro_env_var_prefix()
                 try:
                     def _get_rel_test_path(abs_test_path):
                         # Attempt to get relative path based on the "test" dir.
@@ -2662,14 +2739,12 @@ class TestCase(expecttest.TestCase):
                     abs_test_path = os.path.abspath(inspect.getfile(type(self)))
                     test_filename = _get_rel_test_path(abs_test_path)
                     class_name = type(self).__name__
-                    repro_str = f"""
-To execute this test, run the following from the base repo dir:
-    {env_var_prefix} python {test_filename} -k {class_name}.{method_name}
-
-This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
+                    test_run_cmd = f"python {test_filename} -k {class_name}.{method_name}"
+                    env_var_prefix = TestEnvironment.repro_env_var_prefix()
+                    repro_parts = [env_var_prefix, test_run_cmd]
                     self.wrap_with_policy(
                         method_name,
-                        lambda repro_str=repro_str: print_repro_on_failure(repro_str=repro_str))
+                        lambda repro_parts=repro_parts: print_repro_on_failure(repro_parts))
                 except Exception as e:
                     # Don't fail entirely if we can't get the test filename
                     log.info("could not print repro string", extra=str(e))
@@ -4264,6 +4339,20 @@ def random_lowrank_matrix(rank, rows, columns, *batch_dims, **kwargs):
     return B.matmul(C)
 
 
+def _generate_indices_prefer_all_rows(rows: int, cols: int, num_indices: int) -> torch.Tensor:
+    """Generate indices for a row x cols matrix, preferring at least one index per row if possible."""
+    indices = []
+    n_per_row = math.ceil(num_indices / rows)
+    col_indices = list(range(cols))
+
+    for r in range(rows):
+        # Note that this can yield overlapping indices
+        for c in random.choices(col_indices, k=n_per_row):
+            indices.append((r, c))
+
+    return torch.tensor(indices[:num_indices])
+
+
 def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
     """Return rectangular random sparse matrix within given density.
 
@@ -4274,20 +4363,14 @@ def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
     """
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
-    singular = kwargs.get("singular", False)
 
-    k = min(rows, columns)
     nonzero_elements = max(min(rows, columns), int(rows * columns * density))
-
-    row_indices = [i % rows for i in range(nonzero_elements)]
-    column_indices = [i % columns for i in range(nonzero_elements)]
-    random.shuffle(column_indices)
-    indices = [row_indices, column_indices]
+    indices = _generate_indices_prefer_all_rows(rows, columns, nonzero_elements)
     values = torch.randn(nonzero_elements, dtype=dtype, device=device)
+
     # ensure that the diagonal dominates
-    values *= torch.tensor([-float(i - j)**2 for i, j in zip(*indices)], dtype=dtype, device=device).exp()
-    indices_tensor = torch.tensor(indices)
-    A = torch.sparse_coo_tensor(indices_tensor, values, (rows, columns), device=device)
+    values *= torch.tensor([-float(i - j)**2 for i, j in indices], dtype=dtype, device=device).exp()
+    A = torch.sparse_coo_tensor(indices.t(), values, (rows, columns), device=device)
     return A.coalesce()
 
 
@@ -4579,7 +4662,7 @@ def find_library_location(lib_name: str) -> Path:
     path = torch_root / 'lib' / lib_name
     if os.path.exists(path):
         return path
-    torch_root = Path(__file__).resolve().parents[2]
+    torch_root = Path(__file__).resolve().parent.parent.parent
     return torch_root / 'build' / 'lib' / lib_name
 
 def skip_but_pass_in_sandcastle(reason):
@@ -5018,5 +5101,5 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         s = re.sub(r"\n*You can suppress this exception.+", "", s, flags=re.DOTALL)
     if suppress_prefix:
         s = re.sub(r"Cannot export model.+\n\n", "", s)
-    s = re.sub(r" +$", "", s, flags=re.M)
+    s = re.sub(r" +$", "", s, flags=re.MULTILINE)
     return s

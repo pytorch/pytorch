@@ -536,7 +536,7 @@ def triton_compute_type(dtype):
         triton_type_name = "float8e5"
     elif triton_type_name == "float8_e4m3fnuz":
         triton_type_name = "float8e4b8"
-    elif triton_type_name == "float8_e5m2":
+    elif triton_type_name == "float8_e5m2fnuz":
         triton_type_name = "float8e5b16"
     return f"tl.{triton_type_name}"
 
@@ -720,6 +720,16 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def where(a, b, c):
         return f"tl.where({a}, {b}, {c})"
+
+    @staticmethod
+    def inline_asm_elementwise(
+        *inputs, asm, constraints=None, dtype=torch.float32, is_pure=True, pack=1
+    ):
+        triton_type = triton_compute_type(dtype)
+        input_refs = ", ".join([str(i) for i in inputs])
+        if constraints is None:
+            constraints = ", ".join(["=r"] + ["r" for _ in inputs])
+        return f"tl.inline_asm_elementwise('{asm}', '{constraints}', [{input_refs}], dtype={triton_type}, is_pure={is_pure}, pack={pack})"  # noqa: B950
 
     @staticmethod
     def cos(x):
@@ -2725,6 +2735,7 @@ class TritonKernel(SIMDKernel):
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None):
         wrapper = V.graph.wrapper_code
+        wrapper.write_triton_header_once()
         _, call_args, _, arg_types = self.args.python_argdefs()
         grid: List[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
@@ -2876,6 +2887,7 @@ class TritonScheduling(SIMDScheduling):
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.MASKED_SCATTER_WITH_INDEX,
             BackendFeature.SCAN,
+            BackendFeature.TRITON_TEMPLATES,
         ]
     )
     if torch.version.hip is None:
