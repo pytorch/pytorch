@@ -1152,7 +1152,7 @@ void igamma_kernel(TensorIteratorBase& iter) {
         cpu_kernel_vec(
             iter,
             [=](scalar_t a, scalar_t b) -> scalar_t {
-              return calc_igamma(a, b);
+              return calc_igamma<scalar_t, /*is_cuda=*/false>(a, b);
             },
             [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
               return a.igamma(b);
@@ -1166,7 +1166,7 @@ void igammac_kernel(TensorIteratorBase& iter) {
         cpu_kernel_vec(
             iter,
             [=](scalar_t a, scalar_t b) -> scalar_t {
-              return calc_igammac(a, b);
+              return calc_igammac<scalar_t, /*is_cuda=*/false>(a, b);
             },
             [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
               return a.igammac(b);
@@ -1176,21 +1176,21 @@ void igammac_kernel(TensorIteratorBase& iter) {
 
 void igamma_grada_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
-      kHalf, kBFloat16, iter.dtype(), "igamma_grada_cpu", [&]() {
+    kHalf, kBFloat16, iter.dtype(), "igamma_grada_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t x) -> scalar_t {
-        return calc_igamma_grada(a, x);
+        return calc_igamma_grada<scalar_t, /*is_cuda=*/false>(a, x);
       });
-    });
-} 
+  });
+}
 
 void igammac_grada_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
-      kHalf, kBFloat16, iter.dtype(), "igammac_grada_cpu", [&]() {
+    kHalf, kBFloat16, iter.dtype(), "igammac_grada_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t x) -> scalar_t {
-        return calc_igammac_grada(a, x);
+        return calc_igammac_grada<scalar_t, /*is_cuda=*/false>(a, x);
       });
-    });
-} 
+  });
+}
 
 void nextafter_kernel(TensorIteratorBase& iter) {
   if (at::isReducedFloatingType(iter.common_dtype())) {
@@ -1432,12 +1432,12 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(
     shifted_chebyshev_polynomial_w_stub,
     &shifted_chebyshev_polynomial_w_kernel);
-REGISTER_DISPATCH(igamma_grada_stub, &igamma_grada_kernel);
-REGISTER_DISPATCH(igammac_grada_stub, &igammac_grada_kernel);
 // Might enable AVX512 dispatch after enabling explicit vectorization for them.
 REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel);
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel);
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel);
+REGISTER_DISPATCH(igamma_grada_stub, &igamma_grada_kernel);
+REGISTER_DISPATCH(igammac_grada_stub, &igammac_grada_kernel);
 
 ALSO_REGISTER_AVX512_DISPATCH(atan2_stub, &atan2_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);

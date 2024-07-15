@@ -12,6 +12,15 @@
 // TODO: review jiterating igamma and igammac if/when a persistent (across processes)
 //   cache is implemented, because they take a VERY long time to compile
 // TODO: it's also odd these ops use gpu_kernel_with_scalars
+// TODO: calc_igamma and calc_igammac in Math.h are now marked C10_HOST_DEVICE,
+//   so look into whether we can use them here without repeating algo like so:
+//   void igamma_kernel_cuda(TensorIteratorBase& iter) {
+//     AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igamma_cuda", [&]() {
+//       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t x) -> scalar_t {
+//         return calc_igamma<scalar_t, /*is_cuda = */true>(a, x);
+//       });
+//     });
+//   }
 
 namespace {
 
