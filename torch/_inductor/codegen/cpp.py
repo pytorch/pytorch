@@ -2770,11 +2770,12 @@ class CppTile2DKernel(CppVecKernel):
 
     overrides = CppTile2DOverrides  # type: ignore[assignment]
 
-    def __init__(self, args, num_threads, tiling_factor, tiling_indices, tiling_dtype):
+    def __init__(self, args, num_threads, tiling_factor, tiling_indices, tiling_dtype, inner_tail_size=None, outer_tail_size=None):
         super().__init__(
-            args, num_threads, tiling_factor, tiling_indices[1], tiling_dtype
+            args, num_threads, tiling_factor, tiling_indices[1], tiling_dtype, inner_tail_size
         )
         self.tiling_indices = tiling_indices
+        self.outer_num_elems = outer_tail_size if outer_tail_size else tiling_factor
 
     def inner_itervar(self):
         return sympy_index_symbol(f"{self.itervars[self.outer_idx]}_inner")
@@ -2863,7 +2864,9 @@ class CppTile2DKernel(CppVecKernel):
             )
             # vector store inside the kernel inner loop
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
-            if V.graph.get_dtype(name) in DTYPE_LOWP_FP:
+            if self.inner_tail_size:
+                line = f"{value}.store({storebuf}, {self.inner_tail_size});"
+            elif V.graph.get_dtype(name) in DTYPE_LOWP_FP:
                 line = f"{value}.store({storebuf}, {self.tiling_factor});"
             elif V.graph.get_dtype(name) in (torch.uint8, torch.int8):
                 line = f"{value}.store({storebuf}, {self.tiling_factor});"
@@ -2877,7 +2880,7 @@ class CppTile2DKernel(CppVecKernel):
     def codegen_inner_loops(self, code):
         inner = self.inner_itervar()
         code.writeline(
-            f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++)"
+            f"for (long {inner} = 0; {inner} < {self.outer_num_elems}; {inner}++)"
         )
 
     def set_ranges(self, group, reduction_group):
@@ -3615,25 +3618,51 @@ class CppKernelProxy(CppKernel):
                     tiling_indices[1] == len(self.itervars) - 1
                     and tiling_factors[0] == tiling_factors[1]
                 )
-                tile2d_kernel = codegen_kernel(
-                    CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
-                )
-                vec_kernel = codegen_kernel(
-                    CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
-                )
                 metrics.generated_cpp_vec_kernel_count += 2
                 outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
                     tiling_indices[0], factor=tiling_factors[0]
                 )
-                outer_tail_loop.set_kernel(scalar_kernel)
                 (
                     inner_main_loop,
                     inner_tail_loop,
                 ) = outer_main_loop.split_with_tiling(
                     tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                 )
+                tile2d_kernel = codegen_kernel(
+                    CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
+                )
                 inner_main_loop.set_kernel(tile2d_kernel)
-                inner_tail_loop.set_kernel(vec_kernel)
+                if could_masked_vec:
+                    inner_tail_loop.steps = inner_tail_loop.size - inner_tail_loop.offset
+                    masked_tile2d_kernel1 = codegen_kernel(
+                        CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype, inner_tail_loop.steps
+                    )
+                    inner_tail_loop.set_kernel(masked_tile2d_kernel1)
+                else:
+                    vec_kernel = codegen_kernel(
+                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                    )
+                    inner_tail_loop.set_kernel(vec_kernel)
+
+                if could_masked_vec:
+                    outer_tail_loop.steps = outer_tail_loop.size - outer_tail_loop.offset
+                    (
+                        inner_main_loop_for_outer_tail_loop,
+                        inner_tail_loop_for_outer_tail_loop,
+                    ) = outer_tail_loop.split_with_tiling(
+                        tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
+                    )
+                    masked_tile2d_kernel2 = codegen_kernel(
+                        CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype, None, outer_tail_loop.steps
+                    )
+                    inner_main_loop_for_outer_tail_loop.set_kernel(masked_tile2d_kernel2)
+                    inner_tail_loop_for_outer_tail_loop.steps = inner_tail_loop_for_outer_tail_loop.size - inner_tail_loop_for_outer_tail_loop.offset
+                    masked_tile2d_kernel3 = codegen_kernel(
+                        CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype, inner_tail_loop_for_outer_tail_loop.steps, outer_tail_loop.steps
+                    )
+                    inner_tail_loop_for_outer_tail_loop.set_kernel(masked_tile2d_kernel3)
+                else:
+                    outer_tail_loop.set_kernel(scalar_kernel)
 
     def codegen_loop_bodies(self, loop_bodies, var_sizes_list):
         for body in loop_bodies:
