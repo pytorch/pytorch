@@ -4319,8 +4319,9 @@ def split_group(
     """
     Create a new process group splitted from the given parent process group.
 
-    warning:: only the ``NCCL`` backend supports this API. Other backends will raise an error.
-    users of this API must gurantee that all ranks in the parent group enter this API call,
+    warning:: This is an experimental API and only the ``NCCL`` backend supports this API.
+    Other backends will raise an error.
+    Users of this API must gurantee that all ranks in the parent group enter this API call,
     and the split of the sub groups is the same accross all ranks in the parent group.
 
     Args:

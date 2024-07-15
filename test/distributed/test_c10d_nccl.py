@@ -4328,7 +4328,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
             self.assertEqual(tensor, torch.full((1,), 2))
 
         # test split with only one colored group, other ranks should be no color split.
-        ng2 = c10d.split_group(pg, [[5, 6, 7]], timeout=timedelta(seconds=50))
+        ng2 = c10d.split_group(pg, [[5, 6, 7]])
         self.assertEqual(backend.comm_split_count(), 2)
 
         if self.rank >= 5:
