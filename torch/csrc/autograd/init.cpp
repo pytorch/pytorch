@@ -249,6 +249,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("is_async", [](const KinetoEvent& e) { return e.isAsync(); })
       .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs)
       .def("privateuse1_elapsed_us", &KinetoEvent::privateuse1ElapsedUs)
+      .def(
+          "is_user_annotation",
+          [](const KinetoEvent& e) {
+            return e.activityType() ==
+                (uint8_t)libkineto::ActivityType::USER_ANNOTATION ||
+                e.activityType() ==
+                (uint8_t)libkineto::ActivityType::GPU_USER_ANNOTATION;
+          })
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);

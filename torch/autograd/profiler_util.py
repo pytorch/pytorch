@@ -319,6 +319,7 @@ class EventList(list):
                 str(event.node_id),
                 str(event.device_type),
                 str(event.is_legacy),
+                str(event.is_user_annotation),
             ]
             if group_by_input_shapes:
                 key.append(str(event.input_shapes))
@@ -462,6 +463,7 @@ class FunctionEvent(FormattedTimesMixin):
         flops=None,
         trace_name=None,
         concrete_inputs=None,
+        is_user_annotation=False,
     ):
         self.id: int = id
         self.node_id: int = node_id
@@ -491,6 +493,7 @@ class FunctionEvent(FormattedTimesMixin):
         )
         self.is_legacy: bool = is_legacy
         self.flops: Optional[int] = flops
+        self.is_user_annotation: Optional[bool] = is_user_annotation
 
     def append_kernel(self, name, device, duration):
         assert self.device_type == DeviceType.CPU
@@ -655,6 +658,7 @@ class FunctionEventAvg(FormattedTimesMixin):
             self.device_type = other.device_type
             self.is_legacy = other.is_legacy
             self.use_device = other.use_device
+            self.is_user_annotation = other.is_user_annotation
 
         assert isinstance(other, (FunctionEvent, FunctionEventAvg))
         assert other.key == self.key
@@ -944,7 +948,10 @@ def _build_table(
         if evt.device_type == DeviceType.CPU and evt.is_legacy:
             # in legacy profiler, kernel info is stored in cpu events
             sum_self_device_time_total += evt.self_device_time_total
-        elif evt.device_type in [DeviceType.CUDA, DeviceType.PrivateUse1]:
+        elif (
+            evt.device_type in [DeviceType.CUDA, DeviceType.PrivateUse1]
+            and not evt.is_user_annotation
+        ):
             # in kineto profiler, there're events with the correct device type (e.g. CUDA)
             sum_self_device_time_total += evt.self_device_time_total
 
