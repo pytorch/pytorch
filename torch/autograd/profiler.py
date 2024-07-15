@@ -547,6 +547,7 @@ class profile:
                 device_index=kineto_event.device_index(),
                 device_resource_id=kineto_event.device_resource_id(),
                 flops=kineto_event.flops(),
+                is_user_annotation=kineto_event.is_user_annotation(),
             )
             max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:
