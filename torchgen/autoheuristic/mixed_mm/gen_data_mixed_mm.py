@@ -20,6 +20,12 @@ from torch._inductor.utils import fresh_inductor_cache
 
 
 class BenchmarkRunnerMixedMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimported]
+    """
+    BenchmarkRunner for mixed mm. Used to generate collect training data with AutoHeuristic to learn a heuristic.
+    We generate inputs where m <=128, and n and k >= 1024. This allows us to learn a heuristic that works well e.g.
+    for gpt-fast.
+    """
+
     def __init__(self) -> None:
         super().__init__("mixed_mm")
 
@@ -88,29 +94,32 @@ class BenchmarkRunnerMixedMM(BenchmarkRunner):  # type: ignore[misc, no-any-unim
     def get_random_dim(self):
         distr_type = self.get_distr_type()
         if distr_type == "mult_128":
-            return self.random_multiple_of_128()
+            return self.random_multiple_of_128(min_num=10, max_num=17)
         if distr_type == "pow2":
-            return self.get_random_pow2_weighted()
+            return self.get_random_pow2_weighted(min_power2=10, max_power2=17)
         elif distr_type == "uniform-between-pow2":
-            min_power2 = 1
-            max_power2 = 17
-            i = random.randint(min_power2, max_power2 - 1)
-            lower = 2**i + 1
-            upper = 2 ** (i + 1) - 1
-            return random.randint(lower, upper)
+            return self.get_random_between_pow2(min_power2=10, max_power2=17)
         elif distr_type == "uniform":
-            return random.randint(1, 131072)
+            return random.randint(1024, 131072)
         print(f"random_type {distr_type} not supported")
         sys.exit(1)
+
+    def get_random_num_small(self) -> int:
+        pow2 = random.choices([True, False], [0.75, 0.25])[0]
+        if pow2:
+            return 2 ** random.randint(1, 7)
+        else:
+            return self.get_random_between_pow2(1, 7)
 
     def get_m_k_n(self, dtype: Any) -> Tuple[int, int, int]:
         numel_max = 2**31
 
         # repeat until tensors fit in memory
         while True:
-            m = self.get_random_dim()
+            m = self.get_random_num_small()
             k = self.get_random_dim()
             n = self.get_random_dim()
+            assert k >= 1024 and n >= 1024, "k and n must be at least 1024"
 
             if m * k >= numel_max or m * n >= numel_max or k * n >= numel_max:
                 # autotuning will not happen for tensors that are this large

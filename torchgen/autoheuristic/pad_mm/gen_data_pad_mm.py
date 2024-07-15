@@ -22,6 +22,10 @@ from torch._inductor.utils import fresh_inductor_cache
 
 
 class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimported]
+    """
+    BenchmarkRunner for pad_mm. Used to generate collect training data with AutoHeuristic to learn a heuristic.
+    """
+
     def __init__(self) -> None:
         super().__init__("pad_mm")
 
@@ -103,10 +107,7 @@ class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimpo
             return 2 ** random.randint(min_power2, max_power2)  # type: ignore[no-any-return]
         else:
             # choose a random number between 2^i and 2^(i+1)
-            i = random.randint(min_power2, max_power2 - 1)
-            lower = 2**i + 1
-            upper = 2 ** (i + 1) - 1
-            return random.randint(lower, upper)
+            return self.get_random_between_pow2(min_power2, max_power2)  # type: ignore[no-any-return]
 
     def is_aligned(self, dim: int, align_size: int) -> bool:
         return dim % align_size == 0
