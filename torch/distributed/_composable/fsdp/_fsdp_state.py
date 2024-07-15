@@ -306,7 +306,6 @@ class FSDPState(_State):
             warning_once(logger, msg, stacklevel=2)
             # Clear since we want the next forward to run
             self._modules_to_run_forward.clear()
-        self._modules_to_run_forward.clear()
         if self._fsdp_param_group:
             self._fsdp_param_group.finalize_backward()
 
