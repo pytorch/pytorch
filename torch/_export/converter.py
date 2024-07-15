@@ -97,6 +97,7 @@ kind_to_standard_operators = {
     "prim::dtype": get_dtype_as_int,
     "aten::len": len,
     # Mapping from specialized op to its symbolic counterpart.
+    # They currently do not have any other overrides.
     "aten::numel": torch.ops.aten.sym_numel,
     "aten::size": torch.ops.aten.sym_size,
     "aten::storage_offset": torch.ops.aten.sym_storage_offset,
