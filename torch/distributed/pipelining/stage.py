@@ -18,7 +18,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 from ._backward import stage_backward
 from ._debug import map_debug_info
-from ._utils import flatten_args, PipeInfo, validate_tensors_metadata
+from ._utils import flatten_args, PipeInfo, validate_arguments
 
 
 __all__ = [
@@ -548,7 +548,7 @@ class _PipelineStageBase(ABC):
             self, fwd_chunk_id, args, kwargs, recv_args
         )
 
-        self._validate_fwd_input(args, kwargs)
+        self._validate_fwd_input(composite_args, composite_kwargs)
 
         # Compute forward
         try:
@@ -657,10 +657,7 @@ class _PipelineStageBase(ABC):
     def _validate_fwd_input(self, args, kwargs):
         """Raises a RuntimeError if shapes of input args/kwargs do not match the shapes configured for this stage."""
 
-        # print(f"{args=}, {kwargs=}")
-
-        # print(f"{self.args_recv_info=}")
-
+        # print(f"{self.is_first=}, {self.args_recv_info[0]=}")
         if self.is_first:
             # TODO why is there a separate recv_info for each pipeline chunk?
             # kwen2501: to avoid passing a `fwd_chunk_id` to this function, we
@@ -671,22 +668,28 @@ class _PipelineStageBase(ABC):
             # user inputs in canonical pipeline scenarios
             return
 
-        if len(kwargs):
-            # TODO- need a mapping of kwarg to position in self.args_recv_info
-            # without it, we just validate shapes for args and ignore kwargs
-            expected_args = expected_args[: len(expected_args) - len(kwargs)]
+        # if len(kwargs):
+        #     # TODO- need a mapping of kwarg to position in self.args_recv_info
+        #     # without it, we just validate shapes for args and ignore kwargs
+        #     expected_args = expected_args[: len(expected_args) - len(kwargs)]
 
         # TODO- need a mapping of kwarg to position in self.args_recv_info
         # maybe it's impossible to tell whether the len mismatches because
         # (a) the user passed an extra arg or missed an arg
         # (b) the user did not pass a kwarg, which has a default value baked into expected_args
-        # expected_tensors_meta = [
-        #     e.meta if isinstance(e, _RootArgPlaceholder) else e.buffer
-        #     for e in expected_args
-        # ]
-        # validate_tensors_metadata(
-        #     f"Stage {self.stage_index} forward inputs", expected_tensors_meta, args
-        # )
+        expected_args_objects = []
+        for e in expected_args:
+            if isinstance(e, _RootArgPlaceholder) and isinstance(e.obj, torch.Tensor):
+                expected_args_objects.append(e.obj.to("meta"))
+            elif isinstance(e, _RecvInfo):
+                expected_args_objects.append(e.buffer)
+            else:
+                expected_args_objects.append(e.obj)
+
+        print(f"{expected_args_objects=}, {args=}")
+        validate_arguments(
+            f"Stage {self.stage_index} forward inputs", expected_args_objects, args
+        )
 
     def _validate_fwd_outputs(self, outputs: Tuple[torch.Tensor, ...]):
         """Raises a RuntimeError if this stage produces an output of unexpected shape/dtype.
@@ -695,7 +698,7 @@ class _PipelineStageBase(ABC):
         mixed precision which changes output dtype.
         """
         expected_tensors_meta = self.get_outputs_meta()
-        validate_tensors_metadata(
+        validate_arguments(
             f"Stage {self.stage_index} forward outputs", expected_tensors_meta, outputs
         )
 
@@ -1013,6 +1016,7 @@ def _transform_fwd_inputs(
         composite_args = recv_args
         composite_kwargs = {}
 
+    # print(f"{stage.group_rank=}, {stage.is_first=}, {fwd_chunk_id=}, {composite_args=}, {composite_kwargs=}")
     return composite_args, composite_kwargs
 
 
