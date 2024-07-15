@@ -274,6 +274,7 @@ def log_data_ptr_mismatch(
             )
     return error_msg
 
+
 @dataclasses.dataclass(frozen=True)
 class CudagraphCachedInfo:
     """
