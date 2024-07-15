@@ -917,11 +917,11 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         cpu_mocel_dict = get_model_state_dict(cpu_model)
         for key, value in cpu_mocel_dict.items():
             self.assertEqual(len(meta_model_dict[key]), len(value))
-            self.assertEqual(meta_model_dict[key][0].size(),  value[0].size())
+            self.assertEqual(meta_model_dict[key][0].size(), value[0].size())
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def _test_setting_meta_device_model_broadcasting(self) -> None:
+    def test_setting_meta_device_model_broadcasting(self) -> None:
         # This test verifies that we can set model state dict by a meta device model
         # With the correlated changes in state_dict, meta device model should be accepted
         # in broadcasting and get copied successfully.
@@ -944,8 +944,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         meta_model_dict = meta_model.state_dict()
         cpu_mocel_dict = get_model_state_dict(cpu_model)
         for key, value in cpu_mocel_dict.items():
-            self.assertEqual(len(meta_model_dict[key]), int(len(value)/2))
-            self.assertEqual(meta_model_dict[key][0].size(),  value[0].size())
+            self.assertEqual(len(meta_model_dict[key]), int(len(value) / 2))
+            self.assertEqual(meta_model_dict[key][0].size(), value[0].size())
 
 
 class TestNoComm(MultiProcessTestCase):
