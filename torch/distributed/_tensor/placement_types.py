@@ -515,9 +515,7 @@ class Replicate(Placement):
     """
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Replicate):
-            return False
-        return True
+        return isinstance(other, Replicate)
 
     def __hash__(self) -> int:
         # every replicate placement is the same
@@ -800,7 +798,7 @@ class DTensorSpec:
         the distributed tensor. Unlike `dim_map`, `num_shards_map`
         denotes how many shards each tensor dim has. Like `dim_map`:
             len(num_shards_map) == dist_tensor.ndim
-            num_shards_map[i] = 1: means tensor dim i is not sharded 
+            num_shards_map[i] = 1: means tensor dim i is not sharded
             num_shards_map[i] = j: means tensor dim i has j shards in total
 
         For example, we have a dist tensor of shape [18, 20, 30],
