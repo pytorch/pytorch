@@ -1,8 +1,10 @@
 import os
 
-from typing import Callable, Dict
+from typing import Callable, Dict, Union
 
 import torch
+import torch.nn as nn
+
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.examples.comm_mode_features_example_argparser import args
@@ -46,7 +48,52 @@ class CommDebugModeExample:
         self.rank = rank
         self.device_type = get_device_type()
 
-    def test_MLP_distributed_sharding_display(self) -> None:
+    def _MLP_model_setup(
+        self, model_type: type, parallelize_plan: Union[None, dict] = None
+    ) -> tuple[nn.Module, torch.Tensor]:
+        """
+        Creates MLP or MLPStacked model for examples
+        """
+
+        if parallelize_plan is None:
+            parallelize_plan = {
+                "net1": ColwiseParallel(),
+                "net2": RowwiseParallel(),
+            }
+
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, NUM_DEVICES),
+        )
+
+        inp_size = [8, 10]
+        inp = torch.rand(*inp_size, device=self.device_type)
+
+        model = model_type(self.device_type)
+        model = parallelize_module(model, device_mesh, parallelize_plan)
+        return model, inp
+
+    def _transformer_model_setup(
+        self, is_seq_parallel: bool = False
+    ) -> tuple[nn.Module, torch.Tensor]:
+        """
+        Creates transformer model for examples
+        """
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, NUM_DEVICES),
+        )
+
+        model_args = ModelArgs()
+        model = Transformer(model_args).to(device=self.device_type)
+        model = Transformer.parallelize(model, device_mesh, is_seq_parallel)
+        inp_size = [8, 8]
+
+        inp = torch.randint(model_args.vocab_size, inp_size, device=self.device_type)
+
+        return model, inp
+
+    def example_MLP_distributed_sharding_display(self) -> None:
         """
         Example of obtaining all module's FQN and parameters for a given distributed model and printing the sharding info
 
@@ -56,24 +103,9 @@ class CommDebugModeExample:
         MLPModule.net2.weight: (Shard(dim=1),)
         MLPModule.net2.bias: (Replicate(),)
         """
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
-        inp_size = [8, 10]
-        rng_seed = 0
-        torch.manual_seed(rng_seed)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
 
-        LR = 0.25
-
-        parallelize_plan = {
-            "net1": ColwiseParallel(),
-            "net2": RowwiseParallel(),
-        }
-
-        model = parallelize_module(model, device_mesh, parallelize_plan)
+        torch.manual_seed(0)
+        model, inp = self._MLP_model_setup(model_type=MLPModule)
 
         comm_mode = CommDebugMode()
 
@@ -83,7 +115,7 @@ class CommDebugModeExample:
 
         comm_mode.print_sharding_info()
 
-    def test_MLPStacked_distributed_sharding_display(self) -> None:
+    def example_MLPStacked_distributed_sharding_display(self) -> None:
         """
         Example of obtaining all module's FQN and parameters for a given
         distributed model with nested modules and printing the sharding info
@@ -98,17 +130,8 @@ class CommDebugModeExample:
         MLPStacked.layers.1.net2.weight: (Shard(dim=1),)
         MLPStacked.layers.1.net2.bias: (Replicate(),)
         """
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
-        inp_size = [8, 10]
-        rng_seed = 0
-        torch.manual_seed(rng_seed)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPStacked(self.device_type)
 
-        LR = 0.25
+        torch.manual_seed(0)
 
         parallelize_plan = {
             "MLPStacked.layers.0.net1": ColwiseParallel(),
@@ -117,7 +140,9 @@ class CommDebugModeExample:
             "MLPStacked.layers.1.net2": RowwiseParallel(),
         }
 
-        model = parallelize_module(model, device_mesh, parallelize_plan)
+        model, inp = self._MLP_model_setup(
+            model_type=MLPStacked, parallelize_plan=parallelize_plan
+        )
 
         comm_mode = CommDebugMode()
 
@@ -127,40 +152,28 @@ class CommDebugModeExample:
 
         comm_mode.print_sharding_info()
 
-    def test_MLP_module_tracing(self) -> None:
+    def example_MLP_module_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module level tracing using a MLP model.
         Prints a table of module level collective tracing information and logs table to output.txt
 
-        Expected Output
+        Expected Output:
         Global
-        *c10d_functional.all_reduce: 1
-        MLPModule
+          FORWARD PASS
             *c10d_functional.all_reduce: 1
-            MLPModule.net1
-            MLPModule.relu
-            MLPModule.net2
-            *c10d_functional.all_reduce: 1
+            MLPModule
+              FORWARD PASS
+                *c10d_functional.all_reduce: 1
+                MLPModule.net1
+                MLPModule.relu
+                MLPModule.net2
+                  FORWARD PASS
+                    *c10d_functional.all_reduce: 1
         """
 
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
-        inp_size = [8, 10]
-        rng_seed = 0
-        torch.manual_seed(rng_seed)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
+        torch.manual_seed(0)
 
-        LR = 0.25
-
-        parallelize_plan = {
-            "net1": ColwiseParallel(),
-            "net2": RowwiseParallel(),
-        }
-
-        model = parallelize_module(model, device_mesh, parallelize_plan)
+        model, inp = self._MLP_model_setup(model_type=MLPModule)
 
         comm_mode = CommDebugMode()
 
@@ -172,80 +185,85 @@ class CommDebugModeExample:
         print(comm_mode.generate_module_tracing_table())
         comm_mode.log_module_tracing_table_to_file()
 
-    def test_transformer_module_tracing(self, is_seq_parallel: bool = False) -> None:
+    def example_transformer_module_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module level tracing using a distributed Transformer model.
         Prints a table of module level collective tracing information and logs table to output.txt
 
         Expected output:
         Global
-        *c10d_functional.all_reduce: 6
-        *c10d_functional.all_gather_into_tensor: 1
-        Transformer
+          FORWARD PASS
             *c10d_functional.all_reduce: 6
             *c10d_functional.all_gather_into_tensor: 1
-            Transformer.tok_embeddings
-            *c10d_functional.all_reduce: 1
-            Transformer.pos_embeddings
-            *c10d_functional.all_reduce: 1
-            Transformer.dropout
-            Transformer.layers.0
-            *c10d_functional.all_reduce: 2
-            Transformer.layers.0.attention_norm
-            Transformer.layers.0.attention
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.0.attention.wq
-                Transformer.layers.0.attention.wk
-                Transformer.layers.0.attention.wv
-                Transformer.layers.0.attention.wo
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.0.attention.resid_dropout
-            Transformer.layers.0.ffn_norm
-            Transformer.layers.0.feed_forward
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.0.feed_forward.w1
-                Transformer.layers.0.feed_forward.gelu
-                Transformer.layers.0.feed_forward.w2
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.0.feed_forward.resid_dropout
-            Transformer.layers.1
-            *c10d_functional.all_reduce: 2
-            Transformer.layers.1.attention_norm
-            Transformer.layers.1.attention
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.1.attention.wq
-                Transformer.layers.1.attention.wk
-                Transformer.layers.1.attention.wv
-                Transformer.layers.1.attention.wo
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.1.attention.resid_dropout
-            Transformer.layers.1.ffn_norm
-            Transformer.layers.1.feed_forward
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.1.feed_forward.w1
-                Transformer.layers.1.feed_forward.gelu
-                Transformer.layers.1.feed_forward.w2
-                *c10d_functional.all_reduce: 1
-                Transformer.layers.1.feed_forward.resid_dropout
-            Transformer.norm
-            Transformer.output
-            *c10d_functional.all_gather_into_tensor: 1
+            Transformer
+              FORWARD PASS
+                *c10d_functional.all_reduce: 6
+                *c10d_functional.all_gather_into_tensor: 1
+                Transformer.tok_embeddings
+                  FORWARD PASS
+                    *c10d_functional.all_reduce: 1
+                Transformer.pos_embeddings
+                  FORWARD PASS
+                    *c10d_functional.all_reduce: 1
+                Transformer.dropout
+                Transformer.layers.0
+                  FORWARD PASS
+                    *c10d_functional.all_reduce: 2
+                    Transformer.layers.0.attention_norm
+                    Transformer.layers.0.attention
+                      FORWARD PASS
+                        *c10d_functional.all_reduce: 1
+                        Transformer.layers.0.attention.wq
+                        Transformer.layers.0.attention.wk
+                        Transformer.layers.0.attention.wv
+                        Transformer.layers.0.attention.wo
+                          FORWARD PASS
+                            *c10d_functional.all_reduce: 1
+                        Transformer.layers.0.attention.resid_dropout
+                    Transformer.layers.0.ffn_norm
+                    Transformer.layers.0.feed_forward
+                      FORWARD PASS
+                        *c10d_functional.all_reduce: 1
+                        Transformer.layers.0.feed_forward.w1
+                        Transformer.layers.0.feed_forward.gelu
+                        Transformer.layers.0.feed_forward.w2
+                          FORWARD PASS
+                            *c10d_functional.all_reduce: 1
+                        Transformer.layers.0.feed_forward.resid_dropout
+                Transformer.layers.1
+                  FORWARD PASS
+                    *c10d_functional.all_reduce: 2
+                    Transformer.layers.1.attention_norm
+                    Transformer.layers.1.attention
+                      FORWARD PASS
+                        *c10d_functional.all_reduce: 1
+                        Transformer.layers.1.attention.wq
+                        Transformer.layers.1.attention.wk
+                        Transformer.layers.1.attention.wv
+                        Transformer.layers.1.attention.wo
+                          FORWARD PASS
+                            *c10d_functional.all_reduce: 1
+                        Transformer.layers.1.attention.resid_dropout
+                    Transformer.layers.1.ffn_norm
+                    Transformer.layers.1.feed_forward
+                      FORWARD PASS
+                        *c10d_functional.all_reduce: 1
+                        Transformer.layers.1.feed_forward.w1
+                        Transformer.layers.1.feed_forward.gelu
+                        Transformer.layers.1.feed_forward.w2
+                          FORWARD PASS
+                            *c10d_functional.all_reduce: 1
+                        Transformer.layers.1.feed_forward.resid_dropout
+                Transformer.norm
+                Transformer.output
+                  FORWARD PASS
+                    *c10d_functional.all_gather_into_tensor: 1
 
         """
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
-
-        model_args = ModelArgs()
-        model = Transformer(model_args).to(device=self.device_type)
-        model = Transformer.parallelize(model, device_mesh, is_seq_parallel)
-
-        LR = 0.25
-        inp_size = [8, 8]
 
         torch.manual_seed(0)
-        inp = torch.randint(model_args.vocab_size, inp_size, device=self.device_type)
+
+        model, inp = self._transformer_model_setup()
 
         comm_mode = CommDebugMode()
         with comm_mode:
@@ -255,18 +273,362 @@ class CommDebugModeExample:
         print(comm_mode.generate_module_tracing_table())
         comm_mode.log_module_tracing_table_to_file()
 
+    def example_MLP_operation_tracing(self) -> None:
+        """
+        Example code to demonstrate CommModeDebug's module operation level tracing using a distributed MLP model.
+        Prints a table of module opoeration level collective tracing information and logs table to output.txt
+
+        Expected output:
+        Global
+          FORWARD PASS
+            *c10d_functional.all_reduce: 1
+            MLPModule
+            *module type: class 'torch.testing._internal.distributed._tensor.common_dtensor.MLPModule'
+              FORWARD PASS
+                *c10d_functional.all_reduce: 1
+                MLPModule.net1
+                *module type: class 'torch.nn.modules.linear.Linear'
+                *Parameter List
+                *weight: (Shard(dim=0),)
+                *bias: (Shard(dim=0),)
+                  FORWARD PASS
+                    **aten.detach.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.view.default
+                    **aten.t.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.t.default
+                    **aten.addmm.default
+                      shape: [torch.Size([16]), torch.Size([8, 10]), torch.Size([10, 16])]
+                      sharding: [(Shard(dim=0),), (Replicate(),), (Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.addmm.default
+                    **aten.view.default
+                MLPModule.relu
+                *module type: class 'torch.nn.modules.activation.ReLU'
+                  FORWARD PASS
+                    **aten.relu.default
+                    **aten.detach.default
+                MLPModule.net2
+                *module type: class 'torch.nn.modules.linear.Linear'
+                *Parameter List
+                *weight: (Shard(dim=1),)
+                *bias: (Replicate(),)
+                  FORWARD PASS
+                    *c10d_functional.all_reduce: 1
+                    **aten.detach.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10])]
+                      sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10])]
+                      sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10])]
+                      sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10])]
+                      sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.view.default
+                    **aten.t.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.t.default
+                    **aten.addmm.default
+                      shape: [torch.Size([10]), torch.Size([8, 16]), torch.Size([16, 10])]
+                      sharding: [(Replicate(),), (Shard(dim=1),), (Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.div.Tensor
+                    **aten.addmm.default
+                    **_c10d_functional.all_reduce.default
+                    **aten.view.default
+                    **aten.sum.default
+                    **aten.ones_like.default
+                  BACKWARD PASS
+                    **aten.expand.default
+                    **aten.t.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.t.default
+                    **aten.mm.default
+                      shape: [torch.Size([8, 10]), torch.Size([10, 16])]
+                      sharding: [(Replicate(),), (Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.mm.default
+                    **aten.t.default
+                      shape: [torch.Size([8, 10])]
+                      sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.t.default
+                    **aten.mm.default
+                      shape: [torch.Size([10, 8]), torch.Size([8, 16])]
+                      sharding: [(Replicate(),), (Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.mm.default
+                    **aten.t.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.t.default
+                    **aten.sum.dim_IntList
+                      shape: [torch.Size([8, 10])]
+                      sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.sum.dim_IntList
+                    **aten.view.default
+                      shape: [torch.Size([1, 10])]
+                      sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.view.default
+                    **aten.detach.default
+                      shape: [torch.Size([10])]
+                      sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10])]
+                      sharding: [(Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.t.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.t.default
+                    **aten.detach.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.threshold_backward.default
+                    **aten.t.default
+                      shape: [torch.Size([8, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.t.default
+                    **aten.mm.default
+                      shape: [torch.Size([16, 8]), torch.Size([8, 10])]
+                      sharding: [(Shard(dim=0),), (Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.mm.default
+                    **aten.t.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.t.default
+                    **aten.sum.dim_IntList
+                      shape: [torch.Size([8, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.sum.dim_IntList
+                    **aten.view.default
+                      shape: [torch.Size([1, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.view.default
+                    **aten.detach.default
+                      shape: [torch.Size([16])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.t.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.t.default
+                    **aten.detach.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+
+        """
+        torch.manual_seed(0)
+
+        model, inp = self._MLP_model_setup(model_type=MLPModule)
+
+        comm_mode = CommDebugMode()
+
+        with comm_mode:
+            output_tp = model(inp)
+            output_tp.sum().backward()
+
+        # print the operation level collective tracing information
+        print(comm_mode.generate_operation_tracing_table())
+        comm_mode.log_operation_tracing_table_to_file()
+
+    def example_transformer_operation_tracing(
+        self, is_seq_parallel: bool = False
+    ) -> None:
+        """
+        Example code to demonstrate CommModeDebug's module operation level tracing using a distributed transformer model.
+        Prints a table of module opoeration level collective tracing information and logs table to output.txt
+        """
+
+        torch.manual_seed(0)
+
+        model, inp = self._transformer_model_setup()
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            output = model(inp)
+
+        # print the operation level collective tracing information
+        print(comm_mode.generate_operation_tracing_table())
+        comm_mode.log_operation_tracing_table_to_file()
+
+    def example_MLP_json_dump(self) -> None:
+        """
+        Example code to demonstrate CommModeDebug's json dump using a MLP model. Sends the information to default
+        comm_mode_log.json file
+        """
+        torch.manual_seed(0)
+
+        model, inp = self._MLP_model_setup(model_type=MLPModule)
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            output_tp = model(inp)
+            output_tp.sum().backward()
+
+        comm_mode.generate_json_dump()
+
+    def example_transformer_json_dump(self, is_seq_parallel: bool = False) -> None:
+        """
+        Example code to demonstrate CommModeDebug's json dump using a transformer model. Sends the information to
+        user-passed transformer_log.json file
+        """
+
+        torch.manual_seed(0)
+
+        model, inp = self._transformer_model_setup()
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            output = model(inp)
+
+        comm_mode.generate_json_dump(file_name="transformer_log.json")
+
 
 def run_example(world_size: int, rank: int, example_name: str) -> None:
     # set manual seed
-    torch.manual_seed(0)
     # intializing class with all of the functions
-    instantiated_test = CommDebugModeExample(world_size, rank)
+    instantiated_example = CommDebugModeExample(world_size, rank)
     # dict that stores example code function names
     name_to_example_code: Dict[str, Callable[[], None]] = {
-        "MLP_distributed_sharding_display": instantiated_test.test_MLP_distributed_sharding_display,
-        "MLPStacked_distributed_sharding_display": instantiated_test.test_MLPStacked_distributed_sharding_display,
-        "MLP_module_tracing": instantiated_test.test_MLP_module_tracing,
-        "transformer_module_tracing": instantiated_test.test_transformer_module_tracing,
+        "MLP_distributed_sharding_display": instantiated_example.example_MLP_distributed_sharding_display,
+        "MLPStacked_distributed_sharding_display": instantiated_example.example_MLPStacked_distributed_sharding_display,
+        "MLP_module_tracing": instantiated_example.example_MLP_module_tracing,
+        "transformer_module_tracing": instantiated_example.example_transformer_module_tracing,
+        "MLP_operation_tracing": instantiated_example.example_MLP_operation_tracing,
+        "transformer_operation_tracing": instantiated_example.example_transformer_operation_tracing,
+        "MLP_json_dump": instantiated_example.example_MLP_json_dump,
+        "transformer_json_dump": instantiated_example.example_transformer_json_dump,
     }
 
     name_to_example_code[example_name]()

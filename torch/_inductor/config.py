@@ -98,6 +98,9 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# set to True to enable the back-to-back GEMM pass
+b2b_gemm_pass = False
+
 # register custom graph optimization pass hook. so far, pre/post passes are
 # only applied before/after pattern_matcher in post_grad_passes.
 #
@@ -122,6 +125,16 @@ joint_custom_post_pass: Optional[Callable[[torch.fx.Graph], None]] = None
 # non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
 # use post-grad passes.
 pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
+
+# Registers a custom pass to be run right before fusion in Inductor scheduler.
+# WARNING: Inductor scheduler IR is at prototype stage and subject to change,
+# hence custom IR passes built on top of it might break in the future.
+_pre_fusion_custom_pass: Optional[
+    Callable[
+        [List["torch._inductor.scheduler.BaseSchedulerNode"]],
+        List["torch._inductor.scheduler.BaseSchedulerNode"],
+    ]
+] = None
 
 # Deprecated
 split_cat_fx_passes = True
@@ -216,6 +229,8 @@ reorder_for_compute_comm_overlap = False
 
 # passes (in execution order) for increasing overlap between compute and communication
 # for built-in passes, use string name; for user-defined passes, pass in the function handle
+# WARNING: Inductor scheduler IR is at prototype stage and subject to change,
+# hence custom IR passes built on top of it might break in the future.
 reorder_for_compute_comm_overlap_passes = [
     "reorder_compute_for_overlap",
     "sink_waits",
@@ -672,7 +687,7 @@ class triton:
     cudagraph_trees_history_recording = False
 
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
-    cudagraph_support_input_mutation = False
+    cudagraph_support_input_mutation = False if is_fbcode() else True
 
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
@@ -911,6 +926,36 @@ class rocm:
     # Flag to use a short list of CK instances which perform well across a variety of shapes.
     # Currently RCR and F16 only
     use_preselected_instances: bool = False
+
+
+# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
+cpu_backend = "cpp"
+
+# Backend to use for CUDA codegen either "triton" or "halide" (experimental)
+cuda_backend = "triton"
+
+
+class halide:
+    # Base halide target to use for CPU devices
+    cpu_target = "host"
+
+    # Base halide target to use for CUDA devices
+    gpu_target = "host-cuda"
+
+    # Halide autoscheduler to use, choices are:
+    # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
+    scheduler_cuda = "Anderson2021"
+    scheduler_cpu = "Adams2019"
+
+    # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
+    asserts = False
+
+    # Controls `debug` flag passed to Halide target
+    debug = False
+
+    # Enable (or fallback on) scan kernels such as cumsum
+    # Halide autoschedulers struggle with these kernels
+    scan_kernels = False
 
 
 # create a directory containing lots of debug information
