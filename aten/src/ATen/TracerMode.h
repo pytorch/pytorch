@@ -113,12 +113,12 @@
 
 namespace at::tracer::impl {
 
-inline bool is_dispatch_enabled() {
+static inline bool is_dispatch_enabled() {
   return c10::impl::tls_is_dispatch_key_included(at::DispatchKey::Tracer) &&
       !c10::impl::tls_is_dispatch_key_excluded(at::DispatchKey::Tracer);
 }
 
-inline void set_dispatch_enabled(bool enabled) {
+static inline void set_dispatch_enabled(bool enabled) {
   TORCH_INTERNAL_ASSERT(
       !c10::impl::tls_is_dispatch_key_excluded(at::DispatchKey::Tracer),
       "Cannot enable tracing within the scope of NoTracerDispatchMode!");
