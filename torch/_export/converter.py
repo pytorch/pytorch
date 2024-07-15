@@ -961,7 +961,9 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
             self.name_to_non_tensor_attributes,
         )
         gm = graph_converter.convert()
-        ep = self.retrace_as_exported_program(gm, graph_converter.tensor_constants)
+        ep = self.retrace_as_exported_program(
+            gm, graph_converter.name_to_tensor_constants
+        )
         log.info(f"{ep}")  # noqa: G004
 
         # Post-processing step to ensure ExportedProgram has the same state_dict as
