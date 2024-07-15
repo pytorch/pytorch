@@ -113,11 +113,7 @@ def reduction_dtype_filter(op):
         or torch.int16 not in op.dtypes
     ):
         return False
-
-    argspec = inspect.getfullargspec(op.op)
-    if "dtype" not in argspec.kwonlyargs:
-        return False
-    return True
+    return "dtype" in inspect.getfullargspec(op.op).kwonlyargs
 
 
 # Create a list of operators that are a subset of _ref_test_ops but don't have a
