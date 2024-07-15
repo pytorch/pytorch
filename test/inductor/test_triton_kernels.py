@@ -10,13 +10,13 @@ import torch._dynamo.testing
 import torch._inductor.test_case
 
 from torch._higher_order_ops.triton_kernel_wrap import (
-    capture_triton,
     generate_ttir,
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
 )
 from torch._inductor import metrics
 from torch._inductor.utils import run_and_get_code
+from torch._library import capture_triton
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu, TEST_WITH_ROCM
 
@@ -2261,7 +2261,52 @@ if HAS_GPU:
         setattr(MutationTests, name, fn)
 
 
+class CustomOpTests(torch._inductor.test_case.TestCase):
+    """Tests for custom ops wrapping triton kernels"""
+
+    @requires_gpu
+    @common_utils.parametrize("autotuned", [False, True])
+    def test_add_kernel(self, autotuned):
+        from torch._inductor.utils import run_and_get_code
+
+        libname = "my_cool_namespace"
+        opname = "my_triton_operator"
+
+        @torch._library.triton_op(f"{libname}::{opname}", mutates_args={})
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            if autotuned:
+                capture_triton(add_kernel_autotuned)[grid](x, y, output, n_elements)
+            else:
+                capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            return output
+
+        def f(x, y):
+            return add(x, y)
+
+        x = torch.randn(3, device="cuda")
+        y = torch.randn(3, device="cuda")
+
+        out = f(x, y)
+        expected = x + y
+        self.assertEqual(out, expected)
+        out_compiled, codes = run_and_get_code(torch.compile(f), x, y)
+        self.assertEqual(out_compiled, expected)
+        self.assertEqual(len(codes), 1)
+
+        # Check that we decomposed the operator away
+        code = "\n".join(codes[0])
+        self.assertNotIn(libname, code)
+        self.assertNotIn(opname, code)
+
+
 common_utils.instantiate_parametrized_tests(KernelTests)
+common_utils.instantiate_parametrized_tests(CustomOpTests)
 
 
 if __name__ == "__main__":
