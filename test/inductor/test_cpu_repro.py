@@ -1522,7 +1522,7 @@ class CPUReproTests(TestCase):
     def test_int_div(self):
         def fn(x, y):
             s3 = x.size(1)
-            a = torch.zeros((1 + s3) // 2)
+            a = torch.ones((1 + s3) // 2)
             a += y
             return a, s3
 
@@ -3864,6 +3864,20 @@ class CPUReproTests(TestCase):
             1,
             exactly=True,
         ).run(code)
+
+    def test_convert_fp32_int64_oob_vec(self):
+        # https://github.com/pytorch/pytorch/issues/129863
+        def fn(x):
+            float32 = x.to(torch.float32)
+            return float32.to(torch.int64)
+
+        x = torch.full((32,), -9223372036854775808, dtype=torch.int64)
+        for simdlen in (None, 256):
+            with config.patch({"cpp.simdlen": simdlen}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x,))
+                check_metrics_vec_kernel_count(1)
 
 
 if __name__ == "__main__":

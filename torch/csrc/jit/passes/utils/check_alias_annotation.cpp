@@ -196,7 +196,7 @@ std::optional<IValue> toIValueProp(const Value* v) {
         genericList.push_back(*elem);
       } else {
         // One of the list elements isn't constant.
-        return c10::nullopt;
+        return std::nullopt;
       }
     }
 
@@ -213,7 +213,7 @@ std::optional<IValue> toIValueProp(const Value* v) {
       return IValue(
           fmap(genericList, [](const IValue& v) { return v.toTensor(); }));
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
 
@@ -222,7 +222,7 @@ std::optional<IValue> toIValueProp(const Value* v) {
       return maybe_stack->at(0);
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 // batch_norm and instance_norm have incorrect annotations, because
