@@ -207,6 +207,14 @@ def get_overloads(aten_fn):
     return aten_fn
 
 
+def in_namespace(op, namespace):
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        return namespace in op._qualified_op_name
+    elif isinstance(op, torch._ops.OpOverload):
+        return namespace in op.name()
+    return False
+
+
 def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
     indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
     if (type_promotion_kind or convert_input_to_bool) and indices:
@@ -293,7 +301,9 @@ def _register_lowering(
             args = args[0]
 
         # kwargs tensors not supported yet unless it's a fallback op
-        if not all(fn in fallbacks for fn in aten_fn):
+        if not all(
+            (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
+        ):
             assert not any(isinstance(x, TensorBox) for x in kwargs.values())
             # explicitly assert for "out=" ops for better error messages
             assert not any(
@@ -6365,6 +6375,17 @@ try:
                 group_name,
             ),
         )
+
+    @register_lowering(_c10d_functional.all_gather_into_tensor_out)
+    def _all_gather_into_tensor_out(inp, group_size, group_name, *, out):
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.all_gather_into_tensor_out.default,
+            inp,
+            group_size,
+            group_name,
+            out=out,
+        )
+        return out
 
     @register_lowering(_c10d_functional.reduce_scatter_tensor)
     def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name):
