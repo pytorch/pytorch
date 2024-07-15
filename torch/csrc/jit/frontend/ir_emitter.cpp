@@ -502,42 +502,42 @@ struct Environment {
           {"len",
            makeMagic(
                "__len__",
-               std::make_shared<BuiltinFunction>(aten::len, at::nullopt))},
+               std::make_shared<BuiltinFunction>(aten::len, std::nullopt))},
           {"hex",
            makeMagic(
                "__hex__",
-               std::make_shared<BuiltinFunction>(aten::hex, at::nullopt))},
+               std::make_shared<BuiltinFunction>(aten::hex, std::nullopt))},
           {"oct",
            makeMagic(
                "__oct__",
-               std::make_shared<BuiltinFunction>(aten::oct, at::nullopt))},
+               std::make_shared<BuiltinFunction>(aten::oct, std::nullopt))},
           {"round",
            makeMagic(
                "__round__",
-               std::make_shared<BuiltinFunction>(aten::round, at::nullopt))},
-          {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
-          {"id", std::make_shared<BuiltinFunction>(prim::id, at::nullopt)},
-          {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
-          {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
-          {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
-          {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
-          {"any", std::make_shared<BuiltinFunction>(aten::any, at::nullopt)},
+               std::make_shared<BuiltinFunction>(aten::round, std::nullopt))},
+          {"hash", std::make_shared<BuiltinFunction>(aten::hash, std::nullopt)},
+          {"id", std::make_shared<BuiltinFunction>(prim::id, std::nullopt)},
+          {"min", std::make_shared<BuiltinFunction>(prim::min, std::nullopt)},
+          {"max", std::make_shared<BuiltinFunction>(prim::max, std::nullopt)},
+          {"abs", std::make_shared<BuiltinFunction>(prim::abs, std::nullopt)},
+          {"all", std::make_shared<BuiltinFunction>(aten::all, std::nullopt)},
+          {"any", std::make_shared<BuiltinFunction>(aten::any, std::nullopt)},
           {"divmod",
-           std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
-          {"sum", std::make_shared<BuiltinFunction>(aten::sum, at::nullopt)},
+           std::make_shared<BuiltinFunction>(aten::divmod, std::nullopt)},
+          {"sum", std::make_shared<BuiltinFunction>(aten::sum, std::nullopt)},
           {"list", SpecialFormValue::create(prim::list)},
           {"dict", SpecialFormValue::create(prim::dict)},
-          {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
-          {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
-          {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
-          {"pow", std::make_shared<BuiltinFunction>(aten::pow, at::nullopt)},
+          {"ord", std::make_shared<BuiltinFunction>(aten::ord, std::nullopt)},
+          {"chr", std::make_shared<BuiltinFunction>(aten::chr, std::nullopt)},
+          {"bin", std::make_shared<BuiltinFunction>(aten::bin, std::nullopt)},
+          {"pow", std::make_shared<BuiltinFunction>(aten::pow, std::nullopt)},
           {"range", SpecialFormValue::create(prim::range)},
           {"zip", SpecialFormValue::create(prim::zip)},
           {"enumerate", SpecialFormValue::create(prim::enumerate)},
           {"rangelist",
-           std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
+           std::make_shared<BuiltinFunction>(prim::rangelist, std::nullopt)},
           {"sorted",
-           std::make_shared<BuiltinFunction>(aten::sorted, at::nullopt)},
+           std::make_shared<BuiltinFunction>(aten::sorted, std::nullopt)},
           // Only AssertionError is bound so that we can use it from emitAssert,
           // all other exceptions should be resolved at the Python level
           {"AssertionError",
@@ -2945,7 +2945,7 @@ struct to_ir {
       args.push_back(rhs);
       makeMagic(
           "__setitem__",
-          std::make_shared<BuiltinFunction>(aten::_set_item, at::nullopt))
+          std::make_shared<BuiltinFunction>(aten::_set_item, std::nullopt))
           ->call(stmtRange, method, args, {}, 0);
     }
   }
@@ -4110,7 +4110,7 @@ struct to_ir {
     auto val =
         asSimple(makeMagic(
                      magicMethod,
-                     std::make_shared<BuiltinFunction>(opSymbol, at::nullopt))
+                     std::make_shared<BuiltinFunction>(opSymbol, std::nullopt))
                      ->call(tree->range(), method, named_values, {}, 0));
 
     // if we emitted the unary op and not some other overloaded function,
@@ -4362,7 +4362,7 @@ struct to_ir {
 
     return asSimple(
         makeMagic(
-            overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
+            overload, std::make_shared<BuiltinFunction>(kind, std::nullopt))
             ->call(tree->range(), method, named_values, {}, 0));
   }
 
@@ -4790,7 +4790,7 @@ struct to_ir {
     }
 
     if (sliceable->type()->cast<TupleType>()) {
-      std::vector<at::optional<NamedValue>> tuple_args;
+      std::vector<std::optional<NamedValue>> tuple_args;
       // since we are only dealing with tuple slicing, we try to keep
       // tuple args separate for now
       tuple_args.reserve(3);
@@ -5170,7 +5170,7 @@ struct to_ir {
   Value* emitTupleSlice(
       const SourceRange& loc,
       const NamedValue& tuple_val,
-      const std::vector<at::optional<NamedValue>>& tuple_args) {
+      const std::vector<std::optional<NamedValue>>& tuple_args) {
     auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
     int64_t tuple_len = tuple_type->elements().size();
     auto beg_val = tuple_args[0];
@@ -5224,7 +5224,7 @@ struct to_ir {
         auto s_tuple_val =
             sv->asTupleValue(val_range, method)->asValue(val_range, method);
         const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
-        std::vector<at::optional<NamedValue>> tuple_args;
+        std::vector<std::optional<NamedValue>> tuple_args;
         tuple_args.reserve(3);
         if (slice.start().present()) {
           auto begin = NamedValue(
