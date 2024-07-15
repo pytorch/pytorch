@@ -12,6 +12,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    final,
     Iterator,
     List,
     Optional,
@@ -39,6 +40,8 @@ if TYPE_CHECKING:
 
 import torch
 import torch.utils._pytree as pytree
+
+from torch._export.verifier import Verifier
 from torch._subclasses.functional_tensor import FunctionalTensor
 
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
@@ -65,7 +68,6 @@ from .graph_signature import (  # noqa: F401
     TensorArgument,
     TokenArgument,
 )
-
 
 __all__ = [
     "ExportedProgram",
@@ -375,8 +377,12 @@ def _decompose_and_get_gm_with_new_signature_constants(
         constant_attrs = _gather_constant_attrs(mod)
         aten_export_artifact = _export_to_aten_ir(
             mod,
-            fake_args_unwrapped[0],
-            fake_args_unwrapped[1],
+            # this requires empty kwargs, but not in pytree.flattened format
+            (
+                *fake_args_unwrapped[0],
+                *fake_args_unwrapped[1].values(),
+            ),
+            {},
             fake_params_buffers,
             constant_attrs,
         )
@@ -455,6 +461,38 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     # propagate names to higher order op subgraphs
     _name_hoo_subgraph_placeholders(gm)
+
+    # Run this pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
+    # Overwrite output specs afterwards.
+    from torch._dynamo import config as _dynamo_config
+    from torch._export.passes._node_metadata_hook import (
+        _node_metadata_hook,
+        _set_node_metadata_hook,
+    )
+    from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
+
+    if not _dynamo_config.do_not_emit_runtime_asserts:
+        stack_trace = (
+            'File "torch/fx/passes/runtime_assert.py", line 24, '
+            "in insert_deferred_runtime_asserts"
+        )
+        shape_env = _get_shape_env(gm)
+        if shape_env is not None:
+            with _set_node_metadata_hook(
+                gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+            ):
+                insert_deferred_runtime_asserts(
+                    gm,
+                    shape_env,
+                    f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                    export=True,
+                )
+
+    # update output specs
+    gm.recompile()
+    for i, name in enumerate(_graph_output_names(gm)):
+        if isinstance(new_outputs[i], torch.fx.Node):
+            new_outputs[i].name = name
 
     # To match the output target with correct input for input mutations
     # need to find the old to new placeholder map
@@ -539,12 +577,6 @@ def _decompose_exported_program(
     _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
-    from torch._dynamo import config as _dynamo_config
-    from torch._export.passes._node_metadata_hook import (
-        _node_metadata_hook,
-        _set_node_metadata_hook,
-    )
-
     from torch._export.passes.lift_constants_pass import (
         ConstantAttrMap,
         lift_constants_pass,
@@ -572,23 +604,6 @@ def _decompose_exported_program(
     for k, v in constants.items():
         assert k not in ep.constants
         ep.constants[k] = v
-
-    if not _dynamo_config.do_not_emit_runtime_asserts:
-        stack_trace = (
-            'File "torch/fx/passes/runtime_assert.py", line 24, '
-            "in insert_deferred_runtime_asserts"
-        )
-        shape_env = _get_shape_env(gm)
-        if shape_env is not None:
-            with _set_node_metadata_hook(
-                gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-            ):
-                insert_deferred_runtime_asserts(
-                    gm,
-                    shape_env,
-                    f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
-                    export=True,
-                )
 
     exported_program = ExportedProgram(
         root=gm,
@@ -628,13 +643,15 @@ class ExportedProgram:
         range_constraints: "Dict[sympy.Symbol, Any]",
         module_call_graph: List[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
-        verifier: Optional[Type[Any]] = None,  # TODO Change typing hint to Verifier.
+        verifier: Optional[Type[Any]] = None,  # TODO Deprecate this.
         tensor_constants: Optional[
             Dict[str, torch.Tensor]
         ] = None,  # TODO: deprecate this
         constants: Optional[
             Dict[str, Union[torch.Tensor, FakeScriptObject, torch._C.ScriptObject]]
         ] = None,
+        *,
+        verifiers: Optional[List[Type[Verifier]]] = None,
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -652,14 +669,17 @@ class ExportedProgram:
         self._constants = tensor_constants or constants or {}
         assert self._constants is not None
 
-        from torch._export.verifier import Verifier
-
-        if verifier is None:
-            verifier = Verifier
-        assert issubclass(verifier, Verifier)
-        self._verifier = verifier
+        # TODO Clean up this after we bump executorch's pin.
+        assert verifier is None or verifiers is None
+        if verifiers is None:
+            if verifier is None:
+                verifiers = [Verifier]
+            else:
+                verifiers = [verifier]
+        assert all(issubclass(v, Verifier) for v in verifiers)
+        self._verifiers = verifiers
         # Validate should be always the last step of the constructor.
-        self.verifier().check(self)
+        self._validate()
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -750,13 +770,18 @@ class ExportedProgram:
     @property
     @compatibility(is_backward_compatible=False)
     def verifier(self) -> Any:
-        return self._verifier
+        return self._verifiers[0]
 
     @property
     @compatibility(is_backward_compatible=False)
     def dialect(self) -> str:
-        assert self._verifier is not None
-        return self._verifier.dialect
+        assert self._verifiers is not None
+        return self._verifiers[0].dialect
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def verifiers(self):
+        return self._verifiers
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -1070,8 +1095,10 @@ class ExportedProgram:
             input_placeholders, flat_args_with_path, self.range_constraints
         )
 
+    @final
     def _validate(self):
-        self.verifier().check(self)
+        for v in self.verifiers:
+            v().check(self)
 
     # TODO(zhxchen17) Formalize this.
     def _update(

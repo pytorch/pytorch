@@ -228,6 +228,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
                 });
             return as_pyobj;
           })
+      .def(
+          "kwinputs",
+          [](const KinetoEvent& e) {
+            std::unordered_map<std::string, py::object> inputs;
+            for (const auto& [key, value] : e.kwinputs()) {
+              inputs[key] = torch::jit::toPyObject(value);
+            }
+            return inputs;
+          })
       // stack traces of the PyTorch CPU events
       .def("stack", [](const KinetoEvent& e) { return e.stack().vec(); })
       // type of the RecordFunction that generated a PyTorch CPU event
@@ -324,6 +333,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         torch::profiler::impl::ActivityType::CPU};
 #if defined(USE_KINETO) && \
     (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
+    if (at::hasMTIA()) {
+      activities.insert(torch::profiler::impl::ActivityType::MTIA);
+    }
     if (at::getNumGPUs() > 0) {
       activities.insert(torch::profiler::impl::ActivityType::CUDA);
     }
@@ -1086,7 +1098,7 @@ static PyObject* push_on_torch_dispatch_stack(
     using c10::impl::TorchDispatchModeKey;
     // When we push a mode onto the mode stack, we need to
     // check if it's an "infra" mode, by checking its _mode_key attribute.
-    std::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+    std::optional<c10::impl::TorchDispatchModeKey> mode_key = std::nullopt;
     py::object maybe_mode_key_obj =
         PyObject_FastGetAttrString(arg, "_mode_key");
     if (maybe_mode_key_obj) {
@@ -1110,7 +1122,7 @@ static PyObject* pop_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* maybe_mode_key) {
   HANDLE_TH_ERRORS
-  std::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+  std::optional<c10::impl::TorchDispatchModeKey> mode_key = std::nullopt;
   PyObject* r = nullptr;
   if (maybe_mode_key != Py_None) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
@@ -1176,7 +1188,7 @@ static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(mode_key);
-  if (maybe_mode == c10::nullopt) {
+  if (maybe_mode == std::nullopt) {
     Py_RETURN_NONE;
   }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -1192,7 +1204,7 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   const auto maybe_mode = c10::impl::TorchDispatchModeTLS::unset_mode(mode_key);
-  if (maybe_mode == c10::nullopt) {
+  if (maybe_mode == std::nullopt) {
     Py_RETURN_NONE;
   }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)

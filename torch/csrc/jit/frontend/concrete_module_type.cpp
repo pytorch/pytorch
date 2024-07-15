@@ -151,7 +151,7 @@ TypePtr ConcreteModuleType::getJitType() const {
 
 std::optional<py::object> ConcreteModuleType::getPyClass() const {
   if (!data_.pyClass_) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return data_.pyClass_;
 }
@@ -162,7 +162,7 @@ std::optional<std::vector<std::string>> ConcreteModuleType::findOverloads(
   if (it != data_.overloads_.end()) {
     return it->second;
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 std::optional<Function*> ConcreteModuleType::findFunctionAttribute(
@@ -171,7 +171,7 @@ std::optional<Function*> ConcreteModuleType::findFunctionAttribute(
   if (it != data_.functionAttributes_.end()) {
     return it->second.function_->function();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 std::optional<c10::Symbol> ConcreteModuleType::findBuiltinFunction(
@@ -180,7 +180,7 @@ std::optional<c10::Symbol> ConcreteModuleType::findBuiltinFunction(
   if (it != data_.builtinFunctions_.end()) {
     return it->second;
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 std::optional<std::string> ConcreteModuleType::findFailedAttribute(
@@ -189,7 +189,7 @@ std::optional<std::string> ConcreteModuleType::findFailedAttribute(
   if (it != data_.failedAttributes_.end()) {
     return it->second;
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool ConcreteModuleType::isIgnoredAttribute(const std::string& name) const {
