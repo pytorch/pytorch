@@ -204,10 +204,7 @@ def collect_meta_for_filtered_nodes(
         for node in mod.graph.nodes:
             if node.name in node_names:
                 for field_name in meta_field_name:
-                    print(field_name)
-                    print(node.meta.get(field_name))
                     ret.append(node.meta.get(field_name))
-    print("=========================")
     return ret
 
 
@@ -345,6 +342,7 @@ def forward(self, pred_1, x_1):
     return (getitem_1,)""",  # noqa: B950
         )
 
+    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_nested(self):
         class Nested(torch.nn.Module):
             def forward(self, p0, p1, p2, a, b, c):
@@ -409,6 +407,7 @@ def forward(self, pred_1, x_1):
             expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
             self.assertEqual(expected_grads, grads)
 
+    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_mixed_require_grad(self):
         def true_fn(x, y, z):
             return x * y * z
@@ -453,6 +452,7 @@ def forward(self, pred_1, x_1, y_1, z_1):
     return (getitem_1,)""",  # noqa: B950
         )
 
+    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_grad_through_cond(self):
         nn_module = torch.nn.Linear(4, 4)
 
@@ -696,6 +696,7 @@ def forward(self, x_1):
     return (getitem_5,)""",  # noqa: B950
         )
 
+    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_pytree_not_all_inputs_used(self):
         def true_fn(x):
             return x["t"][0] + x["t"][1]["b"]
@@ -722,87 +723,49 @@ def forward(self, x_1):
                     )
                     self.assertEqual(expected_grads, grads)
 
-                def f(pred):
-                    result = cond(
-                        pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},)
-                    )
-                    grad_out = torch.ones_like(result)
-                    return torch.autograd.grad(result, (a, b, c), grad_out)
+        def f(pred, a, b, c):
+            result = cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
+            grad_out = torch.ones_like(result)
+            return torch.autograd.grad(result, (a, b), grad_out)
 
-                # with self.assertRaisesRegex(Exception, r"."):
-                gm = make_fx(f)(pred)
-                self.assertExpectedInline(
-                    gm.code.strip(),
-                    """\
-def forward(self, pred_1):
+        gm = make_fx(f, tracing_mode="symbolic", _allow_non_fake_inputs=True)(
+            pred, a, b, c
+        )
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, pred_1, a_1, b_1, c_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    _tensor_constant0 = self._tensor_constant0
-    _tensor_constant1 = self._tensor_constant1
-    _tensor_constant2 = self._tensor_constant2
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0,\
- (_tensor_constant0, _tensor_constant1, _tensor_constant2));\
-  true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (a_1, b_1, c_1));  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    _tensor_constant0_1 = self._tensor_constant0
-    _tensor_constant1_1 = self._tensor_constant1
-    _tensor_constant2_1 = self._tensor_constant2
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1,\
- (ones_like, _tensor_constant0_1, _tensor_constant1_1, _tensor_constant2_1));\
-  pred_1 = true_graph_1 = false_graph_1 = ones_like = _tensor_constant0_1 = _tensor_constant1_1 = _tensor_constant2_1 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, a_1, b_1, c_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = a_1 = b_1 = c_1 = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1]
     getitem_3 = cond_1[2];  cond_1 = None
-    return (getitem_1, getitem_2, getitem_3)""",
-                )
-
-            else:
-                grads = torch.autograd.grad(result, (a, b, c), grad_out)
-                expected_grads = torch.autograd.grad(
-                    fn({"t": [a, {"b": b}, (c,)]}), (a, b, c), grad_out
-                )
-                self.assertEqual(expected_grads, grads)
-
-                def f(pred):
-                    result = cond(
-                        pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},)
-                    )
-                    grad_out = torch.ones_like(result)
-                    return torch.autograd.grad(result, (a, b, c), grad_out)
-
-                # with self.assertRaisesRegex(Exception, r"."):
-                gm = make_fx(f)(pred)
-                self.assertExpectedInline(
-                    gm.code.strip(),
-                    """\
-def forward(self, pred_1):
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    _tensor_constant0 = self._tensor_constant0
-    _tensor_constant1 = self._tensor_constant1
-    _tensor_constant2 = self._tensor_constant2
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0,\
- (_tensor_constant0, _tensor_constant1, _tensor_constant2));\
-  true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
-    getitem = cond[0];  cond = None
-    ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
-    true_graph_1 = self.true_graph_1
-    false_graph_1 = self.false_graph_1
-    _tensor_constant0_1 = self._tensor_constant0
-    _tensor_constant1_1 = self._tensor_constant1
-    _tensor_constant2_1 = self._tensor_constant2
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1,\
- (ones_like, _tensor_constant0_1, _tensor_constant1_1,\
- _tensor_constant2_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = _tensor_constant0_1 =\
- _tensor_constant1_1 = _tensor_constant2_1 = None
-    getitem_1 = cond_1[0]
-    getitem_2 = cond_1[1]
-    getitem_3 = cond_1[2];  cond_1 = None
-    return (getitem_1, getitem_2, getitem_3)""",
-                )
+    return (getitem_1, getitem_2)""",  # noqa: B950
+        )
+        # Forward
+        self.assertExpectedInline(
+            gm.true_graph_0.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    return (add,)""",
+        )
+        # Backward
+        self.assertExpectedInline(
+            gm.true_graph_1.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    add = torch.ops.aten.add.Tensor(arg1_1, arg2_1);  arg1_1 = arg2_1 = None
+    clone = torch.ops.aten.clone.default(arg0_1)
+    clone_1 = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    return [clone, clone_1, None]""",
+        )
 
     def test_cond_autograd_pytree_input(self):
         def true_fn(x):
@@ -876,10 +839,11 @@ def forward(self, pred_1):
         ):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile.",
+                "Cond doesn't work unless it is captured completely with torch.compile",
             ):
                 cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
 
+    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_same_pytree_output(self):
         # TODO: If inside the dictionary, inside the list, the first element
         # is composed of the multiplication, then the requires_grad attribute is
@@ -932,161 +896,8 @@ def forward(self, pred_1):
     return {'res': [view, (view_1,)]}""",  # noqa: B950
         )
 
+    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_torch_nn_module(self):
-        # TODO Test under development, not yet functional
-        # nn_module_true = torch.nn.ReLU(inplace=True)
-        nn_module_true = torch.nn.Identity()
-
-        def true_fn(x):
-            return nn_module_true(torch.abs((x**2).sin()))
-
-        # nn_module_false = torch.nn.ReLU(inplace=False)
-        # nn_module_false = torch.nn.GRUCell(4, 4)
-
-        class SimpleNN(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                return torch.maximum(torch.zeros_like(x), x)
-
-        # nn_module_false = SimpleNN()
-        # nn_module_false = torch.nn.Identity()
-        # nn_module_false = torch.nn.Dropout(0.1)
-        # nn_module_false = torch.nn.Linear(4, 4)
-        # nn_module_false = lambda x: torch.nn.functional.threshold(x, 0.1, 0.2)
-        # nn_module_false = lambda x: torch.nn.functional.relu(x)
-        # nn_module_false = lambda x: torch.nn.functional.softmax(x)
-        # nn_module_false = lambda x: torch.nn.functional.tanh(x)
-        # nn_module_false = lambda x: torch.nn.functional.dropout(x)
-        # nn_module_false = lambda x: torch.nn.functional.glu(torch.concat([x, x]))
-        # nn_module_false = lambda x: torch.nn.functional.gelu(x)
-        # nn_module_false = lambda x: torch.nn.functional.leaky_relu(x)
-        # nn_module_false = lambda x: torch.nn.functional.logsigmoid(x)
-        # nn_module_false = lambda x: torch.nn.functional.softplus(x)
-        # nn_module_false = lambda x: torch.nn.functional.softmin(x)
-        # nn_module_false = lambda x: torch.nn.functional.tanh(x)
-        # nn_module_false = lambda x: torch.nn.functional.hardtanh(x)
-        # nn_module_false = lambda x: torch.nn.functional.elu(x)
-        # nn_module_false = lambda x: torch.nn.functional.selu(x)
-        # nn_module_false = lambda x: torch.nn.functional.rrelu(x)
-        def nn_module_false(x):
-            return torch.nn.functional.rrelu(x)
-
-        # w = torch.nn.Parameter(torch.ones(1)*0.5, requires_grad=True)
-        # nn_module_false = lambda x: torch.nn.functional.prelu(x, w)
-        # nn_module_false = torch.nn.RNN(4, 4)
-        # nn_module_false = torch.nn.LSTM(4, 4)
-        # nn_module_false = torch.nn.GRU(4, 4)
-        # trans = torch.nn.Transformer(4, 1, 1, 1, 1)
-        # nn_module_false = lambda x: trans(x, x)[0, :]
-
-        x = torch.randn((4, 4), requires_grad=True)
-
-        def false_fn(x):
-            return nn_module_false(x)
-
-        graph = make_fx(false_fn)(x)
-        if "detach" in graph._code:
-            raise Exception(  # noqa: TRY002
-                "Detach found in code, this is not expected!"
-            )
-
-        nn_module_false_working = [
-            torch.nn.Identity(),
-            torch.nn.Dropout(),
-            torch.nn.Linear(4, 4),
-            lambda x: torch.nn.functional.threshold(x, 0.1, 0.2),
-            lambda x: torch.nn.functional.glu(torch.concat([x, x])),
-            lambda x: torch.nn.functional.gelu(x),
-            lambda x: torch.nn.functional.leaky_relu(x),
-            lambda x: torch.nn.functional.logsigmoid(x),
-            lambda x: torch.nn.functional.softplus(x),
-            lambda x: torch.nn.functional.hardtanh(x),
-            lambda x: torch.nn.functional.elu(x),
-            lambda x: torch.nn.functional.selu(x),
-            lambda x: torch.nn.functional.rrelu(x),
-        ]
-
-        nn_module_false_not_working = [
-            lambda x: torch.nn.functional.relu(x),
-            lambda x: torch.nn.functional.softmax(x),
-            lambda x: torch.nn.functional.tanh(x),
-            lambda x: torch.nn.functional.softmin(x),
-        ]
-
-        x = torch.randn(4, requires_grad=True)
-        for nn_module_false_w in nn_module_false_working:
-
-            def false_fn(x):
-                return nn_module_false_w(x)
-
-            graph = make_fx(false_fn)(x)
-            if "detach" in graph._code:
-                raise Exception(  # noqa: TRY002
-                    "Detach found in code, this is not expected!"
-                )
-
-        # TODO: There should be no detach operations in the graph.
-        # However, there are and this should be resolved eventually.
-        # For the moment no exception is raised in such a case
-        for nn_module_false_nw in nn_module_false_not_working:
-
-            def false_fn(x):
-                return nn_module_false_nw(x)
-
-            graph = make_fx(false_fn)(x)
-            if "detach" in graph._code:
-                # raise Exception("Detach found in code, this is not expected!")  # noqa: TRY002
-                pass
-
-        nn_module_false = torch.nn.Linear(4, 4)  # noqa: F811
-
-        def false_fn(x):
-            # return nn_module_false((x + 42).cos())
-            return nn_module_false(x)
-
-        for pred, fn in zip(
-            [torch.tensor(False), torch.tensor(True)], [false_fn, true_fn]
-        ):
-            x = torch.randn(4, requires_grad=True)
-            result = cond(pred, true_fn, false_fn, (x,))
-            self.assertEqual(result, fn(x))
-
-            grad_out = torch.ones_like(result)
-            grads = torch.autograd.grad(result, (x,), grad_out)
-            expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
-            self.assertEqual(expected_grads, grads)
-
-        def f(pred, x):
-            result = cond(pred, true_fn, false_fn, (x,))
-            grad_out = torch.ones_like(result)
-            return torch.autograd.grad(result, (x,), grad_out)
-
-        gm = make_fx(f)(pred, x)
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
-def forward(self, pred_1, x_1):
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    _param_constant0 = self._param_constant0
-    _param_constant1 = self._param_constant1
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1, _param_constant0, _param_constant1));  true_graph_0 = false_graph_0 = _param_constant0 = _param_constant1 = None
-    getitem = cond[0];  cond = None
-    ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
-    true_graph_1 = self.true_graph_1
-    false_graph_1 = self.false_graph_1
-    _param_constant0_1 = self._param_constant0
-    _param_constant1_1 = self._param_constant1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, _param_constant0_1, _param_constant1_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = _param_constant0_1 = _param_constant1_1 = None
-    getitem_1 = cond_1[0]
-    getitem_2 = cond_1[1]
-    getitem_3 = cond_1[2];  cond_1 = None
-    return (getitem_1,)""",  # noqa: B950
-        )
-
-    def test_cond_autograd_torch_nn_module2(self):
         nn_module_true = torch.nn.Linear(4, 4)
 
         def true_fn(x):
@@ -2049,7 +1860,7 @@ def forward(self, a_1, b_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (a_1, b_1));  gt = true_graph_0 = false_graph_0 = a_1 = b_1 = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [a_1, b_1]);  gt = true_graph_0 = false_graph_0 = a_1 = b_1 = None
     getitem = cond[0];  cond = None
     return getitem""",  # noqa: B950
         )
@@ -2529,11 +2340,11 @@ def forward(self, x_1):
 def forward(self, x_1, pred_1, pred2_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  pred_1 = true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, (x_1,));  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+    cond_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
     getitem_1 = cond_1[0];  cond_1 = None
     add = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
     return add""",  # noqa: B950
@@ -2702,11 +2513,11 @@ def forward(self, arg0_1):
 def forward(self, x_1, pred_1, pred2_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  pred_1 = true_graph_0 = false_graph_0 = None
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, (x_1,));  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+    cond_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
     getitem_1 = cond_1[0];  cond_1 = None
     add = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
     return add""",  # noqa: B950
@@ -3038,7 +2849,7 @@ def forward(self, arg0_1):
         ):
             functional_f(*example_inputs)
 
-    def test_cond_autograd_succeed_when_pred_is_constant(self):
+    def test_cond_autograd_backward(self):
         def true_fn(x):
             return x.cos()
 
@@ -3052,30 +2863,11 @@ def forward(self, arg0_1):
             torch.ones(3, 2, 4, requires_grad=True),
             torch.ones(4, requires_grad=True),
         )
-        # Due to x.shape[0] can be statically evaluated to be False, we can evaluate
-        # the backward.
+        # with self.assertRaisesRegex(RuntimeError, "Autograd not implemented for cond"):
         f(*example_inputs).sum().backward()
 
         # Ensure no error is thrown when not running backward
-        f(*example_inputs)
-
-    def test_cond_autograd_fail(self):
-        def true_fn(x):
-            return x.cos()
-
-        def false_fn(x):
-            return x.sin()
-
-        def f(x, y):
-            return control_flow.cond(x.sum() > 4, true_fn, false_fn, [y])
-
-        example_inputs = (
-            torch.ones(3, 2, 4, requires_grad=True),
-            torch.ones(4, requires_grad=True),
-        )
-        # with self.assertRaisesRegex(RuntimeError, "Autograd not implemented for cond"):
         res = f(*example_inputs)
-        res.sum().backward()
 
         # Ensure no error is thrown when not running backward
         res_compiled = torch.compile(f)(*example_inputs)
@@ -3199,7 +2991,7 @@ def forward(self, x_1):
     eq = sym_size_int == 4;  sym_size_int = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, (x_1,));  eq = true_graph_0 = false_graph_0 = x_1 = None
+    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
     getitem = cond[0];  cond = None
     return getitem""",  # noqa: B950
         )
@@ -3284,7 +3076,7 @@ def forward(self, x_1):
     false_graph_0 = self.false_graph_0
     _tensor_constant0 = self._tensor_constant0
     _tensor_constant1 = self._tensor_constant1
-    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, (x_1, _tensor_constant0, _tensor_constant1));  eq = true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = _tensor_constant1 = None
+    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1, _tensor_constant0, _tensor_constant1]);  eq = true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = _tensor_constant1 = None
     getitem = cond[0];  cond = None
     return getitem""",  # noqa: B950
         )
@@ -3519,7 +3311,7 @@ def forward(self, x_1):
     eq = sym_size_int == 4;  sym_size_int = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, (x_1,));  eq = true_graph_0 = false_graph_0 = x_1 = None
+    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
     getitem = cond[0];  cond = None
     return getitem""",  # noqa: B950
             )

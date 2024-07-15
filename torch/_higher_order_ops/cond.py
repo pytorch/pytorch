@@ -229,19 +229,17 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     if len(flat_true_outs) != len(flat_false_outs):
         raise torch._dynamo.exc.CondOpArgsMismatchError(
             f"Expected to return same number of outputs but got:"
-            f"\n  {true_fn.__name__} returns {len(flat_true_outs)} item(s)"
-            f"\n  {false_fn.__name__} returns {len(flat_false_outs)} item(s)"
+            f"\n  true branch returns {len(flat_true_outs)} item(s)"
+            f"\n  false branch returns {len(flat_false_outs)} item(s)"
         )
 
     for i in range(0, len(flat_true_outs)):
         true_out = flat_true_outs[i]
         false_out = flat_false_outs[i]
-        # TODO: If a torch nn module such as Linear or GRUCell is used, then the
-        # meta data of the output is None and cannot be compared
-        # TODO: If inside the dictionary, inside the list, the first element
-        # is composed of the multiplication, then the requires_grad attribute is
-        # set to False and thus the tracing of the cond errors out.
 
+        # Note that we need skip the check for requires_grad because we're after
+        # after autograd key during tracing, so the rquires_grad attribute of the tensors
+        # are no longer. See Note [invariants for node meta 'val']
         def _same_meta_except_requires_grad(true_out, false_out):
             if true_out is None and false_out is None:
                 return True
@@ -371,6 +369,16 @@ class CondAutogradOp(torch.autograd.Function):
 
 @cond_op.py_impl(DispatchKey.Autograd)
 def cond_autograd(pred, true_fn, false_fn, operands):
+    # A shortcut for the case where all inputs don't require gradient,
+    # we skip tracing the forward and backward graph.
+    if all(
+        not t.requires_grad
+        for t in pytree.tree_flatten((pred, operands))[0]
+        if isinstance(t, torch.Tensor)
+    ):
+        with torch._C._AutoDispatchBelowAutograd():
+            return cond_op(pred, true_fn, false_fn, operands)
+
     (
         fw_true_graph,
         fw_false_graph,

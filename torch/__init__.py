@@ -2422,8 +2422,11 @@ def compile(
         model
     )  # type: ignore[return-value]
 
+
 from torch import export as export
+
 # from torch._higher_order_ops import cond
+
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
@@ -2445,12 +2448,7 @@ def _register_device_module(device_type, module):
     sys.modules[torch_module_name] = module
 
 
-from torch import (
-    export as export,
-    func as func,
-    library as library,
-    return_types as return_types,
-)
+from torch import func as func, library as library, return_types as return_types
 from torch._higher_order_ops import cond as cond, while_loop as while_loop
 from torch.func import vmap as vmap
 

@@ -168,6 +168,7 @@ def extract_val(val):
     elif isinstance(val, (int, float, bool)):
         return val
 
+# Note [invariants for node meta 'val']
 # What invariants do we have for the 'val' set on the FX node?  It has accurate
 # metadata... but only for metadata that exists "below" all other subsystems
 # (most notably autograd, but also vmap, functorch transforms, etc).  This means
