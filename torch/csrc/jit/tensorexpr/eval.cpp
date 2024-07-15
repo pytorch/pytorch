@@ -1305,7 +1305,7 @@ std::optional<int64_t> evalInt(ExprPtr e) {
     return ExprEval<SimpleIREvaluator>(cast<int64_t>(ExprHandle(e)))
         .value<int64_t>();
   } catch (std::runtime_error& err) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 }
 
