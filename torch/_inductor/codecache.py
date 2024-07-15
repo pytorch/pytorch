@@ -554,6 +554,8 @@ class FxGraphCachePickler(pickle.Pickler):
         """
         with io.BytesIO() as stream:
             pickler = cls(stream)
+            # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
+            pickler.fast = True  # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
             try:
                 pickler.dump(obj)
             except (TypeError, AttributeError) as e:
@@ -621,33 +623,35 @@ def build_code_hash(roots, prefix, hasher):
             build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
 
 
-def get_code_hash(roots, extra_files=()):
-    hasher = hashlib.sha256()
-    hasher.update(torch.__version__.encode("utf-8"))
-    build_code_hash(roots, "", hasher)
-    for path in extra_files:
-        if os.path.exists(path):
-            with open(path, "rb") as f:
-                hasher.update(f.read())
-    return hasher.digest()
-
-
 @functools.lru_cache(None)
 def torch_key():
     """
     Compute a key that contains relevant information about torch source files
     """
     if not config.is_fbcode():
-        inductor_root = os.path.dirname(__file__)
-        extra_files = (
-            "codegen/aoti_runtime/interface.cpp",
-            "codegen/aoti_runtime/implementation.cpp",
-            "codegen/cpp_prefix.h",
-            "script.ld",
-        )
-        return get_code_hash(
-            [inductor_root], [os.path.join(inductor_root, x) for x in extra_files]
-        )
+
+        def get_code_hash(root):
+            # This function isn't meant to be used outside of torch_key, just a
+            # helper for clarity. Instead, use torch_key() directly when you need
+            # a hash representing the state of the source code.
+            extra_files = (
+                "codegen/aoti_runtime/interface.cpp",
+                "codegen/aoti_runtime/implementation.cpp",
+                "codegen/cpp_prefix.h",
+                "script.ld",
+            )
+            inductor_root = os.path.dirname(__file__)
+            extra_files = [os.path.join(inductor_root, x) for x in extra_files]
+            hasher = hashlib.sha256()
+            hasher.update(torch.__version__.encode("utf-8"))
+            build_code_hash([root], "", hasher)
+            for path in extra_files:
+                if os.path.exists(path):
+                    with open(path, "rb") as f:
+                        hasher.update(f.read())
+            return hasher.digest()
+
+        return get_code_hash(_TORCH_PATH)
 
     from libfb.py import parutil
 
@@ -1558,7 +1562,7 @@ def split_aot_inductor_output_path(path: str) -> Tuple[str, str]:
 
 @clear_on_fresh_inductor_cache
 class CudaKernelParamCache:
-    cache: Dict[str, Dict[str, str]] = dict()
+    cache: Dict[str, Dict[str, str]] = {}
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
@@ -1595,6 +1599,8 @@ class AotCodeCompiler:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> str:
+        _set_gpu_runtime_env()  # cpp_extension consults the env
+
         picked_vec_isa = pick_vec_isa()
         vec_isa_cmd_gen = CppBuilder(
             name="o",
@@ -2073,17 +2079,35 @@ class CppCodeCache:
             from filelock import FileLock
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
-            output_path = input_path[:-3] + "so"
+            output_name, output_dir = get_name_and_dir_from_output_file_path(input_path)
+            """
+            If `fb_code` env, it need to be dispatched to original `compile_file` function.
+            So, we still need to prepare parameters for the function: `input_path` and `fb_output_path`.
+            """
+            fb_output_path = input_path[:-3] + "so"
             future: Optional[Future[Any]] = None
             lib = None
+
+            cpp_build_option = CppTorchCudaOptions(**compile_command)
+            cpp_builder = CppBuilder(
+                name=output_name,
+                sources=input_path,
+                output_dir=output_dir,
+                BuildOption=cpp_build_option,
+            )
+
             worker_fn = functools.partial(
                 _worker_compile_cpp,
                 lock_path,
+                cpp_builder,
                 input_path,
-                output_path,
-                cpp_compile_command(
-                    input=input_path, output=output_path, **compile_command
-                ),
+                fb_output_path,
+            )
+
+            binary_path = (
+                fb_output_path
+                if config.is_fbcode()
+                else cpp_builder.get_target_file_path()
             )
 
             def load_fn():
@@ -2093,13 +2117,13 @@ class CppCodeCache:
                         future.result()
                     result = worker_fn()
                     assert result is None
-                    lib = cls._load_library(output_path, key)
+                    lib = cls._load_library(binary_path, key)
                     assert lib is not None
                 return lib
 
             if submit_fn is not None:
                 with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-                    if not os.path.exists(output_path):
+                    if not os.path.exists(binary_path):
                         future = submit_fn(worker_fn)
 
             cls.cache[key] = load_fn
@@ -2111,12 +2135,27 @@ class CppCodeCache:
         return cls.load_async(source_code, cuda)()
 
 
-def _worker_compile_cpp(lock_path, input_path, output_path, cmd):
+def _worker_compile_cpp(
+    lock_path,
+    cpp_builder: CppBuilder,
+    fb_input_path: str,
+    fb_output_path: str,
+):
     from filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-        if not os.path.exists(output_path):
-            compile_file(input_path, output_path, shlex.split(cmd))
+        binary_path = (
+            fb_output_path if config.is_fbcode() else cpp_builder.get_target_file_path()
+        )
+        if not os.path.exists(binary_path):
+            if config.is_fbcode():
+                compile_file(
+                    fb_input_path,
+                    fb_output_path,
+                    shlex.split(cpp_builder.get_command_line()),
+                )
+            else:
+                cpp_builder.build()
 
 
 # Customized Python binding for cpp kernels
@@ -2438,6 +2477,10 @@ def validate_new_cpp_commands():
     include_pytorch = [True, False]
     use_absolute_path = [True, False]
     aot_mode = [False, True]
+
+    # Try to pass it in fb_code.
+    if config.is_fbcode():
+        return
 
     for x in cuda:
         for y in use_mmap_weights:
@@ -2788,10 +2831,19 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                                 )
                             )
                     hl.compile_standalone_runtime(afile, hl.Target(target))
+
+                    name, output_dir = get_name_and_dir_from_output_file_path(sofile)
+                    halide_cmd_gen = CppBuilder(
+                        name=name,
+                        sources=[hookfile, afile],
+                        output_dir=output_dir,
+                        BuildOption=CppTorchCudaOptions(
+                            cuda=is_cuda,
+                        ),
+                    )
+
                     subprocess.check_call(
-                        shlex.split(
-                            cpp_compile_command([hookfile, afile], sofile, cuda=is_cuda)
-                        )
+                        shlex.split(halide_cmd_gen.get_command_line())
                     )
                     touch(donefile)
         assert os.path.exists(sofile)
@@ -2843,8 +2895,8 @@ def touch(filename):
 
 @clear_on_fresh_inductor_cache
 class PyCodeCache:
-    cache: Dict[str, ModuleType] = dict()
-    linemaps: Dict[str, List[Tuple[Any, ...]]] = dict()
+    cache: Dict[str, ModuleType] = {}
+    linemaps: Dict[str, List[Tuple[Any, ...]]] = {}
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
@@ -3134,7 +3186,7 @@ class CUDACodeCache:
         input_path: str
         output_path: str
 
-    cache: Dict[str, CacheEntry] = dict()
+    cache: Dict[str, CacheEntry] = {}
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cu"
 
@@ -3219,7 +3271,7 @@ class ROCmCodeCache:
         input_path: str
         output_path: str
 
-    cache: Dict[str, CacheEntry] = dict()
+    cache: Dict[str, CacheEntry] = {}
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cpp"
     _logged_compiler_version = False
