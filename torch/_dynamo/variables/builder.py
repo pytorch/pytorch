@@ -341,14 +341,12 @@ class VariableBuilder:
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt):
-        if type(vt) in [
+        return type(vt) in {
             TensorVariable,
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
-        ]:
-            return True
-        return False
+        }
 
     @staticmethod
     @functools.lru_cache(None)
