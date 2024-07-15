@@ -441,9 +441,6 @@ class TestProfilerTree(TestCase):
     )
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_memory_and_stack(self):
-        # Do lazy imports ahead of time to avoid it showing up in the tree
-        import torch.nested._internal.nested_tensor
-
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
             z = torch.add(t1, t2)
@@ -482,6 +479,8 @@ class TestProfilerTree(TestCase):
                   torch/autograd/__init__.py(...): _tensor_or_tensors_to_tuple
                   torch/autograd/__init__.py(...): _make_grads
                     typing.py(...): inner
+                      typing.py(...): __hash__
+                        <built-in function hash>
                     typing.py(...): cast
                     <built-in function isinstance>
                     <built-in function isinstance>
@@ -983,6 +982,8 @@ class TestProfilerTree(TestCase):
                     torch/autograd/__init__.py(...): _tensor_or_tensors_to_tuple
                     torch/autograd/__init__.py(...): _make_grads
                       typing.py(...): inner
+                        typing.py(...): __hash__
+                          <built-in function hash>
                       typing.py(...): cast
                       <built-in function isinstance>
                       <built-in function isinstance>
