@@ -79,6 +79,11 @@ class Node(abc.ABC):
         r"""Return the metadata."""
         raise NotImplementedError
 
+    @property
+    @abc.abstractmethod
+    def _input_metadata(self) -> List[torch._C._InputMetadata]:
+        raise NotImplementedError
+
     @abc.abstractmethod
     def _register_hook_dict(self, tensor: torch.Tensor) -> None:
         raise NotImplementedError
@@ -790,7 +795,7 @@ def _register_logging_hooks_on_whole_graph(
 
 
 def _engine_run_backward(
-    t_outputs: Sequence[torch.Tensor],
+    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
     *args: Any,
     **kwargs: Any,
 ) -> Tuple[torch.Tensor, ...]:

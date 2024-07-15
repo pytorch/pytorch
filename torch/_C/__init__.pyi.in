@@ -1400,6 +1400,13 @@ class _InferenceMode:
     def __enter__(self): ...
     def __exit__(self, exc_type, exc_value, traceback): ...
 
+class _InputMetadata:
+    dtype: _dtype
+    device: _device
+    shape: List[_int]
+    is_nested_tensor: _bool
+    is_cpp_nested_tensor: _bool
+
 def _set_autograd_fallback_mode(mode: str) -> None: ...
 def _get_autograd_fallback_mode() -> str: ...
 
