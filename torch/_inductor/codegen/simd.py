@@ -1216,7 +1216,7 @@ class SIMDScheduling(BaseScheduling):
             if not isinstance(node, scheduler.BaseSchedulerNode):
                 continue
 
-            buffer_names.update(node.get_buffer_names())
+            buffer_names.update(node.get_names())
             buffer_names.update(node.used_buffer_names())
 
         # Get buffers objects
@@ -1288,11 +1288,8 @@ class SIMDScheduling(BaseScheduling):
 
         mutations = set()
         for node in node_schedule:
-            if node in (DisableReduction, EnableReduction):
-                continue
-
-            for buf in node.get_outputs():
-                mutations.update(buf.get_mutations())
+            if hasattr(node, "get_mutations"):
+                mutations.update(node.get_mutations())
 
         index_dtype = self.select_index_dtype(node_schedule, numel, reduction_numel)
 
@@ -1472,6 +1469,7 @@ class SIMDScheduling(BaseScheduling):
 
         if not isinstance(partial_code, str):
             partial_code.finalize_hook("<DEF_KERNEL>")
+            partial_code.finalize_hook("<ARGDEFS>", strict=False)
         # finalize must be called after adding epilogue above
         with V.set_kernel_handler(kernel):
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
