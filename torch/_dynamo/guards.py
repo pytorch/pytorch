@@ -102,6 +102,7 @@ from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # no
 from .utils import (
     common_constant_types,
     dict_keys_repr,
+    get_custom_getattr,
     guard_failures,
     istype,
     key_is_id,
@@ -110,6 +111,7 @@ from .utils import (
     tensor_always_has_static_shape,
     tuple_iterator_getitem,
     tuple_iterator_len,
+    unpatched_nn_module_getattr,
 )
 
 if TYPE_CHECKING:
@@ -877,7 +879,11 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, AttrSource):
             assert base_guard_manager  # to make mypy happy
 
-            if isinstance(base_example_value, torch.nn.Module):
+            if (
+                isinstance(base_example_value, torch.nn.Module)
+                and get_custom_getattr(base_example_value)
+                is unpatched_nn_module_getattr
+            ):
                 out = self.getattr_on_nn_module(
                     source,
                     base_guard_manager,
@@ -1162,7 +1168,11 @@ class GuardBuilder(GuardBuilderBase):
 
                 # if the base value is nn.Module, check if we can speedup the
                 # guard by going through __dict__ attrs.
-                if isinstance(base_example_value, torch.nn.Module):
+                if (
+                    isinstance(base_example_value, torch.nn.Module)
+                    and get_custom_getattr(base_example_value)
+                    is unpatched_nn_module_getattr
+                ):
                     return self.getattr_on_nn_module(
                         source,
                         base_manager,
