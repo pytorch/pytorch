@@ -757,14 +757,14 @@ def forward(self, primals_1):
     arange_1 = torch.ops.aten.arange.default(9, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     view_1 = torch.ops.aten.view.default(arange_1, [3, 3]);  arange_1 = None
     set_ = torch.ops.aten.set_.source_Tensor(primals_1, view);  view = None
-    mul = torch.ops.aten.mul.Tensor(primals_1, primals_1)
+    mul = torch.ops.aten.mul.Tensor(set_, set_);  set_ = None
     set__1 = torch.ops.aten.set_.source_Tensor(primals_1, view_1)
-    mul_1 = torch.ops.aten.mul.Tensor(primals_1, primals_1)
-    set__2 = torch.ops.aten.set_.source_Tensor(primals_1, view_1);  view_1 = None
-    mul_2 = torch.ops.aten.mul.Tensor(primals_1, primals_1)
+    mul_1 = torch.ops.aten.mul.Tensor(set__1, set__1);  set__1 = None
+    set__2 = torch.ops.aten.set_.source_Tensor(primals_1, view_1);  primals_1 = view_1 = None
+    mul_2 = torch.ops.aten.mul.Tensor(set__2, set__2)
     add = torch.ops.aten.add.Tensor(mul, mul_1);  mul = mul_1 = None
     add_1 = torch.ops.aten.add.Tensor(add, mul_2);  add = mul_2 = None
-    return [add_1, primals_1]""",
+    return [add_1, set__2]""",
         )
 
     def test_input_mutation_simple_with_none_and_nontensor(self):
@@ -1106,8 +1106,8 @@ def forward(self, primals_1, primals_2, primals_3):
             """\
 def forward(self, arg0_1, arg1_1):
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
-    copy_ = torch.ops.aten.copy_.default(arg1_1, sin);  sin = None
-    return (arg1_1,)""",
+    copy_ = torch.ops.aten.copy_.default(arg1_1, sin);  arg1_1 = sin = None
+    return (copy_,)""",
         )
 
     def test_input_mutation_metadata(self):
