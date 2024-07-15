@@ -4,7 +4,10 @@
 #  Functions.h/cpp: subclasses of autograd::Node
 #  python_functions.h/cpp: Python bindings for the above classes
 #
-from typing import Dict, List, Sequence, Tuple
+
+from __future__ import annotations
+
+from typing import Sequence
 
 from torchgen.api.autograd import (
     Derivative,
@@ -42,6 +45,7 @@ from torchgen.model import Argument, FunctionSchema
 from torchgen.utils import FileManager
 
 from .gen_inplace_or_view_type import VIEW_FUNCTIONS
+
 
 FUNCTION_DECLARATION = CodeTemplate(
     """\
@@ -443,8 +447,8 @@ UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 
 
 def get_infos_with_derivatives_list(
-    differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]]
-) -> List[DifferentiabilityInfo]:
+    differentiability_infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]]
+) -> list[DifferentiabilityInfo]:
     diff_info_list = [
         info
         for diffinfo_dict in differentiability_infos.values()
@@ -456,7 +460,7 @@ def get_infos_with_derivatives_list(
 
 def gen_autograd_functions_lib(
     out: str,
-    differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
+    differentiability_infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]],
     template_path: str,
 ) -> None:
     """Functions.h and Functions.cpp body
@@ -490,7 +494,7 @@ def gen_autograd_functions_lib(
 
 def gen_autograd_functions_python(
     out: str,
-    differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
+    differentiability_infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]],
     template_path: str,
 ) -> None:
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
@@ -536,17 +540,17 @@ def gen_autograd_functions_python(
 
 
 def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str:
-    saved_variables: List[str] = []
-    release_variables: List[str] = []
-    saved_list_sizes: List[str] = []
-    unpack: List[str] = []
-    asserts: List[str] = []
-    compute_index_ranges: List[str] = []
-    getter_definitions: List[str] = []
-    py_getsetdef_structs: List[str] = []
-    compiled_args: List[str] = []
-    apply_with_saved_before: List[str] = []
-    apply_with_saved_after: List[str] = []
+    saved_variables: list[str] = []
+    release_variables: list[str] = []
+    saved_list_sizes: list[str] = []
+    unpack: list[str] = []
+    asserts: list[str] = []
+    compute_index_ranges: list[str] = []
+    getter_definitions: list[str] = []
+    py_getsetdef_structs: list[str] = []
+    compiled_args: list[str] = []
+    apply_with_saved_before: list[str] = []
+    apply_with_saved_after: list[str] = []
 
     for arg in info.args_with_derivatives:
         if arg.type in TENSOR_LIST_LIKE_CTYPES:
@@ -807,7 +811,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     else:
         will_release_variables = ""
 
-    body: List[str] = []
+    body: list[str] = []
 
     if uses_single_grad(info):
         body.append("const auto& grad = grads[0];")
@@ -821,7 +825,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     def emit_derivative(
         derivative: Derivative,
         args_with_derivatives: Sequence[Binding],
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         formula = derivative.formula
         var_names = derivative.var_names
         if len(var_names) == 1:
@@ -857,7 +861,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
             else:
                 grad_input_mask = ""
             idx_ranges = ", ".join(f"{n}_ix" for n in var_names)
-            copy_ranges: List[str] = []
+            copy_ranges: list[str] = []
             for i, n in enumerate(var_names):
                 copy_ranges.append(DERIVATIVE_MULTI_COPY_RANGE.substitute(name=n, i=i))
             return False, DERIVATIVE_MULTI.substitute(

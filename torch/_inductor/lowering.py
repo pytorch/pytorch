@@ -81,7 +81,7 @@ prims = torch.ops.prims
 needs_realized_inputs: Set[torch._ops.OpOverload] = set()
 foreach_ops: Set[torch._ops.OpOverload] = set()
 inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
-inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = dict()
+inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
 
 
@@ -291,14 +291,13 @@ def _register_lowering(
             unpacked = True
             args = args[0]
 
-        # explicitly assert for "out=" ops for better error messages
-        assert not any(
-            x == "out" for x in kwargs.keys()
-        ), "out= ops aren't yet supported"
         # kwargs tensors not supported yet unless it's a fallback op
-        assert not any(isinstance(x, TensorBox) for x in kwargs.values()) or all(
-            fn in fallbacks for fn in aten_fn
-        )
+        if not all(fn in fallbacks for fn in aten_fn):
+            assert not any(isinstance(x, TensorBox) for x in kwargs.values())
+            # explicitly assert for "out=" ops for better error messages
+            assert not any(
+                x == "out" for x in kwargs.keys()
+            ), "out= ops aren't yet supported"
 
         args = transform_args(
             args, broadcast, type_promotion_kind, convert_input_to_bool
@@ -764,7 +763,12 @@ def squeeze(x, dim=None):
     if dim is None:
         return TensorBox(SqueezeView.create(x.data))
 
-    dim = canonicalize_dims(len(x.get_size()), dim)
+    dim = (
+        V.graph.sizevars.evaluate_static_shape(dim)
+        if isinstance(dim, (int, sympy.Expr))
+        else tuple(V.graph.sizevars.evaluate_static_shape(d) for d in dim)
+    )
+    dim = canonicalize_dims(len(x.get_size()), dim)  # type: ignore[call-overload]
     dims = set((dim,) if not isinstance(dim, tuple) else dim)
 
     new_shape = []
@@ -1589,7 +1593,7 @@ def unsqueeze_(x, dim):
 
 
 def _validate_dim(x, dim, offset=0):
-    assert isinstance(dim, int)
+    dim = V.graph.sizevars.shape_env.evaluate_expr(sympy.sympify(dim))
     ndim = len(x.get_size())
     if dim < 0:
         dim += ndim + offset
@@ -2153,7 +2157,7 @@ make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 # Haven't checked but sound difficult / impossible
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
-make_fallback(aten._embedding_bag_dense_backward)
+make_fallback(aten._embedding_bag_backward)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
@@ -2182,7 +2186,6 @@ make_fallback(aten._pdist_backward)
 # Sorting / Sorting-like
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
-make_fallback(aten.argsort.stable)
 make_fallback(aten.kthvalue)
 make_fallback(aten.topk)
 make_fallback(aten.mode)
@@ -3166,42 +3169,6 @@ def index_put_impl_(self, indices, values, accumulate, check):
     if x_ndim == 0:
         self = view(self, [])
     return self
-
-
-@register_lowering(
-    inductor_prims.masked_scatter_with_index, type_promotion_kind=None, broadcast=False
-)
-def masked_scatter_with_index(self, mask, source_idx, source):
-    self_flat, mask_flat, source_flat = (view(x, (-1,)) for x in (self, mask, source))
-
-    assert self.get_size() == mask.get_size()
-    assert mask.get_dtype() in {torch.bool, torch.uint8}
-
-    self_loader = self_flat.make_loader()
-    mask_loader = mask_flat.make_loader()
-    source_idx_loader = source_idx.make_loader()
-    source_loader = source_flat.make_loader()
-    source_numel = source.get_numel()
-
-    def inner_fn(idx):
-        self_val = self_loader(idx)
-        mask_val = ops.to_dtype(mask_loader(idx), torch.bool)
-
-        def load_source_val():
-            source_idx_val = source_idx_loader(idx)
-            i = ops.indirect_indexing(source_idx_val, source_numel)
-            return source_loader([i])
-
-        source_val = ops.masked(mask_val, load_source_val, 0)
-        return ops.where(mask_val, source_val, self_val)
-
-    result_flat = Pointwise.create(
-        device=self.get_device(),
-        dtype=self.get_dtype(),
-        inner_fn=inner_fn,
-        ranges=self_flat.get_size(),
-    )
-    return view(result_flat, self.get_size())
 
 
 fallback__unsafe_masked_index = fallback_handler(
@@ -6185,6 +6152,14 @@ try:
     @register_lowering(_c10d_functional.all_reduce)
     def _all_reduce(inp, reduce_op, group_name):
         inp = clone(inp)
+        if config.reorder_for_compute_comm_overlap:
+            # The horizontal fusion of this clone often severely delays the
+            # scheduling of the all_reduce_ node. Horizontally fusing this
+            # clone can almost never out-perform scheduling the all_reduce_
+            # earlier. Also in most cases, this clone is eliminated via
+            # in-place reuse. Therefore, we tell the scheduler to not fuse it.
+            inp.realize()
+            V.graph.no_fuse_buffer_names.add(inp.get_name())
         ir._CollectiveKernel.create_inplace(
             _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
         )
