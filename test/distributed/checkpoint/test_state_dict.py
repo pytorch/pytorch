@@ -944,8 +944,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         meta_model_dict = meta_model.state_dict()
         cpu_mocel_dict = get_model_state_dict(cpu_model)
         for key, value in cpu_mocel_dict.items():
-            self.assertEqual(len(meta_model_dict[key]), int(len(value) / 2))
-            self.assertEqual(meta_model_dict[key][0].size(), value[0].size())
+            self.assertEqual(len(meta_model_dict[key].to_local()), int(len(value) / 2))
+            self.assertEqual(meta_model_dict[key].to_local()[0].size(), value[0].size())
 
 
 class TestNoComm(MultiProcessTestCase):
