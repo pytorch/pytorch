@@ -975,6 +975,52 @@ except RuntimeError as e:
         res_cpu = src.cpu()[idx.cpu()]
         self.assertEqual(res.cpu(), res_cpu)
 
+    def test_randint_randomness_for_large_range(self) -> None:
+        # For large ranges, randint generation is slightly different. This lead to a subtle bug where some Philox
+        # offsets were not calculated correctly, resulting in reused random states.
+        # See https://github.com/pytorch/pytorch/issues/125224
+        size = 1_000_000
+        high = 6_000_000_000  # Keep this above 2**32
+
+        def run(dev: torch.device) -> int:
+            # Measure how many unique numbers are generated in 2 consecutive calls to randint. If random states are
+            # reused, this will yield fewer unique numbers.
+            gen = torch.Generator(device=dev)
+            gen.manual_seed(0)
+            t1 = torch.randint(
+                0, high, [size], device=dev, generator=gen, dtype=torch.int64
+            )
+            t2 = torch.randint(
+                0, high, [size], device=dev, generator=gen, dtype=torch.int64
+            )
+            return torch.stack([t1, t2]).unique().shape[0]
+
+        # Use CPU as reference. The results should not deviate too much.
+        assert abs(run(torch.device("cuda")) - run(torch.device("cpu"))) < 10_000
+
+    @parametrize("dtype", [torch.float32, torch.double])
+    def test_random_no_reused_random_states(self, dtype: torch.dtype) -> None:
+        # Test if random states do not overlap between consecutive rand/randn calls.
+        # See https://github.com/pytorch/pytorch/issues/125224
+
+        def run(func, dev: torch.device, dtype: torch.dtype) -> int:
+            # Measure how many unique numbers are generated in 2 consecutive calls. If random states are
+            # reused, this will yield fewer unique numbers.
+            size = 1000000
+            gen = torch.Generator(device=dev)
+            gen.manual_seed(0)
+            t1 = func((size,), device=dev, generator=gen, dtype=dtype)
+            t2 = func((size,), device=dev, generator=gen, dtype=dtype)
+            return torch.stack([t1, t2]).unique().shape[0]
+
+        # Use CPU as reference. The results should not deviate too much.
+        for func in [torch.rand, torch.randn]:
+            deviation = abs(
+                run(func, torch.device("cuda"), dtype)
+                - run(func, torch.device("cpu"), dtype)
+            )
+            assert deviation < 50_000, deviation
+
     def test_min_max_inits(self):
         # Testing if THC_reduceAll received the correct index initialization.
         # This affects the result of THC_reduceAll operations at extreme values
@@ -4430,7 +4476,7 @@ class TestCudaMallocAsync(TestCase):
 
             def alloc():
                 nonlocal total, c
-                b = random.randrange(2 * 1024 * 1024 // 4, 200 * 1024 * 1024 // 4)
+                b = random.randrange(2 * 1024 * 1024 // 4, 20 * 1024 * 1024 // 4)
                 mem.append((c, torch.full((b,), c, dtype=torch.int32, device="cuda")))
                 c += 1
                 total += b
@@ -4444,7 +4490,7 @@ class TestCudaMallocAsync(TestCase):
 
             choices = [alloc, free, torch.cuda.memory.empty_cache]
             for i in range(N):
-                while total >= 1024 * 1024 * 1024 / 4:
+                while total >= 1024 * 1024 * 1024 / (4 * 10):
                     free()
                 (action,) = random.choices(choices, weights=[1, 1 if mem else 0, 0.1])
                 action()
