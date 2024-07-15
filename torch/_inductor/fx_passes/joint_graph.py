@@ -359,6 +359,10 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
         if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
             continue
 
+        # TODO - not sure about lossy uint->python value->uint conversions
+        if fake_tensor.dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+            continue
+
         if constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1:
             continue
 
