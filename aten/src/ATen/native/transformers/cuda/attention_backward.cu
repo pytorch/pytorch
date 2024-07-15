@@ -242,7 +242,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
                         dv/*Tensor& dV*/,
                         philox_seed/*Tensor& dropoutseed*/,
                         philox_offset/*Tensor& dropoutoffset*/);
-    return std::make_tuple(dq, dk, dv);
+    return std::make_tuple(std::move(dq), std::move(dk), std::move(dv));
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
