@@ -102,6 +102,7 @@ from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # no
 from .utils import (
     common_constant_types,
     dict_keys_repr,
+    get_custom_getattr,
     guard_failures,
     istype,
     key_is_id,
@@ -110,6 +111,7 @@ from .utils import (
     tensor_always_has_static_shape,
     tuple_iterator_getitem,
     tuple_iterator_len,
+    unpatched_nn_module_getattr,
 )
 
 if TYPE_CHECKING:
@@ -877,7 +879,11 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, AttrSource):
             assert base_guard_manager  # to make mypy happy
 
-            if isinstance(base_example_value, torch.nn.Module):
+            if (
+                isinstance(base_example_value, torch.nn.Module)
+                and get_custom_getattr(base_example_value)
+                is unpatched_nn_module_getattr
+            ):
                 out = self.getattr_on_nn_module(
                     source,
                     base_guard_manager,
@@ -1078,7 +1084,7 @@ class GuardBuilder(GuardBuilderBase):
         # guard.
         make_guard_fn_args = ", ".join(closure_vars.keys())
         guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
-        out: Dict[str, Any] = dict()
+        out: Dict[str, Any] = {}
         globals_for_guard_fn = {"G": self.scope["G"]}
         exec(pycode, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
@@ -1162,7 +1168,11 @@ class GuardBuilder(GuardBuilderBase):
 
                 # if the base value is nn.Module, check if we can speedup the
                 # guard by going through __dict__ attrs.
-                if isinstance(base_example_value, torch.nn.Module):
+                if (
+                    isinstance(base_example_value, torch.nn.Module)
+                    and get_custom_getattr(base_example_value)
+                    is unpatched_nn_module_getattr
+                ):
                     return self.getattr_on_nn_module(
                         source,
                         base_manager,
@@ -1407,7 +1417,7 @@ class GuardBuilder(GuardBuilderBase):
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
             self.TYPE_MATCH(guard)
-            code = list()
+            code = []
             code.append(f"__math_isnan({ref})")
             self._set_guard_export_info(guard, code)
 
@@ -1422,7 +1432,7 @@ class GuardBuilder(GuardBuilderBase):
         # Python math library doesn't support complex nan, so we need to use numpy
         if istype(val, complex) and np.isnan(val):
             self.TYPE_MATCH(guard)
-            code = list()
+            code = []
             code.append(f"__numpy_isnan({ref})")
             self._set_guard_export_info(guard, code)
 
@@ -1443,7 +1453,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
             return
 
-        code = list()
+        code = []
 
         # If matching equality against list/tuple, we must also check that
         # the internal types match.  (TODO: what about nested lists?)
@@ -1520,7 +1530,7 @@ class GuardBuilder(GuardBuilderBase):
             # C++ DICT_LENGTH checks for type
             self.TYPE_MATCH(guard)
 
-        code = list()
+        code = []
         if len(value) == 0:
             code.append(f"not {ref}")
         else:
@@ -1548,7 +1558,7 @@ class GuardBuilder(GuardBuilderBase):
             # C++ guard already checks the type
             self.TYPE_MATCH(guard)
 
-        code = list()
+        code = []
         code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
         self._set_guard_export_info(guard, code)
 
@@ -1591,7 +1601,7 @@ class GuardBuilder(GuardBuilderBase):
         t = type(value)
 
         self.TYPE_MATCH(guard)
-        code = list()
+        code = []
         any_key_is_id = any(key_is_id(k) for k in value.keys())
         const_keys_repr = dict_keys_repr(
             key_to_id(value),
@@ -1632,7 +1642,7 @@ class GuardBuilder(GuardBuilderBase):
             # DictGuardManager supports TYPE_MATCH internally
             self.TYPE_MATCH(guard)
 
-        code = list()
+        code = []
         code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
         self._set_guard_export_info(guard, code)
 
@@ -1794,7 +1804,7 @@ class GuardBuilder(GuardBuilderBase):
             #
             # The list of tensor fields and calls we care about can be found in `terms` below.
             # TODO(voz): We are missing storage offset in all our tensor guards?
-            code: List[str] = list()
+            code: List[str] = []
             if self.check_fn_manager.output_graph.export:
                 self.TYPE_MATCH(guard)
                 terms = [
@@ -2371,7 +2381,7 @@ class CheckFunctionManager:
             if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
                 print("GUARDS\n", guard_body)
 
-            out: Dict[str, Any] = dict()
+            out: Dict[str, Any] = {}
 
             # We don't put builder.scope as the globals in exec call because
             # guard_fn.__globals__ becomes equal to builder.scope. This causes

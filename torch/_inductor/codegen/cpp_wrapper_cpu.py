@@ -239,7 +239,7 @@ class CppWrapperCpu(WrapperCodeGen):
         # mark output type to unwrap tensor back to python scalar
         from ..ir import ShapeAsConstantBuffer
 
-        output_is_tensor = dict()
+        output_is_tensor = {}
         for idx, x in enumerate(V.graph.graph_outputs):
             if isinstance(x, ShapeAsConstantBuffer):
                 output_is_tensor[idx] = False
