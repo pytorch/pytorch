@@ -84,7 +84,9 @@ class BroadcastingTorchSaveReader(StorageReader):
         # TODO: read on each host, instead of only the coordinator
         if self.is_coordinator:
             assert self.checkpoint_id is not None
-            torch_state_dict = torch.load(self.checkpoint_id, map_location="cpu", weights_only=False)
+            torch_state_dict = torch.load(
+                self.checkpoint_id, map_location="cpu", weights_only=False
+            )
             if planner.flatten_state_dict:
                 torch_state_dict, _ = flatten_state_dict(torch_state_dict)
         else:

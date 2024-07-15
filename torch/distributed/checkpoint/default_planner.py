@@ -213,7 +213,9 @@ class DefaultLoadPlanner(LoadPlanner):
                 torch.load(value, weights_only=False),
             )
         else:
-            self.state_dict[read_item.dest_index.fqn] = torch.load(value, weights_only=False)
+            self.state_dict[read_item.dest_index.fqn] = torch.load(
+                value, weights_only=False
+            )
 
     def resolve_tensor(self, read_item: ReadItem):
         tensor = self.lookup_tensor(read_item.dest_index)
