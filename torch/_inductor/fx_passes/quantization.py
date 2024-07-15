@@ -607,13 +607,7 @@ def _is_valid_quantized_op_binary_optimization_pattern(
             )
         )
         if (
-            len(
-                _get_remaining_users(
-                    extra_input_of_pattern,
-                    compute_node,
-                )
-            )
-            > 1
+            len(_get_remaining_users(extra_input_of_pattern, compute_node)) > 1
             or extra_input_of_pattern == compute_node.args[0]
         ):
             return False
