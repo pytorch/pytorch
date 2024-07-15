@@ -13,6 +13,7 @@ from typing import List
 import torch
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
+from torch._inductor import metrics
 from torch._inductor.codegen.common import device_codegens, register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.wrapper import WrapperCodeGen
@@ -74,6 +75,12 @@ if TEST_WITH_ROCM:
         ("cpu", "cuda"), is_skip=True
     )
     test_failures["test_unbacked_reduction"] = TestFailure(("cpu"), is_skip=True)
+
+
+if os.getenv("BUILD_ENVIRONMENT", "").endswith("-debug"):
+    # Fails with TORCH_INTERNAL_ASSERT(!is_heap_allocated()), see https://github.com/pytorch/pytorch/issues/130073
+    test_failures["test_resize_as_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
+    test_failures["test_resize_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
 
 
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
@@ -856,6 +863,52 @@ class TestInductorDynamic(TestCase):
             return torch.ones(a, a)
 
         f(torch.tensor([5], device=device))
+
+    def test_sort_dynamic_shape_with_check(self, device):
+        if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
+
+            def check_count(n):
+                self.assertEqual(metrics.generated_kernel_count, 0)
+
+        else:
+
+            def check_count(n):
+                self.assertEqual(metrics.generated_kernel_count, n)
+
+        # Test dynamic shapes with statically known small enough to generate
+        # persistent sort kernel
+        def fn(a, descending):
+            torch._check(a.shape[-1] <= 256)
+            return a.sort(dim=-1, stable=True, descending=descending)
+
+        inp = torch.rand(10, 128, dtype=torch.float32, device=device)
+        inp[:, 10:20] = 1.0
+        inp[:, 30:40] = 1.0
+        metrics.reset()
+
+        opt_fn = torch.compile(fn, dynamic=True)
+        expect = fn(inp, False)
+        actual = opt_fn(inp, False)
+        self.assertEqual(actual, expect)
+        check_count(1)
+
+        expect = fn(inp, True)
+        actual = opt_fn(inp, True)
+        self.assertEqual(actual, expect)
+        check_count(2)
+
+        # Non-power of two
+        inp[:, :120]
+
+        expect = fn(inp, False)
+        actual = opt_fn(inp, False)
+        self.assertEqual(actual, expect)
+        check_count(2)  # Reused existing kernel
+
+        expect = fn(inp, True)
+        actual = opt_fn(inp, True)
+        self.assertEqual(actual, expect)
+        check_count(2)  # Reused existing kernel
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)

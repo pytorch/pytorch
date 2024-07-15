@@ -71,7 +71,12 @@ class TwoTensor(torch.Tensor):
             for o_a, o_b in zip(out_a_flat, out_b_flat)
         ]
         out = pytree.tree_unflatten(out_flat, spec)
-        return return_and_correct_aliasing(func, args, kwargs, out)
+        from torch._higher_order_ops.cond import cond_op
+
+        if func is cond_op:
+            return out
+        else:
+            return return_and_correct_aliasing(func, args, kwargs, out)
 
 
 class TwoTensorMode(torch.utils._python_dispatch.TorchDispatchMode):

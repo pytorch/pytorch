@@ -176,7 +176,10 @@ static __global__ void oneShotAllReduceKernel(
     bf16x8 vals[kWorldSize];
 #pragma unroll kWorldSize
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      streamLoad128(vals[ii], &srcs[ii][i]);
+      // Make sure the values in `vals` are order by rank so that the reduction
+      // results are consistent across ranks.
+      int srcRank = (ii + kWorldSize - rank) % kWorldSize;
+      streamLoad128(vals[srcRank], &srcs[ii][i]);
     }
 
     bf16x8 sums;
@@ -438,13 +441,18 @@ static inline size_t alignUp(uint32_t a, uint32_t b) {
   return divUp(a, b) * b;
 }
 
-static void checkInput(const at::Tensor& input, size_t rank) {
+static void checkInput(const at::Tensor& input, int deviceIdx) {
   TORCH_CHECK(
       input.dtype() == at::kBFloat16,
       "oneShotAllReduce only supports bf16 for now");
   TORCH_CHECK(input.is_non_overlapping_and_dense());
   TORCH_CHECK(input.device().is_cuda());
-  TORCH_CHECK(static_cast<size_t>(input.get_device()) == rank);
+  TORCH_CHECK(
+      input.get_device() == deviceIdx,
+      "IntraNodeComm: expect input to be on device ",
+      deviceIdx,
+      ", got device ",
+      input.get_device());
 }
 
 static void getLaunchConfig(
@@ -504,7 +512,7 @@ void* initTopoInfo(Topology topology, NvlMesh nvlMesh, size_t rank) {
 at::Tensor IntraNodeComm::oneShotAllReduce(
     const at::Tensor& input,
     at::cuda::CUDAStream& stream) {
-  checkInput(input, rank_);
+  checkInput(input, deviceIdx_);
 
   const size_t numelPerWarp =
       kBytesPerThread / input.element_size() * kWarpSize;
