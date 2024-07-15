@@ -1,5 +1,5 @@
 #include <cuda_fp16.h>
-#include <type_traits>
+#include <array>
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
@@ -44,32 +44,32 @@ __global__ void remove_padding_transform0213_2(
     const int* output_sizes,
     int output_dim,
     const int batch_size) {
-  const int batch_id = blockIdx.x;
-  const int grid_id = blockIdx.y;
-  const int tid = threadIdx.x + grid_id * BLOCK_DIM;
+  const auto batch_id = blockIdx.x;
+  const auto grid_id = blockIdx.y;
+  const auto tid = threadIdx.x + grid_id * BLOCK_DIM;
   const int grainsize = GRID_DIM_Y * BLOCK_DIM;
   const int offset = offsets[batch_id];
-  const int* sizes_i = output_sizes + batch_id * output_dim;
+  const int* sizes_i = output_sizes + static_cast<std::ptrdiff_t>(batch_id * output_dim);
   const int numel_i = sizes_i[0] * sizes_i[1];
-  int input_offset =
+  auto input_offset =
       batch_id * input_sizes[1] * input_sizes[2] * input_sizes[3];
-  for (int ii = 0; ii < (numel_i / grainsize); ii++) {
-    const int i = ii * grainsize + tid;
-    const int i2 = i / sizes_i[1];
-    const int i13 = i % sizes_i[1];
-    const int i1 = i13 / (sizes_i[1] / input_sizes[1]);
-    const int i3 = i13 % (sizes_i[1] / input_sizes[1]);
+  for (unsigned int ii = 0; ii < (numel_i / grainsize); ii++) {
+    const auto i = ii * grainsize + tid;
+    const auto i2 = i / sizes_i[1];
+    const auto i13 = i % sizes_i[1];
+    const auto i1 = i13 / (sizes_i[1] / input_sizes[1]);
+    const auto i3 = i13 % (sizes_i[1] / input_sizes[1]);
 
     output[offset + i] = input
         [input_offset + i1 * input_sizes[2] * input_sizes[3] +
          i2 * input_sizes[3] + i3];
   }
-  const int i = (numel_i / grainsize) * grainsize + tid;
+  const unsigned int i = (numel_i / grainsize) * grainsize + tid;
   if (i < numel_i) {
-    const int i2 = i / sizes_i[1];
-    const int i13 = i % sizes_i[1];
-    const int i1 = i13 / (sizes_i[1] / input_sizes[1]);
-    const int i3 = i13 % (sizes_i[1] / input_sizes[1]);
+    const auto i2 = i / sizes_i[1];
+    const auto i13 = i % sizes_i[1];
+    const auto i1 = i13 / (sizes_i[1] / input_sizes[1]);
+    const auto i3 = i13 % (sizes_i[1] / input_sizes[1]);
     output[offset + i] = input
         [input_offset + i1 * input_sizes[2] * input_sizes[3] +
          i2 * input_sizes[3] + i3];
@@ -85,26 +85,26 @@ __global__ void remove_padding_2(
     const int* output_sizes,
     int output_dim,
     const int batch_size) {
-  const int batch_id = blockIdx.x;
-  const int grid_id = blockIdx.y;
-  const int tid = threadIdx.x + grid_id * BLOCK_DIM;
+  const auto batch_id = blockIdx.x;
+  const auto grid_id = blockIdx.y;
+  const auto tid = threadIdx.x + grid_id * BLOCK_DIM;
   const int grainsize = GRID_DIM_Y * BLOCK_DIM;
   const int offset = offsets[batch_id];
-  const int* sizes_i = output_sizes + batch_id * output_dim;
+  const int* sizes_i = output_sizes + static_cast<std::ptrdiff_t>(batch_id * output_dim);
   const int numel_i = sizes_i[0] * sizes_i[1];
-  int input_offset = batch_id * input_sizes[1] * input_sizes[2];
-  for (int ii = 0; ii < (numel_i / grainsize); ii++) {
-    const int i = ii * grainsize + tid;
-    const int i0 = i / sizes_i[1];
-    const int i1 = i % sizes_i[1];
-    const int i0_offset = i0 * input_sizes[2];
+  auto input_offset = batch_id * input_sizes[1] * input_sizes[2];
+  for (unsigned int ii = 0; ii < (numel_i / grainsize); ii++) {
+    const auto i = ii * grainsize + tid;
+    const auto i0 = i / sizes_i[1];
+    const auto i1 = i % sizes_i[1];
+    const auto i0_offset = i0 * input_sizes[2];
     output[offset + i] = input[input_offset + i0_offset + i1];
   }
-  const int i = (numel_i / grainsize) * grainsize + tid;
+  const auto i = (numel_i / grainsize) * grainsize + tid;
   if (i < numel_i) {
-    const int i0 = i / sizes_i[1];
-    const int i1 = i % sizes_i[1];
-    const int i0_offset = i0 * input_sizes[2];
+    const auto i0 = i / sizes_i[1];
+    const auto i1 = i % sizes_i[1];
+    const auto i0_offset = i0 * input_sizes[2];
     output[offset + i] = input[input_offset + i0_offset + i1];
   }
 }
@@ -118,31 +118,31 @@ __global__ void remove_padding(
     const int* output_sizes,
     int output_dim,
     const int batch_size) {
-  const int batch_id = blockIdx.x;
-  const int grid_id = blockIdx.y;
-  const int tid = threadIdx.x + grid_id * BLOCK_DIM;
+  const auto batch_id = blockIdx.x;
+  const auto grid_id = blockIdx.y;
+  const auto tid = threadIdx.x + grid_id * BLOCK_DIM;
   const int grainsize = GRID_DIM_Y * BLOCK_DIM;
   const int offset = offsets[batch_id];
-  const int* sizes_i = output_sizes + batch_id * output_dim;
+  const int* sizes_i = output_sizes + static_cast<std::ptrdiff_t>(batch_id * output_dim);
   const int numel_i = sizes_i[0] * sizes_i[1] * sizes_i[2];
-  int input_offset =
+  auto input_offset =
       batch_id * input_sizes[1] * input_sizes[2] * input_sizes[3];
-  for (int ii = 0; ii < (numel_i / grainsize); ii++) {
-    const int i = ii * grainsize + tid;
-    const int i0 = i / (sizes_i[1] * sizes_i[2]);
-    const int i1 = (i % (sizes_i[1] * sizes_i[2])) / sizes_i[2];
-    const int i2 = i % sizes_i[2];
-    const int i0_offset = i0 * input_sizes[2] * input_sizes[3];
-    const int i1_offset = i1 * input_sizes[3];
+  for (unsigned int ii = 0; ii < (numel_i / grainsize); ii++) {
+    const auto i = ii * grainsize + tid;
+    const auto i0 = i / (sizes_i[1] * sizes_i[2]);
+    const auto i1 = (i % (sizes_i[1] * sizes_i[2])) / sizes_i[2];
+    const auto i2 = i % sizes_i[2];
+    const auto i0_offset = i0 * input_sizes[2] * input_sizes[3];
+    const auto i1_offset = i1 * input_sizes[3];
     output[offset + i] = input[input_offset + i0_offset + i1_offset + i2];
   }
-  const int i = (numel_i / grainsize) * grainsize + tid;
+  const auto i = (numel_i / grainsize) * grainsize + tid;
   if (i < numel_i) {
-    const int i0 = i / (sizes_i[1] * sizes_i[2]);
-    const int i1 = (i % (sizes_i[1] * sizes_i[2])) / sizes_i[2];
-    const int i2 = i % sizes_i[2];
-    const int i0_offset = i0 * input_sizes[2] * input_sizes[3];
-    const int i1_offset = i1 * input_sizes[3];
+    const auto i0 = i / (sizes_i[1] * sizes_i[2]);
+    const auto i1 = (i % (sizes_i[1] * sizes_i[2])) / sizes_i[2];
+    const auto i2 = i % sizes_i[2];
+    const auto i0_offset = i0 * input_sizes[2] * input_sizes[3];
+    const auto i1_offset = i1 * input_sizes[3];
     output[offset + i] = input[input_offset + i0_offset + i1_offset + i2];
   }
 }
@@ -254,15 +254,15 @@ __global__ void add_padding_1(
     int input_dim,
     int output_sizes_1,
     const int batch_size) {
-  const int batch_id = blockIdx.x;
-  const int grid_id = blockIdx.y;
-  const int tid = threadIdx.x + grid_id * BLOCK_DIM;
+  const auto batch_id = blockIdx.x;
+  const auto grid_id = blockIdx.y;
+  const auto tid = threadIdx.x + grid_id * BLOCK_DIM;
   const int grainsize = GRID_DIM_Y * BLOCK_DIM;
-  const int* sizes_i = input_sizes + batch_id * input_dim;
-  const int batch_output_offset = batch_id * output_sizes_1;
-  for (int ii = 0; ii < (output_sizes_1 / grainsize); ii++) {
-    const int i = ii * grainsize + tid;
-    const int output_offset = batch_output_offset + i;
+  const int* sizes_i = input_sizes + static_cast<std::ptrdiff_t>(batch_id * input_dim);
+  const auto batch_output_offset = batch_id * output_sizes_1;
+  for (unsigned int ii = 0; ii < (output_sizes_1 / grainsize); ii++) {
+    const auto i = ii * grainsize + tid;
+    const auto output_offset = batch_output_offset + i;
     if (batch_id < batch_size && i < sizes_i[0]) {
       const int batch_input_offset = offsets[batch_id];
       output[output_offset] = input[batch_input_offset + i];
@@ -270,9 +270,9 @@ __global__ void add_padding_1(
       output[output_offset] = padding_value;
     }
   }
-  const int i = (output_sizes_1 / grainsize) * grainsize + tid;
+  const auto i = (output_sizes_1 / grainsize) * grainsize + tid;
   if (i < output_sizes_1) {
-    const int output_offset = batch_output_offset + i;
+    const auto output_offset = batch_output_offset + i;
     if (batch_id < batch_size && (i < sizes_i[0])) {
       const int batch_input_offset = offsets[batch_id];
       output[output_offset] = input[batch_input_offset + i];
@@ -293,32 +293,32 @@ __global__ void add_padding_2(
     int output_sizes_1,
     int output_sizes_2,
     const int batch_size) {
-  const int batch_id = blockIdx.x;
-  const int grid_id = blockIdx.y;
-  const int tid = threadIdx.x + grid_id * BLOCK_DIM;
+  const auto batch_id = blockIdx.x;
+  const auto grid_id = blockIdx.y;
+  const auto tid = threadIdx.x + grid_id * BLOCK_DIM;
   const int grainsize = GRID_DIM_Y * BLOCK_DIM;
-  const int* sizes_i = input_sizes + batch_id * input_dim;
-  const int output_offset = batch_id * output_sizes_1 * output_sizes_2;
-  const int output_numel = output_sizes_1 * output_sizes_2;
+  const int* sizes_i = input_sizes + static_cast<std::ptrdiff_t>(batch_id * input_dim);
+  const auto output_offset = batch_id * output_sizes_1 * output_sizes_2;
+  const auto output_numel = output_sizes_1 * output_sizes_2;
   for (int ii = 0; ii < (output_numel / grainsize); ii++) {
-    const int i = ii * grainsize + tid;
-    const int i0 = i / (output_sizes_2);
-    const int i1 = i - i0 * output_sizes_2;
+    const auto i = ii * grainsize + tid;
+    const auto i0 = i / (output_sizes_2);
+    const auto i1 = i - i0 * output_sizes_2;
     if (batch_id < batch_size && i0 < sizes_i[0] && i1 < sizes_i[1]) {
-      const int offset = offsets[batch_id];
-      const int input_offset = offset + i0 * sizes_i[1] + i1;
+      const auto offset = offsets[batch_id];
+      const auto input_offset = offset + i0 * sizes_i[1] + i1;
       output[output_offset + i] = input[input_offset];
     } else {
       output[output_offset + i] = padding_value;
     }
   }
-  const int i = (output_numel / grainsize) * grainsize + tid;
+  const auto i = (output_numel / grainsize) * grainsize + tid;
   if (i < output_numel) {
-    const int i0 = i / (output_sizes_2);
-    const int i1 = i - i0 * output_sizes_2;
+    const auto i0 = i / (output_sizes_2);
+    const auto i1 = i - i0 * output_sizes_2;
     if (batch_id < batch_size && i0 < sizes_i[0] && i1 < sizes_i[1]) {
-      const int offset = offsets[batch_id];
-      const int input_offset = offset + i0 * sizes_i[1] + i1;
+      const auto offset = offsets[batch_id];
+      const auto input_offset = offset + i0 * sizes_i[1] + i1;
       output[output_offset + i] = input[input_offset];
     } else {
       output[output_offset + i] = padding_value;
@@ -338,38 +338,38 @@ __global__ void add_padding_3(
     int output_sizes_2,
     int output_sizes_3,
     const int batch_size) {
-  const int batch_id = blockIdx.x;
-  const int grid_id = blockIdx.y;
-  const int tid = threadIdx.x + grid_id * BLOCK_DIM;
+  const auto batch_id = blockIdx.x;
+  const auto grid_id = blockIdx.y;
+  const auto tid = threadIdx.x + grid_id * BLOCK_DIM;
   const int grainsize = GRID_DIM_Y * BLOCK_DIM;
-  const int* sizes_i = input_sizes + batch_id * input_dim;
-  const int output_offset =
+  const int* sizes_i = input_sizes + static_cast<std::ptrdiff_t>(batch_id * input_dim);
+  const auto output_offset =
       batch_id * output_sizes_1 * output_sizes_2 * output_sizes_3;
   const int output_numel = output_sizes_1 * output_sizes_2 * output_sizes_3;
-  for (int ii = 0; ii < (output_numel / grainsize); ii++) {
-    const int i = ii * grainsize + tid;
-    const int i0 = i / (output_sizes_2 * output_sizes_3);
-    const int i1 = (i % (output_sizes_2 * output_sizes_3)) / output_sizes_3;
-    const int i2 = i % output_sizes_3;
+  for (unsigned int ii = 0; ii < (output_numel / grainsize); ii++) {
+    const auto i = ii * grainsize + tid;
+    const auto i0 = i / (output_sizes_2 * output_sizes_3);
+    const auto i1 = (i % (output_sizes_2 * output_sizes_3)) / output_sizes_3;
+    const auto i2 = i % output_sizes_3;
     if (batch_id < batch_size && i0 < sizes_i[0] && i1 < sizes_i[1] &&
         i2 < sizes_i[2]) {
-      const int offset = offsets[batch_id];
-      const int input_offset =
+      const auto offset = offsets[batch_id];
+      const auto input_offset =
           offset + i0 * (sizes_i[1] * sizes_i[2]) + i1 * sizes_i[2] + i2;
       output[output_offset + i] = input[input_offset];
     } else {
       output[output_offset + i] = padding_value;
     }
   }
-  const int i = (output_numel / grainsize) * grainsize + tid;
+  const unsigned int i = (output_numel / grainsize) * grainsize + tid;
   if (i < output_numel) {
-    const int i0 = i / (output_sizes_2 * output_sizes_3);
-    const int i1 = (i % (output_sizes_2 * output_sizes_3)) / output_sizes_3;
-    const int i2 = i % output_sizes_3;
+    const auto i0 = i / (output_sizes_2 * output_sizes_3);
+    const auto i1 = (i % (output_sizes_2 * output_sizes_3)) / output_sizes_3;
+    const auto i2 = i % output_sizes_3;
     if (batch_id < batch_size && i0 < sizes_i[0] && i1 < sizes_i[1] &&
         i2 < sizes_i[2]) {
-      const int offset = offsets[batch_id];
-      const int input_offset =
+      const auto offset = offsets[batch_id];
+      const auto input_offset =
           offset + i0 * (sizes_i[1] * sizes_i[2]) + i1 * sizes_i[2] + i2;
       output[output_offset + i] = input[input_offset];
     } else {
@@ -529,8 +529,8 @@ constexpr size_t kStackArrayMaxDims = 5;
 
 template <typename T>
 struct StackArray {
-  T vals[kStackArrayMaxDims];
-  size_t ndim;
+  std::array<T, kStackArrayMaxDims> vals{};
+  size_t ndim{};
 };
 
 // Warp size
@@ -556,32 +556,32 @@ inline std::tuple<dim3, dim3, StackArray<int64_t>> check_shape_and_partition_(
     const Tensor& values,
     const std::vector<Tensor>& offsets,
     const Tensor& dense_tensor) {
-  const int outer_dense_size = dense_tensor.size(0);
+  const auto outer_dense_size = dense_tensor.size(0);
   TORCH_CHECK(
       outer_dense_size == offsets[0].numel() - 1,
       "outer_dense_size, ",
       outer_dense_size,
       " != offsets[0].numel() - 1, ",
       offsets[0].numel() - 1);
-  const int inner_dense_size = dense_tensor.size(-1);
+  const auto inner_dense_size = dense_tensor.size(-1);
   TORCH_CHECK(
       inner_dense_size == values.size(-1),
       "inner_dense_size, ",
       inner_dense_size,
       " != values.size(-1), ",
       values.size(-1));
-  const int jagged_folded_size =
+  const auto jagged_folded_size =
       dense_tensor.numel() / (outer_dense_size * inner_dense_size);
 
-  const int threads_x =
+  const int64_t threads_x =
       inner_dense_size >= kWarpSize / 2 ? kWarpSize : inner_dense_size;
   const int threads_y = kMaxThreads / kWarpSize;
   const dim3 blocks(
-      div_round_up(outer_dense_size * jagged_folded_size, threads_y));
+      div_round_up(static_cast<int32_t>(outer_dense_size * jagged_folded_size), threads_y));
 
   StackArray<int64_t> jagged_dims_tensor;
-  const int num_jagged_dim = dense_tensor.dim() - 2;
-  TORCH_CHECK(num_jagged_dim <= kStackArrayMaxDims);
+  const auto num_jagged_dim = dense_tensor.dim() - 2;
+  TORCH_CHECK(static_cast<size_t>(num_jagged_dim) <= kStackArrayMaxDims);
   jagged_dims_tensor.ndim = num_jagged_dim;
   std::memcpy(
       &(jagged_dims_tensor.vals[0]),
@@ -598,10 +598,10 @@ DEVICE_INLINE bool walk_down_tensor_storage_tree_(
     const StackArray<index_t*>& x_offsets) {
   // compute coorindates
   int jagged_coords[NUM_JAGGED_DIM];
-  int j_temp = flattened_jagged_idx;
+  int64_t j_temp = flattened_jagged_idx;
 #pragma unroll
   for (int d = NUM_JAGGED_DIM - 1; d >= 0; --d) {
-    const int jagged_size = jagged_dims.vals[d];
+    const auto jagged_size = jagged_dims.vals[d];
     jagged_coords[d] = j_temp % jagged_size;
     j_temp /= jagged_size;
   }
@@ -648,11 +648,11 @@ __launch_bounds__(kMaxThreads) void jagged_dense_elementwise_dense_output_kernel
     const scalar_t padding_value) {
   const int outer_dense_size = y.size(0);
   const int jagged_folded_size = y.size(1);
-  const int inner_dense_size = y.size(2);
+  const auto inner_dense_size = y.size(2);
 
-  const int outer_begin = blockIdx.x * blockDim.y + threadIdx.y;
-  const int outer_stride = gridDim.x * blockDim.y;
-  for (int outer = outer_begin; outer < outer_dense_size * jagged_folded_size;
+  const auto outer_begin = blockIdx.x * blockDim.y + threadIdx.y;
+  const auto outer_stride = gridDim.x * blockDim.y;
+  for (unsigned int outer = outer_begin; outer < outer_dense_size * jagged_folded_size;
        outer += outer_stride) {
     const int oidx = outer / jagged_folded_size;
     const int jidx = outer % jagged_folded_size;
@@ -662,7 +662,7 @@ __launch_bounds__(kMaxThreads) void jagged_dense_elementwise_dense_output_kernel
         offset, jidx, jagged_dims, x_offsets);
 
     if (is_zero) {
-      int iidx;
+      unsigned int iidx = 0;
       for (iidx = threadIdx.x; iidx * 2 + 1 < inner_dense_size;
            iidx += blockDim.x) {
         output[oidx][jidx][2 * iidx] =
@@ -675,7 +675,7 @@ __launch_bounds__(kMaxThreads) void jagged_dense_elementwise_dense_output_kernel
             f(padding_value, y[oidx][jidx][2 * iidx]);
       }
     } else {
-      int iidx;
+      unsigned int iidx = 0;
       for (iidx = threadIdx.x; iidx * 2 + 1 < inner_dense_size;
            iidx += blockDim.x) {
         output[oidx][jidx][2 * iidx] =
@@ -704,7 +704,7 @@ void jagged_dense_elementwise_dense_output_(
     TENSOR_ON_CUDA_GPU(x_offset);
   }
 
-  const int num_jagged_dim = y.dim() - 2;
+  const auto num_jagged_dim = y.dim() - 2;
   TORCH_CHECK(
       x_offsets.size() == static_cast<size_t>(num_jagged_dim),
       "x_offsets.size(), ",
@@ -803,21 +803,21 @@ __launch_bounds__(kMaxThreads) void jagged_dense_dense_elementwise_jagged_output
   const int inner_dense_size = y_0.size(2);
   const int nnz = x_values.size(0);
 
-  const int offset_begin = blockIdx.x * blockDim.y + threadIdx.y;
-  const int offset_stride = gridDim.x * blockDim.y;
-  for (int offset = offset_begin; offset < nnz; offset += offset_stride) {
-    int offset_temp = offset;
-    int jidx = 0;
+  const auto offset_begin = blockIdx.x * blockDim.y + threadIdx.y;
+  const auto offset_stride = gridDim.x * blockDim.y;
+  for (unsigned int offset = offset_begin; offset < nnz; offset += offset_stride) {
+    auto offset_temp = offset;
+    int64_t jidx = 0;
     bool truncated = false;
-    int dim_prod = 1;
+    int64_t dim_prod = 1;
 #pragma unroll
     for (int d = NUM_JAGGED_DIM - 1; d >= 0; --d) {
       // Binary search the first that is bigger than offset
-      int count = x_offsets_sizes.vals[d] - 1;
-      int first = 1;
+      auto count = x_offsets_sizes.vals[d] - 1;
+      long first = 1;
       while (count > 0) {
-        int idx = first;
-        int step = count / 2;
+        auto idx = first;
+        auto step = count / 2;
         idx += step;
         if (x_offsets.vals[d][idx] <= offset_temp) {
           first = ++idx;
@@ -828,7 +828,7 @@ __launch_bounds__(kMaxThreads) void jagged_dense_dense_elementwise_jagged_output
       }
 
       --first;
-      int coord = offset_temp - x_offsets.vals[d][first];
+      int64_t coord = offset_temp - x_offsets.vals[d][first];
       if (coord >= jagged_dims.vals[d]) {
         truncated = true;
         break;
@@ -844,8 +844,8 @@ __launch_bounds__(kMaxThreads) void jagged_dense_dense_elementwise_jagged_output
       truncated = true;
     }
     if (!truncated) {
-      const int oidx = offset_temp;
-      int iidx;
+      const auto oidx = offset_temp;
+      unsigned int iidx = 0;
       for (iidx = threadIdx.x; iidx * 2 + 1 < inner_dense_size;
            iidx += blockDim.x) {
         output_values[offset][2 * iidx] =
@@ -864,7 +864,7 @@ __launch_bounds__(kMaxThreads) void jagged_dense_dense_elementwise_jagged_output
               y_1[oidx][jidx][2 * iidx]);
       }
     } else {
-      int iidx;
+      unsigned int iidx = 0;
       for (iidx = threadIdx.x; iidx * 2 + 1 < inner_dense_size;
            iidx += blockDim.x) {
         output_values[offset][2 * iidx] = f(x_values[offset][2 * iidx], 0, 0);
@@ -891,7 +891,7 @@ void jagged_dense_elementwise_jagged_output_(
     TENSOR_ON_CUDA_GPU(x_offset);
   }
 
-  const int num_jagged_dim = y.dim() - 2;
+  const auto num_jagged_dim = y.dim() - 2;
   TORCH_CHECK(
       x_offsets.size() == static_cast<size_t>(num_jagged_dim),
       "x_offsets.size(), ",
@@ -941,11 +941,11 @@ __global__ void jagged_dense_dense_elementwise_jagged_output_opt_search_kernel_(
   struct SharedMemory<index_t> smem;
   index_t* offsets_sh = smem.getPointer();
 
-  for (int i = threadIdx.x; i < B + 1; i += blockDim.x) {
+  for (unsigned int i = threadIdx.x; i < B + 1; i += blockDim.x) {
     offsets_sh[i] = offsets[i];
   }
   __syncthreads();
-  int row = threadIdx.x + blockIdx.x * blockDim.x;
+  int row = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
   if (row >= nnz)
     return;
   int first = -1;
@@ -966,7 +966,7 @@ __global__ void jagged_dense_dense_elementwise_jagged_output_opt_search_kernel_(
 
   int dense_row = first;
   int offset = offsets_sh[dense_row];
-  int dense_col = row - offset;
+  auto dense_col = row - offset;
   rows[row] = dense_row;
   cols[row] = dense_col;
 }
@@ -1076,11 +1076,11 @@ __global__ void jagged_dense_dense_elementwise_jagged_output_opt_gather_kernel_(
     const int nnz,
     const int E,
     F f) {
-  int values_row = threadIdx.y + blockIdx.y * blockDim.y;
+  auto values_row = threadIdx.y + blockIdx.y * blockDim.y;
   if (values_row >= nnz)
     return;
-  for (int real_row = values_row; real_row < nnz;
-       real_row += blockDim.y * gridDim.y) {
+  for (int real_row = static_cast<int>(values_row); real_row < nnz;
+       real_row += static_cast<int>(blockDim.y * gridDim.y)) {
     int dense_row = rows[real_row];
     int dense_col = cols[real_row];
     __half* values_ptr = reinterpret_cast<__half*>(&values[real_row][0]);
@@ -1093,7 +1093,7 @@ __global__ void jagged_dense_dense_elementwise_jagged_output_opt_gather_kernel_(
     if ((dense_col < y0.size(1)) && (dense_row < y0.size(0)) &&
         (dense_col < y1.size(1)) && (dense_row < y1.size(0)) &&
         (dense_col >= 0) && (dense_row >= 0)) {
-      for (int tid = threadIdx.x; tid < E / 8; tid += blockDim.x) {
+      for (unsigned int tid = threadIdx.x; tid < E / 8; tid += blockDim.x) {
         VecType128 v_x, v_out, v_y0, v_y1;
         v_x.data.mask =
             (reinterpret_cast<const VecType128::TType*>(x_ptr))[tid];
@@ -1105,7 +1105,7 @@ __global__ void jagged_dense_dense_elementwise_jagged_output_opt_gather_kernel_(
         (reinterpret_cast<VecType128::TType*>(values_ptr))[tid] =
             v_out.data.mask;
       }
-      for (int tid = threadIdx.x + (E / 8) * 8; tid < E / 4;
+      for (unsigned int tid = threadIdx.x + (E / 8) * 8; tid < E / 4;
            tid += blockDim.x) {
         VecType64 v_x, v_out, v_y0, v_y1;
         v_x.data.mask = (reinterpret_cast<const VecType64::TType*>(x_ptr))[tid];
@@ -1117,7 +1117,7 @@ __global__ void jagged_dense_dense_elementwise_jagged_output_opt_gather_kernel_(
         (reinterpret_cast<VecType64::TType*>(values_ptr))[tid] =
             v_out.data.mask;
       }
-      for (int tid = threadIdx.x + (E / 4) * 4; tid < E / 2;
+      for (unsigned int tid = threadIdx.x + (E / 4) * 4; tid < E / 2;
            tid += blockDim.x) {
         VecType32 v_x, v_out, v_y0, v_y1;
         v_x.data.mask = (reinterpret_cast<const VecType32::TType*>(x_ptr))[tid];
@@ -1129,14 +1129,14 @@ __global__ void jagged_dense_dense_elementwise_jagged_output_opt_gather_kernel_(
         (reinterpret_cast<VecType32::TType*>(values_ptr))[tid] =
             v_out.data.mask;
       }
-      for (int tid = threadIdx.x + (E / 2) * 2; tid < E; tid += blockDim.x) {
+      for (unsigned int tid = threadIdx.x + (E / 2) * 2; tid < E; tid += blockDim.x) {
         auto v_x = static_cast<__half>(x_ptr[tid]);
         auto v_y0 = static_cast<__half>(y0_ptr[tid]);
         auto v_y1 = static_cast<__half>(y1_ptr[tid]);
         values_ptr[tid] = f(v_x, v_y0, v_y1);
       }
     } else {
-      for (int tid = threadIdx.x; tid < E / 8; tid += blockDim.x) {
+      for (unsigned int tid = threadIdx.x; tid < E / 8; tid += blockDim.x) {
         VecType128 v_x, v_out, v_y0, v_y1;
         v_x.data.mask =
             (reinterpret_cast<const VecType128::TType*>(x_ptr))[tid];
@@ -1144,7 +1144,7 @@ __global__ void jagged_dense_dense_elementwise_jagged_output_opt_gather_kernel_(
         (reinterpret_cast<VecType128::TType*>(values_ptr))[tid] =
             v_out.data.mask;
       }
-      for (int tid = threadIdx.x + (E / 8) * 8; tid < E / 4;
+      for (unsigned int tid = threadIdx.x + (E / 8) * 8; tid < E / 4;
            tid += blockDim.x) {
         VecType64 v_x, v_out, v_y0, v_y1;
         v_x.data.mask = (reinterpret_cast<const VecType64::TType*>(x_ptr))[tid];
@@ -1152,7 +1152,7 @@ __global__ void jagged_dense_dense_elementwise_jagged_output_opt_gather_kernel_(
         (reinterpret_cast<VecType64::TType*>(values_ptr))[tid] =
             v_out.data.mask;
       }
-      for (int tid = threadIdx.x + (E / 4) * 4; tid < E / 2;
+      for (unsigned int tid = threadIdx.x + (E / 4) * 4; tid < E / 2;
            tid += blockDim.x) {
         VecType32 v_x, v_out, v_y0, v_y1;
         v_x.data.mask = (reinterpret_cast<const VecType32::TType*>(x_ptr))[tid];
@@ -1160,7 +1160,7 @@ __global__ void jagged_dense_dense_elementwise_jagged_output_opt_gather_kernel_(
         (reinterpret_cast<VecType32::TType*>(values_ptr))[tid] =
             v_out.data.mask;
       }
-      for (int tid = threadIdx.x + (E / 2) * 2; tid < E; tid += blockDim.x) {
+      for (unsigned int tid = threadIdx.x + (E / 2) * 2; tid < E; tid += blockDim.x) {
         auto v_x = static_cast<__half>(x_ptr[tid]);
         values_ptr[tid] = f(v_x, __half{}, __half{});
       }
@@ -1170,7 +1170,7 @@ __global__ void jagged_dense_dense_elementwise_jagged_output_opt_gather_kernel_(
 
 // Check to see if the inputs to the op are amenable to the fast path
 inline bool jagged_dense_dense_elementwise_jagged_output_matches_opt(
-    const int& num_jagged_dim,
+    const int64_t num_jagged_dim,
     const Tensor& x_values,
     const std::vector<Tensor>& x_offsets,
     const Tensor& y_0_reshaped,
@@ -1201,7 +1201,7 @@ inline bool jagged_dense_dense_elementwise_jagged_output_matches_opt(
   matches &= (y_0_reshaped.size(0) < INT_MAX);
   matches &= (y_0_reshaped.size(1) < INT_MAX);
 
-  int max_shared_bytes;
+  int max_shared_bytes = 0;
 #ifndef USE_ROCM
   C10_CUDA_CHECK(cudaDeviceGetAttribute(
       &max_shared_bytes,
@@ -1226,7 +1226,7 @@ inline bool jagged_dense_dense_elementwise_jagged_output_matches_opt(
         auto B = y_0_reshaped.size(0);
         // the default shared memory on V100/A100/H100 is 48 KB from
         // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#shared-memory-8-x
-        if ((B + 1) * sizeof(index_t) >= used_shared_bytes) {
+        if ((B + 1) * sizeof(index_t) >= static_cast<size_t>(used_shared_bytes)) {
           matches = false;
         }
       });
@@ -1264,8 +1264,8 @@ inline bool jagged_dense_dense_elementwise_jagged_output_matches_opt(
             -> scalar_t { return f(x, y); });                                  \
   }
 
-inline int calc_used_shared_bytes(const int device) {
-    int max_shared_bytes;
+inline size_t calc_used_shared_bytes(const int device) {
+    int max_shared_bytes = 0;
 #ifndef USE_ROCM
     C10_CUDA_CHECK(cudaDeviceGetAttribute(
         &max_shared_bytes,
@@ -1312,7 +1312,7 @@ void jagged_dense_elementwise_jagged_output_opt_(
     TENSOR_ON_CUDA_GPU(x_offset);
   }
 
-  const int num_jagged_dim = y.dim() - 2;
+  const auto num_jagged_dim = y.dim() - 2;
   TORCH_CHECK(
       x_offsets.size() == static_cast<size_t>(num_jagged_dim),
       "x_offsets.size(), ",
@@ -1352,10 +1352,10 @@ void jagged_dense_elementwise_jagged_output_opt_(
           auto cur_max_shared_bytes =
               at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
           if (dynamic_smem_size > cur_max_shared_bytes) {
-            int used_shared_bytes = calc_used_shared_bytes(y_reshaped.get_device());
+            auto used_shared_bytes = calc_used_shared_bytes(y_reshaped.get_device());
             set_max_dynamic_shared_mem_size_for_opt_search_kernel<index_t>(used_shared_bytes);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
-            TORCH_CHECK(dynamic_smem_size <= used_shared_bytes);
+            TORCH_CHECK(dynamic_smem_size <= static_cast<size_t>(used_shared_bytes));
           }
           dim3 threads_bs = dim3(1024, 1, 1);
           dim3 blocks_bs = dim3(div_round_up(nnz, threads_bs.x), 1, 1);
