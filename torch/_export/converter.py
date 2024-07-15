@@ -946,6 +946,10 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
                 else:
                     self.name_to_buffer_map[k] = tensor
 
+        self.name_to_non_tensor_attributes: Dict[str, Any] = {}
+
+        self.lift_tensor_constants_to_buffer()
+
     def convert(self) -> ExportedProgram:
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
 
