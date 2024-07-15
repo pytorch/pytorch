@@ -411,7 +411,7 @@ struct ExpandableSegment {
       return rangeFromHandles(begin, end);
     }
     while (end > handles_.size()) {
-      handles_.emplace_back(c10::nullopt);
+      handles_.emplace_back(std::nullopt);
     }
     for (auto i : c10::irange(begin, end)) {
       TORCH_INTERNAL_ASSERT(!handles_.at(i));
@@ -426,7 +426,7 @@ struct ExpandableSegment {
       if (status == CUDA_ERROR_OUT_OF_MEMORY) {
         for (auto j : c10::irange(begin, i)) {
           auto h = handles_.at(j).value();
-          handles_.at(j) = c10::nullopt;
+          handles_.at(j) = std::nullopt;
           C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h));
         }
         trimHandles();
@@ -507,7 +507,7 @@ struct ExpandableSegment {
     C10_CUDA_CHECK(cudaStreamSynchronize(stream_));
     for (auto i : c10::irange(begin, end)) {
       CUmemGenericAllocationHandle h = handles_.at(i).value();
-      handles_.at(i) = c10::nullopt;
+      handles_.at(i) = std::nullopt;
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
           ptr_ + segment_size_ * i, segment_size_));
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h));
@@ -3044,9 +3044,9 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void recordAnnotation(const std::shared_ptr<GatheredContext>& name) override {
-    for (auto& allocator : device_allocator) {
-      allocator->recordAnnotation(name);
-    }
+    c10::DeviceIndex device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    device_allocator[device]->recordAnnotation(name);
   }
 
   bool isHistoryEnabled() override {

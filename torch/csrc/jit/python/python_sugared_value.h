@@ -32,7 +32,7 @@ std::optional<StrongFunctionPtr> as_function(const py::object& obj);
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   PythonValue(
       py::object the_self,
-      std::optional<py::object> rcb = c10::nullopt,
+      std::optional<py::object> rcb = std::nullopt,
       Value* module_self = nullptr)
       : self(std::move(the_self)),
         rcb(std::move(rcb)),

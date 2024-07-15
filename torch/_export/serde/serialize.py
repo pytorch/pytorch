@@ -594,6 +594,9 @@ class GraphModuleSerializer(metaclass=Final):
         if torch_fn := node.meta.get("torch_fn"):
             ret["torch_fn"] = ST_DELIMITER.join(list(torch_fn))
 
+        if quantization_tag := node.meta.get("quantization_tag"):
+            ret["quantization_tag"] = json.dumps(quantization_tag)
+
         return ret
 
     def serialize_script_obj_meta(
@@ -1384,7 +1387,7 @@ class ExportedProgramSerializer(metaclass=Final):
                 major=SCHEMA_VERSION[0],
                 minor=SCHEMA_VERSION[1],
             ),
-            dialect=exported_program.dialect
+            verifiers=[v.dialect for v in exported_program.verifiers],
         )
 
         # Test canonical form is well defined.
@@ -1859,6 +1862,8 @@ class GraphModuleDeserializer(metaclass=Final):
     def sync_fx_node(self, name: str, fx_node: torch.fx.Node):
         if name in self.serialized_name_to_node:
             raise SerializeError(f"Node {name} has already been deserialized before.")
+        # overwrite name
+        fx_node.name = name
         self.serialized_name_to_node[name] = fx_node
         assert "val" not in fx_node.meta
         fx_node.meta["val"] = self.serialized_name_to_meta[name]
@@ -2147,6 +2152,10 @@ class GraphModuleDeserializer(metaclass=Final):
 
         if torch_fn_str := metadata.get("torch_fn"):
             ret["torch_fn"] = tuple(torch_fn_str.split(ST_DELIMITER))
+
+        if quantization_tag_str := metadata.get("quantization_tag"):
+            ret["quantization_tag"] = json.loads(quantization_tag_str)
+
         return ret
 
     def deserialize_argument_spec(self, x: Argument) -> ep.ArgumentSpec:
@@ -2257,8 +2266,8 @@ class ExportedProgramDeserializer(metaclass=Final):
             range_constraints=range_constraints,
             module_call_graph=res.module_call_graph,
             example_inputs=res.example_inputs,
-            verifier=load_verifier(exported_program.dialect),
             constants=res.constants,
+            verifiers=[load_verifier(v) for v in exported_program.verifiers],
         )
 
 
@@ -2707,7 +2716,12 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
     sorted_ins = sorted(
         enumerate(zip(graph.inputs, signature.input_specs)), key=rank_input
     )
-    sorted_inputs, input_specs = zip(*(i for idx, i in sorted_ins))  # type: ignore[assignment]
+
+    if len(sorted_ins) > 0:
+        sorted_inputs, input_specs = zip(*(i for idx, i in sorted_ins))  # type: ignore[assignment]
+    else:
+        sorted_inputs = ()
+        input_specs = ()
 
     sorted_outs = sorted(
         enumerate(zip(graph.outputs, signature.output_specs)), key=rank_output
@@ -2823,7 +2837,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         opset_version=opset_version,
         range_constraints=range_constraints,
         schema_version=ep.schema_version,
-        dialect=ep.dialect
+        verifiers=ep.verifiers,
     )
 
 
