@@ -1051,13 +1051,7 @@ def static_input(x: torch.Tensor):
     """
     Copy and input while preserving strides
     """
-    # TODO(jansel): figure out why this version doesn't work:
-    # return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
-    needed_size = (
-        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
-    )
-    buffer = torch.empty(needed_size, dtype=x.dtype, device=x.device)
-    return torch.as_strided(buffer, x.size(), x.stride())
+    return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
 
 
 def index_expanded_dims_and_copy_(
