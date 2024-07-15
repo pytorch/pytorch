@@ -276,6 +276,10 @@ class UniformValueConstantFolder(ConstantFolder):
             new_args = [[1], args[1]]
             return aten.full.default(*new_args, **node.kwargs)
 
+        # handle before view ops because this changes value
+        if node.target == aten.view.dtype:
+            return super(ConstantFolder, self).run_node(node)
+
         # view ops, return input tensor, the first argument
         if hasattr(node.target, "overloadpacket") and (
             node.target.overloadpacket in self.view_op_packets
