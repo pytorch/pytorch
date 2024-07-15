@@ -336,22 +336,21 @@ bool check_all_tensors_on_device(sdp_params const& params, bool debug) {
 bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   const auto s_q = params.query.sym_size(2);
   const auto s_k = params.key.sym_size(2);
-  const auto head_dim = params.query.sym_size(3);
+  const auto d_qk = params.query.sym_size(3);
+  const auto d_v = params.value.sym_size(3);
   long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
-  if (cudnn_version >= 90000) {
-    if (head_dim % 8 != 0 || head_dim > 256) {
-      if (debug) {
-        TORCH_WARN("head_dim should be a multiple of 8 and no more than 256");
-      }
-      return false;
+  if (d_qk % 8 != 0 || d_v % 8 != 0) {
+    if (debug) {
+      TORCH_WARN("head_dim should be a multiple of 8");
     }
-  } else {
-    if (head_dim % 8 != 0 || head_dim > 128) {
-      if (debug) {
-        TORCH_WARN("head_dim should be a multiple of 8 and no more than 128");
-      }
-      return false;
+    return false;
+  }
+  constexpr auto head_dim_limit = 128;
+  if (d_qk > head_dim_limit || d_v > head_dim_limit) {
+    if (debug) {
+      TORCH_WARN("head_dim should be no more than ", head_dim_limit);
     }
+    return false;
   }
   if (cudnn_version < 8903) {
     if (debug) {
@@ -525,9 +524,16 @@ bool check_cudnn_deterministic(const sdp_params& params, bool debug) {
 } // namespace
 
 bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
-#if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || \
-    (defined(CUDNN_VERSION) && CUDNN_VERSION < 8900)
-  TORCH_WARN_ONCE(!debug, "Torch was not compiled with cuDNN attention.");
+#if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || !defined(CUDNN_VERSION)
+  if (debug) {
+    TORCH_WARN("Torch was not compiled with cuDNN attention.");
+  }
+  return false;
+#endif
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < 90000
+  if (debug) {
+    TORCH_WARN(CUDNN_VERSION, "cuDNN version too old to use Flash Attention! (< v9.0.0)");
+  }
   return false;
 #endif
   // Define gate functions that determine if a flash kernel can be ran
