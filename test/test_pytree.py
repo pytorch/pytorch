@@ -1284,7 +1284,7 @@ class TestCxxPytree(TestCase):
         _, spec = cxx_pytree.tree_flatten(pytree)
         self.assertEqual(
             repr(spec),
-            ("PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)"),
+            ("PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')"),
         )
 
     @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
@@ -1294,7 +1294,7 @@ class TestCxxPytree(TestCase):
         _, spec = cxx_pytree.tree_flatten(pytree)
         self.assertExpectedInline(
             repr(spec),
-            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)",
+            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')",
         )
 
     @parametrize(

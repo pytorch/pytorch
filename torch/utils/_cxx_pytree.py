@@ -24,20 +24,27 @@ from typing import (
     overload,
     Tuple,
     Type,
+    TYPE_CHECKING,
     TypeVar,
     Union,
 )
 from typing_extensions import deprecated
 
-import torch
-
-if torch._running_with_deploy():  # type: ignore[no-untyped-call]
-    raise ImportError("C++ pytree utilities do not work with torch::deploy.")
-
 import optree
 from optree import PyTreeSpec  # direct import for type annotations
 
-from torch.utils._pytree import KeyEntry
+from torch.utils._pytree import (
+    GetAttrKey,
+    key_get,
+    KeyEntry,
+    keystr,
+    MappingKey,
+    SequenceKey,
+)
+
+
+if TYPE_CHECKING:
+    from optree import PyTreeAccessor
 
 
 __all__ = [
@@ -73,6 +80,10 @@ __all__ = [
     "treespec_loads",
     "treespec_pprint",
 ]
+
+
+__TORCH_DICT_SESSION = optree.dict_insertion_ordered(True, namespace="torch")
+__TORCH_DICT_SESSION.__enter__()  # enable globally and permanently
 
 
 T = TypeVar("T")
@@ -260,20 +271,15 @@ def tree_flatten(
 
     >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> tree_flatten(tree)
-    ([1, 2, 3, 4, None, 5], PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': *, 'd': *}, NoneIsLeaf))
+    ([2, 3, 4, 1, None, 5], PyTreeSpec({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}, NoneIsLeaf, namespace='torch'))
     >>> tree_flatten(1)
-    ([1], PyTreeSpec(*, NoneIsLeaf))
+    ([1], PyTreeSpec(*, NoneIsLeaf, namespace='torch'))
     >>> tree_flatten(None)
-    ([None], PyTreeSpec(*, NoneIsLeaf))
-
-    For unordered dictionaries, :class:`dict` and :class:`collections.defaultdict`, the order is
-    dependent on the **sorted** keys in the dictionary. Please use :class:`collections.OrderedDict`
-    if you want to keep the keys in the insertion order.
-
+    ([None], PyTreeSpec(*, NoneIsLeaf, namespace='torch'))
     >>> from collections import OrderedDict
     >>> tree = OrderedDict([('b', (2, [3, 4])), ('a', 1), ('c', None), ('d', 5)])
     >>> tree_flatten(tree)
-    ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict([('b', (*, [*, *])), ('a', *), ('c', *), ('d', *)]), NoneIsLeaf))
+    ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}), NoneIsLeaf, namespace='torch'))
 
     Args:
         tree (pytree): A pytree to flatten.
@@ -332,7 +338,7 @@ def tree_iter(
 
     >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> list(tree_iter(tree))
-    [1, 2, 3, 4, None, 5]
+    [2, 3, 4, 1, None, 5]
     >>> list(tree_iter(1))
     [1]
     >>> list(tree_iter(None))
@@ -367,7 +373,7 @@ def tree_leaves(
 
     >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> tree_leaves(tree)
-    [1, 2, 3, 4, None, 5]
+    [2, 3, 4, 1, None, 5]
     >>> tree_leaves(1)
     [1]
     >>> tree_leaves(None)
@@ -402,11 +408,11 @@ def tree_structure(
 
     >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> tree_structure(tree)
-    PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': *, 'd': *}, NoneIsLeaf)
+    PyTreeSpec({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}, NoneIsLeaf, namespace='torch')
     >>> tree_structure(1)
-    PyTreeSpec(*, NoneIsLeaf)
+    PyTreeSpec(*, NoneIsLeaf, namespace='torch')
     >>> tree_structure(None)
-    PyTreeSpec(*, NoneIsLeaf)
+    PyTreeSpec(*, NoneIsLeaf, namespace='torch')
 
     Args:
         tree (pytree): A pytree to flatten.
@@ -920,6 +926,24 @@ class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):
         return optree.treespec_leaf(none_is_leaf=True)  # type: ignore[return-value]
 
 
+def _accessor_to_key_path(accessor: "PyTreeAccessor") -> KeyPath:
+    key_path: List[KeyEntry] = []
+    for entry in accessor:
+        if isinstance(entry, optree.GetAttrEntry):
+            key_path.append(GetAttrKey(entry.name))
+        elif isinstance(entry, optree.StructSequenceEntry):
+            key_path.append(SequenceKey(entry.index))
+        elif isinstance(entry, optree.NamedTupleEntry):
+            key_path.append(GetAttrKey(entry.field))
+        elif isinstance(entry, optree.SequenceEntry):
+            key_path.append(SequenceKey(entry.index))
+        elif isinstance(entry, optree.MappingEntry):
+            key_path.append(MappingKey(entry.key))
+        else:
+            raise ValueError(f"Unsupported accessor entry: {entry}")
+    return tuple(key_path)
+
+
 def tree_flatten_with_path(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -940,7 +964,13 @@ def tree_flatten_with_path(
         second element is a :class:`TreeSpec` representing the structure of the flattened
         tree.
     """
-    raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
+    accessors, leaves, treespec = optree.tree_flatten_with_accessor(
+        tree,
+        is_leaf=is_leaf,
+        none_is_leaf=True,
+        namespace="torch",
+    )
+    return list(zip(map(_accessor_to_key_path, accessors), leaves)), treespec
 
 
 def tree_leaves_with_path(
@@ -961,7 +991,7 @@ def tree_leaves_with_path(
     Returns:
         A list of (key path, leaf) pairs.
     """
-    raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
+    return tree_flatten_with_path(tree, is_leaf=is_leaf)[0]
 
 
 def tree_map_with_path(
@@ -993,14 +1023,11 @@ def tree_map_with_path(
         corresponding leaf in ``tree``, ``x`` is the value at that leaf, and
         ``xs`` is the tuple of values at corresponding nodes in ``rests``.
     """
-    raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
-
-
-def keystr(kp: KeyPath) -> str:
-    """Given a key path, return a pretty-printed representation."""
-    raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
-
-
-def key_get(obj: Any, kp: KeyPath) -> Any:
-    """Given an object and a key path, return the value at the key path."""
-    raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
+    return optree.tree_map_with_accessor(
+        lambda accessor, *xs: func(_accessor_to_key_path(accessor), *xs),
+        tree,
+        *rests,
+        is_leaf=is_leaf,
+        none_is_leaf=True,
+        namespace="torch",
+    )
