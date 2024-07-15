@@ -735,9 +735,7 @@ def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor):
                 gm.cond_fn_0.code.strip(),
                 """\
 def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
-    l_iter__1 = l_iter_
-    l_x__1 = l_x_
-    sub = l_iter__1 - l__self___dec_cond_fn;  l_iter__1 = l__self___dec_cond_fn = None
+    sub = l_iter_ - l__self___dec_cond_fn;  l_iter_ = l__self___dec_cond_fn = None
     gt = sub > 0;  sub = None
     return gt""",  # noqa: B950
             )
@@ -745,10 +743,8 @@ def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_bo
                 gm.body_fn_0.code.strip(),
                 """\
 def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
-    l_iter__1 = l_iter_
-    l_x__1 = l_x_
-    child = l_iter__1 - 1;  l_iter__1 = None
-    child_1 = torch._C._nn.linear(l_x__1, l__self___linear_weight_body_fn, l__self___linear_bias_body_fn);  l_x__1 = l__self___linear_weight_body_fn = l__self___linear_bias_body_fn = None
+    child = l_iter_ - 1;  l_iter_ = None
+    child_1 = torch._C._nn.linear(l_x_, l__self___linear_weight_body_fn, l__self___linear_bias_body_fn);  l_x_ = l__self___linear_weight_body_fn = l__self___linear_bias_body_fn = None
     return (child, child_1)""",  # noqa: B950
             )
 
@@ -2701,11 +2697,11 @@ def forward(self, arg0_1):
             backend.graphs[0].cond_true_0.code.strip("\n"),
             """\
 def forward(self, l_inp_, l_tmp_):
-    l_inp__2 = l_inp_
-    l_tmp__2 = l_tmp_
-    a = l_inp__2.clone();  l_inp__2 = None
+    l_inp__1 = l_inp_
+    l_tmp__1 = l_tmp_
+    a = l_inp__1.clone();  l_inp__1 = None
     a_view = a.view(-1)
-    tmp = l_tmp__2.clone();  l_tmp__2 = None
+    tmp = l_tmp__1.clone();  l_tmp__1 = None
     _set_grad_enabled = torch._C._set_grad_enabled(False)
     set_ = a.set_(tmp)
     mul_ = a_view.mul_(2);  a_view = None
