@@ -2,6 +2,7 @@
 """Adds docstrings to functions defined in the torch._C module."""
 
 import re
+from typing import Dict
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
@@ -169,7 +170,7 @@ rocm_fp16_notes = {
 :ref:`different precision<fp16_on_mi200>` for backward."""
 }
 
-reproducibility_notes = {
+reproducibility_notes: Dict[str, str] = {
     "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
 a CUDA device. See :doc:`/notes/randomness` for more information.""",
     "backward_reproducibility_note": """This operation may produce nondeterministic gradients when given tensors on \
@@ -9442,7 +9443,7 @@ Args:
 Keyword args:
     {out}
     {dtype} If `dtype` is not given, infer the data type from the other input
-        arguments. If any of `start`, `end`, or `stop` are floating-point, the
+        arguments. If any of `start`, `end`, or `step` are floating-point, the
         `dtype` is inferred to be the default dtype, see
         :meth:`~torch.get_default_dtype`. Otherwise, the `dtype` is inferred to
         be `torch.int64`.
