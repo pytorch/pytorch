@@ -2223,6 +2223,7 @@ class Scheduler:
         caused indirectly by other fusions.
         """
         # since we are just returning boolean here, use slightly faster, unordered set
+        return False
         visited: Set[FusedSchedulerNode] = set()
 
         def found_path(node: BaseSchedulerNode) -> bool:
