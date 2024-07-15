@@ -221,7 +221,6 @@ class TORCH_CUDA_CPP_API TuningContext {
   private:
     bool enable_;
     bool tuning_enable_;
-    bool record_untuned_;
     bool manager_initialized_;
     bool write_file_on_exit_;
     bool numerics_check_enable_;

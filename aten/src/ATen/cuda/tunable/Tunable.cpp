@@ -133,7 +133,8 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
     }
 
     if (isNew){
-      untuned_file << "Untuned," << op_signature << "," << params_signature << std::endl;
+      std::string device = c10::str(int(c10::cuda::current_device()));
+      untuned_file << "Untuned GPU " <<device<<","<< op_signature << "," << params_signature << std::endl;
       TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
     }
   }
@@ -477,6 +478,17 @@ std::ofstream& TuningContext::GetUntunedFile(){
   {
     const char *env = std::getenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME");
     std::string filename = (env == nullptr) ? "untuned.csv" : env;
+
+    std::string device = c10::str(int(c10::cuda::current_device()));
+    std::size_t found = filename.rfind(".");
+    if (found != std::string::npos) {
+      filename.insert(found, device);
+    }
+    else {
+      // all else fails, just append
+      filename.append(device);
+    }
+
     untuned_file_ = std::ofstream(filename, std::ios::out | std::ios::trunc);
   }
   return untuned_file_;
