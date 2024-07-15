@@ -246,6 +246,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
     from ..external_callable import external_matmul
+
     for k in external_matmul:
         choices.append(ExternKernelChoice(k).bind((mat1, mat2), layout))
 
