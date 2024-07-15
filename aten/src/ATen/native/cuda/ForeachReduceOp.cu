@@ -339,7 +339,7 @@ __global__ void lpnorm_cleanup(
 
 namespace {
 inline void check_foreach_norm_dtype(
-    optional<ScalarType> opt_dtype,
+    std::optional<ScalarType> opt_dtype,
     ScalarType self_dtype,
     const char* const name) {
   if (opt_dtype.has_value()) {
@@ -393,7 +393,7 @@ inline void check_foreach_norm_dtype(
 std::vector<Tensor> foreach_tensor_norm_cuda(
     TensorList tensors,
     const Scalar& ord,
-    c10::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   const auto p = [&]() -> double {
     if (ord.isIntegral(false)) {
       return ord.to<int64_t>();
