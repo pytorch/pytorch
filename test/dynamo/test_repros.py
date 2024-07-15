@@ -4631,8 +4631,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             str(graph.code).strip(),
             """\
 def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
-    s0_1 = s0
-    s1_1 = s1
     l_x_ = L_x_
     getitem_2 = l_x_[0]
     sum_1 = getitem_2.sum();  getitem_2 = None
