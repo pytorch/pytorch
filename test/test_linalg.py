@@ -425,6 +425,12 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, r'input.size\(-2\) should match other.size\(-2\)'):
             torch.linalg.lstsq(a, b.unsqueeze(-1))
 
+        a = torch.randn(1, 1, 1, dtype=dtype, device=device)
+        b = torch.randn(3, 1, dtype=dtype, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, r'input.size\(-2\) should match other.size\(-2\)'):
+            torch.linalg.lstsq(a, b)
+
         def complement_device(device):
             if device == 'cpu' and torch.cuda.is_available():
                 return 'cuda'
@@ -6138,11 +6144,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         b_bf16 = torch.rand((k, n), dtype=torch.bfloat16, device=device)
 
         def convert_weight_to_int4pack(b):
-            b_int32, b_scales_and_zeros = _group_quantize_tensor(
+            b_uint8, b_scales_and_zeros = _group_quantize_tensor(
                 b, n_bit=4, q_group_size=q_group
             )
             b_int4pack = torch._convert_weight_to_int4pack(
-                b_int32, inner_k_tiles
+                b_uint8, inner_k_tiles
             )
 
             return b_int4pack, b_scales_and_zeros

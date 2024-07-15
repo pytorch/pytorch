@@ -4,12 +4,14 @@ import copy
 import math
 
 from dataclasses import dataclass
+from typing import List
 
 import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
+from functorch.compile import aot_module_simplified
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
 if HAS_CUDA:
@@ -221,6 +223,69 @@ class ModuleWithGradFunc(torch.nn.Module):
 
     def forward(self, x):
         return self.f(x)
+
+
+@torch.library.custom_op("_torch_testing::custom_op_forward", mutates_args=())
+def custom_op_forward(
+    foo: torch.Tensor,
+    bar: torch.Tensor,
+    shape: List[int],
+) -> torch.Tensor:
+    return torch.ones_like(foo)
+
+
+@custom_op_forward.register_fake
+def _(foo, bar, weight):
+    return torch.empty_like(foo)
+
+
+@torch.library.custom_op("_torch_testing::custom_op_backward", mutates_args=())
+def custom_op_backward(
+    grad_output: torch.Tensor,
+    foo: torch.Tensor,
+    bar: torch.Tensor,
+    shape: List[int],
+) -> torch.Tensor:
+    assert list(bar.shape) == shape
+    return torch.ones_like(bar)
+
+
+@custom_op_backward.register_fake
+def _(grad_output, foo, bar, shape):
+    return torch.empty_like(bar)
+
+
+class CustomOpFunc(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, weight, normalized_shape):
+        ctx.normalized_shape = normalized_shape
+        input_ = input.contiguous()
+        weight_ = weight.contiguous()
+        output = custom_op_forward(input_, weight_, ctx.normalized_shape)
+        ctx.save_for_backward(input_, weight_)
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        input_, weight_ = ctx.saved_tensors
+        # grad_weight = a_func(grad_output, input_, weight_, ctx.normalized_shape)
+        grad_weight = custom_op_backward(
+            grad_output.contiguous(),
+            input_,
+            weight_,
+            ctx.normalized_shape,
+        )
+        return None, grad_weight, None
+
+
+class CustomOpModule(torch.nn.Module):
+    def __init__(self, shape):
+        super().__init__()
+        self.shape = shape
+        self.weight = torch.nn.Parameter(torch.ones(self.shape))
+
+    def forward(self, x):
+        return CustomOpFunc.apply(x, self.weight, self.shape)
 
 
 class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
@@ -526,22 +591,33 @@ class GraphModule(torch.nn.Module):
         return (autograd_function_apply,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, function_ctx, l_x_: "f32[]", l_z_: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
-            mul: "f32[]" = l_weird_b * l_weird_c
-            clone: "f32[]" = l_x_.clone();  l_x_ = None
+        def forward(self, ctx, x: "f32[]", z: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
+            ctx_1 = ctx
+            x_1 = x
+            z_1 = z
+            l_weird_b_1 = l_weird_b
+            l_weird_c_1 = l_weird_c
+
+            mul: "f32[]" = l_weird_b_1 * l_weird_c_1
+            clone: "f32[]" = x_1.clone();  x_1 = None
             mul_1: "f32[]" = mul * clone;  mul = clone = None
-            return (mul_1, [l_weird_b, l_weird_c])
+            return (mul_1, [l_weird_b_1, l_weird_c_1])
 
     class GraphModule(torch.nn.Module):
-        def forward(self, function_ctx, mul_1: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
+        def forward(self, ctx, grad: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
+            ctx_1 = ctx
+            grad_1 = grad
+            l_weird_b_1 = l_weird_b
+            l_weird_c_1 = l_weird_c
+
             _set_grad_enabled = torch._C._set_grad_enabled(False)
 
-            mul: "f32[]" = mul_1 * l_weird_b;  l_weird_b = None
-            mul_2: "f32[]" = mul * l_weird_c;  mul = l_weird_c = None
-            mul_3: "f32[]" = mul_1 * 2;  mul_1 = None
+            mul: "f32[]" = grad_1 * l_weird_b_1;  l_weird_b_1 = None
+            mul_1: "f32[]" = mul * l_weird_c_1;  mul = l_weird_c_1 = None
+            mul_2: "f32[]" = grad_1 * 2;  grad_1 = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
-            return (mul_2, mul_3)
+            return (mul_1, mul_2)
 """,
         )
 
@@ -1102,6 +1178,22 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x.grad.shape, shape)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
+
+    def test_custom_op(self):
+        shape = [7]
+        x = torch.rand(128, shape[0])
+        model = CustomOpModule(shape)
+        out = model(x)
+
+        def backend(gm, example_inputs):
+            return aot_module_simplified(
+                gm, example_inputs, fw_compiler=lambda gm, _: gm
+            )
+
+        opt_model = torch.compile(model, backend=backend)
+        opt_out = opt_model(x)
+        opt_out.mean().backward()
+        self.assertEqual(out, opt_out)
 
     @requires_cuda
     def test_triton_kernel_basic(self):
