@@ -2111,12 +2111,12 @@ class WorkHookTest(MultiProcessTestCase):
         self._spawn_processes()
 
     def tearDown(self):
-        super().tearDown()
         del os.environ["TORCH_NCCL_ENABLE_TIMING"]
         try:
             os.remove(self.file_name)
         except OSError:
             pass
+        super().tearDown()
 
     def _get_store(self):
         return dist.FileStore(self.file_name, self.world_size)
