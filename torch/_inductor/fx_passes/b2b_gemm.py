@@ -199,7 +199,11 @@ def can_apply_b2b_gemm(match: Match) -> bool:
         )
         ratios.append(ratio)
     # we only dispatch to B2B-GEMM when the average load ratio is > 1
-    return (sum(ratios) / len(ratios)) > 1
+    average_ratio = 1.0
+    for r in ratios:
+        average_ratio *= r
+    average_ratio = average_ratio ** (1 / len(ratios))
+    return average_ratio > 1
 
 
 def unoptimized_b2b_gemm(m1, m2, m3, *, out):
