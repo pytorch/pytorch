@@ -287,7 +287,8 @@ class PyCodegen:
 
     def create_load_closure(self, name) -> Instruction:
         assert name in self.cell_and_freevars()
-        return create_instruction("LOAD_CLOSURE", argval=name)
+        inst_name = "LOAD_FAST" if sys.version_info >= (3, 13) else "LOAD_CLOSURE"
+        return create_instruction(inst_name, argval=name)
 
     def create_store(self, name) -> Instruction:
         if name in self.cell_and_freevars():
