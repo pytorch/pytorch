@@ -1473,7 +1473,7 @@ class BuiltinVariable(VariableTracker):
     def call_map(self, tx, fn, *seqs):
         if all(seq.has_unpack_var_sequence(tx) for seq in seqs):
             unpacked = [seq.unpack_var_sequence(tx) for seq in seqs]
-            items = [fn.call_function(tx, args, {}) for args in zip(*unpacked)]
+            items = [fn.call_function(tx, list(args), {}) for args in zip(*unpacked)]
             return variables.TupleVariable(items)
 
     def call_sum(self, tx, seq, start=_SENTINEL):
