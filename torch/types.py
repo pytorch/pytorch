@@ -44,6 +44,7 @@ _TensorOrTensorsOrGradEdge: TypeAlias = Union[  # noqa: PYI047
 ]
 
 _size: TypeAlias = Union[Size, List[int], Tuple[int, ...]]  # noqa: PYI042,PYI047
+_symsize: TypeAlias = Union[Size, Sequence[Union[int, SymInt]]]  # noqa: PYI042,PYI047
 _dispatchkey: TypeAlias = Union[str, DispatchKey]  # noqa: PYI042,PYI047
 
 # int or SymInt
