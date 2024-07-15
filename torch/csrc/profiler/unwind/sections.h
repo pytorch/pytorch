@@ -94,7 +94,7 @@ struct Sections {
     debug_info_offsets_.add(start, debug_info_offset, false);
     debug_info_offsets_.add(end, std::nullopt, false);
   }
-  optional<std::string> findSubprogramName(uint64_t address) {
+  std::optional<std::string> findSubprogramName(uint64_t address) {
     if (auto e = symbol_table_.find(address)) {
       return demangle(strtab.string(*e));
     }
