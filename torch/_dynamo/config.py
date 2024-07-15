@@ -234,7 +234,7 @@ prefer_deferred_runtime_asserts_over_guards = False
 # range constraints + dims + derived dims language, we raise constraint violation
 # errors or specialize by default. If set to True, this flag avoids crashing/specialization,
 # and allows complex guards as runtime assertions in the graph.
-_allow_complex_guards_as_runtime_asserts = False
+allow_complex_guards_as_runtime_asserts = False
 
 # By default, dynamo will treat all ints as backed SymInts, which means (1) it
 # will wait to see the int change over multiple runs before generalizing and
