@@ -2065,13 +2065,8 @@ class SubgraphTracer(fx.Tracer):
                     TracingContext.extract_stack()
                 )
 
-        # unique
-        if name in self.input_name_to_proxy:
-            for i in itertools.count():
-                candidate_name = f"{name}_{i}"
-                if candidate_name not in self.input_name_to_proxy:
-                    name = candidate_name
-                    break
+        # Use graph_namespace to create unique name.
+        name = self.graph._graph_namespace.create_name(name, obj=None)
 
         if self.input_name_to_proxy:
             prev_name = next(reversed(self.input_name_to_proxy))
