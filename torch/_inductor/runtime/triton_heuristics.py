@@ -1347,7 +1347,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
     while conditional_product(x, r) > target:
         if r == 1:
             break
-        r = int(r / 2)
+        r = r // 2
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
     check_config(cfg, xnumel=size_hints[0])
