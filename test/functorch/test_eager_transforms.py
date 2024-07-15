@@ -3404,7 +3404,7 @@ class TestComposability(TestCase):
     @onlyCPU
     def test_no_warning_on_import_functorch(self, device):
         out = subprocess.check_output(
-            [sys.executable, "-W", "all", "-c", "import functorch"],
+            [sys.executable, "-W", "always", "-c", "import functorch"],
             stderr=subprocess.STDOUT,
             cwd=os.path.dirname(os.path.realpath(__file__)),
         ).decode("utf-8")

@@ -100,7 +100,6 @@ b2b_gemm_template = TritonTemplate(
 
 
 B2B_GEMM_PASS = PatternMatcherPass(
-    prevent_match_across_mutations=True,
     pass_name="b2b_gemm_pass",
 )
 
