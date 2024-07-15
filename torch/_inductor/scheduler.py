@@ -2222,7 +2222,6 @@ class Scheduler:
         Finds whether there's a path from node1 to node2 (or vice-versa)
         caused indirectly by other fusions.
         """
-
         # since we are just returning boolean here, use slightly faster, unordered set
         visited: Set[FusedSchedulerNode] = set()
 
@@ -2577,6 +2576,7 @@ class Scheduler:
         node1_dep_len = len(node1.read_writes.reads) + len(node1.read_writes.writes)
         node2_dep_len = len(node1.read_writes.reads) + len(node2.read_writes.writes)
 
+        # optimization: iter over smaller set
         if max(node1_dep_len, node2_dep_len) * 4 > min(node1_dep_len, node2_dep_len):
             if node1_dep_len > node2_dep_len:
                 tmp = node1
@@ -2584,9 +2584,7 @@ class Scheduler:
                 node2 = tmp
 
             deps = []
-            for dep in itertools.chain(
-                node1.read_writes.reads, node1.read_writes.writes
-            ):
+            for dep in node1.read_writes.reads | node1.read_writes.writes:
                 if dep in node2.read_writes.reads or dep in node2.read_writes.writes:
                     deps.append(dep)
 
