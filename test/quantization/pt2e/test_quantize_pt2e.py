@@ -1243,7 +1243,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_list,
         )
 
-        def verify_quant_dequant_iotypes_new(m):
+        def verify_quant_dequant_iotypes(m):
             for node in m.graph.nodes:
                 if (
                     node.op == "call_function"
@@ -1272,7 +1272,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                             and quant_out_dtype == dequant_in_dtype
                         ), "quant dequant io dtype check failed!"
 
-        verify_quant_dequant_iotypes_new(m)
+        verify_quant_dequant_iotypes(m)
 
     def test_input_edge_sanity_check(self):
         class M(torch.nn.Module):
