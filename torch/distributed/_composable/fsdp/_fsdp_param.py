@@ -120,7 +120,10 @@ def set__functionalize(tensor, data):
     torch._sync(data)
     tensor_inner = torch._from_functional_tensor(tensor)
     data_inner = torch._from_functional_tensor(data)
-    tensor_inner.set_(data_inner)  # type: ignore[call-overload]
+    with torch._C._ExcludeDispatchKeyGuard(
+        torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+    ):
+        torch.ops.fsdp.set_(tensor_inner, data_inner)
 
 
 class ShardedState(Enum):
