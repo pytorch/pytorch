@@ -119,7 +119,9 @@ def as_nested_tensor(
 
             from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
 
-            return nested_view_from_values_offsets(values, offsets)
+            return nested_view_from_values_offsets(
+                values, offsets, min_seqlen=seq_len, max_seqlen=seq_len
+            )
         else:
             from torch.nested._internal.nested_tensor import jagged_from_list
 
