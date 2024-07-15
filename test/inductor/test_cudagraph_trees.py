@@ -1150,7 +1150,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             for _ in range(3):
                 out = foo(inp)
                 node = self.curr_node()
-                self.assertEqual(len(list(node.path_live_weakrefs())), 2)
+                self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
             @torch.compile(mode="reduce-overhead")
             def foo(x):

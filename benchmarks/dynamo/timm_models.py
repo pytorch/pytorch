@@ -36,7 +36,7 @@ finally:
     from timm.data import resolve_data_config
     from timm.models import create_model
 
-TIMM_MODELS = dict()
+TIMM_MODELS = {}
 filename = os.path.join(os.path.dirname(__file__), "timm_models_list.txt")
 
 with open(filename) as fh:
@@ -174,7 +174,7 @@ def refresh_model_names():
         return name.split("_")[0]
 
     def populate_family(models):
-        family = dict()
+        family = {}
         for model_name in models:
             family_name = get_family_name(model_name)
             if family_name not in family:
