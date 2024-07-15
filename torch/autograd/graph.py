@@ -171,11 +171,8 @@ class Node(abc.ABC):
 
 
 def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Node:
-<<<<<<< HEAD
-=======
     if isinstance(t, GradientEdge):
         return t.node
->>>>>>> f4e6df038ec ([autograd] Support GradientEdge as output for torch.autograd.grad)
     if t.requires_grad and t.grad_fn is None:
         node = t.view_as(t).grad_fn.next_functions[0][0]  # type: ignore[union-attr]
     else:
