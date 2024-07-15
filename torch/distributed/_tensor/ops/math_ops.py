@@ -396,7 +396,7 @@ def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrateg
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
     assert isinstance(input_tuple_strategy, TupleStrategy)
-    norm_type = args_schema[1]
+    norm_type = args_schema[1] if len(args_schema) > 1 else 2
     assert isinstance(norm_type, (int, float, str)), f"{norm_type}"
     output_tuple_strategy_childs: List[OpStrategy] = []
     for op_strategy in input_tuple_strategy.childs:
