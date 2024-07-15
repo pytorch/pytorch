@@ -18,8 +18,10 @@ import itertools
 import torch.optim as optim
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, onlyCPU
 from typing import List, Tuple, Optional
+import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
     TEST_WITH_ROCM,
     skipIfRocm,
     skipIfTorchDynamo,
@@ -48,6 +50,12 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
     tf32_on_and_off
 )
+
+if not IS_FBCODE:
+    from test_cpp_extensions_open_device_registration import (
+        remove_build_path,
+        generate_faked_module
+    )
 
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
@@ -1997,6 +2005,22 @@ class TestSDPA(NNTestCase):
                 self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
                 self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
 
+    @onlyCPU
+    def test_scaled_dot_product_fused_attention_with_inf(self, device):
+        # https://github.com/pytorch/pytorch/issues/127055.
+        full = torch.full((600, 600), float("-inf"), device=device)
+        mask = torch.triu(full, diagonal=1) + torch.tril(full, diagonal=-10)
+        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=torch.float32, requires_grad=False)
+        input_shape = SdpaShape(1, 600, 2, 8)
+        q = make_tensor(input_shape)
+        k = make_tensor(input_shape)
+        v = make_tensor(input_shape)
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            actual = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        self.assertEqual(math_ref, actual)
+
     @parametrize("kernel", [SDPBackend.MATH])
     def test_scaled_dot_product_attention_math_with_negative_scale(self, device, kernel: SDPBackend):
         # https://github.com/pytorch/pytorch/issues/105190.
@@ -2207,6 +2231,21 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
+    @skipIfRocm  # No cuDNN Attention
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    def test_cudnn_attention_fail_d128(self, device):
+        # Test that cuDNN attention dispatching correctly bails out on d > 128
+        b, h = 1, 2
+        s_q, s_kv = 128, 128
+        d_qk, d_v = 128, 144
+
+        q = torch.randn(b, h, s_q, d_qk, device=device, dtype=torch.bfloat16)
+        k = torch.randn(b, h, s_kv, d_qk, device=device, dtype=torch.bfloat16)
+        v = torch.randn(b, h, s_kv, d_v, device=device, dtype=torch.bfloat16)
+
+        with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
+            with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+                o = torch.nn.functional.scaled_dot_product_attention(q, k, v)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
@@ -2536,13 +2575,13 @@ class TestSDPACudaOnly(NNTestCase):
         key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
         if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and SM90OrLater:
-            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.CUDNN_ATTENTION.value
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
         elif PLATFORM_SUPPORTS_FLASH_ATTENTION:
-            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION.value
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.FLASH_ATTENTION.value)
         elif type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION:  # e.g., we're on Windows
-            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.CUDNN_ATTENTION.value
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
         else:
-            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.EFFICIENT_ATTENTION.value)
 
         # Change dtype to float32 so that efficient attention should get chosen
         make_tensor = partial(rand_sdpa_tensor, device=device, dtype=torch.float32, packed=True)
@@ -3529,7 +3568,6 @@ class TestAttnBias(NNTestCase):
         if causal_variant == CausalVariant.UPPER_LEFT:
             attn_bias = causal_upper_left(seq_len_q, seq_len_kv)
         else:
-            print(seq_len_q, seq_len_kv)
             attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION,
@@ -3610,6 +3648,69 @@ class TestAttnBias(NNTestCase):
 
         with self.assertRaisesRegex(ValueError, "CausalBias should not be used with causal=True"):
             scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)
+
+@unittest.skipIf(IS_FBCODE, "Ninja is required to load C++ extensions and it's not compatible with Buck ")
+class TestSDPAPrivateUse1Only(NNTestCase):
+    @classmethod
+    def setUpClass(cls):
+        remove_build_path()
+        cls.module = torch.utils.cpp_extension.load(
+            name="custom_device_extension",
+            sources=[
+                "cpp_extensions/open_registration_extension.cpp",
+            ],
+            extra_include_paths=["cpp_extensions"],
+            extra_cflags=["-g"],
+            verbose=True,
+        )
+        # register torch.foo module and foo device to torch
+        torch.utils.rename_privateuse1_backend("foo")
+        torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
+        torch._register_device_module("foo", generate_faked_module())
+
+    @skipIfTorchDynamo()
+    def test_fused_sdp_choice_privateuseone(self):
+        batch_size, seq_len, num_heads, head_dim = 4, 256, 2, 128
+        make_tensor = partial(torch.rand, device="cpu", dtype=torch.float16)
+        shape = SdpaShape(batch_size, num_heads, seq_len, head_dim)
+        q_cpu, k_cpu, v_cpu = make_tensor(shape), make_tensor(shape), make_tensor(shape)
+        q_privateuse1 = q_cpu.to("foo")
+        k_privateuse1 = k_cpu.to("foo")
+        v_privateuse1 = v_cpu.to("foo")
+        assert torch._fused_sdp_choice(q_privateuse1, k_privateuse1, v_privateuse1) == SDPBackend.OVERRIDEABLE.value
+
+    def test_scaled_dot_product_fused_attention_overrideable(self):
+        batch_size, seq_len, num_heads, head_dim = 4, 256, 2, 128
+        make_tensor = partial(torch.rand, device="cpu", dtype=torch.float16)
+        shape = SdpaShape(batch_size, num_heads, seq_len, head_dim)
+        q_cpu, k_cpu, v_cpu = make_tensor(shape), make_tensor(shape), make_tensor(shape)
+        q_privateuse1 = q_cpu.to("foo")
+        k_privateuse1 = k_cpu.to("foo")
+        v_privateuse1 = v_cpu.to("foo")
+        actual = torch.nn.functional.scaled_dot_product_attention(
+            q_privateuse1, k_privateuse1, v_privateuse1, attn_mask=None, dropout_p=0.0)
+
+    def test_scaled_dot_product_fused_attention_overrideable_backward(self):
+        batch_size, seq_len, num_heads, head_dim = 4, 256, 2, 128
+        make_tensor = partial(torch.rand, device="cpu", dtype=torch.float16, requires_grad=True)
+        shape = (batch_size, num_heads, seq_len, head_dim)
+        q_cpu, k_cpu, v_cpu = make_tensor(shape), make_tensor(shape), make_tensor(shape)
+        attn_mask = make_tensor((batch_size, num_heads, seq_len, seq_len))
+        q_privateuse1 = q_cpu.to("foo")
+        k_privateuse1 = k_cpu.to("foo")
+        v_privateuse1 = v_cpu.to("foo")
+        attn_mask_privateuse1 = attn_mask.to("foo")
+        output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask = \
+            torch.ops.aten._scaled_dot_product_fused_attention_overrideable(
+                q_privateuse1, k_privateuse1, v_privateuse1, attn_bias=attn_mask_privateuse1)
+
+        rand_upward = torch.rand(shape, device="cpu", dtype=torch.float16, requires_grad=False)
+        rand_upward_privateuse1 = rand_upward.to("foo")
+        grad_input_mask = [True, True, True, True]
+        grad_q, grad_k, grad_v, grad_attn_mask = torch.ops.aten._scaled_dot_product_fused_attention_overrideable_backward(
+            rand_upward_privateuse1, q_privateuse1, k_privateuse1, v_privateuse1, attn_mask_privateuse1,
+            grad_input_mask, output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, dropout_p=0.0,
+            is_causal=False, philox_seed=philox_seed, philox_offset=philox_offset)
 
 if NOTEST_CPU:
     device_types = ("cuda", )

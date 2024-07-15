@@ -286,7 +286,7 @@ know the python code is not exactly needed for computation. For example:
 In this example, the first call using non-strict mode (through the
 ``strict=False`` flag) traces successfully whereas the second call using strict
 mode (default) results with a failure, where TorchDynamo is unable to support
-context managers. One option is to rewrite the code (see :ref:`Limitations of torch.expot <Limitations of
+context managers. One option is to rewrite the code (see :ref:`Limitations of torch.export <Limitations of
 torch.export>`), but seeing as the context manager does not affect the tensor
 computations in the model, we can go with the non-strict mode's result.
 
