@@ -81,7 +81,7 @@ class Node(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def _input_metadata(self) -> List[torch._C._InputMetadata]:
+    def _input_metadata(self) -> List[Any]:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -175,7 +175,7 @@ class Node(abc.ABC):
         return NotImplemented
 
 
-def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Node:
+def _get_grad_fn_or_grad_acc(t: Union[torch.Tensor, "GradientEdge"]) -> Node:
     if isinstance(t, GradientEdge):
         return t.node
     if t.requires_grad and t.grad_fn is None:
@@ -745,7 +745,7 @@ def allow_mutation_on_saved_tensors() -> (
 
 
 def _register_logging_hooks_on_whole_graph(
-    t_outputs: Sequence[torch.Tensor],
+    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
 ) -> Callable[[], None]:
     grad_fns = list(map(_get_grad_fn_or_grad_acc, t_outputs))
 
