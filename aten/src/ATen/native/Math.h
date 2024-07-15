@@ -1241,25 +1241,25 @@ calc_igamma(scalar_t a, scalar_t x) {
 } // calc_igamma
 
 template <>
-C10_UNUSED c10::BFloat16
+C10_UNUSED inline c10::BFloat16
 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
   return calc_igamma<float, /*is_cuda=*/false>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED c10::Half
+C10_UNUSED inline c10::Half
 calc_igamma<c10::Half>(c10::Half a, c10::Half x) {
   return calc_igamma<float, /*is_cuda=*/false>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED c10::BFloat16
+C10_UNUSED inline c10::BFloat16
 calc_igammac<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
   return calc_igammac<float, /*is_cuda=*/false>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED c10::Half
+C10_UNUSED inline c10::Half
 calc_igammac<c10::Half>(c10::Half a, c10::Half x) {
   return calc_igammac<float, /*is_cuda=*/false>(float(a), float(x));
 }
@@ -1549,29 +1549,29 @@ calc_igamma_grada(scalar_t a, scalar_t x) {
 
 } // calc_igamma_grada
 
-// template <>
-// C10_UNUSED c10::BFloat16
-// calc_igamma_grada<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
-//   return calc_igamma_grada<float, /*is_cuda=*/false>(float(a), float(x));
-// }
+template <>
+C10_UNUSED inline c10::BFloat16
+calc_igamma_grada<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+  return calc_igamma_grada<float, /*is_cuda=*/false>(float(a), float(x));
+}
 
-// template <>
-// C10_UNUSED c10::Half
-// calc_igamma_grada<c10::Half>(c10::Half a, c10::Half x) {
-//   return calc_igamma_grada<float, /*is_cuda=*/false>(float(a), float(x));
-// }
+template <>
+C10_UNUSED inline c10::Half
+calc_igamma_grada<c10::Half>(c10::Half a, c10::Half x) {
+  return calc_igamma_grada<float, /*is_cuda=*/false>(float(a), float(x));
+}
 
-// template <>
-// C10_UNUSED c10::BFloat16
-// calc_igammac_grada<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
-//   return calc_igammac_grada<float, /*is_cuda=*/false>(float(a), float(x));
-// }
+template <>
+C10_UNUSED inline c10::BFloat16
+calc_igammac_grada<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+  return calc_igammac_grada<float, /*is_cuda=*/false>(float(a), float(x));
+}
 
-// template <>
-// C10_UNUSED c10::Half
-// calc_igammac_grada<c10::Half>(c10::Half a, c10::Half x) {
-//   return calc_igammac_grada<float, /*is_cuda=*/false>(float(a), float(x));
-// }
+template <>
+C10_UNUSED inline c10::Half
+calc_igammac_grada<c10::Half>(c10::Half a, c10::Half x) {
+  return calc_igammac_grada<float, /*is_cuda=*/false>(float(a), float(x));
+}
 
 // end of regularized lower & upper incomplete gamma
 
