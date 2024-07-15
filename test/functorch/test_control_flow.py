@@ -710,9 +710,9 @@ def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_lin
                 gm.body_fn_0.code.strip(),
                 """\
 def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
-    sub = l_iter_ - 1;  l_iter_ = None
-    linear = torch._C._nn.linear(l_x_, l_self_modules_linear_parameters_weight__body_fn, l_self_modules_linear_parameters_bias__body_fn);  l_x_ = l_self_modules_linear_parameters_weight__body_fn = l_self_modules_linear_parameters_bias__body_fn = None
-    return (sub, linear)""",  # noqa: B950
+    child = l_iter_ - 1;  l_iter_ = None
+    child_1 = torch._C._nn.linear(l_x_, l_self_modules_linear_parameters_weight__body_fn, l_self_modules_linear_parameters_bias__body_fn);  l_x_ = l_self_modules_linear_parameters_weight__body_fn = l_self_modules_linear_parameters_bias__body_fn = None
+    return (child, child_1)""",  # noqa: B950
             )
         else:
             self.assertExpectedInline(
