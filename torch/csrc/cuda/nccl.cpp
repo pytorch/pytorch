@@ -291,7 +291,7 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
 
 static inline void check_tensor(
     const at::Tensor& input,
-    const at::optional<at::Tensor>& output,
+    const std::optional<at::Tensor>& output,
     int input_multiplier,
     int output_multiplier,
     int64_t ref_numel,
@@ -396,8 +396,8 @@ void check_inputs(
     check_tensor(
         input,
         i == static_cast<std::remove_cv_t<decltype(i)>>(root)
-            ? at::optional<at::Tensor>{output}
-            : at::nullopt,
+            ? std::optional<at::Tensor>{output}
+            : std::nullopt,
         input_multiplier,
         output_multiplier,
         numel,
