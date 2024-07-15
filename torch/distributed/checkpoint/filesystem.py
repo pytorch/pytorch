@@ -657,7 +657,7 @@ class FileSystemReader(StorageReader):
                             torch.load(
                                 cast(IO[bytes], file_slice),
                                 map_location="cpu",
-                                weights_only=False
+                                weights_only=True,
                             ),
                         )
                         tensor = narrow_tensor_by_index(
