@@ -1661,9 +1661,7 @@ def _all_nodes(nodes: Collection[torch.Node]) -> set[torch.Node]:
 
 
 def _has_uses_by_nodes(value: torch.Value, nodes: Collection[torch.Node]) -> bool:
-    if any(use.user in nodes for use in value.uses()):
-        return True
-    return False
+    return any(use.user in nodes for use in value.uses())
 
 
 def _node_has_uses_by(node: torch.Node, nodes: Collection[torch.Node]) -> bool:

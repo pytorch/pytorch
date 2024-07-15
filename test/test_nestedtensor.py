@@ -5207,6 +5207,15 @@ class TestNestedTensorSubclass(TestCase):
         d1_grads = torch.autograd.grad(attn_d1.sum(), (q_d1, k_d1, v_d1))
         d2_grads = torch.autograd.grad(attn_d2.sum(), (q_d2, k_d2, v_d2))
 
+        # Simple case 3: batch_size = 1, seq_len = 1
+        q_3 = torch.randn(1, 8, 16, dtype=dtype, device=device)
+        q_nt_3 = torch.nested.as_nested_tensor([q_3], layout=torch.jagged)
+        q_nt_3 = q_nt_3.transpose(1, 2)
+        attn_out = torch.nn.functional.scaled_dot_product_attention(
+            q_nt_3, q_nt_3, q_nt_3
+        )
+        self.assertEqual(attn_out.shape, q_nt_3.shape)
+
         def check_forward_backward():
             attn_nt = torch.nn.functional.scaled_dot_product_attention(
                 q_nt_t, k_nt_t, v_nt_t
