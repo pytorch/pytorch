@@ -908,6 +908,12 @@ if(USE_SYSTEM_PYBIND11)
   if(NOT pybind11_FOUND)
     message(FATAL "Cannot find system pybind11")
   endif()
+  if(${pybind11_VERSION} VERSION_LESS 2.12)  # for pybind11::gil_safe_call_once_and_store
+    message(FATAL_ERROR
+      "Found pybind11 version ${pybind11_VERSION} which misses some features required by PyTorch. "
+      "Please install pybind11 >= 2.12.0."
+    )
+  endif()
 else()
     message(STATUS "Using third_party/pybind11.")
     set(pybind11_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
