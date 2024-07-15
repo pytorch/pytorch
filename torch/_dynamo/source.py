@@ -530,9 +530,14 @@ class NNModuleSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
-class NotNNModuleSource(NNModuleSource):
+class UnspecializedNNModuleSource(NNModuleSource):
     def guard_source(self):
         return _GUARD_SOURCE_NOT_NN_MODULE[self.base.guard_source()]
+
+
+@dataclasses.dataclass(frozen=True)
+class UnspecializedBuiltinNNModuleSource(UnspecializedNNModuleSource):
+    pass
 
 
 @dataclasses.dataclass(frozen=True)
@@ -579,6 +584,15 @@ class NumpyTensorSource(ChainedSource):
         codegen.add_push_null(lambda: codegen.load_import_from("torch", "as_tensor"))
         self.base.reconstruct(codegen)
         codegen.extend_output(create_call_function(1, False))
+
+
+@dataclasses.dataclass(frozen=True)
+class SubclassAttrListSource(ChainedSource):
+    def name(self) -> str:
+        return f"{self.base.name()}.__tensor_flatten__()[0]"
+
+    def guard_source(self):
+        return self.base.guard_source()
 
 
 # NB: We don't expect you to actually ever generate guards against this
@@ -662,3 +676,9 @@ def is_from_defaults(source: Source):
 
 def is_cell_contents(source: Source):
     return isinstance(source, AttrSource) and source.member == "cell_contents"
+
+
+def is_unspecialized_builtin_nnmodule_attr(source: Source):
+    return isinstance(source, AttrSource) and isinstance(
+        source.base, UnspecializedBuiltinNNModuleSource
+    )

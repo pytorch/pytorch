@@ -1160,7 +1160,14 @@ class TestIndexing(TestCase):
         torch.cfloat, torch.cdouble, torch.float, torch.long, torch.bool, torch.bfloat16
     )
     @dtypesIfCUDA(
-        torch.cfloat, torch.cdouble, torch.half, torch.long, torch.bool, torch.bfloat16
+        torch.cfloat,
+        torch.cdouble,
+        torch.half,
+        torch.long,
+        torch.bool,
+        torch.bfloat16,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
     )
     def test_index_put_src_datatype(self, device, dtype):
         src = torch.ones(3, 2, 4, device=device, dtype=dtype)
