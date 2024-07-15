@@ -434,10 +434,10 @@ def decide_worker_start_method():
     start_method = os.environ.get(
         "TORCHINDUCTOR_WORKER_START", "fork" if is_fbcode() else "subprocess"
     )
-    assert start_method in [
+    assert start_method in (
         "subprocess",
         "fork",
-    ], f"Invalid start method: {start_method}"
+    ), f"Invalid start method: {start_method}"
     return start_method
 
 
