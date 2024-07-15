@@ -1,220 +1,118 @@
+#ifndef USE_ROCM
+#include <c10/cuda/CUDAGuard.h>
+
 #include <pybind11/pybind11.h>
-#include <torch/csrc/THP.h>
-#include <torch/csrc/cuda/GdsFile.h>
-#include <torch/csrc/cuda/Module.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/python_numbers.h>
 
-#include <ATen/cuda/CUDAGdsFile.h>
-#include <structmember.h>
+#include <cuda_runtime.h>
+#include <cufile.h>
 
-PyObject* THCPGdsFileClass = nullptr;
+// POSIX
+template <
+    class T,
+    typename std::enable_if<std::is_integral<T>::value, std::nullptr_t>::type =
+        nullptr>
+std::string cuGDSFileGetErrorString(T status) {
+  status = std::abs(status);
+  return IS_CUFILE_ERR(status) ? std::string(CUFILE_ERRSTR(status))
+                               : std::string(std::strerror(errno));
+}
 
-static PyObject* THCPGdsFile_pynew(
-    PyTypeObject* type,
-    PyObject* args,
-    PyObject* kwargs) {
-  HANDLE_TH_ERRORS
+// CUfileError_t
+template <
+    class T,
+    typename std::enable_if<!std::is_integral<T>::value, std::nullptr_t>::type =
+        nullptr>
+std::string cuGDSFileGetErrorString(T status) {
+  std::string errStr = cuGDSFileGetErrorString(static_cast<int>(status.err));
+  if (IS_CUDA_ERR(status))
+    errStr.append(".").append(
+        cudaGetErrorString(static_cast<cudaError_t>(status.cu_err)));
+  return errStr;
+}
 
-  // NOLINTNEXTLINE(*-c-arrays*)
-  constexpr const char* kwlist[] = {"filename", "mode", nullptr};
-  const char* filename = nullptr;
-  const char* mode = nullptr;
+void load_storage(int64_t handle, const at::Storage& storage, off_t offset) {
+  CUfileHandle_t cf_handle = reinterpret_cast<CUfileHandle_t>(handle);
+  c10::cuda::CUDAGuard gpuGuard(storage.device());
 
-  if (!PyArg_ParseTupleAndKeywords(
-          args,
-          kwargs,
-          "ss",
-          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-          const_cast<char**>(kwlist),
-          &filename,
-          &mode)) {
-    return nullptr;
+  void* dataPtr = storage.mutable_data();
+  const size_t nbytes = storage.nbytes();
+
+  // Read the binary file
+  ssize_t ret = cuFileRead(cf_handle, (void*)dataPtr, nbytes, offset, 0);
+  TORCH_CHECK(ret >= 0, "cuFileRead failed: ", cuGDSFileGetErrorString(ret));
+}
+
+void save_storage(int64_t handle, const at::Storage& storage, off_t offset) {
+  CUfileHandle_t cf_handle = reinterpret_cast<CUfileHandle_t>(handle);
+  c10::cuda::CUDAGuard gpuGuard(storage.device());
+
+  // FIXME: check whether storage.mutable_data() is the correct API to call here
+  void* dataPtr = storage.mutable_data();
+  const size_t nbytes = storage.nbytes();
+
+  // Write device memory contents to the file
+  ssize_t ret = cuFileWrite(cf_handle, dataPtr, nbytes, offset, 0);
+  TORCH_CHECK(ret >= 0, "cuFileWrite failed: ", cuGDSFileGetErrorString(ret));
+}
+
+void gds_register_buffer(const at::Storage& storage) {
+  void* dataPtr = storage.mutable_data();
+  const size_t nbytes = storage.nbytes();
+
+  CUfileError_t status = cuFileBufRegister(dataPtr, nbytes, 0);
+  TORCH_CHECK(
+      status.err == CU_FILE_SUCCESS,
+      "cuFileBufRegister failed: ",
+      cuGDSFileGetErrorString(status));
+  return;
+}
+
+void gds_deregister_buffer(const at::Storage& storage) {
+  void* dataPtr = storage.mutable_data();
+  CUfileError_t status = cuFileBufDeregister(dataPtr);
+  TORCH_CHECK(
+      status.err == CU_FILE_SUCCESS,
+      "cuFileBufDeregister failed: ",
+      cuGDSFileGetErrorString(status));
+  return;
+}
+
+int64_t gds_register_handle(int fd) {
+  CUfileDescr_t cf_descr;
+  CUfileHandle_t cf_handle;
+  memset((void*)&cf_descr, 0, sizeof(CUfileDescr_t));
+  cf_descr.handle.fd = fd;
+  cf_descr.type = CU_FILE_HANDLE_TYPE_OPAQUE_FD;
+  CUfileError_t status = cuFileHandleRegister(&cf_handle, &cf_descr);
+  if (status.err != CU_FILE_SUCCESS) {
+    TORCH_CHECK(
+        false,
+        "cuFileHandleRegister failed: ",
+        cuGDSFileGetErrorString(status));
   }
 
-  // TODO: Need error checking for filename and mode?
-
-  THPObjectPtr ptr(type->tp_alloc(type, 0));
-  if (!ptr) {
-    return nullptr;
-  }
-
-  THCPGdsFile* self = (THCPGdsFile*)ptr.get();
-
-  new (&self->gds_file) at::cuda::GDSFile(filename, mode);
-
-  return (PyObject*)ptr.release();
-  END_HANDLE_TH_ERRORS
+  // Returning cuFileHandle_t as int64_t
+  return reinterpret_cast<int64_t>(cf_handle);
 }
 
-static void THCPGdsFile_dealloc(THCPGdsFile* self) {
-  self->gds_file.~GDSFile();
-  Py_TYPE(self)->tp_free((PyObject*)self);
+void gds_deregister_handle(int handle) {
+  CUfileHandle_t cf_handle = reinterpret_cast<CUfileHandle_t>(handle);
+  cuFileHandleDeregister(cf_handle);
 }
 
-static PyObject* THCPGdsFile_load_tensor(PyObject* _self, PyObject* args) {
-  HANDLE_TH_ERRORS
-  auto self = (THCPGdsFile*)_self;
-  PyObject* t_ = PyTuple_GetItem(args, 0);
-  PyObject* offset_ = PyTuple_GetItem(args, 1);
-
-  TORCH_CHECK(THPVariable_Check(t_));
-  TORCH_CHECK(THPUtils_checkLong(offset_));
-  auto& t = THPVariable_Unpack(t_);
-  int64_t offset = THPUtils_unpackLong(offset_);
-  self->gds_file.load_tensor(t, offset);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THCPGdsFile_save_tensor(PyObject* _self, PyObject* args) {
-  HANDLE_TH_ERRORS
-  auto self = (THCPGdsFile*)_self;
-  PyObject* t_ = PyTuple_GetItem(args, 0);
-  PyObject* offset_ = PyTuple_GetItem(args, 1);
-
-  TORCH_CHECK(THPVariable_Check(t_));
-  TORCH_CHECK(THPUtils_checkLong(offset_));
-  auto& t = THPVariable_Unpack(t_);
-  int64_t offset = THPUtils_unpackLong(offset_);
-  self->gds_file.save_tensor(t, offset);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THCPGdsFile_load_storage(PyObject* _self, PyObject* args) {
-  HANDLE_TH_ERRORS
-  auto self = (THCPGdsFile*)_self;
-  PyObject* s_ = PyTuple_GetItem(args, 0);
-  PyObject* offset_ = PyTuple_GetItem(args, 1);
-
-  TORCH_CHECK(THPStorage_Check(s_));
-  auto& s = THPStorage_Unpack(s_);
-  int64_t offset = THPUtils_unpackLong(offset_);
-  self->gds_file.load_storage(s, offset);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THCPGdsFile_save_storage(PyObject* _self, PyObject* args) {
-  HANDLE_TH_ERRORS
-  auto self = (THCPGdsFile*)_self;
-  PyObject* s_ = PyTuple_GetItem(args, 0);
-  PyObject* offset_ = PyTuple_GetItem(args, 1);
-
-  TORCH_CHECK(THPStorage_Check(s_));
-  auto& s = THPStorage_Unpack(s_);
-  int64_t offset = THPUtils_unpackLong(offset_);
-  self->gds_file.save_storage(s, offset);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
-static struct PyGetSetDef THCPGdsFile_properties[] = {
-    // FIXME: add properties (perhaps getter for filename)
-    // {"filename", (getter)THCPGdsFile_get_filename, nullptr, nullptr,
-    // nullptr},
-    {nullptr}};
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
-static PyMethodDef THCPGdsFile_methods[] = {
-    {(char*)"load_tensor", THCPGdsFile_load_tensor, METH_VARARGS, nullptr},
-    {(char*)"save_tensor", THCPGdsFile_save_tensor, METH_VARARGS, nullptr},
-    {(char*)"load_storage", THCPGdsFile_load_storage, METH_VARARGS, nullptr},
-    {(char*)"save_storage", THCPGdsFile_save_storage, METH_VARARGS, nullptr},
-    // {(char*)"register_buffer",
-    //  THCPGdsFile_register_buffer,
-    //  METH_VARARGS,
-    //  nullptr},
-    // {(char*)"deregister_buffer",
-    //  THCPGdsFile_deregister_buffer,
-    //  METH_VARARGS,
-    //  nullptr},
-    {nullptr}};
-
-PyTypeObject THCPGdsFileType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._CudaGdsFileBase", /* tp_name */
-    sizeof(THCPGdsFile), /* tp_basicsize */
-    0, /* tp_itemsize */
-    (destructor)THCPGdsFile_dealloc, /* tp_dealloc */
-    0, /* tp_vectorcall_offset */
-    nullptr, /* tp_getattr */
-    nullptr, /* tp_setattr */
-    nullptr, /* tp_reserved */
-    nullptr, /* tp_repr */
-    nullptr, /* tp_as_number */
-    nullptr, /* tp_as_sequence */
-    nullptr, /* tp_as_mapping */
-    nullptr, /* tp_hash  */
-    nullptr, /* tp_call */
-    nullptr, /* tp_str */
-    nullptr, /* tp_getattro */
-    nullptr, /* tp_setattro */
-    nullptr, /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-    nullptr, /* tp_doc */
-    nullptr, /* tp_traverse */
-    nullptr, /* tp_clear */
-    nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
-    nullptr, /* tp_iter */
-    nullptr, /* tp_iternext */
-    THCPGdsFile_methods, /* tp_methods */
-    nullptr, /* tp_members */
-    THCPGdsFile_properties, /* tp_getset */
-    nullptr, /* tp_base */
-    nullptr, /* tp_dict */
-    nullptr, /* tp_descr_get */
-    nullptr, /* tp_descr_set */
-    0, /* tp_dictoffset */
-    nullptr, /* tp_init */
-    nullptr, /* tp_alloc */
-    THCPGdsFile_pynew, /* tp_new */
-};
-
-PyObject* THCPModule_gds_register_buffer(PyObject* _self, PyObject* args) {
-  HANDLE_TH_ERRORS
-  PyObject* t_ = PyTuple_GetItem(args, 0);
-
-  TORCH_CHECK(THPVariable_Check(t_) || THPStorage_Check(t_));
-  if (THPVariable_Check(t_)) {
-    auto& t = THPVariable_Unpack(t_);
-    at::cuda::gds_register_buffer(t);
-  } else {
-    auto& t = THPStorage_Unpack(t_);
-    at::cuda::gds_register_buffer(t);
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_gds_deregister_buffer(PyObject* _self, PyObject* args) {
-  HANDLE_TH_ERRORS
-  PyObject* t_ = PyTuple_GetItem(args, 0);
-
-  TORCH_CHECK(THPVariable_Check(t_) || THPStorage_Check(t_));
-  if (THPVariable_Check(t_)) {
-    auto& t = THPVariable_Unpack(t_);
-    at::cuda::gds_deregister_buffer(t);
-  } else {
-    auto& t = THPStorage_Unpack(t_);
-    at::cuda::gds_deregister_buffer(t);
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
+#endif
 
 void THCPGdsFile_init(PyObject* module) {
-  THCPGdsFileClass = (PyObject*)&THCPGdsFileType;
-  if (PyType_Ready(&THCPGdsFileType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THCPGdsFileType);
-  if (PyModule_AddObject(
-          module, "_CudaGdsFileBase", (PyObject*)&THCPGdsFileType) < 0) {
-    throw python_error();
-  }
+  auto m = py::handle(module).cast<py::module>();
+// FIXME: Figure out whether this is needed / how to use this
+// auto gds = m.def_submodule("_gds");
+#ifndef USE_ROCM
+  m.def("gds_register_handle", &gds_register_handle);
+  m.def("gds_deregister_handle", &gds_deregister_handle);
+  m.def("gds_register_buffer", &gds_register_buffer);
+  m.def("gds_deregister_buffer", &gds_deregister_buffer);
+  m.def("gds_load_storage", &load_storage);
+  m.def("gds_save_storage", &save_storage);
+#endif
 }
