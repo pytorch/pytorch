@@ -13,7 +13,7 @@ TEST(TypeCustomPrinter, Basic) {
     if (auto tensorType = t.cast<TensorType>()) {
       return "CustomTensor";
     }
-    return c10::nullopt;
+    return std::nullopt;
   };
 
   // Tensor types should be rewritten
@@ -33,7 +33,7 @@ TEST(TypeCustomPrinter, ContainedTypes) {
     if (auto tensorType = t.cast<TensorType>()) {
       return "CustomTensor";
     }
-    return c10::nullopt;
+    return std::nullopt;
   };
   torch::Tensor iv = torch::rand({2, 3});
   const auto type = TensorType::create(iv);
@@ -60,7 +60,7 @@ TEST(TypeCustomPrinter, NamedTuples) {
         return "Rewritten";
       }
     }
-    return c10::nullopt;
+    return std::nullopt;
   };
   torch::Tensor iv = torch::rand({2, 3});
   const auto type = TensorType::create(iv);
