@@ -2232,6 +2232,10 @@ class InstructionTranslatorBase(
         self._load_fast(inst.argval[0])
         self._load_fast(inst.argval[1])
 
+    def STORE_FAST_STORE_FAST(self, inst):
+        self._store_fast(inst.argval[0])
+        self._store_fast(inst.argval[1])
+
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
             # perf optimization only
