@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 
-
-if TYPE_CHECKING:
-    from torch import _C
+from torch import _C
 
 
 class ExportTypes:
