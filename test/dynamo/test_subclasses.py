@@ -1402,7 +1402,7 @@ s1 > 3""",
         x = CtxSubclassTensorCustomGuardFn(torch.ones(2), 3)
         self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
-            "Tensor subclass method __metdata_guard__ must take exactly two subclass metadata arguments",
+            "Tensor subclass method __metadata_guard__ must take exactly two subclass metadata arguments",
             lambda: torch.compile(lambda x: x * x)(x),
         )
 
@@ -1416,7 +1416,7 @@ s1 > 3""",
         x = CtxSubclassTensorCustomGuardFn(torch.ones(2), 3)
         self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
-            "Tensor subclass method __metdata_guard__ must be a classmethod",
+            "Tensor subclass method __metadata_guard__ must be a classmethod",
             lambda: torch.compile(lambda x: x * x)(x),
         )
 

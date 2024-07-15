@@ -2843,11 +2843,11 @@ def verify_guard_fn_signature(value):
         from .exc import InternalTorchDynamoError
 
         raise InternalTorchDynamoError(
-            "Tensor subclass method __metdata_guard__ must take exactly two subclass metadata arguments"
+            "Tensor subclass method __metadata_guard__ must take exactly two subclass metadata arguments"
         )
     if fn.__self__ != value.__class__:
         from .exc import InternalTorchDynamoError
 
         raise InternalTorchDynamoError(
-            "Tensor subclass method __metdata_guard__ must be a classmethod"
+            "Tensor subclass method __metadata_guard__ must be a classmethod"
         )
