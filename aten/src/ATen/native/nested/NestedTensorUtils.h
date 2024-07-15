@@ -440,10 +440,10 @@ template <class F, class... A>
 inline at::Tensor map_nested_tensor(F&& fn, A... a) {
   return wrap_tensor_node(
       impl::map(std::forward<F>(fn), impl::get_nested_tensor_structure(a)...),
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt);
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt);
 }
 
 } // namespace native
