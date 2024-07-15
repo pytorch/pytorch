@@ -965,7 +965,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         # (dynamic shapes, static shapes)
         self.assertIn(cnt.frame_count, (5, 7))
-        self.assertIn(cnt.op_count, (104, 106, 127))
+        self.assertIn(cnt.op_count, (94, 106, 121))
 
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
@@ -1008,7 +1008,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """1""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """6""")
+            self.assertExpectedInline(cnt.op_count, """2""")
 
     def _reformer(self, nopython):
         input = torch.randn([1, 64, 256])
@@ -1236,13 +1236,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         if torch._dynamo.config.assume_static_by_default:
             if torch._dynamo.config.automatic_dynamic_shapes:
                 self.assertExpectedInline(cnt.frame_count, """2""")
-                self.assertExpectedInline(cnt.op_count, """14""")
+                self.assertExpectedInline(cnt.op_count, """8""")
             else:
                 self.assertExpectedInline(cnt.frame_count, """2""")
                 self.assertExpectedInline(cnt.op_count, """4""")
         else:
             self.assertExpectedInline(cnt.frame_count, """2""")
-            self.assertExpectedInline(cnt.op_count, """35""")
+            self.assertExpectedInline(cnt.op_count, """21""")
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -1607,12 +1607,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertEqual(opt_fn(cfg), 64)
         # With unspec int, maximum computation is preserved
-        if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """3""")
-        else:
-            self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """4""")
+        self.assertExpectedInline(cnt.frame_count, """1""")
+        self.assertExpectedInline(cnt.op_count, """3""")
 
     def test_reformer_sorting(self):
         x = torch.zeros([1, 12, 4096], dtype=torch.int64)
@@ -1627,7 +1623,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """14""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """27""")
+            self.assertExpectedInline(cnt.op_count, """16""")
 
     def test_recursive_map(self):
         # https://github.com/pytorch/torchdynamo/issues/132
@@ -5131,6 +5127,29 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         inp = torch.randn(3, 3)
         self.assertEqual(fn(inp), opt_fn(inp))
 
+    def test_dict_tag_guard(self):
+        class Foo:
+            def __init__(self):
+                self.scalar = 10
+
+        def fn(d, x):
+            return d["a"] * d["b"] * d["c"].scalar * x
+
+        foo = Foo()
+
+        d = {"a": 2, "b": 3, "c": foo}
+
+        opt_fn = torch.compile(fn, backend="eager")
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(d, inp), opt_fn(d, inp))
+
+        d["a"] = 4
+        self.assertEqual(fn(d, inp), opt_fn(d, inp))
+
+        # Check that recompilation happens
+        foo.scalar = 12
+        self.assertEqual(fn(d, inp), opt_fn(d, inp))
+
     def test_nonconst_issubclass(self):
         def fn(x):
             if issubclass(x.__class__, np.ndarray):
@@ -5296,6 +5315,17 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         m()
         # the second call causes a failure
         m()
+
+    # https://github.com/pytorch/pytorch/issues/121621
+    def test_tensor_random(self):
+        def random_op(tensor, params):
+            res = tensor.random_(**params)
+            return res
+
+        random_op = torch.compile(random_op)
+        params = {"from": -10, "to": 10}
+        tensor = torch.randn([2, 3])
+        res = random_op(tensor, params)
 
 
 instantiate_parametrized_tests(ReproTests)

@@ -10009,7 +10009,7 @@ dedent """
                 super().__init__()
                 x = torch.zeros(1, 3)
                 mod_fn = lambda : mod(x)  # noqa: E731
-                self.mod = torch.jit.trace(mod_fn, tuple())
+                self.mod = torch.jit.trace(mod_fn, ())
 
             @torch.jit.script_method
             def forward(self):
