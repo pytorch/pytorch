@@ -9216,6 +9216,11 @@ class TestLinalgMPS(TestCaseMPS):
             )
             b_int32 = b_int32.to("mps")
             b_scales_and_zeros = b_scales_and_zeros.to("mps")
+
+            if product_version >= 15.0:
+                scales_and_zeros = b_scales_and_zeros.transpose(0, 1).contiguous()
+                b_scales_and_zeros = torch._convert_scales_and_zeros_mps(scales_and_zeros[:, :, 0], scales_and_zeros[:, :, 1])
+
             b_int4pack = torch._convert_weight_to_int4pack(
                 b_int32, inner_k_tiles
             )

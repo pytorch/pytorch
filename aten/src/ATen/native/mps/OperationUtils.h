@@ -313,6 +313,21 @@ inline T* LookUpOrCreateCachedGraph(const std::string& key, std::function<void(M
   });
 }
 
+template<typename T>
+inline T* LookUpOrCreateCachedMPSKernel(const std::string& key, std::function<T*()> instantiate) {
+  static std::unordered_map<int64_t, void*> _mps_cache;
+  auto keyHash = std::hash<std::string>{}(key);
+  auto it = _mps_cache.find(keyHash);
+  if (it != _mps_cache.end()) {
+    return (T*)it->second;
+  }
+
+  T* mpsKernel = instantiate();
+  TORCH_CHECK(mpsKernel != nil);
+  _mps_cache[keyHash] = (void*)mpsKernel;
+  return mpsKernel;
+}
+
 // Common math operations
 MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 
