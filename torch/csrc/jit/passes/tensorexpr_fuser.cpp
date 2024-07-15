@@ -782,7 +782,7 @@ class TensorExprFuser {
 
   std::optional<Node*> tryMerge(Node* fusion_group, Node* to_merge) {
     if (!canMerge(fusion_group, to_merge)) {
-      return c10::nullopt;
+      return std::nullopt;
     }
 
     std::vector<Node*> nodes_to_merge = {to_merge};
@@ -799,7 +799,7 @@ class TensorExprFuser {
       GRAPH_UPDATE("Trying to move node next to fusion group: ", getHeader(n));
       if (!aliasDb_->moveBeforeTopologicallyValid(n, move_point)) {
         GRAPH_UPDATE("Failed to move because of AliasDB checks!");
-        return c10::nullopt;
+        return std::nullopt;
       }
       move_point = n;
     }
