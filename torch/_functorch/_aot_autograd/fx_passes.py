@@ -29,9 +29,7 @@ def update_set_to_write_into_primal(graph: fx.Graph) -> None:
     node_list = list(graph.nodes)
     primal_inputs = [*filter(is_primal, node_list)]
     for i, n in enumerate(node_list):
-        if (
-            n.op == "call_function" and n.target is torch.ops.aten.set_.source_Tensor
-        ):  # TODO(yf225): change to fsdp.set_
+        if n.op == "call_function" and n.target is torch.ops.aten.set_.source_Tensor:
             if (
                 n.args[0].target is torch.ops.aten.set_.source_Tensor
                 and n.args[0].args[0] in primal_inputs
