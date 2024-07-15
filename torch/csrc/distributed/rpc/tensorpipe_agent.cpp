@@ -386,7 +386,7 @@ TensorPipeAgent::TensorPipeAgent(
     const c10::intrusive_ptr<::c10d::Store>& store,
     std::string selfName,
     worker_id_t selfId,
-    optional<int> worldSize,
+    std::optional<int> worldSize,
     TensorPipeRpcBackendOptions opts,
     std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
     std::vector<c10::Device> devices,

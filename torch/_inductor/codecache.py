@@ -554,6 +554,8 @@ class FxGraphCachePickler(pickle.Pickler):
         """
         with io.BytesIO() as stream:
             pickler = cls(stream)
+            # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
+            pickler.fast = True  # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
             try:
                 pickler.dump(obj)
             except (TypeError, AttributeError) as e:
@@ -1560,7 +1562,7 @@ def split_aot_inductor_output_path(path: str) -> Tuple[str, str]:
 
 @clear_on_fresh_inductor_cache
 class CudaKernelParamCache:
-    cache: Dict[str, Dict[str, str]] = dict()
+    cache: Dict[str, Dict[str, str]] = {}
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
@@ -2077,17 +2079,35 @@ class CppCodeCache:
             from filelock import FileLock
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
-            output_path = input_path[:-3] + "so"
+            output_name, output_dir = get_name_and_dir_from_output_file_path(input_path)
+            """
+            If `fb_code` env, it need to be dispatched to original `compile_file` function.
+            So, we still need to prepare parameters for the function: `input_path` and `fb_output_path`.
+            """
+            fb_output_path = input_path[:-3] + "so"
             future: Optional[Future[Any]] = None
             lib = None
+
+            cpp_build_option = CppTorchCudaOptions(**compile_command)
+            cpp_builder = CppBuilder(
+                name=output_name,
+                sources=input_path,
+                output_dir=output_dir,
+                BuildOption=cpp_build_option,
+            )
+
             worker_fn = functools.partial(
                 _worker_compile_cpp,
                 lock_path,
+                cpp_builder,
                 input_path,
-                output_path,
-                cpp_compile_command(
-                    input=input_path, output=output_path, **compile_command
-                ),
+                fb_output_path,
+            )
+
+            binary_path = (
+                fb_output_path
+                if config.is_fbcode()
+                else cpp_builder.get_target_file_path()
             )
 
             def load_fn():
@@ -2097,13 +2117,13 @@ class CppCodeCache:
                         future.result()
                     result = worker_fn()
                     assert result is None
-                    lib = cls._load_library(output_path, key)
+                    lib = cls._load_library(binary_path, key)
                     assert lib is not None
                 return lib
 
             if submit_fn is not None:
                 with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-                    if not os.path.exists(output_path):
+                    if not os.path.exists(binary_path):
                         future = submit_fn(worker_fn)
 
             cls.cache[key] = load_fn
@@ -2115,12 +2135,27 @@ class CppCodeCache:
         return cls.load_async(source_code, cuda)()
 
 
-def _worker_compile_cpp(lock_path, input_path, output_path, cmd):
+def _worker_compile_cpp(
+    lock_path,
+    cpp_builder: CppBuilder,
+    fb_input_path: str,
+    fb_output_path: str,
+):
     from filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-        if not os.path.exists(output_path):
-            compile_file(input_path, output_path, shlex.split(cmd))
+        binary_path = (
+            fb_output_path if config.is_fbcode() else cpp_builder.get_target_file_path()
+        )
+        if not os.path.exists(binary_path):
+            if config.is_fbcode():
+                compile_file(
+                    fb_input_path,
+                    fb_output_path,
+                    shlex.split(cpp_builder.get_command_line()),
+                )
+            else:
+                cpp_builder.build()
 
 
 # Customized Python binding for cpp kernels
@@ -2860,8 +2895,8 @@ def touch(filename):
 
 @clear_on_fresh_inductor_cache
 class PyCodeCache:
-    cache: Dict[str, ModuleType] = dict()
-    linemaps: Dict[str, List[Tuple[Any, ...]]] = dict()
+    cache: Dict[str, ModuleType] = {}
+    linemaps: Dict[str, List[Tuple[Any, ...]]] = {}
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
@@ -3151,7 +3186,7 @@ class CUDACodeCache:
         input_path: str
         output_path: str
 
-    cache: Dict[str, CacheEntry] = dict()
+    cache: Dict[str, CacheEntry] = {}
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cu"
 
@@ -3236,7 +3271,7 @@ class ROCmCodeCache:
         input_path: str
         output_path: str
 
-    cache: Dict[str, CacheEntry] = dict()
+    cache: Dict[str, CacheEntry] = {}
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cpp"
     _logged_compiler_version = False
