@@ -4311,7 +4311,7 @@ def _is_safe_to_split() -> bool:
 @_time_logger
 def split_group(
     parent_pg: Optional[ProcessGroup] = None,
-    split_ranks: Optional[list[list[int]]] = None,
+    split_ranks: Optional[list] = None,
     timeout: Optional[timedelta] = None,
     pg_options: Optional[Any] = None,
     group_desc: Optional[str] = None,

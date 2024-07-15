@@ -4337,8 +4337,9 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
             self.assertEqual(tensor2, torch.full((1,), 7))
         else:
             self.assertEqual(ng2, None)
-        # give enough time for the broadcast to finish before destroying all pgs.
-        time.sleep(2)
+        # a barrier and a cuda sync before destroying all pgs.
+        dist.barrier(pg)
+        torch.cuda.synchronize()
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
@@ -4388,8 +4389,9 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         if self.rank == 6 or self.rank == 7:
             dist.broadcast(tensor2, 6, group=ng2)
             self.assertEqual(tensor2, torch.full((1,), 6))
-        # give enough time for the broadcast to finish before destroying all pgs.
-        time.sleep(2)
+        # a barrier and a cuda sync before destroying all pgs.
+        dist.barrier(pg)
+        torch.cuda.synchronize()
         dist.destroy_process_group()
 
 
