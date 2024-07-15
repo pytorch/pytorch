@@ -15,7 +15,7 @@ import torch
 import torch._dynamo as torchdynamo
 import torch.export._trace
 import torch.utils._pytree as pytree
-from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
+from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
     canonicalize,
@@ -851,9 +851,8 @@ def forward(self, x):
     )
     def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
-        inputs = normalize_inputs(case.example_inputs)
         _check_meta = "map" not in name
-        self.check_graph(model, inputs.args, _check_meta=_check_meta)
+        self.check_graph(model, case.example_args, _check_meta=_check_meta)
 
     def test_constraints(self):
         class Module(torch.nn.Module):
@@ -989,9 +988,6 @@ class TestSchemaVersioning(TestCase):
 
 # We didn't set up kwargs input yet
 unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_fn_with_kwargs)
-
-# Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph.
-unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_scalar_output)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
@@ -1192,6 +1188,27 @@ class TestSerializeCustomClass(TestCase):
         serialized_vals = serialize(ep)
         ep = deserialize(serialized_vals)
         self.assertTrue(isinstance(ep.constants["custom_obj"].get(), FakeTensor))
+
+    def test_quantization_tag_metadata(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        f = Foo()
+
+        inputs = (torch.zeros(4, 4),)
+        ep = export(f, inputs)
+
+        for node in ep.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                node.meta["quantization_tag"] = "foo"
+
+        serialized_vals = serialize(ep)
+        ep = deserialize(serialized_vals)
+
+        for node in ep.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                self.assertTrue(node.meta["quantization_tag"] == "foo")
 
 
 if __name__ == "__main__":
