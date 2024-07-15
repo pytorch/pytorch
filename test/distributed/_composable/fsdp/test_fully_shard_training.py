@@ -591,7 +591,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             {
                 "reshard_after_forward": [True, False],
                 "checkpoint_impl": ["composable", "utils", "wrapper"],
-                "multi_module": [False, True],
+                "module_grouping": ["block", "mem_eff", "mem_eff_weight_tied"],
             },
             self._test_train_parity_with_activation_checkpointing,
         )
@@ -600,7 +600,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         self,
         reshard_after_forward: Union[bool, int],
         checkpoint_impl: str,
-        multi_module: bool,
+        module_grouping: str,
     ):
         assert checkpoint_impl in ("composable", "utils", "wrapper")
         testing_compile = fully_shard != torch.distributed._composable.fsdp.fully_shard
@@ -616,9 +616,10 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 max_seq_len=64,
                 dropout_p=0,
                 checkpoint_activations=(checkpoint_impl == "utils"),
-                # For the multi-module grouping, we separate the embeddings
-                # from the output projection, so this does not support tying
-                weight_tying=not multi_module,
+                # For the mem-efficient module grouping, we separate the
+                # embeddings from the output projection, which does not support
+                # weight tying
+                weight_tying=module_grouping != "mem_eff",
             )
             model = Transformer(model_args)
         ref_model = replicate(copy.deepcopy(model), device_ids=[self.rank])
@@ -638,15 +639,21 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
 
         # Apply FSDP
         fsdp_kwargs = {"reshard_after_forward": reshard_after_forward}
-        if multi_module:
+        if module_grouping == "mem_eff":
             assert model_args.n_layers == 3
             fully_shard(model.layers[0], **fsdp_kwargs)
             fully_shard([model.layers[1], model.layers[2]], **fsdp_kwargs)
             fully_shard([model.tok_embeddings, model.pos_embeddings], **fsdp_kwargs)
             fully_shard([model.norm, model.output], **fsdp_kwargs)
-        else:
+        elif module_grouping == "mem_eff_weight_tied":
+            fully_shard([model.tok_embeddings, model.output], **fsdp_kwargs)
             for layer in model.layers:
                 fully_shard(layer, **fsdp_kwargs)
+        elif module_grouping == "block":
+            for layer in model.layers:
+                fully_shard(layer, **fsdp_kwargs)
+        else:
+            raise NotImplementedError(f"Unknown module grouping: {module_grouping}")
         fully_shard(model, **fsdp_kwargs)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
