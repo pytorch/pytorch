@@ -115,8 +115,8 @@ GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
 
 compile_lock = threading.RLock()
 
-T = TypeVar("T")
-P = ParamSpec("P")
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 
 class TODO_UNKNOWN:
@@ -160,7 +160,7 @@ def fx_forward_from_src_skip_result(
     return result
 
 
-def preserve_global_state(fn: Callable[P, T]) -> Callable[P, T]:
+def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     """
     Context manager to:
         1) Save/restore torch.is_grad_enabled() state
@@ -170,7 +170,7 @@ def preserve_global_state(fn: Callable[P, T]) -> Callable[P, T]:
     """
 
     @functools.wraps(fn)
-    def _fn(*args: P.args, **kwargs: P.kwargs) -> T:
+    def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
         # Just in case we get left in a bad dispatch state we want to restore
@@ -313,15 +313,15 @@ FRAME_COMPILE_COUNTER: typing.Counter[
 ] = collections.Counter()
 
 
-def maybe_cprofile(func: Callable[P, T]) -> Callable[P, T]:
+def maybe_cprofile(func: Callable[_P, _T]) -> Callable[_P, _T]:
     if config.cprofile:
         return cprofile_wrapper(func)
     return func
 
 
-def cprofile_wrapper(func: Callable[P, T]) -> Callable[P, T]:
+def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
     @functools.wraps(func)
-    def profile_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+    def profile_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         trace_id = CompileContext.current_trace_id()
         assert trace_id, "Trace id is None"
         profile_path = Path(
