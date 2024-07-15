@@ -28,7 +28,7 @@ class IpcChannel {
 
     TORCH_CHECK(
         bind(socket_, (struct sockaddr*)&addr, SUN_LEN(&addr)) == 0,
-        "Failed to bind socket");
+        perror("Failed to bind socket"));
   }
 
   ~IpcChannel() {
@@ -58,7 +58,9 @@ class IpcChannel {
     cmsg->cmsg_type = SCM_RIGHTS;
     memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
 
-    TORCH_CHECK(sendmsg(socket_, &msg, 0) > 0, "Failed to send fd");
+    TORCH_CHECK(
+        sendmsg(socket_, &msg, 0) > 0,
+        perror("Failed to send fd"));
   }
 
   int recv_fd() {
@@ -74,7 +76,9 @@ class IpcChannel {
         .msg_control = cbuf,
         .msg_controllen = sizeof(cbuf)};
 
-    TORCH_CHECK(recvmsg(socket_, &msg, 0) > 0, "Failed to receive fd");
+    TORCH_CHECK(
+        recvmsg(socket_, &msg, 0) > 0,
+        perror("Failed to receive fd"));
 
     auto cmsg = CMSG_FIRSTHDR(&msg);
     TORCH_CHECK(cmsg != NULL);
@@ -105,7 +109,7 @@ class IpcChannel {
  private:
   static std::string get_socket_name(int pid) {
     std::ostringstream oss;
-    oss << "symm_mem-" << pid;
+    oss << "/tmp/symm_mem-" << pid;
     return oss.str();
   }
 
