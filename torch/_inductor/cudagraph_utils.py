@@ -246,7 +246,7 @@ class CheckInvariantStatus(Enum):
 
 
 def log_data_ptr_mismatch(
-    placeholders: List[torch.fx.Node],
+    placeholders: List[PlaceholderInfo],
     inputs: List[torch.Tensor],
     recorded_data_ptr: List[Optional[int]],
     target_idxs: List[int],
