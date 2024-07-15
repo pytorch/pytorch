@@ -10,11 +10,11 @@ from typing import Any, Callable, Mapping, Optional, Sequence, TYPE_CHECKING, Un
 
 import torch._dynamo
 import torch.fx
+import torch.onnx
 from torch.onnx._internal import exporter, io_adapter
 from torch.onnx._internal.diagnostics import infra
 
 if TYPE_CHECKING:
-    import torch.onnx
     from torch.export.exported_program import ExportedProgram
 
 
