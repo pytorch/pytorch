@@ -82,10 +82,10 @@ class BenchmarkRunnerMixedMM(BenchmarkRunner):  # type: ignore[misc, no-any-unim
         return 2 ** random.choice(group)
 
     def get_distr_type(self) -> str:
-        # 85%: choose a random multiple of 128 between 2^7 and 2^17
-        # 10%: choose a random power of 2 between 2^1 and 2^17 favoring larger values
-        #  4%: choose a random number between 1 and 131072
-        #  1%: choose a random number between 2^i and 2^(i+1) with i in [1, 16]
+        # 85%: choose a random multiple of 128 between 2^10 and 2^17
+        # 10%: choose a random power of 2 between 2^10 and 2^17 favoring larger values
+        #  4%: choose a random number between 1024 and 131072
+        #  1%: choose a random number between 2^i and 2^(i+1) with i in [10, 16]
         return random.choices(
             ["mult_128", "pow2", "uniform", "uniform-between-pow2"],
             [0.85, 0.1, 0.04, 0.01],
