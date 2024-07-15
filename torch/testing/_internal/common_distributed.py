@@ -29,6 +29,7 @@ import torch._dynamo.test_case
 import torch.cuda.nccl
 import torch.distributed as c10d
 import torch.nn as nn
+from torch._inductor.test_case import TestCase, run_tests
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     find_free_port,
@@ -38,8 +39,6 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
-    TestCase,
-    run_tests,
 )
 from torch.testing._internal.distributed.multi_threaded_pg import (
     _install_threaded_pg,
