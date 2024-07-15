@@ -98,7 +98,7 @@ def sample_inputs_cond(opinfo, device, dtype, requires_grad, **kwargs):
 
 
 def simple_cond(x):
-    return torch.cond(x.shape[0] > 2, lambda x: x.cos(), lambda x: x.sin(), [x])
+    return torch.cond(x.sum() > 2, lambda x: x.cos(), lambda x: x.sin(), [x])
 
 
 def sample_inputs_auto_functionalize(opinfo, device, dtype, requires_grad, **kwargs):
@@ -195,6 +195,8 @@ hop_db = [
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
         supports_autograd=True,
+        # "torch.compile with aot_autograd does not currently support double backward."
+        supports_gradgrad=False,
     ),
     OpInfo(
         name="while_loop",
