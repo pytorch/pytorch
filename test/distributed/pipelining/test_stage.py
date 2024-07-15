@@ -308,8 +308,6 @@ class StageTest(MultiProcContinousTest):
                 return schedule.step()
 
         out = _run_step(x)
-        # print(out)
-        print("finished")
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
