@@ -41,9 +41,15 @@ ir_nodes_pre_fusion = 0
 # counters for tracking to_dtype inserted
 cpp_to_dtype_count = 0
 
+
+@dataclasses.dataclass
+class CppOuterLoopFusedCount:
+    inner_kernel_number: int
+    local_buffer_number: int = 0
+
+
 # The length counts the number of outer loop fusions.
-# Each element counts the number of inner kernels in each outer loop fusion.
-cpp_outer_loop_fused_inner_counts: List[int] = []
+cpp_outer_loop_fused_inner_counts: List[CppOuterLoopFusedCount] = []
 
 num_comprehensive_padding = 0
 num_matches_for_scatter_upon_const_tensor = 0

@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-# mypy: disable-error-code=arg-type
 from __future__ import annotations
 
 import functools
@@ -15,7 +14,7 @@ from torch.onnx import (
     symbolic_opset9 as opset9,
     utils,
 )
-from torch.onnx._internal import jit_utils, registration
+from torch.onnx._internal import _beartype, jit_utils, registration
 
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -46,6 +45,7 @@ __all__ = [
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=12)
 
 
+@_beartype.beartype
 def _einsum_helper(g: jit_utils.GraphContext, equation, tensors):
     if not tensors:
         raise RuntimeError("Einsum inputs are empty.")
@@ -66,6 +66,7 @@ def _einsum_helper(g: jit_utils.GraphContext, equation, tensors):
 
 @_onnx_symbolic("aten::einsum")
 @symbolic_helper.parse_args("s", "v", "is")
+@_beartype.beartype
 def einsum(g: jit_utils.GraphContext, equation, tensor_list, path=None):
     tensors = symbolic_helper._unpack_list(tensor_list)
     return _einsum_helper(g, equation, tensors)
@@ -73,6 +74,7 @@ def einsum(g: jit_utils.GraphContext, equation, tensor_list, path=None):
 
 @_onnx_symbolic("aten::outer")
 @symbolic_helper.parse_args("v", "v")
+@_beartype.beartype
 def outer(g: jit_utils.GraphContext, input, other):
     # make sure to cast other to self's type
     if _type_utils.JitScalarType.from_value(
@@ -86,6 +88,7 @@ def outer(g: jit_utils.GraphContext, input, other):
     return _einsum_helper(g, "i,j->ij", [input, other])
 
 
+@_beartype.beartype
 def _dropout_returns_masked_input_and_mask(
     g: jit_utils.GraphContext, input: torch._C.Value, p: float, train: bool
 ) -> Tuple[torch._C.Value, Optional[torch._C.Value]]:
@@ -102,6 +105,7 @@ def _dropout_returns_masked_input_and_mask(
 
 @_onnx_symbolic("aten::dropout")
 @symbolic_helper.parse_args("v", "f", "b")
+@_beartype.beartype
 def dropout(g: jit_utils.GraphContext, input, p, train):
     masked, _ = _dropout_returns_masked_input_and_mask(g, input, p, train)
     return masked
@@ -109,11 +113,13 @@ def dropout(g: jit_utils.GraphContext, input, p, train):
 
 @_onnx_symbolic("aten::native_dropout")
 @symbolic_helper.parse_args("v", "f", "b")
+@_beartype.beartype
 def native_dropout(g: jit_utils.GraphContext, input, p, train):
     return _dropout_returns_masked_input_and_mask(g, input, p, train)
 
 
 @_onnx_symbolic("aten::nll_loss")
+@_beartype.beartype
 def nll_loss(g: jit_utils.GraphContext, self, target, weight, reduction, ignore_index):
     # none reduction : onnx::Constant[value={0}]
     # mean reduction : onnx::Constant[value={1}]
@@ -147,6 +153,7 @@ def nll_loss(g: jit_utils.GraphContext, self, target, weight, reduction, ignore_
 
 
 @_onnx_symbolic("aten::nll_loss2d")
+@_beartype.beartype
 def nll_loss2d(
     g: jit_utils.GraphContext, self, target, weight, reduction, ignore_index
 ):
@@ -154,6 +161,7 @@ def nll_loss2d(
 
 
 @_onnx_symbolic("aten::nll_loss_nd")
+@_beartype.beartype
 def nll_loss_nd(
     g: jit_utils.GraphContext, self, target, weight, reduction, ignore_index
 ):
@@ -161,6 +169,7 @@ def nll_loss_nd(
 
 
 @_onnx_symbolic("aten::cross_entropy_loss")
+@_beartype.beartype
 def cross_entropy_loss(
     g: jit_utils.GraphContext,
     self,
@@ -209,6 +218,7 @@ def cross_entropy_loss(
 
 @_onnx_symbolic("aten::binary_cross_entropy_with_logits")
 @symbolic_helper.parse_args("v", "v", "v", "v", "i")
+@_beartype.beartype
 def binary_cross_entropy_with_logits(
     g: jit_utils.GraphContext, input, target, weight, pos_weight, reduction
 ):
@@ -253,6 +263,7 @@ def binary_cross_entropy_with_logits(
 
 
 @_onnx_symbolic("aten::celu")
+@_beartype.beartype
 def celu(g: jit_utils.GraphContext, self, alpha):
     alpha = symbolic_helper._maybe_get_const(alpha, "f")
     # if the input is of type double cast it to float
@@ -269,6 +280,7 @@ def celu(g: jit_utils.GraphContext, self, alpha):
 
 @_onnx_symbolic("aten::argmax")
 @symbolic_helper.parse_args("v", "v", "b")
+@_beartype.beartype
 def argmax(
     g: jit_utils.GraphContext,
     input: torch._C.Value,
@@ -280,6 +292,7 @@ def argmax(
 
 @_onnx_symbolic("aten::argmin")
 @symbolic_helper.parse_args("v", "v", "b")
+@_beartype.beartype
 def argmin(
     g: jit_utils.GraphContext,
     input: torch._C.Value,
@@ -290,22 +303,26 @@ def argmin(
 
 
 @_onnx_symbolic("aten::pow")
+@_beartype.beartype
 def pow(g: jit_utils.GraphContext, self, exponent):
     return g.op("Pow", self, exponent)
 
 
 @_onnx_symbolic("aten::ge")
+@_beartype.beartype
 def ge(g: jit_utils.GraphContext, input, other):
     return g.op("GreaterOrEqual", input, other)
 
 
 @_onnx_symbolic("aten::le")
+@_beartype.beartype
 def le(g: jit_utils.GraphContext, input, other):
     return g.op("LessOrEqual", input, other)
 
 
 @_onnx_symbolic("aten::unfold")
 @symbolic_helper.parse_args("v", "i", "v", "v")
+@_beartype.beartype
 def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
     const_size = symbolic_helper._maybe_get_const(size, "i")
     const_step = symbolic_helper._maybe_get_const(step, "i")
@@ -382,6 +399,7 @@ def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
 
 @_onnx_symbolic("aten::tensordot")
 @symbolic_helper.parse_args("v", "v", "is", "is", "v")
+@_beartype.beartype
 def tensordot(g: jit_utils.GraphContext, input_a, input_b, dims_a, dims_b, out=None):
     if out is not None:
         symbolic_helper._unimplemented(
