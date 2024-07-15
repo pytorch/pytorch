@@ -24,8 +24,8 @@ namespace detail {
 // you're probably losing only a word (the vptr in the allocated object.)
 static CUDAHooksInterface* cuda_hooks = nullptr;
 
-const CUDAHooksInterface& getCUDAHooks() {
-  // NB: The once_flag here implies that if you try to call any CUDA
+const CUDAHooksInterface* getCUDAHooksPtr() {
+   // NB: The once_flag here implies that if you try to call any CUDA
   // functionality before libATen_cuda.so is loaded, CUDA is permanently
   // disabled for that copy of ATen.  In principle, we can relax this
   // restriction, but you might have to fix some code.  See getVariableHooks()
@@ -46,8 +46,13 @@ const CUDAHooksInterface& getCUDAHooks() {
     cuda_hooks = new CUDAHooksInterface();
   }
 #endif
-  return *cuda_hooks;
+  return cuda_hooks;
 }
+
+const CUDAHooksInterface& getCUDAHooks() {
+  return *(getCUDAHooksPtr());
+}
+
 } // namespace detail
 
 C10_DEFINE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)

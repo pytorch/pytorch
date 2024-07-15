@@ -207,5 +207,6 @@ TORCH_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs);
 
 namespace detail {
 TORCH_API const CUDAHooksInterface& getCUDAHooks();
+TORCH_API const CUDAHooksInterface* getCUDAHooksPtr();
 } // namespace detail
 } // namespace at

@@ -500,8 +500,14 @@ struct ConvParams {
     if (needs_64bit_indexing_no_split(input, weight)) {
       return false;
     }
+    bool compiledWithMiOpen = false;
+    // Checking the pointer before using it
+    auto cudaHooksPtr = detail::getCUDAHooksPtr();
+    if(cudaHooksPtr != nullptr) {
+      compiledWithMiOpen = cudaHooksPtr->compiledWithMIOpen();
+    }
     return ((input.scalar_type() == at::kFloat) || (input.scalar_type() == at::kHalf) || (input.scalar_type() == at::kBFloat16))
-           && detail::getCUDAHooks().compiledWithMIOpen()
+           && compiledWithMiOpen
            && input.is_cuda()
            && input.dim() <= MIOPEN_DIM_MAX
            && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
