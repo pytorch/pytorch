@@ -1167,7 +1167,7 @@ def try_script(model, example_inputs):
 
 
 class AOTInductorModelCache:
-    cache = dict()
+    cache = {}
 
     @classmethod
     def load(cls, model, example_inputs, device):
@@ -2272,6 +2272,9 @@ class BenchmarkRunner:
             equal_nan = False
         return equal_nan
 
+    def use_larger_multiplier_for_smaller_tensor(self, name):
+        return False
+
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):
             for device in args.devices:
@@ -2602,6 +2605,9 @@ class BenchmarkRunner:
                         cos_similarity=False,
                         tol=0,
                         equal_nan=self.equal_nan,
+                        use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
+                            name
+                        ),
                     )
                 ):
                     is_same = False
@@ -2690,6 +2696,9 @@ class BenchmarkRunner:
                     new_result,
                     fp64_outputs,
                     equal_nan=self.equal_nan,
+                    use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
+                        name
+                    ),
                     cos_similarity=cos_similarity,
                     tol=tolerance,
                 ):
@@ -3996,7 +4005,7 @@ def run(runner, args, original_dir=None):
         )
         experiment = speedup_experiment_onnx
         output_filename = "torch_onnx_patch.csv"
-        current_onnx_compiler = "torch_onnx_patch"
+        current_onnx_compiler = "dynamo"
     elif args.dynamo_onnx:
         optimize_ctx = functools.partial(
             optimize_onnx_ctx,

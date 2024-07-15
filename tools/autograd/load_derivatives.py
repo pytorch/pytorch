@@ -240,7 +240,7 @@ def create_forward_derivative(
     for r in f.func.returns:
         if r.name in var_names:
             if var_types is None:
-                var_types = tuple()
+                var_types = ()
             var_types = var_types + (r.type,)
 
     # Handle default return names
@@ -253,7 +253,7 @@ def create_forward_derivative(
                 res = re.findall(r"^result(\d+)$", var_name)
                 if len(res) == 1:
                     if var_types is None:
-                        var_types = tuple()
+                        var_types = ()
                     arg_idx = int(res[0])
                     var_types = var_types + (f.func.returns[arg_idx].type,)
 
