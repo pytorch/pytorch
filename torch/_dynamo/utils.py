@@ -78,7 +78,7 @@ try:
             np.random: tnp.random,
         }
     else:
-        NP_SUPPORTED_MODULES = tuple()
+        NP_SUPPORTED_MODULES = ()
 
         NP_TO_TNP_MODULE = {}
     from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -164,15 +164,21 @@ def increment_op_count(cnt):
 # Calculate total time spent so far for each phase
 # For example, {'entire_frame_compile':8.574629999999999, 'backend_compile':5.26806}
 def calculate_time_spent():
-    total = 0.0
+    total_wall_time = 0.0
     total_by_key = {}
     for timings in frame_phase_timing.values():
+        total_wall_time += timings.get(
+            "entire_frame_compile", timings.get("inductor_compile", 0)
+        )
+
         for key, timing in timings.items():
-            total += timing
             if key not in total_by_key:
                 total_by_key[key] = timing
             else:
                 total_by_key[key] += timing
+
+    if total_by_key:
+        total_by_key["total_wall_time"] = total_wall_time
 
     return total_by_key
 
@@ -463,8 +469,8 @@ class ExactWeakKeyDictionary:
     """Similar to weakref.WeakKeyDictionary, but use `is`/`id` rather than `==` to compare equality"""
 
     def __init__(self):
-        self.values = dict()
-        self.refs = dict()
+        self.values = {}
+        self.refs = {}
 
     def __getitem__(self, key):
         return self.values[id(key)]
@@ -587,9 +593,16 @@ def is_wrapper_or_member_descriptor(value):
     return isinstance(
         value,
         (
-            types.MethodWrapperType,
+            # set up by PyGetSetDef
+            types.GetSetDescriptorType,
+            # set by PyMethodDef, e.g. list.append
+            types.MethodDescriptorType,
+            # slots - list.__add__
             types.WrapperDescriptorType,
+            # set up by PyMemberDef
             types.MemberDescriptorType,
+            # wrapper over C functions
+            types.MethodWrapperType,
         ),
     )
 
@@ -1137,10 +1150,10 @@ def check_numpy_ndarray_args(args, kwargs):
     )
 
 
-dict_keys: Type[KeysView[Any]] = type(dict().keys())
-dict_values: Type[ValuesView[Any]] = type(dict().values())
+dict_keys: Type[KeysView[Any]] = type({}.keys())
+dict_values: Type[ValuesView[Any]] = type({}.values())
 odict_values: Type[ValuesView[Any]] = type(collections.OrderedDict().values())
-tuple_iterator: Type[Iterator[Any]] = type(iter(tuple()))
+tuple_iterator: Type[Iterator[Any]] = type(iter(()))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
 
@@ -1603,7 +1616,7 @@ orig_code_map = ExactWeakKeyDictionary()
 guard_failures: DefaultDict[Any, List[Any]] = collections.defaultdict(list)
 
 # Keep a record of graph break reasons for logging
-graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReason"] = list()
+graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReason"] = []
 
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
