@@ -67,7 +67,16 @@ class _ToTorchTensor(torch.autograd.Function):
     ):
         ctx.dtensor_spec = input._spec
         ctx.grad_placements = grad_placements
-        local_tensor = input._local_tensor
+
+        cur_unpadded_shard_size = ctx.dtensor_spec.unpadded_local_shard_size
+        if cur_unpadded_shard_size is None:
+            local_tensor = input._local_tensor
+        else:
+            slices = [
+                slice(0, unpadded_dim_size)
+                for unpadded_dim_size in cur_unpadded_shard_size
+            ]
+            local_tensor = input._local_tensor[slices]
 
         # We need to return a fresh Tensor object there as autograd metadata
         # will be inplaced into it. So we don't want to pollute the Tensor
@@ -246,6 +255,91 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             requires_grad=requires_grad,
         )
 
+        # The utility function needs to be broken up and should live somewhere else instead of being in the __new__,
+        # but this logic needs to happen here at runtime before we assign the local tensor to the wrapper tensor.
+        # This is because 1. we need to validate the size of local tensor and 2. pad the local tensor if needed.
+        # To pad a local tensor, we need two information: 1) the full shard size (with padding), 2) the unpadded shard size.
+        def maybe_pad_local_tensor(local_tensor, spec):
+            import math
+
+            global_shape = spec.tensor_meta.shape
+            mesh = spec.mesh
+            placements = spec.placements
+
+            # 1. Calculate globally how many chunks a given tensor dim will have globally.
+            num_chunks_by_dim = [1 for _ in range(len(global_shape))]
+            for mesh_idx, placement in enumerate(placements):
+                if placement.is_shard():
+                    tensor_dim = placement.dim  # type: ignore[attr-defined]
+                    mesh_dim_size = mesh.size(mesh_idx)
+                    num_chunks_by_dim[tensor_dim] *= mesh_dim_size
+
+            # 2. Calculate the shape of a full shard and the shape of the current shard
+            full_shard_size, cur_unpadded_shard_size = [], []
+            for tensor_dim, tensor_dim_size in enumerate(global_shape):
+                # Calculate the full chunk size and the number of full chunks on a given tensor dim
+                full_chunk_size = math.ceil(
+                    tensor_dim_size / num_chunks_by_dim[tensor_dim]
+                )
+                num_full_chunks = math.floor(tensor_dim_size / full_chunk_size)
+                tail_chunk_size = tensor_dim_size % full_chunk_size
+                full_shard_size.append(full_chunk_size)
+
+                # Currently we assume the shard id is to equal to the global rank.
+                # Note that this might not be true for 2D (strided sharding + global_rank)
+                # and 3D (strided sharding + 2D local rank).
+                cur_chunk = mesh.get_rank()
+
+                # We cannot directly use the shape of local_tensor as cur_unpadded_shard_size, since we need to verify
+                # whether the shape of local_tensor given by user is legit.
+                # We need to derive the shape of the current shard without padding based on the global shape and the shard id.
+
+                # If the index of cur chunk is smaller than num_full_chunks,
+                # this means cur_chunk would be a full chunk on the given tensor dimension.
+                if cur_chunk < num_full_chunks:
+                    cur_unpadded_shard_size.append(full_chunk_size)
+                # If the index of cur_chunk is num_full_chunks and the tail_chunk_size is not 0,
+                # this means the cur_chunk is the non-empty tail chunk.
+                # There should be only 1 non-empty tail chunk.
+                # For example, shard [1, 1, 1, 1, 1] to 4 chunks, we would have [1, 1], [1, 1], [1].
+                # The third shard is a non-empty tail chunk and the last shard is an empty chunk.
+                elif cur_chunk == num_full_chunks and tail_chunk_size != 0:
+                    cur_unpadded_shard_size.append(tail_chunk_size)
+                # Otherwise, the cur_chunk is an empty chunk on the tensor_dim. There could be more than 1 empty chunks.
+                # For example, chunk a tensor([1, 1]) into 4 chunks, the last two chunks would be empty.
+                else:
+                    cur_unpadded_shard_size.append(0)
+
+            # 3. add a check to see whether the given local tensor is legit.
+            if list(local_tensor.shape) != cur_unpadded_shard_size:
+                raise RuntimeError(
+                    f"The given local tensor shape {local_tensor.shape} does not"
+                    f"match the expected local tesnsor shape {cur_unpadded_shard_size}!"
+                )
+
+            # 4. short-circuit return if no padding is needed for the given shard.
+            if full_shard_size == cur_unpadded_shard_size:
+                # make `unpadded_local_shard_size` a cached property in DTensorSpec
+                # so we don't need to re-calculate this during backward of _ToTorchTensor.
+                spec.unpadded_local_shard_size = None
+                return local_tensor, spec
+
+            # 5. create a padded local tensor and copy local tensor into padded local tensor
+            spec.unpadded_local_shard_size = (
+                cur_unpadded_shard_size  # make this a cached property in DTensorSpec
+            )
+            padded_local_tensor = local_tensor.new_zeros(full_shard_size)
+            slices = [
+                slice(0, unpadded_dim_size)
+                for unpadded_dim_size in cur_unpadded_shard_size
+            ]
+            padded_local_tensor[slices].copy_(local_tensor)
+            del local_tensor
+
+            return padded_local_tensor, spec
+
+        local_tensor, spec = maybe_pad_local_tensor(local_tensor, spec)
+
         r._spec = spec
         r._local_tensor = local_tensor
         return r
@@ -420,7 +514,15 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             will depend on if the `DTensor` requires_grad or not.
         """
         if not torch.is_grad_enabled():
-            return self._local_tensor
+            cur_unpadded_shard_size = self._spec.unpadded_local_shard_size
+            if cur_unpadded_shard_size is None:
+                return self._local_tensor
+            else:
+                slices = [
+                    slice(0, unpadded_dim_size)
+                    for unpadded_dim_size in cur_unpadded_shard_size
+                ]
+                return self._local_tensor[slices]
 
         if grad_placements is not None and not isinstance(grad_placements, tuple):
             grad_placements = tuple(grad_placements)
