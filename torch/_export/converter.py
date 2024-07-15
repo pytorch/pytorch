@@ -73,14 +73,6 @@ _TORCH_DTYPE_TO_ENUM = {
 }
 
 
-_TORCH_SPECIALIZED_OP_TO_SYMBOLIC_OP = {
-    torch.ops.aten.numel: torch.ops.aten.sym_numel,
-    torch.ops.aten.size: torch.ops.aten.sym_size,
-    torch.ops.aten.storage_offset: torch.ops.aten.sym_storage_offset,
-    torch.ops.aten.stride: torch.ops.aten.sym_stride,
-}
-
-
 def get_dtype_as_int(tensor):
     """
     prim::dtype has the signature "Tensor a) -> int", where it gets the dtype of
@@ -104,6 +96,11 @@ kind_to_standard_operators = {
     "aten::__contains__": operator.contains,
     "prim::dtype": get_dtype_as_int,
     "aten::len": len,
+    # Mapping from specialized op to its symbolic counterpart.
+    "aten::numel": torch.ops.aten.sym_numel,
+    "aten::size": torch.ops.aten.sym_size,
+    "aten::storage_offset": torch.ops.aten.sym_storage_offset,
+    "aten::stride": torch.ops.aten.sym_stride,
 }
 
 
@@ -232,13 +229,6 @@ def get_op_overload(node: torch._C.Node):
     try:
         op_overload_mod = getattr(torch.ops, ns)
         op_overload_packet = getattr(op_overload_mod, op_name)
-
-        # To match the behavior of direct export, we replace specialized operator
-        # with its symbolic counterpart if exists.
-        if op_overload_packet in _TORCH_SPECIALIZED_OP_TO_SYMBOLIC_OP:
-            op_overload_packet = _TORCH_SPECIALIZED_OP_TO_SYMBOLIC_OP[
-                op_overload_packet
-            ]
 
         if override:
             op_overload = getattr(op_overload_packet, override)
@@ -949,6 +939,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
             self.name_to_non_tensor_attributes,
         )
         gm = graph_converter.convert()
+        print(gm)
         ep = self.retrace_as_exported_program(
             gm, graph_converter.name_to_tensor_constants
         )
