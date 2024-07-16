@@ -984,8 +984,16 @@ def register_vmap(
         per output that specifies if the output has the vmapped dimension and what index it is in.
 
     Examples:
-
-        >>> @torch.library.custom_op("_torch_testing::numpy_cube", mutates_args=())
+        >>> import torch
+        >>> import numpy as np
+        >>> from torch import Tensor
+        >>> from typing import Tuple
+        >>>
+        >>> def to_numpy(tensor):
+        >>>     return tensor.cpu().numpy()
+        >>>
+        >>> lib = torch.library.Library("mylib", "FRAGMENT")
+        >>> @torch.library.custom_op("mylib::numpy_cube", mutates_args=())
         >>> def numpy_cube(x: Tensor) -> Tuple[Tensor, Tensor]:
         >>>     x_np = to_numpy(x)
         >>>     dx = torch.tensor(3 * x_np ** 2, device=x.device)
@@ -998,9 +1006,9 @@ def register_vmap(
         >>> numpy_cube.register_vmap(numpy_cube_vmap)
 
         >>> x = torch.randn(3)
-        >>> torch.vamp(numpy_cube)(x)
+        >>> torch.vmap(numpy_cube)(x)
 
-        >>> @torch.library.custom_op("_torch_testing::numpy_mul", mutates_args=())
+        >>> @torch.library.custom_op("mylib::numpy_mul", mutates_args=())
         >>> def numpy_mul(x: Tensor, y: Tensor) -> Tensor:
         >>>     return torch.tensor(to_numpy(x) * to_numpy(y), device=x.device)
         >>>
@@ -1015,7 +1023,7 @@ def register_vmap(
         >>> numpy_mul.register_vmap(numpy_mul_vmap)
         >>> x = torch.randn(3)
         >>> y = torch.randn(3)
-        >>> torch.vamp(numpy_mul)(x, y)
+        >>> torch.vmap(numpy_mul)(x, y)
 
     .. note::
 
