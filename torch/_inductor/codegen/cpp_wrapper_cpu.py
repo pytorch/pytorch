@@ -15,7 +15,6 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 import torch._ops
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey
 from .. import config, ir
-from ..codecache import CudaKernelParamCache
 from ..utils import _align, ALIGN_BYTES, cache_on_self, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
@@ -1284,36 +1283,6 @@ class CppWrapperCpu(WrapperCodeGen):
             self.generate_c_shim_extern_kernel_call(kernel, args)
         else:
             self.writeline(self.wrap_kernel_call(kernel, args))
-
-    def generate_user_defined_triton_kernel(
-        self, kernel_name, grid, configs, args, triton_meta, raw_args
-    ):
-        assert len(grid) != 0
-        if len(grid) == 1:
-            grid_decision = grid[0]
-        else:
-            meta = CudaKernelParamCache.get(kernel_name)
-            assert meta is not None
-            grid_decision = None
-            for i, c in enumerate(configs):
-                if all(arg == meta["meta"][key] for key, arg in c.kwargs.items()):
-                    grid_decision = grid[i]
-                    break
-            assert grid_decision is not None
-
-        arg_types = [
-            arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
-            for arg in raw_args
-        ]
-        self.generate_kernel_call(
-            kernel_name,
-            args,
-            arg_types=arg_types,
-            grid=grid_decision,
-            cuda=True,
-            triton=True,
-            triton_meta=triton_meta,
-        )
 
     def generate_scatter_fallback(
         self,

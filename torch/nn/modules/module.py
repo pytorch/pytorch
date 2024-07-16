@@ -493,8 +493,8 @@ class Module:
         super().__setattr__ for all other attributes.
         """
         super().__setattr__("training", True)
-        super().__setattr__("_parameters", OrderedDict())
-        super().__setattr__("_buffers", OrderedDict())
+        super().__setattr__("_parameters", dict())
+        super().__setattr__("_buffers", dict())
         super().__setattr__("_non_persistent_buffers_set", set())
         super().__setattr__("_backward_pre_hooks", OrderedDict())
         super().__setattr__("_backward_hooks", OrderedDict())
@@ -508,7 +508,7 @@ class Module:
         super().__setattr__("_state_dict_pre_hooks", OrderedDict())
         super().__setattr__("_load_state_dict_pre_hooks", OrderedDict())
         super().__setattr__("_load_state_dict_post_hooks", OrderedDict())
-        super().__setattr__("_modules", OrderedDict())
+        super().__setattr__("_modules", dict())
 
         if self.call_super_init:
             super().__init__(*args, **kwargs)
@@ -723,6 +723,63 @@ class Module:
                 raise AttributeError("`" + item + "` is not " "an nn.Module")
 
         return mod
+
+    def set_submodule(self, target: str, module: "Module") -> None:
+        """
+        Set the submodule given by ``target`` if it exists, otherwise throw an error.
+
+        For example, let's say you have an ``nn.Module`` ``A`` that
+        looks like this:
+
+        .. code-block:: text
+
+            A(
+                (net_b): Module(
+                    (net_c): Module(
+                        (conv): Conv2d(16, 33, kernel_size=(3, 3), stride=(2, 2))
+                    )
+                    (linear): Linear(in_features=100, out_features=200, bias=True)
+                )
+            )
+
+        (The diagram shows an ``nn.Module`` ``A``. ``A`` has a nested
+        submodule ``net_b``, which itself has two submodules ``net_c``
+        and ``linear``. ``net_c`` then has a submodule ``conv``.)
+
+        To overide the ``Conv2d`` with a new submodule ``Linear``, you
+        would call
+        ``set_submodule("net_b.net_c.conv", nn.Linear(33, 16))``.
+
+        Args:
+            target: The fully-qualified string name of the submodule
+                to look for. (See above example for how to specify a
+                fully-qualified string.)
+            module: The module to set the submodule to.
+
+        Raises:
+            ValueError: If the target string is empty
+            AttributeError: If the target string references an invalid
+                path or resolves to something that is not an
+                ``nn.Module``
+        """
+        if target == "":
+            raise ValueError("Cannot set the submodule without a target name!")
+
+        atoms: List[str] = target.split(".")
+        name = atoms.pop(-1)
+        mod: torch.nn.Module = self
+
+        for item in atoms:
+            if not hasattr(mod, item):
+                raise AttributeError(
+                    mod._get_name() + " has no attribute `" + item + "`"
+                )
+
+            mod = getattr(mod, item)
+
+            if type(mod) is not torch.nn.Module:
+                raise AttributeError("`" + item + "` is not an nn.Module")
+        setattr(mod, name, module)
 
     def get_parameter(self, target: str) -> "Parameter":
         """Return the parameter given by ``target`` if it exists, otherwise throw an error.
@@ -2811,7 +2868,7 @@ class Module:
 
         # replicas do not have parameters themselves, the replicas reference the original
         # module.
-        replica._parameters = OrderedDict()
+        replica._parameters = dict()
         replica._buffers = replica._buffers.copy()
         replica._modules = replica._modules.copy()
         replica._is_replica = True  # type: ignore[assignment]

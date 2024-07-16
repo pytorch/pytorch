@@ -264,18 +264,6 @@ elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
-# temp workarounds for https://github.com/pytorch/pytorch/issues/126692, remove when fixed
-if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
-  pushd test
-  CUDA_VERSION=$(python -c "import torch; print(torch.version.cuda)")
-  if [ "$CUDA_VERSION" == "12.4" ]; then
-    ISCUDA124="cu124"
-  else
-    ISCUDA124=""
-  fi
-  popd
-fi
-
 test_python_legacy_jit() {
   time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
   assert_git_not_dirty
@@ -393,7 +381,7 @@ test_inductor_cpp_wrapper_abi_compatible() {
     --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv"
   python benchmarks/dynamo/check_accuracy.py \
     --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv" \
-    --expected "benchmarks/dynamo/ci_expected_accuracy/${ISCUDA124}/inductor_timm_training.csv"
+    --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_timm_training.csv"
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -555,10 +543,10 @@ test_single_dynamo_benchmark() {
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${ISCUDA124}/${TEST_CONFIG}_${name}.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${TEST_CONFIG}_${name}.csv"
     python benchmarks/dynamo/check_graph_breaks.py \
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${ISCUDA124}/${TEST_CONFIG}_${name}.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${TEST_CONFIG}_${name}.csv"
   fi
 }
 
@@ -587,10 +575,14 @@ test_dynamo_benchmark() {
     test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
   else
     if [[ "${TEST_CONFIG}" == *cpu_inductor* ]]; then
+      local dt="float32"
+      if [[ "${TEST_CONFIG}" == *amp* ]]; then
+        dt="amp"
+      fi
       if [[ "${TEST_CONFIG}" == *freezing* ]]; then
-        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 --freezing "$@"
+        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" --freezing "$@"
       else
-        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
+        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" "$@"
       fi
     elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
@@ -614,7 +606,7 @@ test_inductor_torchbench_smoketest_perf() {
     --bfloat16 --inference --inductor --only moco --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
   python benchmarks/dynamo/check_accuracy.py \
     --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv" \
-    --expected "benchmarks/dynamo/ci_expected_accuracy/${ISCUDA124}/inductor_torchbench_inference.csv"
+    --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
 
   python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
     --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
@@ -629,13 +621,8 @@ test_inductor_torchbench_smoketest_perf() {
   # https://github.com/pytorch/pytorch/actions/runs/7158691360/job/19491437314,
   # and thus we lower its threshold to reduce flakiness. If this continues to be a problem,
   # we switch to use some other model.
-  # Use 4.7 for cuda 12.4, change back to 4.9 after fixing https://github.com/pytorch/pytorch/issues/126692
-  if [ "$CUDA_VERSION" == "12.4" ]; then
-    THRESHOLD=4.7
-  else
-    THRESHOLD=4.9
-  fi
-  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t $THRESHOLD
+  # lowering threshold from 4.9 to 4.7 for cu124. Will bump it up after cuda 12.4.0->12.4.1 update
+  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 4.7
 
   # Check memory compression ratio for a few models
   for test in hf_Albert timm_vision_transformer; do
@@ -654,7 +641,7 @@ test_inductor_torchbench_smoketest_perf() {
       --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${ISCUDA124}/inductor_huggingface_training.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_huggingface_training.csv"
   done
 }
 
@@ -1287,6 +1274,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   fi
   install_torchtext
   install_torchvision
+  TORCH_CUDA_ARCH_LIST="8.0;8.6" pip_install git+https://github.com/pytorch/ao.git
   id=$((SHARD_NUMBER-1))
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74

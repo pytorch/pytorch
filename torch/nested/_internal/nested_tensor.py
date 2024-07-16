@@ -200,6 +200,9 @@ class NestedTensor(torch.Tensor):
     def _min_seqlen(self):
         return self._get_min_seqlen()
 
+    def data_ptr(self) -> int:
+        return self._values.data_ptr()
+
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
         grad_fn_str = (

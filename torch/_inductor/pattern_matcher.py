@@ -1060,7 +1060,10 @@ class ReplacementPatternEntry(PatternEntry):
             last_node = min(indices, key=operator.itemgetter(0))[1]
 
         def percolate_tags(
-            node: torch.fx.Node, recompute_tag: str, input_stops: Set[torch.fx.Node]
+            node: torch.fx.Node,
+            tag_name: str,
+            tag_value: str,
+            input_stops: Set[torch.fx.Node],
         ) -> None:
             queue = [node]
             visited = set()
@@ -1073,7 +1076,7 @@ class ReplacementPatternEntry(PatternEntry):
                     and hasattr(arg, "meta")
                 ):
                     visited.add(arg)
-                    arg.meta["recompute"] = recompute_tag
+                    arg.meta[tag_name] = tag_value
                     queue.extend(arg.all_input_nodes)
 
         with graph.inserting_before(last_node):
@@ -1113,8 +1116,9 @@ class ReplacementPatternEntry(PatternEntry):
                     # many to many, there is no easy way to correctly map the
                     # recomputable tags. It is possible in some scenarios that we
                     # incorrectly tag some nodes as recomputables.
-                    if "recompute" in old.meta:
-                        percolate_tags(new, old.meta["recompute"], set(args))
+                    for tag_name in ["recompute", "ac_graph_id"]:
+                        if tag_name in old.meta:
+                            percolate_tags(new, tag_name, old.meta[tag_name], set(args))
 
                     old.replace_all_uses_with(new)
                     graph.erase_node(old)

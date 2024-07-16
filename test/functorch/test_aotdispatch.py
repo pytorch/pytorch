@@ -72,6 +72,7 @@ from torch.testing._internal.common_utils import (
     xfail_inherited_tests,
     xfailIfTorchDynamo,
 )
+from torch.testing._internal.custom_tensor import ConstantExtraMetadataTensor
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.optests import (
     _test_aot_autograd_forwards_backwards_helper,
@@ -777,6 +778,208 @@ def forward(self, primals_1):
         (x_test * x_test_view).sum().backward()
         self.assertEqual(x_ref.grad, x_test.grad)
         self.assertEqual(x_ref_view.grad, x_test_view.grad)
+
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
+    def test_nested_subclasses(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x.sin().cos()
+
+        a = torch.ones(4, requires_grad=True)
+        a2 = a.clone().detach().requires_grad_()
+        aa = TwoTensor(a, a2)
+        aa2 = aa.clone().detach().requires_grad_()
+        aaaa = TwoTensor(aa, aa2)
+        out = f(aaaa)
+        self.assertTrue(isinstance(out, TwoTensor))
+        self.assertTrue(isinstance(out.a, TwoTensor))
+        self.assertTrue(isinstance(out.b, TwoTensor))
+        self.assertTrue(isinstance(out.a.a, torch.Tensor))
+        self.assertTrue(isinstance(out.a.b, torch.Tensor))
+        self.assertTrue(isinstance(out.b.a, torch.Tensor))
+        self.assertTrue(isinstance(out.b.b, torch.Tensor))
+
+        out.sum().backward()
+        self.assertTrue(isinstance(aaaa.grad, TwoTensor))
+        self.assertTrue(isinstance(aaaa.grad.a, TwoTensor))
+        self.assertTrue(isinstance(aaaa.grad.b, TwoTensor))
+
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
+    def test_nested_subclasses_non_nested_grad(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x.sin().cos()
+
+        a = torch.ones(4, requires_grad=True)
+        a2 = a.clone().detach().requires_grad_()
+        a3 = a.clone().detach().requires_grad_()
+        a4 = a.clone().detach().requires_grad_()
+        new_aa = TwoTensor(a3, a4)
+        aa = TwoTensor(a, a2)
+
+        aa2 = aa.clone().detach().requires_grad_()
+        aaaa = TwoTensor(aa, aa2)
+        out = f(new_aa)
+        new_out = out + aaaa
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "The grad inputs should be same tensor subclass type as forward output",
+        ):
+            new_out.sum().backward()
+
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
+    def test_custom_tensor_metadata(self):
+        def f(x):
+            x_elem = x.elem
+            x_elem_elem = x_elem.elem
+            x_elem_metadata = x_elem.constant_attribute
+            return x * x_elem * x_elem_elem * x_elem_metadata
+
+        a = torch.ones(4, requires_grad=True)
+        custom_a = ConstantExtraMetadataTensor(a)
+        custom_a.constant_attribute = 6
+        custom_aa = ConstantExtraMetadataTensor(custom_a)
+        custom_aa.constant_attribute = 4
+
+        custom_aa_compile = custom_aa.clone().detach().requires_grad_()
+        custom_aa_compile.elem.constant_attribute = 6
+        out_eager = f(custom_aa)
+
+        compiled_f = torch.compile(f, backend="aot_eager")
+        out = compiled_f(custom_aa_compile)
+
+        self.assertTrue(torch.allclose(out_eager, out))
+
+        out.sum().backward()
+
+        self.assertTrue(isinstance(custom_aa_compile.grad, ConstantExtraMetadataTensor))
+        self.assertTrue(
+            isinstance(custom_aa_compile.grad.elem, ConstantExtraMetadataTensor)
+        )
+
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
+    def test_nested_subclasses_complicated_inps(self):
+        def f(x, y, z):
+            temp = x + y
+            temp_plain = x.a + y.b
+            res = temp.sum() + temp_plain.sum()
+            return x.sin().cos() + res
+
+        x = torch.ones(4, requires_grad=True)
+        x2 = x.clone().detach().requires_grad_()
+        xx = TwoTensor(x, x2)
+        xx2 = xx.clone().detach().requires_grad_()
+
+        x_nested = TwoTensor(xx, xx2)
+        x_nested_compile = x_nested.clone().detach().requires_grad_()
+
+        y_nested = x_nested.clone().detach().requires_grad_()
+        y_nested_compile = y_nested.clone().detach().requires_grad_()
+
+        z = x.clone().detach().requires_grad_()
+        z_compile = z.clone().detach().requires_grad_()
+
+        out_eager = f(x_nested, y_nested, z)
+        compiled_f = torch.compile(f, backend="aot_eager")
+        out = compiled_f(x_nested_compile, y_nested_compile, z_compile)
+        self.assertTrue(torch.allclose(out_eager, out))
+
+        self.assertTrue(isinstance(out, TwoTensor))
+        self.assertTrue(isinstance(out.a, TwoTensor))
+        self.assertTrue(isinstance(out.b, TwoTensor))
+        self.assertTrue(isinstance(out.a.a, torch.Tensor))
+        self.assertTrue(isinstance(out.a.b, torch.Tensor))
+        self.assertTrue(isinstance(out.b.a, torch.Tensor))
+        self.assertTrue(isinstance(out.b.b, torch.Tensor))
+
+        out.sum().backward()
+        out_eager.sum().backward()
+
+        self.assertTrue(isinstance(x_nested_compile.grad, TwoTensor))
+        self.assertTrue(isinstance(x_nested_compile.grad.a, TwoTensor))
+        self.assertTrue(isinstance(x_nested_compile.grad.b, TwoTensor))
+
+        self.assertTrue(isinstance(y_nested_compile.grad, TwoTensor))
+        self.assertTrue(isinstance(y_nested_compile.grad.a, TwoTensor))
+        self.assertTrue(isinstance(y_nested_compile.grad.b, TwoTensor))
+
+        self.assertTrue(torch.allclose(x_nested_compile.grad.a.a, x_nested.grad.a.a))
+        self.assertTrue(torch.allclose(x_nested_compile.grad.a.b, x_nested.grad.a.b))
+        self.assertTrue(torch.allclose(y_nested_compile.grad.a.a, y_nested.grad.a.a))
+        self.assertTrue(torch.allclose(y_nested_compile.grad.a.b, y_nested.grad.a.b))
+
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
+    def test_nested_subclasses_complicated_inps_mixed(self):
+        def f(x, y):
+            y_elem = y.elem
+            y_elem_elem = y_elem.elem
+            y_elem_metadata = y_elem.constant_attribute
+            return y * y_elem * y_elem_elem * y_elem_metadata + x
+
+        x = torch.ones(4, requires_grad=True)
+        x2 = x.clone().detach().requires_grad_()
+        xx = TwoTensor(x, x2)
+        xx2 = xx.clone().detach().requires_grad_()
+
+        x_nested = TwoTensor(xx, xx2)
+        x_nested_compile = x_nested.clone().detach().requires_grad_()
+
+        a = torch.ones(4, requires_grad=True)
+        custom_a = ConstantExtraMetadataTensor(a)
+        custom_a.constant_attribute = 6
+        custom_aa = ConstantExtraMetadataTensor(custom_a)
+        custom_aa.constant_attribute = 4
+
+        custom_aa_compile = custom_aa.clone().detach().requires_grad_()
+        custom_aa_compile.constant_attribute = 4
+        custom_aa_compile.elem.constant_attribute = 6
+
+        compiled_f = torch.compile(f, backend="aot_eager")
+        out_eager = f(x_nested, custom_aa)
+        out = compiled_f(x_nested_compile, custom_aa_compile)
+        self.assertTrue(torch.allclose(out_eager, out))
+
+        out.sum().backward()
+        out_eager.sum().backward()
+
+        self.assertTrue(torch.allclose(x_nested_compile.grad, x_nested.grad))
+        self.assertTrue(torch.allclose(custom_aa_compile.grad, custom_aa.grad))
+
+    @skipIfTorchDynamo("This test suite already uses dynamo")
+    def test_composite_impl_compile(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, a):
+                return self.linear(a)
+
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        fw_graph = self.verify_aot_autograd(Foo(), inp, test_mutation=True)
+        inp = [torch.ones(3, 3, requires_grad=False)]
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, primals_1, primals_2, primals_3):
+    t = torch.ops.aten.t.default(primals_1);  primals_1 = None
+    addmm = torch.ops.aten.addmm.default(primals_2, primals_3, t);  primals_2 = None
+    return [addmm, primals_3, t]""",
+        )
+
+        with torch.inference_mode():
+            fw_graph = self.verify_aot_autograd(Foo(), inp, test_mutation=True)
+            inp = [torch.ones(3, 3, requires_grad=False)]
+            self.assertExpectedInline(
+                fw_graph.code.strip(),
+                """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    addmm = torch.ops.aten.addmm.default(arg1_1, arg2_1, t);  arg1_1 = arg2_1 = t = None
+    return (addmm,)""",
+            )
 
     def test_outputs_are_aliased(self):
         # Tensor, None, int
