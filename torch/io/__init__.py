@@ -4,6 +4,7 @@ from typing import Union, Type
 from typing_extensions import TypeGuard  # Python 3.10+
 
 from .file import *
+from .hdfs import HDFSOpener
 from .opener import Opener
 
 __all__ = [
@@ -15,7 +16,7 @@ __all__ = [
     "check_seekable"
 ]
 
-supported_protocol = {}
+supported_protocol = {"hdfs": HDFSOpener}
 
 
 def is_path(file_like) -> TypeGuard[Union[str, os.PathLike]]:
