@@ -19,6 +19,8 @@ __all__ = [
 
 NUMERIC_DEBUG_HANDLE_KEY = "_numeric_debug_handle"
 
+log = logging.getLogger(__name__)
+
 
 def generate_numeric_debug_handle(graph_module: GraphModule) -> None:
     """Attach numeric_debug_handle_id for all nodes in the model except for placeholder node
@@ -210,7 +212,7 @@ def compare_results(
     comparisons = {}
     for debug_handle, (ref_name, ref_stack, ref_stats) in ref_results.items():
         if debug_handle not in actual_results:
-            logging.debug(
+            log.debug(
                 "Cannot compare for handle %s because it wasn't found in the transformed model",
                 debug_handle,
             )
