@@ -1751,6 +1751,8 @@ coverage_ignore_functions = [
     "verify_aten_graph",
     # torch.optim.adadelta
     "adadelta",
+    # torch.optim.adafactor
+    "adafactor",
     # torch.optim.adagrad
     "adagrad",
     # torch.optim.adam
@@ -3017,6 +3019,8 @@ coverage_ignore_classes = [
     "OnnxTestCaseRepro",
     # torch.optim.adadelta
     "Adadelta",
+    # torch.optim.adafactor
+    "Adafactor",
     # torch.optim.adagrad
     "Adagrad",
     # torch.optim.adam
