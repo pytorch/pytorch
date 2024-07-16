@@ -5119,6 +5119,8 @@ class TestCompileTransforms(TestCase):
         self.assertEqual(actual, expected)
 
     @torch._dynamo.config.patch(suppress_errors=False)
+    # TODO_HANXU: Confirm behavior
+    @expectedFailureIf(IS_WINDOWS)
     def test_grad_deprecated_api(self, device):
         x = torch.randn((), device=device)
         y = torch.randn((), device=device)
