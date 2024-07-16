@@ -1469,7 +1469,7 @@ calc_igammac_grada(scalar_t a, scalar_t x) {
 
   // boundary values following Stan
   // note that in Stan, a is strictly positive and x is non-negative
-  if (::isnan(a) || ::isnan(x)) {
+  if (std::isnan(a) || std::isnan(x)) {
     return std::numeric_limits<scalar_t>::quiet_NaN();
   }
   else if ((a <= ZERO) || (x < ZERO)) {
@@ -1517,7 +1517,7 @@ calc_igamma_grada(scalar_t a, scalar_t x) {
 
   // boundary values following Stan
   // note that in Stan, a is strictly positive and x is non-negative
-  if (::isnan(a) || ::isnan(x)) {
+  if (std::isnan(a) || std::isnan(x)) {
     return std::numeric_limits<scalar_t>::quiet_NaN();
   }
   else if ((a <= ZERO) || (x < ZERO)) {
