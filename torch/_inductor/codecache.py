@@ -1924,14 +1924,15 @@ class AotCodeCompiler:
 
                 from torch._inductor.package import package_aoti
 
-                package_constants = {
-                    name: graph.get_original_value_of_constant(name)
-                    for name in graph.constants.keys()
-                    if name not in graph.folded_constants
-                }
-                archive_path = package_aoti(
-                    os.path.split(input_path)[0], package_constants
-                )
+                if use_mmap_weights:
+                    weight_file = (
+                        os.path.splitext(input_path)[0] + "_serialized_weights.bin"
+                    )
+                    with open(weight_file, "wb") as f_weights:
+                        f_weights.write(serialized_weights)
+                        f_weights.write(struct.pack("q", magic_number))
+
+                archive_path = package_aoti(os.path.split(input_path)[0])
                 return archive_path
 
             # TODO: replace this with using the CppBuilder above

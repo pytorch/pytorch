@@ -8,6 +8,7 @@ from torch._inductor import config
 from torch._inductor.package import load_package
 from torch._inductor.test_case import TestCase
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import IS_FBCODE
 from torch.testing._internal.triton_utils import HAS_CUDA
 
 try:
@@ -101,7 +102,7 @@ class AOTInductorTestsTemplate:
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
 
-@unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
+@unittest.skipIf(sys.platform == "darwin" or IS_FBCODE, "No CUDA on MacOS")
 class AOTInductorTestPackagedABICompatibleCuda(TestCase):
     device = "cuda"
     check_model = check_model
@@ -114,6 +115,7 @@ copy_tests(
 )
 
 
+@unittest.skipIf(IS_FBCODE, "This is for OSS only")
 class AOTInductorTestPackagedABICompatibleCpu(TestCase):
     device = "cpu"
     check_model = check_model

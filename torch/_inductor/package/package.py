@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Callable, List, Optional, Union
 
 import torch
 import torch._inductor
@@ -138,26 +138,22 @@ def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
 
     _run_command_and_check(link_cmd)
 
-    # TODO: load constants w/ mmap
-    # tmp_file = os.path.join(tmp_dir, os.path.join(tmp_dir, CONSTANTS_DIR, "constants.pt"))
-    # constants = torch.load(tmp_file, mmap=True)
-    # print(constants.keys())
+    # mmapped weights
+    serialized_weights_filename = file_name + "_serialized_weights.bin"
+    if serialized_weights_filename in aoti_files:
+        with open(serialized_weights_filename, "rb") as f_weights:
+            serialized_weights = f_weights.read()
 
-    # serialized_weights = b"".join(
-    #     _to_bytes(constant) for constant in constants.values()
-    # )
-
-    # with open(output_so, "a+b") as f_so:
-    #     so_size = f_so.tell()
-    #     # Page align the weights
-    #     f_so.write(b" " * (16384 - so_size % 16384))
-    #     f_so.write(serialized_weights)
-    #     f_so.write(struct.pack("q", magic_number))
+        with open(output_so, "a+b") as f_so:
+            so_size = f_so.tell()
+            # Page align the weights
+            f_so.write(b" " * (16384 - so_size % 16384))
+            f_so.write(serialized_weights)
 
     return output_so
 
 
-def package_aoti(aoti_output_dir: str, constants: Dict[str, Any]) -> str:
+def package_aoti(aoti_output_dir: str) -> str:
     """
     Saves the AOTInductor generated files to the PT2Archive format.
     """
@@ -185,13 +181,6 @@ def package_aoti(aoti_output_dir: str, constants: Dict[str, Any]) -> str:
             for path in package_files:
                 filename = os.path.basename(path)
                 archive_writer.write_file(f"{AOTINDUCTOR_DIR}{filename}", path)
-
-        # For saving constants for mmap
-        # buffer = io.BytesIO()
-        # torch.save(constants, buffer, _use_new_zipfile_serialization=True)
-        # archive_writer.writestr(
-        #     os.path.join(CONSTANTS_DIR, "constants.pt"), buffer.getvalue()
-        # )
 
         return archive_path
 
