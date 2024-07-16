@@ -966,6 +966,20 @@ class TestConverter(TestCase):
         # Cannot script variable length inputs.
         self._check_equal_ts_ep_converter(func2, tuple(values), ["trace"])
 
+    def test_dict_input(self):
+        # TorchScript supports index type as ints while not supporting `str`
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, inp: Dict[int, torch.Tensor]):
+                return inp[1] + inp[3]
+
+        inp = ({1: torch.randn(3, 2), 3: torch.randn(3, 2)},)
+
+        self._check_equal_ts_ep_converter(Mod(), inp)
+
 
 if __name__ == "__main__":
     run_tests()

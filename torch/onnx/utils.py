@@ -998,19 +998,25 @@ def _get_param_count_list(method_graph, args_params):
 def _check_flatten_did_not_remove(original, jit_flattened):
     """torch.jit._flatten removes None. Check if it did so in this case."""
 
+    # torch.jit._flatten converts both keys and values to args
+    # so we keep track of #keys here.
+    num_dict_keys = 0
+
     @_beartype.beartype
     def flatten(x):
         if isinstance(x, (list, tuple)):
             for inner in x:
                 yield from flatten(inner)
         elif isinstance(x, dict):
+            nonlocal num_dict_keys
+            num_dict_keys += len(x)
             for inner in x.values():
                 yield from flatten(inner)
         else:
             yield x
 
     flattened_with_none = list(flatten(original))
-    num_none = len(flattened_with_none) - len(jit_flattened)
+    num_none = len(flattened_with_none) + num_dict_keys - len(jit_flattened)
     assert num_none >= 0
     if num_none:
         raise ValueError(
