@@ -685,15 +685,9 @@ class NNModuleVariable(VariableTracker):
                         )
                     )
 
+                # slice on nn module results in a creation of new module instance, so we need to make it sourceless
                 new_module = module[args[0].as_python_constant()]
-                new_module_variable = tx.output.register_attr_or_module(
-                    new_module,
-                    f"{self}.__getitem__(slice)",
-                    source=NNModuleSource(
-                        GetItemSource(self.source, args[0].as_python_constant())
-                    ),
-                )
-                return new_module_variable
+                return variables.UnspecializedNNModuleVariable(new_module)
 
             from .tensor import SymNodeVariable
 
