@@ -150,7 +150,7 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
     def test_managed_modules_single(self):
         model = MLP(8)
         # Assume calling `fully_shard` on `model`
-        managed_modules = _get_managed_modules(model)
+        managed_modules = _get_managed_modules((model,))
         expected_managed_modules = list(model.modules())
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
@@ -159,7 +159,7 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         model = nn.Sequential(*[MLP(8) for _ in range(2)])
         fully_shard(model[0])
         # Assume calling `fully_shard` on `model`
-        managed_modules = _get_managed_modules(model)
+        managed_modules = _get_managed_modules((model,))
         expected_managed_modules = list(model[1].modules()) + [model]
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
@@ -169,7 +169,7 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         replicate(model[0])
         fully_shard(model[2])
         # Assume calling `fully_shard` on `model`
-        managed_modules = _get_managed_modules(model)
+        managed_modules = _get_managed_modules((model,))
         expected_managed_modules = list(model[1].modules()) + [model]
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
@@ -178,10 +178,25 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         mlp = MLP(8)
         model = nn.Sequential(mlp, mlp)  # duplicate MLP
         # Assume calling `fully_shard` on `model`
-        managed_modules = _get_managed_modules(model)
+        managed_modules = _get_managed_modules((model,))
         # Check that the duplicate module is only counted once
         expected_managed_modules = list(mlp.modules()) + [model]
         self._check_managed_modules(managed_modules, expected_managed_modules)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_managed_modules_list_of_mlps(self):
+        model = nn.Sequential(*[MLP(8) for _ in range(5)])
+        # Assume calling `fully_shard` on `[model[0], model[1], model[2]]`
+        managed_modules = _get_managed_modules((model[0], model[1], model[2]))
+        expected_managed_modules = (
+            list(model[0].modules())
+            + list(model[1].modules())
+            + list(model[2].modules())
+        )
+        self._check_managed_modules(managed_modules, expected_managed_modules)
+        # Assume calling `fully_shard` on `[model[1], model[3]]`
+        managed_modules = _get_managed_modules((model[1], model[3]))
+        expected_managed_modules = list(model[1].modules()) + list(model[3].modules())
 
     def _check_managed_modules(
         self,
@@ -199,7 +214,7 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         model[2].in_proj.weight = model[1].in_proj.weight
         model[1].buffer = model[2].buffer
         # Assume calling `fully_shard` on `model`
-        managed_modules = _get_managed_modules(model)
+        managed_modules = _get_managed_modules((model,))
         params, buffers = _get_managed_states(managed_modules)
         expected_params = list(model.parameters())  # de-dups shared
         expected_buffers = list(model.buffers())  # de-dups shared
@@ -210,10 +225,28 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         model = nn.Sequential(*[MLP(8, with_buffer=True) for _ in range(2)])
         fully_shard(model[0])
         # Assume calling `fully_shard` on `model`
-        managed_modules = _get_managed_modules(model)
+        managed_modules = _get_managed_modules((model,))
         params, buffers = _get_managed_states(managed_modules)
         expected_params = list(model[1].parameters())
         expected_buffers = list(model[1].buffers())
+        self._check_managed_states(params, buffers, expected_params, expected_buffers)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_managed_states_list_of_mlps(self):
+        model = nn.Sequential(*[MLP(8, with_buffer=True) for _ in range(5)])
+        # Assume calling `fully_shard` on `[model[0], model[1], model[2]]`
+        managed_modules = _get_managed_modules((model[0], model[1], model[2]))
+        params, buffers = _get_managed_states(managed_modules)
+        expected_params = (
+            list(model[0].parameters())
+            + list(model[1].parameters())
+            + list(model[2].parameters())
+        )
+        expected_buffers = (
+            list(model[0].buffers())
+            + list(model[1].buffers())
+            + list(model[2].buffers())
+        )
         self._check_managed_states(params, buffers, expected_params, expected_buffers)
 
     def _check_managed_states(
@@ -238,7 +271,7 @@ class TestFullyShardParamModuleInfos(FSDPTestMultiThread):
     def test_get_param_module_infos_shared_params(self):
         model = nn.Sequential(*[MLP(8) for _ in range(2)])
         model[0].in_proj.weight = model[1].in_proj.weight
-        managed_modules = _get_managed_modules(model)
+        managed_modules = _get_managed_modules((model,))
         params, _ = _get_managed_states(managed_modules)
         param_module_infos = _get_param_module_infos(params, model)
         self.assertEqual(len(param_module_infos), len(params))
@@ -282,6 +315,26 @@ class TestFullyShardParamModuleInfos(FSDPTestMultiThread):
             ParamModuleInfo(mlp.out_proj, "weight", [], []),
             ParamModuleInfo(mlp.out_proj, "bias", [], []),
         ]
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_get_param_module_infos_list_of_mlps(self):
+        model = nn.Sequential(*[MLP(8) for _ in range(2)])
+        managed_modules = _get_managed_modules((model[0], model[1]))
+        params, _ = _get_managed_states(managed_modules)
+        param_module_infos = _get_param_module_infos(params, model)
+        self.assertEqual(len(param_module_infos), len(params))
+        expected_param_module_infos = [
+            ParamModuleInfo(model[0].in_proj, "weight", [], []),
+            ParamModuleInfo(model[0].in_proj, "bias", [], []),
+            ParamModuleInfo(model[0].out_proj, "weight", [], []),
+            ParamModuleInfo(model[0].out_proj, "bias", [], []),
+            ParamModuleInfo(model[1].in_proj, "weight", [], []),
+            ParamModuleInfo(model[1].in_proj, "bias", [], []),
+            ParamModuleInfo(model[1].out_proj, "weight", [], []),
+            ParamModuleInfo(model[1].out_proj, "bias", [], []),
+        ]
+        self.assertEqual(len(param_module_infos), len(expected_param_module_infos))
+        self.assertEqual(param_module_infos, expected_param_module_infos)
 
 
 class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
@@ -465,6 +518,15 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
             "FSDP state has already been lazily initialized for 0.in_proj\n"
             "FSDP requires running forward through the root module first"
         )
+        with self.assertRaisesRegex(RuntimeError, regex):
+            root_state._lazy_init()
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_fully_shard_multi_module_root(self):
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard([model[0], model[1]])
+        root_state = fully_shard.state(model[0])
+        regex = "FSDP requires a single root module but got "
         with self.assertRaisesRegex(RuntimeError, regex):
             root_state._lazy_init()
 
