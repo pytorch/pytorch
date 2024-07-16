@@ -436,6 +436,7 @@ class TestProfilerTree(TestCase):
             [memory]""",
         )
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
