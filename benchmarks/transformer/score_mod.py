@@ -36,13 +36,16 @@ class ExperimentConfig:
     calculate_bwd_time: bool
 
     def __post_init__(self):
-        assert len(self.shape) == 4, "Shape must be of length 4"
+        assert (
+            len(self.shape) == 6
+        ), "Shape must be of length 6"  # [B, Hq, M, Hkv, N, D]
 
     def asdict(self):
         # Convert the dataclass instance to a dictionary
         d = asdict(self)
         # Remove the 'calculate_bwd_time' key
         d.pop("calculate_bwd_time", None)
+        d["shape(B,Hq,M,Hkv,N,D)"] = d.pop("shape")
         return d
 
 
@@ -62,6 +65,7 @@ class ExperimentResults:
 class Experiment:
     config: ExperimentConfig
     results: ExperimentResults
+    cal_bandwidth: bool
 
     def asdict(self):
         dict1 = self.config.asdict()
@@ -71,16 +75,21 @@ class Experiment:
 
 def generate_inputs(
     batch_size: int,
-    num_heads: int,
+    q_heads: int,
     q_sequence_length: int,
+    kv_heads: int,
     kv_sequence_length: int,
     head_dim: int,
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
 ):
-    q_shape = (batch_size, q_sequence_length, num_heads * head_dim)
-    kv_shape = (batch_size, kv_sequence_length, num_heads * head_dim)
+    q_shape = (batch_size, q_sequence_length, q_heads * head_dim)
+    kv_shape = (batch_size, kv_sequence_length, kv_heads * head_dim)
+
+    assert q_heads % kv_heads == 0
+
+    num_h_groups = q_heads // kv_heads
 
     make_q = partial(
         torch.rand, q_shape, device=device, dtype=dtype, requires_grad=requires_grad
@@ -90,17 +99,17 @@ def generate_inputs(
     )
     query = (
         make_q()
-        .view(batch_size, q_sequence_length, num_heads, head_dim)
+        .view(batch_size, num_h_groups * q_sequence_length, kv_heads, head_dim)
         .transpose(1, 2)
     )
     key = (
         make_kv()
-        .view(batch_size, kv_sequence_length, num_heads, head_dim)
+        .view(batch_size, kv_sequence_length, kv_heads, head_dim)
         .transpose(1, 2)
     )
     value = (
         make_kv()
-        .view(batch_size, kv_sequence_length, num_heads, head_dim)
+        .view(batch_size, kv_sequence_length, kv_heads, head_dim)
         .transpose(1, 2)
     )
     return query, key, value
@@ -110,12 +119,13 @@ def run_single_experiment(
     config: ExperimentConfig, dynamic=False, max_autotune=False
 ) -> ExperimentResults:
     device = torch.device("cuda")
-    batch_size, num_heads, q_seq_len, head_dim = config.shape
+    batch_size, q_heads, q_seq_len, kv_heads, kv_seq_len, head_dim = config.shape
     query, key, value = generate_inputs(
         batch_size,
-        num_heads,
+        q_heads,
         q_seq_len,
-        q_seq_len,
+        kv_heads,
+        kv_seq_len,
         head_dim,
         config.dtype,
         device,
@@ -175,6 +185,46 @@ def calculate_speedup(results: ExperimentResults, type: str) -> float:
         raise ValueError(f"Invalid type {type}")
 
 
+def calculate_bandwidth(
+    config: ExperimentConfig, results: ExperimentResults, type: str
+) -> float:
+    if type == "fwd":
+        batch_size, q_heads, q_seq_len, kv_heads, kv_seq_len, head_dim = config.shape
+        query_size = (
+            batch_size
+            * q_heads
+            * q_seq_len
+            * head_dim
+            * torch.finfo(config.dtype).bits
+            / 8
+        )
+        kv_size = (
+            batch_size
+            * kv_heads
+            * kv_seq_len
+            * head_dim
+            * torch.finfo(config.dtype).bits
+            / 8
+            * 2
+        )
+        output_size = query_size
+        total_size = (query_size + kv_size + output_size) / 1024 / 1024 / 1024  # In GB
+        time_in_seconds = results.fwd_times.compiled_time / 1e6
+        return total_size / time_in_seconds / 1024
+    else:
+        raise ValueError(f"Invalid type {type}")
+
+
+def calculate_gflops(config: ExperimentConfig, results: ExperimentResults) -> float:
+    (B, Hq, M, Hkv, N, D) = config.shape
+    qk_flops = M * N * D * 2
+    softmax_flops = M * N * 2  # Not counting online softmax overhead
+    o_flops = M * D * N * 2
+    # Not counting split k overhead
+    total_flops = B * Hq * (qk_flops + softmax_flops + o_flops)
+    return total_flops / results.fwd_times.compiled_time / 1e3  # in GFLOPs/
+
+
 def get_func_name(func):
     return func.__name__.split("<locals>.")[-1].split(" at ")[0]
 
@@ -230,6 +280,16 @@ def print_results(results: List[Experiment]):
     # Calculate speedups
     fwd_speedups = [calculate_speedup(r.results, type="fwd") for r in results]
     table_data["fwd_speedup"] = fwd_speedups
+
+    # Calculate mem + computational throughput
+    if results[0].cal_bandwidth:
+        fwd_bandwidth = [
+            calculate_bandwidth(r.config, r.results, type="fwd") for r in results
+        ]
+        table_data["fwd_mem_bw (TB/s)"] = fwd_bandwidth
+        fwd_gflops = [calculate_gflops(r.config, r.results) for r in results]
+        table_data["GFlops/s"] = fwd_gflops
+
     if results[0].config.calculate_bwd_time:
         bwd_speedups = [calculate_speedup(r.results, type="bwd") for r in results]
         table_data["bwd_speedup"] = bwd_speedups
@@ -277,29 +337,48 @@ def generate_experiment_configs(
     calculate_bwd: bool,
     dtype: torch.dtype,
     batch_sizes: List[int],
-    num_heads: List[int],
+    num_heads: List[Tuple[int, int]],
     seq_lens: List[int],
     head_dims: List[int],
     score_mods: List[str],
+    decoding: bool,
+    kv_cache_size: List[int],
 ) -> List[ExperimentConfig]:
-    q_kv_seq_lens = [(i, i) for i in seq_lens]  # only testing q_len == kv_len
+    assert not (calculate_bwd and decoding), "Decoding does not support backward"
+
+    if decoding:
+        q_kv_seq_lens = [(1, i) for i in seq_lens]  # only testing query length == 1
+    else:
+        q_kv_seq_lens = [(i, i) for i in seq_lens]  # only testing q_len == kv_len
     dtypes = [dtype]
     score_mods = generate_score_mods(score_mods)
     all_configs = []
     for (
         bsz,
-        n_heads,
+        (q_heads, kv_heads),
         (q_seq_len, kv_seq_len),
         head_dim,
         score_mod,
         dtype,
     ) in itertools.product(
-        batch_sizes, num_heads, q_kv_seq_lens, head_dims, score_mods, dtypes
+        kv_cache_size if kv_cache_size else batch_sizes,
+        num_heads,
+        q_kv_seq_lens,
+        head_dims,
+        score_mods,
+        dtypes,
     ):
-        assert q_seq_len == kv_seq_len, "Only equal length inputs supported for now."
+        if kv_cache_size:
+            head_size_bytes = torch.finfo(dtype).bits / 8 * head_dim
+            bsz = int(
+                (bsz * 1024 * 1024) // (kv_heads * kv_seq_len * head_size_bytes * 2)
+            )
+            if bsz <= 0:
+                continue
+
         all_configs.append(
             ExperimentConfig(
-                shape=(bsz, n_heads, q_seq_len, head_dim),
+                shape=(bsz, q_heads, q_seq_len, kv_heads, kv_seq_len, head_dim),
                 score_mod=score_mod,
                 dtype=dtype,
                 calculate_bwd_time=calculate_bwd,
@@ -316,7 +395,15 @@ def main(args):
     results = []
     for config in tqdm(
         generate_experiment_configs(
-            args.calculate_bwd, args.dtype, args.b, args.nh, args.s, args.d, args.mods
+            args.calculate_bwd,
+            args.dtype,
+            args.b,
+            args.nh,
+            args.s,
+            args.d,
+            args.mods,
+            args.decoding,
+            args.kv_cache_size,
         )
     ):
         results.append(
@@ -325,6 +412,7 @@ def main(args):
                 run_single_experiment(
                     config, dynamic=args.dynamic, max_autotune=args.max_autotune
                 ),
+                args.cal_bandwidth,
             )
         )
 
@@ -350,7 +438,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "-b", type=int, nargs="+", help="batch sizes", default=[2, 8, 16]
     )
-    parser.add_argument("-nh", type=int, nargs="+", help="# of heads", default=[16])
+    parser.add_argument(
+        "-nh",
+        type=int,
+        nargs="+",
+        help="# of (q heads, kv heads)",
+        default=[(16, 16), (16, 2)],
+    )
     parser.add_argument(
         "-s", type=int, nargs="+", help="sequence lengths", default=[512, 1024, 4096]
     )
@@ -364,6 +458,26 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--max-autotune", action="store_true", help="Turn on max-autotune"
+    )
+    parser.add_argument(
+        "--decoding",
+        action="store_true",
+        help="Benchmark Decoding (query sequence length = 1)",
+    )
+    parser.add_argument(
+        "--kv-cache-size",
+        type=int,
+        nargs="+",
+        required=False,
+        help="""
+key/value cache size in MB.
+Ignores -b batch size and calculate batch size from kv_cache size instead when specified.
+""",
+    )
+    parser.add_argument(
+        "--cal-bandwidth",
+        action="store_true",
+        help="Calculate kernel memory bandwidth & computational throughput. ",
     )
 
     # Parse arguments
