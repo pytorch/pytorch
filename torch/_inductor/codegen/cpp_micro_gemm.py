@@ -343,7 +343,7 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
                     break;
                 {%- endfor %}
                 default:
-                    {{kernel.assert_function}}(false, "Unsupported block_m: ", block_m);
+                    {{kernel.assert_function}}(false, "Unsupported block_m");
                 }
             }
         }
