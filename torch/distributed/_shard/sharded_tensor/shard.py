@@ -18,7 +18,8 @@ class Shard:
         metadata(:class `torch.distributed._shard.sharded_tensor.ShardMetadata`):
             The metadata for the shard, including offsets, lengths and device placement.
     """
-    __slots__ = ['tensor', 'metadata']
+
+    __slots__ = ["tensor", "metadata"]
     tensor: torch.Tensor
     metadata: ShardMetadata
 
@@ -31,7 +32,10 @@ class Shard:
                 f"metadata.shard_lengths: {self.metadata.shard_sizes}, "
             )
         placement_device = self.metadata.placement
-        if placement_device is not None and placement_device.device() != self.tensor.device:
+        if (
+            placement_device is not None
+            and placement_device.device() != self.tensor.device
+        ):
             raise ValueError(
                 f"Local shard tensor device does not match with local Shard's placement! "
                 f"Found local shard tensor device: {self.tensor.device}, "
@@ -39,7 +43,9 @@ class Shard:
             )
 
     @classmethod
-    def from_tensor_and_offsets(cls, tensor: torch.Tensor, shard_offsets: List[int], rank: int):
+    def from_tensor_and_offsets(
+        cls, tensor: torch.Tensor, shard_offsets: List[int], rank: int
+    ):
         """
         Creates a Shard of a ShardedTensor from a local torch.Tensor, shard_offsets and rank.
 
@@ -52,8 +58,6 @@ class Shard:
         shard_sizes = list(tensor.size())
         placement = _remote_device(f"rank:{rank}/{str(tensor.device)}")
         shard_meta = ShardMetadata(
-            shard_offsets=shard_offsets,
-            shard_sizes=shard_sizes,
-            placement=placement
+            shard_offsets=shard_offsets, shard_sizes=shard_sizes, placement=placement
         )
         return Shard(tensor, shard_meta)

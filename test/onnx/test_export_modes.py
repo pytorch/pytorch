@@ -86,26 +86,6 @@ class TestExportModes(pytorch_test_common.ExportTestCase):
         x = torch.ones(3)
         torch.onnx.export(foo, (x,), f)
 
-    @common_utils.skipIfNoCaffe2
-    @common_utils.skipIfNoLapack
-    def test_caffe2_aten_fallback(self):
-        class ModelWithAtenNotONNXOp(nn.Module):
-            def forward(self, x, y):
-                abcd = x + y
-                defg = torch.linalg.qr(abcd)
-                return defg
-
-        x = torch.rand(3, 4)
-        y = torch.rand(3, 4)
-        torch.onnx.export_to_pretty_string(
-            ModelWithAtenNotONNXOp(),
-            (x, y),
-            add_node_names=False,
-            do_constant_folding=False,
-            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK,
-        )
-
-    @common_utils.skipIfCaffe2
     @common_utils.skipIfNoLapack
     def test_aten_fallback(self):
         class ModelWithAtenNotONNXOp(nn.Module):

@@ -143,15 +143,15 @@ class FloorDiv(sympy.Function):
         if isinstance(base, FloorDiv):
             return FloorDiv(base.args[0], base.args[1] * divisor)
 
-        # gcd in sympy is over polynomials, so you'll end up with rationals if
-        # you do this.  Don't.
-        """
-        if isinstance(base, sympy.Add):
-            for a in base.args:
-                gcd = sympy.gcd(a, divisor)
-                if gcd == divisor:
-                    return FloorDiv(base - a, divisor) + a / gcd
-        """
+        # Expands (x + y) // b into x // b + y // b.
+        # This only works if floor is an identity, i.e. x / b is an integer.
+        for term in sympy.Add.make_args(base):
+            quotient = term / divisor
+            if quotient.is_integer and isinstance(divisor, sympy.Integer):
+                # NB: this is correct even if the divisor is not an integer, but it
+                # creates rational expressions that cause problems with dynamic
+                # shapes.
+                return FloorDiv(base - term, divisor) + quotient
 
         try:
             gcd = sympy.gcd(base, divisor)
@@ -502,7 +502,6 @@ class PowByNatural(sympy.Function):
 # base is assumed to be nonnegative, thereby prevent complex numbers from
 # occuring
 class FloatPow(sympy.Function):
-    is_integer = False
     is_real = True
 
     @classmethod
@@ -523,7 +522,6 @@ class FloatPow(sympy.Function):
 # In particular, sympy division is willing to simplify x/x == 1
 # where 1 is an integer, but this must be a float if x was float.
 class FloatTrueDiv(sympy.Function):
-    is_integer = False
     is_real = True
 
     @classmethod
@@ -547,7 +545,6 @@ class FloatTrueDiv(sympy.Function):
 # so just have a different operator
 # NB: Right now, Inductor codegen doesn't implement this correctly lol
 class IntTrueDiv(sympy.Function):
-    is_integer = False
     is_real = True
 
     @classmethod
@@ -633,7 +630,6 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
 
 # NB: this is inconsistent with math.trunc in Python
 class TruncToFloat(sympy.Function):
-    is_integer = False
     is_real = True
 
     @classmethod
@@ -692,7 +688,6 @@ class RoundToInt(sympy.Function):
 
 # NB: Like Round, this only ever returns floats.  ndigits cannot be None
 class RoundDecimal(sympy.Function):
-    is_integer = False
     is_real = True
 
     @classmethod
@@ -704,7 +699,6 @@ class RoundDecimal(sympy.Function):
 
 
 class ToFloat(sympy.Function):
-    is_integer = False
     is_real = True
 
     @classmethod

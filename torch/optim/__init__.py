@@ -37,6 +37,3 @@ del rmsprop  # type: ignore[name-defined] # noqa: F821
 del optimizer  # type: ignore[name-defined] # noqa: F821
 del nadam  # type: ignore[name-defined] # noqa: F821
 del lbfgs  # type: ignore[name-defined] # noqa: F821
-
-
-import torch.optim._multi_tensor

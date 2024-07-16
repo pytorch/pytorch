@@ -7,12 +7,14 @@ import torch.distributed as dist
 from . import (
     debugging_hooks as debugging,
     default_hooks as default,
+    optimizer_overlap_hooks as optimizer_overlap,
     powerSGD_hook as powerSGD,
     quantization_hooks as quantization,
-    optimizer_overlap_hooks as optimizer_overlap,
 )
 
-__all__ = ['DDPCommHookType', 'register_ddp_comm_hook']
+
+__all__ = ["DDPCommHookType", "register_ddp_comm_hook"]
+
 
 def _ddp_comm_hook_wrapper(comm_hook, model, state):
     model.register_comm_hook(state, comm_hook)
@@ -86,13 +88,12 @@ class DDPCommHookType(Enum):
         matrix_approximation_rank=2,
     )
     NOOP = partial(
-        _ddp_comm_hook_wrapper, comm_hook=debugging.noop_hook,
+        _ddp_comm_hook_wrapper,
+        comm_hook=debugging.noop_hook,
     )
 
 
-def register_ddp_comm_hook(
-    comm_hook_type: DDPCommHookType, model, state=None
-):
+def register_ddp_comm_hook(comm_hook_type: DDPCommHookType, model, state=None):
     """
     Register ``ddp_comm_hooks`` to DDP model.
 

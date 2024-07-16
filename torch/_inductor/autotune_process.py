@@ -841,7 +841,11 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
             self.extra_args,
         )
         run_method = getattr(self.DLL, self.kernel_name)
-        run_method.argtypes = [ctypes.c_ulonglong] * len(args)
+        # Assume only size with type ctypes.c_ulonglong in extra_args
+        assert all(isinstance(arg, ctypes.c_ulonglong) for arg in self.extra_args)
+        run_method.argtypes = [ctypes.c_ulonglong] * (
+            len(args) + len(list(self.extra_args))
+        )
 
         # Generate partial function.
         return functools.partial(

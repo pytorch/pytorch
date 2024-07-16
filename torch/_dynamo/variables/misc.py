@@ -13,7 +13,11 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 from .. import config, variables
-from ..bytecode_transformation import create_call_function, create_instruction
+from ..bytecode_transformation import (
+    add_push_null_call_function_ex,
+    create_call_function,
+    create_instruction,
+)
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -51,13 +55,13 @@ class SuperVariable(VariableTracker):
         self.specialized = specialized  # directly get attr from self.typevar if true
 
     def reconstruct(self, codegen):
-        codegen(variables.BuiltinVariable(super))
+        codegen.add_push_null(lambda: codegen(variables.BuiltinVariable(super)))
         codegen(self.typevar)
         if self.objvar is not None:
             codegen(self.objvar)
-            codegen.extend_output(create_call_function(2, True))
+            codegen.extend_output(create_call_function(2, False))
         else:
-            codegen.extend_output(create_call_function(1, True))
+            codegen.extend_output(create_call_function(1, False))
 
     def _resolved_getattr_and_source(self, tx, name):
         assert self.objvar, "1-arg super not implemented"
@@ -204,9 +208,11 @@ class ExceptionVariable(VariableTracker):
         self.args = args
 
     def reconstruct(self, codegen):
-        codegen.load_import_from("builtins", self.exc_type.__name__)
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("builtins", self.exc_type.__name__)
+        )
         codegen.foreach(self.args)
-        codegen.call_function(len(self.args), True)
+        codegen.call_function(len(self.args), False)
 
 
 class UnknownVariable(VariableTracker):
@@ -270,7 +276,7 @@ class ComptimeVariable(VariableTracker):
                 # a free variable that we actually DO have the runtime
                 # value for
                 # tuple(make_cell(ComptimeVar(i)) for i in fn.closure.items)
-                tuple(),
+                (),
             )
             func(ComptimeContext(tx))
         else:
@@ -574,7 +580,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 for x in args
             )
         proxy = tx.output.create_proxy(
-            "call_function", torch.autograd.function.FunctionCtx, tuple(), {}
+            "call_function", torch.autograd.function.FunctionCtx, (), {}
         )
         out = tx.output.side_effects.track_object_new(
             None,
@@ -641,6 +647,47 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                     self.value.needs_input_grad
                 )
         return super().var_getattr(tx, name)
+
+
+class AutogradEngineVariable(UserDefinedObjectVariable):
+    """
+    Represents a torch._C._ImperativeEngine instance.
+    """
+
+    def __init__(
+        self,
+        value,
+        value_type=None,
+        **kwargs,
+    ):
+        super().__init__(value=value, value_type=value_type, **kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "queue_callback":
+            if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+                assert (
+                    tx.one_graph
+                ), "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
+                return variables.UserFunctionVariable(
+                    torch._dynamo.external_utils.FakeCompiledAutogradEngine.queue_callback,
+                    source=self.source,
+                ).call_function(
+                    tx,
+                    (tx.output.side_effects.get_ca_final_callbacks_var(), *args),
+                    kwargs,
+                )
+            else:
+                unimplemented(
+                    "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
+                )
+        else:
+            unimplemented(f"torch._C._ImperativeEngine method: {name}")
 
 
 class LambdaVariable(VariableTracker):
@@ -820,6 +867,20 @@ class PythonModuleVariable(VariableTracker):
             result = hasattr(self.value, name)
             return variables.ConstantVariable.create(result)
         return super().call_hasattr(tx, name)
+
+    def var_getattr(self, tx, name):
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            return tx.output.side_effects.load_attr(self, name)
+
+        from .builder import SourcelessBuilder, VariableBuilder
+
+        attr_value = getattr(self.value, name)
+
+        if self.source:
+            new_source = AttrSource(self.source, name)
+            return VariableBuilder(tx, new_source)(attr_value)
+        else:
+            return SourcelessBuilder.create(tx, attr_value)
 
 
 class TypingVariable(VariableTracker):
@@ -1023,10 +1084,14 @@ class StringFormatVariable(VariableTracker):
         return f"{self.__class__.__name__}({self.format_string!r}, {self.sym_args!r}, {self.sym_kwargs!r})"
 
     def reconstruct(self, codegen):
-        if sys.version_info >= (3, 11):
-            codegen.append_output(create_instruction("PUSH_NULL"))
-        codegen.append_output(codegen.create_load_const(self.format_string))
-        codegen.append_output(codegen.create_load_attr("format"))
+        codegen.extend_output(
+            add_push_null_call_function_ex(
+                [
+                    codegen.create_load_const(self.format_string),
+                    codegen.create_load_attr("format"),
+                ]
+            )
+        )
         codegen(variables.TupleVariable(self.sym_args))
         kwargs = {
             variables.ConstantVariable.create(k): v for k, v in self.sym_kwargs.items()
@@ -1117,9 +1182,11 @@ class StopIterationVariable(VariableTracker):
         self.args = args
 
     def reconstruct(self, codegen):
-        codegen.load_import_from("builtins", "StopIteration")
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("builtins", "StopIteration")
+        )
         codegen.foreach(self.args)
-        codegen.call_function(len(self.args), True)
+        codegen.call_function(len(self.args), False)
 
 
 class ConstantLikeVariable(VariableTracker):

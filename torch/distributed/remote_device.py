@@ -47,7 +47,7 @@ class _remote_device:
             else:
                 raise ValueError(PARSE_ERROR)
         else:
-            raise TypeError(f'Invalid type for remote_device: {type(remote_device)}')
+            raise TypeError(f"Invalid type for remote_device: {type(remote_device)}")
 
         # Do some basic sanity check (no empty string)
         if self._worker_name is not None and not self._worker_name:
@@ -96,34 +96,25 @@ class _remote_device:
     def __repr__(self):
         if self._device is not None:
             if self._worker_name is not None:
-                return f'{self._worker_name}/{self._device}'
+                return f"{self._worker_name}/{self._device}"
             elif self._rank is not None:
-                return f'rank:{self._rank}/{self._device}'
+                return f"rank:{self._rank}/{self._device}"
             else:
                 return str(self._device)
         else:
             if self._worker_name is not None:
-                return f'{self._worker_name}'
+                return f"{self._worker_name}"
             elif self._rank is not None:
-                return f'{self._rank}'
+                return f"{self._rank}"
             else:
-                raise RuntimeError('Invalid state!')
+                raise RuntimeError("Invalid state!")
 
     def __eq__(self, other):
-        if not isinstance(other, _remote_device):
-            return False
-
-        if (
+        return isinstance(other, _remote_device) and (
             self._worker_name == other._worker_name
             and self._device == other._device
             and self._rank == other._rank
-        ):
-            return True
-
-        return False
-
+        )
 
     def __hash__(self):
-        return hash(self._worker_name) ^ \
-            hash(self._device) ^ \
-            hash(self._rank)
+        return hash(self._worker_name) ^ hash(self._device) ^ hash(self._rank)

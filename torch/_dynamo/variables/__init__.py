@@ -9,6 +9,7 @@ from .ctx_manager import (
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     DualLevelContextManager,
+    FSDPParamGroupUseTrainingStateVariable,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
@@ -79,7 +80,11 @@ from .misc import (
     TypingVariable,
     UnknownVariable,
 )
-from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .nn_module import (
+    NNModuleVariable,
+    UnspecializedBuiltinNNModuleVariable,
+    UnspecializedNNModuleVariable,
+)
 
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
@@ -96,6 +101,7 @@ from .user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
+    WeakRefVariable,
 )
 
 __all__ = [
@@ -154,6 +160,7 @@ __all__ = [
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",
+    "UnspecializedBuiltinNNModuleVariable",
     "UnspecializedPythonVariable",
     "UntypedStorageVariable",
     "UserDefinedClassVariable",

@@ -3,12 +3,12 @@
 from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
-
 from torch.distributed._tensor._op_schema import (
     _is_inplace_op,
     OpSchema,
     OpStrategy,
     OutputSharding,
+    PlacementList,
     PlacementStrategy,
     RuntimeSchemaInfo,
     StrategyType,
@@ -373,7 +373,7 @@ def scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # first we always have replicate all for inputs and output
     if len(op_schema.args_strategy) < 3:
         # scatter_.src/scatter.src with src be float number instead of tensor
-        all_replicate: List[Placement] = [Replicate()] * 3
+        all_replicate: PlacementList = [Replicate()] * 3
     else:
         all_replicate = [Replicate()] * 4
     single_mesh_dim_strategies.append(all_replicate)
@@ -400,7 +400,7 @@ def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
     # placement list stores placements of [output, input, index]
     # first we always have replicate all for inputs and output
-    all_replicate: List[Placement] = [Replicate()] * 3
+    all_replicate: PlacementList = [Replicate()] * 3
     single_mesh_dim_strategies.append(all_replicate)
 
     # input sharding, input sharded, index accepts mask partial, output follows index
@@ -408,7 +408,7 @@ def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # index has size 1 on the gather dimension
     if index_shape[dim] == 1:
         index_partial_placement = _MaskPartial(logical_dim_size=input_shape[dim])
-        input_sharding = [
+        input_sharding: PlacementList = [
             index_partial_placement,
             Shard(dim),
             index_partial_placement,
@@ -417,7 +417,7 @@ def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
     # index sharding, input replicated, index sharded, output follows index
     # this only works when the sharding dimension is the gather dimension
-    index_sharding = [Shard(dim), Replicate(), Shard(dim)]
+    index_sharding: PlacementList = [Shard(dim), Replicate(), Shard(dim)]
     single_mesh_dim_strategies.append(index_sharding)
 
     return expand_to_full_mesh_op_strategy(
@@ -514,7 +514,6 @@ def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     follow_placements = _derive_follow_placements_from_tuple_strategy(
         input_tuple_strategy
     )
-    follow_placements = normalize_shard_for_stack(follow_placements, dim)
 
     # create op strategy base on the follow placements
     op_strategy = OpStrategy([])
@@ -523,6 +522,9 @@ def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         DTensorSpec(mesh, tuple(follow_placements))
         for _ in range(len(input_tuple_strategy.childs))
     )
+
+    follow_placements = normalize_shard_for_stack(follow_placements, dim)
+
     op_strategy.strategies.append(
         PlacementStrategy(
             output_specs=DTensorSpec(mesh, tuple(follow_placements)),
