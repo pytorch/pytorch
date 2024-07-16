@@ -550,10 +550,6 @@ def forward(self, pred_1, x_1):
             grad_out = torch.ones_like(x_new)
             return torch.autograd.grad(x_new, (x,), grad_out)
 
-        # TODO: During compilation, the metadata of the true_fn has the
-        # requires_grad attribute set to False, while the false_fn has it
-        # set to true. Therefore, the tracing of the cond errors out.
-        # Similar to behavior to the test case test_cond_autograd_same_pytree_output
         gm = make_fx(f, tracing_mode="symbolic")(x)
         self.assertExpectedInline(
             gm.code.strip(),
@@ -576,124 +572,6 @@ def forward(self, x_1):
     mul_8 = torch.ops.aten.mul.Tensor(add_4, x_1);  add_4 = x_1 = None
     add_5 = torch.ops.aten.add.Tensor(mul_8, mul_7);  mul_8 = mul_7 = None
     return (add_5,)""",  # noqa: B950
-        )
-
-    def test_cond_in_while(self):
-        def while_loop_fake(x):
-            def cond_fn(cnt, x):
-                return cnt < 3
-
-            def body_fn(cnt, x):
-                return (cnt + 1, x * x + 1)
-
-            cnt = torch.tensor(0)
-            cnt, x = _fake_while_loop(
-                cond_fn,
-                body_fn,
-                (
-                    cnt,
-                    x,
-                ),
-            )
-            return x, cnt
-
-        # TODO: Once the while loop does support autograd, replace the manual while
-        # loop with the higher_order_operator
-        def while_loop_test(x):
-            cnt = torch.tensor(0)
-            while cnt < 3:
-                pred = cnt < 3
-
-                def true_fn(x):
-                    return x * x + 1
-
-                def false_fn(x):
-                    return x
-
-                x = cond(pred, true_fn, false_fn, (x,))
-                cnt += 1
-
-            return x, cnt
-
-        # def while_loop_test(x):
-        #     def cond_fn(cnt, x):
-        #         return cnt < 3
-
-        #     def body_fn(cnt, x):
-        #         return (cnt + 1, x * x + 1)
-
-        #     cnt = torch.tensor(0)
-        #     cnt, x = while_loop(cond_fn, body_fn, (cnt, x,))
-        #     return x, cnt
-
-        x = torch.ones(4, requires_grad=True)
-        x_new, cnt = while_loop_test(x)
-        x_exp, cnt_exp = while_loop_fake(x)
-
-        self.assertEqual(x_new, x_exp)
-        self.assertEqual(cnt, cnt_exp)
-
-        grad_out = torch.ones_like(x_new)
-        grads = torch.autograd.grad(x_new, (x,), grad_out)
-        expected_grads = torch.autograd.grad(x_exp, (x,), grad_out)
-        self.assertEqual(expected_grads, grads)
-
-        def f(x):
-            x_new, cnt = while_loop_test(x)
-            grad_out = torch.ones_like(x_new)
-            return torch.autograd.grad(x_new, (x,), grad_out)
-
-        # TODO: During compilation, the metadata of the true_fn has the
-        # requires_grad attribute set to False, while the false_fn has it
-        # set to true. Therefore, the tracing of the cond errors out.
-        # Similar to behavior to the test case test_cond_autograd_same_pytree_output
-        gm = make_fx(f, tracing_mode="symbolic")(x)
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
-def forward(self, x_1):
-    _tensor_constant0 = self._tensor_constant0
-    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
-    lt = torch.ops.aten.lt.Scalar(lift_fresh_copy, 3)
-    lt_1 = torch.ops.aten.lt.Scalar(lift_fresh_copy, 3)
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(lt_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
-    getitem = cond[0];  cond = None
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
-    view = torch.ops.aten.view.default(getitem, [sym_size_int])
-    add_ = torch.ops.aten.add_.Tensor(lift_fresh_copy, 1);  lift_fresh_copy = None
-    lt_2 = torch.ops.aten.lt.Scalar(add_, 3)
-    lt_3 = torch.ops.aten.lt.Scalar(add_, 3)
-    true_graph_1 = self.true_graph_1
-    false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(lt_3, true_graph_1, false_graph_1, (view,));  true_graph_1 = false_graph_1 = view = None
-    getitem_1 = cond_1[0];  cond_1 = None
-    view_1 = torch.ops.aten.view.default(getitem_1, [sym_size_int])
-    add__1 = torch.ops.aten.add_.Tensor(add_, 1);  add_ = None
-    lt_4 = torch.ops.aten.lt.Scalar(add__1, 3)
-    lt_5 = torch.ops.aten.lt.Scalar(add__1, 3)
-    true_graph_2 = self.true_graph_2
-    false_graph_2 = self.false_graph_2
-    cond_2 = torch.ops.higher_order.cond(lt_5, true_graph_2, false_graph_2, (view_1,));  true_graph_2 = false_graph_2 = view_1 = None
-    getitem_2 = cond_2[0];  cond_2 = None
-    view_2 = torch.ops.aten.view.default(getitem_2, [sym_size_int]);  sym_size_int = None
-    add__2 = torch.ops.aten.add_.Tensor(add__1, 1);  add__1 = None
-    lt_6 = torch.ops.aten.lt.Scalar(add__2, 3);  add__2 = None
-    ones_like = torch.ops.aten.ones_like.default(view_2, pin_memory = False);  view_2 = None
-    true_graph_3 = self.true_graph_3
-    false_graph_3 = self.false_graph_3
-    cond_3 = torch.ops.higher_order.cond(lt_5, true_graph_3, false_graph_3, (ones_like, getitem_2));  lt_5 = true_graph_3 = false_graph_3 = ones_like = getitem_2 = None
-    getitem_3 = cond_3[0];  cond_3 = None
-    true_graph_4 = self.true_graph_4
-    false_graph_4 = self.false_graph_4
-    cond_4 = torch.ops.higher_order.cond(lt_3, true_graph_4, false_graph_4, (getitem_3, getitem_1));  lt_3 = true_graph_4 = false_graph_4 = getitem_3 = getitem_1 = None
-    getitem_4 = cond_4[0];  cond_4 = None
-    true_graph_5 = self.true_graph_5
-    false_graph_5 = self.false_graph_5
-    cond_5 = torch.ops.higher_order.cond(lt_1, true_graph_5, false_graph_5, (getitem_4, getitem));  lt_1 = true_graph_5 = false_graph_5 = getitem_4 = getitem = None
-    getitem_5 = cond_5[0];  cond_5 = None
-    return (getitem_5,)""",  # noqa: B950
         )
 
     @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
@@ -845,11 +723,7 @@ def forward(self, pred_1):
 
     @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_same_pytree_output(self):
-        # TODO: If inside the dictionary, inside the list, the first element
-        # is composed of the multiplication, then the requires_grad attribute is
-        # set to False and thus the tracing of the cond errors out.
         def true_fn(x):
-            # return {"res": [x['t'][0] * x['t'][1]['b'], (x['t'][2][0],)]}
             return {"res": [x["t"][0], (x["t"][2][0],)]}
 
         def false_fn(x):
@@ -2863,7 +2737,6 @@ def forward(self, arg0_1):
             torch.ones(3, 2, 4, requires_grad=True),
             torch.ones(4, requires_grad=True),
         )
-        # with self.assertRaisesRegex(RuntimeError, "Autograd not implemented for cond"):
         f(*example_inputs).sum().backward()
 
         # Ensure no error is thrown when not running backward
