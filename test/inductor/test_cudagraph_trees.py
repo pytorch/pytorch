@@ -1989,6 +1989,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 fn_compiled = torch.compile(Foo(), mode="reduce-overhead")
                 for _ in range(3):
                     fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
+                    fn_compiled.param.grad = None
 
                 # Change static tensor address
                 fn_compiled.param.data = torch.rand([2, 2], device="cuda")
@@ -2025,11 +2026,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     fn_compiled = torch.compile(Foo(), mode="reduce-overhead")
                     for _ in range(3):
                         fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
+                        fn_compiled.param.grad = None
 
                     for _ in range(5):
                         # Change static tensor address
                         fn_compiled.param.data = torch.rand([2, 2], device="cuda")
                         fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
+                        fn_compiled.param.grad = None
 
             FileCheck().check_count(
                 "skipping cudagraph due to function 0 exceeding max re-recording limit (=0) "
