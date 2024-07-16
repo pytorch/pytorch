@@ -322,6 +322,7 @@ def reorder_compute_and_comm_for_overlap(
 
 
 def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
+    import torch.distributed._composable.fsdp._fsdp_collectives
     from .pattern_matcher import (
         CallFunction,
         KeywordArg,
@@ -329,6 +330,13 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
         PatternMatcherPass,
         register_graph_pattern,
     )
+
+    if not (
+        torch.distributed.is_available()
+        and hasattr(torch.ops._c10d_functional, "all_gather_into_tensor")
+        and hasattr(torch.ops._c10d_functional, "all_gather_into_tensor_out")
+    ):
+        return
 
     """
     all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(...);
