@@ -32,7 +32,6 @@ ISORT_WHITELIST = re.compile(
                     # .ci/**
                     # .github/**
                     # benchmarks/**
-                    "benchmarks/**",
                     # functorch/**
                     "functorch/**",
                     # tools/**
