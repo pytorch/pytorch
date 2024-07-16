@@ -132,6 +132,11 @@ CI_SKIP_OPTIMIZER = {
     "PegasusForConditionalGeneration",  # OOM
 }
 
+try:
+    from .fb.common import INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY
+except ImportError:
+    INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY = set()
+
 CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "sam",
     # See https://github.com/mindee/doctr/blob/f2114758d529ed8d3d0030581638f0520b6b98d8/doctr/models/detection/core.py#L89
@@ -150,7 +155,7 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "detectron2_fasterrcnn_r_50_dc5",
     "detectron2_fasterrcnn_r_50_fpn",
     "hf_T5_generate",
-}
+}.union(INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY)
 
 # These models currently fail accuracy with eager Adam optimizer
 # so we use SGD when running the full benchmarks
