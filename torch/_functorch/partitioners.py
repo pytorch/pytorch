@@ -645,7 +645,7 @@ def functionalize_rng_ops(
     joint_graph_rng_ops = get_rng_ops(joint_module)
     fw_graph_rng_ops = get_rng_ops(fw_module)
     bw_graph_rng_ops = get_rng_ops(bw_module)
-    recomputable_rng_ops_map = dict()
+    recomputable_rng_ops_map = {}
     for node in joint_module.graph.nodes:
         if (
             must_recompute(node)
