@@ -996,6 +996,7 @@ struct HelperInterpBase {
 
     auto [indices_weights, aligned_interp_size, wt_max] = HelperInterpBase::_compute_index_ranges_weights<double, aa_filter_fn_t, sizeof(int16_t)>(
         input_size, output_size, stride, ndims, reshape_dim, scale, interp_size, aa_filter_fn, antialias, align_corners);
+    interp_size = aligned_interp_size;
 
     // Rescale float weights to int16 and compute weights precision
     auto weights_f64 = indices_weights[3];
@@ -1014,17 +1015,17 @@ struct HelperInterpBase {
     if (align_i32) {
       // We should respect int32 alignment as we will load int16 data as int32
       // See ImagingResampleHorizontalConvolution8u4x, mmk0 = _mm256_set1_epi32(*(int32_t*)&k[x]);
-      // compute aligned_interp_size = nearest pair value to aligned_interp_size
+      // compute aligned_interp_size = nearest pair value to interp_size
       while (aligned_interp_size % sizeof(int32_t) != 0) {
         aligned_interp_size += 1;
       }
       // assert that we wont go out of bounds
-      TORCH_INTERNAL_ASSERT(aligned_interp_size * sizeof(int16_t) < aligned_interp_size * sizeof(double));
+      TORCH_INTERNAL_ASSERT(aligned_interp_size * sizeof(int16_t) < interp_size * sizeof(double));
     }
 
     for (const auto j : c10::irange(output_size)) {
-      for (const auto k : c10::irange(aligned_interp_size )) {
-        double v = data_f64[j * aligned_interp_size + k] * (1 << weights_precision);
+      for (const auto k : c10::irange(interp_size)) {
+        double v = data_f64[j * interp_size + k] * (1 << weights_precision);
         data_i16[j * aligned_interp_size + k] = (v < 0) ? (int) (-0.5 + v) : (int) (0.5 + v);
       }
     }
