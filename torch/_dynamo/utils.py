@@ -50,11 +50,11 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import TypeGuard
+from typing_extensions import TypeIs
 
 from ..utils.hooks import RemovableHandle
 
-T = TypeVar("T")
+_T = TypeVar("_T")
 
 try:
     import numpy as np
@@ -505,14 +505,14 @@ class ExactWeakKeyDictionary:
 
 
 @overload
-def istype(obj: object, allowed_types: Type[T]) -> TypeGuard[T]:
+def istype(obj: object, allowed_types: Type[_T]) -> TypeIs[_T]:
     ...
 
 
 @overload
 def istype(
-    obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
-) -> TypeGuard[T]:
+    obj: object, allowed_types: Tuple[Type[List[_T]], Type[Tuple[_T, ...]]]
+) -> TypeIs[_T]:
     ...
 
 
