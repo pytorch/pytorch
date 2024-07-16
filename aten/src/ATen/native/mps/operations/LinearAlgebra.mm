@@ -448,13 +448,10 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_}) + ":" +
         std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* selfTensor = nil;
-      MPSGraphTensor* otherTensor = nil;
-      MPSGraphTensor* productTensor = nil;
       MPSGraphTensor* biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
 
       // TODO: Use alpha and beta here with fill_.Scalar and mul
-      std::tie(selfTensor, otherTensor, productTensor) = do_mm(mpsGraph, self, other);
+      auto [selfTensor, otherTensor, productTensor] = do_mm(mpsGraph, self, other);
 
       auto productTimesAlphaTensor = productTensor;
       if (alpha.toDouble() != 1.0) {
