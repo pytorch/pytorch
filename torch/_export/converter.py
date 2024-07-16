@@ -758,7 +758,10 @@ class TS2FXGraphConverter:
         self._convert_as_noop(node)
 
     def convert_prim_Enter(self, node: torch._C.Node):
-        # export treats prim::Enter as noop
+        # export generally treats prim::Enter as noop
+        # The only context manager export supports is aten::enable_grad.
+        # Unfortunately, TorchScript does not support aten::enable_grad yet.
+        # TODO: support aten::enable_grad in both TorchScript and Converter.
         return
 
     def convert_prim_Exit(self, node: torch._C.Node):
