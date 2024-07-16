@@ -1205,6 +1205,8 @@ def load(
         >>> torch.load("module.pt", encoding="ascii", weights_only=False)
         # Load a module from HDFS
         >>> torch.load('hdfs://ip:port/tensor.pt', weights_only=True)
+        # Load a module from HTTP
+        >>> torch.load('http://ip:port/tensor.pt', weights_only=True)
     """
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (

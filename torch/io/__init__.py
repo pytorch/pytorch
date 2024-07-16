@@ -5,6 +5,7 @@ from typing_extensions import TypeIs
 
 from .file import *
 from .hdfs import HDFSOpener
+from .http import HTTPOpener
 from .opener import Opener
 
 __all__ = [
@@ -16,7 +17,7 @@ __all__ = [
     "check_seekable"
 ]
 
-supported_protocol = {"hdfs": HDFSOpener}
+supported_protocol = {"hdfs": HDFSOpener, "http": HTTPOpener}
 
 
 def is_path(file_like) -> TypeIs[Union[str, os.PathLike]]:
