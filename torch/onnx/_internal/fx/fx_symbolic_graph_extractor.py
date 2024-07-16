@@ -10,7 +10,7 @@ import torch.fx
 import torch.onnx
 
 import torch.onnx._internal.fx.passes as passes
-from torch.onnx._internal import _beartype, exporter, io_adapter
+from torch.onnx._internal import exporter, io_adapter
 
 # Functions directly wrapped to produce torch.fx.Proxy so that symbolic
 # data can flow through those functions. Python functions (e.g., `torch.arange`)
@@ -37,7 +37,6 @@ class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
     exporter.
     """
 
-    @_beartype.beartype
     def is_leaf_module(
         self, module: torch.nn.Module, module_qualified_name: str
     ) -> bool:
@@ -46,7 +45,6 @@ class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
         # torch.fx._symbolic_trace.Tracer.call_module.
         return False
 
-    @_beartype.beartype
     def to_bool(self, obj: torch.fx.Proxy) -> bool:
         # FIXME: This is a hack to tracing through if-else Python blocks.
         # It may generate incorrect ONNX graphs if the if-else block
@@ -82,7 +80,6 @@ def _wrap_for_symbolic_trace(target: Callable) -> Tuple[Callable, Callable]:
     return wrapper, target
 
 
-@_beartype.beartype
 def _module_expansion_symbolic_trace(
     root: Union[torch.nn.Module, Callable[..., Any]],
     concrete_args: Optional[Dict[str, Any]] = None,
@@ -160,7 +157,6 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
         # TODO: plumb ``concrete_args`` to symbolic_trace call at ``generate_fx``
         self.concrete_args = concrete_args
 
-    @_beartype.beartype
     def _trace_into_fx_graph_via_fx_symbolic_trace(
         self, model, model_args, model_kwargs
     ) -> torch.fx.GraphModule:
@@ -238,7 +234,6 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
 
         return self.pre_export_passes(options, model, graph_module, updated_model_args)  # type: ignore[return-value]
 
-    @_beartype.beartype
     def pre_export_passes(
         self,
         options: exporter.ResolvedExportOptions,
