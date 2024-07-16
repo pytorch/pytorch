@@ -12,8 +12,6 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/repeat_interleave.h>
 #include <ATen/ops/repeat_interleave_native.h>
-
-#include <utility>
 #endif
 
 template <typename index_t>
@@ -102,7 +100,7 @@ Tensor repeat_interleave_symint(
 
 Tensor repeat_interleave_symint(
     const Tensor& self,
-    const c10::SymInt& repeats,
+    c10::SymInt repeats,
     std::optional<int64_t> dim_opt,
     std::optional<SymInt> output_size) {
   Tensor input = dim_opt ? self : self.flatten();

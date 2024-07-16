@@ -4004,7 +4004,7 @@ Tensor linalg_solve_triangular(
 
 Tensor linalg_vander_symint(
     const Tensor& x,
-    const std::optional<c10::SymInt>& N) {
+    std::optional<c10::SymInt> N) {
   auto t = x.scalar_type();
   TORCH_CHECK(t == ScalarType::Float ||
               t == ScalarType::Double ||
