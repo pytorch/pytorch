@@ -29,6 +29,10 @@ def maybe_dupe_op(x):
         return y, z
 
 
+def is_dynamic_shape_test(test_name):
+    return test_name.endswith("_dynamic_shapes")
+
+
 aten = torch.ops.aten
 lib = torch.library.Library("custom", "DEF")  # noqa: TOR901
 lib.define("maybe_dupe_op(Tensor a) -> (Tensor, Tensor)")
@@ -1202,8 +1206,14 @@ SeqNr|OrigAten|SrcFn
         with self.assertLogs(logger_name, level="INFO") as captured:
             relu(torch.rand([3, 3], requires_grad=True)).sum().backward()
 
+        if is_dynamic_shape_test(self._testMethodName):
+            # an extra symint exists
+            expected_msg = "bw_donated_idxs=[1]"
+        else:
+            expected_msg = "bw_donated_idxs=[0]"
+
         # le is a donated buffer from relu
-        FileCheck().check("bw_donated_idxs=[0]").run("\n".join(captured.output))
+        FileCheck().check(expected_msg).run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer2(self):

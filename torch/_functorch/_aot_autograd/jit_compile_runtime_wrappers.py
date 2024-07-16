@@ -247,9 +247,9 @@ def aot_dispatch_base(
 
 
 def collect_fw_donated_buffer_idxs(
-    fw_ins: List[FakeTensor],
-    user_fw_outs: List[FakeTensor],
-    bw_outs: List[FakeTensor],
+    fw_ins: List[Optional[FakeTensor]],
+    user_fw_outs: List[Optional[FakeTensor]],
+    bw_outs: List[Optional[FakeTensor]],
     saved_tensors: List[FakeTensor],
 ) -> List[int]:
     """
@@ -288,9 +288,9 @@ def collect_bw_donated_buffer_idxs(
     # check if every node has meta["val"] since meta["val"] may be lost during
     # graph transformation.
     try:
-        fw_ins = [n.meta["val"] for n in fw_ins]
-        fw_outs = [n.meta["val"] for n in fw_outs]
-        bw_outs = [n.meta["val"] for n in bw_outs]
+        fw_ins = [n.meta["val"] if hasattr(n, "meta") else None for n in fw_ins]
+        fw_outs = [n.meta["val"] if hasattr(n, "meta") else None for n in fw_outs]
+        bw_outs = [n.meta["val"] if hasattr(n, "meta") else None for n in bw_outs]
     except KeyError:
         return []
 
