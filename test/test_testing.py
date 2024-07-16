@@ -2216,7 +2216,7 @@ class TestImports(TestCase):
     @classmethod
     def _check_python_output(cls, program) -> str:
         return subprocess.check_output(
-            [sys.executable, "-W", "all", "-c", program],
+            [sys.executable, "-W", "always", "-c", program],
             stderr=subprocess.STDOUT,
             # On Windows, opening the subprocess with the default CWD makes `import torch`
             # fail, so just set CWD to this script's directory
