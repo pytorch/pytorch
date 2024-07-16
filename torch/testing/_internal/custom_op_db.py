@@ -25,7 +25,7 @@ from typing import *  # noqa: F403
 # so they can easily be consumed by OpInfo-based tests to check if subsystems
 # support them correctly.
 
-CUSTOM_OPS_VMAP_OUT_DIMS_INPUT_EXAMPLE : dict[str, Union[Callable, int, Tuple, List]] = {}
+CUSTOM_OPS_VMAP_OUT_DIMS_INPUT_EXAMPLE : Dict[str, Union[Callable, int, Tuple, List]] = {}
 
 def add_vmap_out_dims_example_custom_op(op, out_dims):
     CUSTOM_OPS_VMAP_OUT_DIMS_INPUT_EXAMPLE[op] = out_dims
