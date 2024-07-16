@@ -36,6 +36,7 @@ from typing import (
     Any,
     Callable,
     cast,
+    Counter,
     Dict,
     Generator,
     List,
@@ -56,27 +57,26 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
-from .cpp_builder import (
-    _get_python_include_dirs,
-    get_cpp_compiler,
-    homebrew_libomp,
-    is_apple_clang,
-    is_clang,
-    is_conda_llvm_openmp_installed,
-)
 
 """
 codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
 https://github.com/pytorch/pytorch/issues/124245#issuecomment-2197778902
 """
 from torch._inductor.cpp_builder import (
+    _get_python_include_dirs,
     _set_gpu_runtime_env,
     _transform_cuda_paths,
     CppBuilder,
     CppOptions,
     CppTorchCudaOptions,
     get_compiler_version_info,
+    get_cpp_compiler,
     get_name_and_dir_from_output_file_path,
+    homebrew_libomp,
+    is_apple_clang,
+    is_clang,
+    is_conda_llvm_openmp_installed,
+    normalize_path_separator,
 )
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, pick_vec_isa, VecISA
 from torch._inductor.runtime.compile_tasks import (
@@ -945,10 +945,11 @@ class FxGraphCache:
                 "fx graph cache key %s post-load guards: %s", key, shape_env.guards
             )
 
-        # Increment the cached metrics by the amounts recorded when the FX
+        # Increment the cached metrics/counters by the amounts recorded when the FX
         # graph was compiled for this cache entry. Pretending these counters
         # were incremented normally is useful for testing with the cache enabled.
         metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
+        counters["inductor"] += graph.counter_deltas
 
         from .graph import GraphLowering
 
@@ -1159,6 +1160,7 @@ class CompiledFxGraph:
     output_strides: Optional[List[Optional[Tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
+    counter_deltas: Counter[str]
     # This is a string representation of an expression we serialize
     # with the object so the guards can be evaluated in a different
     # context in order to verify the validity of serving a cached
@@ -1176,6 +1178,7 @@ class CompiledFxGraph:
         output_strides: List[Optional[Tuple[_StrideExprStr, ...]]],
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
+        counter_deltas: Counter[str],
     ):
         self.current_callable = current_callable
         self.cache_key = graph.cache_key
@@ -1192,6 +1195,7 @@ class CompiledFxGraph:
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
         self.metrics_deltas = metrics_deltas
+        self.counter_deltas = counter_deltas
         self.guards_expr = None
 
     def __call__(self, inputs: List[Any]) -> Any:
@@ -1917,7 +1921,7 @@ def cpp_prefix_path() -> str:
             content,
             "h",
         )
-    return filename
+    return normalize_path_separator(filename)
 
 
 def cpp_prefix() -> str:
@@ -2104,7 +2108,7 @@ class CppCodeCache:
                 fb_output_path,
             )
 
-            binary_path = (
+            binary_path = normalize_path_separator(
                 fb_output_path
                 if config.is_fbcode()
                 else cpp_builder.get_target_file_path()
