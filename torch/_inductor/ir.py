@@ -2550,9 +2550,6 @@ class DtypeView(BaseView):
     def get_size(self):
         return self.data.get_size()
 
-    def get_stride(self):
-        return self.data.get_stride()
-
     def make_loader(self):
         inner = self.data.make_loader()
 
@@ -2560,13 +2557,6 @@ class DtypeView(BaseView):
             return ops.to_dtype_bitcast(inner(idx), self.target_dtype, self.data.dtype)
 
         return loader
-
-    def codegen_reference(self, writer=None):
-        return V.graph.wrapper_code.codegen_dtype_view(
-            self.data,
-            self.target_dtype,
-            writer,
-        )
 
 
 class SliceView(View):
@@ -4480,8 +4470,6 @@ class ExternKernel(InputsKernel):
             return x
         if isinstance(x, TensorBox):
             return cls.realize_input(x.data)
-        if isinstance(x, DtypeView):
-            return DtypeView(cls.realize_input(x.data), x.target_dtype)
         if isinstance(x, ReinterpretView):
             return ReinterpretView(cls.realize_input(x.data), x.get_layout())
         if isinstance(x, BaseView):
