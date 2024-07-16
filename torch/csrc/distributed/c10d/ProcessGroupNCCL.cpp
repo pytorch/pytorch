@@ -2115,7 +2115,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // Get the device index
   auto deviceIndex = device.index();
   gpuGuard.set_index(deviceIndex);
+
 #ifdef NCCL_HAS_COMM_SPLIT
+  options_->config.splitShare = 1;
   if (options_->split_from) {
     TORCH_CHECK(
         options_->split_color != 0,
@@ -2177,8 +2179,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       size_); // worldSize
 
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
-            << ncclComm->ncclComm_
-            << " on CUDA device: " << static_cast<int>(deviceIndex);
+            << ncclComm->ncclComm_ << " on CUDA device: " << deviceIndex;
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
