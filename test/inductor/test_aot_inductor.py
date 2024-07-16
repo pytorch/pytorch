@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_CI,
     IS_FBCODE,
+    IS_MACOS,
     IS_WINDOWS,
     skipIfRocm,
     TEST_WITH_ROCM,
@@ -3007,7 +3008,11 @@ class AOTInductorTestsTemplate:
             model, example_inputs_list, dynamic_shapes=dynamic_shapes
         )
 
-    def test_misc_1(self):
+    @common_utils.parametrize("max_autotune", [False, True])
+    def test_misc_1(self, max_autotune):
+        if self.device == "cpu" and IS_MACOS and max_autotune:
+            raise unittest.SkipTest("max_autotune not supported on macos")
+
         class Model(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3028,7 +3033,9 @@ class AOTInductorTestsTemplate:
             torch.randn(16, 128, device=self.device),
             torch.randint(0, 128, (16, 10), device=self.device),
         )
-        self.check_model(Model(), example_inputs)
+        self.check_model(
+            Model(), example_inputs, options=dict(max_autotune=max_autotune)
+        )
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
