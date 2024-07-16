@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import os
 import shutil
 import sys
@@ -7,7 +6,6 @@ from pathlib import Path
 from subprocess import check_call
 from tempfile import TemporaryDirectory
 from typing import Optional
-
 
 SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent

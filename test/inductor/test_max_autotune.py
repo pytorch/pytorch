@@ -322,7 +322,7 @@ class TestMaxAutotune(TestCase):
                 return None
 
         fake_choices = [FakeChoiceCaller() for i in range(10)]
-        fake_lookup_result = dict.fromkeys(fake_choices, 0.123)
+        fake_lookup_result = {choice: 0.123 for choice in fake_choices}
 
         def no_lookup(
             choices: List[ChoiceCaller],
