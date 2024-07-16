@@ -10,7 +10,6 @@
 #endif // _WIN32
 
 #include <fmt/format.h>
-#include <fmt/ranges.h>
 #include <chrono>
 #include <cmath>
 #include <fstream>

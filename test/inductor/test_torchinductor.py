@@ -5239,12 +5239,6 @@ class CommonTemplate:
             ),
         )
 
-    def test_cat_empty_index(self):
-        def fn(out, x):
-            return torch.cat([out[0], x], dim=0)
-
-        self.common(fn, (torch.randn(1, 0, 64), torch.randn(128, 64)))
-
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cat_unbacked_legacy_empty(self):
         def fn(x, y):

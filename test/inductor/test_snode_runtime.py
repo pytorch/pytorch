@@ -1,12 +1,12 @@
 # Owner(s): ["module: inductor"]
 
-import contextlib
+
 from unittest import skipIf
 
 import torch
 import torch.distributed as dist
 
-from torch._inductor import config, metrics
+from torch._inductor import metrics
 from torch._inductor.comm_analysis import estimate_nccl_collective_runtime
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -57,19 +57,6 @@ class TestCase(InductorTestCase):
 
     atol/rtol must be provided explicitly with each call, since precision/rel_tol overrides are not always utilized
     """
-
-    def setUp(self):
-        super().setUp()
-        # These tests check metrics.node_runtimes and we don't save / restore
-        # those in the FX graph cache.
-        self._test_snode_stack = contextlib.ExitStack()
-        self._test_snode_stack.enter_context(
-            config.patch({"fx_graph_remote_cache": False})
-        )
-
-    def tearDown(self):
-        self._test_snode_stack.close()
-        super().tearDown()
 
     def assertZero(self, x: float):
         assert isinstance(x, float)

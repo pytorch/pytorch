@@ -244,12 +244,6 @@ def run_command_line(cmd_line, cwd=None):
     return status
 
 
-def normalize_path_separator(orig_path: str) -> str:
-    if _IS_WINDOWS:
-        return orig_path.replace(os.sep, "/")
-    return orig_path
-
-
 class BuildOptionsBase:
     """
     This is the Base class for store cxx build options, as a template.
@@ -1225,7 +1219,7 @@ class CppBuilder:
                     f"{compiler} {include_dirs_args} {definations_args} {cflags_args} {sources} "
                     f"{passthougn_args} /LD /Fe{target_file} /link {libraries_dirs_args} {libraries_args} {ldflags_args} "
                 )
-                cmd = normalize_path_separator(cmd)
+                cmd = cmd.replace("\\", "/")
             else:
                 compile_only_arg = "-c" if self._compile_only else ""
                 cmd = re.sub(
@@ -1253,7 +1247,7 @@ class CppBuilder:
         return command_line
 
     def get_target_file_path(self):
-        return normalize_path_separator(self._target_file)
+        return self._target_file
 
     def build(self) -> Tuple[int, str]:
         """

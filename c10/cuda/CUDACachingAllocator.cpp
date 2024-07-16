@@ -792,69 +792,6 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
   }
 }
 
-class TraceEntryRingBuffer {
- public:
-  TraceEntryRingBuffer() {
-    // alloc_trace is a pointer because we need to intentionally
-    // leak this on deallocation it can hold references to Python
-    // state which will already be destroyed when we are in exit handlers
-    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
-    alloc_trace = new std::vector<TraceEntry>();
-  }
-
-  void setMaxEntries(size_t size) {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    alloc_trace_max_entries_ = std::max(size_t(1), size);
-  }
-
-  void insertTraceEntries(const TraceEntry& te) {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    if (alloc_trace->size() < alloc_trace_max_entries_) {
-      alloc_trace->emplace_back(te);
-    } else {
-      (*alloc_trace)[alloc_trace_next++] = te;
-      if (alloc_trace_next == alloc_trace_max_entries_) {
-        alloc_trace_next = 0;
-      }
-    }
-  }
-
-  void getTraceEntries(std::vector<TraceEntry>& result) {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    result.reserve(alloc_trace->size());
-    result.insert(
-        result.end(),
-        alloc_trace->begin() +
-            static_cast<std::vector<TraceEntry>::difference_type>(
-                alloc_trace_next),
-        alloc_trace->end());
-    result.insert(
-        result.end(),
-        alloc_trace->begin(),
-        alloc_trace->begin() +
-            static_cast<std::vector<TraceEntry>::difference_type>(
-                alloc_trace_next));
-  }
-
-  void clear() {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    alloc_trace_next = 0;
-    alloc_trace->clear();
-  }
-
- private:
-  size_t alloc_trace_max_entries_ = 1;
-
-  // Both alloc_trace and alloc_trace_next needs to be used
-  // under alloc_trace_lock.
-  std::mutex alloc_trace_lock;
-  size_t alloc_trace_next = 0;
-  std::vector<TraceEntry>*
-      alloc_trace; // pointer because we need to intentionally leak this on
-                   // deallocation it can hold references to Python state which
-                   // will already be destroyed when we are in exit handlers
-};
-
 } // anonymous namespace
 } // namespace Native
 
@@ -965,9 +902,18 @@ class DeviceCachingAllocator {
 
   std::atomic<CreateContextFn> context_recorder_;
   RecordContext record_context_ = RecordContext::NEVER;
+  size_t alloc_trace_max_entries_ = 1;
 
-  // Ring buffer for memory snapshot TraceEntry's
-  TraceEntryRingBuffer alloc_buffer;
+  // Both alloc_trace and alloc_trace_next needs to be used
+  // under alloc_trace_lock.
+  // TODO: reduce risk of deadlock and remove recursive lock by
+  //       wrapping this into a class instance.
+  std::recursive_mutex alloc_trace_lock;
+  size_t alloc_trace_next = 0;
+  std::vector<TraceEntry>*
+      alloc_trace; // pointer because we need to intentionally leak this on
+                   // deallocation it can hold references to Python state which
+                   // will already be destroyed when we are in exit handlers
 
   // Members specific to CUDA graphs
 
@@ -993,7 +939,9 @@ class DeviceCachingAllocator {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   DeviceCachingAllocator()
-      : large_blocks(/*small=*/false), small_blocks(/*small=*/true) {
+      : large_blocks(/*small=*/false),
+        small_blocks(/*small=*/true),
+        alloc_trace(new std::vector<TraceEntry>()) {
     stats.max_split_size =
         static_cast<int64_t>(CUDAAllocatorConfig::max_split_size());
     context_recorder_.store(nullptr);
@@ -1002,16 +950,18 @@ class DeviceCachingAllocator {
   void recordHistory(
       bool enabled,
       CreateContextFn context_recorder,
-      size_t alloc_buffer_max_entries,
+      size_t alloc_trace_max_entries,
       RecordContext when) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     TORCH_CHECK(when == RecordContext::NEVER || context_recorder);
     record_history = enabled;
     context_recorder_.store(record_history ? context_recorder : nullptr);
-    alloc_buffer.setMaxEntries(alloc_buffer_max_entries);
+    alloc_trace_max_entries_ = std::max(size_t(1), alloc_trace_max_entries);
     record_context_ = enabled ? when : RecordContext::NEVER;
     if (!enabled) {
-      alloc_buffer.clear();
+      std::lock_guard<std::recursive_mutex> lk(alloc_trace_lock);
+      alloc_trace_next = 0;
+      alloc_trace->clear();
     }
   }
 
@@ -1842,7 +1792,23 @@ class DeviceCachingAllocator {
       const std::function<time_t(approx_time_t)>& tsc_to_us) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     std::vector<TraceEntry> result;
-    alloc_buffer.getTraceEntries(result);
+
+    {
+      std::lock_guard<std::recursive_mutex> lk(alloc_trace_lock);
+      result.reserve(alloc_trace->size());
+      result.insert(
+          result.end(),
+          alloc_trace->begin() +
+              static_cast<std::vector<TraceEntry>::difference_type>(
+                  alloc_trace_next),
+          alloc_trace->end());
+      result.insert(
+          result.end(),
+          alloc_trace->begin(),
+          alloc_trace->begin() +
+              static_cast<std::vector<TraceEntry>::difference_type>(
+                  alloc_trace_next));
+    }
 
     // Convert all the timestamps from tsc to epoch time in microseconds.
     for (auto& te : result) {
@@ -2944,7 +2910,15 @@ class DeviceCachingAllocator {
     }
 
     if (record_history) {
-      alloc_buffer.insertTraceEntries(te);
+      std::lock_guard<std::recursive_mutex> lk(alloc_trace_lock);
+      if (alloc_trace->size() < alloc_trace_max_entries_) {
+        alloc_trace->emplace_back(te);
+      } else {
+        (*alloc_trace)[alloc_trace_next++] = te;
+        if (alloc_trace_next == alloc_trace_max_entries_) {
+          alloc_trace_next = 0;
+        }
+      }
     }
   }
 };
@@ -3088,11 +3062,11 @@ class NativeCachingAllocator : public CUDAAllocator {
   void recordHistory(
       bool enabled,
       CreateContextFn context_recorder,
-      size_t alloc_buffer_max_entries,
+      size_t alloc_trace_max_entries,
       RecordContext when) override {
     for (auto& allocator : device_allocator) {
       allocator->recordHistory(
-          enabled, context_recorder, alloc_buffer_max_entries, when);
+          enabled, context_recorder, alloc_trace_max_entries, when);
     }
   }
 

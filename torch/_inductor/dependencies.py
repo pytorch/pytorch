@@ -69,7 +69,7 @@ class MemoryDep(Dep):
         """
         Return the offset by setting every variable to be 0.
         """
-        return sympy_subs(self.index, dict.fromkeys(self.var_names, 0))
+        return sympy_subs(self.index, {v: 0 for v in self.var_names})
 
     def normalize_with_stride_order(self, prefix="t"):
         r"""

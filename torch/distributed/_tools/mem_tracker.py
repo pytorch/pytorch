@@ -439,7 +439,7 @@ class MemTracker(TorchDispatchMode):
         maybe_zero = False
         # Ensure the device entry exists in the current memory snapshot, initializing if necessary.
         dev_snap = self._curr_mem_snap.setdefault(
-            winfo.device, dict.fromkeys(self._ref_class, 0)
+            winfo.device, {reftype: 0 for reftype in self._ref_class}
         )
         dev_snap.setdefault(_TOTAL_KEY, 0)
         # Handle different types of updates based on the update type (`u_type`).

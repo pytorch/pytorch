@@ -192,6 +192,19 @@ def reduction_project(reduction_type, acc):
     return acc
 
 
+def is_to_lowp_dtype(expr):
+    to_exprs = ["convert<half>", "convert<bfloat16>"]
+    return any(to_expr in expr for to_expr in to_exprs)
+
+
+def get_lowp_to_high_prec_expr(lowp_var, dtype, kernel):
+    if isinstance(kernel, CppVecKernel):
+        return f"at::vec::convert<{DTYPE_TO_CPP[dtype]}>({lowp_var})"
+    else:
+        assert isinstance(kernel, CppKernel)
+        return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({lowp_var})"
+
+
 index_value_name_counter = 1
 
 
@@ -587,46 +600,8 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None):
-        assert isinstance(x, CppCSEVariable)
-        if src_dtype is None:
-            src_dtype = x.dtype
-        expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
-        csevar = V.kernel.cse.generate(V.kernel.compute, expr)
-        csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
-        if dtype in [torch.bfloat16, torch.float16] and src_dtype == torch.float:
-            """
-            https://github.com/pytorch/pytorch/issues/115260
-            For FusedSchedulerNode[node1, node2], the node2 loads what node1 stores and the buffer is
-            in low-precision floating point data type. When the output of node1 also serves as the output of the
-            kernel, the result of nodes would be different from the case when output of node1 is not the output
-            of the kernel (where we don't need to insert `to_dtype` for legalization). To address the problem, on
-            storing the lowp node1 output, we also add the inverse dtype conversion to high precision data type
-            to the cse cache.
-
-            Example (pseudo code):
-                node1_output = ...
-                node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
-                store(buf, node1_output_lowp)
-                node2_input_lowp = load(buf)
-                node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
-
-            Without cse cache trick:
-                node1_output = ...
-                node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
-                store(buf, node1_output_lowp)
-                node2_input_lowp = node_output_lowp # hit store cache
-                node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
-
-            With cse cache trick:
-                node1_output = ...
-                node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
-                # also add `to_dtype(node1_input_lowp, dtype=torch.float)` -> `node1_output` to cse cache
-                store(buf, node1_output_lowp)
-                node2_input_lowp = node_output_lowp # hit store cache
-                node2_input = node1_output # hit cse cache
-            """
-            V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
-        return csevar
+        assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
+        return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
     def to_dtype_bitcast(x, dtype, src_dtype):
@@ -1438,12 +1413,20 @@ class CppVecOverrides(CppOverrides):
         assert opt_ctx_x.dtype is not None
         assert isinstance(V.kernel, CppVecKernel)
         src_dtype = opt_ctx_x.dtype
-        expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
-        csevar = V.kernel.cse.generate(V.kernel.compute, expr)
-        csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
-        if dtype in [torch.bfloat16, torch.float16] and src_dtype == torch.float:
-            V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
-        return csevar
+        src_cpp_type = DTYPE_TO_CPP[src_dtype]
+        src_num_vectors = V.kernel._get_num_vectors(src_dtype)
+        dst_cpp_type = DTYPE_TO_CPP[dtype]
+        dst_num_vectors = V.kernel._get_num_vectors(dtype)
+        if src_dtype != torch.bool and dtype == torch.bool:
+            return f"{V.kernel._get_mask_type(src_dtype)}::from<{src_cpp_type},{src_num_vectors}>({x})"
+        if opt_ctx_x.dtype == torch.bool and dtype != torch.bool:
+            return f"{x}.to<{dst_cpp_type},{dst_num_vectors}>()"
+        if src_dtype != dtype:
+            if src_num_vectors == dst_num_vectors == 1:
+                return f"at::vec::convert<{dst_cpp_type}>({x})"
+            else:
+                return f"at::vec::convert<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({x})"
+        return f"({x})"
 
     @staticmethod
     def log1p(x):
@@ -1677,6 +1660,67 @@ class CppKernel(Kernel):
         finally:
             self._load_mask = prior
 
+    def cache_high_prec_cse_var_before_lowp_store(self, var_to_store):
+        """
+        https://github.com/pytorch/pytorch/issues/115260
+        For FusedSchedulerNode[node1, node2], the node2 loads what node1 stores and the buffer is
+        in low-precision floating point data type. When the output of node1 also serves as the output of the
+        kernel, the result of nodes would be different from the case when output of node1 is not the output
+        of the kernel (where we don't need to insert `to_dtype` for legalization). To address the problem, on
+        storing the lowp node1 output, we also add the inverse dtype conversion to high precision data type
+        to the cse cache.
+
+        Example (pseudo code):
+            node1_output = ...
+            node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+            store(buf, node1_output_lowp)
+            node2_input_lowp = load(buf)
+            node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
+
+        Without cse cache trick:
+            node1_output = ...
+            node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+            store(buf, node1_output_lowp)
+            node2_input_lowp = node_output_lowp # hit store cache
+            node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
+
+        With cse cache trick:
+            node1_output = ...
+            node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+            # also add `to_dtype(node1_input_lowp, dtype=torch.float)` -> `node1_output` to cse cache
+            store(buf, node1_output_lowp)
+            node2_input_lowp = node_output_lowp # hit store cache
+            node2_input = node1_output # hit cse cache
+        """
+
+        if var_to_store.dtype not in DTYPE_LOWP_FP:
+            # only need to cache fp32 cse var while var_to_store is lowp data
+            return
+
+        def find_high_prec_var(var, cache):
+            high_prec_cse_var = None
+            high_prec_cse_var_name = None
+            for expr, cse_var in cache.items():
+                if cse_var == var:
+                    if is_to_lowp_dtype(expr):
+                        m = re.search(r"tmp\d+", expr)
+                        if m is not None:
+                            high_prec_cse_var_name = m.group()
+            if high_prec_cse_var_name:
+                for cse_var in cache.values():
+                    if cse_var.name == high_prec_cse_var_name:
+                        high_prec_cse_var = cse_var
+                        break
+                assert high_prec_cse_var is not None
+            return high_prec_cse_var
+
+        high_prec_var = find_high_prec_var(var_to_store, self.cse.cache)
+        if high_prec_var and high_prec_var.dtype in DTYPE_TO_CPP:
+            cache_key = get_lowp_to_high_prec_expr(
+                var_to_store, high_prec_var.dtype, self
+            )
+            self.cse.cache[cache_key] = high_prec_var
+
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
     ):
@@ -1754,6 +1798,7 @@ class CppKernel(Kernel):
     def store(self, name, index, value, mode=None):
         assert "buf" in name
         var = self.args.output(name)
+        self.cache_high_prec_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
         if mode is None:
             line = f"{var}[{cexpr_index(index)}] = {value};"
@@ -2082,13 +2127,6 @@ class CppKernel(Kernel):
     def create_cse_var(self, *args, **kwargs):
         return CppCSEVariable(*args, **kwargs)
 
-    def get_to_dtype_expr(self, src, dtype, src_dtype):
-        return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({src})"
-
-    def cache_dtype_convert(self, dst, dst_dtype, src, src_dtype):
-        expr = self.get_to_dtype_expr(src, dst_dtype, src_dtype)
-        self.cse.cache[expr] = dst
-
 
 class CppVecKernel(CppKernel):
     overrides = CppVecOverrides  # type: ignore[assignment]
@@ -2382,6 +2420,7 @@ class CppVecKernel(CppKernel):
             value = self.broadcast(value)
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
+        self.cache_high_prec_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
         code = self._get_store_line(value, var, index, V.graph.get_dtype(name))
         self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
@@ -2619,26 +2658,6 @@ class CppVecKernel(CppKernel):
             cond_print = f"{var} < {upper_scalar}"
         cond = f"({self._get_mask_type(var.dtype)}({cond})).all_masked()"
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
-
-    def get_to_dtype_expr(self, src, dtype, src_dtype):
-        assert isinstance(src, CppCSEVariable)
-        if not src.is_vec:
-            return super().get_to_dtype_expr(src, dtype, src_dtype)
-        src_cpp_type = DTYPE_TO_CPP[src_dtype]
-        src_num_vectors = self._get_num_vectors(src_dtype)
-        dst_cpp_type = DTYPE_TO_CPP[dtype]
-        dst_num_vectors = self._get_num_vectors(dtype)
-        expr = f"({src})"
-        if src_dtype != torch.bool and dtype == torch.bool:
-            expr = f"{self._get_mask_type(src_dtype)}::from<{src_cpp_type},{src_num_vectors}>({src})"
-        elif src_dtype == torch.bool and dtype != torch.bool:
-            expr = f"{src}.to<{dst_cpp_type},{dst_num_vectors}>()"
-        elif src_dtype != dtype:
-            if src_num_vectors == dst_num_vectors == 1:
-                expr = f"at::vec::convert<{dst_cpp_type}>({src})"
-            else:
-                expr = f"at::vec::convert<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})"
-        return expr
 
 
 class CppTile2DKernel(CppVecKernel):

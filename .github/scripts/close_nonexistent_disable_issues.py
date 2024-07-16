@@ -10,7 +10,6 @@ import requests
 import rockset  # type: ignore[import]
 from gitutils import retries_decorator
 
-
 LOGS_QUERY = """
 with
     shas as (
