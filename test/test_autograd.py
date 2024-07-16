@@ -985,6 +985,113 @@ class TestAutograd(TestCase):
         torch.autograd.backward(out.sum(), inputs=(x, edge_y))
         torch.autograd.backward(out.sum(), inputs=(edge_x, edge_y))
 
+    def test_grad_fn_input_metadata(self):
+        x = torch.rand(2, requires_grad=True, dtype=torch.float32)
+        y = torch.rand(2, requires_grad=True, dtype=torch.float32)
+        z = x * y
+        z_metadata = z.grad_fn._input_metadata[0]
+        self.assertEqual(z_metadata.shape, (2,))
+        self.assertEqual(z_metadata.dtype, torch.float32)
+
+        # Multiple outputs
+        b = torch.rand(3, 3, requires_grad=True)
+        var, _ = torch.var_mean(b, dim=0)
+
+        metadata_0 = var.grad_fn._input_metadata[0]
+        metadata_1 = var.grad_fn._input_metadata[1]
+        self.assertEqual(metadata_0.shape, (3,))
+        self.assertEqual(metadata_1.shape, (3,))
+
+        # Preserves symints
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(
+                    3,
+                    2,
+                ),
+                torch.randn(
+                    2,
+                    2,
+                ),
+            ],
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+        nt_metadata = nt.clone().grad_fn._input_metadata[0]
+
+        self.assertIsInstance(nt_metadata.shape[1], torch.SymInt)
+        self.assertEqual(nt_metadata.shape, nt.shape)
+        self.assertTrue(nt_metadata.is_nested_tensor)
+        self.assertFalse(nt_metadata.is_cpp_nested_tensor)
+        self.assertEqual(nt_metadata.dtype, nt.dtype)
+
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        x = torch.randn(3, 3, requires_grad=True)
+        x = Test.apply(x)
+        metadata = x.grad_fn._input_metadata[0]
+        self.assertEqual(metadata.shape, (3, 3))
+
+    def test_gradient_edge_output(self):
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+
+        def fn(x, reduce=True):
+            tmp = x.sin().cos()
+            if reduce:
+                tmp = tmp.sum()
+            out = tmp.exp().clone().sin().sum()
+            tmp_edge = torch.autograd.graph.get_gradient_edge(tmp)
+            return out, tmp_edge
+
+        # Compute fn backward in two steps
+        out, tmp_edge = fn(x)
+        (tmp_grad,) = torch.autograd.grad(out, (tmp_edge,))
+
+        (x_grad,) = torch.autograd.grad(tmp_edge, (x,), grad_outputs=(tmp_grad,))
+
+        # Compare with as if we did it in one go.
+        out, _ = fn(x)
+        (x_grad_ref,) = torch.autograd.grad(out, (x,))
+        self.assertEqual(x_grad, x_grad_ref)
+
+        # Incorrect case: grad_outputs not passed/implicitly None and output is
+        # not a scalar
+        out, tmp_edge = fn(x, reduce=False)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "grad can be implicitly created only for scalar output",
+        ):
+            torch.autograd.grad(tmp_edge, (x,))
+
+        # grad_outputs is None, and output is a scalar is fine
+        out, tmp_edge = fn(x, reduce=True)
+        torch.autograd.grad(tmp_edge, (x,))
+
+        # Incorrect case: grad_outputs wrong size
+        out, tmp_edge = fn(x)
+        (tmp_grad,) = torch.autograd.grad(out, (tmp_edge,))
+        with self.assertRaisesRegex(RuntimeError, "Mismatch in shape"):
+            torch.autograd.grad(
+                tmp_edge, (x,), grad_outputs=torch.tensor([1.0, 2.0, 3.0, 4.0])
+            )
+
+        # Incorrect case: wrong dtype
+        out, tmp_edge = fn(x)
+        (tmp_grad,) = torch.autograd.grad(out, (tmp_edge,))
+        with self.assertRaisesRegex(RuntimeError, "required to have the same dtype"):
+            torch.autograd.grad(
+                tmp_edge,
+                (x,),
+                grad_outputs=torch.rand_like(tmp_grad, dtype=torch.complex64),
+            )
+
     def test_grad_nonleaf(self):
         x_init = torch.randn(2, 2, requires_grad=True)
         x = x_init
