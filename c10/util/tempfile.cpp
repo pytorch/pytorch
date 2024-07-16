@@ -2,6 +2,8 @@
 #include <c10/util/tempfile.h>
 #include <fmt/format.h>
 
+#include <filesystem>
+
 #if !defined(_WIN32)
 #include <unistd.h>
 #include <cerrno>
@@ -21,15 +23,11 @@ static std::string make_filename(std::string_view name_prefix) {
 
   // We see if any of these environment variables is set and use their value, or
   // else default the temporary directory to `/tmp`.
-
-  const char* tmp_directory = "/tmp";
-  for (const char* variable : {"TMPDIR", "TMP", "TEMP", "TEMPDIR"}) {
-    if (const char* path = getenv(variable)) {
-      tmp_directory = path;
-      break;
-    }
-  }
-  return fmt::format("{}/{}{}", tmp_directory, name_prefix, kRandomPattern);
+  return fmt::format(
+      "{}/{}{}",
+      std::filesystem::temp_directory_path().string(),
+      name_prefix,
+      kRandomPattern);
 }
 #else
 static std::string make_filename() {
