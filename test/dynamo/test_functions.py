@@ -330,6 +330,40 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_methodcall3(a, b):
         return constant3(a, b=1.0) + b
 
+    def test_is_integer(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def forward(t, m):
+            return 2 * t if m.is_integer() else t
+
+        t = torch.tensor([1])
+        self.assertEqual(forward(t, 1.0).item(), 2)
+        self.assertEqual(forward(t, 1.5).item(), 1)
+
+    @parametrize(
+        "method, num_type",
+        (
+            ("as_integer_ratio", int),
+            ("bit_length", int),
+            ("conjugate", int),
+            ("as_integer_ratio", float),
+            ("conjugate", float),
+            ("hex", float),
+            ("is_integer", float),
+        ),
+    )
+    def test_number_method(self, method, num_type):
+        def forward(t, m):
+            return 2 * t if getattr(m, method)() else t
+
+        wrapped = torch.compile(backend="eager", fullgraph=True)(forward)
+
+        for i in (0, 1, 2.5):
+            m = num_type(i)
+            t = torch.tensor([1])
+            actual = wrapped(t, m)
+            expected = forward(t, m)
+            self.assertEqual(actual, expected)
+
     @make_test
     def test_device_constant(a):
         return a + torch.ones(1, device=torch.device("cpu"))
@@ -1217,6 +1251,51 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         test = make_test(fn)
         test(self)
+
+    @make_test
+    def test_set_intersection(a, b):
+        set1 = {"apple", "banana", "cherry"}
+        set2 = {"google", "microsoft", "apple"}
+        intersection_set = set1.intersection(set2)
+        if "apple" in intersection_set:
+            x = a + b
+        else:
+            x = a - b
+        if "banana" in intersection_set:
+            y = a + b
+        else:
+            y = a - b
+        return x, y
+
+    @make_test
+    def test_set_union(a, b):
+        set1 = {"apple", "banana", "cherry"}
+        set2 = {"google", "microsoft", "apple"}
+        union_set = set1.union(set2)
+        if "apple" in union_set:
+            x = a + b
+        else:
+            x = a - b
+        if "banana" in union_set:
+            y = a + b
+        else:
+            y = a - b
+        return x, y
+
+    @make_test
+    def test_set_difference(a, b):
+        set1 = {"apple", "banana", "cherry"}
+        set2 = {"google", "microsoft", "apple"}
+        difference_set = set1.difference(set2)
+        if "apple" in difference_set:
+            x = a + b
+        else:
+            x = a - b
+        if "banana" in difference_set:
+            y = a + b
+        else:
+            y = a - b
+        return x, y
 
     @make_test
     def test_tuple_iadd(a, b):

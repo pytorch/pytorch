@@ -2068,7 +2068,44 @@ class KernelTemplate:
         env = jinja2_env()
         if env is not None:
             env.filters["indent_except_first"] = KernelTemplate.indent_except_first
-            return env.from_string(source)
+            from jinja2 import TemplateSyntaxError
+
+            class DetailedTemplateSyntaxError(TemplateSyntaxError):
+                def __init__(self, original_error):
+                    super().__init__(
+                        original_error.message,
+                        original_error.lineno,
+                        original_error.name,
+                        original_error.filename,
+                    )
+                    self.original_error = original_error
+
+                def __str__(self):
+                    error_info = f"Error in template at line {self.lineno}\n"
+                    error_info += f"Error message: {self.message}\n"
+                    if hasattr(self.original_error, "source"):
+                        lines = self.original_error.source.split("\n")
+                        error_info += "Context:\n"
+                        start = max(0, self.lineno - 2)
+                        end = min(len(lines), self.lineno + 2)
+                        for i in range(start, end):
+                            if i == self.lineno - 1:
+                                error_info += f"{i+1}: --> {lines[i]}\n"
+                                if hasattr(self.original_error, "column"):
+                                    error_info += (
+                                        "     "
+                                        + " " * (self.original_error.column - 1)
+                                        + "^\n"
+                                    )
+                            else:
+                                error_info += f"{i+1}:     {lines[i]}\n"
+                    return error_info
+
+            try:
+                return env.from_string(source)
+            except TemplateSyntaxError as e:
+                raise DetailedTemplateSyntaxError(e) from e
+
         return None
 
     @staticmethod

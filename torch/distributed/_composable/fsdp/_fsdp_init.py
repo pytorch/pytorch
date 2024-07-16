@@ -140,7 +140,8 @@ def _move_states_to_device(
             raise AssertionError(
                 f"Expects DTensor to be moved to {dtensor_mesh_type} but got {tensor.device}"
             )
-        if is_traceable_wrapper_subclass(tensor):
+        tensor_ = tensor
+        if is_traceable_wrapper_subclass(tensor_):
             with torch.no_grad():  # avoid autograd increasing C++ refcount by 1
                 tensor_on_device = nn.Parameter(tensor.to(device))
             torch.utils.swap_tensors(tensor, tensor_on_device)
