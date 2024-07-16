@@ -1,4 +1,5 @@
 import copy
+import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -57,10 +58,13 @@ class OutputLogger(torch.nn.Module):
         return x
 
     def __extra_repr__(self) -> str:
-        return f"debug_handle={self.debug_handle}, node_name={self.node_name}, nn_module_stack={self.nn_module_stack}, num_stats={len(self.stats)})"
+        return (
+            f"debug_handle={self.debug_handle}, node_name={self.node_name}, "
+            "nn_module_stack={self.nn_module_stack}, num_stats={len(self.stats)})"
+        )
 
 
-def _insert_logger(model: GraphModule, node: Node, debug_handle: str) -> Node:
+def _insert_logger(model: GraphModule, node: Node, debug_handle: int) -> Node:
     """For a given node, adds an OutputLogger that observes the output of that node,
     and all its users use the OutputLogger output instead.
     The OutputLogger will contain the debug_handle which can be used to compare
@@ -133,17 +137,19 @@ class QuantizationComparisonResult:
             f"QuantizationComparisonResult(mse_loss={self.mse_loss}, sqnr={self.sqnr})"
         )
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.actual, torch.Tensor):
-            raise ValueError(f"`actual` value must be a Tensor, got: {actual}")
+            raise ValueError(
+                f"`self.actual` value must be a Tensor, got: {self.actual}"
+            )
 
         if not isinstance(self.ref, torch.Tensor):
-            raise ValueError(f"`ref` value must be a Tensor, got: {ref}")
+            raise ValueError(f"`self.ref` value must be a Tensor, got: {self.ref}")
 
 
 @dataclass(frozen=True)
 class NodeAccuracySummary:
-    handle: str
+    handle: int
     actual_node_name: str
     actual_module_stack: str
     ref_node_name: str
@@ -167,14 +173,14 @@ def _module_stack_to_str(module_stack: object) -> str:
 
 def extract_results_from_loggers(
     model: GraphModule,
-) -> Dict[int, Tuple[str, object, List[torch.Tensor]]]:
+) -> Dict[int, Tuple[Optional[str], object, List[torch.Tensor]]]:
     """For a given model, extract the tensors stats and related information for each debug handle.
 
     Returns:
         A dict is keyed by the debug_handle id and the values are a list of Tensors recorded
         in loggers"""
     # Results maps debug handle to a tensor list for each model being compared.
-    handles: Dict[int, Tuple[str, object, List[torch.Tensor]]] = {}
+    handles: Dict[int, Tuple[Optional[str], object, List[torch.Tensor]]] = {}
     for _name, module in model.named_children():
         if isinstance(module, OutputLogger) and len(module.stats) > 0:
             handles[module.debug_handle] = (
@@ -204,7 +210,7 @@ def compare_results(
     comparisons = {}
     for debug_handle, (ref_name, ref_stack, ref_stats) in ref_results.items():
         if debug_handle not in actual_results:
-            log.debug(
+            logging.debug(
                 "Cannot compare for handle %s because it wasn't found in the transformed model",
                 debug_handle,
             )

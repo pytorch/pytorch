@@ -161,6 +161,6 @@ class TestNumericDebugger(TestCase):
         ref_results = extract_results_from_loggers(m_ref_logger)
         quant_results = extract_results_from_loggers(m_quant_logger)
         comparison_results = compare_results(ref_results, quant_results)
-        for node, node_summary in comparison_results.items():
+        for node_summary in comparison_results.values():
             if len(node_summary.results) > 0:
                 self.assertGreaterEqual(node_summary.results[0].sqnr, 35)
