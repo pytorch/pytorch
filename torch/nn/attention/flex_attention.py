@@ -234,8 +234,7 @@ class BlockMask:
     q_indices: Tensor
     full_q_num_blocks: Optional[Tensor]
     full_q_indices: Optional[Tensor]
-    KV_BLOCK_SIZE: int
-    Q_BLOCK_SIZE: int
+    BLOCK_SIZE: Tuple[int, int]
     mask_mod: _mask_mod_signature
 
     def __init__(
@@ -244,12 +243,7 @@ class BlockMask:
         kv_indices: Tensor,
         full_kv_num_blocks: Optional[Tensor] = None,
         full_kv_indices: Optional[Tensor] = None,
-        q_num_blocks: Optional[Tensor] = None,
-        q_indices: Optional[Tensor] = None,
-        full_q_num_blocks: Optional[Tensor] = None,
-        full_q_indices: Optional[Tensor] = None,
-        KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
-        Q_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
+        BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
         mask_mod: Optional[_mask_mod_signature] = None,
     ):
         if kv_indices.dim() < 2:
@@ -259,29 +253,19 @@ class BlockMask:
         self.full_kv_num_blocks = full_kv_num_blocks
         self.full_kv_indices = full_kv_indices
 
-        if q_num_blocks is None:
-            assert q_indices is None
-            self.q_num_blocks, self.q_indices = _transpose_ordered(
-                kv_num_blocks, kv_indices
-            )
-        else:
-            assert q_indices is not None
-            self.q_num_blocks, self.q_indices = q_num_blocks, q_indices
+        self.q_num_blocks, self.q_indices = _transpose_ordered(
+            kv_num_blocks, kv_indices
+        )
 
         if full_kv_num_blocks is not None:
-            if full_q_num_blocks is None:
-                self.full_q_num_blocks, self.full_q_indices = _transpose_ordered(
-                    full_kv_num_blocks, full_kv_indices
-                )
-            else:
-                self.full_q_num_blocks, self.full_q_indices = (
-                    full_q_num_blocks,
-                    full_q_indices,
-                )
+            self.full_q_num_blocks, self.full_q_indices = _transpose_ordered(
+                full_kv_num_blocks, full_kv_indices
+            )
         else:
             self.full_q_num_blocks, self.full_q_indices = None, None
-        self.KV_BLOCK_SIZE = KV_BLOCK_SIZE
-        self.Q_BLOCK_SIZE = Q_BLOCK_SIZE
+        if isinstance(BLOCK_SIZE, int):
+            BLOCK_SIZE = (BLOCK_SIZE, BLOCK_SIZE)
+        self.BLOCK_SIZE = BLOCK_SIZE
         if mask_mod is None:
             mask_mod = _no_mask
         self.mask_mod = mask_mod
@@ -296,8 +280,8 @@ class BlockMask:
             self.q_indices,
             self.full_q_num_blocks,
             self.full_q_indices,
-            self.KV_BLOCK_SIZE,
-            self.Q_BLOCK_SIZE,
+            self.BLOCK_SIZE[0],
+            self.BLOCK_SIZE[1],
             self.mask_mod,
         )
 
@@ -309,8 +293,14 @@ class BlockMask:
         return s
 
     def __getitem__(self, index) -> "BlockMask":
-        new_values = [x[index] if isinstance(x, Tensor) else x for x in self.as_tuple()]
-        return BlockMask(*new_values)
+        new_kv_num_blocks = self.kv_num_blocks[index]
+        new_kv_indices = self.kv_indices[index]
+        return BlockMask(
+            new_kv_num_blocks,
+            new_kv_indices,
+            BLOCK_SIZE=self.BLOCK_SIZE,
+            mask_mod=self.mask_mod,
+        )
 
     @property
     def shape(self):
@@ -318,8 +308,8 @@ class BlockMask:
         Returns the shape of the mask.
         """
         *batch_dims, q_length, _ = self.kv_indices.shape
-        q_length = self.kv_indices.shape[-2] * self.KV_BLOCK_SIZE
-        kv_length = self.kv_indices.shape[-1] * self.Q_BLOCK_SIZE
+        q_length = self.kv_indices.shape[-2] * self.BLOCK_SIZE[0]
+        kv_length = self.kv_indices.shape[-1] * self.BLOCK_SIZE[1]
         return tuple(batch_dims + [q_length, kv_length])
 
     def numel(self):
@@ -342,7 +332,7 @@ class BlockMask:
         if self.full_kv_num_blocks is not None:
             computed_blocks += self.full_kv_num_blocks.sum()
 
-        computed_size = computed_blocks.item() * self.KV_BLOCK_SIZE * self.Q_BLOCK_SIZE
+        computed_size = computed_blocks.item() * self.BLOCK_SIZE[0] * self.BLOCK_SIZE[1]
         dense_ratio = computed_size / total_size
         return 100 * (1 - dense_ratio)
 
@@ -497,8 +487,7 @@ def _create_sparse_block_from_block_mask(
         full_bm[1],
         partial_bm[0],
         partial_bm[1],
-        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
-        Q_BLOCK_SIZE=Q_BLOCK_SIZE,
+        BLOCK_SIZE=(KV_BLOCK_SIZE, Q_BLOCK_SIZE),
         mask_mod=mask_mod,
     )
 
@@ -633,10 +622,7 @@ def _create_empty_block_mask(query, key, value) -> BlockMask:
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
         full_kv_num_blocks=None,
         full_kv_indices=None,
-        q_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
-        q_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
-        KV_BLOCK_SIZE=kv_len,
-        Q_BLOCK_SIZE=q_len,
+        BLOCK_SIZE=(kv_len, q_len),
     )
 
 
