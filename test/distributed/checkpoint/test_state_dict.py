@@ -916,8 +916,9 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         meta_model_dict = meta_model.state_dict()
         cpu_mocel_dict = get_model_state_dict(cpu_model)
         for key, value in cpu_mocel_dict.items():
-            meta_model_list = meta_model_dict[key].tolist()
-            self.assertEqual(meta_model_list, value.tolist())
+            device = value.device
+            meta_model_change_device = meta_model_dict[key].to(device=device)
+            self.assertEqual(value, meta_model_change_device)
 
     @with_comms
     @skip_if_lt_x_gpu(2)
@@ -944,8 +945,9 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         meta_model_dict = meta_model.state_dict()
         cpu_mocel_dict = get_model_state_dict(cpu_model)
         for key, value in cpu_mocel_dict.items():
-            meta_model_list = meta_model_dict[key].tolist()
-            self.assertEqual(meta_model_list, value.tolist())
+            device = value.device
+            meta_model_change_device = meta_model_dict[key].to(device=device)
+            self.assertEqual(value, meta_model_change_device)
 
 
 class TestNoComm(MultiProcessTestCase):
