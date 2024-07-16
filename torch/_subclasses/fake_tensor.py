@@ -887,7 +887,7 @@ class FakeTensor(Tensor):
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
 
 
-@dataclass
+@dataclass(slots=True)
 class TensorMetadata:
     """
     The Tensor metadata relevant to hashing FakeTensors when caching.
@@ -971,7 +971,7 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class _DispatchCacheKey:
     """
     Key for the FakeTensor dispatch cache.
@@ -998,7 +998,7 @@ class _DispatchCacheKey:
                 v.strip_shape_env()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DeconstructedSymNode:
     """
     Represents a SymNode without the associated ShapeEnv
@@ -1050,7 +1050,7 @@ class _DeconstructedSymNode:
         return hash((self._expr, self.pytype, self._hint, self.constant, self.fx_node))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DeconstructedSymType:
     """
     Represents a SymInt, SymFloat, SymBool without the associated ShapeEnv
@@ -1079,7 +1079,7 @@ class _DeconstructedSymType:
         return NotImplemented
 
 
-@dataclass
+@dataclass(slots=True)
 class _PySymInputStub:
     """
     Represents a SymInt in the cached key. Needed because SymInt doesn't
@@ -1119,7 +1119,7 @@ class _PySymInputStub:
         return self.value.node._value_hash()
 
 
-@dataclass
+@dataclass(slots=True)
 class _SymIntOutputStub:
     """
     Represents a SymInt in the cached output.
@@ -1153,7 +1153,7 @@ class _SymIntOutputStub:
         raise NotImplementedError
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DispatchCacheEntry:
     """
     Entry type for the FakeTensor dispatch cache. Accounts for two possibilities:
@@ -1189,7 +1189,7 @@ class DispatchCacheInfo:
     size: int
 
 
-@dataclass
+@dataclass(slots=True)
 class _CacheKeyState:
     """
     State used while building our cache key.

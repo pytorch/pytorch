@@ -3,7 +3,6 @@ import json
 import math
 import sys
 
-
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--test-name", dest="test_name", action="store", required=True, help="test name"

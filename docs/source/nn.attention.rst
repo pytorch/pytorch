@@ -20,11 +20,9 @@ Submodules
 .. autosummary::
     :nosignatures:
 
-    flex_attention
     bias
 
 .. toctree::
     :hidden:
 
-    nn.attention.flex_attention
     nn.attention.bias

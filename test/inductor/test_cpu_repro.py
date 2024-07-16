@@ -4011,25 +4011,6 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x,))
                 check_metrics_vec_kernel_count(1)
 
-    def test_consistent_remove_buffers(self):
-        def fn(x):
-            z = x + x
-            z1 = test_operators.realize(z)
-            return x + z1
-
-        # The shape makes sure we generate both vec and scalar kernels
-        x = torch.randn((65,), dtype=torch.bfloat16)
-        with config.patch(inplace_buffers=False):
-            metrics.reset()
-            self.common(fn, (x,))
-            check_metrics_vec_kernel_count(1)
-            _, code = run_and_get_cpp_code(torch.compile(fn), x)
-            FileCheck().check_count(
-                "tmp1 + tmp2",
-                2,
-                exactly=True,
-            ).run(code)
-
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

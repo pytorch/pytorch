@@ -67,7 +67,6 @@ Sections start with a reference to the source file where the code related to the
   - [Handling Mutability](#handling-mutability)
     - [Aliasing and mutation in the PyTorch API](#aliasing-and-mutation-in-the-pytorch-api)
     - [Aliasing and mutation annotations in FunctionSchema](#aliasing-and-mutation-annotations-in-functionschema)
-    - [Marking custom ops as side-effectful](#marking-custom-ops-as-side-effectful)
     - [Alias Analysis in the IR](#alias-analysis-in-the-ir)
     - [Writing optimization passes with `AliasDb`](#writing-optimization-passes-with-aliasdb)
 - [Profiling Programs](#profiling-programs)
@@ -1360,20 +1359,6 @@ func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]
 ```
 
 This annotation language is consumed by the `FunctionSchema` parser, which produces `AliasInfo` objects summarizing the aliasing relationships for each schema `Argument`.
-
-### Marking custom ops as side-effectful
-
-Sometimes, one will register a custom op that is side-effectful. For example, an op that does logging might take in a tensor (or other input), but not return anything. Without further annotation, these types of ops will often be dead-code-eliminated by TorchScript.
-
-To mark a custom op as side-effectful, or otherwise mark it to be handled conservatively by the alias analysis, it can be marked as `c10::AliasAnalysisKind::CONSERVATIVE`:
-
-```c++
-TORCH_LIBRARY(my_library, m) {
-  m.def(torch::schema(
-    "my_logging_op(Tensor data) -> ()",
-    c10::AliasAnalysisKind::CONSERVATIVE"));
-}
-```
 
 ### Alias Analysis in the IR
 
