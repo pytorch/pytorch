@@ -22,7 +22,7 @@ import torch.onnx
 from torch import nn
 
 from torch._subclasses import fake_tensor
-from torch.onnx._internal import _beartype, exporter
+from torch.onnx._internal import exporter
 from torch.onnx._internal.fx import (
     diagnostics,
     fx_symbolic_graph_extractor,
@@ -437,9 +437,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
-    @pytorch_test_common.xfail(
-        error_message=("Unsupported FX nodes: {'call_function': [")
-    )
+    @pytorch_test_common.xfail_dynamic_fx_test  # no dynamic shapes present
     def test_squeeze_runtime_dim(self):
         class Squeeze(torch.nn.Module):
             def forward(self, d1, d2):
@@ -644,10 +642,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.tensor([1]), torch.randn(3, 4))
         )
 
-    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        error_message="Unsupported FX nodes: {'call_function': ['aten._assert_async.msg']}",
-        reason="https://github.com/pytorch/pytorch/issues/112622",
-    )
     def test_operator_with_dynamic_output_shape(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -727,7 +721,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             CustomModule(), (torch.randn(1, 2, 3),)
         )
 
-    @_beartype.beartype
     def _test_fx_symbolic_tracer_large_scale_exporter(
         self,
         model_name: str,
@@ -961,7 +954,6 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         super().setUp()
         self.ort_version = onnxruntime.__version__
 
-    @_beartype.beartype
     def _test_fake_tensor_mode_exporter(
         self,
         model_name: str,
@@ -1235,7 +1227,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         batch, seq = 4, 256
 
         def create_args():
-            return tuple()
+            return ()
 
         def create_kwargs():
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
@@ -1269,14 +1261,9 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         reason="Dynamo error: scaled_dot_product_attention(): argument 'is_causal' must be bool, not SymBool",
         model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
     )
-    @pytorch_test_common.xfail_op_level_debug_test(
+    @pytorch_test_common.xfail(
         error_message="Could not find an implementation for Trilu(14) node",
         reason="ORT error during op level dubug",
-        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
-    )
-    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        error_message="n=copy_, n.args[0]=zeros_like, placeholders={",
-        reason="aot_autograd doesn't support it.",
     )
     def test_fake_tensor_mode_huggingface_openai_whisper(self):
         config = transformers.WhisperConfig(
@@ -1342,7 +1329,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         batch, seq = 4, 256
 
         def create_args():
-            return tuple()
+            return ()
 
         def create_kwargs():
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
@@ -1375,7 +1362,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         batch, seq = 4, 256
 
         def create_args():
-            return tuple()
+            return ()
 
         def create_kwargs():
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
@@ -1412,7 +1399,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return transformers.GPT2Model(config).eval()
 
         def create_args():
-            return tuple()
+            return ()
 
         def create_kwargs():
             batch, seq = 4, 256
@@ -1460,7 +1447,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return transformers.GPTNeoXModel(config).eval()
 
         def create_args():
-            return tuple()
+            return ()
 
         def create_kwargs():
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))

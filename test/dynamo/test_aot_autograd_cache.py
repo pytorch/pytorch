@@ -378,6 +378,45 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
                 res2[0].sum().backward()
                 self.assertEqual(a.grad, a2.grad)
 
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_nn_module_with_params_global_constant(self):
+        class MyMod(torch.nn.Module):
+            CONSTANT = torch.tensor([[2, 2], [2, 2]])
+
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn([2, 2]))
+
+            def forward(self, x):
+                return x.sin() + self.param + MyMod.CONSTANT
+
+        with torch.no_grad():
+            compiled_fn = torch.compile(MyMod(), backend="inductor", fullgraph=True)
+            res1 = compiled_fn(torch.ones([2, 2]))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            self._clear_dynamo_and_codecache()
+            res2 = compiled_fn(torch.ones([2, 2]))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            self.assertEqual(res1, res2)
+            # Edit the "constant". We'll get a cache hit,
+            # but it should result in a different result when run
+            # because MyMod.CONSTANT is an input to the graph
+            MyMod.CONSTANT = torch.tensor([[3, 3], [3, 3]])
+            self._clear_dynamo_and_codecache()
+            res3 = compiled_fn(torch.ones([2, 2]))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+            self.assertNotEqual(res1, res3)
+            self.assertEqual(res1, res3.sub(torch.ones(2, 2)))
+
 
 @inductor_config.patch("fx_graph_cache", True)
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
@@ -564,6 +603,21 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         r1 = self.gen_cache_key(fn, config, inputs=[torch.ones(3), 1])
         r2 = self.gen_cache_key(fn, config, inputs=[torch.ones(3), 2])
         self.assertNotEqual(r1, r2)
+
+    def test_nn_module_with_params(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.seq = torch.nn.Parameter(torch.ones((3, 3)))
+
+            def forward(self, x):
+                return self.seq + x
+
+        config = self.default_config()
+        # Different inputs and parameters, but all the same size
+        c1 = self.gen_cache_key(MyMod(), config, inputs=[torch.ones((3, 3))])
+        c2 = self.gen_cache_key(MyMod(), config, inputs=[torch.ones((3, 3))])
+        self.assertEqual(c1, c2)
 
     def test_normal_torch_function(self):
         @torch._dynamo.allow_in_graph
