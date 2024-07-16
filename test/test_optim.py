@@ -1327,6 +1327,11 @@ class TestOptimRenewed(TestCase):
             optim.zero_grad()
             loss = (w.mv(i) + b).pow(2).sum()
             loss.backward()
+            if optim_info.only_supports_sparse_grads:
+                if w.grad is not None:
+                    w.grad = w.grad.to_sparse()
+                if b.grad is not None:
+                    b.grad = b.grad.to_sparse()
             return loss
 
         for optim_input in all_optim_inputs:
