@@ -12,6 +12,8 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/repeat_interleave.h>
 #include <ATen/ops/repeat_interleave_native.h>
+
+#include <utility>
 #endif
 
 template <typename index_t>
@@ -87,7 +89,7 @@ Tensor repeat_interleave_symint(
   }
 
   auto ret = input.index_select(
-      dim.value(), at::repeat_interleave_symint(repeats_, output_size));
+      dim.value(), at::repeat_interleave_symint(repeats_, std::move(output_size)));
   // Restore conj and neg bits
   if (conj) {
     ret = ret.conj();
@@ -100,7 +102,7 @@ Tensor repeat_interleave_symint(
 
 Tensor repeat_interleave_symint(
     const Tensor& self,
-    c10::SymInt repeats,
+    const c10::SymInt& repeats,
     std::optional<int64_t> dim_opt,
     std::optional<SymInt> output_size) {
   Tensor input = dim_opt ? self : self.flatten();
