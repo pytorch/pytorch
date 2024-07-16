@@ -319,7 +319,7 @@ def _deduce_output_dtype_by_name(
         "to_dtype",
         "index_expr",
     ):
-        return kwargs["dtype"] if "dtype" in kwargs else args[-1]
+        return kwargs["dtype"] if "dtype" in kwargs else args[1]
     elif op_name in (
         "rand",
         "randn",
