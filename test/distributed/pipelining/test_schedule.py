@@ -242,6 +242,46 @@ class TestScheduleLowering(TestCase):
                 )
             self.assertEqual(len(comms_sch[rank]), len(expected_comms_sch[rank]))
 
+    def test_csv(self):
+
+
+        def _dump_csv(pipeline_order_with_comms, filename: str):
+            """Dump a CSV representation of the compute + comms schedule into a file with the provided filename."""
+            with open(filename, "w", newline="") as csvfile:
+                writer = csv.writer(csvfile)
+                for rank in pipeline_order_with_comms:
+                    writer.writerow(pipeline_order_with_comms[rank])
+
+        import csv
+        compute_sch = {}
+        with open("lowered_compute.csv", newline="") as csvfile:
+            reader = csv.reader(csvfile)
+            for rank, row in enumerate(reader):
+                compute_sch[rank] = [_Action.from_str(s) for s in row]
+        print(f"schedule loaded: ")
+        print(_format_pipeline_order(compute_sch))
+        num_model_chunks = 3
+        pipeline_parallel_size = 8
+        comms_sch = _add_send_recv(
+            compute_sch,
+            stage_to_rank=lambda chunk_index: chunk_index % pipeline_parallel_size,
+            num_stages=num_model_chunks * pipeline_parallel_size,
+        )
+        _dump_csv(comms_sch, "lowered_comms.csv")
+        # for rank in expected_comms_sch:
+        #     for i, (expected, actual) in enumerate(
+        #         zip(expected_comms_sch[rank], comms_sch[rank])
+        #     ):
+        #         self.assertEqual(
+        #             expected,
+        #             actual,
+        #             (
+        #                 f"Mismatch on rank {rank} at position {i}."
+        #                 f"\nExpected: {expected_comms_sch[rank]}"
+        #                 f"\nActual:   {comms_sch[rank]}"
+        #             ),
+        #         )
+        #     self.assertEqual(len(comms_sch[rank]), len(expected_comms_sch[rank]))
 
 instantiate_parametrized_tests(TestScheduleLowering)
 

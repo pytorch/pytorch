@@ -867,6 +867,13 @@ def _add_unshard_reshard(
 
     return unshard_actions
 
+def _batch_send_recv(ops, peer_ops):
+    new_ops = [o for o in ops]
+    new_peer_ops = [o for o in peer_ops]
+    ops.clear()
+    peer_ops.clear()
+    return new_ops, new_peer_ops
+
 
 def _add_send_recv(
     compute_actions: Dict[int, List[_Action]],
@@ -874,7 +881,6 @@ def _add_send_recv(
     num_stages: int,
 ) -> Dict[int, List[_Action]]:
     comm_actions: Dict[int, List[_Action]] = {rank: [] for rank in compute_actions}
-
     def _has_comms(action: _Action) -> bool:
         if action.computation_type == F:
             return action.stage_index != num_stages - 1
@@ -921,10 +927,13 @@ def _add_send_recv(
     while compute_actions:
         progress = False
         # go in order of ranks even if dict keys aren't ordered
-        for rank in range(len(compute_actions)):
+        new_comms = {rank: defaultdict(list) for rank in sorted(compute_actions)}
+        for rank in sorted(compute_actions):
+            if rank not in compute_actions:
+                continue
+
             assert len(compute_actions[rank]) > 0
             action = compute_actions[rank][0]
-
             if not _ready_to_schedule(action, comm_actions[rank]):
                 continue
 
@@ -934,16 +943,47 @@ def _add_send_recv(
                     send, recv = _get_comms(action)
                     # TODO we can avoid send/recv if the 2 stages are on the same rank.
                     # should we avoid that in the runtime or here?
-                    comm_actions[rank].append(send)
-                    comm_actions[stage_to_rank(recv.stage_index)].append(recv)
+                    new_comms[rank][stage_to_rank(send.stage_index)].append(send)
+                    new_comms[stage_to_rank(recv.stage_index)][rank].append(recv)
 
             compute_actions[rank].pop(0)
             if len(compute_actions[rank]) == 0:
                 del compute_actions[rank]
             progress = True
+        
+        if not progress:
+            print(f"WIP comms schedule:\n", _format_pipeline_order(comm_actions))
+            print(f"remaining compute actions:\n", compute_actions)
         assert progress, "Malformed compute schedule, can't schedule sends/recvs"
+        
+        # comm batching needs to be done carefully to avoid reordering comms and causing a hang
+        # algorithm:
+        # Process sends/recvs in pairs.  Processing means consuming from 'new_comms' and adding the final schedule
+        # processing batches is done the same way except 4 ops at a time are consumed and 2 are written
+        # rules: 
+        # 1- if we batch ops for one rank, we also batch matching ops for another rank 
+        # 2- when we create a batch, we append the batches to both ranks' schedules at the same time
+        # 3- we remove individual sends/recvs from 'new_comms' when we consume them in a batch
+        # 4- append individual (unbatchable) sends/recvs
+        for rank in new_comms:
+            for peer in new_comms[rank]:
+                # we batch and process all the operations between rank and peer.
+                # this should symmetrically consume all actions from new_comms[rank][peer] and new_comms[peer][rank]
+                ops = new_comms[rank][peer]
+                peer_ops = new_comms[peer][rank]
+                if len(ops) == 0:
+                    assert len(peer_ops) == 0, f"ops was empty but peer_ops was not, {peer_ops}"
+                
+                # batched_ops lists include both batched ops and unbatchable ops
+                batched_ops, batched_peer_ops = _batch_send_recv(ops, peer_ops)
+                
+                # now we have consumed ops from this rank and matching ops from peer.
+                # peer will be empty and we will not do anything when we iterate to it
+                assert len(ops) == 0 and len(peer_ops) == 0, f"Expected to process all ops, {ops}, {peer_ops}"
+                comm_actions[rank].extend(batched_ops)
+                comm_actions[peer].extend(batched_peer_ops)
+                
     return comm_actions
-
 
 class PipelineScheduleMulti(_PipelineSchedule):
     """
