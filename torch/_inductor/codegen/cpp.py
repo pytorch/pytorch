@@ -49,6 +49,7 @@ from ..utils import (
 
 from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
+    _deduce_output_dtype_by_name,
     BackendFeature,
     BracesBuffer,
     CppWrapperKernelArgs,
@@ -534,8 +535,8 @@ class CppCSEVariable(CSEVariable):
 
     def update_on_args(self, name, args, kwargs):
         if name == "load":
-            # args[1] is index
-            self._set_dependent_itervars(args[1])
+            # args[2] is index
+            self._set_dependent_itervars(args[2])
         else:
             # propagate relevant itervars and is_vec from args
             self.dependent_itervars.update(
@@ -549,22 +550,32 @@ class CppCSEVariable(CSEVariable):
                 self._set_dependent_itervars(args[0])
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
                 self.is_vec = True
-        # NOTE [dtype of CppCSEVariable]
-        # Deciding dtype according to the current optimization context is not
-        # always accurate since the dtypes are initialized during dtype propagation
-        # at the beginning of the codegen. It is possible that some ops are invoked
-        # during the codegen of the current op and take different dtypes from the
-        # current op.
-        # TODO(jgong5): A more accurate way of deciding the dtype of the variables is to
-        # propagate the dtypes here inside `update_on_args`.
+        # NOTE [Deduce dtype of CppCSEVariable at runtime]
         if (
-            hasattr(V.interpreter, "current_node")
-            and get_current_node_opt_ctx() is not None
-        ):
+            output_dtype := _deduce_output_dtype_by_name(
+                name,
+                *args,
+                **kwargs,
+            )
+        ) is not None:
+            self.dtype = output_dtype
+        elif name == "masked":
+            assert (
+                hasattr(V.interpreter, "current_node")
+                and V.interpreter.current_node.target.startswith("masked_subblock")
+                and get_current_node_opt_ctx() is not None
+            )
             self.dtype = get_current_node_opt_ctx().dtype
-
-        if name in BIN_CMP_OPS:
-            self.dtype = torch.bool
+        else:
+            # Induce output dtype by inputs' dtype
+            assert all(
+                arg.dtype is not None for arg in args if isinstance(arg, CppCSEVariable)
+            )
+            self.dtype = functools.reduce(
+                torch.promote_types,  # type: ignore[arg-type]
+                [arg.dtype for arg in args if isinstance(arg, CppCSEVariable)],
+            )
+        assert self.dtype is not None
 
     def _set_dependent_itervars(self, index: sympy.Expr):
         """
@@ -852,9 +863,6 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None, opt_ctx
-        dtype = opt_ctx.dtype
         if dtype in DTYPE_LOWP_FP:
             # Since load promotes all half-precision inputs to float, constants
             # must be promoted as well
@@ -863,10 +871,6 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None
-        dtype = opt_ctx.dtype
-
         idx_str = cexpr(V.kernel.rename_indexing(expr))
         var = V.kernel.cse.generate(
             V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
@@ -963,6 +967,52 @@ class CppOverrides(OpOverrides):
 CppOverrides._initialize_pointwise_overrides("cpp")
 
 
+def get_promote_dtype(args):
+    return (
+        functools.reduce(
+            torch.promote_types,  # type: ignore[arg-type]
+            [n.dtype for n in args if isinstance(n, CppCSEVariable)],
+        )
+        if all(n.dtype is not None for n in args if isinstance(n, CppCSEVariable))
+        else None  # not enough info to calculate the promote dtype
+    )
+
+
+def promote_vec_args(new_args):
+    def promote_vec_arg(arg, promote_type):
+        if (
+            isinstance(arg, CppCSEVariable)
+            and arg.dtype
+            and promote_type
+            and arg.dtype != promote_type
+        ):
+            assert arg.is_vec, "expect vec arg"
+            arg = ops.to_dtype(arg, promote_type)
+            arg = arg.value if isinstance(arg, OpsValue) else arg
+            arg.dtype = promote_type
+        return arg
+
+    promote_type = get_promote_dtype(new_args)
+    if (
+        all(
+            new_arg.dtype is not None
+            for new_arg in new_args
+            if isinstance(new_arg, CppCSEVariable)
+        )
+        and promote_type
+    ):
+        new_args = list(
+            map(
+                functools.partial(
+                    promote_vec_arg,
+                    promote_type=promote_type,
+                ),
+                new_args,
+            )
+        )
+    return new_args
+
+
 class CppVecOverrides(CppOverrides):
     """Map element-wise ops to aten vectorization C++"""
 
@@ -998,34 +1048,51 @@ class CppVecOverrides(CppOverrides):
                 if scalars and vectors:
                     # broadcast scalar args to vector if needed
                     new_args = []
-                    vec_dtype = vectors[0].dtype
+                    # Fix a data type mismatch in test_torchinductor.py::test_max_pool2d5_cpu.
+                    # In which, a floordiv node has vec arg of int8 and scalar node of int32.
+                    # In data type propagation, we set the output arg as int32.
+                    # However, in previous implementation, we cast scalar to vec data type int8
+                    # for calculation which causes following node data type mis match.
+                    # We should cast vec/scalar arg to promote data type instead.
+                    promote_type = get_promote_dtype(args)
                     for arg in args:
                         if isinstance(arg, (int, sympy.Expr)):
-                            arg_dtype = torch.int64
-                            opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-                            assert opt_ctx
-                            if opt_ctx.dtype is not None:
-                                arg_dtype = opt_ctx.dtype
                             if isinstance(arg, sympy.Expr) and not arg.is_number:
-                                arg = ops.index_expr(arg, arg_dtype)
+                                arg = ops.index_expr(arg, torch.int64)
                             else:
-                                arg = ops.constant(arg, arg_dtype)
+                                arg = ops.constant(arg, torch.int64)
                             arg = arg.value if isinstance(arg, OpsValue) else arg
-                        if isinstance(arg, CppCSEVariable) and not arg.is_vec:
+                        if isinstance(arg, CppCSEVariable):
                             assert isinstance(V.kernel, CppVecKernel)
                             # align scalar data type to the vector for binary ops
-                            if len(args) == 2 and arg.dtype != vec_dtype:
-                                arg = ops.to_dtype(arg, vec_dtype)
+                            if (
+                                len(args) == 2
+                                and promote_type
+                                and arg.dtype != promote_type
+                            ):
+                                arg = ops.to_dtype(arg, promote_type)
                                 arg = arg.value if isinstance(arg, OpsValue) else arg
                                 # See NOTE [dtype of CppCSEVariable]: we have to fix arg.dtype since
                                 # the dtype from optimization context could be wrong.
                                 assert isinstance(arg, CppCSEVariable)
-                                arg.dtype = vec_dtype
-                            new_arg = V.kernel.broadcast(arg)
+                                arg.dtype = promote_type
+                            if not arg.is_vec:
+                                new_arg = V.kernel.broadcast(arg)
+                            else:
+                                new_arg = arg
                             new_args.append(new_arg)
                         else:
                             new_args.append(arg)
                 if vectors:
+                    # We have saw several data type mismatch issues related with index_expr in
+                    # the lowering phase of torch.int8. torch.int32, torch.int64.
+                    # 1. int32 and int64 in test_torchinductor.py::test_max_pool2d_with_indices_backward3_cpu
+                    # 2. int8 and int32 in test_torchinductor.py::test_max_pool2d5_cpu
+                    # 3. int32 and fp32 in test_torchinductor_dynamic_shapes.py::test_avg_pool2d8_dynamic_shapes_cpu
+                    if len(new_args) == 2:
+                        new_args = promote_vec_args(new_args)
+                    elif func == CppVecOverrides.where:
+                        new_args[1:] = promote_vec_args(new_args[1:])
                     return func(*new_args, **kwargs)
                 else:
                     # fallback to scalar ops
@@ -1407,20 +1474,15 @@ class CppVecOverrides(CppOverrides):
             torch.int32,
             torch.int64,
         ], f"{__name__} does not support {dtype}"
-        node: torch.fx.Node = V.interpreter.current_node
-        assert node and isinstance(node, torch.fx.Node)
-        opt_ctx_x = get_opt_ctx(node.args[1])
-        assert opt_ctx_x
-        assert opt_ctx_x.dtype is not None
-        assert isinstance(V.kernel, CppVecKernel)
-        src_dtype = opt_ctx_x.dtype
+        assert isinstance(x, CppCSEVariable)
+        src_dtype = x.dtype
         src_cpp_type = DTYPE_TO_CPP[src_dtype]
         src_num_vectors = V.kernel._get_num_vectors(src_dtype)
         dst_cpp_type = DTYPE_TO_CPP[dtype]
         dst_num_vectors = V.kernel._get_num_vectors(dtype)
         if src_dtype != torch.bool and dtype == torch.bool:
             return f"{V.kernel._get_mask_type(src_dtype)}::from<{src_cpp_type},{src_num_vectors}>({x})"
-        if opt_ctx_x.dtype == torch.bool and dtype != torch.bool:
+        if src_dtype == torch.bool and dtype != torch.bool:
             return f"{x}.to<{dst_cpp_type},{dst_num_vectors}>()"
         if src_dtype != dtype:
             if src_num_vectors == dst_num_vectors == 1:
@@ -1514,9 +1576,6 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None
-        dtype = opt_ctx.dtype
         assert isinstance(V.kernel, CppVecKernel)
         index = V.kernel.rename_indexing(expr)
         tiling_var = V.kernel.itervars[V.kernel.tiling_idx]
@@ -1793,7 +1852,7 @@ class CppKernel(Kernel):
         if V.graph.get_dtype(name) in [torch.float16]:
             line = f"static_cast<float>({line})"
         csevar = self.cse.generate(self.loads, line)
-        csevar.update_on_args("load", (name, index), {})
+        csevar.update_on_args("load", (self, name, index), {})
         return csevar
 
     def store(self, name, index, value, mode=None):
@@ -2179,8 +2238,6 @@ class CppVecKernel(CppKernel):
            vector lanes for 8-bit data types.
         2. `torch.bool` and `torch.uint8` could mean masks and we load them as float mask vectors.
         """
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx is not None
         cpp_type = DTYPE_TO_CPP[dtype]
         num_vectors = self._get_num_vectors(dtype)
         load_mask_str = None
@@ -2257,8 +2314,6 @@ class CppVecKernel(CppKernel):
             assert isinstance(csevar, CppCSEVariable)
             return csevar
 
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx is not None
         code = BracesBuffer()
         code.writeline("[&]")
         with code.indent():
@@ -2331,7 +2386,6 @@ class CppVecKernel(CppKernel):
             return csevar
 
     def load(self, name: str, index: sympy.Expr):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.input(name)
         index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
@@ -2347,7 +2401,7 @@ class CppVecKernel(CppKernel):
         else:
             csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
-        csevar.update_on_args("load", (name, index), {})
+        csevar.update_on_args("load", (self, name, index), {})
         csevar.is_vec = True
         return csevar
 
@@ -2392,7 +2446,6 @@ class CppVecKernel(CppKernel):
         if not value.is_vec:
             # this happens when we store a scalar into a vectorized buffer like "fill"
             value = self.broadcast(value)
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
         self.cache_high_prec_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
@@ -2724,7 +2777,6 @@ class CppTile2DKernel(CppVecKernel):
         return tile_var
 
     def load(self, name: str, index: sympy.Expr):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.input(name)
         index = self.rename_indexing(index)
 
@@ -2738,7 +2790,7 @@ class CppTile2DKernel(CppVecKernel):
             dtype = V.graph.get_dtype(name)
             line = self._get_vec_load_line(loadbuf, 0, dtype)  # type: ignore[arg-type]
             csevar = self.cse.generate(self.loads, line)
-            csevar.update_on_args("load", (name, index), {})
+            csevar.update_on_args("load", (self, name, index), {})
             assert isinstance(csevar, CppCSEVariable)
             csevar.is_vec = True
             return csevar
@@ -2748,7 +2800,6 @@ class CppTile2DKernel(CppVecKernel):
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
 
         inner = self.inner_itervar()
@@ -2956,21 +3007,6 @@ class CppVecKernelChecker(CppVecKernel):
                 with RecordOptimizationContext(__name__) as node_ctx:
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
-                    # VecKernel override dtype for constant
-                    # Vectorization only support int32/fp32 now
-                    # So if dtype = int64/fp64, we will cast it to int32/fp32 if possible
-                    i32_iinfo = torch.iinfo(torch.int32)
-                    if (
-                        dtype == torch.int64
-                        and val <= i32_iinfo.max
-                        and val >= i32_iinfo.min
-                        and all(
-                            user.target in BIN_CMP_OPS
-                            for user in node_ctx.current_node.users
-                        )
-                    ):
-                        opt_ctx.dtype = torch.int32
-
                     f32_iinfo = torch.finfo(torch.float32)
                     if dtype == torch.double:
                         if (
