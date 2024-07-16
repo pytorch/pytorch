@@ -6,7 +6,6 @@
 # LICENSE file in the root directory of this source tree.
 
 import socket
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, ClassVar, Dict, Optional
@@ -51,15 +50,18 @@ class RendezvousConnectionError(RendezvousError):
 class RendezvousStateError(RendezvousError):
     """Raised when the state of a rendezvous is corrupt."""
 
+
 class RendezvousGracefulExitError(RendezvousError):
     """Raised when node wasn't not included in rendezvous and gracefully exits.
 
     Exception is a mechanism to exit the stack, however does not mean a failure.
     """
 
+
 @dataclass
 class RendezvousStoreInfo:
     """Store address and port that can be used to bootstrap trainer distributed comms"""
+
     MASTER_ADDR_KEY: ClassVar[str] = "MASTER_ADDR"
     MASTER_PORT_KEY: ClassVar[str] = "MASTER_PORT"
     master_addr: str
@@ -79,13 +81,22 @@ class RendezvousStoreInfo:
             store.set(RendezvousStoreInfo.MASTER_PORT_KEY, str(port).encode(encoding="UTF-8"))  # type: ignore[arg-type]
 
         addr = store.get(RendezvousStoreInfo.MASTER_ADDR_KEY).decode(encoding="UTF-8")
-        port = int(store.get(RendezvousStoreInfo.MASTER_PORT_KEY).decode(encoding="UTF-8"))
+        port = int(
+            store.get(RendezvousStoreInfo.MASTER_PORT_KEY).decode(encoding="UTF-8")
+        )
         return RendezvousStoreInfo(master_addr=addr, master_port=port)
 
 
 class RendezvousInfo:
     """Holds the information about the rendezvous."""
-    def __init__(self, store: Store, rank: int, world_size: int, bootstrap_store_info: RendezvousStoreInfo):
+
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        world_size: int,
+        bootstrap_store_info: RendezvousStoreInfo,
+    ):
         self._store = store
         self._rank = rank
         self._world_size = world_size

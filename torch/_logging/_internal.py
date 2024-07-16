@@ -179,6 +179,7 @@ DEFAULT_LOGGING = {
     "dynamo": logging.DEBUG,
     "aot": logging.DEBUG,
     "inductor": logging.DEBUG,
+    "fsdp": logging.DEBUG,
     "ddp_graphs": True,
     "graph_breaks": True,
     "guards": True,
@@ -196,9 +197,10 @@ def set_logs(
     dynamic: Optional[int] = None,
     inductor: Optional[int] = None,
     distributed: Optional[int] = None,
-    dist_c10d: Optional[int] = None,
-    dist_ddp: Optional[int] = None,
-    dist_fsdp: Optional[int] = None,
+    c10d: Optional[int] = None,
+    ddp: Optional[int] = None,
+    fsdp: Optional[int] = None,
+    dtensor: Optional[int] = None,
     onnx: Optional[int] = None,
     bytecode: bool = False,
     aot_graphs: bool = False,
@@ -286,16 +288,20 @@ def set_logs(
             Whether to log c10d communication operations and other debug info from PyTorch Distributed components.
             Default: ``logging.WARN``
 
-        dist_c10d (:class:`Optional[int]`):
+        c10d (:class:`Optional[int]`):
             Whether to log c10d communication operations related debug info in PyTorch Distributed components.
             Default: ``logging.WARN``
 
-        dist_ddp (:class:`Optional[int]`):
+        ddp (:class:`Optional[int]`):
             Whether to log debug info related to ``DistributedDataParallel``(DDP) from PyTorch Distributed components.
             Default: ``logging.WARN``
 
-        dist_fsdp (:class:`Optional[int]`):
+        fsdp (:class:`Optional[int]`):
             Whether to log debug info related to ``FullyShardedDataParallel``(FSDP) in PyTorch Distributed components.
+            Default: ``logging.WARN``
+
+        dtensor (:class:`Optional[int]`):
+            Whether to log debug info related to ``DTensor``(DTensor) in PyTorch Distributed components.
             Default: ``logging.WARN``
 
         onnx (:class:`Optional[int]`):
@@ -464,9 +470,10 @@ def set_logs(
         aot_joint_graph=aot_joint_graph,
         ddp_graphs=ddp_graphs,
         distributed=distributed,
-        dist_c10d=dist_c10d,
-        dist_ddp=dist_ddp,
-        dist_fsdp=dist_fsdp,
+        c10d=c10d,
+        ddp=ddp,
+        fsdp=fsdp,
+        dtensor=dtensor,
         graph=graph,
         graph_code=graph_code,
         graph_breaks=graph_breaks,
@@ -650,7 +657,7 @@ Valid settings:
 @functools.lru_cache
 def _parse_log_settings(settings):
     if settings == "":
-        return dict()
+        return {}
 
     if settings == "help":
         raise ValueError(help_message(verbose=False))
@@ -983,8 +990,13 @@ class LazyTraceHandler(logging.StreamHandler):
 
                 import torch.version as torch_version
 
-                if hasattr(torch_version, "git_version"):
-                    log.info("LazyTraceHandler: disabled because not fbcode")
+                if (
+                    hasattr(torch_version, "git_version")
+                    and os.getenv("MAST_HPC_JOB_NAME") is None
+                ):
+                    log.info(
+                        "LazyTraceHandler: disabled because not fbcode or conda on mast"
+                    )
                 elif not torch._utils_internal.justknobs_check("pytorch/trace:enable"):
                     log.info(
                         "LazyTraceHandler: disabled because justknobs_check('pytorch/trace:enable') returned False"

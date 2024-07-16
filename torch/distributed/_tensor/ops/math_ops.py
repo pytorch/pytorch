@@ -6,10 +6,10 @@ from enum import Enum
 from typing import cast, List, Optional, Sequence, Tuple, Union
 
 import torch
-
 from torch.distributed._tensor._op_schema import (
     OpSchema,
     OpStrategy,
+    PlacementList,
     PlacementStrategy,
     RuntimeSchemaInfo,
     TupleStrategy,
@@ -397,7 +397,7 @@ def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrateg
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
     assert isinstance(input_tuple_strategy, TupleStrategy)
-    norm_type = args_schema[1]
+    norm_type = args_schema[1] if len(args_schema) > 1 else 2
     assert isinstance(norm_type, (int, float, str)), f"{norm_type}"
     output_tuple_strategy_childs: List[OpStrategy] = []
     for op_strategy in input_tuple_strategy.childs:
@@ -1025,13 +1025,13 @@ def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
 
     # two outputs (values, indices), 1 input
     # replicate always works
-    all_replicate: List[Placement] = [Replicate()] * 3
+    all_replicate: PlacementList = [Replicate()] * 3
     single_mesh_dim_strategies.append(all_replicate)
 
     # every dim except topk dim should work
     for dim in range(input_strategy.ndim):
         if dim != topk_dim:
-            dim_shardings: List[Placement] = [Shard(dim)] * 3
+            dim_shardings: PlacementList = [Shard(dim)] * 3
             single_mesh_dim_strategies.append(dim_shardings)
     # TODO: topk on sharded dim requries non-trival reduction, address it later
 

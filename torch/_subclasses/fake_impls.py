@@ -54,9 +54,7 @@ def ordered_set(*items):
 # This function indicates if the backend device
 # supports non-contiguous tensors
 def is_noncontiguous_supported(device):
-    if device.type == "hpu":
-        return False
-    return True
+    return device.type != "hpu"
 
 
 _like_tensor_constructors = ordered_set(
@@ -761,6 +759,62 @@ def meta__scaled_dot_product_flash(fake_mode, func, *args, **kwargs):
         convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
         convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
         debug_mask,
+    )
+
+
+@register_op_impl(aten._scaled_dot_product_cudnn_attention.default)
+def meta__scaled_dot_product_cudnn(fake_mode, func, *args, **kwargs):
+    _, kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    query = kwargs["query"]
+    key = kwargs["key"]
+    value = kwargs["value"]
+    compute_log_sumexp = kwargs["compute_log_sumexp"]
+    # unused: attn_bias, dropout_p, is_causal, return_debug_mask, scale
+
+    def convert_tensor(t, device):
+        return FakeTensor(fake_mode, t, device)
+
+    B = query.size(0)
+    H = query.size(1)
+    S_Q = query.size(2)
+    S_KV = key.size(2)
+    D_QK = query.size(-1)
+    D_V = value.size(-1)
+
+    res = convert_tensor(
+        torch.empty(B, H, S_Q, D_V, dtype=query.dtype, device="meta"),
+        query.device,
+    )
+
+    logsum_exp = convert_tensor(
+        torch.empty(
+            (B, H, S_Q),
+            dtype=torch.float,
+            device="meta",
+        ),
+        query.device,
+    )
+
+    # See Note [Seed and Offset]:
+    seed = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
+    offset = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
+    return (
+        res,
+        logsum_exp,
+        None,
+        None,
+        S_Q,
+        S_KV,
+        seed,
+        offset,
+        None,
     )
 
 

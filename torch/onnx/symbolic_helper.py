@@ -368,7 +368,7 @@ def quantized_args(
                 return descriptor and _is_value(arg) and _is_tuple_construct(arg)
 
             # Run regular symbolic function if none of the argument is QTensor.
-            is_quantized = list()
+            is_quantized = []
             for descriptor, arg in descriptor_args:
                 # ListConstruct
                 if _is_packed_list(arg):
@@ -536,14 +536,6 @@ def is_complex_value(x: _C.Value) -> bool:
 
 
 @_beartype.beartype
-def is_caffe2_aten_fallback() -> bool:
-    return (
-        GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-        and _C_onnx._CAFFE2_ATEN_FALLBACK
-    )
-
-
-@_beartype.beartype
 def _get_tensor_rank(x: _C.Value) -> Optional[int]:
     if not _is_tensor(x) or x.type() is None:
         return None
@@ -592,9 +584,7 @@ def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
 @_beartype.beartype
 def _unimplemented(op: str, msg: str, value: Optional[_C.Value] = None) -> None:
     # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
-    if _C_onnx._CAFFE2_ATEN_FALLBACK:
-        warnings.warn(f"ONNX export failed on {op} because {msg} not supported")
-    elif GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
+    if GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
         _onnx_unsupported(f"{op}, {msg}", value)
 
 
@@ -1811,7 +1801,7 @@ def _reduce_op_symbolic_helper(onnx_op_name, allow_multi_dim_support=True):
     @_beartype.beartype
     def symbolic(g, self, dim=None, keepdim=None):
         self = _maybe_cast_reduce_op_input(g, self)
-        if dim is None or dim == tuple():
+        if dim is None or dim == ():
             # Dim can be 0, which will cause (not dim) == True. So we don't want to do
             # (not dim)
             # all-reduce path

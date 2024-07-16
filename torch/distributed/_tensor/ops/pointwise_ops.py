@@ -2,7 +2,6 @@
 from typing import List, Sequence, Tuple
 
 import torch
-
 from torch.distributed._tensor._op_schema import (
     _is_inplace_op,
     _is_out_variant_op,
@@ -13,7 +12,6 @@ from torch.distributed._tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
-
 from torch.distributed._tensor.ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
@@ -60,6 +58,14 @@ linear_pointwise_ops = [
 
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
+    aten.__ilshift__.Scalar,
+    aten.__ilshift__.Tensor,
+    aten.__irshift__.Scalar,
+    aten.__irshift__.Tensor,
+    aten.__lshift__.Scalar,
+    aten.__lshift__.Tensor,
+    aten.__rshift__.Scalar,
+    aten.__rshift__.Tensor,
     aten._conj.default,
     aten.abs.default,
     aten.abs.out,

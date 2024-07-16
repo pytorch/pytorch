@@ -107,9 +107,10 @@ def is_available() -> bool:
     return device_count() > 0
 
 
-def synchronize() -> None:
+def synchronize(device: Optional[_device_t] = None) -> None:
     r"""Waits for all jobs in all streams on a MTIA device to complete."""
-    return torch._C._mtia_deviceSynchronize()
+    with torch.mtia.device(device):
+        return torch._C._mtia_deviceSynchronize()
 
 
 def device_count() -> int:

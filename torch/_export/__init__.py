@@ -19,36 +19,13 @@ from functools import lru_cache
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
-import sympy
-
 import torch
-import torch._dynamo
 import torch.fx
 import torch.utils._pytree as pytree
 
-from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.exc import UserError, UserErrorType
-from torch._dynamo.source import ConstantSource
-from torch._export.non_strict_utils import make_constraints
-from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
-from torch._functorch.aot_autograd import aot_export_module, GraphSignature
-from torch._functorch.eager_transforms import functionalize
-from torch._guards import detect_fake_mode
-from torch._inductor import config
-from torch._ops import OpOverload
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._utils_internal import log_export_usage
 from torch.export._tree_utils import reorder_kwargs
-from torch.export._unlift import _create_stateful_graph_module
-from torch.export.dynamic_shapes import _combine_args, Constraint, dims, dynamic_dim
-from torch.export.exported_program import (
-    _disable_prexisiting_fake_mode,
-    ExportedProgram,
-    ModuleCallEntry,
-    ModuleCallSignature,
-)
 from torch.export.graph_signature import (
     _sig_to_specs,
     ArgumentSpec,
@@ -64,18 +41,8 @@ from torch.export.graph_signature import (
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
-from torch.fx.experimental.symbolic_shapes import (
-    ConstraintViolationError,
-    GuardOnDataDependentSymNode,
-    ShapeEnv,
-    StrictMinMaxConstraint,
-)
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
-from .passes.add_runtime_assertions_for_constraints_pass import (
-    _AddRuntimeAssertionsForInlineConstraintsPass,
-)
 from .wrappers import _wrap_submodules
 
 log = logging.getLogger(__name__)
@@ -92,6 +59,8 @@ class ExportDynamoConfig:
 # is called multiple times.
 @lru_cache
 def capture_pre_autograd_graph_warning():
+    from torch._inductor import config
+
     log.warning("+============================+")
     log.warning("|     !!!   WARNING   !!!    |")
     log.warning("+============================+")
@@ -141,6 +110,10 @@ def capture_pre_autograd_graph(
     """
     from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG, _ignore_backend_decomps
     from torch._utils_internal import export_api_rollout_check
+    from torch._export.non_strict_utils import make_constraints
+    from torch._subclasses.functional_tensor import FunctionalTensor
+    from torch.export._unlift import _create_stateful_graph_module
+    from torch.export.dynamic_shapes import _combine_args
 
     capture_pre_autograd_graph_warning()
 
@@ -235,12 +208,13 @@ def capture_pre_autograd_graph(
 
 
 def save(
-    ep: ExportedProgram,
+    ep,
     f: Union[str, os.PathLike, io.BytesIO],
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     opset_version: Optional[Dict[str, int]] = None,
 ) -> None:
+    from torch.export.exported_program import ExportedProgram
     if not isinstance(ep, ExportedProgram):
         raise TypeError(f"save() expects an ExportedProgram but got {type(ep)}")
 
@@ -273,7 +247,7 @@ def load(
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     expected_opset_version: Optional[Dict[str, int]] = None,
-) -> ExportedProgram:
+):
     if isinstance(f, (str, os.PathLike)):
         f = os.fspath(f)
 
@@ -386,6 +360,7 @@ def aot_compile(
     """
     from torch.export._trace import _export_to_torch_ir
     from torch._inductor.decomposition import select_decomp_table
+    from torch._inductor import config
 
     if config.is_predispatch:
         gm = torch.export._trace._export(f, args, kwargs, dynamic_shapes, pre_dispatch=True).module()

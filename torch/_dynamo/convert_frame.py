@@ -216,7 +216,7 @@ def has_tensor_in_frame(frame):
             if np and config.trace_numpy and (obj is np or is_numpy(obj)):
                 return True
 
-    seen_ids: Dict[int, bool] = dict()
+    seen_ids: Dict[int, bool] = {}
 
     def has_tensor(obj):
         """Recursively check if the obj has a tensor"""
@@ -519,7 +519,6 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
-@compile_time_strobelight_meta(phase_name="_compile")
 @_use_lazy_graph_module(config.use_lazy_graph_module)
 def _compile(
     code: types.CodeType,
@@ -604,6 +603,7 @@ def _compile(
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
     @dynamo_timed(phase_name="entire_frame_compile")
+    @compile_time_strobelight_meta(phase_name="compile_inner")
     @maybe_cprofile
     def compile_inner(
         code: types.CodeType,
@@ -728,7 +728,7 @@ def _compile(
             hooks.guard_fail_fn if hooks else None,
         )
 
-        guarded_code = GuardedCode(out_code, check_fn.check_fn)
+        guarded_code = GuardedCode(out_code, check_fn.check_fn, compile_id)
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
             # We should not run the guard_export_fn when Dynamo does not
@@ -1063,16 +1063,21 @@ class CatchErrorsWrapper:
         assert frame_state is not None
 
         is_skipfile = trace_rules.check(frame.f_code)
+        if sys.version_info >= (3, 13):
+            has_started_execution = frame.f_lasti > first_real_inst_idx(frame.f_code)
+        else:
+            has_started_execution = frame.f_lasti >= first_real_inst_idx(frame.f_code)
         if (
             # TODO: the first condition is not covered by any test
-            frame.f_lasti >= first_real_inst_idx(frame.f_code)
+            has_started_execution
             or is_skipfile
             or config.disable
         ):
             if log.isEnabledFor(logging.DEBUG):
+                print(frame.f_lasti, first_real_inst_idx(frame.f_code))
                 skip_reason = (
                     "traced frame already"
-                    if frame.f_lasti >= first_real_inst_idx(frame.f_code)
+                    if has_started_execution
                     else (
                         "in skipfiles"
                         if trace_rules.check(frame.f_code)

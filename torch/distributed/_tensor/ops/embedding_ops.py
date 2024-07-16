@@ -2,24 +2,28 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
 from dataclasses import dataclass, field
-from typing import cast, List, Optional
+from typing import cast, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
-from torch.distributed._tensor._op_schema import OpSchema, OpStrategy, StrategyType
+from torch.distributed._tensor._op_schema import (
+    OpSchema,
+    OpStrategy,
+    PlacementList,
+    StrategyType,
+)
 from torch.distributed._tensor.ops.utils import (
     expand_to_full_mesh_op_strategy,
     register_op_strategy,
 )
-
 from torch.distributed._tensor.placement_types import (
     Partial,
     Placement,
     Replicate,
     Shard,
 )
-
 from torch.distributed.device_mesh import DeviceMesh
+
 
 aten = torch.ops.aten
 
@@ -179,11 +183,11 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
     # placement list stores placements of [output, weight, input_indices]
     # first we always have replicate all for inputs and output
-    all_replicate: List[Placement] = [Replicate()] * 3
+    all_replicate: PlacementList = [Replicate()] * 3
     single_mesh_dim_strategies.append(all_replicate)
 
     # colwise sharding, output shard on last dim, weight shard on dim 1, input replicate
-    colwise_sharding = [Shard(output_emd_dim), Shard(1), Replicate()]
+    colwise_sharding: PlacementList = [Shard(output_emd_dim), Shard(1), Replicate()]
     single_mesh_dim_strategies.append(colwise_sharding)
 
     # rowwise sharding, output is embedding partial, weight shard on dim 0, input accepts embedding partial
@@ -191,7 +195,7 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
     # NOTE we want to reuse the same mask partial placement so that we can reuse the same mask that generates
     # from the input indices and use it for output reduction
-    rowwise_sharding = [
+    rowwise_sharding: PlacementList = [
         embedding_partial_placement,
         Shard(0),
         embedding_partial_placement,
@@ -200,7 +204,11 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
     # batch dim sharding, weight replicated, input can shard on any dim, output follows input
     for input_dim in range(len(indices_shape)):
-        batch_sharding = [Shard(input_dim), Replicate(), Shard(input_dim)]
+        batch_sharding: PlacementList = [
+            Shard(input_dim),
+            Replicate(),
+            Shard(input_dim),
+        ]
         single_mesh_dim_strategies.append(batch_sharding)
 
     return expand_to_full_mesh_op_strategy(mesh, op_schema, single_mesh_dim_strategies)
@@ -225,22 +233,22 @@ def embedding_dense_backward_strategy(
 
     # placement list stores placements of [output, weight, input_indices]
     # first we always have replicate all for inputs and output
-    all_replicate: List[Placement] = [Replicate()] * 3
+    all_replicate: PlacementList = [Replicate()] * 3
     single_mesh_dim_strategies.append(all_replicate)
 
     # colwise sharding backward, grad_out shard on last dim, input replicate,
     # weight grad shard colwise
-    colwise_sharding = [Shard(1), Shard(grad_out_ndim - 1), Replicate()]
+    colwise_sharding: PlacementList = [Shard(1), Shard(grad_out_ndim - 1), Replicate()]
     single_mesh_dim_strategies.append(colwise_sharding)
 
     # batch dim sharding, weight replicated, grad_out/input have same sharding
     # that can shard on any dim, weight grad partial
     for input_dim in range(len(indices_shape)):
-        batch_sharding = [Partial(), Shard(input_dim), Shard(input_dim)]
+        batch_sharding: PlacementList = [Partial(), Shard(input_dim), Shard(input_dim)]
         single_mesh_dim_strategies.append(batch_sharding)
 
     # grad_out partial, input replicate, weight grad keep partial
-    partial_sharding = [Partial(), Partial(), Replicate()]
+    partial_sharding: PlacementList = [Partial(), Partial(), Replicate()]
     single_mesh_dim_strategies.append(partial_sharding)
 
     return expand_to_full_mesh_op_strategy(mesh, op_schema, single_mesh_dim_strategies)

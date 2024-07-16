@@ -18,6 +18,7 @@ from torch.distributed._tensor.ops.math_ops import (
 from torch.distributed._tensor.placement_types import DTensorSpec, Placement, TensorMeta
 from torch.distributed.device_mesh import DeviceMesh
 
+
 aten = torch.ops.aten
 
 
@@ -366,7 +367,7 @@ def _nll_loss_and_log_softmax_backward(
     masked_safe_target = partial_placement._partition_value(safe_target, mesh, mesh_dim)
     # only update grad_input to -1 if not masked
     assert partial_placement.mask_buffer.data is not None
-    grad_update = partial_placement.mask_buffer.data.float() - 1.0
+    grad_update = partial_placement.mask_buffer.data.to(grad_input.dtype) - 1.0
     arange_1d = torch.arange(
         masked_safe_target.shape[0], device=masked_safe_target.device
     )

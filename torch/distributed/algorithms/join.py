@@ -7,7 +7,9 @@ from typing import Any, List, NamedTuple, Optional, Type
 import torch
 import torch.distributed as dist
 
-__all__ = ['JoinHook', 'Joinable', 'Join']
+
+__all__ = ["JoinHook", "Joinable", "Join"]
+
 
 class JoinHook:
     r"""
@@ -97,11 +99,8 @@ class _JoinConfig(NamedTuple):
         e.g. if the caller is not in a join context manager.
         """
         return _JoinConfig(
-            enable=False,
-            throw_on_early_termination=False,
-            is_first_joinable=False
+            enable=False, throw_on_early_termination=False, is_first_joinable=False
         )
-
 
 
 class Join:
@@ -176,7 +175,9 @@ class Join:
         if len(joinables) == 0:
             raise ValueError("The join context manager requires at least one joinable")
         self._joinables = joinables
-        self._join_hooks = [joinable.join_hook(**kwargs) for joinable in self._joinables]
+        self._join_hooks = [
+            joinable.join_hook(**kwargs) for joinable in self._joinables
+        ]
         self._enable = enable
         self._throw_on_early_termination = throw_on_early_termination
         self._set_joinable_configs()
@@ -190,7 +191,7 @@ class Join:
             joinable._join_config = _JoinConfig(
                 enable=self._enable,
                 throw_on_early_termination=self._throw_on_early_termination,
-                is_first_joinable=is_first_joinable
+                is_first_joinable=is_first_joinable,
             )
             is_first_joinable = False
 
@@ -215,7 +216,9 @@ class Join:
             if process_group is None:
                 process_group = joinable.join_process_group
             elif process_group != joinable.join_process_group:
-                raise ValueError("Using join context manager with multiple process groups")
+                raise ValueError(
+                    "Using join context manager with multiple process groups"
+                )
             if device is None:
                 device = joinable.join_device
         self._process_group = process_group
@@ -229,7 +232,7 @@ class Join:
         self,
         type: Optional[Type[BaseException]],
         value: Optional[BaseException],
-        traceback: Optional[TracebackType]
+        traceback: Optional[TracebackType],
     ):
         r"""
         Repeatedly runs the main hooks until all processes join; then, runs the post-hooks.
@@ -318,9 +321,10 @@ class Join:
             manager that the process has not yet joined if ``joinable`` is the
             first one passed into the context manager; ``None`` otherwise.
         """
-        assert hasattr(joinable, "_join_config"), \
-            f"Check that the {type(joinable)} constructor calls the " \
+        assert hasattr(joinable, "_join_config"), (
+            f"Check that the {type(joinable)} constructor calls the "
             "``Joinable`` constructor"
+        )
 
         join_config = joinable._join_config
         # First joinable is responsible for the collective communications
