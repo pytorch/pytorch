@@ -14,6 +14,7 @@ import json
 from typing import Any
 
 import boto3  # type: ignore[import]
+
 from label_utils import gh_get_labels
 
 

@@ -921,7 +921,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             params_list = collect_parameters(self, recurse=recurse)
 
             # Account for duplicated params
-            deduplicated_params = list(dict.fromkeys(params_list).keys())
+            deduplicated_params = list({param: None for param in params_list}.keys())
 
             return variables.ListIteratorVariable(
                 deduplicated_params, mutable_local=MutableLocal()

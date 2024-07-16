@@ -323,7 +323,8 @@ void _sparse_binary_op_intersection_kernel_impl(
   //
   // intersection_count and intersection_first_idx are used to form indices at which
   // intersection values are selected.
-  auto [intersection_count, intersection_first_idx] = [&]() -> std::tuple<Tensor, Tensor> {
+  Tensor intersection_count, intersection_first_idx;
+  std::tie(intersection_count, intersection_first_idx) = [&]() -> std::tuple<Tensor, Tensor> {
     const auto source_nnz = source._nnz();
     auto intersection_buffer = at::empty({2, source_nnz}, sorted_hash.options());
     auto intersection_count = intersection_buffer.select(0, 0);
