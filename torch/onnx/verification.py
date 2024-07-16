@@ -40,7 +40,7 @@ import torch._C._onnx as _C_onnx
 from torch import _C
 from torch.onnx import _constants, _experimental, _exporter_states, utils
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, onnx_proto_utils
+from torch.onnx._internal import onnx_proto_utils
 from torch.types import Number
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
@@ -99,7 +99,6 @@ class VerificationOptions:
     acceptable_error_percentage: Optional[float] = None
 
 
-@_beartype.beartype
 def _flatten_tuples(elem):
     flattened = []
     for t in elem:
@@ -129,7 +128,6 @@ def _to_numpy(elem) -> Union[list, np.ndarray]:
     return elem
 
 
-@_beartype.beartype
 def _inline_flatten_list(inputs, res_list) -> list:
     for i in inputs:
         res_list.append(i) if not isinstance(
@@ -138,7 +136,6 @@ def _inline_flatten_list(inputs, res_list) -> list:
     return res_list
 
 
-@_beartype.beartype
 def _unpack_to_numpy(values, cast_onnx_accepted=True) -> list:
     value_unpacked = []
     for value in values:
@@ -148,7 +145,6 @@ def _unpack_to_numpy(values, cast_onnx_accepted=True) -> list:
     return [_to_numpy(v) for v in value_unpacked]
 
 
-@_beartype.beartype
 def _run_onnx(onnx_session, inputs) -> _OutputsType:
     kw_inputs = {}
     if inputs and isinstance(inputs[-1], dict):
@@ -179,7 +175,6 @@ def _run_onnx(onnx_session, inputs) -> _OutputsType:
     return onnx_outs
 
 
-@_beartype.beartype
 def _ort_session(
     model: Union[str, io.BytesIO], ort_providers: Sequence[str] = _ORT_PROVIDERS
 ):
@@ -203,7 +198,6 @@ def _ort_session(
     return ort_session
 
 
-@_beartype.beartype
 def _onnx_reference_evaluator_session(model: Union[str, io.BytesIO]):
     try:
         import onnx
@@ -220,7 +214,6 @@ def _onnx_reference_evaluator_session(model: Union[str, io.BytesIO]):
     return onnx_session
 
 
-@_beartype.beartype
 def _onnx_backend_session(model: Union[str, io.BytesIO], backend: OnnxBackend):
     if backend == OnnxBackend.REFERENCE:
         onnx_session = _onnx_reference_evaluator_session(model)
@@ -231,7 +224,6 @@ def _onnx_backend_session(model: Union[str, io.BytesIO], backend: OnnxBackend):
     return onnx_session
 
 
-@_beartype.beartype
 def _compare_onnx_pytorch_outputs_in_np(
     onnx_outs: _OutputsType,
     pt_outs: _OutputsType,
@@ -281,7 +273,6 @@ def _compare_onnx_pytorch_outputs_in_np(
             raise
 
 
-@_beartype.beartype
 def _compare_onnx_pytorch_outputs(
     onnx_outs: _OutputsType,
     pt_outs: Any,
@@ -310,7 +301,6 @@ def _compare_onnx_pytorch_outputs(
     _compare_onnx_pytorch_outputs_in_np(onnx_outs, pt_outs_np, options)
 
 
-@_beartype.beartype
 def _prepare_input_for_pytorch(args, kwargs):
     """Prepare input for PyTorch model execution.
 
@@ -337,7 +327,6 @@ def _prepare_input_for_pytorch(args, kwargs):
     return args, kwargs
 
 
-@_beartype.beartype
 def _prepare_input_for_export(args, kwargs):
     """Prepare input for ONNX model export.
 
@@ -362,7 +351,6 @@ def _prepare_input_for_export(args, kwargs):
     return onnx_inputs
 
 
-@_beartype.beartype
 def _prepare_input_for_onnx(
     args, kwargs, remained_onnx_input_idx: Optional[Sequence[int]], flatten: bool
 ):
@@ -392,7 +380,6 @@ def _prepare_input_for_onnx(
         return onnx_inputs
 
 
-@_beartype.beartype
 def _try_clone_model(model):
     """Used for preserving original model in case forward mutates model states."""
     try:
@@ -404,7 +391,6 @@ def _try_clone_model(model):
         return model
 
 
-@_beartype.beartype
 def _compare_onnx_pytorch_model(
     pt_model: _ModelType,
     onnx_model_f: Union[str, io.BytesIO],
@@ -430,7 +416,6 @@ def _compare_onnx_pytorch_model(
     """
     onnx_session = _onnx_backend_session(onnx_model_f, options.backend)
 
-    @_beartype.beartype
     def compare_onnx_pytorch_model_with_input(input_args, input_kwargs):
         pt_args, pt_kwargs = _prepare_input_for_pytorch(input_args, input_kwargs)
         # TODO: remove this and treat mutating model separately. See #77679
@@ -459,7 +444,6 @@ def _compare_onnx_pytorch_model(
 class _GraphDiff:
     """A class to represent the difference between two graphs."""
 
-    @_beartype.beartype
     def __init__(self, graph_a: _C.Graph, graph_b: _C.Graph):
         """Construct a _GraphDiff object.
 
@@ -470,16 +454,13 @@ class _GraphDiff:
         self.graph_a = graph_a
         self.graph_b = graph_b
 
-    @_beartype.beartype
     def __str__(self):
         """See function :func:`diff_report`."""
         return self.diff_report()
 
-    @_beartype.beartype
     def _indent(self, lines: str) -> str:
         return "\n".join(["\t" + line for line in lines.splitlines()])
 
-    @_beartype.beartype
     def diff_report(self) -> str:
         """Return a string representation of the graph difference.
 
@@ -529,7 +510,6 @@ class _GraphDiff:
         return "\n".join(graph_diff_report)
 
 
-@_beartype.beartype
 def _check_graph_diff(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     test_input_groups: Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]],
@@ -571,7 +551,6 @@ def _check_graph_diff(
     return ""
 
 
-@_beartype.beartype
 def _traced_graph_from_model(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     args: Tuple[Any, ...],
@@ -599,7 +578,6 @@ def _traced_graph_from_model(
         return jit_graph
 
 
-@_beartype.beartype
 def _onnx_graph_from_model(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     args: Tuple[Any, ...],
@@ -664,7 +642,6 @@ def _onnx_graph_from_model(
         return onnx_graph
 
 
-@_beartype.beartype
 def _onnx_graph_from_aten_graph(
     graph: torch.Graph,
     export_options: _experimental.ExportOptions,
@@ -728,7 +705,6 @@ def _onnx_graph_from_aten_graph(
     return graph, params_dict
 
 
-@_beartype.beartype
 def _onnx_proto_from_onnx_graph(
     onnx_graph: torch.Graph,
     export_options: _experimental.ExportOptions,
@@ -762,7 +738,6 @@ def _onnx_proto_from_onnx_graph(
     return proto, export_map
 
 
-@_beartype.beartype
 def check_export_model_diff(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     test_input_groups: Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]],
@@ -806,7 +781,6 @@ def check_export_model_diff(
     )
 
 
-@_beartype.beartype
 def verify(
     model: _ModelType,
     input_args: _InputArgsType,
@@ -895,7 +869,6 @@ def verify(
         )
 
 
-@_beartype.beartype
 def verify_aten_graph(
     graph: torch.Graph,
     input_args: Tuple[Any, ...],
@@ -996,7 +969,6 @@ class GraphInfoPrettyPrinter:
             self.upper_printer = None
             self.lower_printer = None
 
-    @_beartype.beartype
     def _total_rows(self) -> int:
         if self.graph_info is None:
             return 1
@@ -1006,7 +978,6 @@ class GraphInfoPrettyPrinter:
             )
         return 2  # Two lines: node count + id.
 
-    @_beartype.beartype
     def _node_count_segment_str(self) -> str:
         if self.graph_info is None:
             return "..."
@@ -1020,19 +991,16 @@ class GraphInfoPrettyPrinter:
 
         return f"{node_count} {'X' if has_mismatch else chr(0x2713)} {error_node_kind}"
 
-    @_beartype.beartype
     def _graph_id_segment_str(self) -> str:
         if self.graph_info is None:
             return ""
         return f"id: {self.graph_info.id}"
 
-    @_beartype.beartype
     def _max_segment_columns(self) -> int:
         return max(
             map(len, (self._node_count_segment_str(), self._graph_id_segment_str()))
         )
 
-    @_beartype.beartype
     def _graph_segment_str_at_line(self, line: int) -> str:
         """Get the string representation of the graph segment at the given line."""
         if line == 0:
@@ -1047,7 +1015,6 @@ class GraphInfoPrettyPrinter:
             return " " * self._max_segment_columns()
         return ""
 
-    @_beartype.beartype
     def _connector_segment_str_at_line(self, line: int) -> str:
         """Get the connector segment string at the given line."""
         if self.upper_printer is None and self.lower_printer is None:
@@ -1064,7 +1031,6 @@ class GraphInfoPrettyPrinter:
             return "    "
         return ""
 
-    @_beartype.beartype
     def _children_str_at_line(self, line: int) -> str:
         """Get the string representation of the children at the given line.
 
@@ -1086,7 +1052,6 @@ class GraphInfoPrettyPrinter:
             )
         return ""
 
-    @_beartype.beartype
     def _str_at_line(self, line: int) -> str:
         """Get the string representation of the graph at the given line."""
         return (
@@ -1136,7 +1101,6 @@ class OnnxTestCaseRepro:
         )
 
     @classmethod
-    @_beartype.beartype
     def create_test_case_repro(
         cls, proto: bytes, inputs, outputs, dir: str, name: Optional[str] = None
     ):
@@ -1174,7 +1138,6 @@ class OnnxTestCaseRepro:
             dir,
         )
 
-    @_beartype.beartype
     def validate(self, options: VerificationOptions):
         """Run the ONNX test case with options.backend, and compare with the expected outputs.
 
@@ -1286,19 +1249,16 @@ class GraphInfo:
         else:
             print(" No mismatch ".center(80, "="))
 
-    @_beartype.beartype
     def has_mismatch(self) -> bool:
         """Return True if the subgraph has output mismatch between torch and ONNX."""
         return self.mismatch_error is not None
 
-    @_beartype.beartype
     def essential_node_count(self) -> int:
         """Return the number of nodes in the subgraph excluding those in `_EXCLUDED_NODE_KINDS`."""
         return sum(
             1 for n in self.graph.nodes() if n.kind() not in self._EXCLUDED_NODE_KINDS
         )
 
-    @_beartype.beartype
     def essential_node_kinds(self) -> Set[str]:
         """Return the set of node kinds in the subgraph excluding those in `_EXCLUDED_NODE_KINDS`."""
         return {
@@ -1307,8 +1267,7 @@ class GraphInfo:
             if n.kind() not in self._EXCLUDED_NODE_KINDS
         }
 
-    @_beartype.beartype
-    def all_mismatch_leaf_graph_info(self) -> List["GraphInfo"]:
+    def all_mismatch_leaf_graph_info(self) -> List[GraphInfo]:
         """Return a list of all leaf `GraphInfo` objects that have mismatch."""
         if not self.has_mismatch():
             return []
@@ -1330,8 +1289,7 @@ class GraphInfo:
 
         return results
 
-    @_beartype.beartype
-    def find_partition(self, id: str) -> Optional["GraphInfo"]:
+    def find_partition(self, id: str) -> Optional[GraphInfo]:
         """Find the `GraphInfo` object with the given id."""
         if id == self.id:
             return self
@@ -1343,7 +1301,6 @@ class GraphInfo:
                 return self.lower_graph_info.find_partition(id)
         return None
 
-    @_beartype.beartype
     def export_repro(
         self, repro_dir: Optional[str] = None, name: Optional[str] = None
     ) -> str:
@@ -1384,7 +1341,6 @@ class GraphInfo:
             proto, self.input_args, self.pt_outs, repro_dir, name
         )
 
-    @_beartype.beartype
     def _graph_partition_pivot(self) -> int:
         """Find the pivot index to partition the graph.
 
@@ -1407,7 +1363,6 @@ class GraphInfo:
             return included_node_indices[half_idx] + 1
         return -1
 
-    @_beartype.beartype
     def _partition_upper_graph(self) -> torch.Graph:
         pivot = self._graph_partition_pivot()
         if pivot == -1:
@@ -1451,7 +1406,6 @@ class GraphInfo:
 
         return graph
 
-    @_beartype.beartype
     def _partition_lower_graph(self) -> torch.Graph:
         pivot = self._graph_partition_pivot()
         if pivot == -1:
@@ -1506,7 +1460,6 @@ class GraphInfo:
 
         return graph
 
-    @_beartype.beartype
     def _partition_node(
         self,
         node: torch.Node,
@@ -1545,7 +1498,6 @@ class GraphInfo:
                 ):
                     covered_bridge_values.add(process_bridge_value(output))
 
-    @_beartype.beartype
     def _partition_nodes(
         self,
         graph: torch.Graph,
@@ -1585,7 +1537,6 @@ class GraphInfo:
             complete_lower_nodes_set,
         )
 
-    @_beartype.beartype
     def _bridge_kwargs(self):
         pt_outs = self.pt_outs
         graph_outputs = list(self.graph.outputs())
@@ -1595,7 +1546,6 @@ class GraphInfo:
         ), f"{len(graph_outputs)} vs {len(pt_outs)}\nGraph: {self.graph}"
         return {v.debugName(): o for v, o in zip(graph_outputs, pt_outs)}
 
-    @_beartype.beartype
     def _args_and_params_for_partition_graph(
         self,
         graph: torch.Graph,
@@ -1612,7 +1562,6 @@ class GraphInfo:
         ), f"{len(args)} + {len(params)} vs {len(input_names)}: {input_names}"
         return args, params
 
-    @_beartype.beartype
     def verify_export(
         self, options: VerificationOptions
     ) -> Tuple[Optional[AssertionError], torch.Graph, _OutputsType, _OutputsType]:
@@ -1642,7 +1591,6 @@ class GraphInfo:
             verification_options=options,
         )
 
-    @_beartype.beartype
     def find_mismatch(
         self,
         options: Optional[VerificationOptions] = None,
@@ -1722,7 +1670,6 @@ class GraphInfo:
         self.lower_graph_info.find_mismatch(options)
 
 
-@_beartype.beartype
 def _all_nodes(nodes: Collection[torch.Node]) -> Set[torch.Node]:
     all_nodes = set(nodes)
     for n in nodes:
@@ -1731,12 +1678,10 @@ def _all_nodes(nodes: Collection[torch.Node]) -> Set[torch.Node]:
     return all_nodes
 
 
-@_beartype.beartype
 def _has_uses_by_nodes(value: torch.Value, nodes: Collection[torch.Node]) -> bool:
     return any(use.user in nodes for use in value.uses())
 
 
-@_beartype.beartype
 def _node_has_uses_by(node: torch.Node, nodes: Collection[torch.Node]) -> bool:
     for output in node.outputs():
         if _has_uses_by_nodes(output, nodes):
@@ -1744,12 +1689,10 @@ def _node_has_uses_by(node: torch.Node, nodes: Collection[torch.Node]) -> bool:
     return False
 
 
-@_beartype.beartype
 def _produced_by(value: torch.Value, nodes: Collection[torch.Node]) -> bool:
     return value.node() in nodes
 
 
-@_beartype.beartype
 def find_mismatch(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     input_args: Tuple[Any, ...],
