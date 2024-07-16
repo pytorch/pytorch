@@ -25,6 +25,19 @@ from typing import *  # noqa: F403
 # so they can easily be consumed by OpInfo-based tests to check if subsystems
 # support them correctly.
 
+CUSTOM_OPS_VMAP_OUT_DIMS_INPUT_EXAMPLE : dict[str, Union[Callable, int, Tuple, List]] = {}
+
+def add_vmap_out_dims_example_custom_op(op, out_dims):
+    CUSTOM_OPS_VMAP_OUT_DIMS_INPUT_EXAMPLE[op] = out_dims
+
+def get_vmap_out_dims_example_custom_op(op):
+    """
+    Returns a valid example of out_dim for torch.vmap(op).
+    It's either a callable that takes the inputs of the op or
+    a valid example itself.
+    """
+    return CUSTOM_OPS_VMAP_OUT_DIMS_INPUT_EXAMPLE.get(op, 0)
+
 def to_numpy(tensor):
     return tensor.cpu().numpy()
 
@@ -141,7 +154,6 @@ def numpy_sort_backward(ctx, grad_out, grad_ind, grad_ind_inv):
 
 numpy_sort.register_autograd(numpy_sort_backward, setup_context=numpy_sort_setup_context)
 
-
 def numpy_sort_vmap(info, in_dims, x, dim):
     x_bdim, _ = in_dims
     x = x.movedim(x_bdim, 0)
@@ -225,7 +237,16 @@ def sample_inputs_numpy_nonzero(opinfo, device, dtype, requires_grad, **kwargs):
     yield SampleInput(result, args=())
 
 def numpy_nonzero_vmap(info, in_dims, x):
-    return numpy_nonzero(x), in_dims[0]
+    x_bdim, = in_dims
+    x = x.movedim(x_bdim, 0)
+    res = numpy_nonzero(x)
+    # Get unique values in the first column
+    unique_values = torch.unique(res[:, 0])
+    # Split the tensor into groups based on the first column
+    groups = [res[res[:, 0] == val][:, 1:] for val in unique_values]
+    # Stack the groups into a single tensor
+    result = torch.stack(groups)
+    return result, 0
 
 numpy_nonzero.register_vmap(numpy_nonzero_vmap)
 
@@ -244,6 +265,16 @@ def numpy_view_copy_backward(ctx, grad_out):
     return torch.ops._torch_testing.numpy_view_copy(grad_out, ctx.x_shape), None
 
 numpy_view_copy.register_autograd(numpy_view_copy_backward, setup_context=numpy_view_copy_setup_context)
+
+def numpy_view_copy_vmap(info, in_dims, x, shape):
+    x_bdim, _ = in_dims
+    x = x.movedim(x_bdim, 0)
+    x_shape = x.shape[0]
+    batch_shape = (x_shape, *shape)
+    result = numpy_view_copy(x, batch_shape)
+    return result, 0
+
+numpy_view_copy.register_vmap(numpy_view_copy_vmap)
 
 def sample_inputs_numpy_view_copy(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -281,6 +312,13 @@ def numpy_cat_backward(ctx, grad_out):
 
 numpy_cat.register_autograd(numpy_cat_backward, setup_context=numpy_cat_setup_context)
 
+def numpy_cat_vmap(info, in_dims, x, dim):
+    x_bdim, = in_dims
+    result = numpy_cat(x, dim)
+    return result, x_bdim
+
+numpy_cat.register_vmap(numpy_cat_vmap)
+
 def sample_inputs_numpy_cat(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     r0 = make_arg(2, 3, 4, low=0.9, high=2)
@@ -308,6 +346,14 @@ def numpy_split_copy_backward(ctx, grad_out):
 
 numpy_split_copy.register_autograd(numpy_split_copy_backward, setup_context=numpy_split_copy_setup_context)
 
+def numpy_split_copy_vmap(info, in_dims, x, splits, dim):
+    x_bdim, _ , _ = in_dims
+    x = x.movedim(x_bdim, 0)
+    result = numpy_split_copy(x, splits, dim + 1)
+    return result, 0
+
+numpy_split_copy.register_vmap(numpy_split_copy_vmap)
+
 def sample_inputs_numpy_split_copy(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     x = make_arg(2, 9, low=0.9, high=2)
@@ -333,6 +379,19 @@ def numpy_split_copy_with_int_backward(ctx, grad_out, _):
 numpy_split_copy_with_int.register_autograd(
     numpy_split_copy_with_int_backward,
     setup_context=numpy_split_copy_with_int_setup_context)
+
+def numpy_split_copy_with_int_vmap(info, in_dims, x, splits, dim):
+    x_bdim, _ , _ = in_dims
+    x = x.movedim(x_bdim, 0)
+    result, len_split = numpy_split_copy_with_int(x, splits, dim + 1)
+    return (result, len_split), ([0 for _ in range(len(result))], None)
+
+numpy_split_copy_with_int.register_vmap(numpy_split_copy_with_int_vmap)
+
+def sample_vmap_out_dim_numpy_split_copy_with_int(x, splits, dim):
+    return [0 for _ in range(len(splits) + 1)], None
+
+add_vmap_out_dims_example_custom_op('NumpySplitCopyWithIntCustomOp', sample_vmap_out_dim_numpy_split_copy_with_int)
 
 @torch.library.custom_op("_torch_testing::numpy_nms", mutates_args=())
 def numpy_nms(boxes: Tensor, scores: Tensor, iou_threshold: Number) -> Tensor:
@@ -389,6 +448,23 @@ def _(boxes, scores, iou_threshold):
     i0 = ctx.create_unbacked_symint()
     result = boxes.new_empty([i0], dtype=torch.int64)
     return result
+
+def numpy_nms_vmap(info, in_dims, boxes, scores, iou_threshold):
+    boxes_bdim, scores_bdim , _ = in_dims
+    boxes = boxes.movedim(boxes_bdim, 0) if boxes_bdim is not None else boxes.unsqueeze(0)
+    scores = scores.movedim(scores_bdim, 0) if scores_bdim is not None else scores.unsqueeze(0)
+    results = []
+    if boxes_bdim is not None and scores_bdim is not None:
+        for (box, score) in zip(boxes, scores):
+            results.append(numpy_nms(box, score, iou_threshold))
+    else:
+        for box in boxes:
+            for score in scores:
+                results.append(numpy_nms(box, score, iou_threshold))
+    result = torch.stack(results)
+    return result, 0
+
+numpy_nms.register_vmap(numpy_nms_vmap)
 
 def sample_inputs_numpy_nms(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(make_tensor, device=device, dtype=dtype)

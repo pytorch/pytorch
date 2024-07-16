@@ -38,8 +38,26 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
         flat_out, out_spec = pytree.tree_flatten(out)
         outs.append(flat_out)
 
+    # use the same out_dim for all outputs
+    if isinstance(out_dim, int):
+        flat_out_dim = [out_dim for _ in flat_out]
+    else:
+        flat_out_dim, _ = pytree.tree_flatten(out_dim)
+
     outs = zip(*outs)
-    result = [torch.stack(out_lst) for out_lst in outs]
+
+    result = []
+    for i, out_lst in enumerate(outs):
+        if flat_out_dim[i] is not None:
+            if not all(isinstance(x, torch.Tensor) for x in out_lst):
+                raise ValueError(
+                    f"vmap `{op}` must only return "
+                    "Tensors. Did you mean to set out_dims= to None for output?"
+                )
+            result.append(torch.stack(out_lst))
+        else:
+            # not batched over, result should be the same for all batches
+            result.append(out_lst[0])
     return pytree.tree_unflatten(result, out_spec)
 
 
@@ -317,9 +335,9 @@ def _compute_quantities_for_vmap_test(
     inner_in_dims = (0,) + pytree.tree_map(lambda x: None, in_dims)
     outer_in_dims = (0,) + in_dims
     batched_args, kwarg_values = maybe_clone_inputs()
-    vmapvmap_output = vmap(vmap(f, inner_in_dims), outer_in_dims)(
-        dummy, *batched_args, **kwarg_values
-    )
+    vmapvmap_output = vmap(
+        vmap(f, inner_in_dims, out_dims=out_dim), outer_in_dims, out_dims=out_dim
+    )(dummy, *batched_args, **kwarg_values)
 
     yield (batched_out, loop_out, vmapvmap_output, vmapvmap_expected)
 

@@ -674,7 +674,7 @@ class CustomOpDef:
         def wrapped_func(keyset, *args, **kwargs):
             interpreter = retrieve_current_functorch_interpreter()
             return custom_function_call_vmap_helper(
-                interpreter, self._vmap_fn, None, *args, **kwargs
+                interpreter, self._vmap_fn, self._opoverload, *args, **kwargs
             )
 
         self._lib.impl(self._name, wrapped_func, "FuncTorchBatched", with_keyset=True)
