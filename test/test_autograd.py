@@ -7374,7 +7374,7 @@ for shape in [(1,), ()]:
             out.grad_fn._saved_bias_sym_sizes_opt, (1,)
         )  # c10::optional<SymIntArrayRef> -> SymInt[]?
         out = nn.Conv2d(1, 1, 3, bias=False)(a)
-        # TODO: This is BAD! we converted a c10::nullopt into a (0,)
+        # TODO: This is BAD! we converted a std::nullopt into a (0,)
         self.assertEqual(out.grad_fn._saved_bias_sym_sizes_opt, (0,))
 
         a = torch.ones(1, 3, 3, requires_grad=True)
