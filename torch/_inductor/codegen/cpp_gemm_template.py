@@ -16,7 +16,11 @@ from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
 
 from .cpp_template_kernel import CppTemplateKernel
-from .cpp_utils import GemmBlocking, get_gemm_template_output_and_compute_dtype
+from .cpp_utils import (
+    DTYPE_TO_CPP,
+    GemmBlocking,
+    get_gemm_template_output_and_compute_dtype,
+)
 
 GEMM_TEMPLATE = r"""
 {{template.header().getvalue()}}
@@ -56,6 +60,7 @@ extern "C"
     {%- endif %}
     const int64_t Mc_blocks = Mt_blocks;
     const int64_t Kc_blocks = Kt_blocks;
+    const int64_t num_k_slices = (K0_blocks + Kt_blocks - 1) / Kt_blocks;
     {%- else %}
     constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
     constexpr int64_t M0_blocks = (M + M0 - 1) / M0;
@@ -64,32 +69,48 @@ extern "C"
     constexpr int64_t Kt_blocks = {{template.thread_blocking().block_k}};
     constexpr int64_t Mc_blocks = {{template.cache_blocking().block_m}};
     constexpr int64_t Kc_blocks = {{template.cache_blocking().block_k}};
+    constexpr int64_t num_k_slices = (K0_blocks + Kt_blocks - 1) / Kt_blocks;
     {%- endif %}
 
-    // TODO(jgong5): support k-slicing
-    {{kernel.assert_function}}(Kt_blocks == K0_blocks, "Do not support k slicing yet.");
     // make sure all partitions are assigned
     {{kernel.assert_function}}(
         Mt_blocks * Nt_blocks * Kt_blocks * {{num_threads}} >= M0_blocks * N0_blocks * K0_blocks,
         "Not all partitions are assigned."
     );
 
+    // TODO: avoid working on barriers if we don't need k slicing
+    {{kernel.assert_function}}(
+        {{num_threads}} % num_k_slices == 0,
+        "Number of threads should be divisible by number of k slices."
+    );
+    int64_t num_barriers = {{num_threads}} / num_k_slices;
+    auto barriers = std::make_unique<Barrier[]>(num_barriers);
+    for (int64_t i = 0; i < num_barriers; i++) {
+        barriers[i].init(num_k_slices);
+    }
+    auto local_buf_ptrs = std::make_unique<{{DTYPE_TO_CPP[acc_buf_dtype]}}*[]>({{num_threads}});
+
     {%- if num_threads > 1 %}
     #pragma omp parallel num_threads({{num_threads}})
     {
-        int tid = omp_get_thread_num();
+        const int tid = omp_get_thread_num();
         int64_t m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end;
         mm_get_thread_blocks(
             tid, M0_blocks, N0_blocks, K0_blocks, Mt_blocks, Nt_blocks, Kt_blocks,
             m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end);
+        const int64_t k_group_id = tid / num_k_slices;
+        const int64_t k_group_offset = tid % num_k_slices;
     {%- else %}
     {
-        int64_t m_block_start = 0;
-        int64_t m_block_end = M0_blocks;
-        int64_t n_block_start = 0;
-        int64_t n_block_end = N0_blocks;
-        int64_t k_block_start = 0;
-        int64_t k_block_end = K0_blocks;
+        const int tid = 0;
+        const int64_t m_block_start = 0;
+        const int64_t m_block_end = M0_blocks;
+        const int64_t n_block_start = 0;
+        const int64_t n_block_end = N0_blocks;
+        const int64_t k_block_start = 0;
+        const int64_t k_block_end = K0_blocks;
+        constexpr int64_t k_group_id = 0;
+        const int64_t k_group_offset = 0;
     {%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
         for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
@@ -102,6 +123,7 @@ extern "C"
             for (int64_t nc = n_block_start; nc < n_block_end; ++nc) {
                 const int64_t n_start = nc * N0;
                 const int64_t n_end = std::min((nc + 1) * N0, N);
+                const int64_t n_size = n_end - n_start;
                 {%- if use_local_acc %}
                 {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {%- else %}
@@ -119,6 +141,22 @@ extern "C"
                         {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(24, false) }}
                     }
                 }
+                {%- if use_local_acc %}
+                local_buf_ptrs[tid] = {{acc_buf_name}};
+                {%- endif %}
+                barriers[k_group_id].arrive_and_wait();
+                // TODO: parallelize epilogue computes among k groups
+                if (k_group_offset == 0) {
+                {%- if use_local_acc %}
+                    for (int64_t other_id = tid + 1; other_id < num_k_slices; other_id++) {
+                        for (int64_t m = 0; m < m_size; m++) {
+                            #pragma omp simd
+                            for (int64_t n = 0; n < n_size; n++) {
+                                local_buf_ptrs[tid][m*N0 + n] += local_buf_ptrs[other_id][m*N0 + n];
+                            }
+                        }
+                    }
+                {%- endif %}
                 {%- if N == PADDED_N %}
                     {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
                     {%- set tile_acc = acc %}
@@ -126,10 +164,12 @@ extern "C"
                     {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
                     {%- set tile_acc = kernel.slice_nd(acc, [(), ("0", "n_end - n_start")]) %}
                 {%- endif %}
-                {{ kernel.store_output(
-                      tile_Y, tile_acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
-                   )|indent(16, false)
-                }}
+                    {{ kernel.store_output(
+                        tile_Y, tile_acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
+                    )|indent(16, false)
+                    }}
+                }
+                barriers[k_group_id].arrive_and_wait();
             }
         }
         {{ micro_gemm.codegen_finalize(kernel) }}
@@ -622,6 +662,7 @@ class CppPackedGemmTemplate(CppTemplate):
             w_scale=w_scale,
             w_zp=w_zp,
             acc_buf_dtype=torch.int32 if int8_gemm else torch.float,
+            DTYPE_TO_CPP=DTYPE_TO_CPP,
         )
         with contextlib.ExitStack() as stack:
             for buf in fake_buffers:

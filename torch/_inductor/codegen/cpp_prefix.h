@@ -417,6 +417,51 @@ inline void mm_get_thread_blocks(
   m_block_end = std::min(m_block_start + Mt_blocks, M_blocks);
 }
 
+class Barrier {
+private:
+  bool is_init_;
+  size_t size_;
+  std::atomic<size_t> counter_;
+  std::atomic_flag flag_ = ATOMIC_FLAG_INIT;
+
+  inline void pause() {
+
+  }
+
+public:
+  Barrier(): is_init_(false), size_(0), counter_(0) {}
+
+  Barrier(size_t size) {
+    init(size);
+  }
+
+  void init(size_t size) {
+    TORCH_CHECK(!is_init_, "Barrier is already initialized.");
+    is_init_ = true;
+    size_ = size;
+    counter_ = 0;
+    flag_.clear();
+  }
+
+  void arrive_and_wait() {
+    TORCH_CHECK(is_init_, "Barrier is not initialized.");
+    flag_.test_and_set(std::memory_order_acquire);
+    size_t count = counter_.fetch_add(1, std::memory_order_acquire) + 1;
+    if (count == size_) {
+      counter_.store(0, std::memory_order_release);
+    } else {
+      while (flag_.test_and_set(std::memory_order_acquire)) {
+#ifdef __aarch64__
+        __asm__ __volatile__("yield;" : : : "memory");
+#elif defined(__x86_64__) || defined(__i386__)
+        _mm_pause();
+#endif
+      }
+    }
+    flag_.clear(std::memory_order_release);
+  }
+};
+
 struct amx_tilecfg {
   uint8_t palette_id;
   uint8_t start_row;
