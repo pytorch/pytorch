@@ -76,7 +76,7 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
       SDPBackend::flash_attention,
       SDPBackend::efficient_attention,
       SDPBackend::math};
-  static const bool prefer_cudnn = true;//check_prefer_cudnn_attention();
+  static const bool prefer_cudnn = check_prefer_cudnn_attention();
   return prefer_cudnn ? cudnn_order : default_order;
 }
 
