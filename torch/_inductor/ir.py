@@ -3944,15 +3944,12 @@ class CppTemplateBuffer(TemplateBuffer):
 class InputsKernel(OperationBuffer):
     inputs: List[Buffer]
 
-    def get_read_writes_input(self, x):
-        return dependencies.StarDep(x.get_name())
-
     def get_read_writes(self):
         reads: Set[dependencies.Dep] = set()
         StarDep = dependencies.StarDep
         for input in self.inputs:
             if isinstance(input, list):
-                reads.update({StarDep(x.get_name()) for x in input})
+                reads.update(StarDep(x.get_name()) for x in input)
             else:
                 reads.add(StarDep(input.get_name()))
 
