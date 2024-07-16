@@ -433,6 +433,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // via `ncclCommSplit`
     std::shared_ptr<ProcessGroupNCCL> split_from;
     int64_t split_color{0};
+    // whether to share the parent NCCL communicator resources
+    // when trying to overlap comm ops accross communicators, we need
+    // splitShare=0
+    bool split_share{true};
     std::vector<uint64_t> global_ranks_in_group;
     std::string group_name;
   };

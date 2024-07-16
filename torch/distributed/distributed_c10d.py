@@ -4315,6 +4315,7 @@ def split_group(
     timeout: Optional[timedelta] = None,
     pg_options: Optional[Any] = None,
     group_desc: Optional[str] = None,
+    split_share: Optional[bool] = None,
 ) -> Optional[ProcessGroup]:
     """
     Create a new process group splitted from the given parent process group.
@@ -4341,6 +4342,9 @@ def split_group(
             the construction of specific process groups. i.e.``is_high_priority_stream``
             can be specified so that process group can pick up high priority cuda streams.
         group_desc (str, optional): a string to describe the process group.
+        split_share (bool, optional): if True, the new PG will share the same communicator resources
+            with the parent PG. If None, the default value is True. if split_share is False, communiation
+            ops between the new PG and the parent PG can overlap.
 
     Returns:
         ProcessGroup if the current rank is within one split/subgroup given by split_ranks,
@@ -4456,6 +4460,8 @@ def split_group(
     pg_options._timeout = timeout
     pg_options.split_from = parent_backend
     pg_options.split_color = _process_group_color(my_group)
+    if split_share is not None:
+        pg_options.split_share = split_share
     pg_options.global_ranks_in_group = global_ranks_in_my_group
     pg_options.group_name = group_name
     backend_class = ProcessGroupNCCL(

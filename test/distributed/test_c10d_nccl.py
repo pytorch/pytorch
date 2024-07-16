@@ -646,6 +646,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             backend.options.is_high_priority_stream,
             backend1.options.is_high_priority_stream,
         )
+        self.assertEqual(backend.options.split_share, backend1.options.split_share)
+        self.assertEqual(backend1.options.split_share, True)
         self.assertEqual(ng1.group_desc, "default_pg:split:0")
 
         # comm split happens eagerly since device_id is passed to init_process_group.
@@ -653,9 +655,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.broadcast(tensor, 0, group=ng1)
         self.assertEqual(tensor, torch.full((1,), 0))
 
-        ng2 = c10d.split_group(pg, [[0, 1]])
+        ng2 = c10d.split_group(pg, [[0, 1]], split_share=False)
         self.assertEqual(ng2.group_desc, "default_pg:split:1")
         self.assertEqual(backend.comm_split_count(), 2)
+        self.assertEqual(backend1.options.split_share, False)
 
         dist.destroy_process_group()
 

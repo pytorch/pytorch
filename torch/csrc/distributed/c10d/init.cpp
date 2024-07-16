@@ -2799,6 +2799,8 @@ Example::
       .def_readwrite(
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
       .def_readwrite(
+          "split_share", &::c10d::ProcessGroupNCCL::Options::split_share)
+      .def_readwrite(
           "global_ranks_in_group",
           &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group)
       .def_readwrite(

@@ -860,6 +860,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << options_->is_high_priority_stream
             << ", SPLIT_FROM: " << options_->split_from
             << ", SPLIT_COLOR: " << options_->split_color
+            << ", SPLIT_SHARE: " << options_->split_share
             << ", PG Name: " << options_->group_name;
 
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL environments: "
@@ -2117,7 +2118,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   gpuGuard.set_index(deviceIndex);
 
 #ifdef NCCL_HAS_COMM_SPLIT
-  options_->config.splitShare = 1;
+  if (options_->split_share) {
+    options_->config.splitShare = 1;
+  }
   if (options_->split_from) {
     TORCH_CHECK(
         options_->split_color != 0,
