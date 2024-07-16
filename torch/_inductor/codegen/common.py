@@ -145,6 +145,7 @@ class BackendFeature(Enum):
     INPLACE_BUFFERS = auto()
     MASKED_SCATTER_WITH_INDEX = auto()
     SCAN = auto()
+    SORT = auto()
     TUPLE_REDUCTION = auto()
     PREFER_STORE_LOOP_ORDER = auto()
 
@@ -1667,6 +1668,15 @@ class Kernel(CodeGen):
     ) -> Tuple[CSEVariable, ...]:
         raise NotImplementedError
 
+    def sort(
+        self,
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[CSEVariable, ...],
+        stable: bool,
+        descending: bool,
+    ) -> Tuple[CSEVariable, ...]:
+        raise NotImplementedError
+
     def var_ranges(self):
         raise NotImplementedError
 
@@ -1739,7 +1749,9 @@ class Kernel(CodeGen):
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
 
                     def do_cse(v):
-                        csevar = self.cse.generate(self.compute, v, bounds=bounds)
+                        csevar = V.kernel.cse.generate(
+                            V.kernel.compute, v, bounds=bounds
+                        )
                         csevar.update_on_args(name, args, kwargs)
                         return csevar
 
@@ -1905,6 +1917,15 @@ class Kernel(CodeGen):
                 values: Tuple[CSEVariable, ...],
             ) -> Tuple[CSEVariable, ...]:
                 return self.scan(dtypes, combine_fn, values)
+
+            @staticmethod
+            def sort(
+                dtypes: Tuple[torch.dtype, ...],
+                values: Tuple[CSEVariable, ...],
+                stable: bool,
+                descending: bool,
+            ) -> Tuple[CSEVariable, ...]:
+                return self.sort(dtypes, values, stable, descending)
 
             @staticmethod
             def bucketize(

@@ -235,6 +235,8 @@ hop_db = [
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
+            DecorateInfo(unittest.expectedFailure, "TestProxyTensorOpInfo", "test_make_fx_symbolic_exhaustive"),
+            DecorateInfo(unittest.expectedFailure, "TestEagerFusionOpInfo", "test_aot_autograd_symbolic_exhaustive"),
         )
     ),
     OpInfo(
@@ -253,6 +255,8 @@ hop_db = [
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
+            DecorateInfo(unittest.expectedFailure, "TestProxyTensorOpInfo", "test_make_fx_symbolic_exhaustive"),
+            DecorateInfo(unittest.expectedFailure, "TestEagerFusionOpInfo", "test_aot_autograd_symbolic_exhaustive"),
         )
     )
 ]

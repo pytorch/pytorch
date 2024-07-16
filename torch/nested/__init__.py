@@ -389,3 +389,13 @@ Example::
     from torch.nested._internal.nested_tensor import nested_view_from_values_offsets_lengths
 
     return nested_view_from_values_offsets_lengths(values, offsets, lengths, ragged_idx=jagged_dim)
+
+
+# This library impl is here so pytorch picks it up when initializing, otherwise users had to import
+# torch.nested._internal.ops to get it, which is not ideal. Importing all of ops here results in a
+# fun circular dependency hell, so this is the next best thing
+@torch.library.impl("aten::_nested_get_jagged_dummy", ["default", "NestedTensorCPU", "NestedTensorCUDA"])  # type: ignore[has-type]
+def _aten_nested_get_jagged_dummy(x) -> Tensor:
+    from torch.nested._internal.nested_tensor import _nt_view_dummy
+
+    return _nt_view_dummy()

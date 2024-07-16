@@ -661,6 +661,38 @@ class TestExport(TestCase):
                 actual_result.append(node.meta.get("torch_fn"))
         self.assertEqual(actual_result, expected_result)
 
+    def test_export_preserve_linear_at_aot_level(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return torch.ops.aten.chunk.default(x, 3, 0)
+
+        gm = (
+            torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            )
+            .run_decompositions({}, _preserve_ops=(torch.ops.aten.linear.default,))
+            .graph_module
+        )
+        # linear is CompositeImplicitAutograd functional op so we should preserve it
+        # chunk is CompositeImplicitAutograd non-functional op we decompose.
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, x):
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    split = torch.ops.aten.split.Tensor(linear, 1);  linear = None
+    getitem = split[0]
+    getitem_1 = split[1]
+    getitem_2 = split[2];  split = None
+    return (getitem, getitem_1, getitem_2)""",
+        )
+
     # TODO(yidi)
     # Expected failure for test cases that calls run_decomposition().
     # The top-level cond node has pre-existing metadata,
@@ -1014,6 +1046,137 @@ class TestExport(TestCase):
             self.assertTrue(
                 "dy - 6 = 6" not in exc.args[0]
             )  # don't suggest fix for non-root dim
+
+    def test_keep_composite_ops_invalid(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return torch.ops.aten.chunk.default(x, 3, 0)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "aten.chunk.default is a mutating/aliasing op"
+        ):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions({}, _preserve_ops=(torch.ops.aten.chunk.default,))
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "aten.add.Tensor is not CompositeImplicitAutograd op, so we will preserve it as",
+        ):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions({}, _preserve_ops=(torch.ops.aten.add.Tensor,))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "aten.sym_size.default is a metadata query function"
+        ):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions({}, _preserve_ops=(torch.ops.aten.sym_size.default,))
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "We can't detect aten.native_batch_norm.default as a functional op statically",
+        ):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions(
+                {}, _preserve_ops=(torch.ops.aten.native_batch_norm.default,)
+            )
+
+    def test_keep_composite_ops_linear_convd(self):
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.conv1d = torch.nn.Conv1d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x, y):
+                x_conv = self.conv(x)
+                y_conv_1d = self.conv1d(y)
+                x_linear = self.linear(x_conv)
+                return x_linear.cos() + y_conv_1d.sum()
+
+        ep = torch.export.export(
+            Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
+        )
+        ep_has_linear_convd = ep.run_decompositions(
+            decomp_table={},
+            _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
+        )
+        self.assertExpectedInline(
+            str(ep_has_linear_convd.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    linear = torch.ops.aten.linear.default(conv2d, c_linear_weight, c_linear_bias);  conv2d = c_linear_weight = c_linear_bias = None
+    cos = torch.ops.aten.cos.default(linear);  linear = None
+    sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
+
+        ep_has_convd = ep.run_decompositions(
+            decomp_table=None,
+            _preserve_ops=[
+                torch.ops.aten.conv2d.default,
+                torch.ops.aten.conv1d.default,
+            ],
+        )
+        self.assertExpectedInline(
+            str(ep_has_convd.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
+    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(c_linear_bias, view, permute);  c_linear_bias = view = permute = None
+    view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
+    cos = torch.ops.aten.cos.default(view_1);  view_1 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(conv1d, []);  conv1d = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
+
+        ep_has_convd = ep_has_convd.run_decompositions(
+            decomp_table=None, _preserve_ops=[torch.ops.aten.conv2d.default]
+        )
+        self.assertExpectedInline(
+            str(ep_has_convd.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    convolution = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
+    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(c_linear_bias, view, permute);  c_linear_bias = view = permute = None
+    view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
+    cos = torch.ops.aten.cos.default(view_1);  view_1 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(convolution, []);  convolution = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
 
     def test_derived_dim_out_of_order_simplified(self):
         _dimz = torch.export.Dim("_dimz", min=6, max=8)
