@@ -1,4 +1,3 @@
-import logging
 from typing import Any, Dict, Optional, Tuple
 
 import sympy
@@ -17,7 +16,6 @@ from ..utils import use_aten_gemm_kernels, use_triton_template
 from .mm import _is_static_problem  # TODO(yangsiyu) move to mm_common
 from .mm_common import mm_args, mm_grid, scaled_mm_configs
 
-log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
@@ -68,9 +66,9 @@ scaled_mm_template = TritonTemplate(
         if B_PROLOGUE_CAST_TYPE is not None:
             b = b.to(B_PROLOGUE_CAST_TYPE)
         if USE_FAST_ACCUM:
-            acc = tl.dot(a, b, acc, out_dtype=ACC_TYPE, allow_tf32=ALLOW_TF32)
+            acc = tl.dot(a, b, acc, out_dtype=ACC_TYPE)
         else:
-            acc += tl.dot(a, b, out_dtype=ACC_TYPE, allow_tf32=ALLOW_TF32)
+            acc += tl.dot(a, b, out_dtype=ACC_TYPE)
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
 
@@ -150,9 +148,9 @@ scaled_mm_bias_template = TritonTemplate(
         if B_PROLOGUE_CAST_TYPE is not None:
             b = b.to(B_PROLOGUE_CAST_TYPE)
         if USE_FAST_ACCUM:
-            acc = tl.dot(a, b, acc, out_dtype=ACC_TYPE, allow_tf32=ALLOW_TF32)
+            acc = tl.dot(a, b, acc, out_dtype=ACC_TYPE)
         else:
-            acc += tl.dot(a, b, out_dtype=ACC_TYPE, allow_tf32=ALLOW_TF32)
+            acc += tl.dot(a, b, out_dtype=ACC_TYPE)
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
 
@@ -200,13 +198,8 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     use_fast_accum: bool,
     b_prologue_cast_type: Optional[str] = None,
 ) -> Dict[str, Any]:
-    # these two options are copied from mm_common.mm_options()
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
-    )
-    allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
-        not inductor_config.force_same_precision
-        or ((sym_m % 16) == 0 and (sym_n % 16) == 0 and (sym_k % 8) == 0)
     )
 
     assert len(scale_a.get_size()) == len(
@@ -216,7 +209,6 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     return dict(
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
-        ALLOW_TF32=allow_tf32,
         ACC_TYPE="tl.float32",
         B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         USE_FAST_ACCUM=use_fast_accum,
@@ -237,7 +229,7 @@ def tuned_scaled_mm(
     bias: Optional[TensorBox] = None,
     scale_result: Optional[TensorBox] = None,
     out_dtype: Optional[torch.dtype] = None,
-    use_fast_accum: bool = True,
+    use_fast_accum: bool = False,
     layout: Optional[Layout] = None,
 ) -> TensorBox:
     add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)

@@ -372,13 +372,18 @@ class TestFP8Types(TestCase):
 class TestFP8Lowering(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
-    @parametrize("dtype", (torch.bfloat16,))
+    @parametrize("dtype", (torch.bfloat16, torch.float32))
     @parametrize("shape", ("16,16,32", "1024,1024,512"))
     @parametrize("has_bias", (False, True))
-    def test_tensorwise_scaling(self, dtype: torch.dtype, shape: str, has_bias: bool):
+    @parametrize("use_fast_accum", (False, True))
+    def test_tensorwise_scaling(
+        self, dtype: torch.dtype, shape: str, has_bias: bool, use_fast_accum: bool
+    ):
+        if dtype is torch.float32 and has_bias:
+            self.skipTest("bias is not supported when output dtype is float32")
+
         device = "cuda"
         dtype_float8 = torch.float8_e4m3fn
-        use_fast_accum = True
 
         shape = [int(dim) for dim in shape.split(",")]
         M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
