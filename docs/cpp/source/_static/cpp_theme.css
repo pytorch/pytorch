@@ -1,0 +1,32 @@
+/* These are hacks on top of pytorch-sphinx-theme to fix random problems when
+it is applied to C++ docs */
+
+/* Fix clickable types floating to the right */
+a.reference.internal {
+    position: static !important;
+}
+
+/* Clickable links should have a underline */
+a.reference.internal:hover {
+    text-decoration: underline !important;
+}
+
+/* Non-clickable type properties should match C++ syntax and be black */
+.function em.property {
+    text-transform: none !important;
+    color: #262626 !important;
+}
+
+/* This was broken for some reason and wasn't using the right font */
+.function a.anchorjs-link {
+    font-family: anchorjs-icons !important;
+}
+/* Prevents keywords from overlapping */
+article.pytorch-article .class dt em.property {
+    position: initial !important;
+}
+
+/* Properly aligns keywords the left */
+article.pytorch-article .class dt {
+    padding-left: 0.5em !important;
+}
