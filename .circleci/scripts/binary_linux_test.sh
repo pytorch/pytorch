@@ -127,6 +127,9 @@ fi
 # Test the package
 /builder/check_binary.sh
 
+# Clean temp files
+cd /builder && git clean -ffdx
+
 # =================== The above code will be executed inside Docker container ===================
 EOL
 echo
