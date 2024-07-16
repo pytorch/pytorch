@@ -809,6 +809,9 @@ def save(
         >>> # Save to io.BytesIO buffer
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
+
+        >>> # Save to HDFS
+        >>> torch.save(x, 'hdfs://ip:port/tensor.pt')
     """
     torch._C._log_api_usage_once("torch.save")
     _check_dill_version(pickle_module)
@@ -1200,6 +1203,8 @@ def load(
         # Load a module with 'ascii' encoding for unpickling
         # Loading from a module setting weights_only=False, warning this can be unsafe
         >>> torch.load("module.pt", encoding="ascii", weights_only=False)
+        # Load a module from HDFS
+        >>> torch.load('hdfs://ip:port/tensor.pt', weights_only=True)
     """
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (
