@@ -419,6 +419,14 @@ def main(args):
     print_results(results)
 
 
+def heads_input_type(s):
+    try:
+        hq, hkv = map(int, s.split(","))
+        return hq, hkv
+    except Exception as e:
+        raise argparse.ArgumentTypeError("Heads must be Hq,Hkv") from e
+
+
 if __name__ == "__main__":
     # Set up the argument parser
     parser = argparse.ArgumentParser(
@@ -440,9 +448,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-nh",
-        type=int,
+        type=heads_input_type,
         nargs="+",
-        help="# of (q heads, kv heads)",
+        help="# of q-heads,kv-heads",
         default=[(16, 16), (16, 2)],
     )
     parser.add_argument(
