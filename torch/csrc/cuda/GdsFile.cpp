@@ -113,7 +113,9 @@ void gds_deregister_handle(int handle) {
 
 #endif
 
-void THCPGdsFile_init(PyObject* module) {
+namespace torch::cuda::shared {
+
+void initGdsBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
 #ifndef USE_ROCM
@@ -125,3 +127,5 @@ void THCPGdsFile_init(PyObject* module) {
   m.def("_gds_save_storage", &gds_save_storage);
 #endif
 }
+
+} // namespace torch::cuda::shared

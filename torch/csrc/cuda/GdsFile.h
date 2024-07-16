@@ -3,5 +3,5 @@
 
 #include <torch/csrc/python_headers.h>
 
-void THCPGdsFile_init(PyObject* module);
+void initGdsBindings(PyObject* module);
 #endif // THCP_GDSFILE_INC
