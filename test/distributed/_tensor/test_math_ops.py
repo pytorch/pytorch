@@ -437,6 +437,25 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(len(comm_counts), 1)
         self.assertEqual(comm_counts[funcol.all_gather_into_tensor], 1)
 
+    @with_comms
+    def test_foreach_norm(self):
+        device_mesh = self.build_device_mesh()
+
+        grad0 = torch.randn(12, 8)
+        grad1 = torch.randn(8, 8)
+
+        sharded_grad0 = distribute_tensor(grad0, device_mesh, [Shard(0)])
+        sharded_grad1 = distribute_tensor(grad1, device_mesh, [Shard(0)])
+
+        # non-sharded op
+        out = torch.ops.aten._foreach_norm([grad0, grad1], 2)
+
+        # sharded op
+        sharded_out = torch.ops.aten._foreach_norm([sharded_grad0, sharded_grad1], 2)
+
+        for o, so in zip(out, sharded_out):
+            self.assertEqual(so.full_tensor(), o)
+
 
 if __name__ == "__main__":
     run_tests()

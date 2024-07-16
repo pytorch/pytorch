@@ -528,7 +528,7 @@ std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& att
   // to mask *out*.
   if (attn_mask->dtype() == at::kBool) {
     // TODO Use the max type of the input and output
-    return at::where(attn_mask->logical_not(), -std::numeric_limits<double>::infinity(), at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype)));
+    return at::where(attn_mask->logical_not(), -std::numeric_limits<double>::infinity(), at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
   }
   // Otherwise, attn_mask represents an additive attention tensor
   return attn_mask;
