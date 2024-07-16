@@ -1,22 +1,27 @@
 import copy
-import logging
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Sequence, Tuple, Optional
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
-from torch.fx import GraphModule, Node
 from torch.ao.ns.fx.utils import compute_sqnr
+from torch.fx import GraphModule, Node
 from torch.nn import functional as F
 
 
-__all__ = ["generate_numeric_debug_handle", "NUMERIC_DEBUG_HANDLE_KEY", "prepare_for_propagation_comparison", "extract_results_from_loggers", "compare_results"]
+__all__ = [
+    "generate_numeric_debug_handle",
+    "NUMERIC_DEBUG_HANDLE_KEY",
+    "prepare_for_propagation_comparison",
+    "extract_results_from_loggers",
+    "compare_results",
+]
 
 NUMERIC_DEBUG_HANDLE_KEY = "_numeric_debug_handle"
 
 
 def generate_numeric_debug_handle(graph_module: GraphModule) -> None:
     """Attach numeric_debug_handle_id for all nodes in the model except for placeholder node
-       The graph nodes of input model is modified inplace.
+    The graph nodes of input model is modified inplace.
     """
     unique_id = 0
     for node in graph_module.graph.nodes:
@@ -53,6 +58,7 @@ class OutputLogger(torch.nn.Module):
 
     def __extra_repr__(self) -> str:
         return f"debug_handle={self.debug_handle}, node_name={self.node_name}, nn_module_stack={self.nn_module_stack}, num_stats={len(self.stats)})"
+
 
 def _insert_logger(model: GraphModule, node: Node, debug_handle: str) -> Node:
     """For a given node, adds an OutputLogger that observes the output of that node,
@@ -101,6 +107,7 @@ def prepare_for_propagation_comparison(model: GraphModule) -> GraphModule:
 
     model.recompile()
     return model
+
 
 @dataclass(frozen=True)
 class QuantizationComparisonResult:
@@ -158,7 +165,9 @@ def _module_stack_to_str(module_stack: object) -> str:
         return str(module_stack)
 
 
-def extract_results_from_loggers(model: GraphModule) -> Dict[int, Tuple[str, object, List[torch.Tensor]]]:
+def extract_results_from_loggers(
+    model: GraphModule,
+) -> Dict[int, Tuple[str, object, List[torch.Tensor]]]:
     """For a given model, extract the tensors stats and related information for each debug handle.
 
     Returns:
@@ -176,14 +185,18 @@ def extract_results_from_loggers(model: GraphModule) -> Dict[int, Tuple[str, obj
 
     return handles
 
-def compare_results(ref_results: Dict[int, Tuple[str, object, List[torch.Tensor]]], actual_results: Dict[int, Tuple[str, object, List[torch.Tensor]]) -> Dict[int, NodeAccuracySummary]:
+
+def compare_results(
+    ref_results: Dict[int, Tuple[str, object, List[torch.Tensor]]],
+    actual_results: Dict[int, Tuple[str, object, List[torch.Tensor]]],
+) -> Dict[int, NodeAccuracySummary]:
     """Given two dict mapping from `debug_handle_id` (int) to list of tensors
     return a map from `debug_handle_id` to `NodeAccuracySummary` that contains
     comparison information like SQNR, MSE etc.
 
     Args:
-        ref_results (Dict[int, Tuple[str, object, List[torch.Tensor]]): reference results for each debug_handle_id
-        actual_results (Dict[int, Tuple[str, object, List[torch.Tensor]]): actual results for each debug_handle_id
+        ref_results (Dict[int, Tuple[str, object, List[torch.Tensor]]]): reference results for each debug_handle_id
+        actual_results (Dict[int, Tuple[str, object, List[torch.Tensor]]]): actual results for each debug_handle_id
 
     Returns:
         Dict[int, NodeAccuracySummary]
@@ -191,7 +204,7 @@ def compare_results(ref_results: Dict[int, Tuple[str, object, List[torch.Tensor]
     comparisons = {}
     for debug_handle, (ref_name, ref_stack, ref_stats) in ref_results.items():
         if debug_handle not in actual_results:
-            logging.debug(
+            log.debug(
                 "Cannot compare for handle %s because it wasn't found in the transformed model",
                 debug_handle,
             )

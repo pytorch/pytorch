@@ -8,11 +8,11 @@ from typing import Dict
 import torch
 from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
+    compare_results,
+    extract_results_from_loggers,
     generate_numeric_debug_handle,
     NUMERIC_DEBUG_HANDLE_KEY,
     prepare_for_propagation_comparison,
-    extract_results_from_loggers,
-    compare_results,
 )
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
@@ -135,6 +135,7 @@ class TestNumericDebugger(TestCase):
         res = m_logger(*example_inputs)
 
         from torch.ao.quantization.pt2e.numeric_debugger import OutputLogger
+
         loggers = [m for m in m_logger.modules() if isinstance(m, OutputLogger)]
         self.assertEqual(len(loggers), 8)
         self.assertTrue("conv2d" in [logger.node_name for logger in loggers])
