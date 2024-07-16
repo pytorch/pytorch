@@ -40,8 +40,19 @@ def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
     replaced_patterns = subgraph_rewriter.replace_pattern(gm, pattern, replacement)
 
 
-def normalize_name(name: str) -> str:
-    return name.replace(".", "_")
+def is_valid_for_codegen(name):
+    if len(name) == 0:
+        raise RuntimeError("Empty argument name for codegen")
+    if name[0].isdigit():
+        return False
+    return True
+
+
+def normalize_name(name: str, prefix: str = "rename") -> str:
+    name = name.replace(".", "_")
+    if is_valid_for_codegen(name):
+        return name
+    return f"{prefix}_{name}"
 
 
 def ir_name_to_func_name(name: str) -> str:
@@ -314,6 +325,7 @@ class TS2FXGraphConverter:
 
     def get_fx_value(self, value: torch._C.Value):
         value_name = value.debugName()
+
         if value_name in self.name_to_node:
             input_node = self.name_to_node[value_name]
             return input_node
@@ -351,9 +363,9 @@ class TS2FXGraphConverter:
     def convert_graph_inputs(self):
         for graph_input in self.ts_graph.inputs():
             name = graph_input.debugName()
-            normalized_name = normalize_name(name)
 
             if name in self.name_to_param_map:
+                normalized_name = normalize_name(name)
                 self.input_specs.append(
                     InputSpec(
                         InputKind.PARAMETER,
@@ -365,6 +377,7 @@ class TS2FXGraphConverter:
                     self.fx_graph, name, self.is_top_level_graph()
                 )
             elif name in self.name_to_buffer_map:
+                normalized_name = normalize_name(name)
                 self.input_specs.append(
                     InputSpec(
                         InputKind.BUFFER,
@@ -377,6 +390,7 @@ class TS2FXGraphConverter:
                     self.fx_graph, name, self.is_top_level_graph()
                 )
             else:
+                normalized_name = normalize_name(name, prefix="input")
                 self.input_specs.append(
                     InputSpec(
                         InputKind.USER_INPUT,
@@ -650,19 +664,30 @@ class TS2FXGraphConverter:
         assert len(inputs) == 1
         predicate = self.get_fx_value(inputs[0])
 
-        # Get union of inputs to blocks
-        arguments = set()
-        for block in node.blocks():
-            block_args = set()
+        def _identify_inputs_as_arguments(entry):
+            """
+            Identify inputs from the innermost sub-block. This is needed
+            for nested sub-blocks when the input is hidden in the nested sub-block.
+            E.g., example IR of input is hidden in the nested sub-block.
+            Graph[x.1]
+            %1 = ...
+                Block[]
+                    Block[x.1]
+                        %2 = x.1 ...
+            """
+            arguments: Set[str] = set()
+            for block in entry.blocks():
+                for block_node in block.nodes():
+                    for block_node_in in block_node.inputs():
+                        if block_node_in.debugName() in self.name_to_node:
+                            arguments.add(block_node_in.debugName())
+                    arguments = arguments.union(
+                        _identify_inputs_as_arguments(block_node)
+                    )
+            return arguments
 
-            # TODO: block.inputs(), not sure what theyre used for
-
-            for block_node in block.nodes():
-                for block_node_in in block_node.inputs():
-                    if block_node_in.debugName() in self.name_to_node:
-                        block_args.add(block_node_in.debugName())
-
-            arguments.update(block_args)
+        # Find inputs.
+        arguments = _identify_inputs_as_arguments(node)
 
         # Lift parameters as inputs.
         for block in node.blocks():

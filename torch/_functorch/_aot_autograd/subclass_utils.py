@@ -136,6 +136,24 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
     return unwrapped_args
 
 
+def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
+    static_input_indices = set(static_input_indices)
+    new_ind = 0
+    remapped_static_indices = []
+    for i, arg in enumerate(wrapped_args):
+        num_indices = 1
+        if is_traceable_wrapper_subclass(arg):
+            num_indices = len(get_plain_tensors(arg))
+
+        for _ in range(num_indices):
+            if i in static_input_indices:
+                remapped_static_indices.append(new_ind)
+
+            new_ind += 1
+
+    return remapped_static_indices
+
+
 # Turns a flattened list of tensor arguments into (maybe) subclass tensors.
 # This function is used both at trace time and runtime, so we have an is_runtime flag telling us which context we're in.
 def wrap_tensor_subclasses(
