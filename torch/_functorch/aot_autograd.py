@@ -507,7 +507,9 @@ def create_aot_dispatcher_function(
                             shape_env.create_symbol(x, source), hint=x, source=source
                         )
                 if isinstance(x, torch.ScriptObject):
-                    return torch._library.fake_class_registry.to_fake_obj(fake_mode, x)
+                    return torch._library.fake_class_registry.maybe_to_fake_obj(
+                        fake_mode, x
+                    )
                 if not isinstance(x, torch.Tensor):
                     return x
                 if isinstance(x, FakeTensor):
@@ -551,14 +553,17 @@ def create_aot_dispatcher_function(
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
-        from torch._library.fake_class_registry import FakeScriptObject, to_fake_obj
+        from torch._library.fake_class_registry import (
+            FakeScriptObject,
+            maybe_to_fake_obj,
+        )
 
         # Tracing may mutate the states the fake script object,
         # so we need to duplicate the fake script objects so that subsequent tracing
         # won't be affected.
         def _dup_fake_script_obj(fake_flat_args):
             return [
-                to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
+                maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
                 if isinstance(arg, FakeScriptObject)
                 else arg
                 for arg in fake_flat_args

@@ -334,6 +334,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             self.push(value)
         if_jump = self.create_call_resume_at(inst.target)
 
+        if sys.version_info >= (3, 13):
+            # 3.13 requires stack[-1] to be bool type
+            self.output.add_output_instructions([create_instruction("TO_BOOL")])
+
         self.output.add_output_instructions(
             [create_instruction(inst.opname, target=if_jump[0])] + if_next + if_jump
         )
@@ -2078,12 +2082,17 @@ class InstructionTranslatorBase(
         # see https://docs.python.org/3.11/library/dis.html#opcode-CALL
         # for convention
         contents = self.popn(inst.arg + 2)
-        if isinstance(contents[0], NullVariable):
-            fn = contents[1]
-            args = []
-        else:
+        if sys.version_info >= (3, 13):
+            # NULL and callable swapped
             fn = contents[0]
-            args = [contents[1]]
+            args = [] if isinstance(contents[1], NullVariable) else [contents[1]]
+        else:
+            if isinstance(contents[0], NullVariable):
+                fn = contents[1]
+                args = []
+            else:
+                fn = contents[0]
+                args = [contents[1]]
         kw_names = self.kw_names.value if self.kw_names else ()
         if kw_names:
             args = args + contents[2 : -len(kw_names)]

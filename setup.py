@@ -1199,7 +1199,7 @@ def main():
     install_requires += extra_install_requires
 
     extras_require = {
-        "optree": ["optree==0.11.0"],
+        "optree": ["optree>=0.12.0"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
 
