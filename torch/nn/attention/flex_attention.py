@@ -50,7 +50,7 @@ class _ModificationType(Enum):
     """
 
     SCORE_MOD = 1
-    mask_mod = 2
+    MASK_MOD = 2
 
 
 @torch._dynamo.assume_constant_result
@@ -70,7 +70,7 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
     if num_positional_args == 5:
         return _ModificationType.SCORE_MOD
     elif num_positional_args == 4:
-        return _ModificationType.mask_mod
+        return _ModificationType.MASK_MOD
     else:
         raise AssertionError
 
@@ -546,7 +546,7 @@ def create_mask(
             out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
             mask = torch.where(torch.isneginf(out), False, True)
             return mask
-        elif mod_type == _ModificationType.mask_mod:
+        elif mod_type == _ModificationType.MASK_MOD:
             mask_mod = mod_fn
             mask_mod = _vmap_for_bhqkv(mask_mod, prefix=())
             mask = mask_mod(b, h, m, n)
@@ -562,7 +562,7 @@ def _create_block_mask_inner(
 ):
     mask_tensor = create_mask(mod_fn, B, H, M, N, device, _compile=True)
     mod_type = _get_mod_type(mod_fn)
-    if mod_type == _ModificationType.mask_mod:
+    if mod_type == _ModificationType.MASK_MOD:
         mask_mod = mod_fn
     else:
         mask_mod = None
