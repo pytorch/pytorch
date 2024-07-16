@@ -1457,8 +1457,8 @@ class GraphModule(torch.nn.Module):
         child_6: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         child_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         child_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (ones, zeros, None, None, ones_1, zeros_1, None, None, 128, 128, mask_fn_0), 0.5, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = ones = zeros = ones_1 = zeros_1 = mask_fn_0 = None
+        mask_mod_0 = self.mask_mod_0
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (ones, zeros, None, None, ones_1, zeros_1, None, None, 128, 128, mask_mod_0), 0.5, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = ones = zeros = ones_1 = zeros_1 = mask_mod_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 

@@ -204,7 +204,7 @@ flex_attention_template = TritonTemplate(
 
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # We don't know anything "special" about these blocks, so we need to apply
-    # both score_mod and mask_fn to it
+    # both score_mod and mask_mod to it
     kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
     kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
     sparse_kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
@@ -240,7 +240,7 @@ flex_attention_template = TritonTemplate(
 
     # ~~~~~~~~~~~~~~ "full" blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # We know these blocks are guaranteed to be "full", so we don't need to
-    # apply mask_fn to them - only score_mod
+    # apply mask_mod to them - only score_mod
     if HAS_FULL_BLOCKS:
         # PARTIAL_KV_IDX and PARTIAL_KV_NUM_BLKS are always contiguous.
         kv_indices = PARTIAL_KV_IDX + sparse_kv_idx_offset
@@ -349,7 +349,7 @@ def forward_inner(
         if not IS_FULL_BLOCKS:
             {{ modification(
                 subgraph_number=1,
-                output_name="mask_fn_output",
+                output_name="mask_mod_output",
                 score="qk",
                 b="off_z",
                 h="off_h",
@@ -357,7 +357,7 @@ def forward_inner(
                 n="n",
             ) | indent_except_first(3) }}
             # apply mask for partially unmasked blocks
-            post_mod_scores = tl.where(mask_fn_output, post_mod_scores, float("-inf"))
+            post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
 
         # TODO: In the case that score_mod is linear, this can be LICMed
         if not PRESCALE_QK:
@@ -531,7 +531,7 @@ def flex_attention(
     block_mask,
     scale,
     score_mod_other_buffers,
-    mask_fn_other_buffers,
+    mask_mod_other_buffers,
 ):
     (
         kv_num_blocks,
@@ -594,7 +594,7 @@ def flex_attention(
         ]
     ]
     mask_graph_buffer = build_subgraph_buffer(
-        mask_graph_placeholder_inps + list(mask_fn_other_buffers), mask_graph
+        mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
     layout = FixedLayout(
         query.get_device(),
@@ -689,7 +689,7 @@ def flex_attention(
             full_kv_indices,
         ]
         + list(score_mod_other_buffers)
-        + list(mask_fn_other_buffers)
+        + list(mask_mod_other_buffers)
     )
     input_gen_fns = {
         4: create_num_blocks_fake_generator(full_kv_indices),
@@ -996,7 +996,7 @@ def bwd_dq_inner(
         if not IS_FULL_BLOCKS:
             {{ modification(
                 subgraph_number=2,
-                output_name="mask_fn_output",
+                output_name="mask_mod_output",
                 score="qk",
                 b="off_z",
                 h="off_h",
@@ -1005,7 +1005,7 @@ def bwd_dq_inner(
             ) | indent_except_first(3) }}
 
             # apply mask for partial masked block
-            post_mod_scores = tl.where(mask_fn_output, post_mod_scores, float("-inf"))
+            post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         if not PRESCALE_QK:
             post_mod_scores *= RCP_LN2
@@ -1028,7 +1028,7 @@ def bwd_dq_inner(
 
         if not IS_FULL_BLOCKS:
             # (grads) apply mask for partially unmasked block
-            ds = tl.where(mask_fn_output, ds, 0.0)
+            ds = tl.where(mask_mod_output, ds, 0.0)
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         ds = ds.to(MATMUL_PRECISION)
         # Compute dQ.
@@ -1093,7 +1093,7 @@ def bwd_dkdv_inner(
         if not IS_FULL_BLOCKS:
             {{ modification(
                 subgraph_number=2,
-                output_name="mask_fn_output",
+                output_name="mask_mod_output",
                 score="qkT",
                 b="off_z",
                 h="off_h",
@@ -1101,7 +1101,7 @@ def bwd_dkdv_inner(
                 n="n",
             ) | indent_except_first(3) }}
             # (grads) apply mask for fully masked block
-            post_mod_scores = tl.where(mask_fn_output, post_mod_scores, float("-inf"))
+            post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         if not PRESCALE_QK:
             post_mod_scores *= RCP_LN2
@@ -1130,7 +1130,7 @@ def bwd_dkdv_inner(
         dsT = grad_scores
         if not IS_FULL_BLOCKS:
             # (grads) apply mask for partially unmasked block
-            dsT = tl.where(mask_fn_output, dsT, 0.0)
+            dsT = tl.where(mask_mod_output, dsT, 0.0)
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
         # Increment pointers.
@@ -1169,7 +1169,7 @@ def flex_attention_backward(*args, **kwargs):
         block_mask,
         scale,
         score_mod_other_buffers,
-        mask_fn_other_buffers,
+        mask_mod_other_buffers,
     ) = args
     (
         kv_num_blocks,
@@ -1239,7 +1239,7 @@ def flex_attention_backward(*args, **kwargs):
         ]
     ]
     mask_graph_buffer = build_subgraph_buffer(
-        mask_graph_placeholder_inps + list(mask_fn_other_buffers), mask_graph
+        mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
 
     layout_k = FixedLayout(
@@ -1353,7 +1353,7 @@ def flex_attention_backward(*args, **kwargs):
             full_q_indices,
         ]
         + list(score_mod_other_buffers)
-        + list(mask_fn_other_buffers)
+        + list(mask_mod_other_buffers)
     )
     input_gen_fns = {
         8: create_num_blocks_fake_generator(kv_indices),  # kv_num_blocks

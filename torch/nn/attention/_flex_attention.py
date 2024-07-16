@@ -42,25 +42,13 @@ _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
 
 
-class _ModificationType(Enum):
-    """Enum for the type of modification function.
-    - SCORE_MOD: score_mod function which accepts a score as the first argument
-    - mask_mod: mask function which does not accept a score and is only used for generating
-    block mask
-    """
-
+class ModificationType(Enum):
     SCORE_MOD = 1
     mask_mod = 2
 
 
 @torch._dynamo.assume_constant_result
-def _get_mod_type(fn: Callable) -> _ModificationType:
-    """Get the type of modification function.
-    This function inspects the number of positional arguments of the function to determine
-    the type of modification function. If the function has 5 positional arguments, it is
-    considered as a score_mod function. If the function has 4 positional arguments, it is
-    considered as a mask function.
-    """
+def get_mod_type(fn) -> ModificationType:
     num_positional_args = sum(
         1
         for param in inspect.signature(fn).parameters.values()
@@ -68,9 +56,9 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
     )
     assert num_positional_args == 5 or num_positional_args == 4
     if num_positional_args == 5:
-        return _ModificationType.SCORE_MOD
+        return ModificationType.SCORE_MOD
     elif num_positional_args == 4:
-        return _ModificationType.mask_mod
+        return ModificationType.mask_mod
     else:
         raise AssertionError
 
@@ -121,117 +109,63 @@ def _no_mask(
 _DEFAULT_SPARSE_BLOCK_SIZE = 128
 
 
-def _ordered_to_dense(num_blocks_in_row, col_indices):
-    num_rows = col_indices.shape[-2]
-    num_cols = col_indices.shape[-1]
-    batch_dims = num_blocks_in_row.shape[:-1]
-    device = num_blocks_in_row.device
-
-    def create_dense_one(kv_num_blocks, kv_indices):
-        dense_mask = kv_indices.new_zeros(num_rows, num_cols + 1, dtype=torch.int32)
-
-        row_indices = torch.arange(num_rows, dtype=torch.int, device=device).unsqueeze(
-            -1
-        )
-        col_range = torch.arange(num_cols, dtype=torch.int, device=device)
-        index_mask = col_range < kv_num_blocks.unsqueeze(-1)
-
-        # We write to one spot "out of bounds"
-        valid_indices = torch.where(index_mask, kv_indices, num_cols)
-
-        # set the values in 'a' to 1 where the indices are valid
-        dense_mask[row_indices, valid_indices] = 1
-        return dense_mask[:, :num_cols]
-
-    create_dense_batched = create_dense_one
-    for _ in range(len(batch_dims)):
-        create_dense_batched = torch.vmap(create_dense_batched, in_dims=(0, 0))
-
-    out = create_dense_batched(num_blocks_in_row, col_indices)
-    return out
-
-
-def _dense_to_ordered(dense_mask) -> Tuple:
-    dense_mask = dense_mask.to(dtype=torch.int32)
-    num_blocks_in_row = dense_mask.sum(dim=-1)
-    col_indices = torch.argsort(dense_mask, dim=-1, descending=True, stable=True)
-    return (
-        num_blocks_in_row.to(torch.int32).to(dense_mask.device).contiguous(),
-        col_indices.to(torch.int32).to(dense_mask.device).contiguous(),
-    )
-
-
-def _transpose_ordered(num_blocks_in_row, col_indices):
-    dense = _ordered_to_dense(num_blocks_in_row, col_indices)
-    return _dense_to_ordered(dense.transpose(-2, -1))
-
-
 class BlockMask:
     r"""
     BlockMask is our format for representing a block-sparse attention mask.
     It is somewhat of a cross in-between BCSR and a non-sparse format.
 
-    Basics
-    ------
+    ## Basics
     A block-sparse mask means that instead of representing the sparsity of
-    individual elements in the mask, a KV_BLOCK_SIZE x Q_BLOCK_SIZE block is
-    considered sparse only if every element within that block is sparse.
-    This aligns well with hardware, which generally expects to perform
-    contiguous loads and computation.
+    individual elements in the mask, we only consider a block sparse if an
+    entire KV_BLOCK_SIZE x Q_BLOCK_SIZE is sparse. This aligns well with
+    hardware, which generally expects to perform contiguous loads and
+    computation.
 
     This format is primarily optimized for 1. simplicity, and 2. kernel
-    efficiency. Notably, it is *not* optimized for size, as this mask is always
-    reduced by a factor of KV_BLOCK_SIZE * Q_BLOCK_SIZE. If the size is a
-    concern, the tensors can be reduced in size by increasing the block size.
+    efficiency. Notably, it is *not* optimized for size, as we believe the mask
+    is sufficiently small that its size is not a concern.
 
     The essentials of our format are:
+    num_blocks_in_row: Tensor[ROWS]  # Describes the number of blocks present in
+    each row.
+    col_indices: Tensor[ROWS, MAX_BLOCKS_IN_COL]  # col_indices[i] is the
+    position of the blocks in index i. The values of this row after
+    col_indices[i][num_blocks_in_row[i]] are undefined.
 
-    - num_blocks_in_row: Tensor[ROWS]
-        Describes the number of blocks present in each row.
-
-    - col_indices: Tensor[ROWS, MAX_BLOCKS_IN_COL]
-        `col_indices[i]` is the sequence of block positions for row i. The values of
-        this row after `col_indices[i][num_blocks_in_row[i]]` are undefined.
-
-    For example, to reconstruct the original tensor from this format:
-
-    .. code-block:: python
-
-        dense_mask = torch.zeros(ROWS, COLS)
-        for row in range(ROWS):
-            for block_idx in range(num_blocks_in_row[row]):
-                dense_mask[row, col_indices[row, block_idx]] = 1
+    For example, to reconstruct the original tensor from this format.
+    ```
+    dense_mask = torch.zeros(ROWS, COLS)
+    for row in range(ROWS):
+        for block_idx in range(num_blocks_in_row[row]):
+            dense_mask[row, col_indices[row, block_idx]] = 1
+    ```
 
     Notably, this format makes it easier to implement a reduction along the
     *rows* of the mask.
 
-    Details
-    -------
-    The basics of our format require only kv_num_blocks and kv_indices. But, we
-    have up to 8 tensors on this object. This represents 4 pairs:
+    ## Details
+    The basics of our format require only kv_num_blocks and kv_indices. But, we have up to 8 tensors on this object. This represents 4 pairs:
 
-    1. (kv_num_blocks, kv_indices): Used for the forwards pass of attention, as
-    we reduce along the KV dimension.
+    (kv_num_blocks, kv_indices): This is used for the forwards pass of
+        attention, as we reduce along the KV dimension.
+    (q_num_blocks, q_indices): This is required for the backwards pass, as
+        computing dKV requires iterating along the mask along the Q dimension.
+    [OPTIONAL](full_kv_num_blocks, full_kv_indices): This is optional, and is
+        purely an optimization. As it turns out, applying masking to every block is
+        quite expensive! If we specifically know which blocks are "full" and don't
+        require masking at all, then we can skip applying mask_mod to these blocks.
+        This requires the user to split out a separate mask_mod from the score_mod.
+        For causal masks, this is about a 15% speedup.
+    [OPTIONAL](full_q_num_blocks, full_q_indices): Same as above, but for the
+    backwards.
 
-    2. [OPTIONAL] (full_kv_num_blocks, full_kv_indices): This is optional and
-    purely an optimization. As it turns out, applying masking to every block
-    is quite expensive! If we specifically know which blocks are "full" and
-    don't require masking at all, then we can skip applying mask_mod to these
-    blocks. This requires the user to split out a separate mask_mod from the
-    score_mod. For causal masks, this is about a 15% speedup.
-
-    3. [GENERATED] (q_num_blocks, q_indices): Required for the backwards pass,
-    as computing dKV requires iterating along the mask along the Q dimension. These are autogenerated from 1.
-
-    4. [GENERATED] (full_q_num_blocks, full_q_indices): Same as above, but for
-    the backwards pass. These are autogenerated from 2.
     """
     kv_num_blocks: Tensor
     kv_indices: Tensor
-    full_kv_num_blocks: Optional[Tensor]
-    full_kv_indices: Optional[Tensor]
     q_num_blocks: Tensor
     q_indices: Tensor
+    full_kv_num_blocks: Optional[Tensor]
+    full_kv_indices: Optional[Tensor]
     full_q_num_blocks: Optional[Tensor]
     full_q_indices: Optional[Tensor]
     KV_BLOCK_SIZE: int
@@ -242,44 +176,26 @@ class BlockMask:
         self,
         kv_num_blocks: Tensor,
         kv_indices: Tensor,
-        full_kv_num_blocks: Optional[Tensor] = None,
-        full_kv_indices: Optional[Tensor] = None,
-        q_num_blocks: Optional[Tensor] = None,
-        q_indices: Optional[Tensor] = None,
-        full_q_num_blocks: Optional[Tensor] = None,
-        full_q_indices: Optional[Tensor] = None,
+        q_num_blocks: Tensor,
+        q_indices: Tensor,
+        full_kv_num_blocks: Optional[Tensor],
+        full_kv_indices: Optional[Tensor],
+        full_q_num_blocks: Optional[Tensor],
+        full_q_indices: Optional[Tensor],
         KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
         Q_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
-        mask_mod: Optional[_mask_mod_signature] = None,
+        mask_mod=None,
     ):
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
         self.kv_num_blocks = kv_num_blocks
         self.kv_indices = kv_indices
+        self.q_num_blocks = q_num_blocks
+        self.q_indices = q_indices
         self.full_kv_num_blocks = full_kv_num_blocks
         self.full_kv_indices = full_kv_indices
-
-        if q_num_blocks is None:
-            assert q_indices is None
-            self.q_num_blocks, self.q_indices = _transpose_ordered(
-                kv_num_blocks, kv_indices
-            )
-        else:
-            assert q_indices is not None
-            self.q_num_blocks, self.q_indices = q_num_blocks, q_indices
-
-        if full_kv_num_blocks is not None:
-            if full_q_num_blocks is None:
-                self.full_q_num_blocks, self.full_q_indices = _transpose_ordered(
-                    full_kv_num_blocks, full_kv_indices
-                )
-            else:
-                self.full_q_num_blocks, self.full_q_indices = (
-                    full_q_num_blocks,
-                    full_q_indices,
-                )
-        else:
-            self.full_q_num_blocks, self.full_q_indices = None, None
+        self.full_q_num_blocks = full_q_num_blocks
+        self.full_q_indices = full_q_indices
         self.KV_BLOCK_SIZE = KV_BLOCK_SIZE
         self.Q_BLOCK_SIZE = Q_BLOCK_SIZE
         if mask_mod is None:
@@ -290,10 +206,10 @@ class BlockMask:
         return (
             self.kv_num_blocks,
             self.kv_indices,
-            self.full_kv_num_blocks,
-            self.full_kv_indices,
             self.q_num_blocks,
             self.q_indices,
+            self.full_kv_num_blocks,
+            self.full_kv_indices,
             self.full_q_num_blocks,
             self.full_q_indices,
             self.KV_BLOCK_SIZE,
@@ -318,8 +234,8 @@ class BlockMask:
         Returns the shape of the mask.
         """
         *batch_dims, q_length, _ = self.kv_indices.shape
-        q_length = self.kv_indices.shape[-2] * self.KV_BLOCK_SIZE
-        kv_length = self.kv_indices.shape[-1] * self.Q_BLOCK_SIZE
+        q_length = self.kv_num_blocks.shape[-1] * self.KV_BLOCK_SIZE
+        kv_length = self.q_num_blocks.shape[-1] * self.Q_BLOCK_SIZE
         return tuple(batch_dims + [q_length, kv_length])
 
     def numel(self):
@@ -350,12 +266,34 @@ class BlockMask:
         """
         Returns a dense block that is equivalent to the block mask.
         """
-        partial_dense = _ordered_to_dense(self.kv_num_blocks, self.kv_indices)
-        if self.full_kv_num_blocks is not None:
-            return partial_dense | _ordered_to_dense(
-                self.full_kv_num_blocks, self.full_kv_indices
-            )
-        return partial_dense
+        num_rows = self.kv_num_blocks.shape[-1]
+        num_cols = self.q_num_blocks.shape[-1]
+        batch_dims = self.kv_num_blocks.shape[:-1]
+        device = self.kv_num_blocks.device
+
+        def create_dense_one(kv_num_blocks, kv_indices):
+            dense_mask = kv_indices.new_zeros(num_rows, num_cols + 1, dtype=torch.int32)
+
+            row_indices = torch.arange(
+                num_rows, dtype=torch.int, device=device
+            ).unsqueeze(-1)
+            col_indices = torch.arange(num_cols, dtype=torch.int, device=device)
+            index_mask = col_indices < kv_num_blocks.unsqueeze(-1)
+
+            # We write to one spot "out of bounds"
+            valid_indices = torch.where(index_mask, kv_indices, num_cols)
+
+            # set the values in 'a' to 1 where the indices are valid
+            dense_mask[row_indices, valid_indices] = 1
+            return dense_mask[:, :num_cols]
+
+        create_dense_batched = create_dense_one
+        for _ in range(len(batch_dims)):
+            create_dense_batched = torch.vmap(create_dense_batched, in_dims=(0, 0))
+        out = create_dense_batched(self.kv_num_blocks, self.kv_indices)
+        # if self.full_kv_num_blocks is not None:
+        #     out |= create_dense_batched(self.full_kv_num_blocks, self.full_kv_indices)
+        return out
 
     def to_string(self, grid_size=(20, 20), limit=4):
         """
@@ -486,20 +424,33 @@ def _create_sparse_block_from_block_mask(
 ) -> BlockMask:
     full_blocks, partial_blocks = block_mask
 
-    full_bm = _dense_to_ordered(full_blocks)
+    def create_sparse_block_from_block_mask_inner(block_mask) -> Tuple:
+        block_mask = block_mask.to(dtype=torch.int32)
+        kv_num_blocks = block_mask.sum(dim=3)
+        kv_indices = torch.argsort(block_mask, dim=3, descending=True, stable=True)
+        q_num_blocks = block_mask.sum(dim=2)
+        q_indices = torch.argsort(
+            block_mask, dim=2, descending=True, stable=True
+        ).permute(0, 1, 3, 2)
+        return (
+            kv_num_blocks.to(torch.int32).to(block_mask.device).contiguous(),
+            kv_indices.to(torch.int32).to(block_mask.device).contiguous(),
+            q_num_blocks.to(torch.int32).to(block_mask.device).contiguous(),
+            q_indices.to(torch.int32).to(block_mask.device).contiguous(),
+        )
+
+    full_bm = create_sparse_block_from_block_mask_inner(full_blocks)
     if partial_blocks is not None:
-        partial_bm = _dense_to_ordered(partial_blocks)
+        partial_bm = create_sparse_block_from_block_mask_inner(partial_blocks)
     else:
-        partial_bm = (None, None)
+        partial_bm = (None, None, None, None)
 
     return BlockMask(  # type: ignore[call-arg]
-        full_bm[0],
-        full_bm[1],
-        partial_bm[0],
-        partial_bm[1],
-        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
-        Q_BLOCK_SIZE=Q_BLOCK_SIZE,
-        mask_mod=mask_mod,
+        *full_bm,
+        *partial_bm,
+        KV_BLOCK_SIZE,
+        Q_BLOCK_SIZE,
+        mask_mod,
     )
 
 
@@ -515,7 +466,7 @@ def create_mask(
     r"""This function creates a mask tensor from a mod_fn function.
 
     Args:
-        mod_fn (Union[_score_mod_signature, _mask_mod_signature]): Function to modify attention scores.
+        mod_fn (Callable): Function to modify attention scores.
         B (int): Batch size.
         H (int): Number of heads.
         M (int): Sequence length of query.
@@ -537,16 +488,16 @@ def create_mask(
         ctx = nullcontext()
     else:
         ctx = TransformGetItemToIndex()  # type: ignore[assignment]
-    mod_type = _get_mod_type(mod_fn)
+    mod_type = get_mod_type(mod_fn)
 
     with ctx:
-        if mod_type == _ModificationType.SCORE_MOD:
+        if mod_type == ModificationType.SCORE_MOD:
             score_mod = mod_fn
             score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,))  # first input is score
             out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
             mask = torch.where(torch.isneginf(out), False, True)
             return mask
-        elif mod_type == _ModificationType.mask_mod:
+        elif mod_type == ModificationType.mask_mod:
             mask_mod = mod_fn
             mask_mod = _vmap_for_bhqkv(mask_mod, prefix=())
             mask = mask_mod(b, h, m, n)
@@ -561,8 +512,8 @@ def _create_block_mask_inner(
     mod_fn, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE, mod_type
 ):
     mask_tensor = create_mask(mod_fn, B, H, M, N, device, _compile=True)
-    mod_type = _get_mod_type(mod_fn)
-    if mod_type == _ModificationType.mask_mod:
+    mod_type = get_mod_type(mod_fn)
+    if mod_type == ModificationType.mask_mod:
         mask_mod = mod_fn
     else:
         mask_mod = None
@@ -604,7 +555,7 @@ def create_block_mask(
         block_mask (tuple): A tuple of (kv_num_blocks, kv_indices, q_num_blocks, q_indices,
                             KV_BLOCK_SIZE, Q_BLOCK_SIZE) which represents the block mask.
     """
-    mod_type = _get_mod_type(fn)
+    mod_type = get_mod_type(fn)
     inner_func = _create_block_mask_inner
     # This is kind of a temporary hack to workaround some issues
     if _compile:
@@ -631,10 +582,12 @@ def _create_empty_block_mask(query, key, value) -> BlockMask:
     return BlockMask(
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
-        full_kv_num_blocks=None,
-        full_kv_indices=None,
         q_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         q_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
+        full_kv_num_blocks=None,
+        full_kv_indices=None,
+        full_q_num_blocks=None,
+        full_q_indices=None,
         KV_BLOCK_SIZE=kv_len,
         Q_BLOCK_SIZE=q_len,
     )
@@ -662,14 +615,14 @@ def flex_attention(
             score: Tensor,
             batch: Tensor,
             head: Tensor,
-            q_idx: Tensor,
-            kv_idx: Tensor
+            token_q: Tensor,
+            token_kv: Tensor
         ) -> Tensor:
 
     Where:
         - ``score``: A scalar tensor representing the attention score,
           with the same data type and device as the query, key, and value tensors.
-        - ``batch``, ``head``, ``q_idx``, ``kv_idx``: Scalar tensors indicating
+        - ``b``, ``h``, ``q_idx``, ``kv_idx``: Scalar tensors indicating
           the batch index, head index, query index, and key/value index, respectively.
           These should have the ``torch.int`` data type and be located on the same device as the score tensor.
 
