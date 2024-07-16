@@ -92,7 +92,6 @@ if(USE_XPU)
     caffe2_update_option(USE_XPU OFF)
   else()
     if(LINUX)
-      # Workaround about XPU ABI neutral build
       string(APPEND CMAKE_CXX_FLAGS " -D__INTEL_PREVIEW_BREAKING_CHANGES")
     endif()
   endif()
