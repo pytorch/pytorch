@@ -85,15 +85,15 @@ struct GemmParams : OpParams {
   }
 
   size_t GetSizeA() const {
-    return sizeof(T) * m * k;
+    return sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
   }
 
   size_t GetSizeB() const {
-    return sizeof(T) * k * n;
+    return sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
   }
 
   size_t GetSizeC() const {
-    return sizeof(T) * m * n;
+    return sizeof(T) * ldc * n;
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -251,15 +251,15 @@ struct ScaledGemmParams : OpParams {
   }
 
   size_t GetSizeA() const {
-    return sizeof(T) * m * k;
+    return sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
   }
 
   size_t GetSizeB() const {
-    return sizeof(T) * k * n;
+    return sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
   }
 
   size_t GetSizeC() const {
-    return sizeof(T) * m * n;
+    return sizeof(T) * ldc * n;
   }
 
   size_t GetSize(bool duplicate_inputs) const {
