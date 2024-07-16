@@ -1976,7 +1976,7 @@ def as_storage_and_layout(
             else:
                 x.data.decide_layout()
         return x, x.data.layout
-    if isinstance(x, (ReinterpretView, DtypeView)):
+    if isinstance(x, ReinterpretView):
         # making the base of x contiguous or stride_ordered will not necessarily make
         # the ReinterpretView either, so don't pass along those arguments
         buffer, _ = as_storage_and_layout(
@@ -2524,10 +2524,6 @@ class DtypeView(BaseView):
 
     target_dtype: torch.dtype
 
-    def __post_init__(self):
-        super().__post_init__()
-        self._layout = self.create_new_layout(self.data, self.target_dtype)
-
     @classmethod
     def create(cls, x, new_dtype):
         if is_storage_and_layout(x):
@@ -2550,24 +2546,6 @@ class DtypeView(BaseView):
     @property
     def dtype(self):
         return self.target_dtype
-
-    @property
-    def layout(self):
-        if not hasattr(self, "_layout") or self._layout is None:
-            self._layout = self.create_new_layout(self.data, self.target_dtype)
-        return self._layout
-
-    def create_new_layout(self, x, new_dtype):
-        if is_storage_and_layout(x):
-            _, old_layout = as_storage_and_layout(x)
-            return FixedLayout(
-                old_layout.device,
-                new_dtype,
-                old_layout.size,
-                old_layout.stride,
-                old_layout.offset,
-            )
-        return None
 
     def get_size(self):
         return self.data.get_size()
@@ -3972,7 +3950,7 @@ class InputsKernel(Buffer):
             x = x.data
         if isinstance(x, StorageBox):
             x = x.data
-        if isinstance(x, BaseView) and not isinstance(x, (ReinterpretView, DtypeView)):
+        if isinstance(x, BaseView) and not isinstance(x, ReinterpretView):
             x = ExternKernel.realize_input(x)
         if isinstance(x, TensorBox):
             # when converting to ReinterpretView fails in the
@@ -3982,7 +3960,7 @@ class InputsKernel(Buffer):
             return cls.unwrap_storage_for_input(x)
         if isinstance(x, TorchBindObject):
             return x
-        assert isinstance(x, (Buffer, ReinterpretView, DtypeView)), x
+        assert isinstance(x, (Buffer, ReinterpretView)), x
         return x
 
     @staticmethod
