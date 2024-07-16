@@ -290,13 +290,13 @@ Adafactor.__doc__ = (
 
         .. math::
             \begin{aligned}
-            &\hspace{5mm}R_t \leftarrow \widehat{\beta}_{2_t}R_{t-1}+
-                        (1-\widehat{\beta}_{2_t})(G_t \odot G_t + \epsilon_1 1_n \cdot 1^\top_m) \cdot 1_m          \\
-            &\hspace{5mm}C_t \leftarrow \widehat{\beta}_{2_t}C_{t-1}+
-                        (1-\widehat{\beta}_{2_t}) 1^\top_n \cdot (G_t \odot G_t + \epsilon_1 1_n \cdot 1^\top_m)    \\
-            &\hspace{5mm}\widehat{V}_t \leftarrow \frac{R_t \cdot C_t}{1^\top_n \cdot R_t}                          \\
-            &\hspace{5mm}U_t \leftarrow \frac{G_t}{\sqrt{\widehat{V}_t}}        \\
-        \end{aligned}
+                &\hspace{5mm}R_t \leftarrow \widehat{\beta}_{2_t}R_{t-1}+
+                            (1-\widehat{\beta}_{2_t})(G_t \odot G_t + \epsilon_1 1_n \cdot 1^\top_m) \cdot 1_m          \\
+                &\hspace{5mm}C_t \leftarrow \widehat{\beta}_{2_t}C_{t-1}+
+                            (1-\widehat{\beta}_{2_t}) 1^\top_n \cdot (G_t \odot G_t + \epsilon_1 1_n \cdot 1^\top_m)    \\
+                &\hspace{5mm}\widehat{V}_t \leftarrow \frac{R_t \cdot C_t}{1^\top_n \cdot R_t}                          \\
+                &\hspace{5mm}U_t \leftarrow \frac{G_t}{\sqrt{\widehat{V}_t}}                                            \\
+            \end{aligned}
 
 
     .. _Adafactor: Adaptive Learning Rates with Sublinear Memory Cost:
