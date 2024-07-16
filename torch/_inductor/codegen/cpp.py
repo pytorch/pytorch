@@ -2617,8 +2617,6 @@ class CppVecKernel(CppKernel):
             if isinstance(mask, CppCSEVariable) and mask.is_vec:
                 mask = f"({mask}).all_masked()"
             return super().indirect_assert(var, lower, upper, mask)
-
-        var_dtype = var.dtype
         lower_scalar = lower
         upper_scalar = upper
         if lower:
@@ -2635,7 +2633,6 @@ class CppVecKernel(CppKernel):
             assert upper
             cond = f"{var} < {upper}"
             cond_print = f"{var} < {upper_scalar}"
-
         cond = f"{self._get_mask_type(var.dtype)}({cond})"
         if mask:
             if not mask.is_vec:
