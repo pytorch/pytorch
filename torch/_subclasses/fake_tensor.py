@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import contextlib
 import functools
 import logging
@@ -1041,12 +1042,13 @@ class _DeconstructedSymNode:
                 and self.pytype == other.pytype
                 and self._hint == other._hint
                 and self.constant == other.constant
+                and self.fx_node == other.fx_node
             )
         else:
             return False
 
     def _value_hash(self) -> int:
-        return hash((self._expr, self.pytype, self._hint, self.constant))
+        return hash((self._expr, self.pytype, self._hint, self.constant, self.fx_node))
 
 
 @dataclass(frozen=True)
@@ -2554,3 +2556,16 @@ from torch._subclasses.fake_impls import (  # noqa: F401
     op_implementations_checks,
     stride_incorrect_op,
 )
+
+
+@atexit.register
+def dump_cache_stats() -> None:
+    log.info("FakeTensor cache stats:")
+    log.info("  cache_hits: %s", FakeTensorMode.cache_hits)
+    log.info("  cache_misses: %s", FakeTensorMode.cache_misses)
+    bypasses = FakeTensorMode.cache_bypasses
+    if bypasses:
+        log.info("  cache_bypasses:")
+        width = max(len(k) for k in bypasses)
+        for k, v in sorted(bypasses.items(), key=lambda i: -i[1]):
+            log.info("    %-*s %s", width + 1, f"{k}:", v)

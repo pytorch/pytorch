@@ -156,11 +156,12 @@ class SymNode:
             and self.pytype == other.pytype
             and self._hint == other._hint
             and self.constant == other.constant
+            and self.fx_node == other.fx_node
         )
 
     def _value_hash(self) -> int:
         # Purposely don't include the shape_env in the hash.
-        return hash((self._expr, self.pytype, self._hint, self.constant))
+        return hash((self._expr, self.pytype, self._hint, self.constant, self.fx_node))
 
     @property
     def expr(self):
