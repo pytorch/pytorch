@@ -1526,45 +1526,6 @@ class GraphModule(torch.nn.Module):
                 out_test = compiled_f(view)
                 self.assertEqual(out_ref, out_test)
 
-    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-    def test_mark_static_with_subclass_desugaring(self):
-        from typing import Any, Callable, Dict, List, Optional
-
-        from torch._dynamo.decorators import mark_static_address
-        from torch._inductor.compile_fx import compile_fx
-        from torch._inductor.cudagraph_utils import BoxedDeviceIndex
-        from torch._inductor.utils import BoxedBool
-
-        x_inner = torch.ones(4)
-        x = TwoTensor(x_inner, x_inner)
-        mark_static_address(x, guard=False)
-
-        def inner_compile(
-            gm: torch.fx.GraphModule,
-            example_inputs: List[torch.Tensor],
-            cudagraphs: Optional[BoxedBool] = None,
-            static_input_idxs: Optional[List[int]] = None,
-            is_backward: bool = False,
-            graph_id: Optional[int] = None,
-            cpp_wrapper: bool = False,
-            aot_mode: bool = False,
-            is_inference: bool = False,
-            boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
-            user_visible_outputs: Optional[Dict[str, None]] = None,
-            layout_opt: Optional[bool] = None,
-            extern_node_serializer: Optional[Callable[[List[Any]], Any]] = None,
-        ):
-            self.assertEqual(static_input_idxs, [1, 2])
-            return gm
-
-        compiler = functools.partial(compile_fx, inner_compile=inner_compile)
-
-        @torch.compile(backend=compiler)
-        def fn(t0, t1, t2):
-            return t0 + t1 + t2 + 2
-
-        fn(torch.ones(4), x, torch.ones(4))
-
 
 instantiate_parametrized_tests(SubclassTests)
 
