@@ -410,7 +410,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
             mutated_inputs.add(node.args[0])
 
-    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
+    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node, mutated_arg):
         node_loc = node_order[node]
         copy_node_loc = node_order[copy_node] if copy_node is not None else None
 
@@ -432,6 +432,17 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 # Reinplacing does not change shape metadata
                 if is_meta_only_user(user):
                     continue
+                # If our graph looks like:
+                # foo(mutated_arg)
+                # mutated_arg.copy_(other)
+                # then it's safe for us to reinplace foo because mutated_arg
+                # will get overwritten anyways.
+                if (
+                    user.target is torch.ops.aten.copy_.default
+                    and mutated_arg is not None
+                    and mutated_arg is shared_view_nodes[0].args[0]
+                ):
+                    continue
                 return True
         return False
 
@@ -443,13 +454,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
         if mutated_arg.op in ("placeholder", "get_attr"):
-            if not (
-                copy_node := copy_args_to_copy_nodes.get((mutated_arg, node), False)
-            ):
-                return False
-
+            copy_node = copy_args_to_copy_nodes.get((mutated_arg, node), None)
             if any_use_of_views_after_node(
-                node, shared_view_nodes, copy_node=copy_node
+                node, shared_view_nodes, copy_node=copy_node, mutated_arg=mutated_arg
             ):
                 return False
 
@@ -461,7 +468,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             return False
         else:
             return not any_use_of_views_after_node(
-                node, shared_view_nodes, copy_node=None
+                node, shared_view_nodes, copy_node=None, mutated_arg=mutated_arg
             )
 
     replace_dict: Dict[torch.fx.Node, torch.fx.Node] = {}
