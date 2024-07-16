@@ -91,7 +91,6 @@ def parallel_apply(
             with torch.cuda.device(device), torch.cuda.stream(
                 stream
             ), torch.amp.autocast("cuda", enabled=autocast_enabled):
-            ):
                 # this also avoids accidental slicing of `input` if it is a Tensor
                 if not isinstance(input, (list, tuple)):
                     input = (input,)
