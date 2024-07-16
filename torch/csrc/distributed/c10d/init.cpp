@@ -2744,6 +2744,7 @@ for details.
       .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
       .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
       .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
+      .def_readwrite("split_share", &ncclConfig_t::splitShare)
       .def_property(
           "net_name",
           [](const ncclConfig_t& self) { return self.netName; },
@@ -2784,6 +2785,7 @@ Example::
     >>> nccl_options.config.cga_cluster_size = 2
     >>> nccl_options.config.max_ctas = 4
     >>> nccl_options.config.min_ctas = 2
+    >>> nccl_options.config.split_share = 1
     >>> # initialize a nccl process group with the options just created
     >>> dist.init_process_group("nccl", pg_options=nccl_options)
       )")
@@ -2795,7 +2797,8 @@ Example::
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)
       .def_readwrite(
-          "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
+          "
+          ", &::c10d::ProcessGroupNCCL::Options::split_from)
       .def_readwrite(
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
       .def_readwrite(
