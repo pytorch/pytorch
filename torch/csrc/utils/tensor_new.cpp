@@ -69,7 +69,7 @@ TensorOptions build_options(
 Tensor new_with_sizes(
     c10::TensorOptions options,
     at::ScalarType scalar_type,
-    const optional<Device>& device,
+    const std::optional<Device>& device,
     c10::SymIntArrayRef sizes) {
   maybe_initialize_device(options.device());
   pybind11::gil_scoped_release no_gil;
