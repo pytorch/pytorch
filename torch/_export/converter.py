@@ -107,6 +107,12 @@ kind_to_standard_operators = {
     "aten::__contains__": operator.contains,
     "prim::dtype": get_dtype_as_int,
     "aten::len": len,
+    # Mapping from specialized op to its symbolic counterpart.
+    # They currently do not have any other overrides.
+    "aten::numel": torch.ops.aten.sym_numel,
+    "aten::size": torch.ops.aten.sym_size,
+    "aten::storage_offset": torch.ops.aten.sym_storage_offset,
+    "aten::stride": torch.ops.aten.sym_stride,
 }
 
 
@@ -496,9 +502,6 @@ class TS2FXGraphConverter:
 
     def convert_call_function_op(self, node: torch._C.Node):
         target = get_op_overload(node)
-
-        if target is torch.ops.aten.size.int:
-            target = torch.ops.aten.sym_size.int
 
         args, kwargs = self.get_args_kwargs(node, target._schema)
 
