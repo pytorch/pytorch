@@ -299,7 +299,7 @@ Adafactor.__doc__ = (
             \end{aligned}
 
 
-    .. _Adafactor: Adaptive Learning Rates with Sublinear Memory Cost:
+    .. _Adafactor\: Adaptive Learning Rates with Sublinear Memory Cost:
         https://arxiv.org/pdf/1804.04235
     .. _Decoupled Weight Decay Regularization:
         https://arxiv.org/abs/1711.05101
