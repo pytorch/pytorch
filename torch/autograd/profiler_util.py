@@ -975,11 +975,15 @@ def _build_table(
         if evt.device_type == DeviceType.CPU and evt.is_legacy:
             # in legacy profiler, kernel info is stored in cpu events
             sum_self_device_time_total += evt.self_device_time_total
-        elif evt.device_type in [
-            DeviceType.CUDA,
-            DeviceType.PrivateUse1,
-            DeviceType.MTIA,
-        ] and not evt.is_user_annotation:
+        elif (
+            evt.device_type
+            in [
+                DeviceType.CUDA,
+                DeviceType.PrivateUse1,
+                DeviceType.MTIA,
+            ]
+            and not evt.is_user_annotation
+        ):
             # in kineto profiler, there're events with the correct device type (e.g. CUDA)
             sum_self_device_time_total += evt.self_device_time_total
 
