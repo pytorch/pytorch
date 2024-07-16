@@ -1017,7 +1017,14 @@ def remove_fused_load_store(instructions: List[Instruction]) -> None:
             inst.opname = inst0
             inst.argval = argval0
 
-            new_insts.append(create_instruction(inst1, argval=argval1))
+            new_inst = create_instruction(inst1, argval=argval1)
+            # update inst.exn_tab_entry.end if necessary
+            if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:
+                inst.exn_tab_entry.end = new_inst
+            # preserve exception table entries
+            new_inst.exn_tab_entry = copy.copy(inst.exn_tab_entry)
+
+            new_insts.append(new_inst)
     instructions[:] = new_insts
 
 
