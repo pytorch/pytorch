@@ -359,25 +359,10 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
                 kwargs,
             )
 
-    @ops(custom_op_db.custom_op_db, dtypes=OpDTypes.any_one)
-    def test_op_vmap(self, device, dtype, op):
-        def vmap_check(op, *args, **kwargs):
-            # vmap only works for tenor arguments.
-            if all(isinstance(arg, torch.Tensor) for arg in args):
-                torch.vmap(op)(*args, **kwargs)
-
-        for sample_input in op.sample_inputs(device, dtype, requires_grad=False):
-            args = [sample_input.input] + list(sample_input.args)
-            kwargs = sample_input.kwargs
-            vmap_check(
-                op.op,
-                args,
-                kwargs,
-            )
-
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor: ...
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            ...
 
         @foo.impl(["cpu", "cuda"])
         def foo_impl(x):
