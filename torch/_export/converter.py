@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
-import logging
 import inspect
+import logging
 import operator
 import warnings
 
