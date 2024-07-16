@@ -679,7 +679,11 @@ class TS2FXGraphConverter:
             for block in entry.blocks():
                 for block_node in block.nodes():
                     for block_node_in in block_node.inputs():
-                        if block_node_in.debugName() in self.name_to_node:
+                        if (
+                            block_node_in.debugName() in self.name_to_node
+                            and block_node_in.debugName()
+                            not in self.name_to_attribute_fqn
+                        ):
                             arguments.add(block_node_in.debugName())
                     arguments = arguments.union(
                         _identify_inputs_as_arguments(block_node)
@@ -933,7 +937,6 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
         log.info(f"TorchScript graph\n\n{self.ts_graph}\n")  # noqa: G004
-        print(self.ts_model)
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
