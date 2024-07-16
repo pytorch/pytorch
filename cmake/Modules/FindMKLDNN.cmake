@@ -43,7 +43,6 @@ IF(NOT MKLDNN_FOUND)
       endif()
     endif()
     if(LINUX)
-      # Workaround about XPU ABI neutral build
       set(ABI_NEUTRAL_FLAGS -fpreview-breaking-changes)
     endif()
     ExternalProject_Add(xpu_mkldnn_proj
