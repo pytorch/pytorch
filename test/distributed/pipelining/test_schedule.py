@@ -267,6 +267,7 @@ class TestScheduleLowering(TestCase):
             stage_to_rank=lambda chunk_index: chunk_index % pipeline_parallel_size,
             num_stages=num_model_chunks * pipeline_parallel_size,
         )
+        print(_format_pipeline_order(comms_sch))
         _dump_csv(comms_sch, "lowered_comms.csv")
         # for rank in expected_comms_sch:
         #     for i, (expected, actual) in enumerate(
