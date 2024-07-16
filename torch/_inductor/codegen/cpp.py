@@ -2790,7 +2790,10 @@ class CppTile2DKernel(CppVecKernel):
         )
         self.tiling_indices = tiling_indices
         self.inner_tail_size = inner_tail_size
+        self.outer_tail_size = outer_tail_size
+        self.inner_num_elems = inner_tail_size if inner_tail_size else tiling_factor
         self.outer_num_elems = outer_tail_size if outer_tail_size else tiling_factor
+        self.inner_is_tiling_idx = True
 
     def inner_itervar(self):
         return sympy_index_symbol(f"{self.itervars[self.outer_idx]}_inner")
@@ -2821,14 +2824,14 @@ class CppTile2DKernel(CppVecKernel):
             ld_src, ld_dst = ld_dst, ld_src
 
         need_define = True
-        if is_store:
+        if self.inner_is_tiling_idx ^ is_store:
             load_or_store = (
-                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{self.outer_num_elems},{self.num_elems}>"
+                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{self.inner_num_elems},{self.outer_num_elems}>"
                 f"({src}, {ld_src}, {dst}, {ld_dst});"
             )
         else:
             load_or_store = (
-                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{self.num_elems},{self.outer_num_elems}>"
+                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{self.outer_num_elems},{self.inner_num_elems}>"
                 f"({src}, {ld_src}, {dst}, {ld_dst});"
             )
         if is_store:
@@ -2888,8 +2891,8 @@ class CppTile2DKernel(CppVecKernel):
             )
             # vector store inside the kernel inner loop
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
-            if self.inner_tail_size:
-                line = f"{value}.store({storebuf}, {self.inner_tail_size});"
+            if self.tail_size:
+                line = f"{value}.store({storebuf}, {self.tail_size});"
             elif V.graph.get_dtype(name) in DTYPE_LOWP_FP:
                 line = f"{value}.store({storebuf}, {self.tiling_factor});"
             elif V.graph.get_dtype(name) in (torch.uint8, torch.int8):
@@ -2903,9 +2906,14 @@ class CppTile2DKernel(CppVecKernel):
 
     def codegen_inner_loops(self, code):
         inner = self.inner_itervar()
-        code.writeline(
-            f"for (long {inner} = 0; {inner} < {self.outer_num_elems}; {inner}++)"
-        )
+        if self.inner_is_tiling_idx:
+            code.writeline(
+                f"for (long {inner} = 0; {inner} < {self.outer_num_elems}; {inner}++)"
+            )
+        else:
+            code.writeline(
+                f"for (long {inner} = 0; {inner} < {self.inner_num_elems}; {inner}++)"
+            )
 
     def set_ranges(self, group, reduction_group):
         vars = super().set_ranges(group, reduction_group)
@@ -2915,6 +2923,14 @@ class CppTile2DKernel(CppVecKernel):
             if self.tiling_indices[1] < self.reduction_depth
             else reversed(self.tiling_indices)
         )
+        if self.tiling_idx == self.tiling_indices[0]:
+            self.tail_size = self.outer_tail_size
+            self.num_elems = self.outer_num_elems
+            self.inner_is_tiling_idx = False
+        else:
+            self.tail_size = self.inner_tail_size
+            self.num_elems = self.inner_num_elems
+            self.inner_is_tiling_idx = True
         return vars
 
     def transform_indexing(self, index: sympy.Expr) -> sympy.Expr:
