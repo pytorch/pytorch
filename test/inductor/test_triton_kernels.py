@@ -518,9 +518,7 @@ def forward(self, x_1, output_1):
             self.assertEqual(compiled_out, x.sin().sin().sin())
 
             # Check that we're allocating the minimal # of buffers.
-            num_bufs_allocated = code.count(
-                "empty_strided_cuda((10, ), (1, ), torch.float32)"
-            )
+            num_bufs_allocated = code.count("empty_strided")
             self.assertEqual(num_bufs_allocated, 0)
 
     @requires_gpu
