@@ -164,15 +164,21 @@ def increment_op_count(cnt):
 # Calculate total time spent so far for each phase
 # For example, {'entire_frame_compile':8.574629999999999, 'backend_compile':5.26806}
 def calculate_time_spent():
-    total = 0.0
+    total_wall_time = 0.0
     total_by_key = {}
     for timings in frame_phase_timing.values():
+        total_wall_time += timings.get(
+            "entire_frame_compile", timings.get("inductor_compile", 0)
+        )
+
         for key, timing in timings.items():
-            total += timing
             if key not in total_by_key:
                 total_by_key[key] = timing
             else:
                 total_by_key[key] += timing
+
+    if total_by_key:
+        total_by_key["total_wall_time"] = total_wall_time
 
     return total_by_key
 
