@@ -3928,7 +3928,8 @@ class CppScheduling(BaseScheduling):
                                 return x == contiguous_index_expr
 
                             return is_contiguous_index(write_index_expr) and all(
-                                is_contiguous_index(
+                                isinstance(user.node, SchedulerNode)
+                                and is_contiguous_index(
                                     user.node._body.reads_name2expr[
                                         scheduler_buffer.get_name()
                                     ],
