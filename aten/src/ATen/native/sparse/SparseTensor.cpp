@@ -725,8 +725,8 @@ static std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inp
               "`mask.sparse_dim() == ", mask.sparse_dim(), "`.");
 
   const auto wrapped_tensor = [](const Tensor& t,
-                                 const OptTensor& indices = c10::nullopt,
-                                 const OptTensor& values = c10::nullopt) -> Tensor {
+                                 const OptTensor& indices = std::nullopt,
+                                 const OptTensor& values = std::nullopt) -> Tensor {
     auto res = at::empty({0}, t.options());
     auto* res_sparse_impl = get_sparse_impl(res);
     res_sparse_impl->raw_resize_(t.sparse_dim(), t.dense_dim(), t.sizes());
@@ -740,7 +740,7 @@ static std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inp
 
   auto [lhs, lhs_hash_opt, lhs_is_movable] = [&]() -> auto {
     if (t.is_coalesced()) {
-      return std::make_tuple(t, static_cast<OptTensor>(c10::nullopt), false);
+      return std::make_tuple(t, static_cast<OptTensor>(std::nullopt), false);
     } else {
       const auto indices_hash = at::sparse::flatten_indices(t._indices(), t.sizes());
       const auto argsort_indices_hash = std::get<1>(indices_hash.sort(0));

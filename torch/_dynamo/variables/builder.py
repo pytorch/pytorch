@@ -67,6 +67,7 @@ from ..source import (
     is_constant_source,
     is_from_defaults,
     is_from_optimizer_source,
+    is_unspecialized_builtin_nnmodule_attr,
     LocalSource,
     NumpyTensorSource,
     OptimizerSource,
@@ -176,7 +177,11 @@ from .misc import (
     TorchVersionVariable,
     TypingVariable,
 )
-from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
+from .nn_module import (
+    FSDPManagedNNModuleVariable,
+    UnspecializedBuiltinNNModuleVariable,
+    UnspecializedNNModuleVariable,
+)
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
 
@@ -338,14 +343,12 @@ class VariableBuilder:
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt):
-        if type(vt) in [
+        return type(vt) in {
             TensorVariable,
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
-        ]:
-            return True
-        return False
+        }
 
     @staticmethod
     @functools.lru_cache(None)
@@ -1010,6 +1013,25 @@ class VariableBuilder:
                 ScriptObjectQualifiedNameSource,
             )
 
+            if torch._library.fake_class_registry.tracing_with_real(value):
+                proxy = self.tx.output.root_tracer.create_graph_input(
+                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                    type(value),
+                    source=self.source,
+                )
+
+                # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
+                # seting example to be real value because these example values will be used
+                # as example_inputs for user compiler.
+                proxy.node.meta["grapharg"] = GraphArg(
+                    self.source, value, False, None, False, value
+                )
+                return TorchScriptObjectVariable.create(
+                    proxy,
+                    value,
+                    source=self.source,
+                )
+
             # This exists to allow a smoother transition.
             # The implications are:
             # The script objects won't be tracked as proxies.
@@ -1032,7 +1054,7 @@ class VariableBuilder:
                 )
             )
 
-            fake_script_obj = torch._library.fake_class_registry.to_fake_obj(
+            fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 self.tx.output.fake_mode, value
             )
 
@@ -1068,6 +1090,17 @@ class VariableBuilder:
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
+
+        if (
+            self.source
+            and is_unspecialized_builtin_nnmodule_attr(self.source)
+            and type(value) is tuple
+            and all(ConstantVariable.is_literal(x) for x in value)
+        ):
+            # Heuristic to speedup up guards coming from conv2d attrs like dilation and padding.
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return TupleVariable([ConstantVariable.create(x) for x in value])
+
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
         self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -1245,7 +1278,10 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            result = UnspecializedNNModuleVariable(value, source=self.source)
+            if value.__module__.startswith(("torch.nn.", "torch.ao.")):
+                result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
+            else:
+                result = UnspecializedNNModuleVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
