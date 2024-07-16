@@ -3893,9 +3893,11 @@ class CppScheduling(BaseScheduling):
                 visited_scheduler_nodes: Set[str] = set()
                 for scheduler_node in node.get_nodes():
                     # all users inside same OuterLoopFusedSchedulerNode
+                    assert isinstance(scheduler_node, SchedulerNode)
                     visited_scheduler_nodes.add(scheduler_node.get_name())
                     if (
-                        scheduler_node.is_reduction() or len(scheduler_node.get_outputs()) != 1
+                        scheduler_node.is_reduction()
+                        or len(scheduler_node.get_outputs()) != 1
                     ):
                         continue
 
@@ -3903,7 +3905,6 @@ class CppScheduling(BaseScheduling):
                     if all(
                         user.node in node.get_nodes() for user in scheduler_buffer.users
                     ):
-
                         global_buffer = scheduler_buffer.node
                         assert isinstance(global_buffer, ir.ComputedBuffer)
                         global_buffer_layout = global_buffer.get_layout()
