@@ -126,6 +126,9 @@ def set__functionalize(tensor, data):
         torch.ops.fsdp.set_(tensor_inner, data_inner)
 
 
+torch.fx.node.has_side_effect(torch.ops.fsdp.set_.default)
+
+
 class ShardedState(Enum):
     """
     - ``SHARDED``: The sharded parameter is registered to the module. It is the

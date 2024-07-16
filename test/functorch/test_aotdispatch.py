@@ -748,6 +748,13 @@ def forward(self, primals_1):
         )
         inp = [torch.ones(3, 3, requires_grad=False)]
         self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
+        """
+        Expected behavior:
+        (1) When there are multiple set_() calls on the same graph input primal_X,
+        we want those set_() calls to all show up with primal_X as the first arg in the graph.
+        (2) Behavior (1) is not the case today with normal aten.set_ (blocked on #129892),
+        but using a custom fsdp.set_ op with no returns is a simple workaround to achieve that behavior.
+        """
         self.assertExpectedInline(
             fw_graph.code.strip(),
             """\
