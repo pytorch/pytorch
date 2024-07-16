@@ -386,25 +386,25 @@ void ConvertGraphToONNXProto(
     SymbolDimMap& symbol_dim_map,
     DimSymbolMap& dim_symbol_map,
     int opset_version) {
-  auto [
-      model_proto_tmp,
-      export_map,
-      new_symbol_dim_map,
-      val_use_external_data_format,
-      node_names] =
-      export_onnx(
-          graph,
-          {},
-          opset_version,
-          {},
-          false,
-          onnx_torch::OperatorExportTypes::ONNX,
-          true,
-          true,
-          {},
-          true,
-          false,
-          std::string());
+  auto
+      [model_proto_tmp,
+       export_map,
+       new_symbol_dim_map,
+       val_use_external_data_format,
+       node_names] =
+          export_onnx(
+              graph,
+              {},
+              opset_version,
+              {},
+              false,
+              onnx_torch::OperatorExportTypes::ONNX,
+              true,
+              true,
+              {},
+              true,
+              false,
+              std::string());
   model_proto = std::move(model_proto_tmp);
   symbol_dim_map.insert(new_symbol_dim_map.begin(), new_symbol_dim_map.end());
   for (const auto& pair : new_symbol_dim_map) {
