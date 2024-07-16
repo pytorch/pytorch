@@ -256,7 +256,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
   }
   // if all values of acc.weight are same as index,
   // use index to reduce to save the overhead of vec_shuffle_down for acc.weight
-  bool use_index = (acc.weight - Vec(acc.index)).zero_mask() == 0xFFFF;
+  bool use_index = (acc.weight - Vec(acc.index)).zero_mask() == static_cast<int>((1 << Vec::size()) - 1);
   for (size_t n = 1; n < Vec::size(); n *= 2) {
     auto shuffled = Welford<Vec>{
       vec_shuffle_down(acc.mean, n),

@@ -2789,6 +2789,7 @@ class CppTile2DKernel(CppVecKernel):
             inner_tail_size,
         )
         self.tiling_indices = tiling_indices
+        self.inner_tail_size = inner_tail_size
         self.outer_num_elems = outer_tail_size if outer_tail_size else tiling_factor
 
     def inner_itervar(self):
@@ -2820,7 +2821,16 @@ class CppTile2DKernel(CppVecKernel):
             ld_src, ld_dst = ld_dst, ld_src
 
         need_define = True
-        load_or_store = f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{factor},{factor}>({src}, {ld_src}, {dst}, {ld_dst});"
+        if is_store:
+            load_or_store = (
+                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{self.outer_num_elems},{self.num_elems}>"
+                f"({src}, {ld_src}, {dst}, {ld_dst});"
+            )
+        else:
+            load_or_store = (
+                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{self.num_elems},{self.outer_num_elems}>"
+                f"({src}, {ld_src}, {dst}, {ld_dst});"
+            )
         if is_store:
             tile_var = self.cse.newvar()
         elif load_or_store not in self.cse.cache:
@@ -3669,8 +3679,8 @@ class CppKernelProxy(CppKernel):
                         outer_tail_loop.size - outer_tail_loop.offset
                     )
                     (
-                        inner_main_loop_for_outer_tail_loop,
-                        inner_tail_loop_for_outer_tail_loop,
+                        inner_main_loop_of_outer_tail_loop,
+                        inner_tail_loop_of_outer_tail_loop,
                     ) = outer_tail_loop.split_with_tiling(
                         tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                     )
@@ -3682,24 +3692,20 @@ class CppKernelProxy(CppKernel):
                         None,
                         outer_tail_loop.steps,
                     )
-                    inner_main_loop_for_outer_tail_loop.set_kernel(
-                        masked_tile2d_kernel2
-                    )
-                    inner_tail_loop_for_outer_tail_loop.steps = (
-                        inner_tail_loop_for_outer_tail_loop.size
-                        - inner_tail_loop_for_outer_tail_loop.offset
+                    inner_main_loop_of_outer_tail_loop.set_kernel(masked_tile2d_kernel2)
+                    inner_tail_loop_of_outer_tail_loop.steps = (
+                        inner_tail_loop_of_outer_tail_loop.size
+                        - inner_tail_loop_of_outer_tail_loop.offset
                     )
                     masked_tile2d_kernel3 = codegen_kernel(
                         CppTile2DKernel,
                         tiling_factors[0],
                         tiling_indices,
                         vec_dtype,
-                        inner_tail_loop_for_outer_tail_loop.steps,
+                        inner_tail_loop_of_outer_tail_loop.steps,
                         outer_tail_loop.steps,
                     )
-                    inner_tail_loop_for_outer_tail_loop.set_kernel(
-                        masked_tile2d_kernel3
-                    )
+                    inner_tail_loop_of_outer_tail_loop.set_kernel(masked_tile2d_kernel3)
                 else:
                     outer_tail_loop.set_kernel(scalar_kernel)
 
