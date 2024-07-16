@@ -136,7 +136,7 @@ def get_static_input_idxs(num_fixed):
     if not context or not context.fw_metadata:
         return fixed
 
-    return fixed + context.fw_metadata.static_parameter_indices
+    return fixed + context.fw_metadata.static_input_indices
 
 
 @functools.lru_cache(None)
@@ -1249,7 +1249,7 @@ def fw_compiler_freezing(
                 params_flat[i] = None
 
         if tracing_context.fw_metadata:
-            static_input_idxs += tracing_context.fw_metadata.static_parameter_indices
+            static_input_idxs += tracing_context.fw_metadata.static_input_indices
 
     with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
