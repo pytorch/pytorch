@@ -1119,7 +1119,7 @@ class FakeTensorMode(TorchDispatchMode):
     #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
     @property
     def avoid_device_init(self) -> bool:
-        return not (torch.cuda.is_available() or torch.xpu.is_available())
+        return not torch.cuda.is_available()
 
     @property
     def stack(self) -> str:

@@ -5239,6 +5239,12 @@ class CommonTemplate:
             ),
         )
 
+    def test_cat_empty_index(self):
+        def fn(out, x):
+            return torch.cat([out[0], x], dim=0)
+
+        self.common(fn, (torch.randn(1, 0, 64), torch.randn(128, 64)))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cat_unbacked_legacy_empty(self):
         def fn(x, y):
@@ -11443,10 +11449,10 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 x[:, mask] = -math.inf
                 return x
 
-            x_tmp = torch.randn(512, 19, device="cuda")
+            x_tmp = torch.randn(512, 19, device=GPU_TYPE)
             x = x_tmp.permute(1, 0).view(-1, 128, 4)[:, :, 1:]
 
-            mask_tmp = torch.ones(128, 3, dtype=torch.int32, device="cuda")
+            mask_tmp = torch.ones(128, 3, dtype=torch.int32, device=GPU_TYPE)
             mask = mask_tmp == mask_tmp
             f(x, mask)
             code = run_and_get_triton_code(f, x, mask)
