@@ -1505,7 +1505,7 @@ class CommonTemplate:
             (a,),
             has_assert=ifdynstaticdefault(False, True),
             has_wrapping=False,
-            vectorize=True,  # Constant propagation off -> indirect indexing -> no vec
+            vectorize=True,
         )
 
         def unsafe_index(a, b):
