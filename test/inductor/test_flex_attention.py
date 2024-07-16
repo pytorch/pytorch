@@ -1376,14 +1376,8 @@ class GraphModule(torch.nn.Module):
         return (out,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, child: "f64[]", child_2: "i32[]", child_4: "i32[]", child_6: "i32[]", child_8: "i32[]"):
-            child_1 = child
-            child_3 = child_2
-            child_5 = child_4
-            child_7 = child_6
-            child_9 = child_8
-
-            mul: "f64[]" = child_1 * child_1;  child_1 = None
+        def forward(self, child: "f64[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]", child_4: "i32[]"):
+            mul: "f64[]" = child * child;  child = None
             return mul
 
     class GraphModule(torch.nn.Module):

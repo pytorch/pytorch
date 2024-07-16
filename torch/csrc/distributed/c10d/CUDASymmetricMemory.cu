@@ -21,14 +21,16 @@ class IpcChannel {
   IpcChannel() : socket_name_(get_socket_name(getpid())) {
     TORCH_CHECK(
         (socket_ = socket(AF_UNIX, SOCK_DGRAM, 0)) != 0,
-        "Failed to create socket");
+        "Failed to create socket: ",
+        strerror(errno));
 
     struct sockaddr_un addr = {.sun_family = AF_UNIX};
     std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
 
     TORCH_CHECK(
         bind(socket_, (struct sockaddr*)&addr, SUN_LEN(&addr)) == 0,
-        perror("Failed to bind socket"));
+        "Failed to bind socket: ",
+        strerror(errno));
   }
 
   ~IpcChannel() {
@@ -60,7 +62,8 @@ class IpcChannel {
 
     TORCH_CHECK(
         sendmsg(socket_, &msg, 0) > 0,
-        perror("Failed to send fd"));
+        "Failed to send fd: ",
+        strerror(errno));
   }
 
   int recv_fd() {
@@ -78,7 +81,8 @@ class IpcChannel {
 
     TORCH_CHECK(
         recvmsg(socket_, &msg, 0) > 0,
-        perror("Failed to receive fd"));
+        "Failed to receive fd: ",
+        strerror(errno));
 
     auto cmsg = CMSG_FIRSTHDR(&msg);
     TORCH_CHECK(cmsg != NULL);
@@ -108,8 +112,15 @@ class IpcChannel {
 
  private:
   static std::string get_socket_name(int pid) {
+    const char* tmp_dir = "/tmp";
+    for (const char* env_var : {"TMPDIR", "TMP", "TEMP", "TEMPDIR"}) {
+      if (const char* path = getenv(env_var)) {
+        tmp_dir = path;
+        break;
+      }
+    }
     std::ostringstream oss;
-    oss << "/tmp/symm_mem-" << pid;
+    oss << tmp_dir << "/symm_mem-" << pid;
     return oss.str();
   }
 
