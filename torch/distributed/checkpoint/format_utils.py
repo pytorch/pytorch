@@ -84,7 +84,9 @@ class BroadcastingTorchSaveReader(StorageReader):
         # TODO: read on each host, instead of only the coordinator
         if self.is_coordinator:
             assert self.checkpoint_id is not None
-            torch_state_dict = torch.load(self.checkpoint_id, map_location="cpu")
+            torch_state_dict = torch.load(
+                self.checkpoint_id, map_location="cpu", weights_only=False
+            )
             if planner.flatten_state_dict:
                 torch_state_dict, _ = flatten_state_dict(torch_state_dict)
         else:
@@ -230,7 +232,7 @@ def torch_save_to_dcp(
         To avoid OOM, it's recommended to only run this function on a single rank.
     """
 
-    state_dict = torch.load(torch_save_path)
+    state_dict = torch.load(torch_save_path, weights_only=False)
     # we don't need stateful behavior here because the expectation is anything loaded by
     # torch.load would not contain stateful objects.
     _save_state_dict(

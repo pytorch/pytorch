@@ -331,7 +331,7 @@ class LoadPlanner:
     >>>
     >>>     def load_bytes(self, read_item, value):
     >>>         # Remove the "foo_" prefix
-    >>>         self.original_state_dict[read_item.dest_index.fqn[4:]] = torch.load(value)
+    >>>         self.original_state_dict[read_item.dest_index.fqn[4:]] = torch.load(value, weights_only=False)
 
 
     Modifying resolve_tensor and commit_tensor to handle load time transformation.
