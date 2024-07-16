@@ -1,0 +1,245 @@
+name: win-test
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      cuda-version:
+        required: true
+        type: string
+        description: What CUDA version to build with, "cpu" for none.
+      test-matrix:
+        required: true
+        type: string
+        description: JSON description of what test configs to run.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
+      timeout-minutes:
+        required: false
+        type: number
+        default: 240
+        description: |
+          Set the maximum (in minutes) how long the workflow should take to finish
+
+env:
+  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+jobs:
+  test:
+    # Don't run on forked repos or empty test matrix
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
+    strategy:
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Duplicated in win-build because this MUST go before a checkout
+      - name: Enable git symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
+
+      - name: Clean up leftover processes on non-ephemeral Windows runner
+        uses: pytorch/test-infra/.github/actions/cleanup-runner@main
+
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            To forward remote desktop on your local machine ssh as follows:
+              ssh -L 3389:localhost:3389 %%username%%@%%hostname%%
+            And then change password using `passwd` command.
+
+            To start tests locally, change working folder to \actions-runner\_work\pytorch\pytorch\test,
+            Activate miniconda and Visual Studio environment and set PYTHON_PATH, by running:
+              call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
+              call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+              set PYTHONPATH=C:\actions-runner\_work\pytorch\pytorch\build\win_tmp\build
+
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+
+      - name: Setup Windows
+        uses: ./.github/actions/setup-win
+        with:
+          cuda-version: ${{ inputs.cuda-version }}
+
+      # TODO: Move to a requirements.txt file for windows
+      - name: Install pip dependencies
+        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+        with:
+          shell: bash
+          timeout_minutes: 5
+          max_attempts: 5
+          retry_wait_seconds: 30
+          command: |
+            set -eu
+            python3 -m pip install rockset==1.0.3 'xdoctest>=1.1.0'
+
+      - name: Start monitoring script
+        id: monitor-script
+        shell: bash
+        continue-on-error: true
+        run: |
+          # Windows conda doesn't have python3 binary, only python, but it's python3
+          ${CONDA_RUN} python -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download PyTorch Build Artifacts
+        uses: seemethere/download-artifact-s3@v4
+        with:
+          name: ${{ inputs.build-environment }}
+          path: C:\${{ github.run_id }}\build-results
+
+      - name: Check build-results folder
+        shell: powershell
+        run: |
+          tree /F C:\$Env:GITHUB_RUN_ID\build-results
+
+      - name: Download TD artifacts
+        continue-on-error: true
+        uses: ./.github/actions/download-td-artifacts
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for keep-going label and re-enabled test issues
+        # This uses the filter-test-configs action because it conviniently
+        # checks for labels and re-enabled test issues.  It does not actually do
+        # any filtering.  All filtering is done in the build step.
+        id: keep-going
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+          job-name: ${{ steps.get-job-id.outputs.job-name }}
+
+      - name: Set Test step time
+        id: test-timeout
+        shell: bash
+        env:
+          JOB_TIMEOUT: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+        run: |
+          echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
+
+      - name: Test
+        id: test
+        shell: bash
+        timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
+        env:
+          USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
+          INSTALL_WINDOWS_SDK: 1
+          PYTHON_VERSION: 3.8
+          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
+          NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
+          NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
+          VC_PRODUCT: "BuildTools"
+          VC_VERSION: ""
+          VS_VERSION: "16.8.6"
+          VC_YEAR: "2019"
+          AWS_DEFAULT_REGION: us-east-1
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          CUDA_VERSION: ${{ inputs.cuda-version }}
+          PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+          SHARD_NUMBER: ${{ matrix.shard }}
+          NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+          TEST_CONFIG: ${{ matrix.config }}
+          REENABLED_ISSUES: ${{ github.event.pull_request.reenabled-issues }}
+          TORCH_CUDA_ARCH_LIST: "8.6"
+          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
+          PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
+        run: |
+          pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
+          # shellcheck disable=SC2046,SC2102
+          python3 -mpip install $(echo *.whl)[opt-einsum,optree]
+          popd
+
+          .ci/pytorch/win-test.sh
+
+      - name: Upload pytest cache if tests failed
+        uses: ./.github/actions/pytest-cache-upload
+        continue-on-error: true
+        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure'
+        with:
+          cache_dir: .pytest_cache
+          shard: ${{ matrix.shard }}
+          sha: ${{ github.event.pull_request.head.sha || github.sha }}
+          test_config: ${{ matrix.config }}
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
+
+      - name: Print remaining test logs
+        shell: bash
+        if: always() && steps.test.conclusion
+        run: |
+          cat test/**/*_toprint.log || true
+
+      - name: Stop monitoring script
+        if: always() && steps.monitor-script.outputs.monitor-script-pid
+        shell: bash
+        continue-on-error: true
+        env:
+          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        run: |
+          kill "$MONITOR_SCRIPT_PID"
+
+      - name: Upload test artifacts
+        uses: ./.github/actions/upload-test-artifacts
+        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
+        with:
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Parse ref
+        id: parse-ref
+        shell: bash
+        run: python3 .github/scripts/parse_ref.py
+
+      - name: Uninstall PyTorch
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          # This step removes PyTorch installed by the test to give a clean slate
+          # to the next job
+          python3 -mpip uninstall -y torch
+
+      - name: Teardown Windows
+        uses: ./.github/actions/teardown-win
+        if: always()
+        timeout-minutes: 120
