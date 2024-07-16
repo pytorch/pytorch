@@ -1381,13 +1381,8 @@ class GraphModule(torch.nn.Module):
             return mul
 
     class GraphModule(torch.nn.Module):
-        def forward(self, child_5: "i32[]", child_7: "i32[]", child_9: "i32[]", child_11: "i32[]"):
-            child_6 = child_5
-            child_8 = child_7
-            child_10 = child_9
-            child_12 = child_11
-
-            new_ones: "b8[]" = child_10.new_ones(size = (), dtype = torch.bool, device = device(type='cuda', index=0));  child_10 = None
+        def forward(self, child_5: "i32[]", child_6: "i32[]", child_7: "i32[]", child_8: "i32[]"):
+            new_ones: "b8[]" = child_7.new_ones(size = (), dtype = torch.bool, device = device(type='cuda', index=0));  child_7 = None
             return new_ones
 """,  # noqa: B950
         )

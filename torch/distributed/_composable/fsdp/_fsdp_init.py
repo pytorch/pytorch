@@ -70,8 +70,9 @@ def _get_device_from_mesh(mesh: DeviceMesh) -> torch.device:
     return torch.device(mesh.device_type, device_handle.current_device())
 
 
-def _get_managed_modules(root_module: nn.Module) -> List[nn.Module]:
+def _get_managed_modules(root_modules: Tuple[nn.Module, ...]) -> List[nn.Module]:
     modules: List[nn.Module] = []
+    root_modules_set = set(root_modules)
     # Track visisted modules to avoid visiting shared modules multiple times
     visited_modules: Set[nn.Module] = set()
 
@@ -82,7 +83,10 @@ def _get_managed_modules(root_module: nn.Module) -> List[nn.Module]:
         """
         if not _is_composable_with_fsdp(module):
             return
-        elif module is not root_module and _get_module_fsdp_state(module) is not None:
+        elif (
+            module not in root_modules_set
+            and _get_module_fsdp_state(module) is not None
+        ):
             return  # nested `fully_shard` module
         visited_modules.add(module)
         for submodule in module.children():
@@ -90,7 +94,8 @@ def _get_managed_modules(root_module: nn.Module) -> List[nn.Module]:
                 dfs(submodule)
         modules.append(module)
 
-    dfs(root_module)
+    for root_module in root_modules:
+        dfs(root_module)
     return modules
 
 
