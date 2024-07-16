@@ -177,6 +177,21 @@ See the :doc:`documentation <cuda._sanitizer>` for information on how to use it.
     cuda._sanitizer
 
 
+GPU Direct Storage (prototype)
+______________________________
+
+This module provides wrappers around GPUDirect Storage (``cufile``) APIs.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    gds_register_buffer
+    gds_deregister_buffer
+    GdsFile
+
+
+
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.cuda.comm

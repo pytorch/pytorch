@@ -1,51 +1,48 @@
 import os
-from typing import Callable
+from typing import Callable, Optional
 
 import torch
+from torch.types import Storage
 
 
 def _dummy_fn(name: str) -> Callable:
-    def fn(*args, **kwargs):
-        raise RuntimeError(f"{name} is not supported on this platform")
+    def fn(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise RuntimeError(f"torch._C.{name} is not supported on this platform")
 
     return fn
 
 
-if not hasattr(torch._C, "gds_register_buffer"):
-    assert not hasattr(torch._C, "gds_deregister_buffer")
-    assert not hasattr(torch._C, "gds_register_handle")
-    assert not hasattr(torch._C, "gds_deregister_handle")
-    assert not hasattr(torch._C, "gds_load_storage")
-    assert not hasattr(torch._C, "gds_save_storage")
+if not hasattr(torch._C, "_gds_register_buffer"):
+    assert not hasattr(torch._C, "_gds_deregister_buffer")
+    assert not hasattr(torch._C, "_gds_register_handle")
+    assert not hasattr(torch._C, "_gds_deregister_handle")
+    assert not hasattr(torch._C, "_gds_load_storage")
+    assert not hasattr(torch._C, "_gds_save_storage")
     # Define functions
-    torch._C.__dict__["gds_register_buffer"] = _dummy_fn("gds_register_buffer")
-    torch._C.__dict__["gds_deregister_buffer"] = _dummy_fn("gds_deregister_buffer")
-    torch._C.__dict__["gds_register_handle"] = _dummy_fn("gds_register_handle")
-    torch._C.__dict__["gds_deregister_handle"] = _dummy_fn("gds_deregister_handle")
-    torch._C.__dict__["gds_load_storage"] = _dummy_fn("gds_register_handle")
-    torch._C.__dict__["gds_save_storage"] = _dummy_fn("gds_register_handle")
-
-if not hasattr(torch._C, "_gds_deregister_buffer"):
-    # Define dummy base classes
+    torch._C.__dict__["_gds_register_buffer"] = _dummy_fn("_gds_register_buffer")
     torch._C.__dict__["_gds_deregister_buffer"] = _dummy_fn("_gds_deregister_buffer")
+    torch._C.__dict__["_gds_register_handle"] = _dummy_fn("_gds_register_handle")
+    torch._C.__dict__["_gds_deregister_handle"] = _dummy_fn("_gds_deregister_handle")
+    torch._C.__dict__["_gds_load_storage"] = _dummy_fn("_gds_load_storage")
+    torch._C.__dict__["_gds_save_storage"] = _dummy_fn("_gds_save_storage")
 
 
-def gds_register_buffer(t: torch.UntypedStorage) -> None:
+def gds_register_buffer(s: Storage) -> None:
     """Registers a buffer.
 
     Args:
-        t (Tensor or Storage): Buffer to register.
+        s (Tensor or Storage): Buffer to register.
     """
-    torch._C.gds_register_buffer(t)
+    torch._C._gds_register_buffer(s)
 
 
-def gds_deregister_buffer(t: torch.UntypedStorage) -> None:
+def gds_deregister_buffer(s: Storage) -> None:
     """Registers a buffer.
 
     Args:
-        t (Tensor or Storage): Buffer to register.
+        s (Storage): Buffer to register.
     """
-    torch._C.gds_deregister_buffer(t)
+    torch._C._gds_deregister_buffer(s)
 
 
 class GdsFile:
@@ -66,6 +63,7 @@ class GdsFile:
         self.filename = filename
         self.flags = flags
         self.fd = os.open(filename, flags | os.O_DIRECT)
+        self.handle: Optional[int] = None
         self.register_handle()
 
     def register_handle(self) -> None:
@@ -74,7 +72,7 @@ class GdsFile:
         Args:
             handle (int): Handle to register.
         """
-        self.handle = torch._C.gds_register_handle(self.fd)
+        self.handle = torch._C._gds_register_handle(self.fd)
 
     def deregister_handle(self) -> None:
         """Deregisters file descriptor from cuFile Driver.
@@ -85,28 +83,34 @@ class GdsFile:
         assert (
             self.handle is not None
         ), "Cannot deregister a handle that is not registered."
-        torch._C.gds_deregister_handle(self.handle)
+        torch._C._gds_deregister_handle(self.handle)
         self.handle = None
 
-    def load_storage(self, storage: torch.UntypedStorage, offset: int = 0) -> None:
+    def load_storage(self, storage: Storage, offset: int = 0) -> None:
         """Loads data from the file into the storage.
 
         ``storage.nbytes()`` of data will be loaded from the file at ``offset``
         into the storage.
 
         Args:
-            storage (torch.UntypedStorage): Storage to load data into.
+            storage (Storage): Storage to load data into.
             offset (int, optional): Offset into the file to start loading from.
         """
-        torch._C.gds_load_storage(self.handle, storage, offset)
+        assert (
+            self.handle is not None
+        ), "Cannot load data from a file that is not registered."
+        torch._C._gds_load_storage(self.handle, storage, offset)
 
-    def save_storage(self, storage: torch.UntypedStorage, offset: int = 0) -> None:
+    def save_storage(self, storage: Storage, offset: int = 0) -> None:
         """Saves data from the storage into the file.
 
         All bytes of the storage will be written to the file at ``offset``.
 
         Args:
-            storage (torch.UntypedStorage): Storage to save data from.
+            storage (Storage): Storage to save data from.
             offset (int, optional): Offset into the file to start saving to.
         """
-        torch._C.gds_save_storage(self.handle, storage, offset)
+        assert (
+            self.handle is not None
+        ), "Cannot save data to a file that is not registered."
+        torch._C._gds_save_storage(self.handle, storage, offset)

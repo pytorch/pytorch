@@ -1,8 +1,8 @@
-#ifndef USE_ROCM
-#include <c10/cuda/CUDAGuard.h>
-
 #include <pybind11/pybind11.h>
 #include <torch/csrc/utils/pybind.h>
+
+#ifndef USE_ROCM
+#include <c10/cuda/CUDAGuard.h>
 
 #include <cuda_runtime.h>
 #include <cufile.h>
@@ -31,7 +31,11 @@ std::string cuGDSFileGetErrorString(T status) {
   return errStr;
 }
 
-void load_storage(int64_t handle, const at::Storage& storage, off_t offset) {
+void gds_load_storage(
+    int64_t handle,
+    const at::Storage& storage,
+    off_t offset) {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   CUfileHandle_t cf_handle = reinterpret_cast<CUfileHandle_t>(handle);
   c10::cuda::CUDAGuard gpuGuard(storage.device());
 
@@ -43,7 +47,11 @@ void load_storage(int64_t handle, const at::Storage& storage, off_t offset) {
   TORCH_CHECK(ret >= 0, "cuFileRead failed: ", cuGDSFileGetErrorString(ret));
 }
 
-void save_storage(int64_t handle, const at::Storage& storage, off_t offset) {
+void gds_save_storage(
+    int64_t handle,
+    const at::Storage& storage,
+    off_t offset) {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   CUfileHandle_t cf_handle = reinterpret_cast<CUfileHandle_t>(handle);
   c10::cuda::CUDAGuard gpuGuard(storage.device());
 
@@ -80,6 +88,7 @@ void gds_deregister_buffer(const at::Storage& storage) {
 
 int64_t gds_register_handle(int fd) {
   CUfileDescr_t cf_descr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   CUfileHandle_t cf_handle;
   memset((void*)&cf_descr, 0, sizeof(CUfileDescr_t));
   cf_descr.handle.fd = fd;
@@ -97,6 +106,7 @@ int64_t gds_register_handle(int fd) {
 }
 
 void gds_deregister_handle(int handle) {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   CUfileHandle_t cf_handle = reinterpret_cast<CUfileHandle_t>(handle);
   cuFileHandleDeregister(cf_handle);
 }
@@ -105,14 +115,13 @@ void gds_deregister_handle(int handle) {
 
 void THCPGdsFile_init(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
-// FIXME: Figure out whether this is needed / how to use this
-// auto gds = m.def_submodule("_gds");
+
 #ifndef USE_ROCM
-  m.def("gds_register_handle", &gds_register_handle);
-  m.def("gds_deregister_handle", &gds_deregister_handle);
-  m.def("gds_register_buffer", &gds_register_buffer);
-  m.def("gds_deregister_buffer", &gds_deregister_buffer);
-  m.def("gds_load_storage", &load_storage);
-  m.def("gds_save_storage", &save_storage);
+  m.def("_gds_register_handle", &gds_register_handle);
+  m.def("_gds_deregister_handle", &gds_deregister_handle);
+  m.def("_gds_register_buffer", &gds_register_buffer);
+  m.def("_gds_deregister_buffer", &gds_deregister_buffer);
+  m.def("_gds_load_storage", &gds_load_storage);
+  m.def("_gds_save_storage", &gds_save_storage);
 #endif
 }
