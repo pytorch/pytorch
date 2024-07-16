@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
 from typing import cast, Dict, List, Tuple
@@ -5,6 +6,7 @@ from typing import cast, Dict, List, Tuple
 import torch
 import torch.distributed as dist
 import torch.distributed._tensor.api as dtensor
+
 
 aten = torch.ops.aten
 

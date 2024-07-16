@@ -21,7 +21,7 @@ namespace impl {
 // on TLS.
 //
 // NB: If there is no valid dispatch key, this will return Undefined
-static inline DispatchKeySet computeDispatchKeySet(
+inline DispatchKeySet computeDispatchKeySet(
     DispatchKeySet ks,
     // The key mask lets us eliminate (by zero entries) keys which should not
     // be considered for dispatch.  There are two cases when we use this:
@@ -42,7 +42,7 @@ static inline DispatchKeySet computeDispatchKeySet(
   // be nice to only do one.  Can always_included be folded into the TLS?  Well,
   // it's a bit troublesome, because fastpath TLS access requires the type of
   // the TLS in question to be zero-initialized, so you don't actually win
-  // anyting in that case.
+  // anything in that case.
   return (((ks | local.included_) - local.excluded_) & key_mask);
 }
 

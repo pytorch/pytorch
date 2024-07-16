@@ -476,6 +476,7 @@ class CompileTest(TestCase):
             .check("return (buf0, buf7, )")
             .run(code)
         )
+        assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
         out = AOTIRunnerUtil.run("cuda", func, (arg,))
@@ -521,6 +522,7 @@ class CompileTest(TestCase):
             .check("return (buf0, buf1, buf5, buf6, )")
             .run(code)
         )
+        assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
         out = AOTIRunnerUtil.run("cuda", func, (args,))
@@ -586,6 +588,7 @@ class CompileTest(TestCase):
             .check("return (buf7, buf8, )")
             .run(code)
         )
+        assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
@@ -608,6 +611,7 @@ class CompileTest(TestCase):
             .check("return (buf0, )")
             .run(code)
         )
+        assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
         out = AOTIRunnerUtil.run("cuda", func, (arg,))

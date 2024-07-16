@@ -7,9 +7,8 @@ import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch._inductor import config
 from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import HAS_CUDA
-
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.triton_utils import requires_gpu
 
 
 class MinifierTests(MinifierTestBase):
@@ -39,15 +38,15 @@ inner(torch.randn(20, 20).to("{device}"))
     def test_after_aot_cpu_accuracy_error(self):
         self._test_after_aot("cpu", "AccuracyError")
 
-    @requires_cuda
+    @requires_gpu
     @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "compile_error")
-    def test_after_aot_cuda_compile_error(self):
-        self._test_after_aot("cuda", "SyntaxError")
+    def test_after_aot_gpu_compile_error(self):
+        self._test_after_aot(GPU_TYPE, "SyntaxError")
 
-    @requires_cuda
+    @requires_gpu
     @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy")
-    def test_after_aot_cuda_accuracy_error(self):
-        self._test_after_aot("cuda", "AccuracyError")
+    def test_after_aot_gpu_accuracy_error(self):
+        self._test_after_aot(GPU_TYPE, "AccuracyError")
 
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
     def test_constant_in_graph(self):
@@ -60,17 +59,19 @@ inner(torch.randn(2))
 """
         self._run_full_test(run_code, "aot", "AccuracyError", isolate=False)
 
-    @requires_cuda
+    @requires_gpu
     @patch.object(config, "joint_graph_constant_folding", False)
     def test_rmse_improves_over_atol(self):
         # From https://twitter.com/itsclivetime/status/1651135821045719041?s=20
         run_code = """
 @torch.compile()
 def inner(x):
-    return x - torch.tensor(655, dtype=torch.half, device='cuda') * 100
+    return x - torch.tensor(655, dtype=torch.half, device='GPU_TYPE') * 100
 
-inner(torch.tensor(655 * 100, dtype=torch.half, device='cuda'))
-"""
+inner(torch.tensor(655 * 100, dtype=torch.half, device='GPU_TYPE'))
+""".replace(
+            "GPU_TYPE", GPU_TYPE
+        )
 
         # If we disable RMSE against fp64, this triggers accuracy error,
         # as the increased precision from torch.compile changes the result

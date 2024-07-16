@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Dispatcher for AtenLib functions from onnx-script."""
 
 from __future__ import annotations
@@ -808,7 +809,7 @@ class _OnnxSchemaChecker:
         import onnx
 
         onnx_inputs: List[Any] = []
-        onnx_attributes: Dict[str, Any] = dict()
+        onnx_attributes: Dict[str, Any] = {}
         # NOTE: We need to copy kwargs because we will mutate it
         copy_kwargs = kwargs.copy()
         for i, param in enumerate(param_schemas):

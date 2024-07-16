@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import operator
 from functools import reduce
@@ -788,14 +789,28 @@ if torch._C._has_mkldnn:
         def is_linear_add_bias(match):
             add_node = match.output_node()
             linear_node = add_node.args[0]
-            weight_meta = linear_node.args[1].meta.get("val")
+            packed_weight_node = linear_node.args[1]
+            assert packed_weight_node.target == mkldnn._reorder_linear_weight
+            transpose_weight_node = packed_weight_node.args[0]
+            assert transpose_weight_node.target == aten.permute.default
+            weight_meta = transpose_weight_node.args[0].meta.get("val")
+            bias_node = add_node.args[1]
+            if isinstance(bias_node, int):
+                # we only folding bias if it is a constant
+                return False
             bias_meta = add_node.args[1].meta.get("val")
             if weight_meta is None or bias_meta is None:
+                return False
+            assert weight_meta.dtype in (
+                torch.bfloat16,
+                torch.float16,
+            )
+            if bias_meta.dtype != weight_meta.dtype:
                 return False
             return (
                 linear_node.args[2] is None
                 and bias_meta.dim() == 1
-                and bias_meta.size(0) == weight_meta.size(0)
+                and bias_meta.size(0) == weight_meta.size(1)
             )
 
         # convert linear+bias to a single linear for applying fusion path.

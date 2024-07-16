@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 

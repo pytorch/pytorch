@@ -213,9 +213,9 @@ void PyTorchStreamReader::init() {
   if (version_ < static_cast<decltype(version_)>(kMinSupportedFileFormatVersion)) {
     CAFFE_THROW(
         "Attempted to read a PyTorch file with version ",
-        c10::to_string(version_),
+        std::to_string(version_),
         ", but the minimum supported version for reading is ",
-        c10::to_string(kMinSupportedFileFormatVersion),
+        std::to_string(kMinSupportedFileFormatVersion),
         ". Your PyTorch script module file is too old. Please regenerate it",
         " with latest version of PyTorch to mitigate this issue.");
   }
@@ -733,7 +733,7 @@ void PyTorchStreamWriter::writeEndOfFile() {
   auto allRecords = getAllWrittenRecords();
   // If no ".data/version" or "version" record in the output model, rewrites version info
   if(allRecords.find(".data/version") == allRecords.end() && allRecords.find("version") == allRecords.end()) {
-    std::string version = c10::to_string(version_);
+    std::string version = std::to_string(version_);
     version.push_back('\n');
     if (version_ >= 0x6L) {
       writeRecord(".data/version", version.c_str(), version.size());

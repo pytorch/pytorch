@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import abc
 import collections
 import dataclasses
@@ -455,7 +456,7 @@ class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
 # TODO: check call sites
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
     cnt = itertools.count()
-    var_ranges: VarRanges = dict()
+    var_ranges: VarRanges = {}
 
     def add_var(length: sympy.Expr) -> sympy.Symbol:
         v = sympy_index_symbol(f"{prefix}{next(cnt)}")
@@ -605,6 +606,9 @@ class FreeUnbackedSymbolsOpsHandler:
         return (None,) * 2
 
     def scan(self, dtypes, combine_fn, values):
+        return (None,) * len(values)
+
+    def sort(self, dtypes, values, stable, descending):
         return (None,) * len(values)
 
     def reduction(

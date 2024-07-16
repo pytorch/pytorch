@@ -19,9 +19,7 @@
 #include <pybind11/chrono.h>
 #include <pybind11/operators.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 namespace {
 
@@ -537,15 +535,15 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       .def(
           py::init<
               int,
-              optional<std::vector<std::string>>,
-              optional<std::vector<std::string>>,
+              std::optional<std::vector<std::string>>,
+              std::optional<std::vector<std::string>>,
               float,
               std::string,
               std::unordered_map<std::string, DeviceMap>,
               std::vector<c10::Device>>(),
           py::arg("num_worker_threads") = kDefaultNumWorkerThreads,
-          py::arg("_transports") = optional<std::vector<std::string>>(),
-          py::arg("_channels") = optional<std::vector<std::string>>(),
+          py::arg("_transports") = std::optional<std::vector<std::string>>(),
+          py::arg("_channels") = std::optional<std::vector<std::string>>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
           py::arg("init_method") = kDefaultInitMethod,
           py::arg("device_maps") = std::unordered_map<std::string, DeviceMap>(),
@@ -577,7 +575,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               [](const c10::intrusive_ptr<::c10d::Store>& store,
                  std::string selfName,
                  worker_id_t selfId,
-                 optional<int> worldSize,
+                 std::optional<int> worldSize,
                  TensorPipeRpcBackendOptions opts,
                  std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
                  std::vector<c10::Device> devices) {
@@ -857,6 +855,4 @@ PyMethodDef* python_functions() {
   return methods;
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
