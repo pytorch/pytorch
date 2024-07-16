@@ -2424,6 +2424,10 @@ class ShapeEnv:
         # FakeTensor per-ShapeEnv operation cache. This is used for caching
         # operations that contain symbolic shapes which have guards on the
         # ShapeEnv (so are ShapeEnv-dependent).
+        #
+        # NOTE: It's important that SymNodes in this cache have their ShapeEnv
+        # stripped otherwise you end up with cycles which can only be cleaned
+        # with the GC.
         self.fake_tensor_cache: Dict[torch._subclasses.fake_tensor._DispatchCacheKey,
                                      torch._subclasses.fake_tensor._DispatchCacheEntry] = {}
 
