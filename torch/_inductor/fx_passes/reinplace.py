@@ -382,6 +382,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     """
 
     copy_args_to_copy_nodes = {}
+    # maps argument to the first copy_ node that mutates it.
+    copy_nodes = {}
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
     node_order: Dict[Any, int] = {}
@@ -407,6 +409,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 src = src.args[0]
 
             copy_args_to_copy_nodes[(dst, src)] = node
+            copy_nodes[dst] = node
 
             mutated_inputs.add(node.args[0])
 
@@ -439,8 +442,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 # will get overwritten anyways.
                 if (
                     user.target is torch.ops.aten.copy_.default
-                    and mutated_arg is not None
-                    and mutated_arg is shared_view_nodes[0].args[0]
+                    and mutated_arg is user.args[0]
                 ):
                     continue
                 return True
@@ -454,7 +456,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
         if mutated_arg.op in ("placeholder", "get_attr"):
-            copy_node = copy_args_to_copy_nodes.get((mutated_arg, node), None)
+            copy_node = copy_nodes.get(mutated_arg, None)
             if any_use_of_views_after_node(
                 node, shared_view_nodes, copy_node=copy_node, mutated_arg=mutated_arg
             ):

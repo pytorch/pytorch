@@ -2,6 +2,7 @@
 # flake8: noqa: E731
 # Skip do not assign a lambda expression, use a def
 import functools
+import re
 from unittest.mock import patch
 
 import torch
@@ -517,9 +518,9 @@ def forward(self, x_1, output_1):
             )
             self.assertEqual(compiled_out, x.sin().sin().sin())
 
-            # Check that we're allocating the minimal # of buffers.
-            num_bufs_allocated = code.count("empty_strided")
-            self.assertEqual(num_bufs_allocated, 0)
+            # Check that we are allocating the minimum number of intermediate buffers
+            matches = re.findall(r"empty_strided_\w+\(", code)
+            self.assertEqual(len(matches), int(intermediate))
 
     @requires_gpu
     def test_triton_kernel_reinplace_inplaceable_pass(self):
