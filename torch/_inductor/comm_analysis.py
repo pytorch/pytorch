@@ -1,6 +1,7 @@
 import functools
 import math
 from enum import IntEnum
+from typing import Tuple
 
 import sympy
 
@@ -53,16 +54,16 @@ def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
         raise ValueError(f"Unsupported collective kernel: {kernel_name}")
 
 
-def get_collective_input_size_bytes(node: ir.IRNode) -> int:
+def get_collective_size_bytes(args) -> int:  # type: ignore[no-untyped-def]
     sz_bytes = 0
-    for inp in node.inputs:  # type: ignore[attr-defined]
-        numel = sympy_product(inp.layout.size)
+    for arg in args:
+        numel = sympy_product(arg.layout.size)
         if isinstance(numel, sympy.Integer):
             # For ease of testing
             numel = int(numel)
         else:
             numel = V.graph.sizevars.size_hint(numel, fallback=0)
-        sz_bytes += numel * get_dtype_size(inp.layout.dtype)
+        sz_bytes += numel * get_dtype_size(arg.layout.dtype)
     return sz_bytes
 
 
@@ -171,24 +172,77 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     - 8 gpus per node  # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
     - collective is one of: allreduce, reducescatter, allgather
     """
-    tensor_storage_size_bytes = get_collective_input_size_bytes(node)
-    # Convert bytes to GB
-    tensor_storage_size_GB = tensor_storage_size_bytes / 1024 / 1024 / 1024
 
     # Currently assumes each node has 8 gpus. And when >1 node is used, assumes each node uses all 8 gpus.
     # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
     num_gpus_per_node = 8
     group_size = get_collective_group_size(node)
+
+    # Assumes ring algorithm
+    nccl_algo = NCCL_ALGO.RING
+    # Assume LL protocol
+    nccl_proto = NCCL_PROTO.LL
+    # Assume NVLINK for intra-node and infiniband for inter-node
+    intraHw = NCCL_HW.NVLINK
+    interHw = NCCL_HW.NET
+
+    coll = get_collective_type(node)
+    args = node.inputs if coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_REDUCE) else node.outputs  # type: ignore[attr-defined]
+    tensor_storage_size_bytes = get_collective_size_bytes(args)
+    # Convert bytes to GB
+    tensor_storage_size_GB = tensor_storage_size_bytes / 1024 / 1024 / 1024
+    # Get nccl latency and bandwidth
+    latency_ns, bandwidth_GB_per_ns = estimate_nccl_collective_lat_and_bw(
+        coll, intraHw, interHw, nccl_proto, nccl_algo, group_size, num_gpus_per_node
+    )
+    # =============== final result ===============
+    transport_ns = tensor_storage_size_GB / bandwidth_GB_per_ns
+    return transport_ns + latency_ns
+
+
+def estimate_nccl_collective_lat_and_bw(
+    coll: NCCL_COLL,
+    intraHw: NCCL_HW,
+    interHw: NCCL_HW,
+    nccl_proto: NCCL_PROTO,
+    nccl_algo: NCCL_ALGO,
+    group_size: int,
+    num_gpus_per_node: int,
+) -> Tuple[float, float]:
+    """
+    Estimates the latency and bandwidth of an NCCL collective operation.
+    Args:
+        coll (NCCL_COLL): The type of collective operation to perform. Can be one of:
+            * `ALL_REDUCE` (0)
+            * `ALL_GATHER` (1)
+            * `REDUCE_SCATTER` (2)
+        intraHw (NCCL_HW): The hardware to use for intra-node communication. Can be one of:
+            * `NVLINK` (0)
+            * `PCI` (1)
+            * `NET` (2)
+        interHw (NCCL_HW): The hardware to use for inter-node communication. Can be one of:
+            * `NVLINK` (0)
+            * `PCI` (1)
+            * `NET` (2)
+        nccl_proto (NCCL_PROTO): The protocol to use for NCCL communication. Can be one of:
+            * `LL` (0) - Low-latency
+            * `LL128` (1) - Low-latency 128-byte
+            * `SIMPLE` (2)
+        nccl_algo (NCCL_ALGO): The algorithm to use for NCCL communication. Can be one of:
+            * `TREE` (0)
+            * `RING` (1)
+        group_size (int): The size of the group participating in the collective operation.
+        num_gpus_per_node (int): The number of GPUs per node participating in the collective operation.
+    Returns:
+        A tuple containing the estimated latency and bandwidth of the collective operation,
+        in nanoseconds and GB/nanoseconds, respectively.
+    """
+
     nNodes = math.ceil(group_size / num_gpus_per_node)
     nRanks = group_size  # this is total # of gpus globally that participate in this collective op
 
     if nRanks <= 1:
-        return 0
-
-    # Assumes ring algorithm
-    nccl_algo = NCCL_ALGO.RING
-    nccl_proto = NCCL_PROTO.LL
-    coll = get_collective_type(node)
+        return (0, 0)
 
     # =============== bandwidth computation ===============
     # First compute bandwidth in GB/s; then at the end, convert it to GB/ns
@@ -230,7 +284,6 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     bandwidth_GB_per_ns = bandwidth / 1e9
 
     # =============== latency computation ===============
-    intraHw = NCCL_HW.NVLINK
 
     if coll == NCCL_COLL.ALL_REDUCE:
         if nNodes > 1:
@@ -243,7 +296,7 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     # First compute latency in us; then at the end, convert it to ns
     latency = baseLat[nccl_algo][nccl_proto]
     intraLat = hwLat[intraHw][nccl_algo][nccl_proto]
-    interLat = hwLat[NCCL_HW.NET][nccl_algo][nccl_proto]
+    interLat = hwLat[interHw][nccl_algo][nccl_proto]
 
     # Inter-node rings still have to launch nsteps * net overhead.
     netOverhead = 0.0
@@ -253,10 +306,7 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     latency += (nsteps - nInterSteps) * intraLat + nInterSteps * interLat  # type: ignore[possibly-undefined]
     # Convert us to ns
     latency_ns = latency * 1e3
-
-    # =============== final result ===============
-    transport_ns = tensor_storage_size_GB / bandwidth_GB_per_ns
-    return transport_ns + latency_ns
+    return (latency_ns, bandwidth_GB_per_ns)
 
 
 ################################################################################################################
