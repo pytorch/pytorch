@@ -1508,7 +1508,7 @@ void _linalg_check_errors(
     return;
   }
 
-  int32_t info;
+  int32_t info = 0;
   std::string batch_str;
   if (is_matrix) {
     info = infos.item<int>();
@@ -2079,7 +2079,7 @@ TORCH_IMPL_FUNC(lu_unpack_out)(const Tensor& LU,
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .declare_static_shape(pivots.sizes(), /*squash_dim=*/pivots.dim() - 1)
+      .declare_static_shape(pivots.sizes(), /*squash_dims=*/pivots.dim() - 1)
       .add_output(perm)
       .add_owned_const_input(pivots.contiguous())
       .build();
@@ -4004,7 +4004,7 @@ Tensor linalg_solve_triangular(
 
 Tensor linalg_vander_symint(
     const Tensor& x,
-    std::optional<c10::SymInt> N) {
+    const std::optional<c10::SymInt>& N) {
   auto t = x.scalar_type();
   TORCH_CHECK(t == ScalarType::Float ||
               t == ScalarType::Double ||
