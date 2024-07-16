@@ -36,6 +36,9 @@ from typing import (
 )
 from typing_extensions import ParamSpec as _ParamSpec, TypeGuard as _TypeGuard
 
+if TYPE_CHECKING:
+    from .types import IntLikeType
+
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -471,6 +474,9 @@ class SymInt:
     def __add__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
+    def __mod__(self, other: "IntLikeType") -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __mul__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
@@ -504,15 +510,33 @@ class SymInt:
     def __neg__(self):
         raise TypeError("type stub not overridden")
 
+    def __sub__(self, other: "IntLikeType") -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __repr__(self):
-        return str(self.node)
+        return self.node._graph_repr()
+
+    def _sympy_(self):
+        return self.node.expr
 
     def __hash__(self) -> builtins.int:
+        return hash(self._get_int())
+
+    def as_integer_ratio(self) -> _Tuple[builtins.int, builtins.int]:
+        """Represent this int as an exact integer ratio"""
+        return self._get_int(), 1
+
+    def bit_length(self) -> "SymInt":
+        return SymInt(self.node.wrap_int(self._get_int().bit_length()))
+
+    def conjugate(self) -> "SymInt":
+        return self
+
+    def _get_int(self) -> builtins.int:
         if self.node.is_nested_int():
-            return hash(self.node.nested_int())
+            return self.node.nested_int()
         else:
-            # We could support constant SymInts as well, but not doing it for now
-            raise TypeError("unhashable type: non-nested SymInt")
+            return builtins.int(self)
 
 
 class SymFloat:
@@ -549,6 +573,9 @@ class SymFloat:
 
     def __bool__(self):
         return self.node.bool_()
+
+    def __float__(self):
+        return self.node.guard_float("", 0)
 
     # Symbolic power does NOT work with negative base, this is to avoid
     # potential complex outputs
@@ -609,8 +636,21 @@ class SymFloat:
         """Return True if the float is an integer."""
         raise TypeError("type stub not overridden")
 
+    def as_integer_ratio(self) -> _Tuple[builtins.int, builtins.int]:
+        """Represent this float as an exact integer ratio"""
+        return self._get_float().as_integer_ratio()
+
     def __repr__(self):
-        return self.node.str()
+        return self.node._graph_repr()
+
+    def _sympy_(self):
+        return self.node.expr
+
+    def __hash__(self):
+        return hash(self._get_float())
+
+    def _get_float(self) -> builtins.float:
+        return self.node.float_() if self.node.is_constant() else builtins.float(self)
 
 
 class SymBool:
@@ -668,13 +708,17 @@ class SymBool:
         raise TypeError("type stub not overridden")
 
     def __repr__(self):
-        return str(self.node)
+        return self.node._graph_repr()
+
+    def _sympy_(self):
+        return self.node.expr
 
     def __hash__(self):
         if self.node.is_constant():
             return hash(self.node.bool_())
         else:
-            raise TypeError("unhashable type: SymBool")
+            # Force specialization
+            return hash(builtins.bool(self))
 
 
 def sym_not(a):
@@ -740,12 +784,33 @@ def sym_max(a, b):
         # max(1, 1.0) === max(1.0, 1) === 1.0
         return b.__sym_max__(a)
     # TODO: Probably can make bool work too, just lazy
-    assert isinstance(a, (builtins.int, builtins.float)), type(a)
-    assert isinstance(b, (builtins.int, builtins.float)), type(b)
-    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+
+    all_types, float_types = __all_and_float_types()
+
+    assert isinstance(a, all_types), type(a)
+    assert isinstance(b, all_types), type(b)
+    if isinstance(a, float_types) or isinstance(b, float_types):
         return builtins.float(builtins.max(a, b))
     else:
         return builtins.max(a, b)
+
+
+def __all_and_float_types() -> _Tuple[_Tuple[_Type, ...], _Tuple[_Type, ...]]:
+    try:
+        import numpy as np
+
+        all_types: _Tuple[_Type, ...] = (
+            np.integer,
+            np.floating,
+            builtins.int,
+            builtins.float,
+        )
+        float_types: _Tuple[_Type, ...] = (np.floating, builtins.float)
+    except ModuleNotFoundError:
+        all_types = (builtins.int, builtins.float)
+        float_types = (builtins.float,)
+
+    return all_types, float_types
 
 
 def sym_min(a, b):
@@ -756,9 +821,12 @@ def sym_min(a, b):
         return a.__sym_min__(b)
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
-    assert isinstance(a, (builtins.int, builtins.float)), type(a)
-    assert isinstance(b, (builtins.int, builtins.float)), type(b)
-    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+
+    all_types, float_types = __all_and_float_types()
+
+    assert isinstance(a, all_types), type(a)
+    assert isinstance(b, all_types), type(b)
+    if isinstance(a, float_types) or isinstance(b, float_types):
         return builtins.float(builtins.min(a, b))
     else:
         return builtins.min(a, b)
@@ -2079,7 +2147,7 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
-        self.config: _Dict[str, _Any] = dict()
+        self.config: _Dict[str, _Any] = {}
         self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
@@ -2520,3 +2588,50 @@ def _constrain_as_size(
 from torch import _logging
 
 _logging._init_logs()
+
+
+def _import_device_backends():
+    """
+    Leverage the Python plugin mechanism to load out-of-the-tree device extensions.
+    See this RFC: https://github.com/pytorch/pytorch/issues/122468
+    """
+    from importlib.metadata import entry_points
+
+    group_name = "torch.backends"
+    if sys.version_info < (3, 10):
+        backend_extensions = entry_points().get(group_name, ())
+    else:
+        backend_extensions = entry_points(group=group_name)
+
+    for backend_extension in backend_extensions:
+        try:
+            # Load the extension
+            entrypoint = backend_extension.load()
+            # Call the entrypoint
+            entrypoint()
+        except Exception as err:
+            raise RuntimeError(
+                f"Failed to load the backend extension: {backend_extension.name}. "
+                f"You can disable extension auto-loading with TORCH_DEVICE_BACKEND_AUTOLOAD=0."
+            ) from err
+
+
+def _is_device_backend_autoload_enabled() -> builtins.bool:
+    """
+    Whether autoloading out-of-the-tree device extensions is enabled.
+    The switch depends on the value of the environment variable
+    `TORCH_DEVICE_BACKEND_AUTOLOAD`.
+
+    Returns:
+        bool: Whether to enable autoloading the extensions. Enabled by default.
+
+    Examples:
+        >>> torch._is_device_backend_autoload_enabled()
+        True
+    """
+    # enabled by default
+    return os.getenv("TORCH_DEVICE_BACKEND_AUTOLOAD", "1") == "1"
+
+
+if _is_device_backend_autoload_enabled():
+    _import_device_backends()

@@ -645,7 +645,7 @@ class DistributedDataParallel(Module, Joinable):
     ):
         super().__init__()
         Joinable.__init__(self)
-        self.logger = None
+        self.logger: Optional[dist.Logger] = None
         if bool(delay_all_reduce_named_params is not None) != bool(
             param_to_hook_all_reduce is not None
         ):
@@ -1207,9 +1207,11 @@ class DistributedDataParallel(Module, Joinable):
             param_to_name_mapping,
             # User can set dist._DEFAULT_FIRST_BUCKET_BYTES to tune DDP first
             # bucket.
-            dist._DEFAULT_FIRST_BUCKET_BYTES
-            if self.bucket_bytes_cap_default
-            else self.bucket_bytes_cap,
+            (
+                dist._DEFAULT_FIRST_BUCKET_BYTES
+                if self.bucket_bytes_cap_default
+                else self.bucket_bytes_cap
+            ),
         )
 
         self.logger = dist.Logger(self.reducer)
@@ -1235,13 +1237,6 @@ class DistributedDataParallel(Module, Joinable):
 
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self.module)
-
-    def __getattr__(self, name: str) -> Any:
-        """Forward missing attributes to the wrapped module."""
-        try:
-            return super().__getattr__(name)  # defer to nn.Module's logic
-        except AttributeError:
-            return getattr(self.module, name)
 
     def __getstate__(self):
         self._check_default_group()

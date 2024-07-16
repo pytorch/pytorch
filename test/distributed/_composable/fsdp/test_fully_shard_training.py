@@ -24,7 +24,6 @@ from torch.distributed._tensor.debug.comm_mode import CommDebugMode
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
     apply_activation_checkpointing,
-    CheckpointWrapper,
 )
 from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
@@ -590,14 +589,18 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         """
         self.run_subtests(
             {
-                "reshard_after_forward": [True, False, 2],
+                "reshard_after_forward": [True, False],
                 "checkpoint_impl": ["composable", "utils", "wrapper"],
+                "module_grouping": ["block", "mem_eff", "mem_eff_weight_tied"],
             },
             self._test_train_parity_with_activation_checkpointing,
         )
 
     def _test_train_parity_with_activation_checkpointing(
-        self, reshard_after_forward: Union[bool, int], checkpoint_impl: str
+        self,
+        reshard_after_forward: Union[bool, int],
+        checkpoint_impl: str,
+        module_grouping: str,
     ):
         assert checkpoint_impl in ("composable", "utils", "wrapper")
         testing_compile = fully_shard != torch.distributed._composable.fsdp.fully_shard
@@ -613,33 +616,46 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 max_seq_len=64,
                 dropout_p=0,
                 checkpoint_activations=(checkpoint_impl == "utils"),
+                # For the mem-efficient module grouping, we separate the
+                # embeddings from the output projection, which does not support
+                # weight tying
+                weight_tying=module_grouping != "mem_eff",
             )
             model = Transformer(model_args)
         ref_model = replicate(copy.deepcopy(model), device_ids=[self.rank])
-        foreach = True
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
-        fully_shard_fn = functools.partial(
-            fully_shard,
-            reshard_after_forward=reshard_after_forward,
-        )
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+
+        # Apply activation checkpointing
+        prefixes_to_ignore = ()
         if checkpoint_impl == "wrapper":
             prefixes_to_ignore = (_CHECKPOINT_PREFIX,)
             apply_activation_checkpointing(
                 model, check_fn=lambda m: isinstance(m, TransformerBlock)
             )
-            for module in model.modules():
-                # Apply to `CheckpointWrapper`, which wraps `TransformerBlock`
-                if isinstance(module, CheckpointWrapper):
-                    fully_shard_fn(module)
-        else:
-            prefixes_to_ignore = ()
+        elif checkpoint_impl == "composable":
             for module in model.modules():
                 if isinstance(module, TransformerBlock):
-                    if checkpoint_impl == "composable":
-                        checkpoint(module)
-                    fully_shard_fn(module)
-        fully_shard_fn(model)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
+                    checkpoint(module)
+
+        # Apply FSDP
+        fsdp_kwargs = {"reshard_after_forward": reshard_after_forward}
+        if module_grouping == "mem_eff":
+            assert model_args.n_layers == 3
+            fully_shard(model.layers[0], **fsdp_kwargs)
+            fully_shard([model.layers[1], model.layers[2]], **fsdp_kwargs)
+            fully_shard([model.tok_embeddings, model.pos_embeddings], **fsdp_kwargs)
+            fully_shard([model.norm, model.output], **fsdp_kwargs)
+        elif module_grouping == "mem_eff_weight_tied":
+            fully_shard([model.tok_embeddings, model.output], **fsdp_kwargs)
+            for layer in model.layers:
+                fully_shard(layer, **fsdp_kwargs)
+        elif module_grouping == "block":
+            for layer in model.layers:
+                fully_shard(layer, **fsdp_kwargs)
+        else:
+            raise NotImplementedError(f"Unknown module grouping: {module_grouping}")
+        fully_shard(model, **fsdp_kwargs)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         torch.manual_seed(42 + self.rank)
         # Reuse the same input across iterations to avoid loss explosion from
@@ -1069,9 +1085,31 @@ class TestFullyShard2DTraining(FSDPTest):
             optim.step()
             ref_optim.step()
 
+    # TODO: remove this test when 2d state_dict is ready.
+    @skip_if_lt_x_gpu(2)
+    @skipIfRocm
+    def test_raise_not_implemented_state_dict_if_2d(self):
+        def parallelize(_model: Transformer, mesh: DeviceMesh, use_seq_parallel: bool):
+            _model = Transformer.parallelize(_model, mesh["tp"], use_seq_parallel)
+            for layer in _model.layers:
+                fully_shard(layer, mesh=mesh["dp"])
+            fully_shard(_model, mesh=mesh["dp"])
+            return _model
+
+        global_mesh = self.init_global_mesh()
+        seed = 42
+        torch.manual_seed(seed)
+        model_args = ModelArgs(dropout_p=0.0)
+        model = parallelize(Transformer(model_args), global_mesh, True)
+
+        with self.assertRaisesRegex(NotImplementedError, "2D"):
+            get_model_state_dict(model)
+
+    # Temporarily disable 2D state dict test, while strided sharding is being devleoped.
+    # TODO: re-enable this test once 2d state_dict is ready.
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_train_parity_2d_transformer_checkpoint_resume(self):
+    def _temp_disable_test_train_parity_2d_transformer_checkpoint_resume(self):
         """
         Tests train parity of a 2D transformer without checkpointing against a
         2D transformer with a checkpoint save/load.
