@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import (
 )
 
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
-from torch.utils.hooks import RemovableHandle
+from torch.utils.hooks import RemovableHandle  # noqa: TCH001
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -197,6 +197,33 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         res = torch.compile(f, backend="inductor")(*inputs)
         self.assertTrue(torch.allclose(res, f(*inputs)))
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @skipIfNoDynamoSupport
+    def test_compile_inductor_external_op_return_none(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::inplace_add",
+                "(Tensor input, Tensor(a!) output) -> ()",
+                lib=lib,
+            )
+
+            def inplace_add(input: torch.Tensor, output: torch.Tensor) -> None:
+                assert input.device == output.device
+                output.add_(input)
+
+            lib.impl("inplace_add", inplace_add, "CompositeExplicitAutograd")
+
+            def f(x):
+                out = torch.empty(3)
+                out = torch.zeros_like(out)
+                torch.ops.mylib.inplace_add(x, out)
+                return out
+
+            inputs = (torch.randn(3),)
+
+            res = torch.compile(f, backend="inductor")(*inputs)
+            self.assertTrue(torch.allclose(res, f(*inputs)))
 
     def test_compile_aot_eager_requires_grad(self):
         def f(x):

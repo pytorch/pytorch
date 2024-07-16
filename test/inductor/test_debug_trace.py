@@ -1,16 +1,16 @@
 # Owner(s): ["module: inductor"]
 import logging
 import os
-import pathlib
 import re
 import shutil
 import sys
 import unittest
+from pathlib import Path
 
 import torch
 from torch._inductor import config, test_operators
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+
 
 try:
     try:
@@ -23,7 +23,7 @@ except unittest.SkipTest:
     raise
 
 
-def filesize(filename: pathlib.Path):
+def filesize(filename: Path):
     assert filename.exists(), f"{filename} is missing"
     return os.stat(filename).st_size
 
@@ -44,7 +44,7 @@ class TestDebugTrace(test_torchinductor.TestCase):
         self.assertEqual(len(cm.output), 1)
         m = re.match(r"WARNING.* debug trace: (.*)", cm.output[0])
         self.assertTrue(m)
-        filename = pathlib.Path(m.group(1))
+        filename = Path(m.group(1))
         self.assertTrue(filename.is_dir())
         self.assertGreater(filesize(filename / "fx_graph_readable.py"), 512)
         self.assertGreater(filesize(filename / "fx_graph_runnable.py"), 512)
@@ -170,7 +170,7 @@ buf2.node.kernel = extern_kernels.mm""",
         # intentionally only cleanup on success so debugging test is easier
         shutil.rmtree(filename)
 
-    @unittest.skipIf(not TEST_CUDA or not has_triton(), "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_debug_multi_tempalte(self):
         class ToyModel(torch.nn.Module):
             def __init__(self):
@@ -188,9 +188,9 @@ buf2.node.kernel = extern_kernels.mm""",
         with self.assertLogs(
             logging.getLogger("torch._inductor.debug"), level=logging.WARNING
         ), fresh_inductor_cache():
-            m = ToyModel().to(device="cuda:0")
+            m = ToyModel().to(device=GPU_TYPE)
             m = torch.compile(m, mode="max-autotune")
-            input_tensor = torch.randn(100).to(device="cuda:0")
+            input_tensor = torch.randn(100).to(device=GPU_TYPE)
             m(input_tensor)
 
 

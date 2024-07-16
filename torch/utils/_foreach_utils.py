@@ -11,7 +11,7 @@ def _get_foreach_kernels_supported_devices() -> List[str]:
 
 def _get_fused_kernels_supported_devices() -> List[str]:
     r"""Return the device type list that supports fused kernels in optimizer."""
-    return ["cuda", "xpu", "cpu", torch._C._get_privateuse1_backend_name()]
+    return ["mps", "cuda", "xpu", "cpu", torch._C._get_privateuse1_backend_name()]
 
 TensorListList: TypeAlias = List[List[Optional[Tensor]]]
 Indices: TypeAlias = List[int]
@@ -34,12 +34,7 @@ def _group_tensors_by_device_and_dtype(
     tensorlistlist: TensorListList,
     with_indices: bool = False,
 ) -> Dict[Tuple[torch.device, torch.dtype], Tuple[TensorListList, Indices]]:
-    return {
-        (device, getattr(torch, str_dtype)): value
-        for (device, str_dtype), value in
-        torch._C._group_tensors_by_device_and_dtype(tensorlistlist, with_indices).items()
-    }
-
+    return torch._C._group_tensors_by_device_and_dtype(tensorlistlist, with_indices)
 
 def _device_has_foreach_support(device: torch.device) -> bool:
     return device.type in (_get_foreach_kernels_supported_devices() + ["cpu"]) and not torch.jit.is_scripting()

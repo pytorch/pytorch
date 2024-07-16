@@ -25,6 +25,10 @@ from torch._dynamo.utils import clone_inputs
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
 
+# Enable FX graph caching
+if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
+    torch._inductor.config.fx_graph_cache = True
+
 
 def _reassign_parameters(model):
     # torch_geometric models register parameter as tensors due to
@@ -136,6 +140,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._config["tolerance"]
 
     @property
+    def _require_larger_multiplier_for_smaller_tensor(self):
+        return self._config["require_larger_multiplier_for_smaller_tensor"]
+
+    @property
     def _accuracy(self):
         return self._config["accuracy"]
 
@@ -211,6 +219,20 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def guard_on_nn_module_models(self):
         return {
             "vision_maskrcnn",
+        }
+
+    @property
+    def inline_inbuilt_nn_modules_models(self):
+        return {
+            "basic_gnn_edgecnn",
+            "drq",
+            "hf_Reformer",
+            "DALLE2_pytorch",
+            "hf_BigBird",
+            "detectron2_maskrcnn_r_50_fpn",
+            "detectron2_maskrcnn_r_101_fpn",
+            "vision_maskrcnn",
+            "doctr_reco_predictor",
         }
 
     def load_model(
@@ -299,6 +321,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 extra_args=extra_args,
                 model_kwargs=model_kwargs,
             )
+            use_eval_mode = True
         elif is_training:
             benchmark = benchmark_cls(
                 test="train",
@@ -381,8 +404,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
             model_name = os.path.basename(model_path)
             if (
-                not re.search("|".join(args.filter), model_name, re.I)
-                or re.search("|".join(args.exclude), model_name, re.I)
+                not re.search("|".join(args.filter), model_name, re.IGNORECASE)
+                or re.search("|".join(args.exclude), model_name, re.IGNORECASE)
                 or model_name in args.exclude_exact
                 or model_name in self.skip_models
             ):
@@ -396,6 +419,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         else:
             return torch.no_grad()
 
+    def use_larger_multiplier_for_smaller_tensor(self, name):
+        return name in self._require_larger_multiplier_for_smaller_tensor
+
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         tolerance = 1e-4
         cosine = self.args.cosine
@@ -403,6 +429,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.float16 or self.args.amp:
             if name in self._tolerance["higher_fp16"]:
                 return 1e-2, cosine
+            elif name in self._tolerance["even_higher"]:
+                return 8 * 1e-2, cosine
             return 1e-3, cosine
 
         if self.args.bfloat16:

@@ -23,14 +23,12 @@ def mocked_serder_export(*args, **kwargs):
 
 
 def make_dynamic_cls(cls):
-    suffix = "_serdes"
-
     cls_prefix = "SerDesExport"
 
     test_class = testing.make_test_cls_with_mocked_export(
         cls,
         cls_prefix,
-        suffix,
+        test_export.SERDES_SUFFIX,
         mocked_serder_export,
         xfail_prop="_expected_failure_serdes",
     )

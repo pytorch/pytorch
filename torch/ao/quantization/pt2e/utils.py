@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import operator
 import types
 
