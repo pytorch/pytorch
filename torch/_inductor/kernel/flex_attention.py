@@ -1037,7 +1037,7 @@ def bwd_dq_inner(
         # Increment pointers.
         indices_idx = start_n // SPARSE_KV_MULTIPLE
         cur_block = tl.load(kv_indices + indices_idx)
-        next_block = tl.load(kv_indices + indices_idx + 1)
+        next_block = tl.load(kv_indices + indices_idx + 1, mask=indices_idx + 1 < sparse_kv_num_blocks)
         needs_jump = (start_n + 1) % SPARSE_KV_MULTIPLE == 0
         jump_to_block = (next_block - cur_block ) * SPARSE_KV_BLOCK_SIZE - (SPARSE_KV_MULTIPLE - 1) * BLOCK_N2
         offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_N2
@@ -1136,7 +1136,7 @@ def bwd_dkdv_inner(
         # Increment pointers.
         indices_idx = q_start // SPARSE_Q_MULTIPLE
         cur_block = tl.load(q_indices + indices_idx)
-        next_block = tl.load(q_indices + indices_idx + 1)
+        next_block = tl.load(q_indices + indices_idx + 1, mask=indices_idx + 1 < sparse_q_num_blocks)
         needs_jump = (q_start + 1) % SPARSE_Q_MULTIPLE == 0
         jump_to_block = (next_block - cur_block ) * SPARSE_Q_BLOCK_SIZE - (SPARSE_Q_MULTIPLE - 1) * BLOCK_M1
         offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_M1
