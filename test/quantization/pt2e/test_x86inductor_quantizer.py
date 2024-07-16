@@ -540,6 +540,15 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         is_qat=False,
         debug=False,
     ):
+        def recreate_m(m_eager, is_qat):
+            m = copy.deepcopy(m_eager)
+            m = capture_pre_autograd_graph(
+                m,
+                example_inputs,
+            )
+
+            m = prepare_qat_pt2e(m, quantizer) if is_qat else prepare_pt2e(m, quantizer)
+            return m
         m_eager = model.train() if is_qat else model.eval()
 
         # program capture
@@ -554,9 +563,10 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         m = prepare_qat_pt2e(m, quantizer) if is_qat else prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
-        prepare_model = copy.deepcopy(m)
+        # copy.deepcopy(m) fails, we should figure out why deepcopy fails.
+        prepare_model = recreate_m(m_eager, is_qat)
         m = convert_pt2e(m)
-        convert_model = copy.deepcopy(m)
+        convert_model = recreate_m(m_eager, is_qat)
         if debug:
             convert_model.print_readable(True)
         pt2_quant_output = m(*example_inputs)
