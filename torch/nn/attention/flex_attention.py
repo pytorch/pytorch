@@ -141,7 +141,7 @@ def _ordered_to_dense(num_blocks_in_row, col_indices):
 
         # set the values in 'a' to 1 where the indices are valid
         dense_mask[row_indices, valid_indices] = 1
-        return dense_mask[:, :num_cols]
+        return dense_mask[:, :num_cols].contiguous()
 
     create_dense_batched = create_dense_one
     for _ in range(len(batch_dims)):
@@ -156,8 +156,8 @@ def _dense_to_ordered(dense_mask) -> Tuple:
     num_blocks_in_row = dense_mask.sum(dim=-1)
     col_indices = torch.argsort(dense_mask, dim=-1, descending=True, stable=True)
     return (
-        num_blocks_in_row.to(torch.int32).to(dense_mask.device).contiguous(),
-        col_indices.to(torch.int32).to(dense_mask.device).contiguous(),
+        num_blocks_in_row.to(torch.int32).contiguous(),
+        col_indices.to(torch.int32).contiguous(),
     )
 
 
