@@ -83,7 +83,7 @@ automatic_dynamic_shapes = True
 # If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
 # If this flag is set to False, then the shapes of torch.nn.Parameter are assumed to be static,
 # while the shapes of torch.Tensor are assumed to be dynamic.
-force_parameter_static_shapes = True
+force_parameter_static_shapes = False
 
 # This flag ensures that the shapes of a nn module are always assumed to be static
 # If the flag is set to True, then the shapes of a nn.module are assumed to be static
