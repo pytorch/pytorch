@@ -27,10 +27,6 @@ from torch._refs.nn import functional as _functional_refs
 from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 
-# Imported to resolve beartype issue when type checking node.Argument.
-from torch.fx.node import Node  # noqa: F401
-
-from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics, type_utils as fx_type_utils
 from torch.utils import _python_dispatch, _pytree
 
@@ -1229,7 +1225,6 @@ class TypePromotionTable:
         for rule in _EXTRA_TYPE_PROMOTION_RULE_SET:
             self.add_rule(rule)
 
-    @_beartype.beartype
     def add_rule(self, rule: TypePromotionRule) -> None:
         """Add a type promotion rule for a python op in a torch.ops module.
 
@@ -1244,7 +1239,6 @@ class TypePromotionTable:
             raise ValueError(f"Invalid type promotion rule: {rule}")
         self._rule_table[f"{rule.namespace}.{rule.op_name}"] = rule
 
-    @_beartype.beartype
     def get_rule(
         self, py_op: torch._ops.OpOverloadPacket
     ) -> Optional[TypePromotionRule]:
@@ -1252,7 +1246,6 @@ class TypePromotionTable:
         return self._rule_table.get(str(py_op), None)
 
 
-@_beartype.beartype
 def get_type_promotion_rule(
     diagnostic: diagnostics.Diagnostic,
     node: torch.fx.Node,
@@ -1305,7 +1298,6 @@ class _OpTraceDispatchMode(_python_dispatch.TorchDispatchMode):
         return func(*args, **kwargs)
 
 
-@_beartype.beartype
 def find_compatible_op_overload(
     op: torch._ops.OpOverloadPacket, args: tuple, kwargs: dict
 ) -> torch._ops.OpOverload:
@@ -1391,7 +1383,6 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         node.meta["val"] = proxy_tensor.extract_val(out)
         return out
 
-    @_beartype.beartype
     def _create_node(
         self,
         graph: torch.fx.Graph,
@@ -1413,7 +1404,6 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         self._run_node_and_set_meta(node)
         return node
 
-    @_beartype.beartype
     def _rerun_node_after_type_promotion(
         self,
         diagnostic: diagnostics.Diagnostic,
@@ -1479,7 +1469,6 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         else:
             raise RuntimeError(f"Unexpected node output type: {type(node_val)}.")
 
-    @_beartype.beartype
     def _maybe_promote_arg(
         self,
         diagnostic: diagnostics.Diagnostic,
@@ -1585,7 +1574,6 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
 
         raise NotImplementedError(f"Unknown fx arg type: {type(fx_arg)}")
 
-    @_beartype.beartype
     def _maybe_promote_node(
         self,
         diagnostic: diagnostics.Diagnostic,
@@ -1720,7 +1708,6 @@ class InsertTypePromotion(_pass.Transform):
                 fake_args.append(meta_value)
         return fake_args
 
-    @_beartype.beartype
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
         assert not args, (
             "`InsertTypePromotion` deduces symbolic fake arguments from the graph. "
