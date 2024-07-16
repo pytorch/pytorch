@@ -69,7 +69,7 @@ class MemoryDep(Dep):
         """
         Return the offset by setting every variable to be 0.
         """
-        return sympy_subs(self.index, {v: 0 for v in self.var_names})
+        return sympy_subs(self.index, dict.fromkeys(self.var_names, 0))
 
     def normalize_with_stride_order(self, prefix="t"):
         r"""
@@ -456,7 +456,7 @@ class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
 # TODO: check call sites
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
     cnt = itertools.count()
-    var_ranges: VarRanges = dict()
+    var_ranges: VarRanges = {}
 
     def add_var(length: sympy.Expr) -> sympy.Symbol:
         v = sympy_index_symbol(f"{prefix}{next(cnt)}")
