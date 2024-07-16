@@ -9,9 +9,14 @@ import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed._tensor import _StridedShard, DTensor, Replicate, Shard
+from torch.distributed._tensor import DTensor, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
-from torch.distributed._tensor.placement_types import DTensorSpec, Placement, TensorMeta
+from torch.distributed._tensor.placement_types import (
+    _StridedShard,
+    DTensorSpec,
+    Placement,
+    TensorMeta,
+)
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
@@ -273,8 +278,9 @@ class FSDPParam:
                 )
 
             # TODO: Hard code FSDP + TP; need to support HSDP + TP
+            split_factor = self._tp_spec.num_shards_map[0]
             self._spmd_placements: Tuple[Placement, ...] = (
-                Shard(0),
+                _StridedShard(0, split_factor=split_factor),
                 self._tp_spec.placements[0],
             )
 
