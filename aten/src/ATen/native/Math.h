@@ -1121,13 +1121,13 @@ calc_igammac(scalar_t a, scalar_t x) {
   else if (x == ZERO) {
     return static_cast<scalar_t>(ONE);
   }
-  else if (::isinf(static_cast<acc_t>(a))) {
-    if (::isinf(static_cast<acc_t>(x))) {
+  else if (std::isinf(static_cast<acc_t>(a))) {
+    if (std::isinf(static_cast<acc_t>(x))) {
       return std::numeric_limits<scalar_t>::quiet_NaN();
     }
     return static_cast<scalar_t>(ONE);
   }
-  else if (::isinf(static_cast<acc_t>(x))) {
+  else if (std::isinf(static_cast<acc_t>(x))) {
     return static_cast<scalar_t>(ZERO);
   }
 
@@ -1213,13 +1213,13 @@ calc_igamma(scalar_t a, scalar_t x) {
   else if (x == ZERO) {
     return static_cast<scalar_t>(ZERO); // zero integration limit
   }
-  else if (::isinf(a)) {
-    if (::isinf(x)) {
+  else if (std::isinf(a)) {
+    if (std::isinf(x)) {
       return std::numeric_limits<scalar_t>::quiet_NaN();
     }
     return static_cast<scalar_t>(ZERO);
   }
-  else if (::isinf(x)) {
+  else if (std::isinf(x)) {
     return static_cast<scalar_t>(ONE);
   }
 
@@ -1475,10 +1475,10 @@ calc_igammac_grada(scalar_t a, scalar_t x) {
   else if ((a <= ZERO) || (x < ZERO)) {
     return std::numeric_limits<scalar_t>::quiet_NaN();
   }
-  else if (::isinf(x)) {
+  else if (std::isinf(x)) {
     return std::numeric_limits<scalar_t>::quiet_NaN();
   }
-  else if (::isinf(a)) {
+  else if (std::isinf(a)) {
     return ZERO;
   }
   else if (x == ZERO) {
@@ -1523,10 +1523,10 @@ calc_igamma_grada(scalar_t a, scalar_t x) {
   else if ((a <= ZERO) || (x < ZERO)) {
     return std::numeric_limits<scalar_t>::quiet_NaN();
   }
-  else if (::isinf(x)) {
+  else if (std::isinf(x)) {
     return std::numeric_limits<scalar_t>::quiet_NaN();
   }
-  else if (::isinf(a)) {
+  else if (std::isinf(a)) {
     return ZERO;
   }
   else if (x == ZERO) {

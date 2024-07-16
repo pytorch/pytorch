@@ -16626,8 +16626,8 @@ op_db: List[OpInfo] = [
         ),
     ),
     BinaryUfuncInfo(
-        'igamma',
-        aliases=('torch.special.gammainc',),
+        "igamma",
+        aliases=("torch.special.gammainc",),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         dtypesIfCUDA=floating_types(),
         lhs_make_tensor_kwargs=dict(low=0, high=10),
@@ -16637,13 +16637,16 @@ op_db: List[OpInfo] = [
         supports_gradgrad=False,
         skips=(
             # FIXME: incorrectly tries to pass a rhs scalar
-            DecorateInfo(unittest.expectedFailure, 'TestJit',
-                            'test_jit_alias_remapping'),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestJit",
+                "test_jit_alias_remapping"
+            ),
         ),
     ),
     BinaryUfuncInfo(
-        'igammac',
-        aliases=('torch.special.gammaincc',),
+        "igammac",
+        aliases=("torch.special.gammaincc",),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         dtypesIfCUDA=floating_types(),
         lhs_make_tensor_kwargs=dict(low=0, high=10),
@@ -16653,8 +16656,11 @@ op_db: List[OpInfo] = [
         supports_gradgrad=False,
         skips=(
             # FIXME: incorrectly tries to pass a rhs scalar
-            DecorateInfo(unittest.expectedFailure, 'TestJit',
-                            'test_jit_alias_remapping'),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestJit",
+                "test_jit_alias_remapping"
+            ),
         ),
     ),
     UnaryUfuncInfo('nn.functional.softshrink',
