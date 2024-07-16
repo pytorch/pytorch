@@ -3,8 +3,7 @@
 #include <torch/csrc/jit/frontend/name_mangler.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 /**
  * class TypeNameUniquer
@@ -29,5 +28,4 @@ class TORCH_API TypeNameUniquer {
       EqualType>
       name_map_;
 };
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

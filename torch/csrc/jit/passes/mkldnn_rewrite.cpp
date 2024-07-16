@@ -112,16 +112,6 @@ static void insertMkldnnPrePackedOps(std::shared_ptr<Graph>& graph) {
   insertMkldnnPrePackedConv2dOp(graph);
 }
 
-static void insertMkldnnPrePackedOps(script::Module& module) {
-  for (auto& method : module.get_methods()) {
-    auto graph = method.graph();
-    insertMkldnnPrePackedOps(graph);
-  }
-  for (script::Module m : module.children()) {
-    insertMkldnnPrePackedOps(m);
-  }
-}
-
 static void FuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
   auto conv_op_rstring = at::jit::CodeTemplate(R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],

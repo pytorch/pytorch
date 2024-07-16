@@ -1,9 +1,8 @@
-#include <c10/util/Optional.h>
 #include <torch/csrc/utils/pybind.h>
+#include <optional>
 #include <tuple>
 
-namespace torch {
-namespace impl {
+namespace torch::impl {
 
 template <typename GuardT, typename... Args>
 struct RAIIContextManager {
@@ -18,7 +17,7 @@ struct RAIIContextManager {
   }
 
   void exit() {
-    guard_ = c10::nullopt;
+    guard_ = std::nullopt;
   }
 
  private:
@@ -37,9 +36,9 @@ void py_context_manager(const py::module& m, const char* name) {
       .def(
           "__exit__",
           [](ContextManagerT& guard,
-             py::object exc_type,
-             py::object exc_value,
-             py::object traceback) { guard.exit(); });
+             const py::object& exc_type,
+             const py::object& exc_value,
+             const py::object& traceback) { guard.exit(); });
 }
 
 template <typename GuardT, typename... Args>
@@ -51,7 +50,7 @@ struct DeprecatedRAIIContextManager {
   void enter() {}
 
   void exit() {
-    guard_ = c10::nullopt;
+    guard_ = std::nullopt;
   }
 
  private:
@@ -77,10 +76,9 @@ void py_context_manager_DEPRECATED(const py::module& m, const char* name) {
       .def(
           "__exit__",
           [](ContextManagerT& guard,
-             py::object exc_type,
-             py::object exc_value,
-             py::object traceback) { guard.exit(); });
+             const py::object& exc_type,
+             const py::object& exc_value,
+             const py::object& traceback) { guard.exit(); });
 }
 
-} // namespace impl
-} // namespace torch
+} // namespace torch::impl

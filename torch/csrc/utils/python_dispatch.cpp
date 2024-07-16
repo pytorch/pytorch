@@ -65,8 +65,8 @@ static c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
 template <typename Func>
 inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
   auto mb_key = std::string(key).empty()
-      ? c10::nullopt
-      : c10::make_optional(c10::parseDispatchKey(key));
+      ? std::nullopt
+      : std::make_optional(c10::parseDispatchKey(key));
   if (mb_key) {
     return torch::dispatch(*mb_key, std::forward<Func>(raw_f));
   } else {
@@ -217,7 +217,7 @@ static py::object ophandle_call_boxed(
       handle.schema(),
       std::move(args),
       kwargs,
-      /*self=*/c10::nullopt);
+      /*self=*/std::nullopt);
   {
     pybind11::gil_scoped_release no_gil_guard;
     handle.callBoxed(stack);
@@ -255,7 +255,7 @@ void initDispatchBindings(PyObject* module) {
       .def("debug", &c10::OperatorHandle::debug)
       .def(
           "redispatch_boxed",
-          [](py::object self,
+          [](const py::object& self,
              c10::DispatchKeySet keyset,
              py::args args,
              const py::kwargs& kwargs) {
@@ -264,7 +264,7 @@ void initDispatchBindings(PyObject* module) {
                 handle.schema(),
                 std::move(args),
                 kwargs,
-                /*self=*/c10::nullopt);
+                /*self=*/std::nullopt);
             {
               pybind11::gil_scoped_release no_gil_guard;
               handle.redispatchBoxed(keyset, &stack);
@@ -477,8 +477,8 @@ void initDispatchBindings(PyObject* module) {
             parseKind(kind),
             std::move(name),
             std::string(dispatch).empty()
-                ? c10::nullopt
-                : c10::make_optional(c10::parseDispatchKey(dispatch)),
+                ? std::nullopt
+                : std::make_optional(c10::parseDispatchKey(dispatch)),
             "/dev/null", // temporary workaround
             linenum);
         END_HANDLE_TH_ERRORS_PYBIND
@@ -716,6 +716,7 @@ void initDispatchBindings(PyObject* module) {
       .def("__or__", &c10::DispatchKeySet::operator|)
       .def("__sub__", &c10::DispatchKeySet::operator-)
       .def("__and__", &c10::DispatchKeySet::operator&)
+      .def("raw_repr", &c10::DispatchKeySet::raw_repr)
       .def("highestPriorityTypeId", &c10::DispatchKeySet::highestPriorityTypeId)
       .def(
           "remove",
@@ -814,12 +815,12 @@ void initDispatchBindings(PyObject* module) {
       "_dispatch_print_registrations_for_dispatch_key",
       [](const char* dispatch_key = "") {
         auto k = std::string(dispatch_key).empty()
-            ? c10::nullopt
-            : c10::make_optional(c10::parseDispatchKey(dispatch_key));
+            ? std::nullopt
+            : std::make_optional(c10::parseDispatchKey(dispatch_key));
         auto op_names =
             c10::Dispatcher::singleton().getRegistrationsForDispatchKey(k);
         for (auto& op : op_names) {
-          std::cout << op << std::endl;
+          std::cout << op << '\n';
         }
       },
       py::arg("dispatch_key") = static_cast<const char*>(""));
@@ -830,7 +831,7 @@ void initDispatchBindings(PyObject* module) {
         try {
           return c10::parseDispatchKey(dispatch_key);
         } catch (const c10::Error& err) {
-          return c10::nullopt;
+          return std::nullopt;
         }
       });
 
@@ -838,8 +839,8 @@ void initDispatchBindings(PyObject* module) {
       "_dispatch_get_registrations_for_dispatch_key",
       [](const char* dispatch_key = "") {
         auto k = std::string(dispatch_key).empty()
-            ? c10::nullopt
-            : c10::make_optional(c10::parseDispatchKey(dispatch_key));
+            ? std::nullopt
+            : std::make_optional(c10::parseDispatchKey(dispatch_key));
         auto op_names =
             c10::Dispatcher::singleton().getRegistrationsForDispatchKey(k);
         std::vector<std::string> names;
@@ -888,7 +889,7 @@ void initDispatchBindings(PyObject* module) {
         "Expected device_type string to not have a device index; got ",
         device_type);
     return c10::toString(
-        c10::computeDispatchKey(c10::nullopt, c10::nullopt, device));
+        c10::computeDispatchKey(std::nullopt, std::nullopt, device));
   });
 
   m.def("_are_functorch_transforms_active", []() {

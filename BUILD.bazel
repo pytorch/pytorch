@@ -455,22 +455,13 @@ filegroup(
     name = "caffe2_core_srcs",
     srcs = [
         "caffe2/core/common.cc",
-        "caffe2/core/types.cc",
     ],
 )
 
 filegroup(
     name = "caffe2_perfkernels_srcs",
     srcs = [
-        "caffe2/perfkernels/adagrad.cc",
-        "caffe2/perfkernels/embedding_lookup.cc",
         "caffe2/perfkernels/embedding_lookup_idx.cc",
-        "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup.cc",
-        "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup_idx.cc",
-        "caffe2/perfkernels/fused_nbit_rowwise_conversion.cc",
-        "caffe2/perfkernels/lstm_unit_cpu_common.cc",
-        "caffe2/perfkernels/math_cpu_base.cc",
-        "caffe2/perfkernels/typed_axpy.cc",
     ],
 )
 
@@ -488,7 +479,6 @@ filegroup(
 filegroup(
     name = "caffe2_utils_srcs",
     srcs = [
-        "caffe2/utils/cpuid.cc",
         "caffe2/utils/proto_wrap.cc",
         "caffe2/utils/string_utils.cc",
         "caffe2/utils/threadpool/ThreadPool.cc",
@@ -507,12 +497,8 @@ cc_library(
     name = "caffe2_for_aten_headers",
     hdrs = [
         "caffe2/core/common.h",
-        "caffe2/core/logging.h",
-        "caffe2/core/types.h",
         "caffe2/perfkernels/common.h",
-        "caffe2/perfkernels/embedding_lookup.h",
         "caffe2/perfkernels/embedding_lookup_idx.h",
-        "caffe2/utils/cpuid.h",
         "caffe2/utils/fixed_divisor.h",
     ] + glob([
         "caffe2/utils/threadpool/*.h",
@@ -522,7 +508,6 @@ cc_library(
     deps = [
         ":caffe2_core_macros",
         "//c10",
-        "//caffe2/proto:caffe2_pb",
     ],
 )
 
@@ -547,7 +532,6 @@ cc_library(
     deps = [
         ":caffe2_core_macros",
         ":caffe2_for_aten_headers",
-        "//caffe2/proto:caffe2_pb",
     ],
 )
 
@@ -568,7 +552,6 @@ cc_library(
         ":caffe2_perfkernels_avx",
         ":caffe2_perfkernels_avx2",
         ":caffe2_perfkernels_avx512",
-        "//caffe2/proto:caffe2_pb",
         "//third_party/miniz-2.1.0:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
@@ -761,6 +744,7 @@ cc_library(
             "torch/csrc/cuda/python_nccl.cpp",
             "torch/csrc/cuda/nccl.cpp",
             "torch/csrc/distributed/c10d/intra_node_comm.cu",
+            "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
             "torch/csrc/distributed/c10d/Utils.cu",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
@@ -777,6 +761,8 @@ cc_library(
         ":caffe2",
         ":torch_headers",
         "@kineto",
+        "@cpp-httplib",
+        "@nlohmann",
     ] + if_cuda([
         "@cuda//:nvToolsExt",
         "@cutlass",

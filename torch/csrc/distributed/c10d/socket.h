@@ -13,6 +13,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/distributed/c10d/Backoff.hpp>
 #include <torch/csrc/distributed/c10d/exception.h>
 
 namespace c10d {
@@ -40,9 +41,22 @@ class SocketOptions {
     return connect_timeout_;
   }
 
+  // Sets the backoff policy to use for socket connect ops.
+  SocketOptions& connect_backoff(std::shared_ptr<Backoff> value) noexcept {
+    connect_backoff_ = std::move(value);
+
+    return *this;
+  }
+
+  const std::shared_ptr<Backoff>& connect_backoff() const noexcept {
+    return connect_backoff_;
+  }
+
  private:
   bool prefer_ipv6_ = true;
   std::chrono::seconds connect_timeout_{30};
+  std::shared_ptr<Backoff> connect_backoff_{
+      std::make_shared<FixedBackoff>(std::chrono::milliseconds(1000))};
 };
 
 class SocketImpl;
@@ -81,6 +95,8 @@ class Socket {
   std::uint16_t port() const;
 
   bool waitForInput(std::chrono::milliseconds timeout);
+
+  std::string repr() const;
 
  private:
   explicit Socket(std::unique_ptr<SocketImpl>&& impl) noexcept;

@@ -26,7 +26,7 @@ jobs:
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
-          docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+          docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
           working-directory: pytorch
 
       - name: Use following to pull public copy of the image

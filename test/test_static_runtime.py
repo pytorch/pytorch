@@ -330,7 +330,7 @@ class TestStaticModule(TestCase):
                 raise RuntimeError(
                     "Tried execution of add.Tensors with incompatible shape. "
                     "Exception raised by forked runtime execution does "
-                    f"not contain expected substring: \"{expected_error_msg}\""
+                    f'not contain expected substring: "{expected_error_msg}"'
                 ) from error
 
     """
@@ -360,7 +360,7 @@ class TestStaticModule(TestCase):
                 raise RuntimeError(
                     "Tried execution of add.Tensors with incompatible shape. "
                     "Exception raised by forked runtime execution does "
-                    f"not contain expected substring: \"{expected_error_msg}\""
+                    f'not contain expected substring: "{expected_error_msg}"'
                 ) from error
 
     def test_multihead_attention_layer(self):

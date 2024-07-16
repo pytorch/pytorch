@@ -29,6 +29,7 @@ python3 -m tools.pyi.gen_pyi \
     --native-functions-path aten/src/ATen/native/native_functions.yaml \
     --tags-path aten/src/ATen/native/tags.yaml \
     --deprecated-functions-path "tools/autograd/deprecated.yaml"
+python3 torch/utils/data/datapipes/gen_pyi.py
 
 RC=0
 # Run lintrunner on all files

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -8,10 +9,13 @@ import struct
 import subprocess
 import sys
 import threading
+import traceback
 import typing
 from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from typing import Any, Callable, Dict
 
+from torch._inductor import config
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 
 log = logging.getLogger(__name__)
@@ -58,6 +62,39 @@ def _recv_msg(read_pipe):
     return job_id, data
 
 
+def _get_ld_library_path():
+    path = os.environ.get("LD_LIBRARY_PATH", "")
+    if config.is_fbcode():
+        from libfb.py.parutil import get_runtime_path
+
+        runtime_path = get_runtime_path()
+        if runtime_path:
+            lib_path = os.path.join(runtime_path, "runtime", "lib")
+            path = os.pathsep.join([lib_path, path]) if path else lib_path
+
+    return path
+
+
+class _SubprocExceptionInfo:
+    """
+    Carries exception info from subprocesses across the wire. traceback
+    objects are not pickleable, so we store the trace as a string and
+    use it for the message in the exception thrown in the main process.
+    """
+
+    def __init__(self, details):
+        self.details = details
+
+
+class SubprocException(Exception):
+    """
+    Thrown when a job in a subprocess raises an Exception.
+    """
+
+    def __init__(self, details):
+        super().__init__(f"An exception occurred in a subprocess:\n\n{details}")
+
+
 class SubprocPool:
     """
     Mimic a concurrent.futures.ProcessPoolExecutor, but wrap it in
@@ -84,19 +121,24 @@ class SubprocPool:
                 # torch._inductor.codecache since the warming process is what
                 # creates the SubprocPool in the first place.
                 "TORCH_WARM_POOL": "0",
+                # Some internal usages need a modified LD_LIBRARY_PATH.
+                "LD_LIBRARY_PATH": _get_ld_library_path(),
             },
         )
         self.write_pipe: Pipe = typing.cast(Pipe, self.process.stdin)
         self.write_lock = threading.Lock()
         self.read_pipe: Pipe = typing.cast(Pipe, self.process.stdout)
         self.read_thread = threading.Thread(target=self._read_thread, daemon=True)
-        self.read_thread.start()
 
         self.futures_lock = threading.Lock()
         self.pending_futures: Dict[int, Future[Any]] = {}
         self.job_id_count = itertools.count()
 
         self.running = True
+
+        # Start thread last to ensure all member variables are initialized
+        # before any access.
+        self.read_thread.start()
 
     def submit(self, job_fn: Callable[..., Any], *args):
         if args:
@@ -106,11 +148,11 @@ class SubprocPool:
         with self.futures_lock:
             job_id = next(self.job_id_count)
             self.pending_futures[job_id] = future = Future()
+        future.set_running_or_notify_cancel()
         with self.write_lock:
             if not self.running:
                 raise RuntimeError("submit() on closed pool")
             _send_msg(self.write_pipe, job_id, job_data)
-        future.set_running_or_notify_cancel()
         return future
 
     def _read_thread(self):
@@ -126,7 +168,13 @@ class SubprocPool:
                 with self.futures_lock:
                     if not self.running:
                         return
-                    if isinstance(result, Exception):
+                    if isinstance(result, _SubprocExceptionInfo):
+                        # An exception occurred in the submitted job
+                        self.pending_futures[job_id].set_exception(
+                            SubprocException(result.details)
+                        )
+                    elif isinstance(result, Exception):
+                        # An exception occurred in some of our subprocess machinery.
                         self.pending_futures[job_id].set_exception(result)
                     else:
                         self.pending_futures[job_id].set_result(result)
@@ -160,16 +208,20 @@ class SubprocMain:
         self.read_pipe = read_pipe
         self.write_pipe = write_pipe
         self.write_lock = threading.Lock()
-        self.pool = ProcessPoolExecutor(
+        self.nprocs = nprocs
+        self.pool = self._new_pool(nprocs, True)
+        self.running = True
+
+    def _new_pool(self, nprocs, warm):
+        pool = ProcessPoolExecutor(
             nprocs,
             mp_context=multiprocessing.get_context("fork"),
             initializer=functools.partial(_async_compile_initializer, os.getpid()),
         )
-        multiprocessing.util.Finalize(
-            None, self.pool.shutdown, exitpriority=sys.maxsize
-        )
-        self.running = True
-        _warm_process_pool(self.pool, nprocs)
+        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
+        if warm:
+            _warm_process_pool(pool, nprocs)
+        return pool
 
     def main(self):
         while True:
@@ -190,6 +242,17 @@ class SubprocMain:
         self.pool.shutdown()
 
     def submit(self, job_id, data):
+        while self.running:
+            try:
+                self._submit_inner(job_id, data)
+                return
+            except BrokenProcessPool:
+                # If any subprocess in the pool crashes, we get a BrokenProcessPool
+                # exception and the whole pool becomes unusable. Handle crashes by
+                # recreating the pool and resubmitting.
+                self.pool = self._new_pool(self.nprocs, False)
+
+    def _submit_inner(self, job_id, data):
         future = self.pool.submit(functools.partial(SubprocMain.do_job, data))
 
         def callback(_):
@@ -211,7 +274,10 @@ class SubprocMain:
     def do_job(data):
         # do the pickle/unpickle in the sub-subproc
         job = pickle.loads(data)
-        result = job()
+        try:
+            result = job()
+        except Exception as e:
+            result = _SubprocExceptionInfo(traceback.format_exc())
         return pickle.dumps(result, pickle.HIGHEST_PROTOCOL)
 
 

@@ -475,7 +475,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_repeat_interleave_Tensor(
     AtenTensorHandle* out);
 
 AOTI_TORCH_EXPORT AOTITorchError
-aoti_check_inf_and_nan(AtenTensorHandle tensor);
+aoti_torch_check_inf_and_nan(const char* tensor_name, AtenTensorHandle tensor);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scatter_out(
     AtenTensorHandle out,
@@ -566,21 +566,25 @@ AOTI_TORCH_EXPORT void aoti_torch_check(
     const char* msg);
 
 #ifdef STRIP_ERROR_MESSAGES
-#define AOTI_TORCH_CHECK(cond, ...)    \
-  aoti_torch_check(                    \
-      cond,                            \
-      __func__,                        \
-      __FILE__,                        \
-      static_cast<uint32_t>(__LINE__), \
-      TORCH_CHECK_MSG(cond, "", __VA_ARGS__));
+#define AOTI_TORCH_CHECK(cond, ...)              \
+  if (!(cond)) {                                 \
+    aoti_torch_check(                            \
+        false,                                   \
+        __func__,                                \
+        __FILE__,                                \
+        static_cast<uint32_t>(__LINE__),         \
+        TORCH_CHECK_MSG(cond, "", __VA_ARGS__)); \
+  }
 #else
-#define AOTI_TORCH_CHECK(cond, ...)    \
-  aoti_torch_check(                    \
-      cond,                            \
-      __func__,                        \
-      __FILE__,                        \
-      static_cast<uint32_t>(__LINE__), \
-      TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__));
+#define AOTI_TORCH_CHECK(cond, ...)                \
+  if (!(cond)) {                                   \
+    aoti_torch_check(                              \
+        false,                                     \
+        __func__,                                  \
+        __FILE__,                                  \
+        static_cast<uint32_t>(__LINE__),           \
+        TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
+  }
 #endif
 
 #ifdef __cplusplus

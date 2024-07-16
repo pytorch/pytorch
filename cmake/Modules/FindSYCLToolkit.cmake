@@ -55,6 +55,23 @@ find_library(
   HINTS ${SYCL_LIBRARY_DIR}
   NO_DEFAULT_PATH
 )
+# On Windows, currently there's no sycl.lib. Only sycl7.lib with version suffix,
+# where the current version of the SYCL runtime is 7.
+# Until oneAPI adds support to sycl.lib without the version suffix,
+# sycl_runtime_version needs to be hardcoded and uplifted when SYCL runtime version uplifts.
+# TODO: remove this when sycl.lib is supported on Windows
+if(WIN32)
+  set(sycl_runtime_version 7)
+  find_library(
+    SYCL_LIBRARY
+    NAMES "sycl${sycl_runtime_version}"
+    HINTS ${SYCL_LIBRARY_DIR}
+    NO_DEFAULT_PATH
+  )
+  if(SYCL_LIBRARY STREQUAL "SYCL_LIBRARY-NOTFOUND")
+    message(FATAL_ERROR "Cannot find a SYCL library on Windows")
+  endif()
+endif()
 
 find_library(
   OCL_LIBRARY

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 import os
 import pathlib
@@ -136,6 +137,8 @@ class MultiKernelState:
         buf.writeline("])")
 
         wrapper.header.splice(buf)
+        if config.triton.autotune_at_compile_time:
+            wrapper.kernel_autotune_defs.splice(buf)
 
         return multi_kernel_name
 
@@ -171,6 +174,12 @@ class MultiKernel:
         for the multi-kernel.
         """
         assert kernel_name == self.kernel_name
+        V.graph.wrapper_code.write_triton_header_once()
+        _, call_args, _, arg_types = self.kernels[0].args.python_argdefs()
+        for kernel in self.kernels[1:]:
+            _, other_call_args, _, other_arg_types = kernel.args.python_argdefs()
+            assert call_args == other_call_args
+            assert arg_types == other_arg_types
 
         grid: List[Any] = []
 
@@ -181,18 +190,15 @@ class MultiKernel:
             kernel_name = self.kernels[picked_kernel].kernel_name
 
         # numels for all subkernels should be the same. Use kernels[0] here
-        call_args, arg_types = self.kernels[0].get_call_args()
         self.kernels[0].add_numel_to_call_args_and_grid(
             kernel_name, call_args, arg_types, grid
         )
 
         grid = V.graph.wrapper_code.generate_default_grid(kernel_name, grid)
-        current_device = V.graph.scheduler.get_current_device_or_throw()
         V.graph.wrapper_code.generate_kernel_call(
             kernel_name,
             call_args,
             grid,
-            current_device.index,
             arg_types=arg_types,
         )
 

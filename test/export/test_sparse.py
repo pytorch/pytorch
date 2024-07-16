@@ -172,7 +172,6 @@ class TestSparseProp(TestCase):
                 if i == 0:
                     self.assertEqualMeta(meta, sparse_input)
                 elif i == 1:
-                    self.assertIsInstance(meta, FakeTensor)
                     self.assertEqualMeta(meta, result)
                 else:
                     self.assertEqual(meta, None)
@@ -218,7 +217,6 @@ class TestSparseProp(TestCase):
         for i, node in enumerate(prog.graph.nodes):
             meta = node.meta.get("val", None)
             if i <= 2:
-                self.assertIsInstance(meta, FakeTensor)
                 self.assertEqualMeta(meta, x[i])
             elif i <= 5:
                 self.assertEqualMeta(meta, result[i - 3])

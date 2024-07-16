@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""This package adds support for device memory management implemented in CUDA."""
 
 import collections
@@ -9,6 +10,7 @@ import warnings
 from inspect import signature
 
 from typing import Any, Dict, Optional, Tuple, Union
+from typing_extensions import deprecated
 
 import torch
 from torch import _C
@@ -446,21 +448,21 @@ def max_memory_reserved(device: Union[Device, int] = None) -> int:
     return memory_stats(device=device).get("reserved_bytes.all.peak", 0)
 
 
+@deprecated(
+    "`torch.cuda.memory_cached` has been renamed to `torch.cuda.memory_reserved`",
+    category=FutureWarning,
+)
 def memory_cached(device: Union[Device, int] = None) -> int:
     r"""Deprecated; see :func:`~torch.cuda.memory_reserved`."""
-    warnings.warn(
-        "torch.cuda.memory_cached has been renamed to torch.cuda.memory_reserved",
-        FutureWarning,
-    )
     return memory_reserved(device=device)
 
 
+@deprecated(
+    "`torch.cuda.max_memory_cached` has been renamed to `torch.cuda.max_memory_reserved`",
+    category=FutureWarning,
+)
 def max_memory_cached(device: Union[Device, int] = None) -> int:
     r"""Deprecated; see :func:`~torch.cuda.max_memory_reserved`."""
-    warnings.warn(
-        "torch.cuda.max_memory_cached has been renamed to torch.cuda.max_memory_reserved",
-        FutureWarning,
-    )
     return max_memory_reserved(device=device)
 
 

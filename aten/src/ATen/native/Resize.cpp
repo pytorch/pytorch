@@ -231,14 +231,6 @@ TensorImpl* resize_impl_cpu_(
   return _resize_impl_(self, size, stride, resize_storage);
 }
 
-static TensorImpl* resize_impl_meta_(
-    TensorImpl* self,
-    c10::SymIntArrayRef size,
-    at::OptionalSymIntArrayRef stride,
-    bool resize_storage = true) {
-  return _resize_impl_(self, size, stride, resize_storage);
-}
-
 template <typename T>
 const Tensor& _resize_(
     const Tensor& self,
@@ -247,7 +239,7 @@ const Tensor& _resize_(
   auto* self_ = self.unsafeGetTensorImpl();
   int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().sym_nbytes().maybe_as_int().value_or(-1) : 0;
   // NOLINTNEXTLINE(bugprone-argument-comment)
-  _resize_impl_<T>(self_, size, /*strides=*/c10::nullopt, true);
+  _resize_impl_<T>(self_, size, /*strides=*/std::nullopt, true);
   if (optional_memory_format.has_value()) {
     auto memory_format =
         optional_memory_format.value();
