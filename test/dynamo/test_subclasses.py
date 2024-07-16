@@ -1614,6 +1614,32 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         self.assertEqual(grad, ref_grad)
 
         #
+        # Fancy mixed case
+        #
+        def fn(nt, values, offsets):
+            nt1 = torch.nested.nested_tensor_from_jagged(values * 2, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values * 3, offsets)
+            return nt1 + nt2 + nt
+
+        values = torch.randn(9, 5).requires_grad_(True)
+        out = torch.compile(fn, fullgraph=True, backend="aot_eager")(
+            nt, values, nt.offsets()
+        )
+
+        # Backward
+        (grad,) = torch.autograd.grad(
+            out, inputs=(values,), grad_outputs=(torch.ones_like(out),)
+        )
+
+        # Correctness
+        ref_out = fn(nt, values, nt.offsets())
+        (ref_grad,) = torch.autograd.grad(
+            ref_out, inputs=(values,), grad_outputs=(torch.ones_like(ref_out),)
+        )
+        self.assertEqual(out, ref_out)
+        self.assertEqual(grad, ref_grad)
+
+        #
         # Binary op guarding
         #
         def fn(values, offsets, offsets2):
