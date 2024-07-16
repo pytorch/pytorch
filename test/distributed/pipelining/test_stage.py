@@ -221,7 +221,6 @@ class StageTest(MultiProcContinousTest):
             self.rank,
             self.world_size,
             self.device,
-            input_args=x.chunk(chunks)[0],
         )
 
         # Attach to a schedule
@@ -357,6 +356,24 @@ class StageTest(MultiProcContinousTest):
             stage_without_dw_builder.backward_one_chunk(
                 bwd_chunk_id=0, full_backward=False
             )
+
+    def test_stage_init_buffers(self):
+        print(f"{self.rank=}, {self.device=}")
+        stage = PipelineStage(
+            torch.nn.Linear(10, 10),
+            self.rank,
+            self.world_size,
+            self.device,
+        )
+        self.assertEqual(stage.submod.in_features, 10)
+        self.assertEqual(stage.submod.out_features, 10)
+        args = [torch.rand((3, 10)).to(self.device)]
+        kwargs = {}
+        num_microbatches = 3
+        stage.has_backward = True
+        stage.init_buffers(num_microbatches, args, kwargs)
+        dist.barrier()
+        print(f"Rank {self.rank} completed")
 
 
 instantiate_parametrized_tests(StageTest)
