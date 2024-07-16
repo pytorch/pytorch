@@ -34,6 +34,7 @@ register_log(
 )
 register_log("pp", ["torch.distributed.pipelining"])
 register_log("fsdp", ["torch.distributed.fsdp", "torch.distributed._composable.fsdp"])
+register_log("dtensor", ["torch.distributed._tensor", "torch.distributed.tensor"])
 register_log("onnx", "torch.onnx")
 register_log(
     "export", ["torch._dynamo", "torch.export", *DYNAMIC, "torch._export.converter"]
@@ -151,6 +152,11 @@ register_artifact(
 register_artifact(
     "sym_node",
     "Logs extra info for various SymNode operations",
+    off_by_default=True,
+)
+register_artifact(
+    "trace_shape_events",
+    "Logs traces for every ShapeEnv operation that we record for replay",
     off_by_default=True,
 )
 
