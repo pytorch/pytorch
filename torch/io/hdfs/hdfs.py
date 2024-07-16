@@ -1,8 +1,10 @@
 from urllib import parse
 from pyarrow import fs
 
+from ..base_io import BaseIO
 
-class HDFSIO():
+
+class HDFSIO(BaseIO):
     def __init__(self, url: str, mode) -> None:
         parse_result = parse.urlparse(url, scheme='hdfs')
         self.path = parse_result.path
@@ -30,25 +32,9 @@ class HDFSIO():
 
     def readline(self, size: int | None = -1, /) -> bytes:
         if size < 0:
-            line = self._readline()
+            line = self._readline(self.read)
         else:
             line = self.read(size)
-
-        return line
-
-    def _readline(self):
-        # line terminator is always b'\n' for binary files
-        line = bytearray()
-        while True:
-            char = self.read(1)
-            if char == b'\n':
-                line += b'\n'
-                break
-
-            if char == b'':
-                break
-
-            line += char
 
         return line
 
