@@ -12,6 +12,7 @@ from torch.ao.quantization import (
     NUMERIC_DEBUG_HANDLE_KEY,
     prepare_for_propagation_comparison,
     extract_results_from_loggers,
+    compare_results,
 )
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
@@ -152,12 +153,13 @@ class TestNumericDebugger(TestCase):
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
         m = convert_pt2e(m)
-        debug_handle_map = _extract_debug_handles(m)
         m_quant_logger = prepare_for_propagation_comparison(m)
 
         m_ref_logger(*example_inputs)
         m_quant_logger(*example_inputs)
-        results = extract_results_from_loggers(m_ref_logger, m_quant_logger)
-        for node, node_summary in results.items():
+        ref_results = extract_results_from_loggers(m_ref_logger)
+        quant_results = extract_results_from_loggers(m_quant_logger)
+        comparison_results = compare_results(ref_results, quant_results)
+        for node, node_summary in comparison_results.items():
             if len(node_summary.results) > 0:
                 self.assertGreaterEqual(node_summary.results[0].sqnr, 35)

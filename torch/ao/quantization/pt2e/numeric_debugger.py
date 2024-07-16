@@ -9,7 +9,7 @@ from torch.ao.ns.fx.utils import compute_sqnr
 from torch.nn import functional as F
 
 
-__all__ = ["generate_numeric_debug_handle", "NUMERIC_DEBUG_HANDLE_KEY", "prepare_for_propagation_comparison", "extract_results_from_loggers"]
+__all__ = ["generate_numeric_debug_handle", "NUMERIC_DEBUG_HANDLE_KEY", "prepare_for_propagation_comparison", "extract_results_from_loggers", "compare_results"]
 
 NUMERIC_DEBUG_HANDLE_KEY = "_numeric_debug_handle"
 
@@ -148,44 +148,34 @@ def _module_stack_to_str(module_stack: object) -> str:
         return str(module_stack)
 
 
-def extract_results_from_loggers(
-    ref_model: GraphModule,
-    actual_model: GraphModule,
-) -> Dict[str, NodeAccuracySummary]:
-    """For each model, extract the comparison of tensors for each debug handle.
-    The first model is the reference, the second is after applying a transform.
+def extract_results_from_loggers(model: GraphModule) -> Dict[int, Tuple[str, object, List[torch.Tensor]]]:
+    """For a given model, extract the tensors stats and related information for each debug handle.
 
     Returns:
-        A dict is keyed by the node name from the reference (first) model given,
-        and the values are a summary of all the tensors that passed through each
-    logger and statistics about how different they are from each other."""
+        A dict is keyed by the debug_handle id and the values are a list of Tensors recorded
+        in loggers"""
     # Results maps debug handle to a tensor list for each model being compared.
-    ref_handles: Dict[str, Tuple[str, object, List[torch.Tensor]]] = {}
-    actual_handles: Dict[str, Tuple[str, object, List[torch.Tensor]]] = {}
-    for _name, module in ref_model.named_children():
+    handles: Dict[int, Tuple[str, object, List[torch.Tensor]]] = {}
+    for _name, module in model.named_children():
         if isinstance(module, OutputLogger) and len(module.stats) > 0:
-            ref_handles[module.debug_handle] = (
-                module.node_name,
-                module.nn_module_stack,
-                module.stats,
-            )
-    for _name, module in actual_model.named_children():
-        if isinstance(module, OutputLogger) and len(module.stats) > 0:
-            actual_handles[module.debug_handle] = (
+            handles[module.debug_handle] = (
                 module.node_name,
                 module.nn_module_stack,
                 module.stats,
             )
 
+    return handles
+
+def compare_results(ref_results, actual_results):
     comparisons = {}
-    for debug_handle, (ref_name, ref_stack, ref_stats) in ref_handles.items():
-        if debug_handle not in actual_handles:
+    for debug_handle, (ref_name, ref_stack, ref_stats) in ref_results.items():
+        if debug_handle not in actual_results:
             logging.debug(
                 "Cannot compare for handle %s because it wasn't found in the transformed model",
                 debug_handle,
             )
             continue
-        actual_name, actual_stack, actual_stats = actual_handles[debug_handle]
+        actual_name, actual_stack, actual_stats = actual_results[debug_handle]
         comparisons[ref_name] = NodeAccuracySummary(
             handle=debug_handle,
             actual_node_name=actual_name,
