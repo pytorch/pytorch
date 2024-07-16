@@ -994,14 +994,13 @@ struct HelperInterpBase {
     double scale = area_pixel_compute_scale<double>(
         input_size, output_size, align_corners, opt_scale);
 
-    std::vector<Tensor> indices_weights;
-    double wt_max;
-    std::tie(indices_weights, interp_size, wt_max) = HelperInterpBase::_compute_index_ranges_weights<double, aa_filter_fn_t, sizeof(int16_t)>(
+    auto [indices_weights, aligned_interp_size, wt_max] = HelperInterpBase::_compute_index_ranges_weights<double, aa_filter_fn_t, sizeof(int16_t)>(
         input_size, output_size, stride, ndims, reshape_dim, scale, interp_size, aa_filter_fn, antialias, align_corners);
+    interp_size = aligned_interp_size;
 
     // Rescale float weights to int16 and compute weights precision
     auto weights_f64 = indices_weights[3];
-    double * data_f64 = weights_f64.data_ptr<double>();
+    double * data_f64 = weights_f64. template data_ptr<double>();
 
     unsigned int weights_precision = 0;
     for (weights_precision = 0; weights_precision < 22; ++weights_precision) {
@@ -1012,7 +1011,6 @@ struct HelperInterpBase {
 
     // Rescale float values to int16
     int16_t * data_i16 = (int16_t *) data_f64;
-    auto aligned_interp_size = interp_size;
 
     if (align_i32) {
       // We should respect int32 alignment as we will load int16 data as int32
