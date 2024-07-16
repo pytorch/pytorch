@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 from dataclasses import dataclass
-from typing import List, Tuple, Union
+from typing import Any, List, Tuple, Union
 
 import torch
 from torch import fx
@@ -57,7 +57,7 @@ class PipeliningShapeError(RuntimeError):
     """Shape mismatch between configured and runtime values."""
 
 
-def validate_tensor_metadata(desc, expected, given):
+def validate_tensor_metadata(desc, expected: torch.Tensor, given: torch.Tensor):
     if not expected.shape == given.shape:
         raise PipeliningShapeError(
             f"{desc} has a shape mismatch: expected {expected.shape} actual {given.shape}"
@@ -72,19 +72,38 @@ def validate_tensor_metadata(desc, expected, given):
         )
 
 
-def validate_tensors_metadata(
+def validate_arguments(
     desc,
-    expected_tensors: Union[List[torch.Tensor], Tuple[torch.Tensor, ...]],
-    actual_tensors: Union[List[torch.Tensor], Tuple[torch.Tensor, ...]],
+    expected: Union[List[Any], Tuple[Any, ...]],
+    actual: Union[List[Any], Tuple[Any, ...]],
 ):
-    if len(expected_tensors) != len(actual_tensors):
+    if len(expected) != len(actual):
         raise PipeliningShapeError(
-            f"{desc}: Number of values ({len(actual_tensors)}) does not match expected number ({len(expected_tensors)})"
+            f"{desc}: Number of values ({len(expected)}) does not match expected number ({len(actual)})"
         )
-    for i in range(len(expected_tensors)):
-        validate_tensor_metadata(
-            f"{desc}: value {i}", expected_tensors[i], actual_tensors[i]
-        )
+
+    for i in range(len(expected)):
+        expected_item = expected[i]
+        actual_item = actual[i]
+        # Check if both items are tensors and validate them
+        if isinstance(expected_item, torch.Tensor) and isinstance(
+            actual_item, torch.Tensor
+        ):
+            validate_tensor_metadata(f"{desc}: value {i}", expected_item, actual_item)
+        # Add more type checks as needed for other data types
+        elif isinstance(expected_item, (list, tuple)) and isinstance(
+            actual_item, (list, tuple)
+        ):
+            if len(expected_item) != len(actual_item):
+                raise PipeliningShapeError(
+                    f"{desc}: value {i} list/tuple length mismatch: expected {len(expected_item)}, actual {len(actual_item)}"
+                )
+            # Recursively validate list/tuple elements
+            validate_arguments(f"{desc}: value {i}", expected_item, actual_item)
+        elif type(expected_item) != type(actual_item):
+            raise PipeliningShapeError(
+                f"{desc}: value {i} type mismatch: expected {type(expected_item)}, actual {type(actual_item)}"
+            )
 
 
 @dataclass
