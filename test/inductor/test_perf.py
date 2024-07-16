@@ -220,7 +220,7 @@ class NumBytesMetricTests(TestCase):
         inp = [T(10, 10, 10), T(10, 10, 10)]
         self.assertExpectedInline(count_numel(f, *inp), """2600""")
 
-    def test_cat_pointwise_elias(self):
+    def test_cat_pointwise(self):
         def f(a, b):
             return torch.cat([torch.softmax(a, dim=-1), torch.softmax(b, dim=-1)])
 
