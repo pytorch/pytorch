@@ -608,19 +608,24 @@ class TestCustomOp(CustomOpTestCaseBase):
         def a(x: Tensor) -> Tensor:
             return torch.empty([])
 
-        self.assertExpectedInline(infer_schema(a), """(Tensor x) -> Tensor""")
+        self.assertExpectedInline(
+            infer_schema(a, mutates_args=()), """(Tensor x) -> Tensor"""
+        )
 
         def kwonly1(x: Tensor, *, y: int, z: float) -> Tensor:
             return torch.empty([])
 
         self.assertExpectedInline(
-            infer_schema(kwonly1), """(Tensor x, *, SymInt y, float z) -> Tensor"""
+            infer_schema(kwonly1, mutates_args=()),
+            """(Tensor x, *, SymInt y, float z) -> Tensor""",
         )
 
         def kwonly2(*, y: Tensor) -> Tensor:
             return torch.empty([])
 
-        self.assertExpectedInline(infer_schema(kwonly2), """(*, Tensor y) -> Tensor""")
+        self.assertExpectedInline(
+            infer_schema(kwonly2, mutates_args=()), """(*, Tensor y) -> Tensor"""
+        )
 
         def b(
             x: Tensor,
@@ -634,7 +639,7 @@ class TestCustomOp(CustomOpTestCaseBase):
             return torch.empty([]), 1, 0.1, True
 
         self.assertExpectedInline(
-            infer_schema(b),
+            infer_schema(b, mutates_args=()),
             """(Tensor x, SymInt y, bool z, float a, ScalarType b, Device c, Scalar d) -> (Tensor, SymInt, float, bool)""",
         )
 
@@ -647,7 +652,7 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [torch.empty([])]
 
         self.assertExpectedInline(
-            infer_schema(c),
+            infer_schema(c, mutates_args=()),
             """(Tensor x, Tensor[] y, Tensor? z, Tensor?[] w) -> Tensor[]""",
         )
 
@@ -655,18 +660,20 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [torch.empty([])], torch.empty([])
 
         self.assertExpectedInline(
-            infer_schema(d), """(Tensor x) -> (Tensor[], Tensor)"""
+            infer_schema(d, mutates_args=()), """(Tensor x) -> (Tensor[], Tensor)"""
         )
 
         def e() -> Tensor:
             return torch.empty([])
 
-        self.assertExpectedInline(infer_schema(e), """() -> Tensor""")
+        self.assertExpectedInline(infer_schema(e, mutates_args=()), """() -> Tensor""")
 
         def f(x: Tensor) -> None:
             pass
 
-        self.assertExpectedInline(infer_schema(f), """(Tensor x) -> ()""")
+        self.assertExpectedInline(
+            infer_schema(f, mutates_args=()), """(Tensor x) -> ()"""
+        )
 
         def g(
             x: Tensor, y: List[Tensor], z: List[Tensor], w: List[Optional[Tensor]]
@@ -674,7 +681,8 @@ class TestCustomOp(CustomOpTestCaseBase):
             pass
 
         self.assertExpectedInline(
-            infer_schema(g), """(Tensor x, Tensor[] y, Tensor[] z, Tensor?[] w) -> ()"""
+            infer_schema(g, mutates_args=()),
+            """(Tensor x, Tensor[] y, Tensor[] z, Tensor?[] w) -> ()""",
         )
 
         self.assertExpectedInline(
@@ -703,12 +711,18 @@ class TestCustomOp(CustomOpTestCaseBase):
             pass
 
         self.assertExpectedInline(
-            infer_schema(h),
+            infer_schema(h, mutates_args=()),
             (
                 """(Tensor x, SymInt? a=None, float b=3.14, bool c=True, SymInt d=3, str e="foo", """
                 """ScalarType f=float32, ScalarType g=float32, ScalarType h=int32, Device i="cpu:0", Device j="cpu") -> ()"""
             ),
         )
+
+        def foo_impl(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        schema = torch.library.infer_schema(foo_impl, op_name="myop", mutates_args={})
+        self.assertExpectedInline(schema, "myop(Tensor x) -> Tensor")
 
     def test_infer_schema_unsupported(self):
         with self.assertRaisesRegex(ValueError, "varargs"):
@@ -716,28 +730,28 @@ class TestCustomOp(CustomOpTestCaseBase):
             def foo(*args):
                 raise NotImplementedError
 
-            infer_schema(foo)
+            infer_schema(foo, mutates_args=())
 
         with self.assertRaisesRegex(ValueError, "varkwargs"):
 
             def foo(**kwargs):
                 raise NotImplementedError
 
-            infer_schema(foo)
+            infer_schema(foo, mutates_args=())
 
         with self.assertRaisesRegex(ValueError, "must have a type annotation"):
 
             def foo(x):
                 raise NotImplementedError
 
-            infer_schema(foo)
+            infer_schema(foo, mutates_args=())
 
         with self.assertRaisesRegex(ValueError, "unsupported"):
 
             def foo(x: Tensor) -> Tuple[Tensor, ...]:
                 raise NotImplementedError
 
-            infer_schema(foo)
+            infer_schema(foo, mutates_args=())
 
         with self.assertRaisesRegex(ValueError, "can be mutated"):
 
@@ -3298,6 +3312,16 @@ Please use `add.register_fake` to add an fake impl.""",
         result = f(device="cpu")
         self.assertEqual(result.device, torch.device("cpu"))
         self.assertEqual(result, torch.ones(3))
+
+    def test_library_schema_infer(self):
+        def foo_impl(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        schema = torch.library.infer_schema(foo_impl, op_name="myop", mutates_args={})
+        self.assertExpectedInline(schema, "myop(Tensor x) -> Tensor")
+
+        schema = torch.library.infer_schema(foo_impl, mutates_args={})
+        self.assertExpectedInline(schema, "(Tensor x) -> Tensor")
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_set_kernel_enabled(self):

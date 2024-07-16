@@ -100,7 +100,7 @@ def process_function(f: NativeFunction) -> str | None:
                 # which would fail otherwise). We handle requires_grad explicitly here
                 # instead of passing it through to the kernel.
                 exprs.append(
-                    f"at::TensorOptions({arg.name}).requires_grad(c10::nullopt)"
+                    f"at::TensorOptions({arg.name}).requires_grad(::std::nullopt)"
                 )
                 # Manually set the requires_grad bit on the result tensor.
                 requires_grad = f"{arg.name}.requires_grad()"
