@@ -1,11 +1,13 @@
+# mypy: allow-untyped-defs
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed._tensor.placement_types import DTensorSpec, Placement
 from torch.distributed.device_mesh import DeviceMesh
+
 
 try:
     from torch.utils._cxx_pytree import tree_leaves, tree_map_only, TreeSpec
@@ -20,6 +22,9 @@ except ImportError:
 # Common type aliases
 ArgsType = Tuple[object, ...]
 KwargsType = Dict[str, object]
+
+PlacementList = List[Optional[Placement]]
+
 # ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type sould
 # be the same set of possibilities.
 OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
@@ -238,15 +243,24 @@ class OpSchema:
             with NO non-DTensor positional arguments (i.e. int/float/tuple, etc)
             mainly used by sharding propagation to propagate the output spec
         """
-        # filter out non-relevant values from args schema to get a clean spec list
-        # this would mainly be used by sharding propagation rules
-        if self.schema_info is not None and self.schema_info.needs_pytree:
-            return tuple(
-                item
-                for item in tree_leaves(self.args_schema)
-                if isinstance(item, DTensorSpec)
-            )
-        return tuple(item for item in self.args_schema if isinstance(item, DTensorSpec))
+        args = (
+            tree_leaves(self.args_schema)
+            if self.schema_info is not None and self.schema_info.needs_pytree
+            else self.args_schema
+        )
+        return tuple(item for item in args if isinstance(item, DTensorSpec))
+
+    @property
+    def args_strategy(self) -> Tuple[OpStrategy, ...]:
+        # filter out non-relevant values from args schema to get a clean OpStrategy list
+        # separate with args_spec for the ease of type annotation
+        # TODO: see if we should merge this with args_spec
+        args = (
+            tree_leaves(self.args_schema)
+            if self.schema_info is not None and self.schema_info.needs_pytree
+            else self.args_schema
+        )
+        return tuple(item for item in args if isinstance(item, OpStrategy))
 
     def __repr__(self) -> str:
         args_schema = ", ".join([str(arg_schema) for arg_schema in self.args_schema])

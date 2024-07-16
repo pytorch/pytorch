@@ -5,6 +5,7 @@ import torch
 import torch.distributed._functional_collectives as funcol
 from torch.distributed._tensor import (
     distribute_tensor,
+    DTensor,
     init_device_mesh,
     Replicate,
     Shard,
@@ -18,23 +19,30 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-def equal_forward(device_mesh, X, Y):
+funcol_py = torch.ops.c10d_functional
+
+
+def equal_allgather_forward(device_mesh, X, Y):
     eq = torch.tensor([torch.equal(X, Y)], device=X.device)
     eq_gather = funcol.all_gather_tensor(eq, 0, device_mesh)
     return torch.all(eq_gather).item()
 
 
-def mm_forward(device_mesh, W, X):
-    return torch.mm(W, X)
+def mm_all_gather_forward(device_mesh, A, B):
+    local_mm_result = torch.mm(A, B)
+    return funcol.all_gather_tensor(local_mm_result, 0, device_mesh).wait()
 
 
-def mm_allreduce_forward(device_mesh, W, X):
-    partial_sum_tensor = torch.mm(W, X)
-    reduced_tensor = funcol.all_reduce(partial_sum_tensor, "sum", device_mesh).wait()
-    return reduced_tensor
+def mm_forward(A, B):  # no device mesh needed since we don't do collective
+    return torch.mm(A, B)
 
 
-def mul_forward(device_mesh, X, scalar):
+def mm_allreduce_forward(device_mesh, A, B):
+    partial_sum_tensor = torch.mm(A, B)
+    return funcol.all_reduce(partial_sum_tensor, "sum", device_mesh).wait()
+
+
+def mul_forward(X, scalar):  # no device mesh needed since we don't do collective
     return torch.mul(X, scalar)
 
 
@@ -58,6 +66,7 @@ class TestLocalMap(DTensorTestBase):
 
         row_wise = [Shard(0)]  # row-wise sharding placements on 1-d mesh
         col_wise = [Shard(1)]  # col-wise sharding placements on 1-d mesh
+        replicate = [Replicate()]
         W_dt = distribute_tensor(
             W, device_mesh, col_wise
         )  # col-wisely sharded W tensor
@@ -70,12 +79,12 @@ class TestLocalMap(DTensorTestBase):
         # DTensors' `_local_tensor`.
         local_mm_allreduce_forward = local_map(
             mm_allreduce_forward,
-            out_placements=[Replicate()],
-            in_placements=(col_wise, row_wise),
+            out_placements=replicate,
+            in_placements=(None, col_wise, row_wise),
             device_mesh=device_mesh,
         )
         with comm_mode:
-            Y_dt = local_mm_allreduce_forward(W_dt, X_dt)
+            Y_dt = local_mm_allreduce_forward(device_mesh, W_dt, X_dt)
 
         # output redistribution to Replicate
         self.assertEqual(comm_mode.get_total_counts(), 1)
@@ -88,6 +97,7 @@ class TestLocalMap(DTensorTestBase):
     # check for `out_placements`
     @with_comms
     def test_local_map_out_placements(self):
+        # Test 1: wrap out into DTensor w/ `out_placements`
         device_mesh = init_device_mesh(
             device_type=self.device_type, mesh_shape=(self.world_size,)
         )
@@ -99,13 +109,39 @@ class TestLocalMap(DTensorTestBase):
         row_wise = [Shard(0)]
         X_dt = distribute_tensor(X, device_mesh, row_wise)
         Y_dt = distribute_tensor(Y, device_mesh, row_wise)
-        local_equal_forward = local_map(equal_forward, out_placements=None)
+        local_equal_allgather_forward = local_map(
+            equal_allgather_forward,
+            out_placements=None,
+        )
         with comm_mode:
-            equal_dt = local_equal_forward(X_dt, Y_dt)  # a bool
+            equal_dt = local_equal_allgather_forward(device_mesh, X_dt, Y_dt)  # a bool
 
         self.assertEqual(comm_mode.get_total_counts(), 1)
         self.assertTrue(not equal_dt)
         self.assertTrue(not (X.equal(Y)))
+
+        # Test 2: directly return out if no argument is DTensor
+        # matmul in DDP
+        replicate = [Replicate()]
+        X = torch.randn(
+            4 // self.world_size, 4, device=self.device_type, requires_grad=False
+        )
+        W = torch.randn(4, 4, device=self.device_type, requires_grad=False)
+        local_mm_all_gather_forward = local_map(
+            mm_all_gather_forward,
+            out_placements=row_wise,
+            in_placements=(None, row_wise, replicate),
+        )
+        with comm_mode:
+            Y = local_mm_all_gather_forward(device_mesh, X, W)
+
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+        self.assertEqual(
+            comm_mode.get_comm_counts()[funcol_py.all_gather_into_tensor], 1
+        )
+        X_replicate = funcol.all_gather_tensor(X, 0, device_mesh).wait()
+        Y_replicate = torch.mm(X_replicate, W)
+        self.assertEqual(Y, Y_replicate)  # Y is a torch.Tensor
 
     # check for `in_placements` handling
     @with_comms
@@ -173,6 +209,54 @@ class TestLocalMap(DTensorTestBase):
             self.assertTrue(placement.is_shard(dim=0))
         self.assertEqual(Y_dt.full_tensor(), Y)
 
+        # Test 4: `None` placements for Tensor input argument
+        X = torch.randn(16, 8, device=self.device_type, requires_grad=False)
+        W = torch.randn(8, 12, device=self.device_type, requires_grad=False)
+        X_dt = distribute_tensor(
+            X, device_mesh, row_wise
+        )  # row-wisely sharded X tensor
+        W_dt = distribute_tensor(W, device_mesh, replicate)  # replicate W tensor
+        local_mm_forward = local_map(
+            mm_forward,
+            out_placements=None,
+            in_placements=(None, None),
+            device_mesh=device_mesh,
+        )
+        with comm_mode:
+            Y_dt_local = local_mm_forward(X_dt.to_local(), W_dt.to_local())
+
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(
+            DTensor.from_local(Y_dt_local, device_mesh, row_wise).full_tensor(),
+            torch.mm(X, W),
+        )
+
+        # Test 5: Some placements for Tensor input argument
+        local_mm_forward = local_map(
+            mm_forward,
+            out_placements=None,
+            in_placements=(replicate, row_wise),
+            device_mesh=device_mesh,
+        )
+        with comm_mode:
+            Y_dt_local = local_mm_forward(X_dt.to_local(), W_dt.to_local())
+
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(
+            DTensor.from_local(Y_dt_local, device_mesh, row_wise).full_tensor(),
+            torch.mm(X, W),
+        )
+
+        # Test 6: expect error - `None` placements for DTensor input argument
+        local_mm_forward = local_map(
+            mm_forward,
+            out_placements=row_wise,
+            in_placements=(row_wise, None),
+            device_mesh=device_mesh,
+        )
+        with self.assertRaisesRegex(AssertionError, "expects placements"):
+            Y_dt = local_mm_forward(X_dt, W_dt)
+
     # check for `redistribute_inputs` handling
     @with_comms
     def test_local_map_redistribute(self):
@@ -188,6 +272,7 @@ class TestLocalMap(DTensorTestBase):
 
         row_wise = [Shard(0)]  # row-wise sharding placements on 1-d mesh
         col_wise = [Shard(1)]  # col-wise sharding placements on 1-d mesh
+        replicate = [Replicate()]
         W_dt = distribute_tensor(
             W, device_mesh, row_wise
         )  # row-wisely sharded W tensor which will be redistributed
@@ -198,13 +283,13 @@ class TestLocalMap(DTensorTestBase):
         # Test 1: allow input redistribution
         local_mm_allreduce_forward = local_map(
             mm_allreduce_forward,
-            out_placements=[Replicate()],
-            in_placements=(col_wise, row_wise),
+            out_placements=replicate,
+            in_placements=(None, col_wise, row_wise),
             device_mesh=device_mesh,
             redistribute_inputs=True,
         )
         with comm_mode:
-            Y_dt = local_mm_allreduce_forward(W_dt, X_dt)
+            Y_dt = local_mm_allreduce_forward(device_mesh, W_dt, X_dt)
 
         # 2 for input redistribution and 1 for output
         self.assertEqual(comm_mode.get_total_counts(), 3)
@@ -215,13 +300,13 @@ class TestLocalMap(DTensorTestBase):
         # Test 2: no input redistribution is allowed
         local_mm_allreduce_forward = local_map(
             mm_allreduce_forward,
-            out_placements=[Replicate()],
-            in_placements=(col_wise, row_wise),
+            out_placements=replicate,
+            in_placements=(None, col_wise, row_wise),
             device_mesh=device_mesh,
             redistribute_inputs=False,
         )
         with self.assertRaisesRegex(ValueError, "set redistribute_inputs=True"):
-            Y_dt = local_mm_allreduce_forward(W_dt, X_dt)
+            Y_dt = local_mm_allreduce_forward(device_mesh, W_dt, X_dt)
 
 
 if __name__ == "__main__":

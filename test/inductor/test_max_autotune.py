@@ -267,7 +267,7 @@ class TestMaxAutotune(TestCase):
                 num_put += 1
 
         cache_module = (
-            "triton.runtime.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend"
+            "triton.fb.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend"
             if config.is_fbcode()
             else "torch._inductor.remote_cache.RedisRemoteCacheBackend"
         )
@@ -316,7 +316,7 @@ class TestMaxAutotune(TestCase):
                 return None
 
             def hash_key(self) -> str:
-                return None
+                return str(hash(self))
 
             def output_node(self) -> "TensorBox":  # noqa: F821
                 return None
@@ -486,6 +486,7 @@ class TestMaxAutotune(TestCase):
         torch._export.aot_compile(fn, args=inputs)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
+    @skipIfRocm
     def test_precompilations(self):
         def fn(a, b, c):
             a = (a @ b) @ c
@@ -668,6 +669,16 @@ class TestMaxAutotune(TestCase):
             y = torch.randint(0, 10, (224,)).to(device="cuda")
             z = torch.randint(0, 10, (224,)).to(device="cuda")
             f(x, y, z)
+
+    def test_conv3d(self):
+        fn = torch.nn.functional.conv3d
+        image = torch.randn([1, 3, 8, 16, 32])
+        filt = torch.randn([3, 3, 7, 7, 7])
+
+        with config.patch({"max_autotune": True}):
+            expected = fn(image, filt)
+            actual = torch.compile(fn)(image, filt)
+            torch.testing.assert_close(actual, expected, atol=6e-5, rtol=0.001)
 
     def test_non_contiguous_input_mm(self):
         """

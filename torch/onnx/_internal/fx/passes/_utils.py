@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Common utility functions for FX passes.
 
 These functions should NOT be directly invoked outside of `passes` package.

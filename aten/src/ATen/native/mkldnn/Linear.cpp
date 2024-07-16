@@ -218,7 +218,7 @@ static Tensor mkldnn_linear_pointwise(
 
   const ideep::tensor mkldnn_input = itensor_view_from_dense(input_reshaped);
 
-  std::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
+  std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
     mkldnn_bias = itensor_from_tensor(bias);
   }
@@ -303,7 +303,7 @@ static Tensor mkldnn_linear_pointwise_binary(
   const ideep::tensor mkldnn_other = itensor_from_tensor(other_reshaped);
   const ideep::tensor mkldnn_input = itensor_view_from_dense(input_reshaped);
 
-  std::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
+  std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
     mkldnn_bias = itensor_from_tensor(bias);
   }
@@ -419,17 +419,6 @@ TORCH_LIBRARY_IMPL(mkl, CPU, m) {
 
 TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("mkl::_mkl_linear"), TORCH_FN(mkl_linear));
-}
-
-#else // AT_MKL_ENABLED
-
-static Tensor mkl_linear(
-    const Tensor& self,
-    const Tensor& mkl_weight_t,
-    const Tensor& origin_weight_t,
-    const std::optional<Tensor>& bias_opt,
-    const int64_t prepack_batch_size) {
-  TORCH_CHECK(false, "mkl_linear: ATen not compiled with MKL support");
 }
 
 #endif// AT_MKL_ENABLED

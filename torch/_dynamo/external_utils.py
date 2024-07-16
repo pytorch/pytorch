@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # This module contains functions that *will be allowed* by dynamo
 
 import functools
@@ -95,6 +96,25 @@ def call_backward(backward_c_function, saved_tensors, *args):
 
 def untyped_storage_size(x: torch.Tensor):
     return x.untyped_storage().size()
+
+
+class FakeCompiledAutogradEngine:
+    @staticmethod
+    def queue_callback(final_callbacks, cb):
+        final_callbacks.append(cb)
+
+    @staticmethod
+    def exec_final_callbacks(final_callbacks):
+        i = 0
+        while i < len(final_callbacks):
+            cb = final_callbacks[i]
+            cb()
+            i += 1
+        final_callbacks.clear()
+
+    @staticmethod
+    def _exec_final_callbacks_stub():
+        pass
 
 
 def call_hook_from_backward_state(*args, bw_state, hook_name: str, **kwargs):

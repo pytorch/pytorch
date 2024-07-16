@@ -6,6 +6,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type_base.h>
+#include <c10/macros/Macros.h>
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
@@ -491,13 +492,7 @@ TEST(ControlFlowTest, Basic) {
   ASSERT_EQ(256, run_binary("while_test", 2, 0));
 }
 
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#define HAS_ASANUBSAN 1
-#endif
-#endif
-
-#ifndef HAS_ASANUBSAN
+#if !(C10_ASAN_ENABLED || C10_UBSAN_ENABLED)
 // This test fails vptr UBSAN checks
 
 TEST(ProtoTest, Basic) {
@@ -1942,7 +1937,7 @@ TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   ASSERT_NE(guard, nodes.end());
   ASSERT_EQ(
       guard->input()->type()->expectRef<TensorType>().sizes().size(),
-      c10::nullopt);
+      std::nullopt);
   checkShape(*guard, {2, 3}, false);
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
   int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
@@ -2912,7 +2907,7 @@ TEST(TestConstant, TensorGrad) {
   auto graph = std::make_shared<Graph>();
   IValue ten = torch::randn({3, 5}).requires_grad_(true);
   auto con = tryInsertConstant(*graph, ten);
-  ASSERT_TRUE(con == c10::nullopt);
+  ASSERT_TRUE(con == std::nullopt);
 }
 
 TEST(TestMutation, Basic) {

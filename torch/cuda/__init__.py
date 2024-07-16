@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""
 This package adds support for CUDA tensor types.
 
@@ -127,7 +128,7 @@ def is_available() -> bool:
         return torch._C._cuda_getDeviceCount() > 0
 
 
-def is_bf16_supported():
+def is_bf16_supported(including_emulation: bool = True):
     r"""Return a bool indicating if the current CUDA/ROCm device supports dtype bfloat16."""
     # Check for ROCm, if true return true, no ROCM_VERSION check required,
     # since it is supported on AMD GPU archs.
@@ -145,6 +146,9 @@ def is_bf16_supported():
         and torch.cuda.get_device_properties(device).major >= 8
     ):
         return True
+
+    if not including_emulation:
+        return False
 
     # Finally try to create a bfloat16 device.
     return _check_bf16_tensor_supported(device)
@@ -333,6 +337,59 @@ def _lazy_init():
 
 
 def cudart():
+    r"""Retrieves the CUDA runtime API module.
+
+
+    This function initializes the CUDA runtime environment if it is not already
+    initialized and returns the CUDA runtime API module (_cudart). The CUDA
+    runtime API module provides access to various CUDA runtime functions.
+
+    Args:
+        ``None``
+
+    Returns:
+        module: The CUDA runtime API module (_cudart).
+
+    Raises:
+        RuntimeError: If CUDA cannot be re-initialized in a forked subprocess.
+        AssertionError: If PyTorch is not compiled with CUDA support or if libcudart functions are unavailable.
+
+    Example of CUDA operations with profiling:
+        >>> import torch
+        >>> from torch.cuda import cudart, check_error
+        >>> import os
+        >>>
+        >>> os.environ['CUDA_PROFILE'] = '1'
+        >>>
+        >>> def perform_cuda_operations_with_streams():
+        >>>     stream = torch.cuda.Stream()
+        >>>     with torch.cuda.stream(stream):
+        >>>         x = torch.randn(100, 100, device='cuda')
+        >>>         y = torch.randn(100, 100, device='cuda')
+        >>>         z = torch.mul(x, y)
+        >>>     return z
+        >>>
+        >>> torch.cuda.synchronize()
+        >>> print("====== Start nsys profiling ======")
+        >>> check_error(cudart().cudaProfilerStart())
+        >>> with torch.autograd.profiler.emit_nvtx():
+        >>>     result = perform_cuda_operations_with_streams()
+        >>>     print("CUDA operations completed.")
+        >>> check_error(torch.cuda.cudart().cudaProfilerStop())
+        >>> print("====== End nsys profiling ======")
+
+    To run this example and save the profiling information, execute:
+        >>> $ nvprof --profile-from-start off --csv --print-summary -o trace_name.prof -f -- python cudart_test.py
+
+    This command profiles the CUDA operations in the provided script and saves
+    the profiling information to a file named `trace_name.prof`.
+    The `--profile-from-start off` option ensures that profiling starts only
+    after the `cudaProfilerStart` call in the script.
+    The `--csv` and `--print-summary` options format the profiling output as a
+    CSV file and print a summary, respectively.
+    The `-o` option specifies the output file name, and the `-f` option forces the
+    overwrite of the output file if it already exists.
+    """
     _lazy_init()
     return _cudart
 
@@ -580,9 +637,13 @@ def set_stream(stream: Stream):
 
 def _parse_visible_devices() -> Union[List[int], List[str]]:
     r"""Parse CUDA_VISIBLE_DEVICES environment variable."""
-    var = os.getenv(
-        "CUDA_VISIBLE_DEVICES" if not torch.version.hip else "HIP_VISIBLE_DEVICES"
-    )
+    var = os.getenv("CUDA_VISIBLE_DEVICES")
+
+    if torch.version.hip:
+        hip_devices = os.getenv("HIP_VISIBLE_DEVICES")
+        if hip_devices is not None:
+            var = hip_devices
+
     if var is None:
         return list(range(64))
 
@@ -629,6 +690,8 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
 
 
 def _raw_device_count_amdsmi() -> int:
+    if not _HAS_PYNVML:  # If amdsmi is not available
+        return -1
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException as e:
@@ -659,6 +722,8 @@ def _raw_device_count_nvml() -> int:
 def _raw_device_uuid_amdsmi() -> Optional[List[str]]:
     from ctypes import byref, c_int, c_void_p, CDLL, create_string_buffer
 
+    if not _HAS_PYNVML:  # If amdsmi is not available
+        return None
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException:
@@ -1006,7 +1071,7 @@ def _get_amdsmi_handler(device: Optional[Union[Device, int]] = None):
 
 
 def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
-    r"""Return the amdsmi index of the device, taking HIP_VISIBLE_DEVICES into account."""
+    r"""Return the amdsmi index of the device, taking visible_devices into account."""
     idx = _get_device_index(device, optional=True)
     visible_devices = _parse_visible_devices()
     if type(visible_devices[0]) is str:
@@ -1043,7 +1108,7 @@ def _get_amdsmi_temperature(device: Optional[Union[Device, int]] = None) -> int:
 
 def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
+    return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
 
 
 def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
@@ -1462,7 +1527,7 @@ def _register_triton_kernels():
 _lazy_call(_register_triton_kernels)
 
 
-from . import amp, jiterator, nvtx, profiler, sparse
+from . import amp, jiterator, nvtx, profiler, sparse, tunable
 
 __all__ = [
     # Typed storage and tensors
@@ -1575,5 +1640,6 @@ __all__ = [
     "stream",
     "streams",
     "synchronize",
+    "tunable",
     "utilization",
 ]

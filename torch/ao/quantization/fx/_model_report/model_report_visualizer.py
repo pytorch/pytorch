@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from typing import Any, Set, Dict, List, Tuple, OrderedDict
 from collections import OrderedDict as OrdDict

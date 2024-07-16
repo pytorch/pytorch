@@ -1,13 +1,16 @@
+# mypy: allow-untyped-defs
 from typing import Dict, List, Optional, Union
 
 import torch
 from torch._C._distributed_rpc import _TensorPipeRpcBackendOptionsBase
+
 from . import constants as rpc_contants
 
 
 DeviceType = Union[int, str, torch.device]
 
 __all__ = ["TensorPipeRpcBackendOptions"]
+
 
 def _to_device(device: DeviceType) -> torch.device:
     device = torch.device(device)

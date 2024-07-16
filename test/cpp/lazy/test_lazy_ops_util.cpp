@@ -12,11 +12,6 @@ namespace torch {
 namespace lazy {
 namespace {
 
-bool IsLtcTensor(const at::Tensor& tensor) {
-  return dynamic_cast<torch::lazy::LTCTensorImpl*>(
-      tensor.unsafeGetTensorImpl());
-}
-
 std::unordered_set<std::string>* CreateIgnoredCounters() {
   std::unordered_set<std::string>* icounters =
       new std::unordered_set<std::string>();
@@ -184,14 +179,14 @@ void TestBackward(
         {sum},
         inputs_w_grad,
         /*grad_outputs=*/{},
-        /*retain_graph=*/c10::nullopt,
+        /*retain_graph=*/std::nullopt,
         /*create_graph=*/create_graph,
         /*allow_unused=*/true);
     xouts = torch::autograd::grad(
         {xsum},
         xinputs_w_grad,
         /*grad_outputs=*/{},
-        /*retain_graph=*/c10::nullopt,
+        /*retain_graph=*/std::nullopt,
         /*create_graph=*/create_graph,
         /*allow_unused=*/true);
     for (size_t i = 0; i < outs.size(); ++i) {

@@ -105,10 +105,6 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
-static Tensor contiguous(const Tensor & self) {
-  return contiguous(self, MemoryFormat::Contiguous);
-}
-
 Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
   if (self.is_contiguous(memory_format)) {
     return self;
