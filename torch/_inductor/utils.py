@@ -46,7 +46,6 @@ from unittest import mock
 import sympy
 
 import torch
-import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
@@ -281,9 +280,7 @@ def convert_shape_to_inductor(
     trivial. But for symbolic tensors, we need to map from SymIntNode into
     sympy.Expr.
     """
-    return [
-        i.node.expr if isinstance(i, torch.SymInt) else sympy.Integer(i) for i in lst
-    ]
+    return [sympy.sympify(i) for i in lst]
 
 
 def convert_shape_to_symint(
@@ -683,6 +680,7 @@ def get_first_incompatible_cudagraph_node(gm):
         forbidden_set.update(
             {
                 "aten._unsafe_index_put.default",
+                "aten._unsafe_masked_index_put_accumulate.default",
                 "aten.index_put.default",
                 "aten.index_put_.default",
                 "aten.scatter.src",
@@ -738,7 +736,7 @@ def clear_inductor_caches():
 
 
 @contextlib.contextmanager
-def fresh_inductor_cache(cache_entries=None):
+def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
     """
     Contextmanager that provides a clean tmp cachedir for inductor.
 
@@ -747,11 +745,12 @@ def fresh_inductor_cache(cache_entries=None):
     """
     clear_inductor_caches()
 
-    inductor_cache_dir = tempfile.mkdtemp()
+    inductor_cache_dir = tempfile.mkdtemp(dir=dir)
     try:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
         ):
+            log.debug("Using inductor cache dir %s", inductor_cache_dir)
             triton_cache_dir = os.path.join(inductor_cache_dir, "triton")
             with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
                 yield
@@ -766,7 +765,8 @@ def fresh_inductor_cache(cache_entries=None):
                                 if ".lock" not in f
                             }
                         )
-        shutil.rmtree(inductor_cache_dir)
+        if delete:
+            shutil.rmtree(inductor_cache_dir)
     except Exception:
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
@@ -1010,11 +1010,15 @@ def _use_autotune_backend(backend: str) -> bool:
 
 
 def use_triton_template(layout, *, enable_int32=False):
+    from .codegen.common import BackendFeature, has_backend_feature
+
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
-    return _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
-        "TRITON"
+    return (
+        _use_template_for_cuda(layout, layout_dtypes)
+        and _use_autotune_backend("TRITON")
+        and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
 
 
@@ -1046,6 +1050,92 @@ def use_cutlass_template(layout, m, n, k):
     return res
 
 
+@functools.lru_cache(None)
+def _rocm_native_device_arch_name(device):
+    return torch.cuda.get_device_properties(device).gcnArchName
+
+
+@functools.lru_cache(None)
+def try_import_ck_lib():
+    try:
+        import ck4inductor  # type: ignore[import]
+        from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
+            gen_ops_library,
+            gen_ops_preselected,
+        )
+        from ck4inductor.universal_gemm.op import (  # type: ignore[import]
+            CKGemmOperation,
+        )
+
+        package_dirname = os.path.dirname(ck4inductor.__file__)
+    except ImportError:
+
+        def gen_ops_library():
+            return []
+
+        def gen_ops_preselected():
+            return []
+
+        class CKGemmOperation:  # type: ignore[no-redef]
+            pass
+
+        package_dirname = None
+    return package_dirname, gen_ops_library, gen_ops_preselected, CKGemmOperation
+
+
+def use_ck_template(layout, m, n, k):
+    # config knobs check 1
+    if not use_max_autotune():
+        return False
+    # config knobs check 2
+    if not _use_autotune_backend("CK"):
+        return False
+    # platform check
+    if not torch.version.hip:
+        return False
+    # tensors must be on GPU
+    if not layout.device.type == "cuda":
+        return False
+    # hardware check
+    # if config arch list is not specified, get the native arch from the device properties
+    native_arch = _rocm_native_device_arch_name(layout.device)
+    requested_archs = {k.split(":")[0]: k for k in config.rocm.arch} or {
+        native_arch.split(":")[0]: native_arch
+    }
+    requested_supported_archs = [
+        requested_archs[k] for k in requested_archs.keys() & config.rocm.supported_arch
+    ]
+    if not requested_supported_archs:
+        return False
+    # supported input dtypes
+    if layout.dtype not in [torch.float16, torch.bfloat16]:
+        return False
+    # TBD: investigate if we need to disable backend based on number of available CUs similar to `is_big_gpu`
+    # check if shape is static and gemm size is not 0
+    from .virtualized import V
+
+    gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
+    if gemm_size <= 0:
+        return False
+    # TBD: investigate if backend needs to be disabled for small gemms similar to CUTLASS
+
+    ck_package_dirname, _, _, _ = try_import_ck_lib()
+
+    if not ck_package_dirname:
+        log.warning("Please pip install Composable Kernel package")
+        return False
+
+    if not config.rocm.ck_dir:
+        log.warning("Please set TORCHINDUCTOR_CK_DIR env variable")
+        return False
+
+    if ck_package_dirname != config.rocm.ck_dir:
+        log.warning("Invalid path to CK library")
+        return False
+
+    return True
+
+
 def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 
@@ -1053,6 +1143,7 @@ def _use_template_for_cpu(layout):
 def use_cpp_packed_gemm_template(layout, mat1, mat2):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
+    from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
     from .kernel.mm_common import mm_args
 
     if not _use_template_for_cpu(layout) or not _use_autotune_backend("CPP"):
@@ -1061,20 +1152,26 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     if not config.cpp.weight_prepack:
         return False
 
-    layout_dtypes = [torch.float32, torch.bfloat16, torch.half]
-    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2)
+    int8_gemm = mat1.get_dtype() == torch.uint8
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
+    m, n, k, layout, mat1, mat2 = mm_args(
+        mat1, mat2, out_dtype=layout.dtype if int8_gemm else None
+    )
     # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
         return False
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
+
+    output_dtype, _ = get_gemm_template_output_and_compute_dtype(mat1.get_dtype())
     micro_gemm = create_micro_gemm(
         "micro_gemm",
         m,
         n,
         k,
-        input_dtype=layout.dtype,
-        output_dtype=torch.float,
+        input_dtype=mat1.get_dtype(),
+        input2_dtype=mat2.get_dtype(),
+        output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
     )
     # TODO(jgong5): support n % n_block_size != 0
@@ -1524,6 +1621,13 @@ def use_scatter_fallback(
     src_device_type,
     src_is_tensor,
 ):
+    if (
+        op_overload.overloadpacket
+        in (torch.ops.aten.scatter_reduce_, torch.ops.aten.scatter_reduce)
+        and reduction_type is None
+    ):
+        return False
+
     reduce_ty = (
         "add" if op_overload.overloadpacket == torch.ops.aten.scatter_ else "sum"
     )
@@ -1683,12 +1787,22 @@ def aoti_compile_with_persistent_cache(
 
     type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
     supported_scalar_types = tuple(type_to_torch_dtype.keys())
-    flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
+    flattened_inputs = list(args) + list(kwargs.values())
     if not all(
-        isinstance(input, (supported_scalar_types, torch.Tensor))
+        isinstance(input, (supported_scalar_types, torch.Tensor, list))
         for input in flattened_inputs
     ):
-        raise NotImplementedError("Only support tensor, int, float, bool for now")
+        raise NotImplementedError(
+            "Only support tensor, tensor list, int, float, bool for now"
+        )
+
+    for input in flattened_inputs:
+        if isinstance(input, list) and not all(
+            isinstance(item, torch.Tensor) for item in input
+        ):
+            raise NotImplementedError(
+                "Regarding list, _impl_with_aoti_compile only support tensor list now."
+            )
 
     persistent_cache = aoti_eager_cache_dir(ns, device_type)
     if not persistent_cache.exists():
@@ -1718,30 +1832,59 @@ def aoti_compile_with_persistent_cache(
             )
 
             kernel_metadata_items = []
-            for input in flattened_inputs:
-                # TODO(Eikan): To add dynamic support
+
+            def extract_tensor_metadata(input: torch.Tensor) -> Dict[str, Any]:
                 metadata: Dict[str, Any] = {}
                 metadata["is_dynamic"] = dynamic
 
-                if isinstance(input, torch.Tensor):
-                    metadata["device_type"] = f"{input.device.type}"
-                    if is_cpu_device([input]):
-                        metadata["device_index"] = -1
-                    else:
-                        metadata["device_index"] = input.device.index
-                    metadata["dtype"] = f"{input.dtype}"
-                    metadata["sizes"] = list(input.size())
-                    metadata["strides"] = list(input.stride())
+                assert isinstance(input, torch.Tensor)
+                metadata["device_type"] = f"{input.device.type}"
+                if is_cpu_device([input]):
+                    metadata["device_index"] = -1
                 else:
-                    assert isinstance(input, supported_scalar_types)
-                    # Scalar tensor
-                    metadata["device_type"] = device_type
-                    metadata["device_index"] = -1 if device_type == "cpu" else 0
-                    metadata["dtype"] = f"{type_to_torch_dtype[type(input)]}"
-                    metadata["sizes"] = []
-                    metadata["strides"] = []
-                    metadata["scalar_value"] = input
+                    metadata["device_index"] = input.device.index
+                metadata["dtype"] = f"{input.dtype}"
+                metadata["sizes"] = list(input.size())
+                metadata["strides"] = list(input.stride())
+                metadata["requires_grad"] = input.requires_grad
+                metadata["dispatch_key_set"] = torch._C._dispatch_keys(input).raw_repr()
+                return metadata
 
+            def extract_scalar_metadata(
+                input: Union[int, float, bool]
+            ) -> Dict[str, Any]:
+                assert isinstance(input, supported_scalar_types)
+                metadata: Dict[str, Any] = {}
+                metadata["is_dynamic"] = dynamic
+                # Scalar tensor
+                metadata["device_type"] = device_type
+                metadata["device_index"] = -1 if device_type == "cpu" else 0
+                metadata["dtype"] = f"{type_to_torch_dtype[type(input)]}"
+                metadata["scalar_value"] = input
+                return metadata
+
+            def extract_tensor_list_metadata(
+                input: List[torch.Tensor],
+            ) -> Dict[str, Any]:
+                metadata_list = []
+                for item in input:
+                    assert isinstance(item, torch.Tensor)
+                    metadata_list.append(extract_tensor_metadata(item))
+
+                metadata: Dict[str, Any] = {}
+                metadata["tensor_list"] = metadata_list
+                return metadata
+
+            for idx, input in enumerate(flattened_inputs):
+                if isinstance(input, torch.Tensor):
+                    metadata = extract_tensor_metadata(input)
+                elif isinstance(input, list):
+                    assert all(isinstance(item, torch.Tensor) for item in input)
+                    metadata = extract_tensor_list_metadata(input)
+                else:
+                    metadata = extract_scalar_metadata(input)
+
+                metadata["arg_order"] = idx
                 kernel_metadata_items.append(metadata)
 
             kernel_meta_info: Dict[str, Any] = {}

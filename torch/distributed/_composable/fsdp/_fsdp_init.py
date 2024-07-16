@@ -4,10 +4,10 @@ from typing import List, Optional, Set, Tuple, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-
 from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.distributed.device_mesh import _get_device_handle
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 from ._fsdp_common import _is_composable_with_fsdp, FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_state import _get_module_fsdp_state
 
@@ -140,7 +140,8 @@ def _move_states_to_device(
             raise AssertionError(
                 f"Expects DTensor to be moved to {dtensor_mesh_type} but got {tensor.device}"
             )
-        if is_traceable_wrapper_subclass(tensor):
+        tensor_ = tensor
+        if is_traceable_wrapper_subclass(tensor_):
             with torch.no_grad():  # avoid autograd increasing C++ refcount by 1
                 tensor_on_device = nn.Parameter(tensor.to(device))
             torch.utils.swap_tensors(tensor, tensor_on_device)

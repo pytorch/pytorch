@@ -15,13 +15,18 @@ import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic import events, metrics
 from torch.distributed.elastic.agent.server.api import WorkerSpec
 from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
-from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs, LogsSpecs, SignalException
+from torch.distributed.elastic.multiprocessing import (
+    DefaultLogsSpecs,
+    LogsSpecs,
+    SignalException,
+)
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
 
-__all__ = ['LaunchConfig', 'elastic_launch', 'launch_agent']
+
+__all__ = ["LaunchConfig", "elastic_launch", "launch_agent"]
 
 logger = get_logger(__name__)
 
@@ -212,8 +217,8 @@ def launch_agent(
             "max_restarts": config.max_restarts,
             "monitor_interval": config.monitor_interval,
             "log_dir": config.logs_specs.root_log_dir,  # type: ignore[union-attr]
-            "metrics_cfg": config.metrics_cfg
-        }
+            "metrics_cfg": config.metrics_cfg,
+        },
     )
 
     rdzv_parameters = RendezvousParameters(

@@ -128,7 +128,7 @@ def is_available() -> bool:
         return torch._C._cuda_getDeviceCount() > 0
 
 
-def is_bf16_supported():
+def is_bf16_supported(including_emulation: bool = True):
     r"""Return a bool indicating if the current CUDA/ROCm device supports dtype bfloat16."""
     # Check for ROCm, if true return true, no ROCM_VERSION check required,
     # since it is supported on AMD GPU archs.
@@ -146,6 +146,9 @@ def is_bf16_supported():
         and torch.cuda.get_device_properties(device).major >= 8
     ):
         return True
+
+    if not including_emulation:
+        return False
 
     # Finally try to create a bfloat16 device.
     return _check_bf16_tensor_supported(device)
@@ -634,9 +637,13 @@ def set_stream(stream: Stream):
 
 def _parse_visible_devices() -> Union[List[int], List[str]]:
     r"""Parse CUDA_VISIBLE_DEVICES environment variable."""
-    var = os.getenv(
-        "CUDA_VISIBLE_DEVICES" if not torch.version.hip else "HIP_VISIBLE_DEVICES"
-    )
+    var = os.getenv("CUDA_VISIBLE_DEVICES")
+
+    if torch.version.hip:
+        hip_devices = os.getenv("HIP_VISIBLE_DEVICES")
+        if hip_devices is not None:
+            var = hip_devices
+
     if var is None:
         return list(range(64))
 
@@ -1064,7 +1071,7 @@ def _get_amdsmi_handler(device: Optional[Union[Device, int]] = None):
 
 
 def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
-    r"""Return the amdsmi index of the device, taking HIP_VISIBLE_DEVICES into account."""
+    r"""Return the amdsmi index of the device, taking visible_devices into account."""
     idx = _get_device_index(device, optional=True)
     visible_devices = _parse_visible_devices()
     if type(visible_devices[0]) is str:

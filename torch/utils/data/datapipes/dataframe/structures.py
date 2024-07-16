@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
-from torch.utils.data.datapipes.datapipe import DataChunk
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
+from torch.utils.data.datapipes.datapipe import DataChunk
 
-__all__ = ["DataChunkDF", ]
+
+__all__ = ["DataChunkDF"]
 
 
 class DataChunkDF(DataChunk):
