@@ -24,21 +24,7 @@ from torch.nn.attention._utils import _validate_sdpa_input
 
 __all__ = ["BlockMask", "flex_attention", "create_block_mask", "create_mask"]
 
-
-def _compose(*fs):
-    """Compose a sequence of score_mod functions."""
-
-    def compose2(f, g):
-        def inner(score, b, h, m, n):
-            return f(g(score, b, h, m, n), b, h, m, n)
-
-        return inner
-
-    return functools.reduce(compose2, fs)
-
-
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
-
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
 
 
@@ -243,7 +229,7 @@ class BlockMask:
         kv_indices: Tensor,
         full_kv_num_blocks: Optional[Tensor] = None,
         full_kv_indices: Optional[Tensor] = None,
-        BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
+        BLOCK_SIZE: Union[int, Tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
         mask_mod: Optional[_mask_mod_signature] = None,
     ):
         if kv_indices.dim() < 2:
@@ -570,8 +556,8 @@ def create_block_mask(
     fn: Callable,
     B: int,
     H: int,
-    M: int,
-    N: int,
+    Q_LEN: int,
+    KV_LEN: int,
     device: str = "cuda",
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
@@ -583,8 +569,8 @@ def create_block_mask(
         fn (Callable): score_mod or mask function.
         B (int): Batch size.
         H (int): Number of heads.
-        M (int): Sequence length of query.
-        N (int): Sequence length of key/value.
+        Q_LEN (int): Sequence length of query.
+        KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
         KV_BLOCK_SIZE (int): Block size of block mask for each query.
         Q_BLOCK_SIZE (int): Block size of block mask for each key/value.
@@ -594,29 +580,31 @@ def create_block_mask(
                             KV_BLOCK_SIZE, Q_BLOCK_SIZE) which represents the block mask.
     """
     mod_type = _get_mod_type(fn)
+    assert (
+        mod_type == _ModificationType.MASK_MOD
+    ), "create-block_mask requires a mask_mod function!"
     inner_func = _create_block_mask_inner
     # This is kind of a temporary hack to workaround some issues
     if _compile:
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
     with TransformGetItemToIndex():
         block_mask = inner_func(
-            fn, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE, mod_type
+            fn, B, H, Q_LEN, KV_LEN, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE, mod_type
         )
     return block_mask
 
 
-"""
+def _create_empty_block_mask(query, key, value) -> BlockMask:
+    r"""Default block mask for flex attention.
+
     The flex attention kernels are implemented using block sparsity,
     where only the unmasked blocks are computed to get the best perf.
     If users don't specify any block sparse mask info, we create this
     empty block sparse mask with all blocks unmasked as the default one.
-"""
-
-
-def _create_empty_block_mask(query, key, value) -> BlockMask:
+    """
     device = query.device
-    kv_len = key.size()[-2]
-    q_len = query.size()[-2]
+    kv_len: int = key.size()[-2]
+    q_len: int = query.size()[-2]
     return BlockMask(
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
@@ -649,13 +637,13 @@ def flex_attention(
             batch: Tensor,
             head: Tensor,
             q_idx: Tensor,
-            kv_idx: Tensor
+            k_idx: Tensor
         ) -> Tensor:
 
     Where:
         - ``score``: A scalar tensor representing the attention score,
           with the same data type and device as the query, key, and value tensors.
-        - ``batch``, ``head``, ``q_idx``, ``kv_idx``: Scalar tensors indicating
+        - ``batch``, ``head``, ``q_idx``, ``k_idx``: Scalar tensors indicating
           the batch index, head index, query index, and key/value index, respectively.
           These should have the ``torch.int`` data type and be located on the same device as the score tensor.
 
@@ -708,7 +696,7 @@ def flex_attention(
         return out
 
     if not torch._dynamo.is_dynamo_supported():
-        raise RuntimeError("flex_attention requires dynamo support.")
+        raise RuntimeError("flex_attention requires dynamo support")
 
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
@@ -717,54 +705,3 @@ def flex_attention(
                     flex_attention_hop, backend="eager", fullgraph=True
                 )(query, key, value, score_mod, block_mask.as_tuple(), scale=scale)
                 return out
-
-
-# Shim for some temporary BC
-_flex_attention = flex_attention
-_create_block_mask = create_block_mask
-
-"""Some common used score_mod functions for flex_attention in PyTorch."""
-
-
-def _causal(
-    score: Tensor,
-    batch: Tensor,
-    head: Tensor,
-    token_q: Tensor,
-    token_kv: Tensor,
-) -> Tensor:
-    return torch.where(token_q >= token_kv, score, float("-inf"))
-
-
-def _rel_bias(
-    score: Tensor,
-    batch: Tensor,
-    head: Tensor,
-    token_q: Tensor,
-    token_kv: Tensor,
-) -> Tensor:
-    return score + (token_q - token_kv)
-
-
-def _rel_causal(
-    score: Tensor,
-    batch: Tensor,
-    head: Tensor,
-    token_q: Tensor,
-    token_kv: Tensor,
-) -> Tensor:
-    return torch.where(token_q >= token_kv, score + (token_q - token_kv), float("-inf"))
-
-
-def _generate_alibi_bias(num_heads: int):
-    def _alibi_bias(
-        score: Tensor,
-        batch: Tensor,
-        head: Tensor,
-        token_q: Tensor,
-        token_kv: Tensor,
-    ) -> Tensor:
-        scale = torch.exp2(-((head + 1) * 8.0 / num_heads))
-        return score + (token_kv - token_q) * scale
-
-    return _alibi_bias
