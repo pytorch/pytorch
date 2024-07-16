@@ -437,6 +437,39 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(metrics.generated_kernel_count, 2)
 
+    @requires_gpu()
+    @requires_triton()
+    @config.patch({"max_autotune": True})
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_inductor_counters(self):
+        """
+        Test that we bump the inductor counters on a cache hit.
+        """
+
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        a = torch.rand(8, 32, device="cuda")
+        b = torch.rand(32, 8, device="cuda")
+
+        compiled_fn = torch.compile(fn)
+
+        counters.clear()
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
+
+        # Verify the "miss" case.
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+        # Verify the "hit" case
+        self.reset()
+        counters.clear()
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     def test_cache_clear(self):

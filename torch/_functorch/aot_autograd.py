@@ -20,7 +20,6 @@ from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-
 from . import config
 from ._aot_autograd.autograd_cache import (  # noqa: F401
     AOTAutogradCache,
@@ -589,7 +588,6 @@ def create_aot_dispatcher_function(
                 with ctx:
                     fw_metadata = run_functionalized_fw_and_collect_metadata(
                         flat_fn,
-                        static_input_indices=aot_config.static_input_indices,
                         keep_input_mutations=aot_config.keep_inference_input_mutations,
                         is_train=needs_autograd,
                         pre_dispatch=aot_config.pre_dispatch,
@@ -625,7 +623,6 @@ def create_aot_dispatcher_function(
                             keep_input_mutations=aot_config.keep_inference_input_mutations,
                             is_train=False,
                             pre_dispatch=aot_config.pre_dispatch,
-                            static_input_indices=aot_config.static_input_indices,
                         )(*fake_flat_args)
                     else:
                         fw_metadata = ViewAndMutationMeta(
@@ -639,7 +636,7 @@ def create_aot_dispatcher_function(
                             subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
                             is_train=False,
                             tokens=fw_metadata.tokens,
-                            static_input_indices=fw_metadata.static_input_indices,
+                            static_parameter_indices=fw_metadata.static_parameter_indices,
                         )
 
         if fw_metadata.num_intermediate_bases > 0:
@@ -944,10 +941,9 @@ def aot_module_simplified(
     # Next, the input args
     full_args.extend(args)
 
-    static_input_indices = []
     if hasattr(mod, "graph"):
         # Non dynamo entrypoints can get to here...
-        for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
+        for node in mod.graph.find_nodes(op="placeholder"):
             if hasattr(node, "_dynamo_source"):
                 # ... but not here!
                 if aot_autograd_arg_pos_to_source is None:
@@ -956,11 +952,6 @@ def aot_module_simplified(
                 assert source not in seen_sources, source
                 seen_sources.add(source)
                 aot_autograd_arg_pos_to_source.append(source)
-
-                if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
-                    "_dynamo_static_input_type", None
-                ):
-                    static_input_indices.append(pos)
 
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
@@ -982,7 +973,6 @@ def aot_module_simplified(
         keep_inference_input_mutations=keep_inference_input_mutations,
         dynamic_shapes=dynamic_shapes,
         aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source,
-        static_input_indices=static_input_indices,
         is_export=False,
         no_tangents=False,
         cache_key=None,
