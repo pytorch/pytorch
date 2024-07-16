@@ -1,17 +1,18 @@
 import argparse
 import random
 import time
-
 from typing import Any, Tuple
 
 from tqdm import tqdm  # type: ignore[import-untyped]
 
 import torch
 
+
 torch.set_default_device("cuda")
 
 from torch._inductor.fx_passes.pad_mm import get_alignment_size_dtype
 from torch._inductor.utils import fresh_inductor_cache
+
 
 # A100: 81920MiB
 # without a threshold we sometimes run out of memory
