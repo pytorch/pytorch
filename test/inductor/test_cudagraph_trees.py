@@ -1154,7 +1154,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             for _ in range(3):
                 out = foo(inp)
                 node = self.curr_node()
-                self.assertEqual(len(list(node.path_live_weakrefs())), 2)
+                self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
             @torch.compile(mode="reduce-overhead")
             def foo(x):
@@ -1986,6 +1986,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 fn_compiled = torch.compile(Foo(), mode="reduce-overhead")
                 for _ in range(3):
                     fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
+                    fn_compiled.param.grad = None
 
                 # Change static tensor address
                 fn_compiled.param.data = torch.rand([2, 2], device="cuda")
@@ -2022,11 +2023,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     fn_compiled = torch.compile(Foo(), mode="reduce-overhead")
                     for _ in range(3):
                         fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
+                        fn_compiled.param.grad = None
 
                     for _ in range(5):
                         # Change static tensor address
                         fn_compiled.param.data = torch.rand([2, 2], device="cuda")
                         fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
+                        fn_compiled.param.grad = None
 
             FileCheck().check_count(
                 "skipping cudagraph due to function 0 exceeding max re-recording limit (=0) "

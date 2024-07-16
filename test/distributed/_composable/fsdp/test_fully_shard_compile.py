@@ -84,7 +84,7 @@ class TestFullyShardCompile(FSDPTest):
         # Construct a dummy FSDPParamGroup, since we just want to test the `use_training_state` ctx manager.
         param_group = FSDPParamGroup(
             [],  # params: List[nn.Parameter],
-            torch.nn.Linear(1, 1),  # module: nn.Module,
+            (torch.nn.Linear(1, 1),),  # module: Tuple[nn.Module, ...],
             None,  # mesh_info: FSDPMeshInfo,
             None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
             None,  # device: torch.device,
