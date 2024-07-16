@@ -540,7 +540,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         is_qat=False,
         debug=False,
     ):
-        def recreate_m(m_eager, is_qat):
+        def recreate_m(m_eager, is_qat, run_convert_pt2e):
             m = copy.deepcopy(m_eager)
             m = capture_pre_autograd_graph(
                 m,
@@ -548,6 +548,11 @@ class X86InductorQuantTestCase(QuantizationTestCase):
             )
 
             m = prepare_qat_pt2e(m, quantizer) if is_qat else prepare_pt2e(m, quantizer)
+            # Calibrate
+            m(*example_inputs)
+            if run_convert_pt2e:
+                torch.ao.quantization.move_exported_model_to_eval(m)
+                m = convert_pt2e(m)
             return m
         m_eager = model.train() if is_qat else model.eval()
 
@@ -563,10 +568,11 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         m = prepare_qat_pt2e(m, quantizer) if is_qat else prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
-        # copy.deepcopy(m) fails, we should figure out why deepcopy fails.
-        prepare_model = recreate_m(m_eager, is_qat)
+        # copy.deepcopy(m) fails, we should figure out why deepcopy fails
+        prepare_model = recreate_m(m_eager, is_qat, False)
+        torch.ao.quantization.move_exported_model_to_eval(m)
         m = convert_pt2e(m)
-        convert_model = recreate_m(m_eager, is_qat)
+        convert_model = recreate_m(m_eager, is_qat, True)
         if debug:
             convert_model.print_readable(True)
         pt2_quant_output = m(*example_inputs)
