@@ -98,7 +98,7 @@ def _schedule_for_comm(
     name_to_snode = {}
     scores_0, scores_1, scores_2 = {}, {}, {}
     for idx, snode in enumerate(snodes):
-        for name in snode.get_names():
+        for name in snode.get_buffer_names():
             name_to_snode[name] = snode
             scores_0[name] = sys.maxsize
             scores_1[name] = 0

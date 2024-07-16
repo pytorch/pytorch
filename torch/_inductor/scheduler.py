@@ -975,7 +975,7 @@ def init_group_node(
 
     group_snode.min_order = min(x.min_order for x in group_snode.snodes)
     group_snode.max_order = max(x.max_order for x in group_snode.snodes)
-    group_snode.outputs_by_name: Dict[str, SchedulerBuffer] = {
+    group_snode.outputs_by_name = {
         buf.get_name(): buf for buf in group_snode.get_outputs()
     }
 
@@ -1155,6 +1155,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     ) -> Optional[BaseSchedulerNode]:
         producers = []
         for rd in consumer.read_writes.reads:
+            if isinstance(rd, dependencies.WeakDep):
+                continue
+
             if rd.name not in self.scheduler.name_to_buf:
                 continue
 
@@ -2464,7 +2467,9 @@ class Scheduler:
             why("template epilogue not satisfied")
             return False
 
-        if (node1.get_buffer_names() | node2.get_buffer_names()) & V.graph.no_fuse_buffer_names:
+        if (
+            node1.get_buffer_names() | node2.get_buffer_names()
+        ) & V.graph.no_fuse_buffer_names:
             why("fusion for buffer explicit disabled")
             return False
 
