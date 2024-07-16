@@ -267,11 +267,7 @@ class UniformValueConstantFolder(ConstantFolder):
                 return out
 
         # handle device_put op
-        if (
-            node.op == "call_function"
-            and hasattr(node.target, "overloadpacket")
-            and node.target.overloadpacket is prims.device_put
-        ):
+        if node.target == prims.device_put.default:
             return super(ConstantFolder, self).run_node(node)
 
         # constructors ops
