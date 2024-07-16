@@ -15,6 +15,9 @@ NUMERIC_DEBUG_HANDLE_KEY = "_numeric_debug_handle"
 
 
 def generate_numeric_debug_handle(graph_module: GraphModule) -> None:
+    """Attach numeric_debug_handle_id for all nodes in the model except for placeholder node
+       The graph nodes of input model is modified inplace.
+    """
     unique_id = 0
     for node in graph_module.graph.nodes:
         if node.op != "placeholder" and NUMERIC_DEBUG_HANDLE_KEY not in node.meta:
@@ -81,6 +84,13 @@ def _insert_logger(model: GraphModule, node: Node, debug_handle: str) -> Node:
 
 
 def prepare_for_propagation_comparison(model: GraphModule) -> GraphModule:
+    """Add output loggers to node that has numeric_debug_handle
+
+    Args:
+        model (GraphModule): original model
+    Returns:
+        a model with output loggers for all nodes that has numeric_debug_handle_id
+    """
     # don't change the original model
     model = copy.deepcopy(model)
     for n in model.graph.nodes:
@@ -166,7 +176,18 @@ def extract_results_from_loggers(model: GraphModule) -> Dict[int, Tuple[str, obj
 
     return handles
 
-def compare_results(ref_results, actual_results):
+def compare_results(ref_results: Dict[int, Tuple[str, object, List[torch.Tensor]]], actual_results: Dict[int, Tuple[str, object, List[torch.Tensor]]) -> Dict[int, NodeAccuracySummary]:
+    """Given two dict mapping from `debug_handle_id` (int) to list of tensors
+    return a map from `debug_handle_id` to `NodeAccuracySummary` that contains
+    comparison information like SQNR, MSE etc.
+
+    Args:
+        ref_results (Dict[int, Tuple[str, object, List[torch.Tensor]]): reference results for each debug_handle_id
+        actual_results (Dict[int, Tuple[str, object, List[torch.Tensor]]): actual results for each debug_handle_id
+
+    Returns:
+        Dict[int, NodeAccuracySummary]
+    """
     comparisons = {}
     for debug_handle, (ref_name, ref_stack, ref_stats) in ref_results.items():
         if debug_handle not in actual_results:
@@ -176,7 +197,7 @@ def compare_results(ref_results, actual_results):
             )
             continue
         actual_name, actual_stack, actual_stats = actual_results[debug_handle]
-        comparisons[ref_name] = NodeAccuracySummary(
+        comparisons[debug_handle] = NodeAccuracySummary(
             handle=debug_handle,
             actual_node_name=actual_name,
             actual_module_stack=_module_stack_to_str(actual_stack),
