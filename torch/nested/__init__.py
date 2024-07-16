@@ -315,6 +315,8 @@ def nested_tensor_from_jagged(
     offsets: Optional[Tensor] = None,
     lengths: Optional[Tensor] = None,
     jagged_dim: Optional[int] = None,
+    min_seqlen: Optional[int] = None,
+    max_seqlen: Optional[int] = None,
 ) -> Tensor:
     r"""
 Constructs a jagged layout nested tensor from the given jagged components. The jagged layout
@@ -346,6 +348,12 @@ Args:
     jagged_dim (optional int): Indicates which dimension in values is the packed jagged
         dimension. If None, this is set to dim=1 (i.e. the dimension immediately following
         the batch dimension). Default: None
+    min_seqlen (optional int): If set, uses the specified value as the cached minimum sequence
+        length for the returned nested tensor. This can be a useful alternative to computing
+        this value on-demand, possibly avoiding a GPU -> CPU sync. Default: None
+    max_seqlen (optional int): If set, uses the specified value as the cached maximum sequence
+        length for the returned nested tensor. This can be a useful alternative to computing
+        this value on-demand, possibly avoiding a GPU -> CPU sync. Default: None
 
 Example::
 
@@ -391,4 +399,5 @@ Example::
 
     from torch.nested._internal.nested_tensor import nested_view_from_values_offsets_lengths
 
-    return nested_view_from_values_offsets_lengths(values, offsets, lengths, ragged_idx=jagged_dim)
+    return nested_view_from_values_offsets_lengths(
+        values, offsets, lengths, ragged_idx=jagged_dim, min_seqlen=min_seqlen, max_seqlen=max_seqlen)
