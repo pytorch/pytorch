@@ -18,7 +18,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 from ._backward import stage_backward
 from ._debug import map_debug_info
-from ._utils import flatten_args, PipeInfo, validate_arguments
+from ._utils import flatten_args, PipeInfo, PipeliningShapeError, validate_arguments
 
 
 __all__ = [
@@ -667,10 +667,16 @@ class _PipelineStageBase(ABC):
             # user inputs in canonical pipeline scenarios
             return
 
-        # if len(kwargs):
-        #     # TODO- need a mapping of kwarg to position in self.args_recv_info
-        #     # without it, we just validate shapes for args and ignore kwargs
-        #     expected_args = expected_args[: len(expected_args) - len(kwargs)]
+        # TODO: Specific case for tracer PipelineStages which holds args and kwargs in args_recv_info
+        if len(kwargs) and hasattr(self, "pipe_info"):
+            # TODO- need a mapping of kwarg to position in self.args_recv_info
+            # without it, we just validate shapes for args and ignore kwargs
+            expected_args = expected_args[: len(expected_args) - len(kwargs)]
+
+        if not _validate_args(self.submod.forward, args, kwargs):
+            raise PipeliningShapeError(
+                f"{self.log_prefix} argument mismatch for submodule forward: {args=}, {kwargs=}"
+            )
 
         # TODO- need a mapping of kwarg to position in self.args_recv_info
         # maybe it's impossible to tell whether the len mismatches because
