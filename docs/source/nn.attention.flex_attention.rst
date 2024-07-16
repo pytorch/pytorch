@@ -6,7 +6,7 @@ torch.nn.attention.flex_attention
 ======================================
 
 .. currentmodule:: torch.nn.attention.flex_attention
-
+.. py:module:: torch.nn.attention.flex_attention
 .. autofunction:: flex_attention
 
 BlockMask Utilities

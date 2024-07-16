@@ -26,6 +26,7 @@ from torch.nn.attention.flex_attention import (
     _rel_causal,
     create_block_mask,
     flex_attention,
+    BlockMask,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -1094,6 +1095,23 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention)
+
+    @supported_platform
+    def test_custom_block_mask_generator(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+        
+        auto_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        BLOCK_SIZE = 128
+        def causal_constructor(S):
+            num_blocks = torch.arange(S // BLOCK_SIZE, device='cuda') + 1
+            indices = torch.arange(S // BLOCK_SIZE, device='cuda').expand(S // BLOCK_SIZE, S // BLOCK_SIZE)
+            num_blocks = num_blocks[None, None, :]
+            indices = indices[None, None, :]
+            return BlockMask(num_blocks, indices, BLOCK_SIZE=BLOCK_SIZE, mask_mod=mask_mod)
+        manual_mask = causal_constructor(S)
+        self.assertEqual(auto_mask, manual_mask)
+
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
