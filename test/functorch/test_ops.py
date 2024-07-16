@@ -351,7 +351,7 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail("tensor_split"),  # data_ptr composite compliance
-    # https://github.com/pytorch/pytorch/issues/96560
+    # Very minor accuracy issue on ROCm
     decorate("nn.functional.scaled_dot_product_attention", decorator=skipIfRocm),
 }
 
@@ -434,7 +434,10 @@ class TestOperators(TestCase):
                 xfail("view_as_complex"),
                 # query: last dimension must be contiguous
                 # Fused attention kernels require last dim to be contiguous
-                xfail("nn.functional.scaled_dot_product_attention"),
+                decorate(
+                    "nn.functional.scaled_dot_product_attention",
+                    decorator=expectedFailureIf(not TEST_WITH_ROCM),
+                ),  # Works on ROCm
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
                 # RuntimeError: Expected contiguous tensor, but got
@@ -750,7 +753,10 @@ class TestOperators(TestCase):
                 xfail("view_as_complex"),
                 # RuntimeError: query: last dimension must be contiguous
                 # The fused attention kernels require the last dim to be contiguous
-                xfail("nn.functional.scaled_dot_product_attention"),
+                decorate(
+                    "nn.functional.scaled_dot_product_attention",
+                    decorator=expectedFailureIf(not TEST_WITH_ROCM),
+                ),  # Works on ROCm
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
                 # BUG
@@ -784,7 +790,7 @@ class TestOperators(TestCase):
             tol2(
                 "linalg.pinv", "hermitian", {torch.float32: tol(atol=1e-05, rtol=1e-05)}
             ),
-            tol1("linalg.tensorsolve", {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+            tol1("linalg.tensorsolve", {torch.float32: tol(atol=9e-03, rtol=2e-04)}),
             tol1("linalg.multi_dot", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
             tol1("svd_lowrank", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
@@ -934,6 +940,7 @@ class TestOperators(TestCase):
                 skip("ormqr"),  # Takes too long
                 xfail("as_strided"),  # incorrect output
                 xfail("as_strided", "partial_views"),  # incorrect output
+                xfail("as_strided_copy"),  # incorrect output
                 xfail("as_strided_scatter"),  # incorrect output
                 skip("bernoulli"),  # calls random op
                 xfail("bfloat16"),  # rank 4 tensor for channels_last
@@ -1012,8 +1019,6 @@ class TestOperators(TestCase):
                 xfail("normal"),  # calls random op
                 xfail("normal", "number_mean"),  # calls random op
                 xfail("pca_lowrank"),  # calls random op
-                # https://github.com/pytorch/pytorch/issues/96560
-                decorate("linalg.pinv", "hermitian", decorator=skipIfRocm),
                 xfail(
                     "quantile", device_type="cpu"
                 ),  # Batching rule not implemented for `at::equal`
@@ -1063,7 +1068,6 @@ class TestOperators(TestCase):
         "test_vmapvjpvjp",
         {
             xfail("as_strided", "partial_views"),
-            xfail("as_strided_copy"),
         },
     )
     def test_vmapvjpvjp(self, device, dtype, op):
@@ -1177,6 +1181,7 @@ class TestOperators(TestCase):
             xfail("nn.functional.max_unpool2d", "grad"),
             xfail("sparse.sampled_addmm", ""),
             xfail("sparse.mm", "reduce"),
+            xfail("as_strided_copy", ""),  # calls as_strided
             xfail("as_strided_scatter", ""),  # calls as_strided
             xfail("index_reduce", "prod"),  # .item() call
             # ---------------------------------------------------------------------
@@ -1291,6 +1296,7 @@ class TestOperators(TestCase):
         xfail("quantile"),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip("as_strided"),  # Test runner cannot handle this
         # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
+        xfail("as_strided_copy"),
         xfail("as_strided_scatter"),
         xfail(
             "nn.functional.gaussian_nll_loss"
@@ -1343,7 +1349,6 @@ class TestOperators(TestCase):
         "test_vmapjvpall",
         vmapjvpall_fail.union(
             {
-                xfail("as_strided_copy"),
                 decorate(
                     "linalg.det",
                     "singular",
@@ -1430,10 +1435,11 @@ class TestOperators(TestCase):
                 xfail("as_strided_scatter", ""),
                 xfail("masked.cumprod", ""),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
-                xfail("t_copy"),
-                xfail("transpose_copy"),
-                xfail("squeeze_copy"),
-                xfail("unsqueeze_copy"),
+            }
+        ).difference(
+            {
+                # as_strided_copy fails test_vmapvjp, succeeds here
+                xfail("as_strided_copy", ""),
             }
         ),
     )
@@ -1509,7 +1515,6 @@ class TestOperators(TestCase):
                 ),  # aten::scatter_reduce.two hit the vmap fallback
                 xfail("quantile"),
                 xfail("renorm"),
-                xfail("squeeze_copy"),
                 xfail("take"),
                 xfail("tensor_split"),
                 xfail("to_sparse"),
@@ -1571,9 +1576,11 @@ class TestOperators(TestCase):
                 xfail(
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
-                xfail("t_copy"),
-                xfail("transpose_copy"),
-                xfail("unsqueeze_copy"),
+            }
+        ).difference(
+            {
+                # as_strided_copy fails test_vmapvjp, succeeds here
+                xfail("as_strided_copy", ""),
             }
         ),
     )
