@@ -334,6 +334,7 @@ class TensorVariable(VariableTracker):
         )
 
     def call_hasattr(self, tx, name):
+        ret_val = False
         if self.source:
             install_guard(
                 AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
