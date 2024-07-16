@@ -4,7 +4,12 @@ import os
 import sys
 import tempfile
 
-from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
+from model_registry import (
+    ExampleCode,
+    ModelWithKwargs,
+    MultiMLP,
+    MultiMLPWithNonTensorArgs,
+)
 
 import torch
 import torch.distributed as dist
@@ -15,6 +20,7 @@ from torch.distributed.pipelining import (
     ScheduleGPipe,
 )
 from torch.distributed.pipelining._utils import PipeliningShapeError
+from torch.distributed.pipelining.microbatch import _Replicate, TensorChunkSpec
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
@@ -256,6 +262,52 @@ class StageTest(MultiProcContinousTest):
             stage_mod.register_forward_hook(get_dtype_change_hook(torch.bfloat16))
             with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
                 _run_step(x)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_manual_with_nontensor_args(self):
+        full_mod = MultiMLPWithNonTensorArgs(d_hid, n_layers=self.world_size)
+        full_mod.to(self.device)
+        stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
+
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        arg1 = object()
+        arg2 = None
+
+        input_args = (x.chunk(chunks)[0], arg1, arg2)
+        bad_input_kwargs = {"invalid": ""}
+        input_kwargs = {"kwarg1": "is_okay"}
+
+        with self.assertRaises(ValueError):
+            stage = PipelineStage(
+                stage_mod,
+                self.rank,
+                self.world_size,
+                self.device,
+                input_args=input_args,
+                input_kwargs=bad_input_kwargs,
+            )
+
+        stage = PipelineStage(
+            stage_mod,
+            self.rank,
+            self.world_size,
+            self.device,
+            input_args=input_args,
+            input_kwargs=input_kwargs,
+        )
+        # Attach to a schedule
+        args_chunk_spec = [TensorChunkSpec(0), _Replicate, _Replicate]
+        schedule = ScheduleGPipe(stage, chunks, args_chunk_spec=args_chunk_spec)
+
+        # Run
+        def _run_step(x):
+            if self.rank == 0:
+                return schedule.step(x, arg1, arg2, **input_kwargs)
+            else:
+                return schedule.step()
+
+        out = _run_step(x)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
