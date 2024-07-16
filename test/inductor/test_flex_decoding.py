@@ -13,7 +13,7 @@ import torch
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
-from torch.nn.attention._flex_attention import (
+from torch.nn.attention.flex_attention import (
     _causal,
     _compose,
     _create_empty_block_mask,
