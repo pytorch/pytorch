@@ -83,6 +83,8 @@ _loader = _EvalCacheLoader()
 
 def _exec_with_source(src: str, globals: Dict[str, Any], co_fields=None):
     key = _loader.cache(src, globals, co_fields)
+    print("Src", src)
+    print("Key", key)
     exec(compile(src, key, "exec"), globals)
 
 
