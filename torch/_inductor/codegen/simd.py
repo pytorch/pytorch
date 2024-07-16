@@ -1341,9 +1341,8 @@ class SIMDScheduling(BaseScheduling):
         )
         kernel.buf_accesses = buf_accesses
 
-        use_multi_kernel = kernel.persistent_reduction and config.triton.multi_kernel
-
-        if use_multi_kernel:
+        kernel2: Optional[SIMDKernel] = None
+        if kernel.persistent_reduction and config.triton.multi_kernel:
             kernel2 = self.kernel_type(
                 *kernel_args,
                 **kernel_kwargs,
@@ -1370,11 +1369,7 @@ class SIMDScheduling(BaseScheduling):
         kernel.kernel_name = kernel_name
         kernel.code_hash = code_hash(src_code)
 
-        final_kernel: Union[MultiKernel, SIMDKernel]
-        if use_multi_kernel:
-            final_kernel = MultiKernel([kernel, kernel2])  # type: ignore[possibly-undefined]
-        else:
-            final_kernel = kernel  # type: ignore[assignment]
+        final_kernel = MultiKernel([kernel, kernel2]) if kernel2 is not None else kernel
 
         with V.set_kernel_handler(final_kernel):
             for node in node_schedule:
@@ -1382,9 +1377,7 @@ class SIMDScheduling(BaseScheduling):
                     node.mark_run()
 
         self.codegen_comment(node_schedule)
-        kernel_name = final_kernel.kernel_name
-        assert kernel_name is not None
-        final_kernel.call_kernel(kernel_name)
+        final_kernel.call_kernel(final_kernel.kernel_name)
         if config.nan_asserts:
             final_kernel.codegen_nan_check()
         if config.warn_mix_layout:

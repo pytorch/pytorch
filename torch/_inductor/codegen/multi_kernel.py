@@ -111,8 +111,6 @@ class MultiKernelState:
             # the second pass of cpp-wrapper.
             return multi_kernel_name
 
-        wrapper = V.graph.wrapper_code
-
         # add subkernel src code hashes to the multi-kernel source code so changing a
         # subkernel implementation will result in a different py file for
         # multi-kernel. This makes cache implementation straightforward since
@@ -136,6 +134,7 @@ class MultiKernelState:
                 buf.writeline(f"{name},")
         buf.writeline("])")
 
+        wrapper = V.graph.wrapper_code
         wrapper.header.splice(buf)
         if config.triton.autotune_at_compile_time:
             wrapper.kernel_autotune_defs.splice(buf)
