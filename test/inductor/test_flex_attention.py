@@ -24,9 +24,9 @@ from torch.nn.attention.flex_attention import (
     _identity,
     _rel_bias,
     _rel_causal,
+    BlockMask,
     create_block_mask,
     flex_attention,
-    BlockMask,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -1100,18 +1100,23 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_custom_block_mask_generator(self):
         def mask_mod(b, h, q, kv):
             return q >= kv
-        
+
         auto_mask = create_block_mask(mask_mod, 1, 1, S, S)
         BLOCK_SIZE = 128
+
         def causal_constructor(S):
-            num_blocks = torch.arange(S // BLOCK_SIZE, device='cuda') + 1
-            indices = torch.arange(S // BLOCK_SIZE, device='cuda').expand(S // BLOCK_SIZE, S // BLOCK_SIZE)
+            num_blocks = torch.arange(S // BLOCK_SIZE, device="cuda") + 1
+            indices = torch.arange(S // BLOCK_SIZE, device="cuda").expand(
+                S // BLOCK_SIZE, S // BLOCK_SIZE
+            )
             num_blocks = num_blocks[None, None, :]
             indices = indices[None, None, :]
-            return BlockMask(num_blocks, indices, BLOCK_SIZE=BLOCK_SIZE, mask_mod=mask_mod)
-        manual_mask = causal_constructor(S)
-        self.assertEqual(auto_mask, manual_mask)
+            return BlockMask(
+                num_blocks, indices, BLOCK_SIZE=BLOCK_SIZE, mask_mod=mask_mod
+            )
 
+        manual_mask = causal_constructor(S)
+        self.assertEqual(auto_mask.to_dense(), manual_mask.to_dense())
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -1439,8 +1444,10 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
+
         def causal(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
+
         block_mask = create_block_mask(causal, 1, 1, 128, 128)
 
         func = torch.compile(flex_attention, backend=cnt, fullgraph=True)
