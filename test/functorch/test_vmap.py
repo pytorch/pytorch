@@ -49,6 +49,7 @@ from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyCUDA,
     OpDTypes,
     ops,
     tol,
@@ -4792,6 +4793,21 @@ class TestVmapOperatorsOpInfo(TestCase):
             return index_put
 
         self.vmap_outplace_test(f, (x, gy), {}, in_dims=(None, 0))
+
+    @onlyCUDA
+    @parametrize("inplace", [True, False])
+    def test_0d_tensor_index_put(self, device, inplace):
+        def f(t, idx, v):
+            fn = torch.index_put_ if inplace else torch.index_put
+            return fn(t, idx, v)
+
+        N = 2
+        t = torch.zeros((N, 5), device="cuda")
+        idx = torch.tensor([1, 3])
+        v = torch.tensor(1, dtype=t.dtype, device="cpu")
+
+        expected = torch.tensor([[0, 1, 0, 1, 0], [0, 1, 0, 1, 0]], dtype=t.dtype)
+        self.assertEqual(expected, vmap(f, in_dims=(0, None, None))(t, (idx,), v))
 
     @parametrize("training", [True, False])
     @parametrize("track_running_stats", [True, False])
