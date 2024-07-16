@@ -723,7 +723,7 @@ class CachingAutotuner(KernelInterface):
         if self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config, time_taken_ns)
 
-    def save_cuda_kernel(self, grid, stream, launcher):
+    def save_gpu_kernel(self, grid, stream, launcher):
         if callable(grid):
             grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
         else:
@@ -753,12 +753,9 @@ class CachingAutotuner(KernelInterface):
         }
         from torch._inductor.codecache import CudaKernelParamCache
 
-        binary = (
-            launcher.bin.asm["cubin"]
-            if self.device_props.type != "hip"
-            else launcher.bin.asm["hsaco"]
-        )
-        CudaKernelParamCache.set(key, params, binary)
+        bin_type = {"hip": "hsaco", "xpu": "spv"}.get(self.device_props.type, "cubin")
+        binary = launcher.bin.asm[bin_type]
+        CudaKernelParamCache.set(key, params, binary, bin_type)
 
         self.cuda_kernel_saved = True
 
@@ -831,7 +828,7 @@ class CachingAutotuner(KernelInterface):
 
         (launcher,) = self.launchers
         if launcher.store_cubin:
-            self.save_cuda_kernel(grid, stream, launcher)
+            self.save_gpu_kernel(grid, stream, launcher)
 
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
