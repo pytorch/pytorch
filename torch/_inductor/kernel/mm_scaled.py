@@ -3,7 +3,6 @@ from typing import Any, Dict, Optional, Tuple
 import sympy
 
 import torch
-from .. import config as inductor_config
 from ..ir import Layout, StorageBox, TensorBox
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (

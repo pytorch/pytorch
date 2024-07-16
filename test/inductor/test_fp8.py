@@ -395,7 +395,7 @@ class TestFP8Lowering(TestCase):
             bias = torch.rand(N, device=device, dtype=torch.bfloat16)
 
         # quantize weight (prior to inference)
-        weight_amax = torch.max(torch.abs(w))
+        weight_amax = torch.max(torch.abs(w))  # tensorwise
         weight_scale = _amax_to_scale(weight_amax, dtype_float8, w.dtype)
         w_t_fp8 = _to_fp8_saturated(w * weight_scale, dtype_float8).t()
         w_inverse_scale = weight_scale.reciprocal()
@@ -403,6 +403,66 @@ class TestFP8Lowering(TestCase):
         def linear(x, w_t_fp8, w_inverse_scale, bias):
             # quantize input x
             amax = torch.max(torch.abs(x))  # tensor-wise
+            scale = _amax_to_scale(amax, dtype_float8, x.dtype)
+            x_fp8 = _to_fp8_saturated(x * scale, dtype_float8)
+            x_inverse_scale = scale.reciprocal()
+
+            y = torch._scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                x_inverse_scale,
+                w_inverse_scale,
+                bias,
+                out_dtype=dtype,
+                use_fast_accum=use_fast_accum,
+            )
+            return y
+
+        y_eager = linear(
+            x,
+            w_t_fp8,
+            w_inverse_scale,
+            bias,
+        )
+        linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
+        y_compiled = linear_compiled(
+            x,
+            w_t_fp8,
+            w_inverse_scale,
+            bias,
+        )
+        torch.testing.assert_close(y_eager, y_compiled, rtol=5e-1, atol=5e-1)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
+    @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
+    @parametrize("shape", ("16,16,32", "1024,1024,512"))
+    @parametrize("has_bias", (False, True))
+    @parametrize("use_fast_accum", (False, True))
+    def test_rowwise_scaling(self, shape: str, has_bias: bool, use_fast_accum: bool):
+        # Only bf16 output type is supported for row-wise scaling, not fp32
+        dtype: torch.dtype = torch.bfloat16
+
+        device = "cuda"
+        dtype_float8 = torch.float8_e4m3fn
+
+        shape = [int(dim) for dim in shape.split(",")]
+        M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
+        x = torch.rand(M, K, dtype=dtype, device=device)
+        w = torch.rand(N, K, dtype=dtype, device=device)
+
+        bias = None
+        if has_bias:
+            bias = torch.rand(N, device=device, dtype=torch.bfloat16)
+
+        # quantize weight (prior to inference)
+        weight_amax = torch.max(torch.abs(w), dim=1, keepdim=True).values  # rowwise
+        weight_scale = _amax_to_scale(weight_amax, dtype_float8, w.dtype)
+        w_t_fp8 = _to_fp8_saturated(w * weight_scale, dtype_float8).t()
+        w_inverse_scale = weight_scale.reciprocal().t()  # scale_b should be (1, N)
+
+        def linear(x, w_t_fp8, w_inverse_scale, bias):
+            # quantize input x
+            amax = torch.max(torch.abs(x), dim=1, keepdim=True).values
             scale = _amax_to_scale(amax, dtype_float8, x.dtype)
             x_fp8 = _to_fp8_saturated(x * scale, dtype_float8)
             x_inverse_scale = scale.reciprocal()
