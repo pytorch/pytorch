@@ -1267,9 +1267,7 @@ class VariableBuilder:
                 # this will get cleaned up once compile ends
                 self.tx.output.nn_modules[self.name] = value
 
-            if value.__module__.startswith(
-                ("torch.nn.", "torch.ao.")
-            ) and not value.__module__.startswith("torch.nn.modules.container"):
+            if value.__module__.startswith(("torch.nn.", "torch.ao.")):
                 result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
             else:
                 result = UnspecializedNNModuleVariable(value, source=self.source)
@@ -2539,6 +2537,8 @@ class SourcelessBuilder:
             return DeviceMeshVariable(value)
         elif isinstance(value, re.Pattern):
             return RegexPatternVariable(value)
+        elif isinstance(value, torch.nn.Module):
+            return UnspecializedNNModuleVariable(value)
         unimplemented(
             f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
         )
