@@ -259,6 +259,56 @@ class TestFlexAttention(InductorTestCase):
             v,
         )
 
+    def run_test_with_call(
+        self,
+        sdpa_call: Callable,
+        dtype: torch.dtype = torch.float16,
+        Q_B: int = B,
+        Q_H: int = H,
+        Q_S: int = S,
+        Q_D: int = D,
+        KV_B: int = B,
+        KV_H: int = H,
+        KV_S: int = S,
+        KV_D: int = D,
+    ):
+        q = torch.randn(
+            (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
+        )
+        k = torch.randn(
+            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=True
+        )
+        v = torch.randn(
+            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=True
+        )
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+        compiled_sdpa = torch.compile(sdpa_call)
+        golden_out = sdpa_call(q_gold, k_gold, v_gold)
+        ref_out = sdpa_call(q_ref, k_ref, v_ref)
+        compiled_out = compiled_sdpa(q, k, v)
+
+        backward_grad = torch.randn((Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda")
+
+        golden_out.backward(backward_grad.to(torch.float64))
+        ref_out.backward(backward_grad)
+        compiled_out.backward(backward_grad)
+
+        self._check_out_and_grad(
+            golden_out,
+            ref_out,
+            compiled_out,
+            q_gold,
+            q_ref,
+            q,
+            k_gold,
+            k_ref,
+            k,
+            v_gold,
+            v_ref,
+            v,
+        )
+
     def run_dynamic_test(
         self,
         score_mod: Callable,
@@ -1036,6 +1086,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         # self.run_test(score_mod)
 
     @supported_platform
+    def test_causal_block(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        attention = functools.partial(flex_attention, block_mask=block_mask)
+
+        self.run_test_with_call(attention)
+
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", [_identity, _causal])
     def test_logsumexp_correctness(self, dtype, score_mod):
@@ -1209,46 +1269,73 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_comparison_vs_sdpa(self):
-        inputs = [
-            torch.randn(
-                2, 2, 2048, 64, device="cuda", dtype=torch.float16, requires_grad=True
-            )
-            for _ in range(3)
-        ]
-        gradOut = torch.randn(2, 2, 2048, 64, device="cuda", dtype=torch.float16)
-        out_ref = torch.nn.functional.scaled_dot_product_attention(
-            *inputs, is_causal=True
-        )
-        out_ref.backward(gradOut)
-
         def causal(score, b, h, q_idx, kv_idx):
             return torch.where(q_idx >= kv_idx, score, -float("inf"))
 
-        inputs_flex = [i.detach().clone().requires_grad_(True) for i in inputs]
-        out_flex = torch.compile(flex_attention)(*inputs_flex, causal)
-        out_flex.backward(gradOut)
-        inputs_golden = [
-            i.detach().clone().to(dtype=torch.float64).requires_grad_(True)
-            for i in inputs
-        ]
-        out_golden = torch.nn.functional.scaled_dot_product_attention(
-            *inputs_golden, is_causal=True
-        )
-        out_golden.backward(gradOut.to(dtype=torch.float64))
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
 
-        for ref, flex, golden in [
-            (out_ref, out_flex, out_golden),
-            (inputs[0].grad, inputs_flex[0].grad, inputs_golden[0].grad),
-            (inputs[1].grad, inputs_flex[1].grad, inputs_golden[1].grad),
-            (inputs[2].grad, inputs_flex[2].grad, inputs_golden[2].grad),
+        block_mask = create_block_mask(causal, 1, 1, 2048, 2048)
+        no_sparse_flex = functools.partial(flex_attention, score_mod=causal)
+        score_mod_sparse_flex = functools.partial(
+            flex_attention,
+            score_mod=causal,
+            block_mask=create_block_mask(causal, 1, 1, 2048, 2048),
+        )
+        mask_mod_sparse_flex = functools.partial(
+            flex_attention, block_mask=create_block_mask(causal_mask, 1, 1, 2048, 2048)
+        )
+        for attention_call in [
+            no_sparse_flex,
+            score_mod_sparse_flex,
+            mask_mod_sparse_flex,
         ]:
-            ref_error = rmse(ref, golden)
-            flex_error = rmse(flex, golden)
-            # Note: This has been carefully tested that FlexAttention is within
-            # 10% of the average error of SDPA! Do not bump this tolerance
-            # unless you are absolutely sure you are not worsening the accuracy
-            # of FlexAttention!
-            self.assertTrue(ref_error < flex_error * 1.1)
+            inputs = [
+                torch.randn(
+                    2,
+                    2,
+                    2048,
+                    64,
+                    device="cuda",
+                    dtype=torch.float16,
+                    requires_grad=True,
+                )
+                for _ in range(3)
+            ]
+            gradOut = torch.randn(2, 2, 2048, 64, device="cuda", dtype=torch.float16)
+            out_ref = torch.nn.functional.scaled_dot_product_attention(
+                *inputs, is_causal=True
+            )
+            out_ref.backward(gradOut)
+
+            inputs_flex = [i.detach().clone().requires_grad_(True) for i in inputs]
+            out_flex = torch.compile(attention_call)(*inputs_flex)
+            out_flex.backward(gradOut)
+            inputs_golden = [
+                i.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+                for i in inputs
+            ]
+            out_golden = torch.nn.functional.scaled_dot_product_attention(
+                *inputs_golden, is_causal=True
+            )
+            out_golden.backward(gradOut.to(dtype=torch.float64))
+
+            for ref, flex, golden in [
+                (out_ref, out_flex, out_golden),
+                (inputs[0].grad, inputs_flex[0].grad, inputs_golden[0].grad),
+                (inputs[1].grad, inputs_flex[1].grad, inputs_golden[1].grad),
+                (inputs[2].grad, inputs_flex[2].grad, inputs_golden[2].grad),
+            ]:
+                ref_error = rmse(ref, golden)
+                flex_error = rmse(flex, golden)
+                # Note: This has been carefully tested that FlexAttention is within
+                # 20% of the average error of SDPA! Do not bump this tolerance
+                # unless you are absolutely sure you are not worsening the accuracy
+                # of FlexAttention!
+                self.assertTrue(
+                    ref_error * 1.2 > flex_error,
+                    f"Ref error: {ref_error}, Flex Error: {flex_error}",
+                )
 
     @supported_platform
     def test_block_mask_attributes(self):
@@ -1371,7 +1458,7 @@ class GraphModule(torch.nn.Module):
         child_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         child_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (ones, zeros, ones_1, zeros_1, None, None, None, None, 128, 128, mask_fn_0), 0.5, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = ones = zeros = ones_1 = zeros_1 = mask_fn_0 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (ones, zeros, None, None, ones_1, zeros_1, None, None, 128, 128, mask_fn_0), 0.5, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = ones = zeros = ones_1 = zeros_1 = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -1411,7 +1498,7 @@ class GraphModule(torch.nn.Module):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
         mask_graph = self.mask_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, (full_default, full_default_1, full_default, full_default_1, None, None, None, None, 128, 128, mask_graph), 0.5, (), ());  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = mask_graph = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem, getitem_1, tangents_1, fw_graph, joint_graph, (full_default, full_default_1, None, None, full_default, full_default_1, None, None, 128, 128, mask_graph), 0.5, (), ());  primals_1 = primals_2 = primals_3 = getitem = getitem_1 = tangents_1 = fw_graph = joint_graph = full_default = full_default_1 = mask_graph = None
         getitem_2: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_3: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_4: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
