@@ -592,7 +592,7 @@ class CppOverrides(OpOverrides):
             src_dtype = x.dtype
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
-        csevar.update_on_args("to_dtype", (x, dtype, src_dtype), {})
+        csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
         if dtype in [torch.bfloat16, torch.float16] and src_dtype == torch.float:
             """
             https://github.com/pytorch/pytorch/issues/115260
@@ -1440,7 +1440,7 @@ class CppVecOverrides(CppOverrides):
         src_dtype = opt_ctx_x.dtype
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
-        csevar.update_on_args("to_dtype", (x, dtype, src_dtype), {})
+        csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
         if dtype in [torch.bfloat16, torch.float16] and src_dtype == torch.float:
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
