@@ -199,6 +199,7 @@ ReduceFunc toFunction(const ReduceOp& r) {
       TORCH_CHECK(false, "Cannot use ReduceOp.PREMUL_SUM with Gloo");
       break;
     case ReduceOp::UNUSED:
+    default:
       break;
   }
 
@@ -262,6 +263,7 @@ ReduceFunc toFunction(const ReduceOp& r) {
       TORCH_CHECK(false, "Cannot use ReduceOp.PREMUL_SUM with Gloo");
       break;
     case ReduceOp::UNUSED:
+    default:
       break;
   }
 
@@ -498,7 +500,8 @@ inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
               profilingTitle,
               c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
         };
-    recordFunctionBeforeCallback_ = at::wrapPropagateTLSState(before_handler);
+    recordFunctionBeforeCallback_ =
+        at::wrapPropagateTLSState(std::move(before_handler));
     std::function<void()> end_handler = [recordingFunction]() {
       recordingFunction->end();
     };
