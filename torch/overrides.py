@@ -59,7 +59,9 @@ __all__ = [
 
 
 def _disable_user_warnings(
-    func: Callable, regex: str = ".*is deprecated, please use.*", module: str = "torch"
+    func: Callable,
+    regex: str = ".*is deprecated, please use.*",
+    module: str = "torch",
 ) -> Callable:
     """
     Decorator that temporarily disables ``UserWarning``s for the given ``module`` if the warning message matches the
@@ -1039,18 +1041,18 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
             lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1  # noqa: B950
         ),
         torch.quantized_max_pool1d: (
-            lambda input, kernel_size, stride=tuple(), padding=(0,), dilation=(
+            lambda input, kernel_size, stride=(), padding=(0,), dilation=(
                 1,
             ), ceil_mode=False: -1
         ),
         torch.quantized_max_pool2d: (
-            lambda input, kernel_size, stride=tuple(), padding=(0, 0), dilation=(
+            lambda input, kernel_size, stride=(), padding=(0, 0), dilation=(
                 1,
                 1,
             ), ceil_mode=False: -1
         ),
         torch.quantized_max_pool3d: (
-            lambda input, kernel_size, stride=tuple(), padding=(0, 0, 0), dilation=(
+            lambda input, kernel_size, stride=(), padding=(0, 0, 0), dilation=(
                 1,
                 1,
                 1,
@@ -1582,7 +1584,8 @@ def wrap_torch_function(dispatcher: Callable):
 
 
 def _get_overloaded_args(
-    relevant_args: Iterable[Any], get_type_fn: Callable[[Any], Type] = None
+    relevant_args: Iterable[Any],
+    get_type_fn: Callable[[Any], Type] = None,
 ) -> List[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 
@@ -1659,7 +1662,10 @@ def _get_overloaded_args(
 
 
 def handle_torch_function(
-    public_api: Callable, relevant_args: Iterable[Any], *args, **kwargs
+    public_api: Callable,
+    relevant_args: Iterable[Any],
+    *args,
+    **kwargs,
 ) -> Any:
     """Implement a function with checks for ``__torch_function__`` overrides.
 

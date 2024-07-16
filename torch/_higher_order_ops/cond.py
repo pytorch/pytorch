@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
 import contextlib
 
+import logging
+
 import torch
 import torch._subclasses.functional_tensor
-
 import torch.utils._pytree as pytree
-
 from torch._C import DispatchKey
 from torch._C._functorch import (
     _add_batch_dim,
@@ -15,7 +15,6 @@ from torch._C._functorch import (
 )
 from torch._functorch.utils import exposed_in
 from torch._guards import detect_fake_mode
-
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -25,7 +24,6 @@ from torch._higher_order_ops.utils import (
     unique_graph_id,
     UnsupportedAliasMutationException,
 )
-
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -35,6 +33,8 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import _get_current_dispatch_mode
+
+log = logging.getLogger(__name__)
 
 
 @exposed_in("torch")
@@ -107,9 +107,18 @@ def cond(pred, true_fn, false_fn, operands):
         - The **output** of branches must be a **single Tensor**. Pytree of tensors will be supported in the future.
 
     """
-
     if torch.compiler.is_dynamo_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
+
+    if isinstance(pred, (bool, int, float)):
+        log.warning(
+            "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
+            " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool."
+        )
+        if pred:
+            return true_fn(*operands)
+        else:
+            return false_fn(*operands)
 
     def _validate_input(pred, true_fn, false_fn, operands):
         if not isinstance(pred, (bool, torch.Tensor, torch.SymBool)):
@@ -204,7 +213,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
 
     out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", func_overload, proxy_args, {}, name="conditional"
+        "call_function", func_overload, proxy_args, {}
     )
 
     # At this point, we're *guaranteed* that whether an output came from the
