@@ -136,7 +136,7 @@ def get_static_input_idxs(num_fixed):
     if not context or not context.fw_metadata:
         return fixed
 
-    return fixed + context.fw_metadata.static_parameter_indices
+    return fixed + context.fw_metadata.static_input_indices
 
 
 @functools.lru_cache(None)
@@ -726,6 +726,8 @@ def fx_codegen_and_compile(
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
 
+    inductor_counters = counters["inductor"].copy()
+
     # lift the maximum depth of the Python interpreter stack
     # to adapt large/deep models
     sys.setrecursionlimit(max(sys.getrecursionlimit(), 2000))
@@ -912,6 +914,7 @@ def fx_codegen_and_compile(
                 output_strides,
                 V.graph.disable_cudagraphs_reason,
                 metrics_helper.get_deltas(),
+                counters["inductor"] - inductor_counters,
             )
 
     return compiled_graph
@@ -1051,13 +1054,7 @@ def static_input(x: torch.Tensor):
     """
     Copy and input while preserving strides
     """
-    # TODO(jansel): figure out why this version doesn't work:
-    # return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
-    needed_size = (
-        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
-    )
-    buffer = torch.empty(needed_size, dtype=x.dtype, device=x.device)
-    return torch.as_strided(buffer, x.size(), x.stride())
+    return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
 
 
 def index_expanded_dims_and_copy_(
@@ -1252,7 +1249,7 @@ def fw_compiler_freezing(
                 params_flat[i] = None
 
         if tracing_context.fw_metadata:
-            static_input_idxs += tracing_context.fw_metadata.static_parameter_indices
+            static_input_idxs += tracing_context.fw_metadata.static_input_indices
 
     with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
