@@ -36,7 +36,6 @@ from common_utils import (
 from functorch_additional_op_db import additional_op_db
 
 import functorch
-
 import torch
 import torch.nn.functional as F
 from functorch import grad, grad_and_value, jacfwd, jvp, vjp, vmap
@@ -49,6 +48,7 @@ from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyCUDA,
     OpDTypes,
     ops,
     tol,
@@ -69,6 +69,7 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 from torch.utils import _pytree as pytree
+
 
 FALLBACK_REGEX = "There is a performance drop"
 
@@ -4276,10 +4277,8 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("quantile"),
                 xfail("renorm"),
                 xfail("resize_as_"),
-                xfail("squeeze_copy"),
                 xfail("take"),
                 xfail("tensor_split"),
-                xfail("transpose_copy"),
                 xfail("to_sparse"),
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
@@ -4307,10 +4306,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("histc"),
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
-                xfail("as_strided_scatter"),
-                xfail("permute_copy"),
-                xfail("t_copy"),
-                xfail("unsqueeze_copy"),
                 xfail("istft"),
                 xfail("nonzero"),
                 xfail("nn.functional.fractional_max_pool2d"),
@@ -4377,6 +4372,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("special.hermite_polynomial_he"),
                 xfail("nn.functional.dropout3d", ""),
                 xfail("special.chebyshev_polynomial_t"),
+                xfail("as_strided_scatter", ""),
                 xfail("equal", ""),
                 xfail("linalg.lu", ""),
                 skip("linalg.ldl_solve", ""),
@@ -4797,6 +4793,21 @@ class TestVmapOperatorsOpInfo(TestCase):
             return index_put
 
         self.vmap_outplace_test(f, (x, gy), {}, in_dims=(None, 0))
+
+    @onlyCUDA
+    @parametrize("inplace", [True, False])
+    def test_0d_tensor_index_put(self, device, inplace):
+        def f(t, idx, v):
+            fn = torch.index_put_ if inplace else torch.index_put
+            return fn(t, idx, v)
+
+        N = 2
+        t = torch.zeros((N, 5), device="cuda")
+        idx = torch.tensor([1, 3])
+        v = torch.tensor(1, dtype=t.dtype, device="cpu")
+
+        expected = torch.tensor([[0, 1, 0, 1, 0], [0, 1, 0, 1, 0]], dtype=t.dtype)
+        self.assertEqual(expected, vmap(f, in_dims=(0, None, None))(t, (idx,), v))
 
     @parametrize("training", [True, False])
     @parametrize("track_running_stats", [True, False])

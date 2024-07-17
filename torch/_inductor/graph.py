@@ -407,6 +407,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
         self.aligned_inputs: Set[str] = set()
+        self.no_fuse_buffer_names: Set[str] = set()
 
     def has_feature(self, device, feature):
         assert isinstance(feature, BackendFeature), feature
@@ -998,6 +999,7 @@ class GraphLowering(torch.fx.Interpreter):
             if value.shape == ():
                 return Constant(value.item(), value.dtype, value.device)
             if self.can_inline_constant(value):
+                log.debug("Inlining constant: %s ", str(target))
                 # tensor lowering has constant inlining logic
                 from .lowering import tensor
 

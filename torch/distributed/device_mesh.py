@@ -255,7 +255,7 @@ else:
                     self._get_or_create_default_group()
                     self._init_process_groups()
 
-                if get_backend() == "threaded":
+                if is_initialized() and get_backend() == "threaded":
                     self._thread_id = threading.get_ident()
 
                 # calculate the coordinates of the current global rank on the mesh
