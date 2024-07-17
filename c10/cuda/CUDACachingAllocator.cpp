@@ -1371,6 +1371,17 @@ class DeviceCachingAllocator {
     return basePtr;
   }
 
+  ShareableHandle shareIpcHandle(Block* block) {
+    size_t outSize = 0;
+    void* base = getBaseAllocation(block, &outSize);
+    auto offset = (char*)block->ptr - (char*)base;
+    cudaIpcMemHandle_t handle;
+    C10_CUDA_CHECK(cudaIpcGetMemHandle(&handle, base));
+    return ShareableHandle{
+        offset,
+        std::string((char*)&handle, (char*)&handle + CUDA_IPC_HANDLE_SIZE)};
+  }
+
   void recordStream(Block* block, cuda::CUDAStream stream) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     if (stream.stream() == block->stream) {
@@ -3086,6 +3097,14 @@ class NativeCachingAllocator : public CUDAAllocator {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
     return device_allocator[block->device]->getBaseAllocation(block, outSize);
+  }
+
+  ShareableHandle shareIpcHandle(void* ptr) override {
+    Block* block = get_allocated_block(ptr);
+    if (!block) {
+      TORCH_CHECK(false, "invalid device pointer: ", ptr);
+    }
+    return device_allocator[block->device]->shareIpcHandle(block);
   }
 
   void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) override {

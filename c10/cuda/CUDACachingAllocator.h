@@ -242,6 +242,11 @@ using OutOfMemoryObserver = std::function<void(
 
 using AllocatorTraceTracker = std::function<void(const TraceEntry&)>;
 
+struct ShareableHandle {
+  ptrdiff_t offset;
+  std::string handle;
+};
+
 class CUDAAllocator : public Allocator {
  public:
   virtual void* raw_alloc(size_t nbytes) = 0;
@@ -277,6 +282,7 @@ class CUDAAllocator : public Allocator {
         " does not yet support checkPoolLiveAllocations. "
         "If you need it, please file an issue describing your use case.");
   }
+  virtual ShareableHandle shareIpcHandle(void* ptr) = 0;
   virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) = 0;
   virtual bool isHistoryEnabled() {
     TORCH_CHECK(
@@ -460,6 +466,10 @@ inline void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
 inline std::shared_ptr<void> getIpcDevPtr(std::string handle) {
   return get()->getIpcDevPtr(std::move(handle));
+}
+
+inline ShareableHandle shareIpcHandle(void* ptr) {
+  return get()->shareIpcHandle(ptr);
 }
 
 inline std::string name() {
