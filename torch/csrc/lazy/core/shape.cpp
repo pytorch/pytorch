@@ -78,7 +78,7 @@ static c10::SymbolicShape get_symbolic_shape(at::Tensor& tensor) {
   std::vector<std::optional<int64_t>> symbolic_dims;
   for (size_t i = 0; i < sizes.size(); i++) {
     if (is_symbolic->at(i)) {
-      symbolic_dims.emplace_back(c10::nullopt);
+      symbolic_dims.emplace_back(std::nullopt);
     } else {
       symbolic_dims.emplace_back(sizes.at(i));
     }
@@ -114,7 +114,7 @@ void applySymbolicShapesOnLT(
   auto res_symbolic = jit::calculateSymbolicShapesOnOp(&schema, converted_args);
   if (!res_symbolic) {
     for (auto& result_shape : result_shapes) {
-      result_shape = result_shape.with_symbolic_dims(c10::nullopt);
+      result_shape = result_shape.with_symbolic_dims(std::nullopt);
     }
   } else {
     TORCH_INTERNAL_ASSERT(

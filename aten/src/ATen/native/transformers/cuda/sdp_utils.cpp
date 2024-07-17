@@ -345,10 +345,7 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
     }
     return false;
   }
-  auto head_dim_limit = 128;
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  auto sm90orabove = dprops->major >= 9;
-  head_dim_limit = cudnn_version >= 90000 && sm90orabove ? 256 : head_dim_limit;
+  constexpr auto head_dim_limit = 128;
   if (d_qk > head_dim_limit || d_v > head_dim_limit) {
     if (debug) {
       TORCH_WARN("head_dim should be no more than ", head_dim_limit);
@@ -553,7 +550,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           check_cudnn_deterministic,
           // check_is_causal,
           check_dtypes_low_precision,
-          check_for_attn_mask_cudnn,
+          check_attn_mask_shape,
           check_cudnn_hardware_support
           );
   for (auto& constraint : general_constraints) {
