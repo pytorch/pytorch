@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/CachedTensorUtils.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/ConvUtils.h>
@@ -1229,22 +1228,6 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
-  });
-
-  m.def("_set_cached_tensors_enabled", [](bool enabled) {
-    at::caching::set_cached_tensors_enabled(enabled);
-  });
-
-  m.def("_add_cached_tensor", [](const at::Tensor& t) {
-    at::caching::add_cached_tensor(t);
-  });
-
-  m.def("_remove_cached_tensor", [](const at::Tensor& t) {
-    at::caching::remove_cached_tensor(t);
-  });
-
-  m.def("_is_cached_tensor", [](const at::Tensor& t) {
-    return at::caching::is_cached_tensor(t);
   });
 
   m.def("_storage_Use_Count", [](size_t storage_impl_ptr) {

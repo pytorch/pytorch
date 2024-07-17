@@ -10,7 +10,6 @@ import torch._dynamo.testing
 import torch.distributed._composable.fsdp._fsdp_param
 from torch import nn
 from torch._dynamo import compiled_autograd
-
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
@@ -84,7 +83,7 @@ class TestFullyShardCompile(FSDPTest):
         # Construct a dummy FSDPParamGroup, since we just want to test the `use_training_state` ctx manager.
         param_group = FSDPParamGroup(
             [],  # params: List[nn.Parameter],
-            (torch.nn.Linear(1, 1),),  # module: Tuple[nn.Module, ...],
+            torch.nn.Linear(1, 1),  # module: nn.Module,
             None,  # mesh_info: FSDPMeshInfo,
             None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
             None,  # device: torch.device,

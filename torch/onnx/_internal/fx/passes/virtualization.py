@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 import torch
 import torch.fx
 
+from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass
 
 
@@ -17,6 +18,7 @@ class MovePlaceholderToFront(_pass.Transform):
     nodes.
     """
 
+    @_beartype.beartype
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
         graph_module = self.module
         graph = graph_module.graph
@@ -51,6 +53,7 @@ class ReplaceGetAttrWithPlaceholder(_pass.Transform):
         ), "Must run ReplaceGetAttrWithPlaceholder first"
         return self._replaced_attrs
 
+    @_beartype.beartype
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
         graph_module = self.module
         graph = graph_module.graph
