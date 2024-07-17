@@ -19,6 +19,7 @@ import textwrap
 import types
 import weakref
 from contextlib import contextmanager
+from copy import deepcopy
 from inspect import currentframe, getframeinfo
 from typing import (
     Any,
@@ -1369,6 +1370,23 @@ class GuardBuilder(GuardBuilderBase):
                 fn, get_verbose_code_parts(code, guard)
             )
         else:
+            self._produce_guard_code(guard, code)
+
+    def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard):
+        original_metadata = deepcopy(self.get(guard.name).__tensor_flatten__()[1])
+
+        def metadata_checker(x):
+            return x.__tensor_flatten__()[1] == original_metadata
+
+        global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
+        if config.enable_cpp_guard_manager:
+            self.get_guard_manager(guard).add_lambda_guard(
+                metadata_checker, get_verbose_code_parts(global_name, guard)
+            )
+        else:
+            global_scope = self.get("G")
+            global_scope[global_name] = metadata_checker
+            code = [f"{global_name}({self.get(guard.name)})"]
             self._produce_guard_code(guard, code)
 
     def EQUALS_MATCH(self, guard: Guard):
