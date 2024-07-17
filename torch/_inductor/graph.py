@@ -1321,24 +1321,27 @@ class GraphLowering(torch.fx.Interpreter):
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
                 unbacked_symbols_in_strides = len(free_unbacked_symbols(strides)) > 0
+
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
-                if not unbacked_symbols_in_strides and dense and len(strides):
-                    stride_order = ir.get_stride_order(strides)
-                    if (
-                        len(result.get_size()) == 4
-                        and n in self.nodes_prefer_channels_last
-                        and n.name not in self.user_visible_outputs
-                        and not is_input_for_as_strided
-                    ):
-                        stride_order = ir.NHWC_STRIDE_ORDER
-
+                if not unbacked_symbols_in_strides and len(strides):
+                    if dense:
+                        stride_order = ir.get_stride_order(strides)
+                        if (
+                            len(result.get_size()) == 4
+                            and n in self.nodes_prefer_channels_last
+                            and n.name not in self.user_visible_outputs
+                            and not is_input_for_as_strided
+                        ):
+                            stride_order = ir.NHWC_STRIDE_ORDER
+                    else:
+                        stride_order = None
                     allow_padding = (
                         n.name not in self.user_visible_outputs
                         and not is_input_for_as_strided
                     )
                     result = ir.ExternKernel.require_stride_order(
-                        result, stride_order, allow_padding=allow_padding
+                        result, stride_order, allow_padding=allow_padding, actual_strides=strides
                     )
 
             # Realize if (1) any user need inputs realized, or (2) there is

@@ -2085,6 +2085,7 @@ def as_storage_and_layout(
     want_contiguous: bool = False,
     stride_order: Optional[Sequence[Union[int, Integer]]] = None,
     allow_padding: bool = False,
+    actual_strides: Optional[Sequence[Union[int, Integer]]] = None,
 ) -> Tuple[StorageBox, Layout]:
     """
     Try to simplify x into a StorageBox and a Layout.
@@ -2099,6 +2100,7 @@ def as_storage_and_layout(
             want_contiguous=want_contiguous,
             stride_order=stride_order,
             allow_padding=allow_padding,
+            actual_strides=actual_strides
         )
     if isinstance(x, StorageBox) and isinstance(x.data, Buffer):
         if freeze:
@@ -2108,6 +2110,10 @@ def as_storage_and_layout(
             elif stride_order is not None:
                 x.data.freeze_layout_with_stride_order(
                     stride_order, allow_padding=allow_padding
+                )
+            elif actual_strides is not None:
+                x.data.freeze_layout_with_actual_strides(
+                    actual_strides, allow_padding=allow_padding
                 )
             else:
                 x.data.decide_layout()
@@ -3202,6 +3208,19 @@ class FlexibleLayout(Layout):
             self.offset,
         )
 
+    def as_actual_strides(self, actual_strides, allow_padding=False):
+        new_stride = actual_strides
+        if self.should_pad_strides() and allow_padding:
+            new_stride = self._pad_strides(new_stride, self.size, self.dtype)
+
+        return FixedLayout(
+            self.device,
+            self.dtype,
+            self.size,
+            new_stride,
+            self.offset,
+        )
+
     def as_fill_order(self, order):
         new_stride = self.fill_ordered(self.size, order)
         if self.should_pad_strides():
@@ -3427,6 +3446,10 @@ class Buffer(IRNode):
     def freeze_layout_with_same_order(self, stride):
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_same_order(stride)
+
+    def freeze_layout_with_actual_strides(self, actual_strides, allow_padding=False):
+        assert isinstance(self.layout, FlexibleLayout)
+        self.layout = self.layout.as_actual_strides(actual_strides, allow_padding=allow_padding)
 
     def is_zero_elements(self):
         return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))  # type: ignore[arg-type]
@@ -4677,7 +4700,7 @@ class ExternKernel(InputsKernel):
         return cls.copy_input(x)
 
     @classmethod
-    def require_stride_order(cls, x, order, allow_padding=False):
+    def require_stride_order(cls, x, order, allow_padding=False, actual_strides=None):
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
 
@@ -4706,6 +4729,7 @@ class ExternKernel(InputsKernel):
                     if is_stride_order_storage_and_layout(x, order)
                     else order,
                     allow_padding=allow_padding,
+                    actual_strides=actual_strides,
                 )
                 return x
             elif isinstance(
@@ -4744,8 +4768,10 @@ class ExternKernel(InputsKernel):
             want_contiguous=False,
             stride_order=order,
             allow_padding=allow_padding,
+            actual_strides=actual_strides,
         )
-        assert is_stride_order_storage_and_layout(x, order)
+        if order and not actual_strides:
+            assert is_stride_order_storage_and_layout(x, order)
         return x
 
     @classmethod
