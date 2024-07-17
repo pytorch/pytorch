@@ -43,7 +43,6 @@ from os.path import abspath, exists
 from random import randint
 
 import matplotlib.pyplot as plt
-
 import numpy as np
 import pandas as pd
 from matplotlib import rcParams
@@ -51,8 +50,8 @@ from scipy.stats import gmean
 from tabulate import tabulate
 
 import torch
-
 import torch._dynamo
+
 
 rcParams.update({"figure.autolayout": True})
 plt.rc("axes", axisbelow=True)
