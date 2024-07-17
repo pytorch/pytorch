@@ -90,6 +90,7 @@ class CachedMetricsDeltas:
     ir_nodes_pre_fusion: int
     cpp_to_dtype_count: int
     num_bytes_accessed: int
+    num_matches_for_scatter_upon_const_tensor: int
 
 
 def get_metric_fields():
