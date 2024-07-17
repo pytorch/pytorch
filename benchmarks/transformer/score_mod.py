@@ -34,6 +34,7 @@ class ExperimentConfig:
     score_mod: Callable
     dtype: torch.dtype
     calculate_bwd_time: bool
+    cal_bandwidth: bool
 
     def __post_init__(self):
         assert (
@@ -43,8 +44,9 @@ class ExperimentConfig:
     def asdict(self):
         # Convert the dataclass instance to a dictionary
         d = asdict(self)
-        # Remove the 'calculate_bwd_time' key
+        # Remove the 'calculate_bwd_time' and `cal_bandwidth` key
         d.pop("calculate_bwd_time", None)
+        d.pop("cal_bandwidth", None)
         d["shape(B,Hq,M,Hkv,N,D)"] = d.pop("shape")
         return d
 
@@ -65,7 +67,6 @@ class ExperimentResults:
 class Experiment:
     config: ExperimentConfig
     results: ExperimentResults
-    cal_bandwidth: bool
 
     def asdict(self):
         dict1 = self.config.asdict()
@@ -215,21 +216,21 @@ def calculate_bandwidth(
             * 2
         )
         output_size = query_size
-        total_size = (query_size + kv_size + output_size) / 1000 / 1000 / 1000  # In GB
+        total_size = (query_size + kv_size + output_size) / 1e9  # In GB
         time_in_seconds = results.fwd_times.compiled_time / 1e6
-        return total_size / time_in_seconds / 1000
+        return total_size / time_in_seconds / 1e3
     else:
         raise ValueError(f"Invalid type {type}")
 
 
-def calculate_gflops(config: ExperimentConfig, results: ExperimentResults) -> float:
+def calculate_tflops(config: ExperimentConfig, results: ExperimentResults) -> float:
     (B, Hq, M, Hkv, N, D) = config.shape
     qk_flops = M * N * D * 2
     softmax_flops = M * N * 2  # Not counting online softmax overhead
     o_flops = M * D * N * 2
     # Not counting split k overhead
     total_flops = B * Hq * (qk_flops + softmax_flops + o_flops)
-    return total_flops / results.fwd_times.compiled_time / 1e3  # in GFLOPs/
+    return total_flops / results.fwd_times.compiled_time / 1e6  # in TFLOPs/
 
 
 def get_func_name(func):
@@ -293,13 +294,13 @@ def print_results(results: List[Experiment]):
     table_data["fwd_speedup"] = fwd_speedups
 
     # Calculate mem + computational throughput
-    if results[0].cal_bandwidth:
+    if results[0].config.cal_bandwidth:
         fwd_bandwidth = [
             calculate_bandwidth(r.config, r.results, type="fwd") for r in results
         ]
         table_data["fwd_mem_bw (TB/s)"] = fwd_bandwidth
-        fwd_gflops = [calculate_gflops(r.config, r.results) for r in results]
-        table_data["GFlops/s"] = fwd_gflops
+        fwd_tflops = [calculate_tflops(r.config, r.results) for r in results]
+        table_data["TFlops/s"] = fwd_tflops
 
     if results[0].config.calculate_bwd_time:
         bwd_speedups = [calculate_speedup(r.results, type="bwd") for r in results]
@@ -366,6 +367,7 @@ def generate_experiment_configs(
     score_mods: List[str],
     decoding: bool,
     kv_cache_size: List[int],
+    cal_bandwidth: bool,
 ) -> List[ExperimentConfig]:
     assert not (calculate_bwd and decoding), "Decoding does not support backward"
 
@@ -410,6 +412,7 @@ def generate_experiment_configs(
                 score_mod=score_mod,
                 dtype=dtype,
                 calculate_bwd_time=calculate_bwd,
+                cal_bandwidth=cal_bandwidth,
             )
         )
 
@@ -432,6 +435,7 @@ def main(args):
             args.mods,
             args.decoding,
             args.kv_cache_size,
+            args.cal_bandwidth,
         )
     ):
         results.append(
@@ -443,7 +447,6 @@ def main(args):
                     max_autotune=args.max_autotune,
                     enable_mask=args.mask,
                 ),
-                args.cal_bandwidth,
             )
         )
 
