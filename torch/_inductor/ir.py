@@ -6486,6 +6486,7 @@ class LoopBody:
         self.submodules = {"get_index": self.get_index}
         self.subblocks = {}
         self.indirect_vars = []
+        self.indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr] = {}
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
 
@@ -6538,7 +6539,9 @@ class LoopBody:
 
     def add_indirect(self, size):
         var = sympy_index_symbol_with_prefix(SymT.INDIRECT, len(self.indirect_vars))
+        assert var not in self.indirect_var_ranges
         self.indirect_vars.append(var)
+        self.indirect_var_ranges[var] = size
         return var
 
     def replace_indirect(self, old, new):
@@ -6719,7 +6722,9 @@ class LoopBodyBlock:
             CaptureIndexing(proxy_ops), self.body.var_ranges
         )
         if config.constant_and_index_propagation:
-            handler = IndexPropagation(handler, self.body.var_ranges)
+            handler = IndexPropagation(
+                handler, self.body.var_ranges, self.body.indirect_var_ranges
+            )
 
         with V.set_ops_handler(handler):
             # This indirection is just a cute way to get IndexPropagation to
