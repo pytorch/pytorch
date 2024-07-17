@@ -1067,8 +1067,6 @@ class FxGraphCache:
         assert local or remote, "at least one of them needs to be enabled"
         compiled_graph = None
         cache_state = None
-        key = None
-        debug_lines = []
         try:
             FxGraphCache._check_can_cache(gm)
             key, debug_lines = compiled_fx_graph_hash(
