@@ -1672,10 +1672,10 @@ class Scan(Loops):
         combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         *,
-        require_split_scan: bool = True,
-        **kwargs,
         # Whether we should fallback if split criteria is met but the backend
         # feature is not available
+        require_split_scan: bool = True,
+        **kwargs,
     ) -> List[Optional[TensorBox]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]

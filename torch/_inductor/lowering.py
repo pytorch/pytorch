@@ -6264,10 +6264,10 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
     kwargs["dtypes"] = tuple(x.get_dtype() for x in input)
     kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
     result = ir.Scan.create(
-        **kwargs,
         combine_fn=wrapped_combine_fn,
         # If split scan is not supported, just use a non-split scan
         require_split_scan=False,
+        **kwargs,
     )
     if result[0] is None:
         raise RuntimeError("Unable to generate code for associative_scan op")
