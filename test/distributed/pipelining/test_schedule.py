@@ -14,6 +14,7 @@ from torch.distributed.pipelining.schedules import (
     _add_send_recv,
     _add_unshard_reshard,
     _format_pipeline_order,
+    _simulate_comms_compute,
     _validate_pipeline_order,
     B,
     F,
@@ -262,12 +263,14 @@ class TestScheduleLowering(TestCase):
         print(_format_pipeline_order(compute_sch))
         num_model_chunks = 3
         pipeline_parallel_size = 8
+        num_stages = num_model_chunks * pipeline_parallel_size
         comms_sch = _add_send_recv(
             compute_sch,
             stage_to_rank=lambda chunk_index: chunk_index % pipeline_parallel_size,
-            num_stages=num_model_chunks * pipeline_parallel_size,
+            num_stages=num_stages,
         )
-        print(_format_pipeline_order(comms_sch))
+
+        _simulate_comms_compute(comms_sch, stage_to_rank=lambda s: s % pipeline_parallel_size, num_stages=num_stages)
         _dump_csv(comms_sch, "lowered_comms.csv")
         # for rank in expected_comms_sch:
         #     for i, (expected, actual) in enumerate(

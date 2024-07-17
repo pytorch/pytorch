@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
+import copy
 import csv
 import itertools
 import logging
@@ -156,6 +157,11 @@ def _format_pipeline_order(pipeline_order: Dict[int, List[Optional[_Action]]]) -
     Formats the pipeline order in a timestep (row) x rank (column) grid of actions
     and returns the formatted string
     """
+    # Replace None with ""
+    for rank in pipeline_order:
+        for i in range(len(pipeline_order[rank])):
+            if pipeline_order[rank][i] is None:
+                pipeline_order[rank][i] = ""
     # Calculate the maximum number of steps across all ranks
     num_steps = max(len(actions) for actions in pipeline_order.values())
     step_labels = [
@@ -1022,6 +1028,60 @@ def _add_send_recv(
                 
     return comm_actions
 
+def _simulate_comms_compute(pipeline_order, stage_to_rank: Callable[[int],int], num_stages: int):
+    pipeline_order = copy.deepcopy(pipeline_order)
+    schedule: Dict[int, List[_Action]] = {rank: [] for rank in sorted(pipeline_order)}
+    def _ready_to_schedule(action: Optional[_Action]) -> bool:
+        if action is None:
+            return True
+        elif action.computation_type == F and not action.stage_index == 0:
+            expected_recv = _Action(action.stage_index, RECV_F, action.microbatch_index)
+            return expected_recv in schedule[stage_to_rank(action.stage_index)]
+        elif action.computation_type == B and not action.stage_index == num_stages - 1:
+            expected_recv = _Action(action.stage_index, RECV_B, action.microbatch_index)
+            return expected_recv in schedule[stage_to_rank(action.stage_index)]
+        elif action.computation_type == SEND_F:
+            expected_f = _Action(action.stage_index, F, action.microbatch_index) 
+            return expected_f in schedule[stage_to_rank(action.stage_index)]
+        elif action.computation_type == RECV_F:
+            peer_stage_idx = action.stage_index - 1
+            expected_send = _Action(peer_stage_idx, SEND_F, action.microbatch_index) 
+            return expected_send in schedule[stage_to_rank(peer_stage_idx)]
+        elif action.computation_type == SEND_B:
+            expected_b = _Action(action.stage_index, B, action.microbatch_index) 
+            return expected_b in schedule[stage_to_rank(action.stage_index)]
+        elif action.computation_type == RECV_B:
+            peer_stage_idx = action.stage_index + 1
+            expected_send = _Action(peer_stage_idx, SEND_B, action.microbatch_index) 
+            return expected_send in schedule[stage_to_rank(peer_stage_idx)]
+        else:
+            return True
+    
+    while pipeline_order:
+        progress = False
+        for rank in sorted(pipeline_order):
+            if len(pipeline_order[rank]) == 0:
+                continue
+            action = pipeline_order[rank][0]
+            if _ready_to_schedule(action):
+                schedule[rank].append(action)
+                pipeline_order[rank].pop(0)
+                progress = True
+            else:
+                schedule[rank].append(None)
+
+        for i in reversed(sorted(pipeline_order)):
+            if len(pipeline_order[i]) == 0:
+                del pipeline_order[i]
+
+        if not progress:
+            print(f"WIP comms schedule:\n", _format_pipeline_order(schedule))
+            print(f"remaining compute actions:\n", pipeline_order)
+            raise ValueError("Schedule is not progressing")
+
+    print(_format_pipeline_order(schedule)) 
+
+
 class PipelineScheduleMulti(_PipelineSchedule):
     """
     Base class for multi-stage schedules.
@@ -1425,49 +1485,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             for rank in self.pipeline_order_with_comms:
                 writer.writerow(self.pipeline_order_with_comms[rank])
 
-
-    def _simulate(self, pipeline_order: Dict[int, List[Optional[_Action]]]):
-        def stage_to_rank(stage_index: int) -> int:
-            return self.stage_index_to_group_rank[stage_index]
-
-        schedule: Dict[int, List[_Action]] = {rank: [] for rank in sorted(pipeline_order)}
-        def _ready_to_schedule(action: Optional[_Action]) -> bool:
-            if action is None:
-                return True
-            elif action.computation_type == F and not action.stage_index == 0:
-                expected_recv = _Action(action.stage_index, RECV_F, action.microbatch_index)
-                return expected_recv in schedule[stage_to_rank(action.stage_index)]
-            elif action.computation_type == B and not action.stage_index == num_stages - 1:
-                expected_recv = _Action(action.stage_index, RECV_B, action.microbatch_index)
-                return expected_recv in schedule[stage_to_rank(action.stage_index)]
-            elif action.computation_type == SEND_F:
-                expected_f = _Action(action.stage_index, F, action.microbatch_index) 
-                return expected_f in schedule[stage_to_rank(action.stage_index)]
-            elif action.computation_type == RECV_F:
-                peer_stage_idx = action.stage_index - 1
-                expected_send = _Action(peer_stage_idx, SEND_F, action.microbatch_index) 
-                return expected_send in schedule[stage_to_rank(peer_stage_idx)]
-            elif action.computation_type == SEND_B:
-                expected_b = _Action(action.stage_index, B, action.microbatch_index) 
-                return expected_b in schedule[stage_to_rank(action.stage_index)]
-            elif action.computation_type == RECV_B:
-                peer_stage_idx = action.stage_index + 1
-                expected_send = _Action(peer_stage_idx, SEND_B, action.microbatch_index) 
-                return expected_send in schedule[stage_to_rank(peer_stage_idx)]
-            else:
-                return True
-        
-        while pipeline_order:
-            progress = False
-            for rank in sorted(pipeline_order):
-                action = pipeline_order[rank][0]
-                if _ready_to_schedule(action):
-                    schedule[rank].append(action)
-                    pipeline_order[rank].pop(0)
-                    progress = True
-            if not progress:
-                raise ValueError("Schedule is not progressing")
-            
+    def _simulate(self):
+        return _simulate_comms_compute(self.pipeline_order_with_comms, lambda s: self.stage_index_to_group_rank[s]) 
 
     def _step_microbatches(
         self,
