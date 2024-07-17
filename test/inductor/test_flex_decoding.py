@@ -834,14 +834,21 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_logsumexp_is_not_fused(self):
-        make_tensor = functools.partial(
+        make_q = functools.partial(
             torch.randn,
             (B, Hkv, Hq // Hkv, D),
             dtype=torch.float32,
             device="cuda",
             requires_grad=True,
         )
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        make_kv = functools.partial(
+            torch.randn,
+            (B, Hkv, S, D),
+            dtype=torch.float32,
+            device="cuda",
+            requires_grad=True,
+        )
+        q, k, v = make_q(), make_kv(), make_kv()
         block_mask = _create_empty_block_mask(q, k, v)
 
         @torch.compile
