@@ -362,8 +362,7 @@ static void histogram_select_outer_bin_edges_kernel(const Tensor& input,
                                                     const int64_t N,
                                                     std::vector<double>& leftmost_edges,
                                                     std::vector<double>& rightmost_edges) {
-  Tensor min, max;
-  std::tie(min, max) = at::aminmax(input, 0);
+  auto [min, max] = at::aminmax(input, 0);
 
   for (const auto i : c10::irange(N)) {
     leftmost_edges[i] = min[i].item().to<double>();
