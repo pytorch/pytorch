@@ -43,6 +43,15 @@ _unflatten = torch._C._jit_unflatten
 R = TypeVar("R", covariant=True)  # return type (always covariant)
 P = ParamSpec("P")
 
+def _unpack_mmdet_det_data_sample(sample):
+    try:
+        scores, bboxes, labels = sample.pred_instances.scores, sample.pred_instances.bboxes, sample.pred_instances.labels
+        bboxes_scores_cat_tensor = torch.cat([bboxes, scores.unsqueeze(1)], dim=1)
+        labels_long_tensor = labels.long()
+        return bboxes_scores_cat_tensor.unsqueeze(0), labels_long_tensor.unsqueeze(0)
+    except:
+        raise TypeError("not a mmdetection data sample") 
+
 
 def _create_interpreter_name_lookup_fn(frames_up=1):
     def _get_interpreter_name_for_var(var):
@@ -130,8 +139,22 @@ class ONNXTracedModule(torch.nn.Module):
                 )
             if self._return_inputs_states:
                 inputs_states.append(_unflatten(in_args, in_desc))
-            outs.append(self.inner(*trace_inputs))
-            if self._return_inputs_states:
+            #outs.append(self.inner(*trace_inputs))
+            # ---------------------------------------------------------------------------------------------------------
+            # ------------------START OF PATCH-------------------------------------------------------------------------
+            # -------------------------------------------------------------------------------------------------------------
+
+            result_ = self.inner(*trace_inputs)
+            try:
+                if result_[0].__class__.__name__ == "DetDataSample":
+                    result_ = _unpack_mmdet_det_data_sample(result_[0])
+            except Exception as e:
+                warnings.warn("Failed to unpack mmdet det data sample, using standard torch output tracing")
+            finally:
+                outs.append(result_)
+
+            # --------------------------------------------------------------------------------------------------------- 
+           if self._return_inputs_states:
                 inputs_states[0] = (inputs_states[0], trace_inputs)
             out_vars, _ = _flatten(outs)
             if len(out_vars) == 1:
