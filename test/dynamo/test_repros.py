@@ -5127,6 +5127,29 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         inp = torch.randn(3, 3)
         self.assertEqual(fn(inp), opt_fn(inp))
 
+    def test_dict_tag_guard(self):
+        class Foo:
+            def __init__(self):
+                self.scalar = 10
+
+        def fn(d, x):
+            return d["a"] * d["b"] * d["c"].scalar * x
+
+        foo = Foo()
+
+        d = {"a": 2, "b": 3, "c": foo}
+
+        opt_fn = torch.compile(fn, backend="eager")
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(d, inp), opt_fn(d, inp))
+
+        d["a"] = 4
+        self.assertEqual(fn(d, inp), opt_fn(d, inp))
+
+        # Check that recompilation happens
+        foo.scalar = 12
+        self.assertEqual(fn(d, inp), opt_fn(d, inp))
+
     def test_nonconst_issubclass(self):
         def fn(x):
             if issubclass(x.__class__, np.ndarray):
@@ -5303,6 +5326,27 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         params = {"from": -10, "to": 10}
         tensor = torch.randn([2, 3])
         res = random_op(tensor, params)
+
+    # https://github.com/pytorch/pytorch/issues/128072
+    def test_map_with_multiple_args(self):
+        def f(a, b):
+            return a[0] * b[0] + a[1] * b[1]
+
+        def gen_inps(len_x, len_y):
+            x = [torch.randn(5) for _ in range(len_x)]
+            y = [torch.randn(5) for _ in range(len_y)]
+            return x, y
+
+        def g(x, y):
+            return tuple(map(f, x, y))
+
+        opt_g = torch.compile(g, fullgraph=True, backend="eager")
+
+        inps = gen_inps(3, 3)
+        self.assertEqual(g(*inps), opt_g(*inps))
+
+        inps = gen_inps(3, 5)
+        self.assertEqual(g(*inps), opt_g(*inps))
 
 
 instantiate_parametrized_tests(ReproTests)

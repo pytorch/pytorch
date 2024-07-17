@@ -44,14 +44,10 @@ class MockPipelineStage(_PipelineStageBase):
 
 
 class TestSchedulePlan(TestCase):
-    @parametrize(
-        "ScheduleClass",
-        [ScheduleFlexibleInterleaved1F1B, ScheduleInterleaved1F1B, ScheduleLoopedBFS],
-    )
-    def test_pipeline_order(self, ScheduleClass):
+    def setUp(self):
         # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
         # These should succeed since num_microbatches % group_size == 0
-        test_cases = [
+        self.test_cases = [
             # small number of stages
             (2, 2, 2),
             (2, 4, 4),
@@ -82,16 +78,19 @@ class TestSchedulePlan(TestCase):
             (2, 10, 4),
             (2, 15, 4),
         ]
-        for num_local_stages, num_microbatches, group_size in test_cases:
+
+    @parametrize(
+        "ScheduleClass",
+        [ScheduleInterleaved1F1B, ScheduleLoopedBFS],
+    )
+    def test_pipeline_order(self, ScheduleClass):
+        for num_local_stages, num_microbatches, group_size in self.test_cases:
             with self.subTest(
                 num_local_stages=num_local_stages,
                 num_microbatches=num_microbatches,
                 group_size=group_size,
             ):
-                only_run_in_flex_pp = num_microbatches % group_size != 0
-                if only_run_in_flex_pp and not isinstance(
-                    ScheduleClass, ScheduleFlexibleInterleaved1F1B
-                ):
+                if num_microbatches % group_size != 0:
                     continue
 
                 print(f"{num_local_stages=} {num_microbatches=} {group_size=}")
@@ -109,6 +108,43 @@ class TestSchedulePlan(TestCase):
                 _validate_pipeline_order(
                     schedule.pipeline_order, num_microbatches, num_stages
                 )
+
+    @parametrize(
+        "ScheduleClass",
+        [ScheduleFlexibleInterleaved1F1B],
+    )
+    def test_pipeline_order_flex_and_zero_bubble(self, ScheduleClass):
+        for num_local_stages, num_microbatches, group_size in self.test_cases:
+            with self.subTest(
+                num_local_stages=num_local_stages,
+                num_microbatches=num_microbatches,
+                group_size=group_size,
+            ):
+                warmups_ops_last_stage = (num_local_stages - 1) * (
+                    num_microbatches // max(1, num_microbatches // group_size)
+                )
+                warmup_ops = warmups_ops_last_stage + 2 * (group_size - 1)
+                warmup_ops = min(warmup_ops, num_microbatches * num_local_stages)
+
+                for i in range(2):
+                    num_stages = num_local_stages * group_size
+                    stages = [
+                        MockPipelineStage(group_size=group_size, num_stages=num_stages)
+                        for i in range(num_local_stages)
+                    ]
+                    schedule = ScheduleClass(
+                        stages, num_microbatches, enable_zero_bubble=(i == 0)
+                    )
+                    formatted_pipeline_order = _format_pipeline_order(
+                        schedule.pipeline_order
+                    )
+                    # print(formatted_pipeline_order)
+                    _validate_pipeline_order(
+                        schedule.pipeline_order,
+                        num_microbatches,
+                        num_stages,
+                        enable_zero_bubble=(i == 0),
+                    )
 
 
 instantiate_parametrized_tests(TestSchedulePlan)
