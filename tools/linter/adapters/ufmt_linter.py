@@ -21,7 +21,7 @@ from usort import Config as UsortConfig
 
 IS_WINDOWS: bool = os.name == "nt"
 REPO_ROOT = Path(__file__).absolute().parents[3]
-ISORT_WHITELIST = re.compile(
+ISORT_SKIPLIST = re.compile(
     "|".join(
         (
             r"\A\Z",  # empty string
@@ -127,7 +127,7 @@ def check_file(filename: str) -> list[LintMessage]:
         usort_config = UsortConfig.find(path)
         black_config = make_black_config(path)
 
-        if not path.samefile(__file__) and not ISORT_WHITELIST.match(
+        if not path.samefile(__file__) and not ISORT_SKIPLIST.match(
             path.absolute().relative_to(REPO_ROOT).as_posix()
         ):
             isorted_replacement = re.sub(
