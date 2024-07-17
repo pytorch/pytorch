@@ -544,19 +544,23 @@ class _ProcessGroupWrapper(Backend):
     wrapped_pg: Backend
 
 class ProcessGroupNCCL(Backend):
-    class Options:
-        def __init__(self, timeout: timedelta | None = None) -> None: ...
-        @property
-        def backend(self) -> str: ...
-        @property
-        def _timeout(self) -> timedelta: ...
-        @_timeout.setter
-        def _timeout(self, val: timedelta) -> None: ...
-        @property
-        def _is_high_priority_stream(self) -> bool: ...
-        @_is_high_priority_stream.setter
-        def _is_high_priority_stream(self, val: bool) -> None: ...
+    class NCCLConfig:
+        blocking: int
+        cga_cluster_size: int
+        min_ctas: int
+        max_ctas: int
 
+        def __init__(self) -> None: ...
+        @property
+        def net_name(self) -> str: ...
+
+    class Options:
+        config: ProcessGroupNCCL.NCCLConfig
+        is_high_priority_stream: bool
+        split_from: ProcessGroupNCCL
+        split_color: int
+        global_ranks_in_group: list[int]
+        group_name: str
     def __init__(
         self,
         store: Store,
