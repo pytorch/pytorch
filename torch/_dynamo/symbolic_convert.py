@@ -596,6 +596,8 @@ def break_graph_if_unsupported(*, push):
                     else ()
                 )
                 if len(kw_names) > 0:
+                    # KW_NAMES no longer used in 3.13
+                    assert sys.version_info < (3, 13)
                     self.output.add_output_instructions(
                         [create_instruction("KW_NAMES", argval=kw_names)]
                     )
@@ -2087,10 +2089,18 @@ class InstructionTranslatorBase(
     def PUSH_NULL(self, inst):
         self.push(NullVariable())
 
-    @break_graph_if_unsupported(push=1)
-    def CALL(self, inst):
+    def _call(self, inst, call_kw=False):
         # see https://docs.python.org/3.11/library/dis.html#opcode-CALL
         # for convention
+        if call_kw:
+            # TOS is kw_names for CALL_KW instruction
+            assert sys.version_info >= (3, 13)
+            kw_names = self.pop()
+            assert isinstance(kw_names, TupleVariable) and kw_names.is_python_constant()
+            kw_names = kw_names.as_python_constant()
+        else:
+            kw_names = self.kw_names.value if self.kw_names else ()
+
         contents = self.popn(inst.arg + 2)
         if sys.version_info >= (3, 13):
             # NULL and callable swapped
@@ -2103,7 +2113,7 @@ class InstructionTranslatorBase(
             else:
                 fn = contents[0]
                 args = [contents[1]]
-        kw_names = self.kw_names.value if self.kw_names else ()
+
         if kw_names:
             args = args + contents[2 : -len(kw_names)]
             kwargs_list = contents[-len(kw_names) :]
@@ -2112,8 +2122,13 @@ class InstructionTranslatorBase(
         else:
             args = args + contents[2:]
             kwargs = {}
+
         self.call_function(fn, args, kwargs)
         self.kw_names = None
+
+    @break_graph_if_unsupported(push=1)
+    def CALL(self, inst):
+        self._call(inst)
 
     def COPY(self, inst):
         self.push(self.stack[-inst.arg])
@@ -2242,6 +2257,10 @@ class InstructionTranslatorBase(
     def STORE_FAST_STORE_FAST(self, inst):
         self._store_fast(inst.argval[0])
         self._store_fast(inst.argval[1])
+
+    @break_graph_if_unsupported(push=1)
+    def CALL_KW(self, inst):
+        self._call(inst, call_kw=True)
 
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
