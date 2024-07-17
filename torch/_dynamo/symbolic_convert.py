@@ -19,7 +19,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -204,14 +204,20 @@ class BlockStackEntry:
     inst: Instruction
     target: Instruction
     stack_index: Optional[int] = None
-    with_context: Optional[ContextWrappingVariable] = None
+    with_context: Optional[
+        Union[ContextWrappingVariable, GenericContextWrappingVariable]
+    ] = None
 
     def can_restore(self):
         return self.with_context is not None
 
     def resume_fn(self):
         assert self.stack_index is not None
-        if self.with_context and self.with_context.target_values:
+        if (
+            self.with_context
+            and hasattr(self.with_context, "target_values")
+            and self.with_context.target_values
+        ):
             return ReenterWith(self.stack_index, tuple(self.with_context.target_values))
         else:
             return ReenterWith(self.stack_index)
@@ -584,6 +590,7 @@ def break_graph_if_unsupported(*, push):
             # Reconstruct the context variable CLASS in the block stack
             for b in self.block_stack:
                 assert b.with_context is not None
+                assert isinstance(b.with_context, ContextWrappingVariable)
                 b.with_context.reconstruct_type(cg)
                 cg.extend_output(b.resume_fn().try_except(cg.code_options, cleanup))
             self.output.add_output_instructions(cg.get_instructions())
@@ -596,6 +603,8 @@ def break_graph_if_unsupported(*, push):
                     else ()
                 )
                 if len(kw_names) > 0:
+                    # KW_NAMES no longer used in 3.13
+                    assert sys.version_info < (3, 13)
                     self.output.add_output_instructions(
                         [create_instruction("KW_NAMES", argval=kw_names)]
                     )
@@ -939,9 +948,7 @@ class InstructionTranslatorBase(
     def popn(self, n: int) -> List[VariableTracker]:
         return [*reversed([self.pop() for _ in range(n)])]
 
-    def LOAD_FAST(self, inst):
-        name = inst.argval
-
+    def _load_fast(self, name):
         if self.exec_recorder and name in self.f_locals:
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
@@ -961,6 +968,9 @@ class InstructionTranslatorBase(
         if name.startswith("___stack"):
             self.symbolic_locals.pop(name)
 
+    def LOAD_FAST(self, inst):
+        self._load_fast(inst.argval)
+
     def LOAD_DEREF(self, inst):
         assert inst.argval in self.cell_and_freevars()
 
@@ -971,11 +981,13 @@ class InstructionTranslatorBase(
             unimplemented(f"undefined LOAD_DEREF {inst.argval}")
         self.push(self.symbolic_locals[inst.argval])
 
-    def STORE_FAST(self, inst):
+    def _store_fast(self, name):
         loaded_vt = self.pop()
-        name = inst.argval
         loaded_vt.set_name_hint(name)
         self.symbolic_locals[name] = loaded_vt
+
+    def STORE_FAST(self, inst):
+        self._store_fast(inst.argval)
 
     def DELETE_FAST(self, inst):
         del self.symbolic_locals[inst.argval]
@@ -1494,8 +1506,15 @@ class InstructionTranslatorBase(
             argsvars = self.pop()
         else:
             unimplemented("CALL_FUNCTION_EX")
+
+        if sys.version_info >= (3, 13):
+            # 3.13 swapped null and callable
+            null = self.pop()
+            assert isinstance(null, NullVariable)
+
         fn = self.pop()
-        if sys.version_info >= (3, 11):
+
+        if sys.version_info >= (3, 11) and sys.version_info < (3, 13):
             null = self.pop()
             assert isinstance(null, NullVariable)
 
@@ -2077,10 +2096,18 @@ class InstructionTranslatorBase(
     def PUSH_NULL(self, inst):
         self.push(NullVariable())
 
-    @break_graph_if_unsupported(push=1)
-    def CALL(self, inst):
+    def _call(self, inst, call_kw=False):
         # see https://docs.python.org/3.11/library/dis.html#opcode-CALL
         # for convention
+        if call_kw:
+            # TOS is kw_names for CALL_KW instruction
+            assert sys.version_info >= (3, 13)
+            kw_names = self.pop()
+            assert isinstance(kw_names, TupleVariable) and kw_names.is_python_constant()
+            kw_names = kw_names.as_python_constant()
+        else:
+            kw_names = self.kw_names.value if self.kw_names else ()
+
         contents = self.popn(inst.arg + 2)
         if sys.version_info >= (3, 13):
             # NULL and callable swapped
@@ -2093,7 +2120,7 @@ class InstructionTranslatorBase(
             else:
                 fn = contents[0]
                 args = [contents[1]]
-        kw_names = self.kw_names.value if self.kw_names else ()
+
         if kw_names:
             args = args + contents[2 : -len(kw_names)]
             kwargs_list = contents[-len(kw_names) :]
@@ -2102,8 +2129,17 @@ class InstructionTranslatorBase(
         else:
             args = args + contents[2:]
             kwargs = {}
-        self.call_function(fn, args, kwargs)
-        self.kw_names = None
+
+        try:
+            # if call_function fails, need to set kw_names to None, otherwise
+            # a subsequent call may have self.kw_names set to an old value
+            self.call_function(fn, args, kwargs)
+        finally:
+            self.kw_names = None
+
+    @break_graph_if_unsupported(push=1)
+    def CALL(self, inst):
+        self._call(inst)
 
     def COPY(self, inst):
         self.push(self.stack[-inst.arg])
@@ -2127,11 +2163,18 @@ class InstructionTranslatorBase(
 
     def setup_or_before_with(self, inst):
         ctx = self.pop()
-        if not isinstance(ctx, ContextWrappingVariable):
+        if not isinstance(
+            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+        ):
             unimplemented(f"{inst.opname} {ctx}")
 
         if isinstance(ctx, GenericContextWrappingVariable):
             self.generic_context_manager_depth += 1
+
+        # Need this redundant check for mypy
+        assert isinstance(
+            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+        )
 
         exit = WithExitFunctionVariable(
             ctx,
@@ -2223,6 +2266,29 @@ class InstructionTranslatorBase(
 
     def END_SEND(self, inst):
         del self.stack[-2]
+
+    # 3.13 opcodes
+    def LOAD_FAST_LOAD_FAST(self, inst):
+        self._load_fast(inst.argval[0])
+        self._load_fast(inst.argval[1])
+
+    def STORE_FAST_STORE_FAST(self, inst):
+        self._store_fast(inst.argval[0])
+        self._store_fast(inst.argval[1])
+
+    @break_graph_if_unsupported(push=1)
+    def CALL_KW(self, inst):
+        self._call(inst, call_kw=True)
+
+    def TO_BOOL(self, inst):
+        # TO_BOOL only precedes a conditional jump or UNARY_NOT (see compile.c in CPython)
+        # So we can skip this instruction as long as we remember to codegen a TO_BOOL
+        # before conditional jumps/UNARY_NOT.
+        assert self.next_instruction.opname in (
+            "POP_JUMP_IF_TRUE",
+            "POP_JUMP_IF_FALSE",
+            "UNARY_NOT",
+        )
 
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:

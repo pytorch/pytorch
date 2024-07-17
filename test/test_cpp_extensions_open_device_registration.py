@@ -10,7 +10,6 @@ from typing import Union
 from unittest.mock import patch
 
 import torch
-
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_utils import (
