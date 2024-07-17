@@ -12,6 +12,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    final,
     Iterator,
     List,
     Optional,
@@ -39,6 +40,8 @@ if TYPE_CHECKING:
 
 import torch
 import torch.utils._pytree as pytree
+
+from torch._export.verifier import Verifier
 from torch._subclasses.functional_tensor import FunctionalTensor
 
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
@@ -65,7 +68,6 @@ from .graph_signature import (  # noqa: F401
     TensorArgument,
     TokenArgument,
 )
-
 
 __all__ = [
     "ExportedProgram",
@@ -324,10 +326,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
     _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
-    from torch._export.non_strict_utils import (
-        _gather_constant_attrs,
-        make_fake_params_buffers,
-    )
+    from torch._export.non_strict_utils import make_fake_params_buffers
+    from torch._export.passes.lift_constants_pass import ConstantAttrMap
     from torch._functorch.aot_autograd import aot_export_module
     from torch._guards import detect_fake_mode
 
@@ -369,14 +369,40 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
         mod.recompile()
 
+        # the exported module will store constants & non-persistent buffers such that
+        # retracing treats them as persistent buffers, so we inform the constants lifting pass
+        # and overwrite the new graph signature using the previous program.
+        constant_attrs = ConstantAttrMap()
+        non_persistent_buffers = {
+            spec.target
+            for spec in ep.graph_signature.input_specs
+            if spec.kind == InputKind.BUFFER and not spec.persistent
+        }
+        for name, value in ep.constants.items():
+            if name in non_persistent_buffers:
+                continue
+            # recursive getattr
+            _mod = mod
+            *atoms, attr = name.split(".")
+            for atom in atoms:
+                _mod = getattr(_mod, atom)
+            # remove as buffer, reassign as constant/non-persistent buffer
+            _mod._buffers.pop(attr, None)
+            setattr(_mod, attr, value)
+            constant_attrs.add(value, name)
+
+        # get params & buffers after excluding constants
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(mod)
         )
-        constant_attrs = _gather_constant_attrs(mod)
         aten_export_artifact = _export_to_aten_ir(
             mod,
-            fake_args_unwrapped[0],
-            fake_args_unwrapped[1],
+            # this requires empty kwargs, but not in pytree.flattened format
+            (
+                *fake_args_unwrapped[0],
+                *fake_args_unwrapped[1].values(),
+            ),
+            {},
             fake_params_buffers,
             constant_attrs,
         )
@@ -393,6 +419,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
                             fqn,
                             mod_cls.__module__ + "." + mod_cls.__qualname__,
                         )
+
+        # overwrite signature for non-persistent buffers
+        for spec in new_graph_signature.input_specs:
+            if spec.kind == InputKind.BUFFER and spec.target in non_persistent_buffers:
+                spec.persistent = False
 
         _verify_nn_module_stack(gm)
         _verify_stack_trace(gm)
@@ -571,11 +602,6 @@ def _decompose_exported_program(
     _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
-    from torch._export.passes.lift_constants_pass import (
-        ConstantAttrMap,
-        lift_constants_pass,
-    )
-
     gm, new_graph_signature = _decompose_and_get_gm_with_new_signature_constants(
         ep,
         decomp_table=decomp_table,
@@ -593,11 +619,6 @@ def _decompose_exported_program(
         ep.range_constraints,
         _is_executorch=False,
     )
-
-    constants = lift_constants_pass(gm, new_graph_signature, ConstantAttrMap())
-    for k, v in constants.items():
-        assert k not in ep.constants
-        ep.constants[k] = v
 
     exported_program = ExportedProgram(
         root=gm,
@@ -637,13 +658,15 @@ class ExportedProgram:
         range_constraints: "Dict[sympy.Symbol, Any]",
         module_call_graph: List[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
-        verifier: Optional[Type[Any]] = None,  # TODO Change typing hint to Verifier.
+        verifier: Optional[Type[Any]] = None,  # TODO Deprecate this.
         tensor_constants: Optional[
             Dict[str, torch.Tensor]
         ] = None,  # TODO: deprecate this
         constants: Optional[
             Dict[str, Union[torch.Tensor, FakeScriptObject, torch._C.ScriptObject]]
         ] = None,
+        *,
+        verifiers: Optional[List[Type[Verifier]]] = None,
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -661,14 +684,17 @@ class ExportedProgram:
         self._constants = tensor_constants or constants or {}
         assert self._constants is not None
 
-        from torch._export.verifier import Verifier
-
-        if verifier is None:
-            verifier = Verifier
-        assert issubclass(verifier, Verifier)
-        self._verifier = verifier
+        # TODO Clean up this after we bump executorch's pin.
+        assert verifier is None or verifiers is None
+        if verifiers is None:
+            if verifier is None:
+                verifiers = [Verifier]
+            else:
+                verifiers = [verifier]
+        assert all(issubclass(v, Verifier) for v in verifiers)
+        self._verifiers = verifiers
         # Validate should be always the last step of the constructor.
-        self.verifier().check(self)
+        self._validate()
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -759,13 +785,18 @@ class ExportedProgram:
     @property
     @compatibility(is_backward_compatible=False)
     def verifier(self) -> Any:
-        return self._verifier
+        return self._verifiers[0]
 
     @property
     @compatibility(is_backward_compatible=False)
     def dialect(self) -> str:
-        assert self._verifier is not None
-        return self._verifier.dialect
+        assert self._verifiers is not None
+        return self._verifiers[0].dialect
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def verifiers(self):
+        return self._verifiers
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -1079,8 +1110,10 @@ class ExportedProgram:
             input_placeholders, flat_args_with_path, self.range_constraints
         )
 
+    @final
     def _validate(self):
-        self.verifier().check(self)
+        for v in self.verifiers:
+            v().check(self)
 
     # TODO(zhxchen17) Formalize this.
     def _update(

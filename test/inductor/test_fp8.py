@@ -69,7 +69,7 @@ class TestFP8Types(TestCase):
             )
             a_inverse_scale = 1 / a_scale
             b_inverse_scale = 1 / b_scale
-            output, updated_amax = torch._scaled_mm(
+            output = torch._scaled_mm(
                 x,
                 weight,
                 bias=input_bias,

@@ -780,8 +780,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   auto k_t = key.transpose(1, 2);
   auto v_t = value.transpose(1, 2);
 
-  Tensor grad_q, grad_k, grad_v, grad_bias;
-
   // This is needed because SaveVariable automatically converts
   // std::optional to undefined tensor
   std::optional<Tensor> kernel_bias;
@@ -797,7 +795,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   sdp::CustomMaskType custom_mask_type = causal
     ? sdp::CustomMaskType::CausalFromTopLeft
     : sdp::CustomMaskType::NoCustomMask;
-  std::tie(grad_q, grad_k, grad_v, grad_bias) =
+  auto [grad_q, grad_k, grad_v, grad_bias] =
       at::_efficient_attention_backward(
           grad_out,
           q_t,
