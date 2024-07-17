@@ -1940,13 +1940,6 @@ class CommonTemplate:
         f = torch.randn(1, 129, 2, device=self.device)
         expect = eager_scan(x, f)
         actual = compiled_scan(x, f)
-        print(expect[0][0,:,0])
-        print(actual[0][0,:,0])
-        print(expect[0][0,:,0] - actual[0][0,:,0])
-        print(x[0, :, 0])
-        print(f[0, :, 0])
-        self.assertEqual(expect[0], actual[0])
-        self.assertEqual(expect[1], actual[1])
         self.assertEqual(expect, actual)
 
     def test_embedding_bag_byte_unpack(self):
