@@ -25,6 +25,10 @@ from typing import (
 from torch._higher_order_ops.utils import autograd_not_implemented
 
 from torch._library.fake_class_registry import FakeScriptObject
+
+from torch._subclasses.fake_tensor import FakeTensorMode
+
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -346,7 +350,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
             node.meta["val"] for node in mod.graph.nodes if node.op == "placeholder"
         ]
         fake_mode = torch._export.utils._detect_fake_mode_from_gm(mod)
-        assert fake_mode is not None, "Cannot detect fake mode from graph"
+        if fake_mode is None:
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
 
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
