@@ -1484,7 +1484,7 @@ class TestTracer(JitTestCase):
                 return x + 2
 
             def forward(self, input):
-                return (lambda a: a + 1)(input)
+                return (lambda a: a + 1)(input)  # noqa: PLC3002
 
         # When tracing Bar as a submodule, we only want to script the
         # exported methods, and we want to keep the forwards still

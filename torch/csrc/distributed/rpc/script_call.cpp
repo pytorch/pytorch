@@ -2,9 +2,7 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 const std::string ScriptCall::BUILTIN_OP_NAMESPACE_("torch.ops.aten.");
 const std::string ScriptCall::ATEN_PREFIX_("aten::");
@@ -155,6 +153,4 @@ std::shared_ptr<Operator> ScriptCall::matchOperator(
   TORCH_CHECK(false, "Cannot find matching operator for schema ", str_schema);
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
