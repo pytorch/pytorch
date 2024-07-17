@@ -188,10 +188,10 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
   float inv_scale_val = 1.0f / scale_val;
   int64_t zero_point_val = native::_get_zero_point_from_tensor(zero_point, quant_min, quant_max, false);
 
-  TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(X.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(scale.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(zero_point.scalar_type() == ScalarType::Float);
+  TORCH_CHECK(dY.is_floating_point());
+  TORCH_CHECK(X.is_floating_point());
+  TORCH_CHECK(scale.is_floating_point());
+  TORCH_CHECK(zero_point.is_floating_point());
   TORCH_CHECK(X.numel() == dY.numel(), "`X` and `dY` are not the same size");
   TORCH_CHECK(
       quant_min <= 0 && quant_max >= 0,
