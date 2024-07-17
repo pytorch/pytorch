@@ -564,7 +564,7 @@ def _sfdp_pattern_20(
     a_scale,
     o_zp,
     o_scale,
-    dropout_p,
+    dropout,
 ):
     # UINT8 QUANTIZED SDPA
     q = query.permute([0, 2, 1, 3])
@@ -584,7 +584,7 @@ def _sfdp_pattern_20(
     )
     a = torch.nn.functional.dropout(
         (torch.matmul(q, k).div(inv_scale) + attn_mask).softmax(dim=-1),
-        dropout_p,
+        dropout,
     )
     # a = torch.nn.functional.dropout(
     #     torch.matmul(q, k).div(inv_scale).softmax(dim=-1),
@@ -626,13 +626,13 @@ def _sfdp_replacement_20(
     a_scale,
     o_zp,
     o_scale,
-    dropout_p,
+    dropout,
 ):
     counters["inductor"]["fuse_attention"] += 1
     print("hit sdpa pattern 20")
     print(
         inv_scale,
-        dropout_p,
+        dropout,
         q_zp,
         q_scale,
         k_zp,
@@ -649,7 +649,7 @@ def _sfdp_replacement_20(
         key.transpose(1, 2),
         value.transpose(1, 2),
         attn_mask=attn_mask,
-        dropout_p=dropout_p,
+        dropout_p=dropout,
         is_causal=False,
         scale=1.0 / inv_scale,
         q_zp=q_zp,
@@ -781,7 +781,7 @@ def _get_sfdp_patterns():
     # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
     d = {"dropout_p": 0.113377}
     d_u8 = {
-        "dropout_p": 0.113377,
+        "dropout": 0.113377,
         "q_zp": 23,
         "q_scale": 0.0111541,
         "k_zp": 14,
@@ -1068,6 +1068,14 @@ def _get_sfdp_patterns():
                         replacement, dropout_p=0.0
                     )
                     workaround = {}
+                else:
+                    # for uint8 pattern with more workarounds other than dropout,
+                    # we need to rename it to avoid influcing other patterns
+                    pattern = partialize_and_update_signature(pattern, dropout=0.0)
+                    replacement = partialize_and_update_signature(
+                        replacement, dropout=0.0
+                    )
+                    del workaround["dropout"]
 
             inference_name = name + "_inference"
             yield inference_name, {

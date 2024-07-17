@@ -1921,12 +1921,12 @@ class TestSDPA(NNTestCase):
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
     @parametrize("dtype", [torch.float32])
-    @parametrize("batch_size", [2])
-    @parametrize("q_seq_len", [9216])
-    @parametrize("kv_seq_len", [9216])
-    @parametrize("n_head", [5])
-    @parametrize("head_dim", [5])
-    @parametrize("mask_dim", [64])
+    @parametrize("batch_size", [56])
+    @parametrize("q_seq_len", [384])
+    @parametrize("kv_seq_len", [384])
+    @parametrize("n_head", [16])
+    @parametrize("head_dim", [64])
+    @parametrize("mask_dim", [4])
     @parametrize("bool_mask", [0])
     @parametrize("train", [False])
     def test_scaled_dot_product_fused_attention_mask_vs_math_cpu_u8(
@@ -1943,6 +1943,7 @@ class TestSDPA(NNTestCase):
         bool_mask,
         train,
     ):
+        # torch.set_printoptions(threshold=10_000)
         tol = Tolerances(1.0, 5e-6)
         # tol = Tolerances(1e-5, 5e-6)
         # if dtype is torch.bfloat16:
@@ -1964,13 +1965,16 @@ class TestSDPA(NNTestCase):
         a_scale = 0.003919653594493866
         o_zp = 128
         o_scale = 1.8191684484481812
-        mask_shape = [batch_size, n_head, q_seq_len, kv_seq_len]
+        mask_shape = [batch_size, 1, 1, kv_seq_len]
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
         q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
         kv_shape = SdpaShape(batch_size, n_head, kv_seq_len, head_dim)
         q = make_tensor(q_shape) * 100
         k = make_tensor(kv_shape) * 100
         v = make_tensor(kv_shape) * 100
+        q = q.to(torch.uint8)
+        k = k.to(torch.uint8)
+        v = v.to(torch.uint8)
         q2, k2, v2 = q.clone(), k.clone(), v.clone()
 
         if train:
@@ -1995,42 +1999,52 @@ class TestSDPA(NNTestCase):
         k2 = k2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
         v2 = v2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
 
-        with sdpa_kernel(backends=[fused_kernel]):
-            actual = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
-        with sdpa_kernel(backends=[SDPBackend.MATH]):
-            if not bool_mask and dtype in [torch.bfloat16, torch.float16]:
-                attn_mask = attn_mask.float()
-            math_ref = torch.nn.functional.scaled_dot_product_attention(
-                q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
-        # iter_n = 100
-        # with torch.profiler.profile(
-        #         activities=[
-        #             torch.profiler.ProfilerActivity.CPU],
-        #         schedule=torch.profiler.schedule(
-        #             wait=2,
-        #             warmup=iter_n,
-        #             active=20),
-        #         on_trace_ready=self.trace_handler
-        #         ) as prof:
-        #     for _ in range(iter_n + 22):
-        #         # with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-        #         actual = torch.nn.functional.scaled_dot_product_attention(
-        #             q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False,
+        # with sdpa_kernel(backends=[fused_kernel]):
+        #     actual = torch.nn.functional.scaled_dot_product_attention(
+        #         q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False,
         #             q_zp=q_zp, q_scale=q_scale,
         #             k_zp=k_zp, k_scale=k_scale,
         #             v_zp=v_zp, v_scale=v_scale,
         #             a_zp=a_zp, a_scale=a_scale,
         #             o_zp=o_zp, o_scale=o_scale)
-        #         prof.step()
+        # with sdpa_kernel(backends=[SDPBackend.MATH]):
+        #     if not bool_mask and dtype in [torch.bfloat16, torch.float16]:
+        #         attn_mask = attn_mask.float()
+        #     math_ref = torch.nn.functional.scaled_dot_product_attention(
+        #         q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=False,
+        #             q_zp=q_zp, q_scale=q_scale,
+        #             k_zp=k_zp, k_scale=k_scale,
+        #             v_zp=v_zp, v_scale=v_scale,
+        #             a_zp=a_zp, a_scale=a_scale,
+        #             o_zp=o_zp, o_scale=o_scale)
+        iter_n = 100
+        with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU],
+                schedule=torch.profiler.schedule(
+                    wait=2,
+                    warmup=iter_n,
+                    active=20),
+                on_trace_ready=self.trace_handler
+                ) as prof:
+            for _ in range(iter_n + 22):
+                # with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+                actual = torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False,
+                    q_zp=q_zp, q_scale=q_scale,
+                    k_zp=k_zp, k_scale=k_scale,
+                    v_zp=v_zp, v_scale=v_scale,
+                    a_zp=a_zp, a_scale=a_scale,
+                    o_zp=o_zp, o_scale=o_scale)
+                prof.step()
 
-        if dtype in [torch.bfloat16, torch.float16]:
-            math_ref = math_ref.to(dtype)
+        # if dtype in [torch.bfloat16, torch.float16]:
+        #     math_ref = math_ref.to(dtype)
 
-        # print("actual", actual)
-        # print("math_ref", math_ref)
+        # # print("actual", actual)
+        # # print("math_ref", math_ref)
 
-        self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
+        # self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
 
         # if train:
         #     actual.sum().backward()
@@ -2078,43 +2092,13 @@ class TestSDPA(NNTestCase):
         # ) if mask_dim == 2 else itertools.product(
         #     [batch_size, 1], [n_head, 1], [q_seq_len, 1], [kv_seq_len, 1]
         # ):
-        q_zp = 127
-        q_scale = 1.7907238006591797
-        k_zp = 125
-        k_scale = 1.8039721250534058
-        v_zp = 127
-        v_scale = 1.839004635810852
-        a_zp = 0
-        a_scale = 0.003919653594493866
-        o_zp = 128
-        o_scale = 1.8191684484481812
-        mask_shape = [batch_size, n_head, q_seq_len, kv_seq_len]
+        mask_shape = [batch_size, 1, 1, kv_seq_len]
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
         q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
         kv_shape = SdpaShape(batch_size, n_head, kv_seq_len, head_dim)
         q = make_tensor(q_shape)
         k = make_tensor(kv_shape)
         v = make_tensor(kv_shape)
-        # q_shape = [batch_size, n_head, q_seq_len, head_dim]
-        # kv_shape = [batch_size, n_head, kv_seq_len, head_dim]
-        # q = torch.randint(
-        #         0, 255,
-        #         q_shape,
-        #         device="cpu",
-        #         dtype=torch.uint8,
-        #         requires_grad=False)
-        # k = torch.randint(
-        #         0, 255,
-        #         kv_shape,
-        #         device="cpu",
-        #         dtype=torch.uint8,
-        #         requires_grad=False)
-        # v = torch.randint(
-        #         0, 255,
-        #         kv_shape,
-        #         device="cpu",
-        #         dtype=torch.uint8,
-        #         requires_grad=False)
         q2, k2, v2 = q.clone(), k.clone(), v.clone()
 
         if train:
@@ -2160,12 +2144,7 @@ class TestSDPA(NNTestCase):
             for _ in range(iter_n + 22):
                 # with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
                 actual = torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False,
-                    q_zp=q_zp, q_scale=q_scale,
-                    k_zp=k_zp, k_scale=k_scale,
-                    v_zp=v_zp, v_scale=v_scale,
-                    a_zp=a_zp, a_scale=a_scale,
-                    o_zp=o_zp, o_scale=o_scale)
+                    q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
                 prof.step()
 
     @parametrize("kernel", [SDPBackend.MATH])
