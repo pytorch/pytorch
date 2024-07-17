@@ -1141,15 +1141,17 @@ def create_inputs_key(input_nodes):
     return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes])
 
 
-def create_precompile_key(name: str, inputs_key: str) -> str:
+def create_precompile_key(
+    name: str, inputs_key: str, choices: List[ChoiceCaller]
+) -> str:
     return ":".join(
-                [
-                    name,
-                    inputs_key,
-                    torch.get_float32_matmul_precision(),
-                ]
-                + [choice.hash_key() for choice in choices]
-            )
+        [
+            name,
+            inputs_key,
+            torch.get_float32_matmul_precision(),
+        ]
+        + [choice.hash_key() for choice in choices]
+    )
 
 
 class AlgorithmSelectorCache(PersistentCache):
@@ -1253,7 +1255,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
-            precompile_key = create_precompile_key(name, inputs_key)
+            precompile_key = create_precompile_key(name, inputs_key, choices)
             if precompile_func := self.precompile_cache.get(precompile_key):
                 return precompile_func
 
@@ -1343,7 +1345,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
 
             if config.collect_autoheuristic(name):
-                precompile_key = create_precompile_key(name, inputs_key)
+                precompile_key = create_precompile_key(name, inputs_key, choices)
                 if precompile_key in autoheuristic_registry:
                     ah_feedback = []
                     for choice, timing in timings.items():

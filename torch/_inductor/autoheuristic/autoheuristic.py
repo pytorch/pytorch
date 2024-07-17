@@ -17,6 +17,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 from torch._inductor.autoheuristic.learned_heuristic_controller import (
     LearnedHeuristicController,
 )
+from torch._inductor.ir import ChoiceCaller
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import get_gpu_shared_memory
 
@@ -71,13 +72,14 @@ class GlobalFeedback(_Feedback):
     will be provided later after autotuning has happened in select_algorithm.py.
     """
 
-    def __init__(self, inputs: List[Any]) -> None:
+    def __init__(self, inputs: List[Any], choices: List[ChoiceCaller]) -> None:
         """
         Args:
             inputs: List of inputs. This has to match the input_nodes that are passed to autotune_select_algorithm().
         """
         super().__init__()
         self.inputs = inputs
+        self.choices = choices
 
 
 class InconsistentMetadata(Exception):
@@ -150,7 +152,9 @@ class AutoHeuristic:
                     feedback_val = self.feedback(choice)
                     self.save_data(choice, feedback_val)
             elif isinstance(self.feedback, GlobalFeedback):
-                self.register_global_feedback(self.feedback.inputs)
+                self.register_global_feedback(
+                    self.feedback.inputs, self.feedback.choices
+                )
 
     def satisfies_precondition(self) -> bool:
         return self.precondition is None or self.precondition(
@@ -182,7 +186,9 @@ class AutoHeuristic:
     def get_collected_feedback(self, choice: Choice) -> Any:
         return self.collected_feedback.get(choice, None)
 
-    def register_global_feedback(self, inputs: List[Any]) -> None:
+    def register_global_feedback(
+        self, inputs: List[Any], choices: List[ChoiceCaller]
+    ) -> None:
         from torch._inductor.select_algorithm import (
             autoheuristic_registry,
             create_inputs_key,
@@ -190,7 +196,7 @@ class AutoHeuristic:
         )
 
         inputs_key = create_inputs_key(inputs)
-        precompile_key = create_precompile_key(self.name, inputs_key)
+        precompile_key = create_precompile_key(self.name, inputs_key, choices)
 
         def store_global_feedback(ah_feedback: List[Tuple[str, float]]) -> None:
             for choice, time in ah_feedback:

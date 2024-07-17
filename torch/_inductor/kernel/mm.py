@@ -492,7 +492,7 @@ def mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes):
     for choice in choices:
         choicestr2choice[choice.autoheuristic_id()] = choice
     choices_str = list(choicestr2choice.keys())
-    feedback = GlobalFeedback(inputs=input_nodes)
+    feedback = GlobalFeedback(inputs=input_nodes, choices=choices)
     context = get_context(m, k, n, mat1, mat2)
     autoheuristic = AutoHeuristic(
         fallback=fallback,
