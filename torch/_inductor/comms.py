@@ -13,7 +13,7 @@ from torch import _inductor
 
 from . import config, ir
 from .dependencies import WeakDep
-from .utils import contains_collective, contains_wait, is_collective, is_wait
+from .utils import contains_collective, contains_wait
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 import logging
@@ -102,11 +102,18 @@ def _schedule_for_comm(
     name_to_snode = {}
     scores_0, scores_1, scores_2 = {}, {}, {}
     for idx, snode in enumerate(snodes):
-        for name in snode.get_names():
+        if isinstance(snode, _inductor.scheduler.GroupedSchedulerNode):
+            name = snode.get_name()
             name_to_snode[name] = snode
             scores_0[name] = sys.maxsize
             scores_1[name] = 0
             scores_2[name] = idx
+        else:
+            for name in snode.get_names():
+                name_to_snode[name] = snode
+                scores_0[name] = sys.maxsize
+                scores_1[name] = 0
+                scores_2[name] = idx
 
     comm_idx = 0
     for snode in snodes:
@@ -150,6 +157,21 @@ def _schedule_for_comm(
             }
         assert snode not in unmet_deps
         unmet_deps[snode] = {dep.name for dep in snode.unmet_dependencies}
+    for snode in unmet_deps:
+        if isinstance(snode, _inductor.scheduler.GroupedSchedulerNode):
+            for dep_name in list(unmet_deps[snode]):
+                if isinstance(name_to_snode[dep_name], _inductor.scheduler.NopKernelSchedulerNode) and isinstance(name_to_snode[dep_name].node, ir.MutationOutput):
+                    unmet_deps[snode].remove(dep_name)
+        # deps = list(unmet_deps[snode])
+        # if len(deps) == 1:
+        #     print(f"deps: {deps}")
+        #     if isinstance(name_to_snode[deps[0]], _inductor.scheduler.NopKernelSchedulerNode) and isinstance(name_to_snode[deps[0]].node, ir.MutationOutput):
+        #         nop_node = name_to_snode[deps[0]]
+        #         nop_node_deps = list(unmet_deps[nop_node])
+        #         print(f"nop_node_deps[0]: {nop_node_deps[0]}")
+        #         if len(nop_node_deps) == 1 and nop_node_deps[0] in snode.get_names():
+        #             # unbreak the cycle between grouped node and its associated mutation output node
+        #             unmet_deps[snode] = set()
 
     ready: List[Runnable] = []
     buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(set)
@@ -182,7 +204,7 @@ def _schedule_for_comm(
         candidates = [
             x
             for x in ready
-            if not is_collective(x.snode.node) and not is_wait(x.snode.node)
+            if not contains_collective(x.snode) and not contains_wait(x.snode)
         ]
         if len(candidates) == 0:
             return None
@@ -194,7 +216,7 @@ def _schedule_for_comm(
         to overlap with it. The strategy is described in the comment of
         `reorder_compute_for_overlap`.
         """
-        assert is_collective(snode.node)
+        assert contains_collective(snode)
         schedule(snode)
 
         collective_cost = snode_to_cost[snode]
@@ -209,29 +231,32 @@ def _schedule_for_comm(
 
     while len(ready):
         snode = heapq.heappop(ready).snode
-        if reorder_for_overlap and is_collective(snode.node):
+        if reorder_for_overlap and contains_collective(snode):
             schedule_collective_for_overlap(snode)
         else:
             schedule(snode)
 
     for snode, deps in unmet_deps.items():
+        if len(deps) == 1:
+            dep_node = name_to_snode[list(deps)[0]]
+            print(f"dep snode: {dep_node}, dep_node.debug_str(): {dep_node.debug_str()}, unmet_deps[dep_node]: {unmet_deps[dep_node]}" )
         assert len(deps) == 0, (
             "Detected unscheduled nodes. "
-            f"Nodes with unmet dependencies: {unmet_deps}"
+            f"Nodes with unmet dependencies: {snode}, deps: {deps}"
         )
     return scheduled
 
 
-def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
+def decide_global_ordering_of_comms(snodes: List[BaseSchedulerNode]):
     """
     Decide global ordering of comms, by just enforcing the ordering that's in the input graph
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
-    comm_nodes = [n for n in nodes if is_collective(n.node)]
-    for i in range(1, len(comm_nodes)):
+    comm_snodes = [sn for sn in snodes if contains_collective(sn)]
+    for i in range(1, len(comm_snodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
-        comm_nodes[i].add_fake_dep(WeakDep(comm_nodes[i - 1].get_name()))
+        comm_snodes[i].add_fake_dep(WeakDep(comm_snodes[i - 1].get_name()))
 
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
@@ -273,7 +298,7 @@ def visualize_overlap(order):
             if contains_collective(snode):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
-            elif contains_wait(snode.node):
+            elif contains_wait(snode):
                 raise AssertionError(
                     "Wait is not expected when there is no collective running"
                 )
@@ -286,7 +311,7 @@ def visualize_overlap(order):
                     "Found two collectives running at the same time. "
                     "`visualize_overlap` needs to be updated to handle this case"
                 )
-            elif contains_wait(snode.node):  # end of this comm op
+            elif contains_wait(snode):  # end of this comm op
                 overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
                 cur_comm_node = None
             else:  # overlapped compute op
