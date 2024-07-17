@@ -63,25 +63,38 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
 
 # Need to define it here so that Dynamo doesn't skip it
 def _vmap_for_bhqkv(
-    fn,
+    fn: Callable,
     prefix: Tuple[Optional[int], ...],
     suffix: Tuple[Optional[int], ...] = (),
     out_dims: Union[int, List[Optional[int]]] = 0,
 ):
-    # This function vmaps a function 4 times, broadcasting the [b, h, q_idx,
-    # kv_idx] dimensions
-    fn = torch.vmap(
-        fn, in_dims=prefix + (None, None, None, 0) + suffix, out_dims=out_dims
-    )
-    fn = torch.vmap(
-        fn, in_dims=prefix + (None, None, 0, None) + suffix, out_dims=out_dims
-    )
-    fn = torch.vmap(
-        fn, in_dims=prefix + (None, 0, None, None) + suffix, out_dims=out_dims
-    )
-    fn = torch.vmap(
-        fn, in_dims=prefix + (0, None, None, None) + suffix, out_dims=out_dims
-    )
+    """Used to vmap both score_mods and mask_mods over 4-dimensional inputs.
+    Mapping over the [b, h, q_idx, kv_idx] dimensions.
+
+    Args:
+        fn (callable): The function to vmap.
+        prefix (tuple): The prefix of the vmap. For score mod functions,
+                        this should be set to (0,).
+        suffix (tuple): We need to add (0,) if gradOut is being mapped over,
+                        and (None,) * len(other_buffers).
+        out_dims (tuple): For forward cases, keep this as the default 0 since
+                          we are only returning 1 output. For backwards, the joint
+                          graph returns grads for B, H, Q_idx, KV_idx and other_buffers,
+                          so we set this to (0, None, None, None, None) + (None,) * len(other_buffers).
+
+    Returns:
+        callable: The vmapped function.
+    """
+    # We vamp a function 4 times, broadcasting the [b, h, q_idx, kv_idx] dimensions
+    dimensions = [
+        (None, None, None, 0),
+        (None, None, 0, None),
+        (None, 0, None, None),
+        (0, None, None, None),
+    ]
+
+    for dims in dimensions:
+        fn = torch.vmap(fn, in_dims=prefix + dims + suffix, out_dims=out_dims)
     return fn
 
 
@@ -288,20 +301,34 @@ class BlockMask:
             mask_mod=self.mask_mod,
         )
 
+    def __repr__(self):
+        return (
+            f"BlockMask(\n"
+            f"    kv_num_blocks={self.kv_num_blocks.shape},\n"
+            f"    kv_indices={self.kv_indices.shape},\n"
+            f"    full_kv_num_blocks={self.full_kv_num_blocks.shape if self.full_kv_num_blocks is not None else None},\n"
+            f"    full_kv_indices={self.full_kv_indices.shape if self.full_kv_indices is not None else None},\n"
+            f"    q_num_blocks={self.q_num_blocks.shape},\n"
+            f"    q_indices={self.q_indices.shape},\n"
+            f"    full_q_num_blocks={self.full_q_num_blocks.shape if self.full_q_num_blocks is not None else None},\n"
+            f"    full_q_indices={self.full_q_indices.shape if self.full_q_indices is not None else None},\n"
+            f"    BLOCK_SIZE={self.BLOCK_SIZE},\n"
+            f"    shape={self.shape},\n"
+            f"    sparsity={self.sparsity():.2f}%,\n"
+            f"    mask_mod={self.mask_mod.__name__ if hasattr(self.mask_mod, '__name__') else self.mask_mod}\n"
+            f")"
+        )
+
     @property
     def shape(self):
-        """
-        Returns the shape of the mask.
-        """
+        """Returns the shape of the mask."""
         *batch_dims, q_length, _ = self.kv_indices.shape
         q_length = self.kv_indices.shape[-2] * self.BLOCK_SIZE[0]
         kv_length = self.kv_indices.shape[-1] * self.BLOCK_SIZE[1]
         return tuple(batch_dims + [q_length, kv_length])
 
     def numel(self):
-        """
-        Returns the number of elements (not accounting for sparsity) in the mask.
-        """
+        """Returns the number of elements (not accounting for sparsity) in the mask."""
         shape = self.shape
 
         def _prod(xs):
@@ -310,9 +337,7 @@ class BlockMask:
         return _prod(shape)
 
     def sparsity(self) -> float:
-        """
-        Computes the percentage of blocks that are sparse (i.e. not computed)
-        """
+        """Computes the percentage of blocks that are sparse (i.e. not computed)"""
         total_size = self.numel()
         computed_blocks = self.kv_num_blocks.sum()
         if self.full_kv_num_blocks is not None:
@@ -323,9 +348,7 @@ class BlockMask:
         return 100 * (1 - dense_ratio)
 
     def to_dense(self) -> Tensor:
-        """
-        Returns a dense block that is equivalent to the block mask.
-        """
+        """Returns a dense block that is equivalent to the block mask."""
         partial_dense = _ordered_to_dense(self.kv_num_blocks, self.kv_indices)
         if self.full_kv_num_blocks is not None:
             return partial_dense | _ordered_to_dense(
@@ -334,8 +357,7 @@ class BlockMask:
         return partial_dense
 
     def to_string(self, grid_size=(20, 20), limit=4):
-        """
-        Returns a string representation of the block mask. Quite nifty.
+        """Returns a string representation of the block mask. Quite nifty.
 
         If grid_size is None, prints out an uncompressed version. Warning, it can be quite big!
         """
@@ -482,8 +504,8 @@ def create_mask(
     mod_fn: Union[_score_mod_signature, _mask_mod_signature],
     B: int,
     H: int,
-    M: int,
-    N: int,
+    Q_LEN: int,
+    KV_LEN: int,
     device: str = "cuda",
     _compile: bool = False,
 ) -> Tensor:
@@ -493,8 +515,8 @@ def create_mask(
         mod_fn (Union[_score_mod_signature, _mask_mod_signature]): Function to modify attention scores.
         B (int): Batch size.
         H (int): Number of heads.
-        M (int): Sequence length of query.
-        N (int): Sequence length of key/value.
+        Q_LEN (int): Sequence length of query.
+        KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
 
     Returns:
@@ -503,11 +525,10 @@ def create_mask(
 
     b = torch.arange(0, B, device=device)
     h = torch.arange(0, H, device=device)
-    m = torch.arange(0, M, device=device)
-    n = torch.arange(0, N, device=device)
+    m = torch.arange(0, Q_LEN, device=device)
+    n = torch.arange(0, KV_LEN, device=device)
     # TODO: fix this
-    # A hack required because of lack of torchfunctionmode support
-    # Working around some bugs with compiling vmap
+    # Lack instantiation support for __torch_function__ mode support under compile
     if _compile:
         ctx = nullcontext()
     else:
@@ -518,7 +539,7 @@ def create_mask(
         if mod_type == _ModificationType.SCORE_MOD:
             score_mod = mod_fn
             score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,))  # first input is score
-            out = score_mod(torch.zeros(B, H, M, N, device=device), b, h, m, n)
+            out = score_mod(torch.zeros(B, H, Q_LEN, KV_LEN, device=device), b, h, m, n)
             mask = torch.where(torch.isneginf(out), False, True)
             return mask
         elif mod_type == _ModificationType.MASK_MOD:
@@ -530,12 +551,22 @@ def create_mask(
             raise AssertionError
 
 
-# Done as a workaround around torch.compile not compiling what we want in the
-# presence of the torchfunctionmdoe
 def _create_block_mask_inner(
-    mod_fn, B, H, M, N, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE, mod_type
+    mod_fn,
+    B,
+    H,
+    Q_LEN,
+    KV_LEN,
+    device,
+    KV_BLOCK_SIZE,
+    Q_BLOCK_SIZE,
+    mod_type,
 ):
-    mask_tensor = create_mask(mod_fn, B, H, M, N, device, _compile=True)
+    r"""Work around for being unable to instantiate __torch_function__ mode under compile.
+    `create_block_mask` will compile this inner function and wrap the call to this
+    with the __torch_function__ mode.
+    """
+    mask_tensor = create_mask(mod_fn, B, H, Q_LEN, KV_LEN, device, _compile=True)
     mod_type = _get_mod_type(mod_fn)
     if mod_type == _ModificationType.MASK_MOD:
         mask_mod = mod_fn
@@ -574,6 +605,7 @@ def create_block_mask(
         device (str): Device to run the mask creation on.
         KV_BLOCK_SIZE (int): Block size of block mask for each query.
         Q_BLOCK_SIZE (int): Block size of block mask for each key/value.
+        _compile (bool): Whether to compile the mask creation.
 
     Returns:
         block_mask (tuple): A tuple of (kv_num_blocks, kv_indices, q_num_blocks, q_indices,
@@ -584,7 +616,7 @@ def create_block_mask(
         mod_type == _ModificationType.MASK_MOD
     ), "create-block_mask requires a mask_mod function!"
     inner_func = _create_block_mask_inner
-    # This is kind of a temporary hack to workaround some issues
+    # Temporary work around see: _create_block_mask_inner for more details
     if _compile:
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
     with TransformGetItemToIndex():
@@ -594,13 +626,11 @@ def create_block_mask(
     return block_mask
 
 
-def _create_empty_block_mask(query, key, value) -> BlockMask:
+def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     r"""Default block mask for flex attention.
-
-    The flex attention kernels are implemented using block sparsity,
-    where only the unmasked blocks are computed to get the best perf.
     If users don't specify any block sparse mask info, we create this
-    empty block sparse mask with all blocks unmasked as the default one.
+    empty block sparse mask. Which creates a BlockMask with 1 block that is the full length
+    of the query and key tensors.
     """
     device = query.device
     kv_len: int = key.size()[-2]
@@ -683,7 +713,7 @@ def flex_attention(
     if score_mod is None:
         score_mod = _identity
     if block_mask is None:
-        block_mask = _create_empty_block_mask(query, key, value)
+        block_mask = _create_empty_block_mask(query, key)
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))
     if torch.compiler.is_dynamo_compiling():
