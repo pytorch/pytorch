@@ -1715,7 +1715,7 @@ class Scan(Loops):
             combine_fn=combine_fn,
             scan_numel=scan_numel,
         )
-        scan_type: Union[Literal[Scan], Literal[SplitScan]] = Scan
+        scan_type = Scan
         if num_splits > 1:
             supports_split = torch.version.hip is None and len(dtypes) == 1
             if not supports_split:

@@ -1910,6 +1910,9 @@ class CommonTemplate:
         self.assertEqual(expect, actual)
 
     def test_custom_scan_would_split(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("associative_scan only supported on GPU")
+
         def combine_linear_recurrence(left, right):
             xl, fl = left
             xr, fr = right
@@ -1933,6 +1936,7 @@ class CommonTemplate:
         @torch.compile
         def compiled_scan(x, f):
             from torch._higher_order_ops.associative_scan import associative_scan
+
             x, f = associative_scan(combine_linear_recurrence, (x, f), dim=1)
             return x, f
 
