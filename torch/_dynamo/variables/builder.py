@@ -47,6 +47,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef
+
 from .. import config, mutation_guard, replay_record, trace_rules
 
 from ..device_interface import get_registered_device_interfaces
@@ -91,6 +92,7 @@ from ..utils import (
     is_function_or_wrapper,
     is_lru_cache_wrapped_function,
     is_namedtuple,
+    is_parameter_freezing,
     is_typing,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -1196,6 +1198,19 @@ class VariableBuilder:
         else:
             return RangeVariable(items, source=self.source)
 
+    def mark_static_input(self, value: torch.Tensor, guard: bool):
+        from ..decorators import mark_static_address
+
+        mark_static_address(value, guard=guard)
+
+        # Check if we've seen this tensor before and update graph metadata if needed
+        # As long as this runs before AOT this is sound
+        if value in self.tx.output.side_effects:
+            var = self.tx.output.side_effects[value]
+            var.proxy.node.meta["tensor_dict"][
+                "_dynamo_static_input_type"
+            ] = value._dynamo_static_input_type
+
     def wrap_module(self, value: torch.nn.Module):
         from ..eval_frame import OptimizedModule
 
@@ -1249,25 +1264,23 @@ class VariableBuilder:
         elif mutation_guard.is_dynamic_nn_module(value, self.tx.export):
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            if (
-                torch._dynamo.config.inline_inbuilt_nn_modules
-                and torch._inductor.config.freezing
-                and not torch.is_grad_enabled()
-            ):
-                from ..decorators import mark_static_address
-
+            if torch._dynamo.config.inline_inbuilt_nn_modules:
+                freezing = is_parameter_freezing()
                 for p in value.parameters():
-                    mark_static_address(p)
+                    self.mark_static_input(p, guard=freezing)
 
                 for b in value.buffers():
-                    mark_static_address(b)
+                    self.mark_static_input(b, guard=freezing)
 
-                # we need to add the module to tracing context
-                # in order to allow its params to get invalidated
-                # this will get cleaned up once compile ends
-                self.tx.output.nn_modules[self.name] = value
+                if freezing:
+                    # we need to add the module to tracing context
+                    # in order to allow its params to get invalidated
+                    # this will get cleaned up once compile ends
+                    self.tx.output.nn_modules[self.name] = value
 
-            if value.__module__.startswith(("torch.nn.", "torch.ao.")):
+            if value.__module__.startswith(
+                ("torch.nn.", "torch.ao.")
+            ) and not value.__module__.startswith("torch.nn.modules.container"):
                 result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
             else:
                 result = UnspecializedNNModuleVariable(value, source=self.source)
@@ -1334,9 +1347,21 @@ class VariableBuilder:
         # it would have already been wrapped
         assert value not in self.tx.output.side_effects
 
+        is_static_input = get_static_address_type(value) is not None
+
         if (
-            source.guard_source().is_nn_module()
-            or get_static_address_type(value) is not None
+            config.inline_inbuilt_nn_modules
+            and not is_static_input
+            and isinstance(value, torch.nn.Parameter)
+        ):
+            self.mark_static_input(value, guard=False)
+
+        make_graph_attribute = is_static_input and (
+            not config.inline_inbuilt_nn_modules or is_parameter_freezing()
+        )
+
+        if (
+            source.guard_source().is_nn_module() or make_graph_attribute
         ) and not source.guard_source().is_fsdp_module():
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
@@ -1388,6 +1413,9 @@ class VariableBuilder:
         is_duplicate_tensor = source in self.tx.output.input_source_to_var
         if is_duplicate_tensor:
             return self.tx.output.input_source_to_var[source]
+
+        if get_static_address_type(value) == "guarded":
+            self.install_guards(GuardBuilder.ID_MATCH)
 
         # By this point, we should have deduplicated all tensors
         self.assert_not_wrapped_by_this_graph(value)
@@ -1449,9 +1477,11 @@ class VariableBuilder:
         self.install_guards(
             functools.partial(
                 guard_type,
-                value=value
-                if isinstance(source, NumpyTensorSource)
-                else TensorWeakRef(value),
+                value=(
+                    value
+                    if isinstance(source, NumpyTensorSource)
+                    else TensorWeakRef(value)
+                ),
             )
         )
 
@@ -2092,21 +2122,29 @@ def wrap_fx_proxy_cls(
     ):
         set_example_value(proxy.node, example_value)
         return EventVariable(proxy, example_value, **options)
-    elif isinstance(example_value, int) and proxy.node.target in [
-        torch.sym_int,
-        getattr,
-        operator.getitem,
-        torch._utils._element_size,
-        torch.seed,
-        operator.mod,
-        torch._functorch.vmap._validate_and_get_batch_size,
-        # some mac builds are missing torch.distributed.get_rank()
-        getattr(torch.distributed, "get_rank", _missing),
-        getattr(torch.distributed, "get_world_size", _missing),
-        # This always wants to be in the graph, even if the constraint
-        # results in a constant int
-        torch._constrain_as_size,
-    ]:
+    elif isinstance(example_value, int) and (
+        proxy.node.target
+        in [
+            torch.sym_int,
+            getattr,
+            operator.getitem,
+            torch._utils._element_size,
+            torch.seed,
+            operator.mod,
+            torch._functorch.vmap._validate_and_get_batch_size,
+            # some mac builds are missing torch.distributed.get_rank()
+            getattr(torch.distributed, "get_rank", _missing),
+            getattr(torch.distributed, "get_world_size", _missing),
+            # This always wants to be in the graph, even if the constraint
+            # results in a constant int
+            torch._constrain_as_size,
+        ]
+        or (
+            # TODO: this is a little sus, because we didn't check what the self is
+            proxy.node.op == "call_method"
+            and proxy.node.target in ["bit_length"]
+        )
+    ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     elif isinstance(example_value, torch.backends.cuda.SDPAParams):
