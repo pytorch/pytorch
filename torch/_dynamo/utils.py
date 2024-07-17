@@ -37,18 +37,24 @@ from typing import (
     DefaultDict,
     Deque,
     Dict,
+    Iterable,
     Iterator,
     KeysView,
     List,
     Optional,
+    overload,
     Set,
     Tuple,
     Type,
+    TypeVar,
     Union,
     ValuesView,
 )
+from typing_extensions import TypeGuard
 
 from ..utils.hooks import RemovableHandle
+
+T = TypeVar("T")
 
 try:
     import numpy as np
@@ -498,6 +504,23 @@ class ExactWeakKeyDictionary:
         self.values.clear()
 
 
+@overload
+def istype(obj: object, allowed_types: Type[T]) -> TypeGuard[T]:
+    ...
+
+
+@overload
+def istype(
+    obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
+) -> TypeGuard[T]:
+    ...
+
+
+@overload
+def istype(obj: object, allowed_types: Iterable[type]) -> bool:
+    ...
+
+
 def istype(obj, allowed_types):
     """isinstance() without subclasses"""
     if isinstance(allowed_types, (tuple, list, set)):
@@ -631,7 +654,7 @@ def is_numpy_ndarray(value):
 
 def istensor(obj):
     """Check of obj is a tensor"""
-    tensor_list = (
+    tensor_list: Tuple[type, ...] = (
         torch.Tensor,
         torch.nn.Parameter,
         *config.traceable_tensor_subclasses,
@@ -1061,7 +1084,7 @@ def rot_n_helper(n):
     return fn
 
 
-common_constant_types = {
+common_constant_types: Set[type] = {
     int,
     float,
     complex,
@@ -1409,6 +1432,10 @@ def same(
             ):
                 log_error("Accuracy failed for key name %s", k)
                 return False
+        return True
+    elif isinstance(ref, set):
+        assert isinstance(res, set)
+        assert set(ref) == set(res), f"elements mismatch {set(ref)} == {set(res)}"
         return True
     elif isinstance(ref, (torch.Tensor, float)):
         assert not isinstance(ref, torch._subclasses.FakeTensor)
@@ -2840,3 +2867,7 @@ def _disable_saved_tensors_hooks_during_tracing():
         yield
     finally:
         torch._C._autograd._saved_tensors_hooks_set_tracing(prior)
+
+
+def is_parameter_freezing():
+    return torch._inductor.config.freezing and not torch.is_grad_enabled()
