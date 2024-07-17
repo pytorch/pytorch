@@ -528,7 +528,7 @@ std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& att
   // to mask *out*.
   if (attn_mask->dtype() == at::kBool) {
     // TODO Use the max type of the input and output
-    return at::where(attn_mask->logical_not(), -std::numeric_limits<double>::infinity(), at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype)));
+    return at::where(attn_mask->logical_not(), -std::numeric_limits<double>::infinity(), at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
   }
   // Otherwise, attn_mask represents an additive attention tensor
   return attn_mask;
@@ -658,7 +658,7 @@ Tensor scaled_dot_product_attention(
     case sdp::SDPBackend::cudnn_attention: {
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
-          query_, key, value, attn_mask_, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
+          query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::flash_attention: {
