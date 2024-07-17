@@ -462,12 +462,14 @@ def _kl_multivariatenormal_multivariatenormal(p, q):
     term3 = _batch_mahalanobis(q._unbroadcasted_scale_tril, (q.loc - p.loc))
     return half_term1 + 0.5 * (term2 + term3 - n)
 
+
 @register_kl(Multinomial, Multinomial)
 def _kl_multinomial_multinomial(p, q):
     t = p.probs * (p.logits - q.logits)
     t[(q.probs == 0).expand_as(t)] = inf
     t[(p.probs == 0).expand_as(t)] = 0
     return t.sum(-1)
+
 
 @register_kl(Normal, Normal)
 def _kl_normal_normal(p, q):
