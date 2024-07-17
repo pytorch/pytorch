@@ -17,7 +17,6 @@ from torch.distributed._tensor.placement_types import (
     Shard,
     TensorMeta,
 )
-
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import DTensorOpTestBase
 
