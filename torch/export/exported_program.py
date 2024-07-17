@@ -26,9 +26,6 @@ from torch._higher_order_ops.utils import autograd_not_implemented
 
 from torch._library.fake_class_registry import FakeScriptObject
 
-from torch._subclasses.fake_tensor import FakeTensorMode
-
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -334,6 +331,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
     from torch._functorch.aot_autograd import aot_export_module
     from torch._guards import detect_fake_mode
+    from torch._subclasses.fake_tensor import FakeTensorMode
 
     from torch.export._trace import (
         _export_to_aten_ir,
@@ -343,6 +341,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_placeholder_names,
         _verify_stack_trace,
     )
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     if ep.verifier.dialect == "TRAINING":
         mod = ep.module()
