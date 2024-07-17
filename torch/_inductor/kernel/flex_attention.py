@@ -114,7 +114,7 @@ flex_attention_template = TritonTemplate(
     name="flex_attention",
     grid=flex_attention_grid,
     source=r"""
-{{def_kernel("Q", "K", "V", "LSE", "KV_NUM_BLKS", "FULL_KV_IDX", "PARTIAL_KV_NUM_BLKS", "PARTIAL_KV_IDX")}}
+{{def_kernel("Q", "K", "V", "LSE", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
     # Sub notation for this kernel:
     #
     # Q: Query, K: Key, V: Value
@@ -122,10 +122,10 @@ flex_attention_template = TritonTemplate(
     # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head
     #
     # The following FULL_* and PARTIAL_* is defined in the block sparse mask grid, rather than the thread block grid.
-    # KV_NUM_BLKS: The number of fully unmasked K/V blocks for each query.
-    # FULL_KV_IDX: The indices of fully unmasked K/V blocks for each query.
-    # PARTIAL_KV_NUM_BLKS: The number of partially unmasked K/V blocks for each query.
-    # PARTIAL_KV_IDX: The indices of partially unmasked K/V blocks for each query.
+    # KV_NUM_BLKS: The number of KV blocks (that may or may not require masking) for each query.
+    # KV_IDX: The indices of KV blocks (that may or may not require masking) for each query.
+    # FULL_KV_NUM_BLKS: The number of fully unmasked KV blocks (so we don't need masking) for each query.
+    # FULL_KV_IDX: The indices of fully unmasked KV blocks (so we don't need masking) for each query.
     #
     # OUTPUT_LOGSUMEXP: We only need to store the logsumexp if we require grad
     #
@@ -186,7 +186,7 @@ flex_attention_template = TritonTemplate(
 
     offs_m = q_start * BLOCK_M + tl.arange(0, BLOCK_M)
 
-    # FULL_KV_IDX and KV_NUM_BLKS are always contiguous.
+    # KV_IDX and KV_NUM_BLKS are always contiguous.
     sparse_hz_offset = sparse_idx_z * SPARSE_H + sparse_idx_h
     sparse_kv_num_blks_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT + q_start // SPARSE_Q_MULTIPLE
     sparse_kv_idx_offset = sparse_hz_offset * SPARSE_Q_BLOCK_CNT * SPARSE_KV_BLOCK_CNT + (q_start // SPARSE_Q_MULTIPLE) * SPARSE_KV_BLOCK_CNT  # noqa: B950
@@ -205,7 +205,7 @@ flex_attention_template = TritonTemplate(
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # We don't know anything "special" about these blocks, so we need to apply
     # both score_mod and mask_mod to it
-    kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
+    kv_indices = KV_IDX + sparse_kv_idx_offset
     kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
     sparse_kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
@@ -242,10 +242,10 @@ flex_attention_template = TritonTemplate(
     # We know these blocks are guaranteed to be "full", so we don't need to
     # apply mask_mod to them - only score_mod
     if HAS_FULL_BLOCKS:
-        # PARTIAL_KV_IDX and PARTIAL_KV_NUM_BLKS are always contiguous.
-        kv_indices = PARTIAL_KV_IDX + sparse_kv_idx_offset
+        # FULL_KV_IDX and FULL_KV_NUM_BLKS are always contiguous.
+        kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
         kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
-        sparse_kv_num_blocks = tl.load(PARTIAL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
+        sparse_kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
         K_block_ptr = tl.make_block_ptr(
             base=K,
@@ -732,7 +732,7 @@ flex_attention_backward_template = TritonTemplate(
     name="flex_attention_backward",
     grid=flex_attention_backward_grid,
     source=r"""
-{{def_kernel("Q", "K", "V", "LSE", "DELTA", "DO", "DQ", "DV", "KV_NUM_BLKS", "FULL_KV_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "PARTIAL_KV_NUM_BLKS", "PARTIAL_KV_IDX", "PARTIAL_Q_NUM_BLKS", "PARTIAL_Q_IDX")}}
+{{def_kernel("Q", "K", "V", "LSE", "DELTA", "DO", "DQ", "DV", "KV_NUM_BLKS", "KV_IDX", "Q_NUM_BLKS", "Q_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX")}}
     # Sub notation for this kernel:
     #
     # Q: Query, K: Key, V: Value
@@ -750,14 +750,14 @@ flex_attention_backward_template = TritonTemplate(
     # BLOCK_N2: when calculating DQ, iterate over BLOCK_N2 across the seqlen dim of K/V in each thread block.
     #
     # The following FULL_* and PARTIAL_* is defined in the block sparse mask grid, rather than the thread block grid.
-    # KV_NUM_BLKS: The number of fully unmasked K/V blocks for each query.
-    # FULL_KV_IDX: The indices of fully unmasked K/V blocks for each query.
-    # FULL_Q_NUM_BLKS: The number of fully unmasked Q blocks for each key/value.
-    # FULL_Q_IDX: The indices of fully unmasked Q blocks for each key/value.
-    # PARTIAL_KV_NUM_BLKS: The number of partially unmasked K/V blocks for each query.
-    # PARTIAL_KV_IDX: The indices of partially unmasked K/V blocks for each query.
-    # PARTIAL_Q_NUM_BLKS: The number of partially unmasked Q blocks for each key/value.
-    # PARTIAL_Q_IDX: The indices of partially unmasked Q blocks for each key/value.
+    # KV_NUM_BLKS: The number of KV blocks (that may or may not require masking) for each query.
+    # KV_IDX: The indices of KV blocks (that may or may not require masking) for each query.
+    # Q_NUM_BLKS: The number of Q blocks (that may or may not require masking) for each query.
+    # Q_IDX: The indices of Q blocks (that may or may not require masking) for each query.
+    # FULL_KV_NUM_BLKS: The number of fully unmasked KV blocks (so we don't need masking) for each query.
+    # FULL_KV_IDX: The indices of fully unmasked KV blocks (so we don't need masking) for each query.
+    # FULL_Q_NUM_BLKS: The number of fully unmasked Q blocks (so we don't need masking) for each query.
+    # FULL_Q_IDX: The indices of fully unmasked Q blocks (so we don't need masking) for each query.
 
     # The below are kernel options that can be applied for certain score_mods,
     # or involve a numerics vs. perf tradeoff
@@ -848,8 +848,8 @@ flex_attention_backward_template = TritonTemplate(
         lse = lse[:, None]
 
         # ~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # FULL_KV_IDX and KV_NUM_BLKS are always contiguous.
-        kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
+        # KV_IDX and KV_NUM_BLKS are always contiguous.
+        kv_indices = KV_IDX + sparse_kv_idx_offset
         kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
         sparse_kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
@@ -865,10 +865,10 @@ flex_attention_backward_template = TritonTemplate(
 
         if HAS_FULL_BLOCKS:
             # ~~~~~~~~~~~ partial unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            # PARTIAL_KV_IDX and PARTIAL_KV_NUM_BLKS are always contiguous.
-            kv_indices = PARTIAL_KV_IDX + sparse_kv_idx_offset
+            # FULL_KV_IDX and FULL_KV_NUM_BLKS are always contiguous.
+            kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
             kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
-            sparse_kv_num_blocks = tl.load(PARTIAL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
+            sparse_kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
             dq = bwd_dq_inner(
                 dq, q, K, V, do, Di, lse,
@@ -905,10 +905,10 @@ flex_attention_backward_template = TritonTemplate(
         v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd)
 
         # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # FULL_Q_IDX and FULL_Q_NUM_BLKS are always contiguous.
-        q_indices = FULL_Q_IDX + sparse_q_idx_offset
+        # Q_IDX and Q_NUM_BLKS are always contiguous.
+        q_indices = Q_IDX + sparse_q_idx_offset
         q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
-        sparse_q_num_blocks = tl.load(FULL_Q_NUM_BLKS + sparse_q_num_blks_offset)
+        sparse_q_num_blocks = tl.load(Q_NUM_BLKS + sparse_q_num_blks_offset)
 
         start_m1 = q_start
 
@@ -925,10 +925,10 @@ flex_attention_backward_template = TritonTemplate(
 
         if HAS_FULL_BLOCKS:
             # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            # PARTIAL_Q_IDX and PARTIAL_Q_NUM_BLKS are always contiguous.
-            q_indices = PARTIAL_Q_IDX + sparse_q_idx_offset
+            # FULL_Q_IDX and FULL_Q_NUM_BLKS are always contiguous.
+            q_indices = FULL_Q_IDX + sparse_q_idx_offset
             q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
-            sparse_q_num_blocks = tl.load(PARTIAL_Q_NUM_BLKS + sparse_q_num_blks_offset)
+            sparse_q_num_blocks = tl.load(FULL_Q_NUM_BLKS + sparse_q_num_blks_offset)
 
             start_m1 = q_start
 
