@@ -2130,8 +2130,12 @@ class InstructionTranslatorBase(
             args = args + contents[2:]
             kwargs = {}
 
-        self.call_function(fn, args, kwargs)
-        self.kw_names = None
+        try:
+            # if call_function fails, need to set kw_names to None, otherwise
+            # a subsequent call may have self.kw_names set to an old value
+            self.call_function(fn, args, kwargs)
+        finally:
+            self.kw_names = None
 
     @break_graph_if_unsupported(push=1)
     def CALL(self, inst):
