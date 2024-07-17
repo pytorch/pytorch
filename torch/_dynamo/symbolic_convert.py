@@ -939,9 +939,7 @@ class InstructionTranslatorBase(
     def popn(self, n: int) -> List[VariableTracker]:
         return [*reversed([self.pop() for _ in range(n)])]
 
-    def LOAD_FAST(self, inst):
-        name = inst.argval
-
+    def _load_fast(self, name):
         if self.exec_recorder and name in self.f_locals:
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
@@ -961,6 +959,9 @@ class InstructionTranslatorBase(
         if name.startswith("___stack"):
             self.symbolic_locals.pop(name)
 
+    def LOAD_FAST(self, inst):
+        self._load_fast(inst.argval)
+
     def LOAD_DEREF(self, inst):
         assert inst.argval in self.cell_and_freevars()
 
@@ -971,11 +972,13 @@ class InstructionTranslatorBase(
             unimplemented(f"undefined LOAD_DEREF {inst.argval}")
         self.push(self.symbolic_locals[inst.argval])
 
-    def STORE_FAST(self, inst):
+    def _store_fast(self, name):
         loaded_vt = self.pop()
-        name = inst.argval
         loaded_vt.set_name_hint(name)
         self.symbolic_locals[name] = loaded_vt
+
+    def STORE_FAST(self, inst):
+        self._store_fast(inst.argval)
 
     def DELETE_FAST(self, inst):
         del self.symbolic_locals[inst.argval]
@@ -2223,6 +2226,15 @@ class InstructionTranslatorBase(
 
     def END_SEND(self, inst):
         del self.stack[-2]
+
+    # 3.13 opcodes
+    def LOAD_FAST_LOAD_FAST(self, inst):
+        self._load_fast(inst.argval[0])
+        self._load_fast(inst.argval[1])
+
+    def STORE_FAST_STORE_FAST(self, inst):
+        self._store_fast(inst.argval[0])
+        self._store_fast(inst.argval[1])
 
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
