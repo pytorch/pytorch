@@ -1053,6 +1053,14 @@ class trace:
 
     log_autotuning_results: bool = False
 
+	
+class benchmarking:
+    enable_lazy_benchmarking = os.environ.get("TORCHINDUCTOR_ENABLE_LAZY_BENCHMARKING", "1") == "1"
+
+    enable_early_ranking = os.environ.get("TORCHINDUCTOR_ENABLE_EARLY_RANKING", "1") == "1"
+
+    enable_early_pruning = os.environ.get("TORCHINDUCTOR_ENABLE_EARLY_PRUNING", "1") == "1"
+
 
 _save_config_ignore = [
     # workaround: "Can't pickle <function ...>"

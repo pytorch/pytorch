@@ -4,7 +4,8 @@ import functools
 import logging
 
 import torch
-from torch._inductor.runtime.runtime_utils import do_bench
+
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import do_bench_using_profiling
 
@@ -21,7 +22,7 @@ class TestBench(TestCase):
         cls._bench_fn = functools.partial(torch.nn.functional.linear, x, w)
 
     def test_do_bench(self):
-        res = do_bench(self._bench_fn)
+        res = benchmarker.benchmark(self._bench_fn)
         log.warning("do_bench result: %s", res)
         self.assertGreater(res, 0)
 

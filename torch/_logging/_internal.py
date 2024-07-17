@@ -231,6 +231,7 @@ def set_logs(
     cudagraphs: bool = False,
     sym_node: bool = False,
     compiled_autograd_verbose: bool = False,
+    benchmarking: bool = False,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -393,6 +394,9 @@ def set_logs(
 
         export (:class:`Optional[int]`):
             The log level for export. Default: ``logging.WARN``
+        
+        benchmarking (:class:`bool`):
+            Whether to emit detailed Inductor benchmarking information. Default: ``False``
 
         modules (dict):
             This argument provides an alternate way to specify the above log
@@ -499,6 +503,7 @@ def set_logs(
         export=export,
         cudagraphs=cudagraphs,
         compiled_autograd_verbose=compiled_autograd_verbose,
+        benchmarking=benchmarking,
     )
 
 

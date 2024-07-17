@@ -68,8 +68,8 @@ from .dependencies import (
     var_builder,
 )
 from .ops_handler import OpCounterCSE
+from .runtime.benchmarking import benchmarker
 from .runtime.hints import ReductionHint
-from .runtime.runtime_utils import do_bench
 from .utils import (
     argsort,
     cache_on_self,
@@ -3846,7 +3846,7 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
-        return do_bench(algo, args, {"out": out})
+        return benchmarker.lazy_benchmark(algo, args, {"out": out}, pruning_key="gemm")
 
     def call_name(self) -> str:
         raise NotImplementedError

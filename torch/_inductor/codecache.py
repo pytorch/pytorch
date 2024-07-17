@@ -325,7 +325,10 @@ class PersistentCache(CacheBase):
             ):
                 try:
                     # re-benchmark everything to try to get consistent numbers from the same machine
-                    timings = benchmark(choices)
+                    timings = {
+                        choice: float(timing)
+                        for choice, timing in benchmark(choices).items()
+                    }
                     assert all(choice in timings for choice in choices)
                     local_cache.setdefault(op, {})
                     local_cache[op].setdefault(inputs, {}).setdefault(precision, {})

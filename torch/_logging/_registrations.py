@@ -157,6 +157,11 @@ register_artifact(
     "trace_shape_events",
     "Logs traces for every ShapeEnv operation that we record for replay",
     off_by_default=True,
+)	
+register_artifact(
+    "benchmarking",
+    "Detailed Inductor benchmarking information.",
+    off_by_default=True,
 )
 
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")

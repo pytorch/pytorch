@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
-from .runtime.runtime_utils import do_bench_cpu, do_bench_gpu
+from .runtime.benchmarking import benchmarker
 from .virtualized import V
 
 
@@ -595,8 +595,7 @@ class GPUDeviceBenchmarkRequest(BenchmarkRequest):
             device_idx = torch.cuda.current_device()
 
         with torch.cuda.device(device_idx):
-            out = do_bench_gpu(fn)
-            torch.cuda.synchronize()  # shake out any CUDA errors
+            out = benchmarker.lazy_benchmark_gpu(fn, pruning_key="gemm")
 
         return out
 
@@ -801,7 +800,7 @@ class CPUDeviceBenchmarkRequest(BenchmarkRequest):
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
     ) -> float:
-        return do_bench_cpu(fn)
+        return benchmarker.benchmark_cpu(fn)
 
 
 class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
