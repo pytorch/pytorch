@@ -58,6 +58,8 @@ class _ComputationType(Enum):
     RECV_F = 7
     SEND_B = 8
     RECV_B = 9
+    SEND_F_RECV_B = 10
+    SEND_B_RECV_F = 11
 
     def __str__(self):
         str_map = {
@@ -70,6 +72,8 @@ class _ComputationType(Enum):
             _ComputationType.RECV_F: "RECV_F",
             _ComputationType.SEND_B: "SEND_B",
             _ComputationType.RECV_B: "RECV_B",
+            _ComputationType.SEND_F_RECV_B: "SEND_F_RECV_B",
+            _ComputationType.SEND_B_RECV_F: "SEND_B_RECV_F",
         }
         return str_map[self]
 
@@ -93,6 +97,10 @@ class _ComputationType(Enum):
             return _ComputationType.SEND_B
         elif action == "RECV_B":
             return _ComputationType.RECV_B
+        elif action == "SEND_F_RECV_B":
+            return _ComputationType.SEND_F_RECV_B
+        elif action == "SEND_B_RECV_F":
+            return _ComputationType.SEND_B_RECV_F
         else:
             raise RuntimeError(f"Invalid computation type {action}")
 
@@ -106,6 +114,8 @@ SEND_F = _ComputationType.SEND_F
 RECV_F = _ComputationType.RECV_F
 SEND_B = _ComputationType.SEND_B
 RECV_B = _ComputationType.RECV_B
+SEND_F_RECV_B = _ComputationType.SEND_F_RECV_B
+SEND_B_RECV_F = _ComputationType.SEND_B_RECV_F
 
 # Convenience shorthand for compute actions only since they are used in 'simple schedule format'
 F = FORWARD
@@ -122,12 +132,30 @@ class _Action(NamedTuple):
     stage_index: int
     computation_type: _ComputationType
     microbatch_index: Optional[int] = None
+    # Used only for batched comms, for the second comm
+    other_stage_index: Optional[int] = None
+    other_microbatch_index: Optional[int] = None
 
     def __repr__(self):
         repr = str(self.stage_index)
-        repr += str(self.computation_type)
-        if self.microbatch_index is not None:
-            repr += str(self.microbatch_index)
+        if self.computation_type == SEND_B_RECV_F:
+            assert self.microbatch_index is not None, "SEND_B_RECV_F requires microbatch_index"
+            assert self.other_stage_index is not None, "SEND_B_RECV_F requires other_stage_index"
+            assert self.other_microbatch_index is not None, "SEND_B_RECV_F requires other_microbatch_index"
+            repr += str(SEND_B) + str(self.microbatch_index)
+            repr += "-" + str(self.other_stage_index)
+            repr += str(RECV_F) + str(self.other_microbatch_index)
+        elif self.computation_type == SEND_F_RECV_B:
+            assert self.microbatch_index is not None, "SEND_F_RECV_B requires microbatch_index"
+            assert self.other_stage_index is not None, "SEND_F_RECV_B requires other_stage_index"
+            assert self.other_microbatch_index is not None, "SEND_F_RECV_B requires other_microbatch_index"
+            repr += str(SEND_F) + str(self.microbatch_index)
+            repr += "-" + str(self.other_stage_index)
+            repr += str(RECV_B) + str(self.other_microbatch_index)
+        else:
+            repr += str(self.computation_type)
+            if self.microbatch_index is not None:
+                repr += str(self.microbatch_index)
         return repr
 
     @staticmethod
@@ -140,6 +168,8 @@ class _Action(NamedTuple):
         """
         if match := _action_regex.match(str):
             stage_index, computation_type, microbatch_index = match.groups()
+            #TODO regex needs update
+            # stage_index, computation_type, microbatch_index, other_computation_type, other_microbatch_index = match.groups()
             return _Action(
                 int(stage_index),
                 _ComputationType.from_str(computation_type),
@@ -875,32 +905,55 @@ def _add_unshard_reshard(
     return unshard_actions
 
 
-# def _batch_send_recv(ops, peer_ops):
-#     """
-
-#     """
-#     while ops:
-#         op = ops.pop(0)
-#         friends = [(i, other) if _can_batch_with(op, other) for i, other in enumerate(ops)]
-#         batch = []
-#         for i, other in friends:
-#             ops.pop(i)
-#             batch.extend(other)
-#         if batch:
-#             batch.extend(op)
-
-#         # send_f_recv_b
-#         # recv_f_send_b
-
-
-#     return ops, peer_ops
 
 def _batch_send_recv(ops, peer_ops):
-    new_ops = [o for o in ops]
-    new_peer_ops = [o for o in peer_ops]
-    ops.clear()
-    peer_ops.clear()
+    # we intentionally mutate ops, peer_ops so the caller knows we consumed them.  maybe i should revsit that.
+    new_ops = []
+    new_peer_ops = []
+    send_f_i = [i for i, o in enumerate(ops) if o.computation_type == SEND_F]
+    recv_b_i = [i for i, o in enumerate(ops) if o.computation_type == RECV_B]
+    send_b_i = [i for i, o in enumerate(peer_ops) if o.computation_type == SEND_B]
+    recv_f_i = [i for i, o in enumerate(peer_ops) if o.computation_type == RECV_F]
+    if len(send_f_i):
+        assert len(send_f_i) == 1, f"Expect at most one send_f per step, {len(send_f)}"
+
+    if len(send_f_i) == 1 and len(recv_b_i):
+        # we have a batch candidate
+        assert len(recv_b_i) == 1, f"Expect at most one recv_b per step, {len(send_f)}"
+        assert len(send_b_i) == 1, "Expected matching send_b for recv_b"
+        assert len(recv_f_i) == 1, "Expected matching recv_f for send_f"
+        send_f = ops[send_f_i[0]]
+        recv_b = ops[recv_b_i[0]]
+        for idx in reversed(sorted([send_f_i[0], recv_b_i[0]])):
+            ops.pop(idx)
+        new_ops.append(_Action(send_f.stage_index, SEND_F_RECV_B, send_f.microbatch_index, recv_b.stage_index, recv_b.microbatch_index))
+
+        send_b = peer_ops[send_b_i[0]]
+        recv_f = peer_ops[recv_f_i[0]]
+        assert send_f.stage_index + 1 == recv_f.stage_index, "Expected matching stage indices for send_f and recv_f"
+        assert send_f.microbatch_index == recv_f.microbatch_index, "Expected matching microbatch indices for send_f and recv_f"
+        assert send_b.stage_index - 1 == recv_b.stage_index, "Expected matching stage indices for send_b and recv_b"
+        assert send_b.microbatch_index == recv_b.microbatch_index, "Expected matching microbatch indices for send_b and recv_b"
+
+        for idx in reversed(sorted([send_b_i[0], recv_f_i[0]])):
+            peer_ops.pop(idx)
+        new_peer_ops.append(_Action(send_b.stage_index, SEND_B_RECV_F, send_b.microbatch_index, recv_f.stage_index, recv_f.microbatch_index))
+        print(f"Made batched ops {new_ops}, {new_peer_ops}")
+
+    # no more batches. just deal with single ops now
+    # TODO - this is bad, i need to match them so they are ordered safely
+    while ops:
+        new_ops.append(ops.pop())
+    while peer_ops:
+        new_peer_ops.append(peer_ops.pop())
     return new_ops, new_peer_ops
+
+# def _batch_send_recv(ops, peer_ops):
+#     new_ops = [o for o in ops]
+#     new_peer_ops = [o for o in peer_ops]
+#     ops.clear()
+#     peer_ops.clear()
+#     return new_ops, new_peer_ops
 
 
 def _add_send_recv(
@@ -949,19 +1002,19 @@ def _add_send_recv(
         if action is None:
             return True
         elif action.computation_type == F and not action.stage_index == 0:
-            expected_recv = _Action(
-                action.stage_index,
-                RECV_F if action.computation_type == F else RECV_B,
-                action.microbatch_index,
-            )
-            return expected_recv in prev_actions
+            for p in prev_actions:
+                if p.computation_type == RECV_F and p.stage_index == action.stage_index and p.microbatch_index == action.microbatch_index:
+                    return True
+                elif p.computation_type == SEND_B_RECV_F and p.other_stage_index == action.stage_index and p.other_microbatch_index == action.microbatch_index:
+                    return True
+            return False
         elif action.computation_type == B and not action.stage_index == num_stages - 1:
-            expected_recv = _Action(
-                action.stage_index,
-                RECV_F if action.computation_type == F else RECV_B,
-                action.microbatch_index,
-            )
-            return expected_recv in prev_actions
+            for p in prev_actions:
+                if p.computation_type == RECV_B and p.stage_index == action.stage_index and p.microbatch_index == action.microbatch_index:
+                    return True
+                elif p.computation_type == SEND_F_RECV_B and p.other_stage_index == action.stage_index and p.other_microbatch_index == action.microbatch_index:
+                    return True
+            return False
         else:
             return True
 
@@ -1034,12 +1087,34 @@ def _simulate_comms_compute(pipeline_order, stage_to_rank: Callable[[int],int], 
     def _ready_to_schedule(action: Optional[_Action]) -> bool:
         if action is None:
             return True
+
+
         elif action.computation_type == F and not action.stage_index == 0:
-            expected_recv = _Action(action.stage_index, RECV_F, action.microbatch_index)
-            return expected_recv in schedule[stage_to_rank(action.stage_index)]
+            for p in schedule[stage_to_rank(action.stage_index)]:
+                if p is None:
+                    continue
+                elif p.computation_type == RECV_F and p.stage_index == action.stage_index and p.microbatch_index == action.microbatch_index:
+                    return True
+                elif p.computation_type == SEND_B_RECV_F and p.other_stage_index == action.stage_index and p.other_microbatch_index == action.microbatch_index:
+                    return True
+            return False
         elif action.computation_type == B and not action.stage_index == num_stages - 1:
-            expected_recv = _Action(action.stage_index, RECV_B, action.microbatch_index)
-            return expected_recv in schedule[stage_to_rank(action.stage_index)]
+            for p in schedule[stage_to_rank(action.stage_index)]:
+                if p is None:
+                    continue
+                elif p.computation_type == RECV_B and p.stage_index == action.stage_index and p.microbatch_index == action.microbatch_index:
+                    return True
+                elif p.computation_type == SEND_F_RECV_B and p.other_stage_index == action.stage_index and p.other_microbatch_index == action.microbatch_index:
+                    return True
+            return False
+
+
+        # elif action.computation_type == F and not action.stage_index == 0:
+        #     expected_recv = _Action(action.stage_index, RECV_F, action.microbatch_index)
+        #     return expected_recv in schedule[stage_to_rank(action.stage_index)]
+        # elif action.computation_type == B and not action.stage_index == num_stages - 1:
+        #     expected_recv = _Action(action.stage_index, RECV_B, action.microbatch_index)
+        #     return expected_recv in schedule[stage_to_rank(action.stage_index)]
         elif action.computation_type == SEND_F:
             expected_f = _Action(action.stage_index, F, action.microbatch_index) 
             return expected_f in schedule[stage_to_rank(action.stage_index)]
@@ -1062,9 +1137,11 @@ def _simulate_comms_compute(pipeline_order, stage_to_rank: Callable[[int],int], 
         for rank in sorted(pipeline_order):
             if len(pipeline_order[rank]) == 0:
                 continue
+            
             action = pipeline_order[rank][0]
             if _ready_to_schedule(action):
-                schedule[rank].append(action)
+                if action is not None:
+                    schedule[rank].append(action)
                 pipeline_order[rank].pop(0)
                 progress = True
             else:
