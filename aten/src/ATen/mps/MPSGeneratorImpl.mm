@@ -63,16 +63,20 @@ void MPSGeneratorImpl::update_philox_counters() {
 }
 
 c10::intrusive_ptr<c10::TensorImpl> MPSGeneratorImpl::get_state() const {
-  static const size_t states_size = mps::detail::PHILOX_STATE_N * sizeof(uint32_t);
-  static const size_t seed_size = sizeof(uint64_t);
-  static const size_t offset_size = sizeof(uint64_t);
-  static const size_t total_size = states_size + seed_size + offset_size;
+  constexpr size_t states_size = mps::detail::PHILOX_STATE_N * sizeof(uint32_t);
+  constexpr size_t seed_size = sizeof(uint64_t);
+  constexpr size_t offset_size = sizeof(uint64_t);
+  constexpr size_t total_size = states_size + seed_size + offset_size;
 
   auto state_tensor = at::detail::empty_cpu(
       {(int64_t)total_size}, ScalarType::Byte, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
   auto rng_state = state_tensor.data_ptr<uint8_t>();
   auto current_seed = this->current_seed();
   auto current_offset = this->get_offset();
+
+  static_assert(sizeof(decltype(current_seed)) == seed_size, "current_seed size is wrong");
+  static_assert(sizeof(decltype(current_offset)) == offset_size, "current_offset size is wrong");
+
   memcpy(rng_state, this->data_.state.data(), states_size);
   memcpy(rng_state + states_size, &current_seed, seed_size);
   memcpy(rng_state + states_size + seed_size, &current_offset, offset_size);
@@ -81,10 +85,10 @@ c10::intrusive_ptr<c10::TensorImpl> MPSGeneratorImpl::get_state() const {
 }
 
 void MPSGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
-  static const size_t states_size = mps::detail::PHILOX_STATE_N * sizeof(uint32_t);
-  static const size_t seed_size = sizeof(uint64_t);
-  static const size_t offset_size = sizeof(uint64_t);
-  static const size_t total_size = states_size + seed_size + offset_size;
+  constexpr size_t states_size = mps::detail::PHILOX_STATE_N * sizeof(uint32_t);
+  constexpr size_t seed_size = sizeof(uint64_t);
+  constexpr size_t offset_size = sizeof(uint64_t);
+  constexpr size_t total_size = states_size + seed_size + offset_size;
 
   detail::check_rng_state(new_state);
 
