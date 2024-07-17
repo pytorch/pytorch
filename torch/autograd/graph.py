@@ -79,6 +79,11 @@ class Node(abc.ABC):
         r"""Return the metadata."""
         raise NotImplementedError
 
+    @property
+    @abc.abstractmethod
+    def _input_metadata(self) -> List[Any]:
+        raise NotImplementedError
+
     @abc.abstractmethod
     def _register_hook_dict(self, tensor: torch.Tensor) -> None:
         raise NotImplementedError
@@ -170,7 +175,9 @@ class Node(abc.ABC):
         return NotImplemented
 
 
-def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Node:
+def _get_grad_fn_or_grad_acc(t: Union[torch.Tensor, "GradientEdge"]) -> Node:
+    if isinstance(t, GradientEdge):
+        return t.node
     if t.requires_grad and t.grad_fn is None:
         node = t.view_as(t).grad_fn.next_functions[0][0]  # type: ignore[union-attr]
     else:
@@ -738,7 +745,7 @@ def allow_mutation_on_saved_tensors() -> (
 
 
 def _register_logging_hooks_on_whole_graph(
-    t_outputs: Sequence[torch.Tensor],
+    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
 ) -> Callable[[], None]:
     grad_fns = list(map(_get_grad_fn_or_grad_acc, t_outputs))
 
@@ -788,7 +795,7 @@ def _register_logging_hooks_on_whole_graph(
 
 
 def _engine_run_backward(
-    t_outputs: Sequence[torch.Tensor],
+    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
     *args: Any,
     **kwargs: Any,
 ) -> Tuple[torch.Tensor, ...]:
