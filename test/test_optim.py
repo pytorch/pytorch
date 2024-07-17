@@ -14,7 +14,6 @@ from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 import torch
 from torch.nn import Parameter
 from torch.optim import Optimizer, SGD
-
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.optim.optimizer import (
     register_optimizer_step_post_hook,
@@ -46,6 +45,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
 
 FP16_REDUCED_PRECISION = {"atol": 1e-5, "rtol": 1e-4}
 
@@ -1327,6 +1327,11 @@ class TestOptimRenewed(TestCase):
             optim.zero_grad()
             loss = (w.mv(i) + b).pow(2).sum()
             loss.backward()
+            if optim_info.only_supports_sparse_grads:
+                if w.grad is not None:
+                    w.grad = w.grad.to_sparse()
+                if b.grad is not None:
+                    b.grad = b.grad.to_sparse()
             return loss
 
         for optim_input in all_optim_inputs:
