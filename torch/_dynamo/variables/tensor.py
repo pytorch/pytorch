@@ -334,12 +334,20 @@ class TensorVariable(VariableTracker):
         )
 
     def call_hasattr(self, tx, name):
-        ret_val = False
+        ret_val = True
+
+        try:
+            self.var_getattr(tx, name)
+        except NotImplementedError:
+            ret_val = False
+
         if self.source:
             install_guard(
                 AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
             )
-            ret_val = ConstantVariable(name in self.proxy.node.meta["tensor_dict"])
+            ret_val = ret_val or ConstantVariable(
+                name in self.proxy.node.meta.get("tensor_dict", dict())
+            )
 
         return ret_val or tx.output.side_effects.has_pending_mutation_of_attr(
             self, name
