@@ -1981,27 +1981,41 @@ Call this whenever a new thread is created in order to propagate values from
       "_can_use_flash_attention",
       [](const sdp::sdp_params& params, bool debug) {
 #ifdef USE_CUDA
+#ifdef USE_FLASH_ATTENTION
         return sdp::can_use_flash_attention(params, debug);
 #else
         return false;
 #endif
+#else
+        return true;
+#endif
       });
+
   py_module.def(
       "_can_use_mem_efficient_attention",
       [](const sdp::sdp_params& params, bool debug) {
 #ifdef USE_CUDA
+#ifdef USE_MEM_EFF_ATTENTION
         return sdp::can_use_mem_efficient_attention(params, debug);
 #else
         return false;
 #endif
+#else
+        return true;
+#endif
       });
+
   py_module.def(
       "_can_use_cudnn_attention",
       [](const sdp::sdp_params& params, bool debug) {
 #ifdef USE_CUDA
+#ifdef USE_CUDNN_ATTENTION
         return sdp::can_use_cudnn_attention(params, debug);
 #else
         return false;
+#endif
+#else
+        return true;
 #endif
       });
 
