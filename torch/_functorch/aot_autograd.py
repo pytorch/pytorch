@@ -507,7 +507,9 @@ def create_aot_dispatcher_function(
                             shape_env.create_symbol(x, source), hint=x, source=source
                         )
                 if isinstance(x, torch.ScriptObject):
-                    return torch._library.fake_class_registry.to_fake_obj(fake_mode, x)
+                    return torch._library.fake_class_registry.maybe_to_fake_obj(
+                        fake_mode, x
+                    )
                 if not isinstance(x, torch.Tensor):
                     return x
                 if isinstance(x, FakeTensor):
@@ -551,14 +553,17 @@ def create_aot_dispatcher_function(
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
-        from torch._library.fake_class_registry import FakeScriptObject, to_fake_obj
+        from torch._library.fake_class_registry import (
+            FakeScriptObject,
+            maybe_to_fake_obj,
+        )
 
         # Tracing may mutate the states the fake script object,
         # so we need to duplicate the fake script objects so that subsequent tracing
         # won't be affected.
         def _dup_fake_script_obj(fake_flat_args):
             return [
-                to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
+                maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
                 if isinstance(arg, FakeScriptObject)
                 else arg
                 for arg in fake_flat_args
@@ -1038,6 +1043,8 @@ def aot_export_module(
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
     pre_dispatch: bool = False,
+    # If None, will be infered from inputs and mod.graph.nodes if mod is a graph module, but the inferred result might be wrong.
+    dynamic_shapes: Optional[bool] = None,
     kwargs=None,
 ) -> Tuple[torch.fx.GraphModule, GraphSignature]:
     """
@@ -1167,6 +1174,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             num_params_buffers=params_len,
             no_tangents=True,
             pre_dispatch=pre_dispatch,
+            dynamic_shapes=dynamic_shapes,
             kwargs=kwargs,
         )
     if trace_joint:
@@ -1344,6 +1352,8 @@ def _aot_export_function(
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
     pre_dispatch: bool = False,
+    # If None, `dynamic_shapes` will be infered from inputs, but the inferred result might be wrong.
+    dynamic_shapes: Optional[bool] = None,
     kwargs=None,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     kwargs = kwargs or {}
@@ -1351,11 +1361,21 @@ def _aot_export_function(
     flat_fn, out_spec = create_tree_flattened_fn(func, args, kwargs)
     flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
-    dynamic_shapes = False
-    for x in flat_args:
-        if isinstance(x, FakeTensor):
-            dynamic_shapes = x.fake_mode.shape_env is not None
-            break
+    if dynamic_shapes is None:
+        # Try to infer `dynamic_shapes from inputs and graph nodes
+        fake_mode = detect_fake_mode(flat_args)
+        if (
+            fake_mode is None
+            and hasattr(func, "_orig_mod")
+            and isinstance(func._orig_mod, torch.fx.GraphModule)
+        ):
+            vals = [
+                node.meta["val"]
+                for node in func._orig_mod.graph.nodes
+                if "val" in node.meta
+            ]
+            fake_mode = detect_fake_mode(vals)
+        dynamic_shapes = fake_mode is not None and fake_mode.shape_env is not None
 
     # The export use case doesn't care about several bits of AOTConfig
     # (1) compilers (we just export the graph)

@@ -165,7 +165,7 @@ std::optional<TensorInfo> getTensorInfo(BufHandle b) {
   for (auto dim : b.dims()) {
     auto val = intValue(dim.node());
     if (!val) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     dims.push_back(*val);
   }

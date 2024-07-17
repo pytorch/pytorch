@@ -40,8 +40,19 @@ def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
     replaced_patterns = subgraph_rewriter.replace_pattern(gm, pattern, replacement)
 
 
-def normalize_name(name: str) -> str:
-    return name.replace(".", "_")
+def is_valid_for_codegen(name):
+    if len(name) == 0:
+        raise RuntimeError("Empty argument name for codegen")
+    if name[0].isdigit():
+        return False
+    return True
+
+
+def normalize_name(name: str, prefix: str = "rename") -> str:
+    name = name.replace(".", "_")
+    if is_valid_for_codegen(name):
+        return name
+    return f"{prefix}_{name}"
 
 
 def ir_name_to_func_name(name: str) -> str:
@@ -129,19 +140,19 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
     """
 
     # A map from a block to its expected to be lifted arguments.
-    blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]] = dict()
+    blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]] = {}
 
     # Reference map stores the input (i.e., src) and output (i.e., dest) IR of a
     # GetAttr node. By traversing this reference map, we can figure out the
     # full IR aliasing pass and figure out the FQN of an attribute.
     # E.g., %2 = GetAttr(linear)[%1] --> node_to_parent_map["%2"] = "%1"
-    node_to_parent_map: Dict[str, str] = dict()
+    node_to_parent_map: Dict[str, str] = {}
 
     # Used for reconstructing the FQN of an attribute based on the reference map.
     # In nutshell, for each GetAttr call, GetAttr(input IR, attribute name) -> output IR
     # This name map stores which attribute name is called for a src IR --> dest IR action.
     # E.g., %2 = GetAttr(linear)[%1] --> node_to_attr_name["%2"] = "linear"
-    node_to_attr_name: Dict[str, str] = dict()
+    node_to_attr_name: Dict[str, str] = {}
 
     def _dfs_get_attr_dependency(entry):
         """
@@ -314,6 +325,7 @@ class TS2FXGraphConverter:
 
     def get_fx_value(self, value: torch._C.Value):
         value_name = value.debugName()
+
         if value_name in self.name_to_node:
             input_node = self.name_to_node[value_name]
             return input_node
@@ -351,9 +363,9 @@ class TS2FXGraphConverter:
     def convert_graph_inputs(self):
         for graph_input in self.ts_graph.inputs():
             name = graph_input.debugName()
-            normalized_name = normalize_name(name)
 
             if name in self.name_to_param_map:
+                normalized_name = normalize_name(name)
                 self.input_specs.append(
                     InputSpec(
                         InputKind.PARAMETER,
@@ -365,6 +377,7 @@ class TS2FXGraphConverter:
                     self.fx_graph, name, self.is_top_level_graph()
                 )
             elif name in self.name_to_buffer_map:
+                normalized_name = normalize_name(name)
                 self.input_specs.append(
                     InputSpec(
                         InputKind.BUFFER,
@@ -377,6 +390,7 @@ class TS2FXGraphConverter:
                     self.fx_graph, name, self.is_top_level_graph()
                 )
             else:
+                normalized_name = normalize_name(name, prefix="input")
                 self.input_specs.append(
                     InputSpec(
                         InputKind.USER_INPUT,
@@ -650,19 +664,30 @@ class TS2FXGraphConverter:
         assert len(inputs) == 1
         predicate = self.get_fx_value(inputs[0])
 
-        # Get union of inputs to blocks
-        arguments = set()
-        for block in node.blocks():
-            block_args = set()
+        def _identify_inputs_as_arguments(entry):
+            """
+            Identify inputs from the innermost sub-block. This is needed
+            for nested sub-blocks when the input is hidden in the nested sub-block.
+            E.g., example IR of input is hidden in the nested sub-block.
+            Graph[x.1]
+            %1 = ...
+                Block[]
+                    Block[x.1]
+                        %2 = x.1 ...
+            """
+            arguments: Set[str] = set()
+            for block in entry.blocks():
+                for block_node in block.nodes():
+                    for block_node_in in block_node.inputs():
+                        if block_node_in.debugName() in self.name_to_node:
+                            arguments.add(block_node_in.debugName())
+                    arguments = arguments.union(
+                        _identify_inputs_as_arguments(block_node)
+                    )
+            return arguments
 
-            # TODO: block.inputs(), not sure what theyre used for
-
-            for block_node in block.nodes():
-                for block_node_in in block_node.inputs():
-                    if block_node_in.debugName() in self.name_to_node:
-                        block_args.add(block_node_in.debugName())
-
-            arguments.update(block_args)
+        # Find inputs.
+        arguments = _identify_inputs_as_arguments(node)
 
         # Lift parameters as inputs.
         for block in node.blocks():
@@ -674,7 +699,7 @@ class TS2FXGraphConverter:
         subgraph_nodes = []
         for block in node.blocks():
             subgraph_converter = TS2FXGraphConverter(
-                block, dict(), dict(), self.blocks_to_lifted_attrs, dict()
+                block, {}, {}, self.blocks_to_lifted_attrs, {}
             )
             subgraph_converter.constant_map = self.constant_map
             subgraph_converter.name_to_attribute_fqn = self.name_to_attribute_fqn
@@ -814,6 +839,77 @@ class TS2FXGraphConverter:
         )  # Get rid of an extra list wrapped around final output.
 
 
+class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
+    """
+    Run TS2FXGraphConverter in an explain mode. It collects all failed operators conversions
+    and provide that information to users. In order to collect all failed conversions, it
+    also mocks some internal attributes (e.g., name_to_node).
+    """
+
+    class _DictMock(dict):
+        def __init__(self, dict_data, mock_value):
+            super().__init__(dict_data)
+            self.mock_value = mock_value
+
+        def __getitem__(self, key):
+            # If the original dictionary has the key, return its value.
+            # Otherwise, return the mock value.
+            if not super().__contains__(key):
+                warnings.warn(
+                    f"{key} is not found in <class 'dict'>. Mock is instead used."
+                )
+                return self.mock_value
+            return super().__getitem__(key)
+
+        def __contains__(self, key):
+            return True
+
+    def __init__(
+        self,
+        ts_graph: Union[torch._C.Graph, torch._C.Block],
+        name_to_param_map: Dict[str, torch.Tensor],
+        name_to_buffer_map: Dict[str, torch.Tensor],
+        blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
+        name_to_non_tensor_attribute: Dict[str, Any],
+    ):
+        super().__init__(
+            ts_graph,
+            name_to_param_map,
+            name_to_buffer_map,
+            blocks_to_lifted_attrs,
+            name_to_non_tensor_attribute,
+        )
+
+        # Data to keep track of unsupported nodes.
+        self.unsupported_node_list: List[torch._C.Node] = []
+
+        # Add mock to needed attributes.
+        self.name_to_node = ExplainTS2FXGraphConverter._DictMock(
+            self.name_to_node,
+            # Dummy node.
+            torch.fx.Node(
+                None,
+                "mock",
+                "call_function",
+                lambda: None,
+                (),
+                {},
+            ),
+        )
+
+    def explain(self):
+        self.convert_graph_inputs()
+        for node in self.ts_graph.nodes():
+            self.convert_node(node)
+        self.convert_graph_outputs()
+
+    def convert_node(self, node):
+        try:
+            super().convert_node(node)
+        except Exception:
+            self.unsupported_node_list.append(node)
+
+
 class TS2EPConverter:
     # TorchScript model to ExportedProgram converter
     def __init__(
@@ -844,14 +940,14 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
         self.name_to_param_map: Dict[str, torch.Tensor] = (
             dict(ts_model.named_parameters())
             if isinstance(ts_model, torch.jit.ScriptModule)
-            else dict()
+            else {}
         )
         self.name_to_buffer_map: Dict[str, torch.Tensor] = (
             dict(ts_model.named_buffers())
             if isinstance(ts_model, torch.jit.ScriptModule)
-            else dict()
+            else {}
         )
-        self.name_to_non_tensor_attributes: Dict[str, Any] = dict()
+        self.name_to_non_tensor_attributes: Dict[str, Any] = {}
 
         self.lift_tensor_constants_to_buffer()
 
@@ -869,6 +965,26 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
             gm, graph_converter.name_to_tensor_constants
         )
         return ep
+
+    def explain(self):
+        blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
+
+        graph_converter = ExplainTS2FXGraphConverter(
+            self.ts_graph,
+            self.name_to_param_map,
+            self.name_to_buffer_map,
+            blocks_to_lifted_attrs,
+            self.name_to_non_tensor_attributes,
+        )
+        graph_converter.explain()
+        if len(graph_converter.unsupported_node_list) > 0:
+            explain_str = "Unsupported nodes are found in the following list:"
+            for i, n in enumerate(graph_converter.unsupported_node_list):
+                node_str = "".join(str(n).split("\n")[:1])
+                explain_str += f"\n\n    {i}. {n.kind()} [{node_str}]"
+            print(explain_str)
+        else:
+            print("Success!")
 
     def retrace_as_exported_program(
         self, gm: torch.fx.GraphModule, tensor_constants: Dict[str, torch.Tensor]

@@ -6,12 +6,13 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 3. handle functionalized randomness
 4. deduplicate inputs and consolidate views into their bases (see input_output_analysis)
 """
+import builtins
 import collections
 import pprint
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils.dlpack
@@ -151,6 +152,98 @@ class RuntimeWrapper(CompilerWrapper):
         )
 
 
+class NoopAliasHandler:
+    def __init__(self, info, runtime_metadata, trace_joint):
+        pass
+
+    def __call__(self, orig_inputs, fw_outs, out):
+        return out
+
+
+def _unwrap_tensoralias(x):
+    assert isinstance(x, TensorAlias)
+    return x.alias
+
+
+def _identity(x):
+    return x
+
+
+class AliasOfInputHandler:
+    def __init__(self, info, runtime_metadata, trace_joint):
+        num_tokens = len(runtime_metadata.tokens)
+        self.base_idx = info.base_idx + num_tokens
+        self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
+        self.requires_grad = info.requires_grad
+        self.functional_tensor = info.functional_tensor
+        self.replay_views = config.view_replay_for_aliased_outputs
+
+    def __call__(self, orig_inputs, fw_outs, out):
+        aliased_base_tensor = orig_inputs[self.base_idx]
+        return gen_alias_from_base(
+            aliased_base_tensor,
+            self.unwrap_out(out),
+            self.requires_grad,
+            self.functional_tensor,
+            replay_views=self.replay_views,
+        )
+
+
+class IsInputHandler:
+    def __init__(self, info, runtime_metadata, trace_joint):
+        num_tokens = len(runtime_metadata.tokens)
+        self.base_idx = info.base_idx + num_tokens
+        self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
+
+    def __call__(self, orig_inputs, fw_outs, out):
+        aliased_base_tensor = orig_inputs[self.base_idx]
+        return aliased_base_tensor
+
+
+class AliasOfIntermediateHandler:
+    def __init__(self, info, runtime_metadata, trace_joint):
+        if info.output_type in (
+            OutputType.alias_of_intermediate,
+            OutputType.alias_of_intermediate_save_as_output,
+        ):
+            num_user_outputs = len(runtime_metadata.output_info)
+            self.base_idx = info.base_idx + num_user_outputs
+        else:
+            self.base_idx = info.base_idx
+
+        self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
+        self.requires_grad = info.requires_grad
+        self.functional_tensor = info.functional_tensor
+        self.replay_views = config.view_replay_for_aliased_outputs
+
+    def __call__(self, orig_inputs, fw_outs, out):
+        aliased_base_tensor = fw_outs[self.base_idx]
+        return gen_alias_from_base(
+            aliased_base_tensor,
+            self.unwrap_out(out),
+            self.requires_grad,
+            self.functional_tensor,
+            replay_views=self.replay_views,
+        )
+
+
+_HANDLER_MAP = {
+    OutputType.non_alias: NoopAliasHandler,
+    OutputType.unsafe_view_alias: NoopAliasHandler,
+    OutputType.custom_function_view: NoopAliasHandler,
+    OutputType.alias_of_input: AliasOfInputHandler,
+    OutputType.is_input: IsInputHandler,
+    OutputType.alias_of_intermediate: AliasOfIntermediateHandler,
+    OutputType.alias_of_intermediate_save_as_output: AliasOfIntermediateHandler,
+    OutputType.alias_of_intermediate_base_is_user_output: AliasOfIntermediateHandler,
+}
+
+
+def make_output_handler(info, runtime_metadata, trace_joint):
+    handler_type = _HANDLER_MAP[info.output_type]
+    return handler_type(info, runtime_metadata, trace_joint)
+
+
 def _create_runtime_wrapper(
     compiled_fn,
     *,
@@ -185,10 +278,18 @@ def _create_runtime_wrapper(
             assert isinstance(info.base_idx, int)
             epilogue_args_idx.append(info.base_idx + num_tokens)
 
+    if config.unlift_effect_tokens:
+        assert num_tokens == 0
+
+    replay_views = config.view_replay_for_aliased_outputs
+    if runtime_metadata.num_outputs_aliased > 0:
+        output_handlers = tuple(
+            make_output_handler(info, runtime_metadata, trace_joint)
+            for info in runtime_metadata.output_info
+        )
+
     def runtime_wrapper(args: List[Any]):
-        if config.unlift_effect_tokens:
-            assert num_tokens == 0
-        elif num_tokens > 0:
+        if num_tokens > 0:
             # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
             old_args = args
             args = [[None] * num_tokens, *args]
@@ -320,69 +421,14 @@ def _create_runtime_wrapper(
         # compiling them.
         if runtime_metadata.num_outputs_aliased > 0:
             # The compiled forward also returned intermediate bases. We don't want to return them to the user.
-            if runtime_metadata.num_intermediate_bases > 0:
-                fw_outs_no_intermediate_bases = fw_outs[
-                    : -runtime_metadata.num_intermediate_bases
-                ]
-                intermediate_bases = fw_outs[-runtime_metadata.num_intermediate_bases :]
-            else:
-                fw_outs_no_intermediate_bases = fw_outs
-                intermediate_bases = []
-
-            assert len(fw_outs_no_intermediate_bases) == len(
-                runtime_metadata.output_info
+            expect_num_outputs = (
+                len(output_handlers) + runtime_metadata.num_intermediate_bases
             )
-            fw_outs_including_aliases = []
-            for i, (o, info) in enumerate(
-                zip(fw_outs_no_intermediate_bases, runtime_metadata.output_info)
-            ):
-                if info.output_type in [
-                    OutputType.non_alias,
-                    OutputType.unsafe_view_alias,
-                    OutputType.custom_function_view,
-                ]:
-                    fw_outs_including_aliases.append(o)
-                    continue
-                if trace_joint:
-                    assert isinstance(o, TensorAlias)
-                    o_ = o.alias
-                else:
-                    o_ = o
-
-                o_grad = runtime_metadata.output_info[i].requires_grad
-                if info.output_type == OutputType.alias_of_input:
-                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index]
-                    regenerated_out = gen_alias_from_base(
-                        aliased_base_tensor, o_, o_grad, info.functional_tensor
-                    )
-                    fw_outs_including_aliases.append(regenerated_out)
-                    continue
-                elif info.output_type == OutputType.is_input:
-                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index]
-                    regenerated_out = aliased_base_tensor
-                    fw_outs_including_aliases.append(regenerated_out)
-                    continue
-                elif info.output_type == OutputType.alias_of_intermediate:
-                    base_tensor_list = intermediate_bases
-                elif (
-                    info.output_type == OutputType.alias_of_intermediate_save_as_output
-                ):
-                    base_tensor_list = intermediate_bases
-                else:
-                    assert (
-                        info.output_type
-                        == OutputType.alias_of_intermediate_base_is_user_output
-                    )
-                    base_tensor_list = fw_outs_no_intermediate_bases
-                aliased_base_tensor = base_tensor_list[info.base_idx]
-                # TODO: handle the custom autograd function case here.
-                # We need a way to check whether a tensor came from a custom autograd fn from python,
-                # AND a way to replay that custom view fn.
-                regenerated_out = gen_alias_from_base(
-                    aliased_base_tensor, o_, o_grad, info.functional_tensor
-                )
-                fw_outs_including_aliases.append(regenerated_out)
-            ret_outs = fw_outs_including_aliases
+            assert len(fw_outs) == expect_num_outputs
+            ret_outs = [
+                handler(orig_inputs, fw_outs, out)
+                for out, handler in builtins.zip(fw_outs, output_handlers)
+            ]
         else:
             ret_outs = fw_outs
 
@@ -1000,6 +1046,8 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             aliased_arg_idx_with_metadata_mutations
         )
 
+        replay_views = config.view_replay_for_aliased_outputs
+
         def _unpack_synthetic_bases(primals: Tuple[Any, ...]) -> List[Any]:
             f_args_inner = []
             for inner_idx_or_tuple in synthetic_base_info:
@@ -1009,7 +1057,10 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                     inner_base_idx, view_tensor = inner_idx_or_tuple
                     base = primals[inner_base_idx]
                     view_arg = gen_alias_from_base(
-                        base, view_tensor, view_tensor.requires_grad
+                        base,
+                        view_tensor,
+                        view_tensor.requires_grad,
+                        replay_views=replay_views,
                     )
                     f_args_inner.append(view_arg)
             return f_args_inner
@@ -1399,7 +1450,7 @@ Expected metadata: {str(expected_tangent_metadata)}
 
 Runtime metadata: {str(runtime_tangent_metadata)}
 
-shape: {str(x.shape)}
+shape: {str(cast(torch.Tensor, x).shape)}
 To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
 """
             )
@@ -1779,14 +1830,16 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
                     assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
-                        AOTDispatchAutograd.coerce_runtime_tangent(
-                            t,
-                            CompiledFunction.metadata.traced_tangent_metas[
-                                i - tangents_start_idx
-                            ],
+                        (
+                            AOTDispatchAutograd.coerce_runtime_tangent(
+                                t,
+                                CompiledFunction.metadata.traced_tangent_metas[
+                                    i - tangents_start_idx
+                                ],
+                            )
+                            if tangents_start_idx <= i < tangents_end_idx
+                            else t
                         )
-                        if tangents_start_idx <= i < tangents_end_idx
-                        else t
                         for i, t in enumerate(all_args)
                     ]
                     all_args = unwrap_tensor_subclasses(
@@ -1798,9 +1851,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # Make the tangents contiguous. Note that we must do this after subclass desugaring
                 # because inputs to inductor have to be contiguous
                 all_args = [
-                    AOTDispatchAutograd._force_contiguous(t)
-                    if (tangents_start_idx <= i < tangents_end_idx)
-                    else t
+                    (
+                        AOTDispatchAutograd._force_contiguous(t)
+                        if (tangents_start_idx <= i < tangents_end_idx)
+                        else t
+                    )
                     for i, t in enumerate(all_args)
                 ]
 

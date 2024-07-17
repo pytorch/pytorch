@@ -195,11 +195,10 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             b = torch.matmul(a, a)
             c = torch.relu(b)
             d = torch.matmul(c, c)
-            b1 = torch.matmul(b, b)
-            e = _functional_collectives.all_reduce(b1, "sum", "0")
+            e = _functional_collectives.all_reduce(b, "sum", "0")
             f = torch.relu(d)
             g = torch.matmul(f, f)
-            return torch.matmul(e, g)
+            return torch.mm(e, g)
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
@@ -208,15 +207,15 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # Things to verify:
             # - The clone prologue of the all_reduce_ should not be fused with
             # any relus.
-            # - The all_reduce_ and its prologue `b1 = torch.matmul(b, b)` should be raised above
-            # `c = torch.relu(b); d = torch.matmul(c, c)` but below `b = torch.matmul(a, a)`.
-            # - The wait_tensor should be sinked below the 4th matmul but above
-            # the 5th matmul.
+            # - The all_reduce_ and its prologue should be raised above the 2nd
+            # matmul but below the 1st matmul.
+            # - The wait_tensor should be sinked below the 3rd matmul but above
+            # the 4th matmul.
             (
                 FileCheck()
-                .check("extern_kernels.mm(arg0_1, arg0_1, out=buf0)")
-                .check("extern_kernels.mm(buf0, buf0, out=buf1)")
-                .check("torch.ops._c10d_functional.all_reduce_.default(buf1,")
+                .check("extern_kernels.mm")
+                .check("triton_poi_fused_all_reduce_0")
+                .check("torch.ops._c10d_functional.all_reduce_.default")
                 .check("triton_poi_fused_relu")
                 .check("extern_kernels.mm")
                 .check("triton_poi_fused_relu")
@@ -229,7 +228,6 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(True, "FIXME: broken test/feature.")
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
@@ -263,26 +261,24 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # 2. then, we schedule the ops (g) that ARE NOT required for second all_reduce and DO NOT depend on first all_reduce.
             # 3. then, we schedule the ops (f) that ARE required for second all_reduce and DO depend on first all_reduce.
             # and then, we schedule the second all_reduce. And then schedule all ops that depend on second all_reduce.
-            FileCheck().check("dist.all_reduce(").check("triton_poi_fused_relu").check(
-                "extern_kernels.mm("
-            ).check("extern_kernels.mm(").check("_wait_tensor(").check(
-                "triton_poi_fused_mul"
-            ).check(
-                "dist.all_reduce("
-            ).check(
-                "_wait_tensor("
-            ).check(
-                "triton_poi_fused_add"
-            ).check(
-                "extern_kernels.mm("
-            ).run(
-                code
+            (
+                FileCheck()
+                .check("torch.ops._c10d_functional.all_reduce_.default")
+                .check("triton_poi_fused_relu")
+                .check("extern_kernels.mm")
+                .check("extern_kernels.mm")
+                .check("torch.ops._c10d_functional.wait_tensor.default")
+                .check("triton_poi_fused_mul")
+                .check("torch.ops._c10d_functional.all_reduce_.default")
+                .check("torch.ops._c10d_functional.wait_tensor.default")
+                .check("triton_poi_fused_add")
+                .check("extern_kernels.mm")
+                .run(code)
             )
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(True, "FIXME: broken test/feature.")
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
@@ -321,20 +317,19 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # 2. then, we schedule the ops (g) that ARE NOT required for second all_reduce and DO NOT depend on first all_reduce.
             # 3. then, we schedule the ops (f) that ARE required for second all_reduce and DO depend on first all_reduce.
             # and then, we schedule the second all_reduce. And then schedule all ops that depend on second all_reduce.
-            FileCheck().check("dist.all_reduce(").check("triton_poi_fused_relu").check(
-                "extern_kernels.mm("
-            ).check("extern_kernels.mm(").check("_wait_tensor(").check(
-                "triton_poi_fused_mul"
-            ).check(
-                "dist.all_reduce("
-            ).check(
-                "_wait_tensor("
-            ).check(
-                "triton_poi_fused_add"
-            ).check(
-                "extern_kernels.mm("
-            ).run(
-                code
+            (
+                FileCheck()
+                .check("torch.ops._c10d_functional.all_reduce_.default")
+                .check("triton_poi_fused_relu")
+                .check("extern_kernels.mm")
+                .check("extern_kernels.mm")
+                .check("torch.ops._c10d_functional.wait_tensor.default")
+                .check("triton_poi_fused_mul")
+                .check("torch.ops._c10d_functional.all_reduce_.default")
+                .check("torch.ops._c10d_functional.wait_tensor.default")
+                .check("triton_poi_fused_add")
+                .check("extern_kernels.mm")
+                .run(code)
             )
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
@@ -346,7 +341,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(
         torch._inductor.config,
-        "pre_fusion_custom_pass",
+        "_pre_fusion_custom_pass",
         create_grouped_node_for_allreduce_and_its_deps,
     )
     def test_grouped_scheduler_node(self):
@@ -365,7 +360,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-            # A few expectations:
+            # Expectations:
             # 1. `add = a + a` and `div = add / a` are still fused, which means fusion
             #    still happens among nodes within a GroupedSchedulerNode.
             # 2. `mul = a * a` is not fused with `add` or `div`, because the latter two are within
