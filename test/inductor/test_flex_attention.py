@@ -272,7 +272,6 @@ class TestFlexAttention(InductorTestCase):
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
-        # block_mask = create_block_mask_test(score_mod, q, k)
         block_mask = None
         sdpa_partial = create_attention(score_mod, block_mask)
         compiled_sdpa = torch.compile(sdpa_partial)
@@ -1005,7 +1004,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_make_block_mask(self):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
-            # return torch.where(q_idx >= kv_idx, score, -float("inf"))
 
         block_mask_a = create_block_mask(causal_mask, 1, 1, 512, 512, _compile=True)
         block_mask_b = create_block_mask(causal_mask, 1, 1, 512, 512, _compile=False)
@@ -1407,7 +1405,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         offset = torch.zeros(8, device="cuda")
 
         def causal_mask(b, h, q, kv):
-            return torch.where((q + offset[b] * 128) >= kv, True, False)
+            return (q + (offset[b] * 128)) >= kv
 
         block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048)
         self.assertEqual(block_mask.shape, (4, 2, 2048, 2048))
@@ -1469,7 +1467,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         offset = torch.arange(8, device="cuda")
 
         def causal_offset_mask(b, h, q, kv):
-            return torch.where(q + offset[b] * 128 >= kv, True, False)
+            return (q + offset[b] * 128) >= kv
 
         block_mask = create_block_mask(causal_offset_mask, 8, 1, 2048, 2048)
         str_block_mask = str(block_mask)

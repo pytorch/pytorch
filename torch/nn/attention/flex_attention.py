@@ -294,9 +294,19 @@ class BlockMask:
     def __getitem__(self, index) -> "BlockMask":
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
+        new_kv_num_blocks_full = (
+            self.full_kv_num_blocks[index]
+            if self.full_kv_num_blocks is not None
+            else None
+        )
+        new_kv_indices_full = (
+            self.full_kv_indices[index] if self.full_kv_indices is not None else None
+        )
         return BlockMask(
             new_kv_num_blocks,
             new_kv_indices,
+            full_kv_num_blocks=new_kv_num_blocks_full,
+            full_kv_indices=new_kv_indices_full,
             BLOCK_SIZE=self.BLOCK_SIZE,
             mask_mod=self.mask_mod,
         )
