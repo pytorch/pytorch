@@ -3072,6 +3072,48 @@ class CppVecKernelChecker(CppVecKernel):
         return self
 
 
+def get_loop_body_lowp_fp(_body: ir.LoopBody):
+    sub_blocks = [_body.root_block] + list(_body.subblocks.values())
+
+    _lowp_fp_type: Optional[torch.dtype] = None
+
+    for sub_block in sub_blocks:
+        for _node in sub_block.graph.nodes:
+            # TODO(Eikan): Regarding get_index and index_expr, we should conclude the
+            # the data type as well.
+            if _node.op == "placeholder" or _node.target in (
+                "get_index",
+                "index_expr",
+            ):
+                continue
+
+            # Fast path if all operations can support bf16/fp16 without converting to fp32
+            if _node.target not in [
+                "load",
+                "store",
+                "abs",
+                "neg",
+                "output",
+            ]:
+                return None
+
+            if hasattr(_node, "meta") and _node.meta:
+                assert OptimizationContext.key in _node.meta
+                opt_ctx: OptimizationContext = _node.meta[OptimizationContext.key]
+                if not opt_ctx.dtype or opt_ctx.dtype not in DTYPE_LOWP_FP:
+                    return None
+                if _lowp_fp_type:
+                    assert (
+                        _lowp_fp_type == opt_ctx.dtype
+                    ), "do not support bf16/fp16 mix"
+                else:
+                    _lowp_fp_type = opt_ctx.dtype
+            else:
+                return None
+
+    return _lowp_fp_type
+
+
 class CppKernelProxy(CppKernel):
     def __init__(self, kernel_group):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
@@ -3089,51 +3131,9 @@ class CppKernelProxy(CppKernel):
     def is_lowp_fp_scheduler(self, scheduler_node: SchedulerNode):
         if not isinstance(scheduler_node._body, ir.LoopBody):
             return True
-
-        _lowp_fp_type: Optional[torch.dtype] = None
-
         # Propagate the dtype to check if all the fx node is bf16/fp16
         DataTypePropagation.propagate_scheduler_node(scheduler_node)
-
-        sub_blocks = [scheduler_node._body.root_block] + list(
-            scheduler_node._body.subblocks.values()
-        )
-        for sub_block in sub_blocks:
-            for _node in sub_block.graph.nodes:
-                # TODO(Eikan): Regarding get_index and index_expr, we should conclude the
-                # the data type as well.
-                if _node.op == "placeholder" or _node.target in (
-                    "get_index",
-                    "index_expr",
-                ):
-                    continue
-
-                # Fast path if all operations can support bf16/fp16 without converting to fp32
-                if _node.target not in [
-                    "load",
-                    "store",
-                    "abs",
-                    "neg",
-                    "output",
-                ]:
-                    return False
-
-                if hasattr(_node, "meta") and _node.meta:
-                    assert OptimizationContext.key in _node.meta
-                    opt_ctx: OptimizationContext = _node.meta[OptimizationContext.key]
-                    if not opt_ctx.dtype or opt_ctx.dtype not in DTYPE_LOWP_FP:
-                        return False
-                    if _lowp_fp_type:
-                        assert (
-                            _lowp_fp_type == opt_ctx.dtype
-                        ), "scheduler node do not support bf16/fp16 mix"
-                    else:
-                        _lowp_fp_type = opt_ctx.dtype
-                else:
-                    return False
-
-        scheduler_node._lowp_fp_type = _lowp_fp_type  # type: ignore[attr-defined]
-        return True
+        return get_loop_body_lowp_fp(scheduler_node._body) is not None
 
     def legalize_lowp_fp_dtype_loopbody(self, loop_body: ir.LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
@@ -3316,8 +3316,22 @@ class CppKernelProxy(CppKernel):
                 body: ir.LoopBody = node._body
                 self.legalize_lowp_fp_dtype_loopbody(body)
 
-    def codegen_functions(self, fn_list, var_sizes_list, vec_dtype=torch.float):
-        # TODO(jgong5): remove vec_dtype arg with alternative tiling factors for various dtypes
+    def codegen_functions(self, fn_list, var_sizes_list):
+        loop_bodies = None
+        if all(isinstance(fn, ir.LoopBody) for fn in fn_list):
+            loop_bodies = fn_list
+        else:
+            assert all(isinstance(fn, functools.partial) for fn in fn_list)
+            assert all(isinstance(fn.args[0]._body, ir.LoopBody) for fn in fn_list)
+            loop_bodies = [fn.args[0]._body for fn in fn_list]
+        vec_dtype = torch.float
+        _lowp_fp_dtype = get_loop_body_lowp_fp(loop_bodies[0])
+        if _lowp_fp_dtype and all(
+            (get_loop_body_lowp_fp(loop_body) == _lowp_fp_dtype)
+            for loop_body in loop_bodies
+        ):
+            vec_dtype = _lowp_fp_dtype
+        assert loop_bodies is not None
         assert len(fn_list) == len(var_sizes_list)
         kernel_group = self.kernel_group
         group, reduction_group = max(var_sizes_list, key=lambda sizes: len(sizes[1]))
@@ -3488,18 +3502,7 @@ class CppKernelProxy(CppKernel):
         # Legalize BF16 node by adding to_dtype explicitly
         self.legalize_lowp_fp_dtype(nodes)
         self.data_type_propagation(nodes)
-
         assert len(nodes) >= 1
-        first_node = nodes[0]
-        vec_dtype = (
-            first_node._lowp_fp_type  # type: ignore[attr-defined]
-            if all(
-                hasattr(_node, "_lowp_fp_type")
-                and _node._lowp_fp_type == first_node._lowp_fp_type  # type: ignore[attr-defined]
-                for _node in nodes
-            )
-            else torch.float
-        )
 
         def fn(node, *index_vars):
             node.decide_inplace_update()
@@ -3511,7 +3514,7 @@ class CppKernelProxy(CppKernel):
 
         fn_list = [functools.partial(fn, node) for node in nodes]
         var_sizes_list = [node.group[1] for node in nodes]
-        self.codegen_functions(fn_list, var_sizes_list, vec_dtype)
+        self.codegen_functions(fn_list, var_sizes_list)
 
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
