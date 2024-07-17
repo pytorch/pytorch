@@ -68,13 +68,17 @@ class Instruction:
 
 
 def convert_instruction(i: dis.Instruction) -> Instruction:
+    if sys.version_info >= (3, 13):
+        starts_line = i.line_number
+    else:
+        starts_line = i.starts_line
     return Instruction(
         i.opcode,
         i.opname,
         i.arg,
         i.argval,
         i.offset,
-        i.starts_line,
+        starts_line,
         i.is_jump_target,
         getattr(i, "positions", None),
     )
