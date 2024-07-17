@@ -277,6 +277,7 @@ def mps_ops_modifier(ops):
         'exp',
         'expand',
         'expand_as',
+        'expand_copy',
         'flatten',
         'fill',
         'full',

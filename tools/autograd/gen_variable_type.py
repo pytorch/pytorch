@@ -189,6 +189,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "diag_embed",
     "repeat",
     "expand",
+    "expand_copy",
     "flip",
     "fliplr",
     "flipud",
