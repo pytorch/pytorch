@@ -110,9 +110,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return self.value in self._constant_fold_classes()
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
-        from .. import trace_rules
         from . import ConstantVariable, EnumVariable
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         if name == "__name__":
             return ConstantVariable.create(self.value.__name__)
@@ -128,9 +127,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if isinstance(obj, staticmethod):
             func = obj.__get__(self.value)
             if source is not None:
-                return trace_rules.lookup(func).create_with_source(func, source=source)
+                return VariableBuilder(tx, source)(func)
             else:
-                return trace_rules.lookup(func)(func)
+                return SourcelessBuilder(tx)(func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source:
@@ -239,7 +238,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and "__subclasses__" not in self.value.__dict__
         ):
             options = {"mutable_local": MutableLocal()}
-            subs_as_vars: List[VariableTracker] = list()
+            subs_as_vars: List[VariableTracker] = []
             for sub in self.value.__subclasses__():
                 source = AttrSource(tx.import_source(sub.__module__), sub.__name__)
                 subs_as_vars.append(

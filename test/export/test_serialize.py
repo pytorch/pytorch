@@ -1190,6 +1190,27 @@ class TestSerializeCustomClass(TestCase):
         ep = deserialize(serialized_vals)
         self.assertTrue(isinstance(ep.constants["custom_obj"].get(), FakeTensor))
 
+    def test_quantization_tag_metadata(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        f = Foo()
+
+        inputs = (torch.zeros(4, 4),)
+        ep = export(f, inputs)
+
+        for node in ep.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                node.meta["quantization_tag"] = "foo"
+
+        serialized_vals = serialize(ep)
+        ep = deserialize(serialized_vals)
+
+        for node in ep.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                self.assertTrue(node.meta["quantization_tag"] == "foo")
+
 
 if __name__ == "__main__":
     run_tests()
