@@ -1,4 +1,4 @@
-name: inductor
+name: operator_benchmark
 
 on:
   push:
