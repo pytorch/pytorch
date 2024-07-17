@@ -3761,7 +3761,11 @@ class TestNestedTensorSubclass(TestCase):
 
     def test_softmax(self, device):
         nt = random_nt_from_dims(
-            [3, None, 5], device=device, dtype=torch.float32, layout=torch.jagged
+            [3, None, 5],
+            device=device,
+            dtype=torch.float32,
+            layout=torch.jagged,
+            requires_grad=True,
         )
 
         # operate on dim=2
@@ -3779,6 +3783,15 @@ class TestNestedTensorSubclass(TestCase):
         output2 = nt.softmax(dim=-1)
         torch._dynamo.disable(self.assertEqual)(output, output2)
         _compare_to_ref(nt, output2, dim=-1)
+
+        def grad_test_func(a, b):
+            nt = torch.nested.as_nested_tensor([a, b], layout=torch.jagged)
+            out = nt.softmax(dim=-1)
+            return out.values()
+
+        a = torch.rand(4, 5, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.rand(8, 5, requires_grad=True, dtype=torch.float64, device=device)
+        gradcheck(grad_test_func, inputs=(a, b), check_batched_grad=False)
 
     def test_views_inherit_ragged_dim(self, device):
         # view
@@ -4454,6 +4467,20 @@ class TestNestedTensorSubclass(TestCase):
         ):
             torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
 
+    @onlyCPU
+    def test_nested_tensor_from_jagged_fx_trace(self, device):
+        def fn(x, y):
+            return torch.nested.nested_tensor_from_jagged(x, y)
+
+        def user_unwrapped(x, y):
+            return fn(x, y)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "torch.nested.nested_tensor_from_jagged does not support tracing with fx.symbolic_trace",
+        ):
+            torch.fx.symbolic_trace(user_unwrapped)
+
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("dim", range(5))
     @parametrize(
@@ -4499,9 +4526,8 @@ class TestNestedTensorSubclass(TestCase):
             dim=dim,
             batch_size=expected_batch_size,
             contiguous=True,
-            # TODO: compute min / max during construction for this case since it's easy
-            cached_min_seqlen=None,
-            cached_max_seqlen=None,
+            cached_min_seqlen=expected_seqlen,
+            cached_max_seqlen=expected_seqlen,
         )
 
         if torch.device(device) == t.device and dtype == t.dtype and contiguous:
@@ -4536,9 +4562,8 @@ class TestNestedTensorSubclass(TestCase):
             dim=dim,
             batch_size=expected_batch_size,
             contiguous=True,
-            # TODO: compute min / max during construction for this case since it's easy
-            cached_min_seqlen=None,
-            cached_max_seqlen=None,
+            cached_min_seqlen=expected_seqlen,
+            cached_max_seqlen=expected_seqlen,
         )
 
         # we don't support conversion between layouts this way atm
