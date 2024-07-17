@@ -28,6 +28,7 @@ from .lowrank_multivariate_normal import (
     _batch_lowrank_mahalanobis,
     LowRankMultivariateNormal,
 )
+from .multinomial import Multinomial
 from .multivariate_normal import _batch_mahalanobis, MultivariateNormal
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
