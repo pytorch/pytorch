@@ -929,7 +929,7 @@ TS2EPConverter logging starts from here.
 INFO: (TORCH_LOGS="export" <cmd>)
     * Log TorchScript IR.
 
-DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
+DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
     * Log conversion IR by IR in a format of [<conversion handler name>] converts [<IR>].
         """
         )
@@ -970,6 +970,8 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
             self.name_to_non_tensor_attributes,
         )
         gm = graph_converter.convert()
+        log.info(f"GraphModule: {gm.print_readable(print_output=False)}")  # noqa: G004
+
         ep = self.retrace_as_exported_program(
             gm, graph_converter.name_to_tensor_constants
         )

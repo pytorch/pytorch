@@ -424,7 +424,7 @@ class TestConverter(TestCase):
             def __init__(self, mod) -> None:
                 super().__init__()
                 self.mod = mod
-            
+
             def forward(self, x, y):
                 return self.mod(x, y)
 
@@ -464,7 +464,10 @@ class TestConverter(TestCase):
                 else:
                     return self.mod1(x, y) - self.mod2(x, y)
 
-        inp = (torch.tensor(True), torch.randn([3, 3]),)
+        inp = (
+            torch.tensor(True),
+            torch.randn([3, 3]),
+        )
         self._check_equal_ts_ep_converter(NestedM(3), inp)
 
     def test_convert_nn_module_with_nested_param(self):
@@ -656,6 +659,7 @@ class TestConverter(TestCase):
 
         t = inp[0]
         t -= 0.8
+        # Skip jit.traced because it specializes on one path.
         for ep in ep_list[1:]:
             torch.testing.assert_close(
                 ep.module()(*inp),
@@ -669,6 +673,7 @@ class TestConverter(TestCase):
 
         t = inp[0]
         t -= 0.8
+        # Skip jit.traced because it specializes on one path.
         for ep in ep_list[1:]:
             torch.testing.assert_close(
                 ep.module()(*inp),
@@ -682,6 +687,7 @@ class TestConverter(TestCase):
 
         t = inp[0]
         t -= 0.8
+        # Skip jit.traced because it specializes on one path.
         for ep in ep_list[1:]:
             torch.testing.assert_close(
                 ep.module()(*inp),
