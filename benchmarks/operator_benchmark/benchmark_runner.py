@@ -92,7 +92,7 @@ def parse_args():
     parser.add_argument(
         "--omp-num-threads",
         "--omp_num_threads",
-        help="Number of OpenMP threads used in PyTorch/Caffe2 runtime",
+        help="Number of OpenMP threads used in PyTorch runtime",
         default=None,
         type=int,
     )
@@ -100,7 +100,7 @@ def parse_args():
     parser.add_argument(
         "--mkl-num-threads",
         "--mkl_num_threads",
-        help="Number of MKL threads used in PyTorch/Caffe2 runtime",
+        help="Number of MKL threads used in PyTorch runtime",
         default=None,
         type=int,
     )
@@ -136,12 +136,6 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--framework",
-        help="Comma-delimited list of frameworks to test (Caffe2, PyTorch)",
-        default="Caffe2,PyTorch",
-    )
-
-    parser.add_argument(
         "--device",
         help="Run tests on the provided architecture (cpu, cuda)",
         default="None",
@@ -160,8 +154,7 @@ def parse_args():
         # "Modifications to the environment variables after the program has started,
         # even if modified by the program itself, are ignored by the OpenMP implementation"
         benchmark_utils.set_omp_threads(args.omp_num_threads)
-        if benchmark_utils.is_pytorch_enabled(args.framework):
-            torch.set_num_threads(args.omp_num_threads)
+        torch.set_num_threads(args.omp_num_threads)
     if args.mkl_num_threads:
         benchmark_utils.set_mkl_threads(args.mkl_num_threads)
 

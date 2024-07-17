@@ -17,11 +17,28 @@ from functools import partial, wraps
 
 # NB: numpy is a testing dependency!
 import numpy as np
+from common_utils import expectedFailureIf
+
+import functorch
 import torch
 import torch.autograd.forward_ad as fwAD
 import torch.nn as nn
 import torch.nn.functional as F
-from common_utils import expectedFailureIf
+from functorch import (
+    combine_state_for_ensemble,
+    grad,
+    grad_and_value,
+    hessian,
+    jacfwd,
+    jacrev,
+    jvp,
+    make_functional,
+    make_functional_with_buffers,
+    make_fx,
+    vjp,
+    vmap,
+)
+from functorch.experimental import functionalize, replace_all_batch_norm_modules_
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
 from torch._dynamo import allow_in_graph
 from torch._functorch.eager_transforms import _slice_argnums
@@ -60,26 +77,10 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfTorchDynamo,
 )
 
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
-
-import functorch
-from functorch import (
-    combine_state_for_ensemble,
-    grad,
-    grad_and_value,
-    hessian,
-    jacfwd,
-    jacrev,
-    jvp,
-    make_functional,
-    make_functional_with_buffers,
-    make_fx,
-    vjp,
-    vmap,
-)
-from functorch.experimental import functionalize, replace_all_batch_norm_modules_
 
 USE_TORCHVISION = False
 try:
@@ -2340,6 +2341,8 @@ class TestJac(VmapTearDownMixin, TestCase):
         )(x)
         self.assertEqual(actual, expected)
 
+    # https://github.com/pytorch/pytorch/issues/127036
+    @xfailIfTorchDynamo
     @parametrize("_preallocate_and_copy", (True, False))
     def test_chunk_jacrev_chunksize_one(self, device, _preallocate_and_copy):
         # With chunk_size=1, we shouldn't `vmap` and hence not be limited
@@ -3255,7 +3258,7 @@ class TestComposability(TestCase):
         x = torch.randn(3, device=device)
 
         # functorch version of the API is deprecated
-        with self.assertWarnsRegex(UserWarning, "Please use torch.vmap"):
+        with self.assertWarnsRegex(FutureWarning, "Please use `torch.vmap`"):
             vmap(torch.sin)
 
         # the non-functorch version is not deprecated
@@ -3273,7 +3276,9 @@ class TestComposability(TestCase):
         new_api = getattr(torch.func, transform)
 
         # functorch version of the API is deprecated
-        with self.assertWarnsRegex(UserWarning, f"Please use torch.func.{transform}"):
+        with self.assertWarnsRegex(
+            FutureWarning, f"Please use `torch.func.{transform}`"
+        ):
             api(torch.sin)
 
         # the non-functorch version is not deprecated
@@ -3392,6 +3397,8 @@ class TestComposability(TestCase):
         new_cotangent = torch.randn(())
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
 
+    # FIXME: test fails in Windows
+    @unittest.skipIf(IS_WINDOWS, "fails in Windows; needs investigation")
     @unittest.skipIf(IS_FBCODE, "can't subprocess in fbcode")
     # it is redundant to run this test twice on a machine that has GPUs
     @onlyCPU

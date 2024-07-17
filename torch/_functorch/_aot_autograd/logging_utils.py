@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 Contains utils for logging in AOTAutograd, including managing the names of the graphs under
 compilation, capturing user-friendly tracebacks, and debug messages.

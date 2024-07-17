@@ -1,4 +1,4 @@
-import distutils.spawn
+# mypy: allow-untyped-defs
 import functools
 import logging
 import os
@@ -9,10 +9,13 @@ from typing import Any, Dict, Optional
 import torch
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
 
+
 log = logging.getLogger(__name__)
 
 if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
-    if not distutils.spawn.find_executable("strobeclient"):
+    import shutil
+
+    if not shutil.which("strobeclient"):
         log.info(
             "TORCH_COMPILE_STROBELIGHT is true, but seems like you are not on a FB machine."
         )
@@ -121,8 +124,22 @@ def log_export_usage(**kwargs):
     pass
 
 
-def log_torchscript_usage(api: str):
+def log_torchscript_usage(api: str, **kwargs):
     _ = api
+    return
+
+
+def check_if_torch_exportable():
+    return False
+
+
+def log_torch_jit_trace_exportability(
+    api: str,
+    type_of_export: str,
+    export_outcome: str,
+    result: str,
+):
+    _, _, _, _ = api, type_of_export, export_outcome, result
     return
 
 

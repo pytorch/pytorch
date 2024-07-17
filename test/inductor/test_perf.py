@@ -2,13 +2,14 @@
 import contextlib
 from unittest.mock import patch
 
+import functorch
+
 import torch
 import torch._inductor.config as config
 import torch.autograd
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch.testing._internal.common_utils import skipIfRocm
 
 ########################
 # Explanation of Tests #
@@ -27,8 +28,6 @@ from torch.testing._internal.common_utils import skipIfRocm
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
-
-import functorch
 
 if HAS_CUDA:
     from torch.testing._internal.triton_utils import add_kernel
@@ -852,7 +851,6 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """42""")
 
     @requires_cuda
-    @skipIfRocm
     def test_inplace_triton_kernel_v1(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
@@ -865,7 +863,6 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """40""")
 
     @requires_cuda
-    @skipIfRocm
     def test_inplace_triton_kernel_v2(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
@@ -879,7 +876,6 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     @requires_cuda
-    @skipIfRocm
     def test_inplace_triton_kernel_v3(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
@@ -893,7 +889,6 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     @requires_cuda
-    @skipIfRocm
     def test_inplace_triton_kernel_v4(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             x_view = x.view(-1)
@@ -908,7 +903,6 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     @requires_cuda
-    @skipIfRocm
     def test_inplace_triton_kernel_v5(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             x_view = x.view(-1)
@@ -923,7 +917,6 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     @requires_cuda
-    @skipIfRocm
     def test_inplace_triton_kernel_v6(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
