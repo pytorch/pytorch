@@ -6,7 +6,6 @@ import itertools
 import logging
 import math
 import operator
-import warnings
 from typing import (
     Callable,
     Dict,
@@ -201,19 +200,6 @@ class ValueRanges(Generic[_T]):
         # NB: [-oo, oo] always advertises as float!
         object.__setattr__(self, "is_float", not self.is_bool and not self.is_int)
         assert self.is_bool or self.is_int or self.is_float, (lower, upper)
-        if self.is_float:
-            if not isinstance(lower, sympy.Float) and lower not in (
-                -sympy.oo,
-                sympy.oo,
-            ):
-                warnings.warn(f"Lower bound must be a float or -oo/oo: {lower}")
-                object.__setattr__(self, "lower", sympy.Float(lower))
-            if not isinstance(upper, sympy.Float) and upper not in (
-                -sympy.oo,
-                sympy.oo,
-            ):
-                warnings.warn(f"Upper bound must be a float or -oo/oo: {upper}")
-                object.__setattr__(self, "upper", sympy.Float(upper))
 
     def boolify(self) -> ValueRanges[SympyBoolean]:
         if vr_is_bool(self):
@@ -365,9 +351,11 @@ class ValueRanges(Generic[_T]):
     def convex_min_zero_map(x: Union[ExprIn, ExprVR], fn: ExprFn) -> ExprVR:
         """Fn is convex and has a minimum at 0."""
         x = ValueRanges.wrap(x)
-        zero = 0.0 if x.is_float else 0
-        if zero in x:
-            return ValueRanges(zero, max(fn(x.lower), fn(x.upper)))
+        if 0 in x:
+            upper = max(fn(x.lower), fn(x.upper))
+            if isinstance(upper, sympy.Float):
+                return ValueRanges(0.0, upper)
+            return ValueRanges(0, upper)
         return ValueRanges.monotone_map(x, fn)
 
     @overload
