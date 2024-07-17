@@ -83,7 +83,7 @@ class MultiKernelTest(TestCase):
         # One for the first pass and one for the second pass.
         # We mainly care about the wrapper for the final pass here.
         wrapper_code = wrapper_code[-1]
-        self.assertTrue(torch.allclose(ref, act))
+        self.assertEqual(ref, act)
         if expect_multi_kernel:
             self.assertTrue(_contains_multi_kernel_code(wrapper_code))
         else:
@@ -110,19 +110,21 @@ class MultiKernelTest(TestCase):
         def f(x):
             return torch.softmax(x, -1) + force_kernel
 
-        orig_run = MultiKernelCall.run_with_argless_kernels
+        orig_run = MultiKernelCall.run
         picked_kernel = None
 
-        def mock_run(self, kernel_calls):
-            out = orig_run(self, kernel_calls)
+        def mock_run(self, *args, **kwargs):
+            out = orig_run(self, *args, **kwargs)
             nonlocal picked_kernel
             picked_kernel = self.picked_kernel
             return out
 
         with unittest.mock.patch.object(
-            MultiKernelCall, "run_with_argless_kernels", mock_run
+            MultiKernelCall, "run", mock_run
         ), unittest.mock.patch.object(
-            MultiKernelCall, "benchmark_sub_kernels", lambda *args: mock_latency
+            MultiKernelCall,
+            "benchmark_sub_kernels",
+            lambda *args, **kwargs: mock_latency,
         ):
             torch.compile(f)(x)
         self.assertEqual(picked_kernel, force_kernel)
@@ -140,9 +142,7 @@ class MultiKernelTest(TestCase):
         x = torch.rand(2, 1024).cuda()
         ref = ln(x)
         act = torch.compile(ln)(x)
-        self.assertTrue(
-            torch.allclose(ref, act, atol=1e-4, rtol=1e-4), f"ref:\n{ref}\nact:\n{act}"
-        )
+        self.assertEqual(ref, act, atol=1e-4, rtol=1e-4)
 
     def test_inplace_update(self):
         """
@@ -156,7 +156,7 @@ class MultiKernelTest(TestCase):
         y = torch.rand(1024, 1024).cuda()
         ref = f(x, y)
         act = torch.compile(f)(x, y)
-        self.assertTrue(torch.allclose(ref, act))
+        self.assertEqual(ref, act)
 
     def test_transformer_snippet(self):
         model = TransformerSnippet().cuda()
@@ -177,10 +177,7 @@ class MultiKernelTest(TestCase):
         # inductor random number implementation is different to eager.
         # We should fallback to eager if we want to test accuracy.
         if config.fallback_random:
-            self.assertTrue(
-                torch.allclose(ref, act, atol=1e-4, rtol=1e-4),
-                f"ref:\n{ref}\nact:\n{act}",
-            )
+            self.assertEqual(ref, act, atol=1e-4, rtol=1e-4)
 
     def test_transformer_snippet_with_fallback_random(self):
         """
@@ -234,7 +231,7 @@ class MultiKernelTest(TestCase):
 
         ref = f(x, y_ref)
         act = torch.compile(f)(x, y)
-        self.assertTrue(torch.allclose(y_ref, y))
+        self.assertEqual(y_ref, y)
 
     def test_reduction_scratch_buffer(self, force_multi_kernel=1):
         """
@@ -259,7 +256,7 @@ class MultiKernelTest(TestCase):
         ref = f(x)
         with config.patch("triton.multi_kernel", force_multi_kernel):
             act = torch.compile(f)(x)
-        self.assertTrue(torch.allclose(ref, act))
+        self.assertEqual(ref, act)
 
     # Use benchmarking to pick the faster kernel
     test_reduction_scratch_buffer_cpp_wrapper = make_cpp_wrapper_test(
