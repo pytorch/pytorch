@@ -10,9 +10,11 @@ from torch.fx.annotate import annotate
 # Make the helper files in test/ importable
 from torch.fx.experimental.rewriter import RewritingTracer
 
+
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
+
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -844,9 +846,7 @@ class TestSubgraphRewriter(JitTestCase):
                     if input_idx == 1:
                         num_node = node
                     input_idx += 1
-            if not isinstance(match.nodes_map[num_node], (int, float)):
-                return False
-            return True
+            return isinstance(match.nodes_map[num_node], (int, float))
 
         def check_replacement_nodes(self, traced, matches):
             replacement_nodes_in_graph = [
