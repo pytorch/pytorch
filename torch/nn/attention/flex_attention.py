@@ -588,7 +588,7 @@ def _create_block_mask_inner(
 
 
 def create_block_mask(
-    fn: Callable,
+    mask_mod: _mask_mod_signature,
     B: int,
     H: int,
     Q_LEN: int,
@@ -598,10 +598,10 @@ def create_block_mask(
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
-    r"""This function creates a block mask tuple from a score_mod function.
+    r"""This function creates a block mask tuple from a mask_mod function.
 
     Args:
-        fn (Callable): score_mod or mask function.
+        mask_mod (Callable): mask_mod function.
         B (int): Batch size.
         H (int): Number of heads.
         Q_LEN (int): Sequence length of query.
@@ -615,7 +615,7 @@ def create_block_mask(
         block_mask (tuple): A tuple of (kv_num_blocks, kv_indices, q_num_blocks, q_indices,
                             KV_BLOCK_SIZE, Q_BLOCK_SIZE) which represents the block mask.
     """
-    mod_type = _get_mod_type(fn)
+    mod_type = _get_mod_type(mask_mod)
     assert (
         mod_type == _ModificationType.MASK_MOD
     ), "create-block_mask requires a mask_mod function!"
@@ -625,7 +625,7 @@ def create_block_mask(
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
     with TransformGetItemToIndex():
         block_mask = inner_func(
-            fn, B, H, Q_LEN, KV_LEN, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
+            mask_mod, B, H, Q_LEN, KV_LEN, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
         )
     return block_mask
 
