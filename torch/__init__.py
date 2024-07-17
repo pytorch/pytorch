@@ -36,6 +36,9 @@ from typing import (
 )
 from typing_extensions import ParamSpec as _ParamSpec, TypeGuard as _TypeGuard
 
+if TYPE_CHECKING:
+    from .types import IntLikeType
+
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -471,6 +474,9 @@ class SymInt:
     def __add__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
+    def __mod__(self, other: "IntLikeType") -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __mul__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
@@ -504,8 +510,11 @@ class SymInt:
     def __neg__(self):
         raise TypeError("type stub not overridden")
 
+    def __sub__(self, other: "IntLikeType") -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __repr__(self):
-        return str(self.node)
+        return self.node._graph_repr()
 
     def _sympy_(self):
         return self.node.expr
@@ -514,8 +523,27 @@ class SymInt:
         if self.node.is_nested_int():
             return hash(self.node.nested_int())
         else:
-            # Force specialization
-            return hash(builtins.int(self))
+            # We could support constant SymInts as well, but not doing it for now
+            raise TypeError("unhashable type: non-nested SymInt")
+            # TODO: Force specialization
+            # This can't be done because the TypeError here is load bearing
+            # for einops
+            # https://github.com/arogozhnikov/einops/blob/6181e1e95dc58c00a3143c1726da1c6ee0463164/einops/einops.py#L237
+            # return hash(builtins.int(self))
+
+    def as_integer_ratio(self) -> _Tuple["SymInt", builtins.int]:
+        """Represent this int as an exact integer ratio"""
+        return self, 1
+
+    def bit_length(self) -> builtins.int:
+        # TODO: A more relaxed guard is possible here, where you guard to
+        # allow all integer quantities which would result in the same bit
+        # length.  We can also just make a dedicated Sympy function for
+        # computing this quantity and represent it symbolically.
+        return builtins.int(self).bit_length()
+
+    def conjugate(self) -> "SymInt":
+        return self
 
 
 class SymFloat:
@@ -615,18 +643,18 @@ class SymFloat:
         """Return True if the float is an integer."""
         raise TypeError("type stub not overridden")
 
+    def as_integer_ratio(self) -> _Tuple[builtins.int, builtins.int]:
+        """Represent this float as an exact integer ratio"""
+        return builtins.float(self).as_integer_ratio()
+
     def __repr__(self):
-        return self.node.str()
+        return self.node._graph_repr()
 
     def _sympy_(self):
         return self.node.expr
 
     def __hash__(self):
-        if self.node.is_constant():
-            return hash(self.node.float_())
-        else:
-            # Force specialization
-            return hash(builtins.float(self))
+        return hash(builtins.float(self))
 
 
 class SymBool:
@@ -684,7 +712,7 @@ class SymBool:
         raise TypeError("type stub not overridden")
 
     def __repr__(self):
-        return str(self.node)
+        return self.node._graph_repr()
 
     def _sympy_(self):
         return self.node.expr
@@ -2123,7 +2151,7 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
-        self.config: _Dict[str, _Any] = dict()
+        self.config: _Dict[str, _Any] = {}
         self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)

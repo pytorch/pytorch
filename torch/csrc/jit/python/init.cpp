@@ -1285,6 +1285,9 @@ void initJITBindings(PyObject* module) {
           "__repr__",
           [](c10::SymNode a) { return a->str(); })
       .def(
+          "_graph_repr",
+          [](c10::SymNode a) { return a->_graph_repr(); })
+      .def(
           "is_constant",
           [](const c10::SymNode& node){
             return node->is_constant();
