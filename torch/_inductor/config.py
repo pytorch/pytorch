@@ -99,7 +99,7 @@ epilogue_fusion_first = False
 pattern_matcher = True
 
 # set to True to enable the back-to-back GEMM pass
-b2b_gemm_pass = False
+b2b_gemm_pass = True
 
 # register custom graph optimization pass hook. so far, pre/post passes are
 # only applied before/after pattern_matcher in post_grad_passes.
