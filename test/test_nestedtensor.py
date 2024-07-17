@@ -4467,6 +4467,20 @@ class TestNestedTensorSubclass(TestCase):
         ):
             torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
 
+    @onlyCPU
+    def test_nested_tensor_from_jagged_fx_trace(self, device):
+        def fn(x, y):
+            return torch.nested.nested_tensor_from_jagged(x, y)
+
+        def user_unwrapped(x, y):
+            return fn(x, y)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "torch.nested.nested_tensor_from_jagged does not support tracing with fx.symbolic_trace",
+        ):
+            torch.fx.symbolic_trace(user_unwrapped)
+
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("dim", range(5))
     @parametrize(
@@ -4512,9 +4526,8 @@ class TestNestedTensorSubclass(TestCase):
             dim=dim,
             batch_size=expected_batch_size,
             contiguous=True,
-            # TODO: compute min / max during construction for this case since it's easy
-            cached_min_seqlen=None,
-            cached_max_seqlen=None,
+            cached_min_seqlen=expected_seqlen,
+            cached_max_seqlen=expected_seqlen,
         )
 
         if torch.device(device) == t.device and dtype == t.dtype and contiguous:
@@ -4549,9 +4562,8 @@ class TestNestedTensorSubclass(TestCase):
             dim=dim,
             batch_size=expected_batch_size,
             contiguous=True,
-            # TODO: compute min / max during construction for this case since it's easy
-            cached_min_seqlen=None,
-            cached_max_seqlen=None,
+            cached_min_seqlen=expected_seqlen,
+            cached_max_seqlen=expected_seqlen,
         )
 
         # we don't support conversion between layouts this way atm
