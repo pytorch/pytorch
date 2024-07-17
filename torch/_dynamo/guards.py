@@ -114,6 +114,7 @@ from .utils import (
     tuple_iterator_getitem,
     tuple_iterator_len,
     unpatched_nn_module_getattr,
+    verify_guard_fn_signature,
 )
 
 if TYPE_CHECKING:
@@ -1373,10 +1374,20 @@ class GuardBuilder(GuardBuilderBase):
             self._produce_guard_code(guard, code)
 
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard):
+        value = self.get(guard.name)
         original_metadata = deepcopy(self.get(guard.name).__tensor_flatten__()[1])
+        if hasattr(value, "__metadata_guard__"):
+            verify_guard_fn_signature(value)
 
-        def metadata_checker(x):
-            return x.__tensor_flatten__()[1] == original_metadata
+            def metadata_checker(x):
+                return value.__metadata_guard__(
+                    original_metadata, x.__tensor_flatten__()[1]
+                )
+
+        else:
+
+            def metadata_checker(x):
+                return x.__tensor_flatten__()[1] == original_metadata
 
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
         if config.enable_cpp_guard_manager:
