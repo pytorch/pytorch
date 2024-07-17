@@ -163,39 +163,41 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         class Module(torch.nn.Module):
-            def forward(self, x: Dict[int, str]):
+            def forward(self, x: Dict[int, torch.Tensor]):
                 length = len(x)
                 return torch.ones(length)
 
         # aten::len.Dict_int
-        inp = ({1: "a", 2: "b", 3: "c"},)
+        inp = ({1: torch.ones(2, 3), 2: torch.ones(2, 3), 3: torch.ones(2, 3)},)
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         class Module(torch.nn.Module):
-            def forward(self, x: Dict[bool, str]):
+            def forward(self, x: Dict[bool, torch.Tensor]):
                 length = len(x)
                 return torch.ones(length)
 
         # aten::len.Dict_bool
-        inp = ({True: "a", False: "b"},)
+        inp = ({True: torch.ones(2, 3), False: torch.ones(2, 3)},)
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         class Module(torch.nn.Module):
-            def forward(self, x: Dict[float, str]):
+            def forward(self, x: Dict[float, torch.Tensor]):
                 length = len(x)
                 return torch.ones(length)
 
         # aten::len.Dict_float
-        inp = ({1.2: "a", 3.4: "b"},)
+        inp = ({1.2: torch.ones(2, 3), 3.4: torch.ones(2, 3)},)
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         class Module(torch.nn.Module):
-            def forward(self, x: Dict[torch.Tensor, str]):
+            def forward(self, x: Dict[torch.Tensor, torch.Tensor]):
                 length = len(x)
                 return torch.ones(length)
 
         # aten::len.Dict_Tensor
-        inp = ({torch.zeros(2, 3): "a", torch.ones(2, 3): "b"},)
+        inp = (
+            {torch.zeros(2, 3): torch.ones(2, 3), torch.ones(2, 3): torch.ones(2, 3)},
+        )
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         # aten::len.str and aten::len.Dict_str are not supported
