@@ -24,6 +24,7 @@ from torch.testing._internal.hop_db import (
     hop_that_doesnt_have_opinfo_test_allowlist,
 )
 
+
 hop_tests = []
 
 for op_info in hop_db:
