@@ -5364,7 +5364,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 torch._dynamo.graph_break()
                 return MyClass.foo_inner(x)
 
-        @torch.compile(backend="eager")
+        @torch.compile(backend="eager", fullgraph=True)
         def f_bad(x):
             return MyClass.foo1(x)
 
