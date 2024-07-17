@@ -136,11 +136,19 @@ class ValueRanges(Generic[_T]):
         return f"VR[{self.lower}, {self.upper}]"
 
     @overload
-    def __init__(self: ValueRanges[sympy.Expr], lower: ExprIn, upper: ExprIn) -> None:
+    def __init__(
+        self: ValueRanges[sympy.Expr],
+        lower: ExprIn,
+        upper: ExprIn,
+    ) -> None:
         ...
 
     @overload
-    def __init__(self: ValueRanges[SympyBoolean], lower: BoolIn, upper: BoolIn) -> None:
+    def __init__(  # type: ignore[misc]
+        self: ValueRanges[SympyBoolean],
+        lower: BoolIn,
+        upper: BoolIn,
+    ) -> None:
         ...
 
     def __init__(self, lower: AllIn, upper: AllIn) -> None:
@@ -171,10 +179,16 @@ class ValueRanges(Generic[_T]):
         object.__setattr__(
             self,
             "is_int",
-            not self.is_bool
-            and (
-                isinstance(lower, (sympy.Integer, NegativeIntInfinity))
-                or isinstance(upper, (sympy.Integer, IntInfinity))
+            (
+                not self.is_bool
+                and (
+                    lower == -sympy.oo  # in simple_sympify() we use -oo for integer
+                    or isinstance(lower, (sympy.Integer, NegativeIntInfinity))
+                )
+                and (
+                    upper == sympy.oo  # in simple_sympify() we use oo for integer
+                    or isinstance(upper, (sympy.Integer, IntInfinity))
+                )
             ),
         )
         """
@@ -216,13 +230,15 @@ class ValueRanges(Generic[_T]):
     # Intersection
     @overload
     def __and__(
-        self: ValueRanges[sympy.Expr], other: ValueRanges[sympy.Expr]
+        self: ValueRanges[sympy.Expr],
+        other: ValueRanges[sympy.Expr],
     ) -> ValueRanges[sympy.Expr]:
         ...
 
     @overload
-    def __and__(
-        self: ValueRanges[SympyBoolean], other: ValueRanges[SympyBoolean]
+    def __and__(  # type: ignore[misc]
+        self: ValueRanges[SympyBoolean],
+        other: ValueRanges[SympyBoolean],
     ) -> ValueRanges[SympyBoolean]:
         ...
 
@@ -246,13 +262,15 @@ class ValueRanges(Generic[_T]):
     # Union
     @overload
     def __or__(
-        self: ValueRanges[sympy.Expr], other: ValueRanges[sympy.Expr]
+        self: ValueRanges[sympy.Expr],
+        other: ValueRanges[sympy.Expr],
     ) -> ValueRanges[sympy.Expr]:
         ...
 
     @overload
-    def __or__(
-        self: ValueRanges[SympyBoolean], other: ValueRanges[SympyBoolean]
+    def __or__(  # type: ignore[misc]
+        self: ValueRanges[SympyBoolean],
+        other: ValueRanges[SympyBoolean],
     ) -> ValueRanges[SympyBoolean]:
         ...
 
@@ -292,7 +310,7 @@ class ValueRanges(Generic[_T]):
 
     @overload
     @staticmethod
-    def wrap(arg: Union[BoolIn, BoolVR]) -> BoolVR:
+    def wrap(arg: Union[BoolIn, BoolVR]) -> BoolVR:  # type: ignore[misc]
         ...
 
     @staticmethod
@@ -317,7 +335,7 @@ class ValueRanges(Generic[_T]):
 
     @overload
     @staticmethod
-    def decreasing_map(x: Union[BoolIn, BoolVR], fn: BoolFn) -> BoolVR:
+    def decreasing_map(x: Union[BoolIn, BoolVR], fn: BoolFn) -> BoolVR:  # type: ignore[misc]
         ...
 
     @staticmethod
@@ -340,27 +358,35 @@ class ValueRanges(Generic[_T]):
         """Fn is convex and has a minimum at 0."""
         x = ValueRanges.wrap(x)
         if 0 in x:
-            return ValueRanges(0, max(fn(x.lower), fn(x.upper)))
-        else:
-            return ValueRanges.monotone_map(x, fn)
+            upper = max(fn(x.lower), fn(x.upper))
+            if isinstance(upper, sympy.Float):
+                return ValueRanges(0.0, upper)
+            return ValueRanges(0, upper)
+        return ValueRanges.monotone_map(x, fn)
 
     @overload
     @staticmethod
     def coordinatewise_increasing_map(
-        x: Union[ExprIn, ExprVR], y: Union[ExprIn, ExprVR], fn: ExprFn2
+        x: Union[ExprIn, ExprVR],
+        y: Union[ExprIn, ExprVR],
+        fn: ExprFn2,
     ) -> ExprVR:
         ...
 
     @overload
     @staticmethod
-    def coordinatewise_increasing_map(
-        x: Union[BoolIn, BoolVR], y: Union[BoolIn, BoolVR], fn: BoolFn2
+    def coordinatewise_increasing_map(  # type: ignore[misc]
+        x: Union[BoolIn, BoolVR],
+        y: Union[BoolIn, BoolVR],
+        fn: BoolFn2,
     ) -> BoolVR:
         ...
 
     @staticmethod
     def coordinatewise_increasing_map(
-        x: Union[AllIn, AllVR], y: Union[AllIn, AllVR], fn: AllFn2
+        x: Union[AllIn, AllVR],
+        y: Union[AllIn, AllVR],
+        fn: AllFn2,
     ) -> AllVR:
         """
         It's increasing on each coordinate.
