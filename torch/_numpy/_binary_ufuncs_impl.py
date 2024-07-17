@@ -42,6 +42,7 @@ from torch import (  # noqa: F401
     not_equal,
     pow as power,
     remainder,
+    remainder as mod,
     subtract,
     true_divide,
 )

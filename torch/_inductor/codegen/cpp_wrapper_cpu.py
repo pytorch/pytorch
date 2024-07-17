@@ -239,7 +239,7 @@ class CppWrapperCpu(WrapperCodeGen):
         # mark output type to unwrap tensor back to python scalar
         from ..ir import ShapeAsConstantBuffer
 
-        output_is_tensor = dict()
+        output_is_tensor = {}
         for idx, x in enumerate(V.graph.graph_outputs):
             if isinstance(x, ShapeAsConstantBuffer):
                 output_is_tensor[idx] = False
@@ -313,12 +313,9 @@ class CppWrapperCpu(WrapperCodeGen):
                         """
                     )
                 else:
-                    assert isinstance(
-                        d, sympy.Symbol
-                    ), f"dimention at {dim_idx=} for tensor {name=} must be a sympy.Symbol"
-                    sym_range = V.graph.sizevars.shape_env.var_to_range.get(d, None)
-                    if sym_range is None:
-                        continue
+                    from torch.utils._sympy.value_ranges import bound_sympy
+
+                    sym_range = bound_sympy(d, V.graph.sizevars.shape_env.var_to_range)
                     if not math.isinf(sym_range.lower):
                         self.prefix.splice(
                             f"""

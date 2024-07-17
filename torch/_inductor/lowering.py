@@ -83,7 +83,7 @@ prims = torch.ops.prims
 needs_realized_inputs: Set[torch._ops.OpOverload] = set()
 foreach_ops: Set[torch._ops.OpOverload] = set()
 inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
-inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = dict()
+inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
 
 
@@ -515,7 +515,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
         outputs = [None] * len(a_list_input)
         for (device, use_foreach), group in groups.items():
-            operation_list: List[str] = []
+            buffer_list = []
             for (
                 output_ind,
                 args,
@@ -532,11 +532,10 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                     and use_foreach
                     and realize_outputs
                 ):
-                    output.realize()
-                    operation_list.append(output.get_operation_name())
+                    buffer_list.append(output.realize())
 
-            if operation_list:
-                V.graph.register_operation_list(operation_list)
+            if buffer_list:
+                V.graph.register_list(buffer_list)
 
         assert all(x is not None for x in outputs)
         return outputs
@@ -1619,11 +1618,8 @@ def fallback_handler(kernel, add_to_fallback_set=True):
         fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
-        def wrap_tensors(x):
-            return TensorBox.create(x) if isinstance(x, ir.IRNode) else x
-
         return pytree.tree_map(
-            wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
+            TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
         )
 
     return handler
@@ -2594,7 +2590,6 @@ def _local_scalar_dense(data):
     binding_sym, keypath = next(iter(unbacked_bindings.items()))
     buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
-    V.graph.register_operation(buffer)
     # NB: the replaced expr is OK to use directly downstream, we want
     # simplifications in this case!
     val = V.graph.current_node.meta["val"]
@@ -3172,7 +3167,6 @@ def index_put_impl_(self, indices, values, accumulate, check):
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
-    V.graph.register_operation(buffer)
 
     if x_ndim == 0:
         self = view(self, [])
@@ -3393,7 +3387,6 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             zero_out,
         )
         buffer.name = V.graph.register_buffer(buffer)
-        V.graph.register_operation(buffer)
 
     # self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
     # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
@@ -3412,7 +3405,6 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
-    V.graph.register_operation(buffer)
 
     if ndim == 0:
         self = view(self, [])
@@ -6312,6 +6304,14 @@ try:
     @register_lowering(_c10d_functional.all_reduce)
     def _all_reduce(inp, reduce_op, group_name):
         inp = clone(inp)
+        if config.reorder_for_compute_comm_overlap:
+            # The horizontal fusion of this clone often severely delays the
+            # scheduling of the all_reduce_ node. Horizontally fusing this
+            # clone can almost never out-perform scheduling the all_reduce_
+            # earlier. Also in most cases, this clone is eliminated via
+            # in-place reuse. Therefore, we tell the scheduler to not fuse it.
+            inp.realize()
+            V.graph.no_fuse_buffer_names.add(inp.get_name())
         ir._CollectiveKernel.create_inplace(
             _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
         )

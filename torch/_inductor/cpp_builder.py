@@ -245,6 +245,12 @@ def run_command_line(cmd_line, cwd=None):
     return status
 
 
+def normalize_path_separator(orig_path: str) -> str:
+    if _IS_WINDOWS:
+        return orig_path.replace(os.sep, "/")
+    return orig_path
+
+
 class BuildOptionsBase:
     """
     This is the Base class for store cxx build options, as a template.
@@ -840,7 +846,7 @@ class CppTorchOptions(CppOptions):
 
     def __init__(
         self,
-        vec_isa: VecISA,
+        vec_isa: VecISA = invalid_vec_isa,
         include_pytorch: bool = False,
         warning_all: bool = True,
         aot_mode: bool = False,
@@ -926,15 +932,12 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     libraries_dirs: List[str] = []
     libraries: List[str] = []
     passthough_args: List[str] = []
-    """
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
         os.environ["CUDA_HOME"] = build_paths.cuda()
-    """
-    from torch._inductor.codecache import _set_gpu_runtime_env, cpp_prefix_path
 
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
@@ -962,6 +965,8 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
 
     if aot_mode:
         if config.is_fbcode():
+            from torch._inductor.codecache import cpp_prefix_path
+
             cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
             include_dirs += cpp_prefix_include_dir
 
@@ -999,7 +1004,7 @@ class CppTorchCudaOptions(CppTorchOptions):
 
     def __init__(
         self,
-        vec_isa: VecISA,
+        vec_isa: VecISA = invalid_vec_isa,
         include_pytorch: bool = False,
         cuda: bool = True,
         aot_mode: bool = False,
@@ -1221,7 +1226,7 @@ class CppBuilder:
                     f"{compiler} {include_dirs_args} {definations_args} {cflags_args} {sources} "
                     f"{passthougn_args} /LD /Fe{target_file} /link {libraries_dirs_args} {libraries_args} {ldflags_args} "
                 )
-                cmd = cmd.replace("\\", "/")
+                cmd = normalize_path_separator(cmd)
             else:
                 compile_only_arg = "-c" if self._compile_only else ""
                 cmd = re.sub(
@@ -1249,7 +1254,7 @@ class CppBuilder:
         return command_line
 
     def get_target_file_path(self):
-        return self._target_file
+        return normalize_path_separator(self._target_file)
 
     def build(self) -> Tuple[int, str]:
         """
