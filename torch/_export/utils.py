@@ -647,6 +647,4 @@ def _detect_fake_mode_from_gm(
             if fake_val is not None and isinstance(fake_val, torch.Tensor):
                 fake_vals.append(fake_val)
 
-    detected_fake_mode = detect_fake_mode(fake_inps + fake_vals)
-    assert detected_fake_mode is not None, "No fake mode detected in the graph."
-    return detected_fake_mode
+    return detect_fake_mode(fake_inps + fake_vals)

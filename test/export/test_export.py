@@ -3857,7 +3857,6 @@ def forward(self, b_a_buffer, x):
         ):
             graph_module.eval()
 
-    @testing.expectedFailureRetraceability  # T183144788
     def test_lifted_constants(self) -> None:
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -5526,7 +5525,6 @@ def forward(self, x):
 
     # original input names aren't retraceable:
     # compilation will succeed, but names won't match forward() signature.
-    @testing.expectedFailureRetraceability
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
         class Foo(torch.nn.Module):

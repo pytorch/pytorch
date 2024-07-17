@@ -346,6 +346,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
             node.meta["val"] for node in mod.graph.nodes if node.op == "placeholder"
         ]
         fake_mode = torch._export.utils._detect_fake_mode_from_gm(mod)
+        assert fake_mode is not None, "Cannot detect fake mode from graph"
 
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec

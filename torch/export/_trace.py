@@ -633,6 +633,7 @@ def _export_to_aten_ir(
 
     flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
     fake_mode = torch.export._trace._detect_fake_mode_from_gm(gm)
+    assert fake_mode is not None, "Cannot detect fake mode from graph"
 
     if not _dynamo_config.do_not_emit_runtime_asserts:
         stack_trace = (
@@ -1925,7 +1926,6 @@ def _export(
     export_graph_signature = export_artifact.aten.sig
     out_spec = export_artifact.out_spec
     fake_mode = export_artifact.fake_mode
-    print("allow_non_fake", fake_mode.allow_non_fake_inputs)
     module_call_specs = export_artifact.module_call_specs
 
     # Add forward args metadata.
