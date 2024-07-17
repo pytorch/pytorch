@@ -19,7 +19,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 
-
 ITER_TIME = 10
 LR = 0.001
 
