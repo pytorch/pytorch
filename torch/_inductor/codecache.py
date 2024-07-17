@@ -36,6 +36,7 @@ from typing import (
     Any,
     Callable,
     cast,
+    Counter,
     Dict,
     Generator,
     List,
@@ -944,10 +945,11 @@ class FxGraphCache:
                 "fx graph cache key %s post-load guards: %s", key, shape_env.guards
             )
 
-        # Increment the cached metrics by the amounts recorded when the FX
+        # Increment the cached metrics/counters by the amounts recorded when the FX
         # graph was compiled for this cache entry. Pretending these counters
         # were incremented normally is useful for testing with the cache enabled.
         metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
+        counters["inductor"] += graph.counter_deltas
 
         from .graph import GraphLowering
 
@@ -1158,6 +1160,7 @@ class CompiledFxGraph:
     output_strides: Optional[List[Optional[Tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
+    counter_deltas: Counter[str]
     # This is a string representation of an expression we serialize
     # with the object so the guards can be evaluated in a different
     # context in order to verify the validity of serving a cached
@@ -1175,6 +1178,7 @@ class CompiledFxGraph:
         output_strides: List[Optional[Tuple[_StrideExprStr, ...]]],
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
+        counter_deltas: Counter[str],
     ):
         self.current_callable = current_callable
         self.cache_key = graph.cache_key
@@ -1191,6 +1195,7 @@ class CompiledFxGraph:
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
         self.metrics_deltas = metrics_deltas
+        self.counter_deltas = counter_deltas
         self.guards_expr = None
 
     def __call__(self, inputs: List[Any]) -> Any:

@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
 from torch.distributed._tensor import DeviceMesh
-from torch.distributed.utils import _get_root_modules
 
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
@@ -26,7 +25,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 # `fully_shard.state(module)`. The state object and module are 1:1.
 @contract(state_cls=FSDPState)  # type: ignore[operator]
 def fully_shard(
-    module: Union[nn.Module, List[nn.Module]],
+    module: nn.Module,
     *,
     mesh: Optional[DeviceMesh] = None,
     reshard_after_forward: Union[bool, int] = True,
@@ -61,8 +60,6 @@ def fully_shard(
     gather parameters and later free parameters/reduce gradients.
 
     Args:
-        module (Union[nn.Module, List[nn.Module]): The module or modules to
-            shard with FSDP and group together for communication.
         mesh (Optional[DeviceMesh]): This data parallel mesh defines the
             sharding and device. If 1D, then parameters are fully sharded
             across the 1D mesh (FSDP). If 2D, then parameters are sharded
@@ -114,20 +111,16 @@ def fully_shard(
         reshard_after_forward, mesh_info
     )
 
-    arg_module = module
-    modules = (
-        (module,) if isinstance(module, nn.Module) else tuple(_get_root_modules(module))
-    )
-    state = fully_shard.state(modules[0])
-    state.init(modules, device, mp_policy)
+    state = fully_shard.state(module)
+    state.init(module, device, mp_policy)
 
-    managed_modules = _get_managed_modules(modules)
+    managed_modules = _get_managed_modules(module)
     params, buffers = _get_managed_states(managed_modules)
     _move_states_to_device(params, buffers, device)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
             params,
-            modules,
+            module,
             mesh_info,
             post_forward_mesh_info,
             device,
@@ -141,12 +134,11 @@ def fully_shard(
         managed_module._fsdp_use_orig_params = True  # type: ignore[assignment]
 
     # Place FSDP leftmost for highest priority in the method resolution order
-    for module in modules:
-        cls = module.__class__
-        dct = {"__deepcopy__": unimplemented_deepcopy}
-        new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
-        module.__class__ = new_cls
-    return arg_module
+    cls = module.__class__
+    dct = {"__deepcopy__": unimplemented_deepcopy}
+    new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
+    module.__class__ = new_cls
+    return module
 
 
 def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
