@@ -50,9 +50,10 @@ class C10_API COWDeleterContext {
   // UniqueVoidPtr using cow::delete_context as the deleter.
   ~COWDeleterContext();
 
+  std::unique_ptr<void, DeleterFnPtr> data_;
+
  private:
   std::shared_mutex mutex_;
-  std::unique_ptr<void, DeleterFnPtr> data_;
   std::atomic<std::int64_t> refcount_ = 1;
 };
 

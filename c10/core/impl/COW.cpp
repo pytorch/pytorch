@@ -61,8 +61,9 @@ bool is_cowsim_data_ptr(const c10::DataPtr& data_ptr) {
   return data_ptr.get_deleter() == &cow::cowsim_deleter;
 }
 
-c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
-  bool simulate = !get_future_lazy_clone();
+c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
+    StorageImpl& storage,
+    bool future) {
   const at::DataPtr& data_ptr = storage.data_ptr();
 
   // There are three possible circumstances:
@@ -92,11 +93,11 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
 
   std::optional<DataPtr> new_data_ptr; // must be set below
 
-  DeleterFnPtr deleter_fn = simulate ? cowsim_deleter : cow_deleter;
+  DeleterFnPtr deleter_fn = future ? cow_deleter : cowsim_deleter;
 
   if (has_simple_data_ptr(storage)) {
     // Case 1) We have a simple data pointer: wrap it.
-    if (simulate && get_extra_conditional_view_warnings()) {
+    if (!future && get_extra_conditional_view_warnings()) {
       TORCH_WARN(
           "This operation creates a conditional view. This behavior is ",
           "deprecated, and in the future it will unconditionally create a ",
@@ -105,9 +106,9 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
     std::unique_ptr<void, DeleterFnPtr> original_ctx =
         storage._mutable_data_ptr_no_checks().move_context();
 
-    COWDeleterContext* ctx = simulate
-        ? new COWSimDeleterContext(std::move(original_ctx))
-        : new COWDeleterContext(std::move(original_ctx));
+    COWDeleterContext* ctx = future
+        ? new COWDeleterContext(std::move(original_ctx))
+        : new COWSimDeleterContext(std::move(original_ctx));
 
     // Save this for the result.
     new_data_ptr = make_data_ptr(data_ptr, *ctx, deleter_fn);
@@ -118,12 +119,12 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
     // Case 2): there is already a copy on write context. Just return a
     // new storage impl.
     TORCH_CHECK(
-        !simulate,
+        future,
         "You cannot create a simulated lazy clone of a genuine COW storage");
     new_data_ptr = copy_data_ptr(data_ptr, deleter_fn);
   } else if (is_cowsim_data_ptr(data_ptr)) {
     TORCH_CHECK(
-        simulate,
+        !future,
         "You cannot create a genuine lazy clone of a simulated COW storage");
     new_data_ptr = copy_data_ptr(data_ptr, deleter_fn);
   } else {

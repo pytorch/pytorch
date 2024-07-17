@@ -115,7 +115,7 @@ static Tensor _lazy_clone_impl(Tensor const& self, bool future) {
   }
 
   c10::intrusive_ptr<c10::StorageImpl> storage =
-    c10::impl::cow::lazy_clone_storage(*self_storage);
+    c10::impl::cow::lazy_clone_storage(*self_storage, future);
 
   if (storage == nullptr) {
     if (future) {

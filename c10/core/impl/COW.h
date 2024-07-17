@@ -24,7 +24,8 @@ namespace c10::impl::cow {
 // not equal to the data pointer (`DataPtr::get()`). In this case, a nullptr is
 // returned.
 C10_API c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
-    StorageImpl& storage);
+    StorageImpl& storage,
+    bool future);
 
 // Check if a storage has a simple DataPtr with no abnormal context
 C10_API bool has_simple_data_ptr(const c10::StorageImpl& storage);
@@ -46,5 +47,19 @@ C10_API void check_cowsim_read(const StorageImpl& storage);
 // return either a copy or a view always return a copy instead.
 C10_API void set_future_lazy_clone(bool mode);
 C10_API bool get_future_lazy_clone();
+
+// TODO: Do I still need this?
+class C10_API FutureLazyCloneGuard {
+ public:
+  FutureLazyCloneGuard(bool mode) : mode_restore(cow::get_future_lazy_clone()) {
+    cow::set_future_lazy_clone(mode);
+  }
+  ~FutureLazyCloneGuard() {
+    cow::set_future_lazy_clone(mode_restore);
+  }
+
+ private:
+  bool mode_restore;
+};
 
 } // namespace c10::impl::cow

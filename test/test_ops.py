@@ -114,11 +114,7 @@ def reduction_dtype_filter(op):
         or torch.int16 not in op.dtypes
     ):
         return False
-
-    argspec = inspect.getfullargspec(op.op)
-    if "dtype" not in argspec.kwonlyargs:
-        return False
-    return True
+    return "dtype" in inspect.getfullargspec(op.op).kwonlyargs
 
 
 # Create a list of operators that are a subset of _ref_test_ops but don't have a
@@ -1409,7 +1405,7 @@ class TestCommon(TestCase):
         unsupported_dtypes = set()
         supported_backward_dtypes = set()
         unsupported_backward_dtypes = set()
-        dtype_error: Dict[torch.dtype, Exception] = dict()
+        dtype_error: Dict[torch.dtype, Exception] = {}
 
         def unsupported(dtype, e):
             dtype_error[dtype] = e

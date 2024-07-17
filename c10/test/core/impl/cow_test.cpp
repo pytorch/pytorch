@@ -40,19 +40,6 @@ class ContextTest : public testing::Test {
   int delete_count_ = 0;
 };
 
-class FutureLazyCloneGuard {
- public:
-  FutureLazyCloneGuard(bool mode) : mode_restore(cow::get_future_lazy_clone()) {
-    cow::set_future_lazy_clone(mode);
-  }
-  ~FutureLazyCloneGuard() {
-    cow::set_future_lazy_clone(mode_restore);
-  }
-
- private:
-  bool mode_restore;
-};
-
 TEST_F(ContextTest, Basic) {
   auto& context = *new cow::COWDeleterContext(new_delete_tracker());
   ASSERT_THAT(delete_count(), testing::Eq(0));
@@ -103,14 +90,13 @@ MATCHER(is_cowsim, "") {
 }
 
 TEST(lazy_clone_storage_test, no_context) {
-  FutureLazyCloneGuard guard(true);
   StorageImpl original_storage(
       {}, /*size_bytes=*/7, GetDefaultCPUAllocator(), /*resizable=*/false);
   ASSERT_THAT(original_storage, testing::Not(is_copy_on_write()));
   ASSERT_TRUE(cow::has_simple_data_ptr(original_storage));
 
   intrusive_ptr<StorageImpl> new_storage =
-      cow::lazy_clone_storage(original_storage);
+      cow::lazy_clone_storage(original_storage, /*future=*/true);
   ASSERT_THAT(new_storage.get(), testing::NotNull());
 
   // The original storage was modified in-place to now hold a copy on
@@ -126,7 +112,6 @@ TEST(lazy_clone_storage_test, no_context) {
 }
 
 TEST(simulate_lazy_clone_test, basic) {
-  FutureLazyCloneGuard guard(false);
   StorageImpl original_storage(
       {}, /*size_bytes=*/7, GetDefaultCPUAllocator(), /*resizable=*/false);
   ASSERT_THAT(original_storage, testing::Not(is_copy_on_write()));
@@ -134,7 +119,7 @@ TEST(simulate_lazy_clone_test, basic) {
   ASSERT_TRUE(cow::has_simple_data_ptr(original_storage));
 
   intrusive_ptr<StorageImpl> new_storage =
-      cow::lazy_clone_storage(original_storage);
+      cow::lazy_clone_storage(original_storage, /*future=*/false);
   ASSERT_THAT(new_storage.get(), testing::NotNull());
 
   // The original storage was modified in-place to now hold a cowsim context.
@@ -164,7 +149,6 @@ void my_deleter(void* ctx) {
 }
 
 TEST(lazy_clone_storage_test, different_context) {
-  FutureLazyCloneGuard guard(true);
   void* bytes = new std::byte[5];
   StorageImpl storage(
       {},
@@ -178,11 +162,11 @@ TEST(lazy_clone_storage_test, different_context) {
       /*resizable=*/false);
 
   // We can't handle an arbitrary context.
-  ASSERT_THAT(cow::lazy_clone_storage(storage), testing::IsNull());
+  ASSERT_THAT(
+      cow::lazy_clone_storage(storage, /*future=*/true), testing::IsNull());
 }
 
 TEST(lazy_clone_storage_test, already_copy_on_write) {
-  FutureLazyCloneGuard guard(true);
   std::unique_ptr<void, DeleterFnPtr> data(
       new std::byte[5],
       +[](void* bytes) { delete[] static_cast<std::byte*>(bytes); });
@@ -201,7 +185,7 @@ TEST(lazy_clone_storage_test, already_copy_on_write) {
   ASSERT_THAT(original_storage, is_copy_on_write());
 
   intrusive_ptr<StorageImpl> new_storage =
-      cow::lazy_clone_storage(original_storage);
+      cow::lazy_clone_storage(original_storage, /*future=*/true);
   ASSERT_THAT(new_storage.get(), testing::NotNull());
 
   // The result is a different storage.
@@ -224,7 +208,6 @@ TEST(materialize_test, not_copy_on_write_context) {
 }
 
 TEST(materialize_test, copy_on_write_single_reference) {
-  FutureLazyCloneGuard guard(true);
   // A copy-on-write storage with only a single reference can just
   // drop the copy-on-write context upon materialization.
   std::unique_ptr<void, DeleterFnPtr> data(
@@ -267,13 +250,12 @@ bool buffers_are_equal(const void* a, const void* b, size_t nbytes) {
 }
 
 TEST(materialize_test, copy_on_write) {
-  FutureLazyCloneGuard guard(true);
   StorageImpl original_storage(
       {}, /*size_bytes=*/6, GetCPUAllocator(), /*resizable=*/false);
   std::memcpy(original_storage.mutable_data(), "abcd", 4);
   void const* original_data = original_storage.data();
 
-  auto new_storage = cow::lazy_clone_storage(original_storage);
+  auto new_storage = cow::lazy_clone_storage(original_storage, /*future=*/true);
   ASSERT_THAT(new_storage, testing::NotNull());
 
   auto context = new_storage->data_ptr().cast_context<cow::COWDeleterContext>(

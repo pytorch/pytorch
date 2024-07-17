@@ -308,9 +308,11 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     """
     if IS_WINDOWS:
         return True
-    which = subprocess.check_output(['which', compiler], stderr=subprocess.STDOUT)
+    compiler_path = shutil.which(compiler)
+    if compiler_path is None:
+        return False
     # Use os.path.realpath to resolve any symlinks, in particular from 'c++' to e.g. 'g++'.
-    compiler_path = os.path.realpath(which.decode(*SUBPROCESS_DECODE_ARGS).strip())
+    compiler_path = os.path.realpath(compiler_path)
     # Check the compiler name
     if any(name in compiler_path for name in _accepted_compilers_for_platform()):
         return True
@@ -1433,10 +1435,7 @@ def _check_and_build_extension_h_precompiler_headers(
             # read all content of a file
             content = file.read()
             # check if string present in a file
-            if signature == content:
-                return True
-            else:
-                return False
+            return signature == content
 
     def _create_if_not_exist(path_dir):
         if not os.path.exists(path_dir):

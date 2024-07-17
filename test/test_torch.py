@@ -4619,9 +4619,10 @@ else:
     # FIXME: move to test distributions
     @deviceCountAtLeast(2)
     @onlyCUDA
+    @skipIfTorchInductor("FIXME: error not thrown")
     def test_multinomial_gpu_device_constrain(self, devices):
         x = torch.empty(3, device=devices[0])
-        y = torch.empty(3, device=devices[1])
+        y = torch.empty(3, device=devices[1], dtype=torch.long)
         self.assertRaisesRegex(
             RuntimeError, "Expected all tensors to be on the same device",
             lambda: torch.multinomial(x, 2, out=y))
@@ -5179,6 +5180,7 @@ else:
                 else:
                     self.assertTrue(b._is_view())
 
+    @skipIfTorchInductor("Warning not needed for inductor")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     @assertNoLeakedLazyCloneWarnings()
     @futureLazyCloneGuard(False)
@@ -5237,6 +5239,7 @@ else:
             b[b0_ind] += 1
             b[b1_ind] += 1
 
+    @skipIfTorchInductor("Warning not needed for inductor")
     @assertNoLeakedLazyCloneWarnings()
     @futureLazyCloneGuard(False)
     def test_simulate_lazy_clone_reshape(self, device):
@@ -5251,6 +5254,7 @@ else:
         b = a.reshape(a.size())
         self.assertTrue(b.requires_grad)
 
+    @skipIfTorchInductor("Warning not needed for inductor")
     @assertNoLeakedLazyCloneWarnings()
     @extraConditionalViewWarningsGuard()
     @futureLazyCloneGuard(False)
