@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 import torch
 import torch.nn.functional as F
-from torch.nn.attention._flex_attention import flex_attention
+from torch.nn.attention.flex_attention import flex_attention
 
 torch._dynamo.config.automatic_dynamic_shapes = False
 # Needed since changing args to function causes recompiles
