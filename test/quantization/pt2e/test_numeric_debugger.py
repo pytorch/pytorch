@@ -35,7 +35,7 @@ def is_fbcode():
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
-class TestGenerateNumericDebugHandle(TestCase):
+class TestNumericDebugger(TestCase):
     def test_simple(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
