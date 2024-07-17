@@ -269,6 +269,9 @@ class EnterSubgraphLine(WrapperLine):
     wrapper: WrapperCodeGen
     graph: GraphLowering
 
+    def __post_init__(self) -> None:
+        self.wrapper.push_computed_sizes(self.wrapper.computed_sizes)
+
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper.push_codegened_graph(self.graph)
         code.do_indent()
@@ -277,6 +280,9 @@ class EnterSubgraphLine(WrapperLine):
 @dataclasses.dataclass
 class ExitSubgraphLine(WrapperLine):
     wrapper: WrapperCodeGen
+
+    def __post_init__(self) -> None:
+        self.wrapper.computed_sizes = self.wrapper.pop_computed_sizes()
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper.pop_codegened_graph()
@@ -488,6 +494,7 @@ class WrapperCodeGen(CodeGen):
         # including the graph instance into a cache key to avoid cross-graph
         # caching during lowering of nested subgraphs
         self.codegened_graph_stack = []
+        self.computed_sizes_stack = []
 
         self.write_header()
         self.write_prefix()
@@ -502,7 +509,7 @@ class WrapperCodeGen(CodeGen):
         self.freed: Set[BufferName] = set()
 
         # maps from reusing buffer to reused buffer
-        self.reuses: Dict[BufferName, BufferName] = dict()
+        self.reuses: Dict[BufferName, BufferName] = {}
 
         self.write_get_raw_stream = functools.lru_cache(None)(  # type: ignore[assignment]
             self.write_get_raw_stream
@@ -575,18 +582,25 @@ class WrapperCodeGen(CodeGen):
 
     @cache_on_self
     def write_triton_header_once(self) -> None:
-        import_str = """
+        import_str = f"""
             import triton
             import triton.language as tl
-            from {} import grid, split_scan_grid, start_graph, end_graph
-            {}
-            """.format(
-            triton_heuristics.__name__,
-            V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"),
-        )
+            from {triton_heuristics.__name__} import grid, split_scan_grid, start_graph, end_graph
+            """
         self.header.splice(import_str)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.splice(import_str)
+        self.write_get_raw_stream_header_once()
+
+    @cache_on_self
+    def write_get_raw_stream_header_once(self) -> None:
+        self.header.writeline(
+            V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+        )
+        if config.triton.autotune_at_compile_time:
+            self.kernel_autotune_calls.writeline(
+                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+            )
 
     def add_meta_once(self, meta: TritonMetaParams) -> str:
         meta = repr(meta)
@@ -659,7 +673,7 @@ class WrapperCodeGen(CodeGen):
     # that stream caching happens per graph instance. this
     # is important for nested subgraph codegening.
     def write_get_raw_stream(self, device_idx: int, graph=None) -> str:
-        self.write_triton_header_once()
+        self.write_get_raw_stream_header_once()
         name = f"stream{device_idx}"
         self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
@@ -672,6 +686,14 @@ class WrapperCodeGen(CodeGen):
 
     def pop_codegened_graph(self):
         return self.codegened_graph_stack.pop()
+
+    def push_computed_sizes(self, computed_sizes):
+        from copy import deepcopy
+
+        return self.computed_sizes_stack.append(deepcopy(computed_sizes))
+
+    def pop_computed_sizes(self):
+        return self.computed_sizes_stack.pop()
 
     def next_kernel_suffix(self) -> str:
         return f"{next(self._names_iter)}"
@@ -883,7 +905,7 @@ class WrapperCodeGen(CodeGen):
             del async_compile
         """
         )
-        scope = dict()  # type: ignore[var-annotated]
+        scope = {}  # type: ignore[var-annotated]
         tuning_code = (
             self.kernel_autotune_defs.getvalue() + self.kernel_autotune_calls.getvalue()
         )
@@ -1577,6 +1599,7 @@ class WrapperCodeGen(CodeGen):
             call_args_str = ", ".join(call_args_str)
             stream_name = self.write_get_raw_stream(device_index, V.graph)
             if triton:
+                self.write_triton_header_once()
                 if grid is None:
                     grid_str = grid_fn
                 else:
@@ -1801,17 +1824,14 @@ class WrapperCodeGen(CodeGen):
 
     def can_reuse(self, input_buffer, output_buffer=None):
         name = input_buffer.get_name()
-        if (
+        return not (
             name in V.graph.removed_buffers
             or name in V.graph.graph_inputs
             or name in V.graph.constants
             or name in V.graph.torchbind_constants
             or name in V.graph.never_reuse_buffers
             or name in self.freed
-        ):
-            return False
-
-        return True
+        )
 
     def did_reuse(self, buffer, reused_buffer):
         # Check whether a given buffer was reused by a possible reuser in the wrapper codegen

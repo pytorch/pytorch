@@ -239,7 +239,7 @@ class CppWrapperCpu(WrapperCodeGen):
         # mark output type to unwrap tensor back to python scalar
         from ..ir import ShapeAsConstantBuffer
 
-        output_is_tensor = dict()
+        output_is_tensor = {}
         for idx, x in enumerate(V.graph.graph_outputs):
             if isinstance(x, ShapeAsConstantBuffer):
                 output_is_tensor[idx] = False
@@ -313,12 +313,9 @@ class CppWrapperCpu(WrapperCodeGen):
                         """
                     )
                 else:
-                    assert isinstance(
-                        d, sympy.Symbol
-                    ), f"dimention at {dim_idx=} for tensor {name=} must be a sympy.Symbol"
-                    sym_range = V.graph.sizevars.shape_env.var_to_range.get(d, None)
-                    if sym_range is None:
-                        continue
+                    from torch.utils._sympy.value_ranges import bound_sympy
+
+                    sym_range = bound_sympy(d, V.graph.sizevars.shape_env.var_to_range)
                     if not math.isinf(sym_range.lower):
                         self.prefix.splice(
                             f"""
@@ -382,7 +379,6 @@ class CppWrapperCpu(WrapperCodeGen):
                     f"{CppWrapperCpu.get_input_cpp_type(x)}"
                     for x in V.graph.graph_inputs.values()
                 )
-
                 output_arrayref_types = ", ".join(
                     f"ArrayRefTensor<{DTYPE_TO_CPP[x.get_dtype()]}>"
                     for x in V.graph.graph_outputs
@@ -928,6 +924,10 @@ class CppWrapperCpu(WrapperCodeGen):
         dtype_str = str(dtype).split(".")[-1]
         writer = indented_buffer or self
         writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
+
+        # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
+        tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+
         writer.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
         )

@@ -3,6 +3,7 @@
 import datetime
 import os
 import socket
+import struct
 import sys
 import tempfile
 import threading
@@ -274,12 +275,26 @@ class TCPStoreTest(TestCase, StoreTestBase):
             addr, world_size, wait_for_workers=False, use_libuv=self._use_libuv
         )
 
-    def test_address_already_in_use(self):
-        err_msg_reg = "^The server socket has failed to listen on any local "
-        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
-            addr = DEFAULT_HOSTNAME
-            port = common.find_free_port()
+    def test_invalid_port(self):
+        addr = DEFAULT_HOSTNAME
+        port = 1
 
+        err_msg_reg = f"^(The server socket has failed to listen on any local|The server socket has failed to bind).*{port}"
+        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
+            # Use noqa to silence flake8.
+            # Need to store in an unused variable here to ensure the first
+            # object is not destroyed before the second object is created.
+            store1 = dist.TCPStore(
+                addr, port, 1, True, use_libuv=self._use_libuv
+            )  # noqa: F841
+            self.assertEqual(store1.libuvBackend, self._use_libuv)
+
+    def test_address_already_in_use(self):
+        addr = DEFAULT_HOSTNAME
+        port = common.find_free_port()
+
+        err_msg_reg = f"^The server socket has failed to listen on any local .*{port}"
+        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
             # object is not destroyed before the second object is created.
@@ -1003,6 +1018,46 @@ class InitPgWithNonUvStore(TestCase):
         self.assertTrue(isinstance(store, dist.TCPStore))
         self.assertFalse(store.libuvBackend)
         dist.destroy_process_group()
+
+
+class TestClientProtocol(TestCase):
+    def test_client_connect(self) -> None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("localhost", 0))
+        port = sock.getsockname()[1]
+
+        def listen() -> None:
+            sock.listen()
+            conn, _ = sock.accept()
+
+            # VALIDATE
+            # 0x3C85F7CE
+            self.assertEqual(conn.recv(5), b"\x00\xce\xf7\x85\x3c")
+
+            # PING
+            data = conn.recv(5)
+            self.assertEqual(data[0], 13)
+            nonce = struct.unpack("i", data[1:])[0]
+            self.assertEqual(nonce, os.getpid())
+
+            # send PING nonce response
+            conn.sendall(data[1:])
+
+            conn.close()
+
+        thread = threading.Thread(target=listen)
+        thread.start()
+
+        store = dist.TCPStore(
+            host_name="localhost",
+            port=port,
+            world_size=2,
+            is_master=False,
+            timeout=timedelta(seconds=2),
+            wait_for_workers=False,
+        )
+
+        thread.join()
 
 
 if __name__ == "__main__":

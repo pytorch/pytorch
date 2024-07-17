@@ -22,5 +22,5 @@ class SpecializedAttribute(torch.nn.Module):
         else:
             raise ValueError("bad")
 
-example_inputs = (torch.randn(3, 2),)
+example_args = (torch.randn(3, 2),)
 model = SpecializedAttribute()

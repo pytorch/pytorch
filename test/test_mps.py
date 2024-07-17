@@ -23,7 +23,7 @@ from torch.nn import Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, IS_CI,
-     NoTest, skipIfSlowGradcheckEnv, suppress_warnings)
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
@@ -1590,6 +1590,13 @@ class TestMPS(TestCaseMPS):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
             a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
+
+    def test_conv_raises_error(self, device='mps', dtype=torch.float):
+        conv = nn.Conv1d(1, 65537, 3, padding=1).to('mps')
+
+        x = torch.ones([1, 1, 3])
+        with self.assertRaises(NotImplementedError):
+            y = conv(x.to("mps"))
 
     def test_triu_inf(self, device="mps", dtype=torch.float):
         for diag in [-1, 0, 1]:
@@ -5334,15 +5341,22 @@ class TestMPS(TestCaseMPS):
         helper((7, 13))
         helper((2, 8, 4, 5))
 
-    @unittest.skip("Test is crashing")
     def test_reduction_ops_5D(self):
         def helper(fn, dim):
-            x_cpu = fn(torch.zeros(1, 1, 1, 1, 1), dim=dim)
-            x_mps = fn(torch.zeros(1, 1, 1, 1, 1, device="mps"), dim=dim)
-            self.assertEqual(x_cpu, x_mps.to('cpu'))
-        for fn in [torch.any]:
+            shape = (1, 1, 2, 1, 1)
+            x_cpu = fn(torch.zeros(shape), dim=dim)
+            x_mps = fn(torch.zeros(shape, device="mps"), dim=dim)
+            self.assertEqual(x_cpu, x_mps.cpu())
+        for fn in [torch.any, torch.all]:
             for dim in range(0, 4):
                 helper(fn, dim)
+
+        # 6D tensor reductions
+        # Regression test for https://github.com/pytorch/pytorch/issues/95538
+        x = (torch.rand(2, 3, 4, 3, 4, 2, device="mps") - .5).relu()
+        self.assertEqual(x.all(), x.cpu().all())
+        for i in range(-5, 6):
+            self.assertEqual(x.all(dim=i), x.cpu().all(dim=i))
 
     def test_all(self):
         def helper(shape):
@@ -5408,9 +5422,10 @@ class TestMPS(TestCaseMPS):
         helper((1, 1, 3, 3))
         helper((7, 13))
         helper((2, 8, 4, 5))
+        # Empty tensor
         x_cpu = torch.tensor([], dtype=torch.bool)
         x_mps = x_cpu.to("mps")
-        assert x_cpu.all() == x_mps.all().cpu()
+        self.assertEqual(x_cpu.all(), x_mps.all().cpu())
 
     # Test forward min
     def test_min_el(self):
@@ -7829,7 +7844,7 @@ class TestMPS(TestCaseMPS):
         x.backward(torch.randn_like(x))
         torch.mps.synchronize()
 
-    @unittest.expectedFailure
+    @serialTest()
     def test_mps_allocator_module(self):
         # first garbage collect and empty the cached blocks
         gc.collect()
@@ -9153,10 +9168,11 @@ class TestLinalgMPS(TestCaseMPS):
                     raise e
 
     @parametrize("m", [1, 32, 64])
-    @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
-    def test__int4_mm(self, m, k, n):
-        q_group = 32
+    @parametrize("q_group", [32, 64, 128, 256])
+    @parametrize("num_groups", [1, 2])
+    def test__int4_mm(self, m, n, q_group, num_groups):
+        k = q_group * num_groups
         inner_k_tiles = 2
 
         torch.manual_seed(1)
@@ -9165,8 +9181,10 @@ class TestLinalgMPS(TestCaseMPS):
 
         def convert_weight_to_int4pack(b):
             b_int32, b_scales_and_zeros = _group_quantize_tensor(
-                b, n_bit=4, q_group_size=q_group
+                b.to("cpu"), n_bit=4, q_group_size=q_group
             )
+            b_int32 = b_int32.to("mps")
+            b_scales_and_zeros = b_scales_and_zeros.to("mps")
             b_int4pack = torch._convert_weight_to_int4pack(
                 b_int32, inner_k_tiles
             )
@@ -11486,7 +11504,7 @@ class TestRNNMPS(TestCaseMPS):
                                      f"mismatch in cpu:{cpu_name} vs mps:{mps_name}, layers: {num_layers}")
 
     LSTM_TEST_CASES = [
-        dict(),  # default
+        {},  # default
         dict(batch_first=True),
         dict(bias=False),
         dict(bidirectional=True),
@@ -11821,7 +11839,13 @@ class TestConsistency(TestCaseMPS):
         self.assertEqual(device, "cpu")
 
         def get_samples():
-            return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
+            return op.sample_inputs(
+                device,
+                dtype,
+                requires_grad=(dtype.is_floating_point or dtype.is_complex),
+                # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
+                set_seed=False,
+            )
         cpu_samples = get_samples()
 
         for cpu_sample in cpu_samples:
@@ -11856,7 +11880,13 @@ class TestConsistency(TestCaseMPS):
         self.assertEqual(device, "cpu")
 
         def get_samples():
-            return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
+            return op.sample_inputs(
+                device,
+                dtype,
+                requires_grad=(dtype.is_floating_point or dtype.is_complex),
+                # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
+                set_seed=False,
+            )
         cpu_samples = get_samples()
 
         for cpu_sample in cpu_samples:
@@ -11932,7 +11962,8 @@ class TestErrorInputs(TestCase):
     def test_error_inputs(self, device, op):
         self.assertEqual(device, "mps:0")
 
-        mps_samples = op.error_inputs(device)
+        # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
+        mps_samples = op.error_inputs(device, set_seed=False)
 
         for mps_sample in mps_samples:
             mps_sample_input = mps_sample.sample_input
@@ -12006,8 +12037,13 @@ class TestCommon(TestCase):
         # does not support float64 Tensors.
         # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
         # get patched up and this workaround removed.
-        broken_on_ref_inputs = op.name in ['clamp', 'where']
-        inputs = op.reference_inputs(device, dtype) if not broken_on_ref_inputs else op.sample_inputs(device, dtype)
+        broken_on_ref_inputs = op.name in ('where',)
+
+        # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
+        inputs = (
+            op.reference_inputs(device, dtype, set_seed=False) if not broken_on_ref_inputs
+            else op.sample_inputs(device, dtype, set_seed=False)
+        )
         for sample_input in inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
