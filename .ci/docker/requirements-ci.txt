@@ -139,7 +139,7 @@ opt-einsum==3.3
 #Pinned versions: 3.3
 #test that import: test_linalg.py
 
-optree==0.12.1
+optree==0.12.1 ; python_version <= "3.12"
 #Description: A library for tree manipulation
 #Pinned versions: 0.12.1
 #test that import: test_vmap.py, test_aotdispatch.py, test_dynamic_shapes.py,
@@ -235,6 +235,7 @@ scikit-image==0.20.0 ; python_version >= "3.10" and python_version <= "3.12"
 
 scipy==1.10.1 ; python_version <= "3.11"
 scipy==1.12.0 ; python_version == "3.12"
+scipy>1.14 ; python_version == "3.13"
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
 #Pinned versions: 1.10.1
@@ -263,7 +264,7 @@ typing-extensions
 #Pinned versions:
 #test that import:
 
-unittest-xml-reporting<=3.2.0,>=2.0.0
+unittest-xml-reporting<=3.2.0,>=2.0.0 ; python_version <= "3.12"
 #Description: saves unit test results to xml
 #Pinned versions:
 #test that import:
@@ -316,12 +317,11 @@ pywavelets==1.5.0 ; python_version == "3.12"
 #test that import:
 
 lxml==5.0.0 ; python_version <= "3.12"
-lxml==5.2.2 ; python_version == "3.13"
 #Description: This is a requirement of unittest-xml-reporting
 
 # Python-3.9 binaries
 
-PyGithub==2.3.0
+PyGithub==2.3.0 ; python_version <= "3.12"
 
 sympy==1.12.1 ; python_version == "3.8"
 sympy==1.13.1 ; python_version >= "3.9"
@@ -329,12 +329,12 @@ sympy==1.13.1 ; python_version >= "3.9"
 #Pinned versions:
 #test that import:
 
-onnx==1.16.1
+onnx==1.16.1 ; python_version <= "3.12"
 #Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:
 
-onnxscript==0.1.0.dev20240817
+onnxscript==0.1.0.dev20240817 ; python_version <= "3.12"
 #Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:
