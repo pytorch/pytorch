@@ -5,11 +5,13 @@ import inspect
 import math
 import operator
 import re
+
 from inspect import Parameter
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
+
 from torch.export import ExportedProgram
 from torch.export.exported_program import (
     _name_hoo_subgraph_placeholders,
@@ -30,7 +32,6 @@ from torch.utils._pytree import (
     tree_flatten_with_path,
     UnflattenFunc,
 )
-
 
 placeholder_prefixes = {
     InputKind.USER_INPUT: "",
@@ -401,8 +402,16 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
             new_output = output[0].args[0]
 
             if isinstance(new_output, torch.fx.Node):
+                # Clear the users of the output node and set
+                # the users to be the users of original call_module node.
+                new_output.users.clear()
                 node_replace_(call_mod_node, new_output, delete_old=True)
             elif isinstance(new_output, (list, tuple)):
+                # Clear the users of the output node and set
+                # the users to be the users of original call_module node.
+                for node in new_output:
+                    node.users.clear()
+
                 # Inline the get_item calls for the output node.
                 get_item_users = nodes_filter(
                     list(call_mod_node.users.keys()),
