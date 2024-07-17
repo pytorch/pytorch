@@ -276,6 +276,10 @@ class UniformValueConstantFolder(ConstantFolder):
             new_args = [[1], args[1]]
             return aten.full.default(*new_args, **node.kwargs)
 
+        # handle before view ops because this changes value
+        if node.target == aten.view.dtype:
+            return super(ConstantFolder, self).run_node(node)
+
         # view ops, return input tensor, the first argument
         if hasattr(node.target, "overloadpacket") and (
             node.target.overloadpacket in self.view_op_packets
@@ -353,6 +357,10 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
         fake_tensor = node.meta["val"]
         if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
+            continue
+
+        # TODO - not sure about lossy uint->python value->uint conversions
+        if fake_tensor.dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
             continue
 
         if constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1:
