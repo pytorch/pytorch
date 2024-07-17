@@ -189,6 +189,7 @@ class ValueRanges(Generic[_T]):
                     upper == sympy.oo  # in simple_sympify() we use oo for integer
                     or isinstance(upper, (sympy.Integer, IntInfinity))
                 )
+                and (lower, upper) != (-sympy.oo, sympy.oo)  # (-oo, oo) is float
             ),
         )
         """
