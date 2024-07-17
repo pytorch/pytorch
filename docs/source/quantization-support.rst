@@ -144,6 +144,8 @@ torch.ao.quantization.pt2e.export_utils
 
     model_is_exported
 
+.. currentmodule:: torch.ao.quantization
+
 PT2 Export (pt2e) Numeric Debugger
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autosummary::
