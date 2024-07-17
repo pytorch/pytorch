@@ -714,7 +714,7 @@ class AOTInductorTestsTemplate:
 
             def forward(self, x, weight, bias, scale_a, scale_b):
                 weight = weight.to(torch.float8_e4m3fn)
-                output, updated_amax = torch._scaled_mm(
+                output = torch._scaled_mm(
                     x,
                     weight,
                     bias=input_bias,
@@ -1502,15 +1502,24 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, x: Dict[str, torch.Tensor]):
-                add_ = torch.zeros(5)
-                mul_ = torch.ones(5)
+                device = next(iter(x.values())).device
+                add_ = torch.zeros(5, device=device)
+                mul_ = torch.ones(5, device=device)
                 for v in x.values():
                     add_ += v
                     mul_ *= v
 
                 return [add_, mul_]
 
-        self.check_model(M(), ({"x": torch.ones(5), "y": torch.ones(5)},))
+        self.check_model(
+            M(),
+            (
+                {
+                    "x": torch.ones(5, device=self.device),
+                    "y": torch.ones(5, device=self.device),
+                },
+            ),
+        )
 
     @requires_multigpu()
     def test_non_default_cuda_device(self):
@@ -1658,6 +1667,26 @@ class AOTInductorTestsTemplate:
             torch._inductor.aot_compile(
                 gm, tuple(i.to(self.device) for i in example_inputs)
             )
+
+    def test_fx_gm_return_tuple_validation(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        example_inputs = (torch.randn(10, 10), torch.randn(10, 10))
+
+        gm = make_fx(Model(), tracing_mode="symbolic")(*example_inputs)
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"Graph output must be a tuple\(\). This is so that we can avoid "
+            "pytree processing of the outputs.",
+        ):
+            torch._inductor.aot_compile(gm, example_inputs)
 
     @unittest.mock.patch("torch._inductor.graph.supported_dtype_of_cpp_wrapper")
     def test_unsupported_input_dtype(self, supported_dtype_of_cpp_wrapper_mock):
