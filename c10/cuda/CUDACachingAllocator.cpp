@@ -503,6 +503,11 @@ struct ExpandableSegment {
       (void)i;
       int fd = 0;
       buf.read((char*)&fd, sizeof(int));
+      // older build setups do not have this syscall, added 2020
+      // but the kernel on the system might still support it.
+#ifndef SYS_pidfd_getfd
+#define SYS_pidfd_getfd 438
+#endif
       auto myfd = syscall(SYS_pidfd_getfd, pidfd, fd, 0);
       if (myfd == -1) {
         close((int)pidfd);
@@ -510,6 +515,12 @@ struct ExpandableSegment {
           C10_CUDA_DRIVER_CHECK(
               DriverAPI::get()->cuMemRelease_(h.value().handle));
           h = std::nullopt;
+        }
+        if (errno == ENOSYS) {
+          TORCH_CHECK(
+              false,
+              "The kernel on this machine does not support the pidfd_getfd syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
+              "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
         }
         TORCH_CHECK(false, "pidfd_getfd: ", std::strerror(errno));
       }
@@ -3672,3 +3683,4 @@ std::atomic<CUDAAllocator*> allocator;
 BackendStaticInitializer backend_static_initializer;
 } // namespace cuda::CUDACachingAllocator
 } // namespace c10
+  
