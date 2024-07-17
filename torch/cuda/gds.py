@@ -52,7 +52,7 @@ class GdsFile:
 
     Args:
         filename (str): Name of the file to open.
-        flags (int): Flags to pass to os.open when opening the file. ``os.O_DIRECT`` will
+        flags (int): Flags to pass to ``os.open`` when opening the file. ``os.O_DIRECT`` will
             be added automatically.
 
     .. _CUDA GPUDirect Storage Documentation:
@@ -65,9 +65,14 @@ class GdsFile:
         self.fd = os.open(filename, flags | os.O_DIRECT)
         self.handle: Optional[int] = None
         self.register_handle()
+    
+    def __del__(self):
+        os.close(self.fd)
 
     def register_handle(self) -> None:
         """Registers file descriptor to cuFile Driver.
+
+        This is a wrapper around ``cuFileHandleRegister``.
 
         Args:
             handle (int): Handle to register.
@@ -77,8 +82,10 @@ class GdsFile:
     def deregister_handle(self) -> None:
         """Deregisters file descriptor from cuFile Driver.
 
+        This is a wrapper around ``cuFileHandleDeregister``.
+
         Args:
-            handle (int): Handle to register.
+            handle (int): Handle to deregister.
         """
         assert (
             self.handle is not None
@@ -89,8 +96,8 @@ class GdsFile:
     def load_storage(self, storage: Storage, offset: int = 0) -> None:
         """Loads data from the file into the storage.
 
-        ``storage.nbytes()`` of data will be loaded from the file at ``offset``
-        into the storage.
+        This is a wrapper around ``cuFileRead``. ``storage.nbytes()`` of data
+        will be loaded from the file at ``offset`` into the storage.
 
         Args:
             storage (Storage): Storage to load data into.
@@ -104,7 +111,8 @@ class GdsFile:
     def save_storage(self, storage: Storage, offset: int = 0) -> None:
         """Saves data from the storage into the file.
 
-        All bytes of the storage will be written to the file at ``offset``.
+        This is a wrapper around ``cuFileWrite``. All bytes of the storage
+        will be written to the file at ``offset``.
 
         Args:
             storage (Storage): Storage to save data from.

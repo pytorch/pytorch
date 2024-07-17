@@ -862,7 +862,7 @@ endif()
 if(CUDAToolkit_FOUND)
 
   function(_CUDAToolkit_find_and_add_import_lib lib_name)
-    cmake_parse_arguments(arg "" "" "ALT;DEPS;EXTRA_PATH_SUFFIXES;EXTRA_INCLUDE_DIRS" ${ARGN})
+    cmake_parse_arguments(arg "" "" "ALT;DEPS;EXTRA_HINTS;EXTRA_PATH_SUFFIXES;EXTRA_INCLUDE_DIRS" ${ARGN})
 
     set(search_names ${lib_name} ${arg_ALT})
 
@@ -870,6 +870,7 @@ if(CUDAToolkit_FOUND)
       NAMES ${search_names}
       HINTS ${CUDAToolkit_LIBRARY_DIR}
             ENV CUDA_PATH
+            ${arg_EXTRA_HINTS}
       PATH_SUFFIXES nvidia/current lib64 lib/x64 lib
                     ${arg_EXTRA_PATH_SUFFIXES}
     )
@@ -879,6 +880,7 @@ if(CUDAToolkit_FOUND)
       NAMES ${search_names}
       HINTS ${CUDAToolkit_LIBRARY_DIR}
             ENV CUDA_PATH
+            ${arg_EXTRA_HINTS}
       PATH_SUFFIXES lib64/stubs lib/x64/stubs lib/stubs stubs
                     # Support NVHPC splayed math library layout
                     ../../math_libs/${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}/lib64
@@ -887,23 +889,33 @@ if(CUDAToolkit_FOUND)
 
     mark_as_advanced(CUDA_${lib_name}_LIBRARY)
 
-    if (NOT TARGET CUDA::${lib_name} AND CUDA_${lib_name}_LIBRARY)
+    if(NOT TARGET CUDA::${lib_name} AND CUDA_${lib_name}_LIBRARY)
       add_library(CUDA::${lib_name} UNKNOWN IMPORTED)
-      target_include_directories(CUDA::${lib_name} SYSTEM INTERFACE "${CUDAToolkit_INCLUDE_DIRS}")
+      set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
+          INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_INCLUDE_DIRS}")
+      set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
+          INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${CUDAToolkit_INCLUDE_DIRS}")
       if(DEFINED CUDAToolkit_MATH_INCLUDE_DIR)
         string(FIND ${CUDA_${lib_name}_LIBRARY} "math_libs" math_libs)
         if(NOT ${math_libs} EQUAL -1)
-          target_include_directories(CUDA::${lib_name} SYSTEM INTERFACE "${CUDAToolkit_MATH_INCLUDE_DIR}")
+          set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
+              INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_MATH_INCLUDE_DIRS}")
+          set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
+              INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${CUDAToolkit_MATH_INCLUDE_DIRS}")
         endif()
       endif()
       set_property(TARGET CUDA::${lib_name} PROPERTY IMPORTED_LOCATION "${CUDA_${lib_name}_LIBRARY}")
       foreach(dep ${arg_DEPS})
         if(TARGET CUDA::${dep})
-          target_link_libraries(CUDA::${lib_name} INTERFACE CUDA::${dep})
+          set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
+              INTERFACE_LINK_LIBRARIES CUDA::${dep})
         endif()
       endforeach()
       if(arg_EXTRA_INCLUDE_DIRS)
-        target_include_directories(CUDA::${lib_name} SYSTEM INTERFACE "${arg_EXTRA_INCLUDE_DIRS}")
+        set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
+            INTERFACE_INCLUDE_DIRECTORIES "${arg_EXTRA_INCLUDE_DIRS}")
+        set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
+            INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${arg_EXTRA_INCLUDE_DIRS}")
       endif()
     endif()
   endfunction()

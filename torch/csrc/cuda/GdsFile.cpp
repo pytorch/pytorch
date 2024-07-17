@@ -105,7 +105,7 @@ int64_t gds_register_handle(int fd) {
   return reinterpret_cast<int64_t>(cf_handle);
 }
 
-void gds_deregister_handle(int handle) {
+void gds_deregister_handle(int64_t handle) {
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
   CUfileHandle_t cf_handle = reinterpret_cast<CUfileHandle_t>(handle);
   cuFileHandleDeregister(cf_handle);
