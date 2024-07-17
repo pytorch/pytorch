@@ -6,7 +6,7 @@ import torch._C._lazy
 
 
 class DeviceContext:
-    _CONTEXTS: Dict[str, Any] = dict()
+    _CONTEXTS: Dict[str, Any] = {}
     _CONTEXTS_LOCK = threading.Lock()
 
     def __init__(self, device):

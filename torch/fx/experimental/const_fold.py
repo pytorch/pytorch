@@ -198,13 +198,14 @@ def split_const_subgraphs(
 
     split = split_module(mod_traced, module, mod_partition)
 
-    const_gm, non_const_gm = split.submod_0, split.submod_1
     const_mod_name, non_const_mod_name = "submod_0", "submod_1"
+    # Safely get submod_1 in case there are no non-const nodes
+    const_gm, non_const_gm = split.submod_0, getattr(split, non_const_mod_name, None)
 
     # The module that a call_module node refers to gets copied to submodules during split.
     # The path to the module also gets inlined, i.e. mod.a.b -> mod_a_b. Here we need to
     # attach inlined modules to `split` as it's the owning module now.
-    for node in non_const_gm.graph.nodes:
+    for node in non_const_gm.graph.nodes if non_const_gm else []:
         if node.op == "call_module":
             setattr(split, node.target, getattr(non_const_gm, node.target))
     for node in const_gm.graph.nodes:
@@ -276,10 +277,11 @@ def split_const_subgraphs(
 
     split.graph.eliminate_dead_code()
 
-    # Finally, inline the non-constant submod into the split submod. This is so that the
-    # original caller who may have passed in a graph module will get back out a graph
-    # module whose graph is traced to the same granularity.
-    _inline_module(split, non_const_mod_name)
+    # Finally, inline the non-constant submod (if it exists) into the split submod.
+    # This is so that the original caller who may have passed in a graph module will
+    # get back out a graph module whose graph is traced to the same granularity.
+    if hasattr(split, non_const_mod_name):
+        _inline_module(split, non_const_mod_name)
 
     return FoldedGraphModule(
         split,

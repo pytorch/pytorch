@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUStream.h>
 #include <c10/xpu/test/impl/XPUTest.h>
+#include <optional>
 
 #include <thread>
 #include <unordered_set>
