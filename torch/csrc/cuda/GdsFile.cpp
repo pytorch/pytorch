@@ -1,7 +1,7 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/utils/pybind.h>
 
-#ifndef USE_ROCM
+#if !defined(USE_ROCM) && defined(USE_CUFILE)
 #include <c10/cuda/CUDAGuard.h>
 
 #include <cuda_runtime.h>
@@ -118,7 +118,7 @@ namespace torch::cuda::shared {
 void initGdsBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
-#ifndef USE_ROCM
+#if !defined(USE_ROCM) && defined(USE_CUFILE)
   m.def("_gds_register_handle", &gds_register_handle);
   m.def("_gds_deregister_handle", &gds_deregister_handle);
   m.def("_gds_register_buffer", &gds_register_buffer);
