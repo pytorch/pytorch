@@ -412,24 +412,8 @@ sdpa_nested_preprocessing(
   Tensor k_t = key.transpose(1, 2);
   Tensor v_t = value.transpose(1, 2);
 
-  auto cumulative_and_max_q_and_nnz_q = cumulative_and_max_seq_len_nnz(q_t);
-  auto cumulative_and_max_kv_and_nnz_kv = cumulative_and_max_seq_len_nnz(k_t);
-
-  // [TODO] K and V have to have the same Nnz, should probably torch_check
-  // assume in order to not iterate over v
-
-  Tensor cumulative_sequence_length_q =
-      std::get<0>(cumulative_and_max_q_and_nnz_q);
-  Tensor cumulative_sequence_length_kv =
-      std::get<0>(cumulative_and_max_kv_and_nnz_kv);
-
-  const int64_t max_seqlen_batch_q =
-      std::get<1>(cumulative_and_max_q_and_nnz_q);
-  const int64_t max_seqlen_batch_kv =
-      std::get<1>(cumulative_and_max_kv_and_nnz_kv);
-
-  const int64_t Nnz_q = std::get<2>(cumulative_and_max_q_and_nnz_q);
-  const int64_t Nnz_kv = std::get<2>(cumulative_and_max_kv_and_nnz_kv);
+  auto [cumulative_sequence_length_q, max_seqlen_batch_q, Nnz_q] = cumulative_and_max_seq_len_nnz(q_t);
+  auto [cumulative_sequence_length_kv, max_seqlen_batch_kv, Nnz_kv]= cumulative_and_max_seq_len_nnz(k_t);
 
   Tensor query_buffer_reshaped;
   Tensor key_buffer_reshaped;

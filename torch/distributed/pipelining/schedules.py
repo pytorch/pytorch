@@ -2,6 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import csv
+import itertools
 import logging
 import re
 from abc import ABC, abstractmethod
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 class _ComputationType(Enum):
+    # TODO(whc) rename to _ActType?
     FORWARD = 1
     BACKWARD = 2
     WEIGHT = 3
@@ -59,17 +61,18 @@ F = _ComputationType.FORWARD
 B = _ComputationType.BACKWARD
 W = _ComputationType.WEIGHT
 
-
-_action_regex = re.compile(r"(\d+)([F,B,W])(\d+)")
+_action_regex = re.compile(r"(\d+)([F,B,W])(\d*)")
 
 
 class _Action(NamedTuple):
-    computation_type: _ComputationType
-    microbatch_index: int
     stage_index: int
+    computation_type: _ComputationType
+    microbatch_index: Optional[int] = None
 
     def __repr__(self):
-        return f"{self.stage_index}{self.computation_type}{self.microbatch_index}"
+        if self.microbatch_index is not None:
+            return f"{self.stage_index}{self.computation_type}{self.microbatch_index}"
+        return f"{self.stage_index}{self.computation_type}"
 
     @staticmethod
     def from_str(str):
@@ -81,15 +84,199 @@ class _Action(NamedTuple):
         if match := _action_regex.match(str):
             stage_index, computation_type, microbatch_index = match.groups()
             return _Action(
-                _ComputationType.from_str(computation_type),
-                int(microbatch_index),
                 int(stage_index),
+                _ComputationType.from_str(computation_type),
+                int(microbatch_index) if len(microbatch_index) else None,
             )
         elif str == "":
             return None
         raise RuntimeError(
             f"Invalid action string: {str}, should be formatted as [stage][action type][microbatch] e.g. 2F0"
         )
+
+
+def _format_pipeline_order(pipeline_order: Dict[int, List[Optional[_Action]]]) -> str:
+    """
+    Formats the pipeline order in a timestep (row) x rank (column) grid of actions
+    and returns the formatted string
+    """
+
+    # Calculate the maximum number of steps across all ranks
+    num_steps = max(len(actions) for actions in pipeline_order.values())
+    step_labels = [
+        "Step " + str(i).zfill(len(str(num_steps - 1))) for i in range(num_steps)
+    ]
+    # Sorting the dictionary by keys and retrieving values in that order
+    rank_actions = [
+        pipeline_order.get(key, [""] * num_steps) for key in sorted(pipeline_order)
+    ]
+    # Transpose the list of lists (rows to columns)
+    transposed_actions = list(itertools.zip_longest(*rank_actions, fillvalue=""))
+    # Generate column labels for ranks
+    num_ranks = len(pipeline_order)
+    rank_labels = ["Rank " + str(i) for i in range(num_ranks)]
+    # Calculate the maximum length of each column, considering labels
+    max_lengths = [
+        max(len(str(item)) if item is not None else 0 for item in col)
+        for col in zip(step_labels, *transposed_actions)
+    ]
+    # Format the header row with rank labels
+    header_row = " " * (len(step_labels[0]) + 2) + " ".join(
+        f"{label:<{max_lengths[i]}}" for i, label in enumerate(rank_labels)
+    )
+    # Format each row with its corresponding label
+    formatted_rows = [
+        f"{label}: "
+        + " ".join(f"{str(item):<{max_lengths[i]}}" for i, item in enumerate(row))
+        for label, row in zip(step_labels, transposed_actions)
+    ]
+    # Join the rows into a single string
+    formatted_table = header_row + "\n" + "\n".join(formatted_rows) + "\n"
+    return formatted_table
+
+
+def _validate_pipeline_order(
+    pipeline_order: Dict[int, List[Optional[_Action]]],
+    num_microbatches: int,
+    num_stages: int,
+    enable_zero_bubble: bool = False,
+):
+    """
+    pipeline_order[rank] = [(computation_type, microbatch_index, stage_index), ...]
+    Validating that the pipeline order follows the rules:
+    1. Forward action for a microbatch must be before the Backward action for that microbatch
+    2. Recv for a microbatch must be before the send for that microbatch
+    3. Microbatch index is handled in sequential order for each stage
+    4. A later stage cannot operate on a microbatch before any of the previous stages have operated on it
+    5. Same microbatch cannot be handled in the same time step across ranks
+    """
+    # microbatch_index: (current computation type, current stage)
+    microbatch_process_info: Dict[int, Tuple[_ComputationType, int]] = {}
+    max_timestep = max(len(rank_list) for rank_list in pipeline_order.values())
+    for timestep in range(max_timestep):
+        error_msg: List[str] = []
+        current_timestep_actions = []
+        for rank in range(len(pipeline_order)):
+            action = (
+                pipeline_order[rank][timestep]
+                if timestep < len(pipeline_order[rank])
+                else None
+            )
+
+            if action is not None:
+                computation_type = action.computation_type
+                if computation_type != _ComputationType.WEIGHT:
+                    current_timestep_actions.append(action)
+
+        # TODO: enable this
+        # if len(current_timestep_actions) == 0:
+        #     error_msg.append(
+        #         "All actions were None, there is an unnecessary gap in the schedule"
+        #     )
+
+        # Ensure that no microbatch is operated on twice in current_timestep_actions
+        unique_microbatch_indices = {
+            action.microbatch_index for action in current_timestep_actions
+        }
+        if len(unique_microbatch_indices) != len(current_timestep_actions):
+            error_msg.append(
+                "Duplicate microbatch index found in current_timestep_actions"
+            )
+
+        for action in current_timestep_actions:
+            stage_index = action.stage_index
+            computation_type = action.computation_type
+            mb_index = action.microbatch_index
+            assert (
+                mb_index is not None
+            ), "All currently supported action types require valid microbatch_index"
+            if mb_index >= num_microbatches:
+                error_msg.append(f"Microbatch index {mb_index} out of range")
+
+            # first microbatch
+            if mb_index not in microbatch_process_info:
+                if computation_type != _ComputationType.FORWARD or stage_index != 0:
+                    error_msg.append(f"Incorrect start for microbatch {mb_index}")
+                microbatch_process_info[mb_index] = (computation_type, stage_index)
+            else:
+                # if the microbatch is included, check that the current stage is right after prev
+                prev_computation, prev_stage = microbatch_process_info[mb_index]
+
+                if prev_computation == _ComputationType.FORWARD:
+                    if prev_stage == num_stages - 1:
+                        expected_stage = num_stages - 1
+                        expected_computation = _ComputationType.BACKWARD
+                    else:
+                        expected_stage = prev_stage + 1
+                        expected_computation = _ComputationType.FORWARD
+                elif prev_computation == _ComputationType.BACKWARD:
+                    if prev_stage == 0:
+                        error_msg.append(
+                            f"[{mb_index=}] already finished backward computation"
+                        )
+                        break
+                    else:
+                        expected_stage = prev_stage - 1
+                        expected_computation = _ComputationType.BACKWARD
+                else:
+                    raise ValueError(
+                        f"Computation type {prev_computation} not supported"
+                    )
+
+                if expected_computation is not None:
+                    if expected_computation != computation_type:
+                        error_msg.append(
+                            f"[{mb_index=}] {expected_computation=} VS. actual {computation_type=}"
+                        )
+
+                if expected_stage != stage_index:
+                    error_msg.append(
+                        f"[{mb_index=}] {expected_stage=} VS. actual {stage_index=}"
+                    )
+
+                microbatch_process_info[mb_index] = (
+                    expected_computation,
+                    expected_stage,
+                )
+
+        if not enable_zero_bubble:
+            if len(error_msg) != 0:
+                raise RuntimeError(
+                    f"Error at timestep {timestep}: " + ",".join(error_msg)
+                )
+            return
+
+        for rank in range(len(pipeline_order)):
+            backward_steps: Set[Tuple[int, int]] = set()
+            weight_steps: Set[Tuple[int, int]] = set()
+
+            for action in pipeline_order[rank]:
+                if action is None:
+                    continue
+
+                stage_index = action.stage_index
+                computation_type = action.computation_type
+                mb_index = action.microbatch_index
+                if computation_type == _ComputationType.BACKWARD:
+                    if mb_index is not None:
+                        backward_steps.add((mb_index, stage_index))
+                elif computation_type == _ComputationType.WEIGHT:
+                    if (mb_index, stage_index) not in backward_steps:
+                        error_msg.append(
+                            f"{mb_index=}, {stage_index=} Weight happened before bwd"
+                        )
+                    if (mb_index, stage_index) in weight_steps:
+                        error_msg.append(
+                            f"{mb_index=}, {stage_index=} Duplicated weight step"
+                        )
+                    if mb_index is not None:
+                        weight_steps.add((mb_index, stage_index))
+
+            if len(backward_steps) != len(weight_steps):
+                error_msg.append("Length weight steps != Length bwd steps")
+
+        if len(error_msg) != 0:
+            raise RuntimeError(f"Error at timestep {timestep}: " + ",".join(error_msg))
 
 
 class _PipelineSchedule(ABC):
@@ -493,6 +680,7 @@ class Schedule1F1B(PipelineScheduleSingle):
         # Chunk counters
         fwd_mb_index = 0
         bwd_mb_index = 0
+        weight_stage_mb_index = 0
 
         # Warmup phase
         send_work = None
@@ -611,6 +799,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
         stage_index_to_group_rank: Optional[Dict[int, int]] = None,
+        use_full_backward: bool = True,
     ):
         if len(stages) <= 1:
             raise ValueError(
@@ -645,7 +834,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
 
         # This will be set during init of derived schedules
         self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
-        self.use_full_backward = True
+        self.use_full_backward = use_full_backward
 
         # TODO: later replace this with lazy shape inference during forward
         # Prepare forward send/recv infrastructure for stage
@@ -804,90 +993,120 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 all_next_ranks.add(self.stage_index_to_group_rank[stage_index + 1])
 
         for time_step, action in enumerate(self.pipeline_order[self.rank]):
-            ops: List[dist.P2POp] = []
-            if action is not None:
-                computation_type, mb_index, stage_index = action
-                if computation_type == _ComputationType.FORWARD:
-                    # perform forward computation
-                    stage = stage_index_to_stage[stage_index]
-                    output = stage.forward_one_chunk(
-                        mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
-                    )
-                    self._maybe_compute_loss(stage, output, target_mbs, mb_index)
-                    ops.extend(stage.get_fwd_send_ops(mb_index))
-                elif computation_type == _ComputationType.BACKWARD:
-                    # perform backward computation
-                    stage = stage_index_to_stage[stage_index]
-                    loss = self._maybe_get_loss(stage, mb_index)
-                    stage.backward_one_chunk(
-                        mb_index, loss=loss, full_backward=self.use_full_backward
-                    )
-                    ops.extend(stage.get_bwd_send_ops(mb_index))
-                elif computation_type == _ComputationType.WEIGHT:
-                    # perform weight update
-                    if self.use_full_backward:
-                        raise ValueError(
-                            f"We detected a weight update in the pipeline schedule, but \
-                            {self.use_full_backward=}"
-                        )
-                    stage = stage_index_to_stage[stage_index]
-                    stage.backward_weight_one_chunk(mb_index)
-                else:
-                    raise ValueError(f"Unknown computation type {computation_type}")
-
-            # Look at the neighboring ranks for this current timestep and determine whether
-            # this current rank needs to do any recv communication
-            for prev_rank in all_prev_ranks:
-                prev_rank_ops = self.pipeline_order[prev_rank]
-                prev_rank_action = None
-                if time_step < len(prev_rank_ops):
-                    prev_rank_action = prev_rank_ops[time_step]
-                if prev_rank_action is not None:
-                    computation_type, mb_index, stage_index = prev_rank_action
-                    # Only handle sends for the forward from a previous rank
+            try:
+                ops: List[dist.P2POp] = []
+                if action is not None:
+                    computation_type = action.computation_type
+                    mb_index = action.microbatch_index
+                    stage_index = action.stage_index
+                    assert (
+                        mb_index is not None
+                    ), "All currently supported action types require valid microbatch_index"
                     if computation_type == _ComputationType.FORWARD:
-                        # If not the last stage, then receive fwd activations
-                        if stage_index + 1 in stage_index_to_stage:
-                            # TODO: We are assuming that stage will always receive from stage-1
-                            # however that is not necessarily true of get_fwd_recv_ops
-                            stage = stage_index_to_stage[stage_index + 1]
-                            ops.extend(stage.get_fwd_recv_ops(mb_index))
-                    elif (
-                        computation_type == _ComputationType.BACKWARD
-                        or computation_type == _ComputationType.WEIGHT
-                    ):
-                        # Previous rank doing backward or weight update has no influence for the current rank forward recv
-                        pass
-                    else:
-                        raise ValueError(f"Unknown computation type {computation_type}")
-
-            for next_rank in all_next_ranks:
-                next_rank_ops = self.pipeline_order[next_rank]
-                next_rank_action = None
-                if time_step < len(next_rank_ops):
-                    next_rank_action = next_rank_ops[time_step]
-                if next_rank_action is not None:
-                    computation_type, mb_index, stage_index = next_rank_action
-                    # Only handle receives for the backwards from a next rank
-                    if (
-                        computation_type == _ComputationType.FORWARD
-                        or computation_type == _ComputationType.WEIGHT
-                    ):
-                        # Next rank doing forward or weight update has no influence for the current rank backward recv
-                        pass
+                        # perform forward computation
+                        stage = stage_index_to_stage[stage_index]
+                        output = stage.forward_one_chunk(
+                            mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
+                        )
+                        self._maybe_compute_loss(stage, output, target_mbs, mb_index)
+                        ops.extend(stage.get_fwd_send_ops(mb_index))
                     elif computation_type == _ComputationType.BACKWARD:
-                        # If not the first stage, then receive bwd gradients
-                        if stage_index - 1 in stage_index_to_stage:
-                            # TODO: We are assuming that stage will always receive from stage+1
-                            # however that is not necessarily true of get_bwd_recv_ops
-                            stage = stage_index_to_stage[stage_index - 1]
-                            ops.extend(stage.get_bwd_recv_ops(mb_index))
+                        # perform backward computation
+                        stage = stage_index_to_stage[stage_index]
+                        loss = self._maybe_get_loss(stage, mb_index)
+                        stage.backward_one_chunk(
+                            mb_index, loss=loss, full_backward=self.use_full_backward
+                        )
+                        ops.extend(stage.get_bwd_send_ops(mb_index))
+                    elif computation_type == _ComputationType.WEIGHT:
+                        # perform weight update
+                        if self.use_full_backward:
+                            raise ValueError(
+                                f"We detected a weight update in the pipeline schedule, but \
+                                {self.use_full_backward=}"
+                            )
+                        stage = stage_index_to_stage[stage_index]
+                        stage.backward_weight_one_chunk(mb_index)
                     else:
                         raise ValueError(f"Unknown computation type {computation_type}")
 
-            # do the communication
-            if ops:
-                _batch_p2p(ops).wait()
+                # Look at the neighboring ranks for this current timestep and determine whether
+                # this current rank needs to do any recv communication
+                for prev_rank in all_prev_ranks:
+                    prev_rank_ops = self.pipeline_order[prev_rank]
+                    prev_rank_action = None
+                    if time_step < len(prev_rank_ops):
+                        prev_rank_action = prev_rank_ops[time_step]
+                    if prev_rank_action is not None:
+                        computation_type = prev_rank_action.computation_type
+                        mb_index = prev_rank_action.microbatch_index
+                        stage_index = prev_rank_action.stage_index
+                        assert (
+                            mb_index is not None
+                        ), "All currently supported action types require valid microbatch_index"
+                        # Only handle sends for the forward from a previous rank
+                        if computation_type == _ComputationType.FORWARD:
+                            # If not the last stage, then receive fwd activations
+                            if stage_index + 1 in stage_index_to_stage:
+                                # TODO: We are assuming that stage will always receive from stage-1
+                                # however that is not necessarily true of get_fwd_recv_ops
+                                stage = stage_index_to_stage[stage_index + 1]
+                                ops.extend(stage.get_fwd_recv_ops(mb_index))
+                        elif (
+                            computation_type == _ComputationType.BACKWARD
+                            or computation_type == _ComputationType.WEIGHT
+                        ):
+                            # Previous rank doing backward or weight update has no influence for the current rank forward recv
+                            pass
+                        else:
+                            raise ValueError(
+                                f"Unknown computation type {computation_type}"
+                            )
+                for next_rank in all_next_ranks:
+                    next_rank_ops = self.pipeline_order[next_rank]
+                    next_rank_action = None
+                    if time_step < len(next_rank_ops):
+                        next_rank_action = next_rank_ops[time_step]
+                    if next_rank_action is not None:
+                        computation_type = next_rank_action.computation_type
+                        mb_index = next_rank_action.microbatch_index
+                        stage_index = next_rank_action.stage_index
+                        assert (
+                            mb_index is not None
+                        ), "All currently supported action types require valid microbatch_index"
+                        # Only handle receives for the backwards from a next rank
+                        if (
+                            computation_type == _ComputationType.FORWARD
+                            or computation_type == _ComputationType.WEIGHT
+                        ):
+                            # Next rank doing forward or weight update has no influence for the current rank backward recv
+                            pass
+                        elif computation_type == _ComputationType.BACKWARD:
+                            # If not the first stage, then receive bwd gradients
+                            if stage_index - 1 in stage_index_to_stage:
+                                # TODO: We are assuming that stage will always receive from stage+1
+                                # however that is not necessarily true of get_bwd_recv_ops
+                                stage = stage_index_to_stage[stage_index - 1]
+                                ops.extend(stage.get_bwd_recv_ops(mb_index))
+                        else:
+                            raise ValueError(
+                                f"Unknown computation type {computation_type}"
+                            )
+
+                # do the communication
+                if ops:
+                    _batch_p2p(ops).wait()
+            except Exception as e:
+                logger.error(
+                    "[Rank %s] pipeline schedule %s caught the following exception \
+                     at time_step %s when running action %s",
+                    self.rank,
+                    self.__class__.__name__,
+                    time_step,
+                    action,
+                )
+                logger.error("%s", _format_pipeline_order(self.pipeline_order))
+                raise e
         # Return losses if there is a container passed in
         self._update_losses(self._stages, losses)
 
@@ -940,7 +1159,7 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         for stage_index in stage_indices:
             for mb_index in range(self._n_microbatches):
                 rank_ops.append(
-                    _Action(_ComputationType.FORWARD, mb_index, stage_index)
+                    _Action(stage_index, _ComputationType.FORWARD, mb_index)
                 )
 
         # wait for the first backward to trickle up
@@ -951,7 +1170,7 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         for stage_index in reversed(stage_indices):
             for mb_index in reversed(range(self._n_microbatches)):
                 rank_ops.append(
-                    _Action(_ComputationType.BACKWARD, mb_index, stage_index)
+                    _Action(stage_index, _ComputationType.BACKWARD, mb_index)
                 )
         return rank_ops
 
@@ -965,10 +1184,14 @@ def _get_1f1b_rank_ops(
     rank,
     forward_stage_index,
     backward_stage_index,
+    num_1f1b_microbatches=0,
+    enable_zero_bubble=False,
 ):
     # All stages start with handling microbatch 0
     fwd_stage_mb_index: Dict[int, int] = defaultdict(int)
     bwd_stage_mb_index: Dict[int, int] = defaultdict(int)
+    weight_stage_mb_index: Dict[int, int] = defaultdict(int)
+
     # Store the list of operations used for that rank
     rank_ops: List[Optional[_Action]] = []
     # Pre-padding, rank starts with no-ops based on the warmup.
@@ -985,7 +1208,13 @@ def _get_1f1b_rank_ops(
         n_local_stages * pp_group_size + 2 * (pp_group_size - 1 - rank)
     ) - (warmup_ops + rank)
 
+    if enable_zero_bubble:
+        post_warmup_ops = pp_group_size - rank - 1
+
     total_ops = warmup_ops + fwd_bwd_ops + cooldown_ops
+
+    backward_op_ids = []
+    weight_op_count = 0
 
     for op in range(total_ops):
         # Warmup phase
@@ -996,7 +1225,7 @@ def _get_1f1b_rank_ops(
                 mb_index := fwd_stage_mb_index[fwd_stage_index]
             ) + 1
             rank_ops.append(
-                _Action(_ComputationType.FORWARD, mb_index, fwd_stage_index)
+                _Action(fwd_stage_index, _ComputationType.FORWARD, mb_index)
             )
             if op == warmup_ops - 1:
                 # This is the last step in the warmup phase, so we need to wait for the backward to trickle back up
@@ -1008,27 +1237,70 @@ def _get_1f1b_rank_ops(
                 fwd_mb_index := fwd_stage_mb_index[fwd_stage_index]
             ) + 1
             rank_ops.append(
-                _Action(_ComputationType.FORWARD, fwd_mb_index, fwd_stage_index)
+                _Action(fwd_stage_index, _ComputationType.FORWARD, fwd_mb_index)
             )
             bwd_stage_index = backward_stage_index(op)
             bwd_stage_mb_index[bwd_stage_index] = (
                 bwd_mb_index := bwd_stage_mb_index[bwd_stage_index]
             ) + 1
             rank_ops.append(
-                _Action(_ComputationType.BACKWARD, bwd_mb_index, bwd_stage_index)
+                _Action(bwd_stage_index, _ComputationType.BACKWARD, bwd_mb_index)
             )
+            backward_op_ids.append(op)
+
+            if enable_zero_bubble and op - warmup_ops >= num_1f1b_microbatches:
+                weight_stage_index = backward_stage_index(
+                    backward_op_ids[weight_op_count]
+                )
+                weight_stage_mb_index[weight_stage_index] = (
+                    weight_mb_index := weight_stage_mb_index[weight_stage_index]
+                ) + 1
+                rank_ops.append(
+                    _Action(
+                        weight_stage_index, _ComputationType.WEIGHT, weight_mb_index
+                    )
+                )
+                weight_op_count += 1
         # Cooldown phase
         else:
             # During cooldown phase, we need steps to align with 1f1b happening in other ranks
             # TODO: we don't need to always append, after all 1f1b are finished we can stop appending None
-            rank_ops.append(None)
+            if not enable_zero_bubble:
+                rank_ops.append(None)
+
             bwd_stage_index = backward_stage_index(op)
             bwd_stage_mb_index[bwd_stage_index] = (
                 bwd_mb_index := bwd_stage_mb_index[bwd_stage_index]
             ) + 1
             rank_ops.append(
-                _Action(_ComputationType.BACKWARD, bwd_mb_index, bwd_stage_index)
+                _Action(bwd_stage_index, _ComputationType.BACKWARD, bwd_mb_index)
             )
+            backward_op_ids.append(op)
+
+            if enable_zero_bubble and op - warmup_ops >= num_1f1b_microbatches:
+                weight_stage_index = backward_stage_index(
+                    backward_op_ids[weight_op_count]
+                )
+                weight_stage_mb_index[weight_stage_index] = (
+                    weight_mb_index := weight_stage_mb_index[weight_stage_index]
+                ) + 1
+                rank_ops.append(
+                    _Action(
+                        weight_stage_index, _ComputationType.WEIGHT, weight_mb_index
+                    )
+                )
+                weight_op_count += 1
+
+    while enable_zero_bubble and weight_op_count < len(backward_op_ids):
+        weight_stage_index = backward_stage_index(backward_op_ids[weight_op_count])
+        weight_stage_mb_index[weight_stage_index] = (
+            weight_mb_index := weight_stage_mb_index[weight_stage_index]
+        ) + 1
+        rank_ops.append(
+            _Action(weight_stage_index, _ComputationType.WEIGHT, weight_mb_index)
+        )
+        weight_op_count += 1
+
     return rank_ops
 
 
@@ -1146,6 +1418,8 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
 
     1. pp_group_size = 4, n_microbatches = 10. We will have num_rounds = 2 and n_microbatches % 2 is 0.
     2. pp_group_size = 4, n_microbatches = 3. We will have num_rounds = 1 and n_microbatches % 1 is 0.
+
+    When enable_zero_bubble is True, we will use the ZB1P schedule in https://openreview.net/pdf?id=tuzTN0eIO5
     """
 
     def __init__(
@@ -1156,6 +1430,7 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
         args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+        enable_zero_bubble: bool = False,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -1165,11 +1440,13 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
             args_chunk_spec=args_chunk_spec,
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
+            use_full_backward=not enable_zero_bubble,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
         self.number_of_rounds = max(1, n_microbatches // self.pp_group_size)
         self.microbatches_per_round = n_microbatches // self.number_of_rounds
+        self.enable_zero_bubble = enable_zero_bubble
         if n_microbatches % self.number_of_rounds != 0:
             raise ValueError(
                 "Flexible Interleaved 1F1B requires the number of microbatches to be a "
@@ -1184,6 +1461,13 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
             rank_ops = self._calculate_single_rank_operations(rank)
             self.pipeline_order[rank] = rank_ops
 
+        # This function add bubbles to the generated schedule based on dependencies of actions
+        # Note that the ZB1P schedule will not require bubbles to be manually added and it is
+        # only useful when n_microbatches <= microbatches_per_round
+        self.pipeline_order = self._add_bubbles_to_actions(
+            self.n_local_stages * self.pp_group_size,
+        )
+
     def _calculate_single_rank_operations(self, rank) -> List[Optional[_Action]]:
         def get_rank_warmup_ops(rank):
             # Warms up operations for last stage
@@ -1191,7 +1475,11 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
                 self.n_local_stages - 1
             ) * self.microbatches_per_round
             # Increment warmup operations by 2 for each hop away from the last stage
-            warmup_ops = warmups_ops_last_stage + 2 * ((self.pp_group_size - 1) - rank)
+            multiply_factor = 1 if self.enable_zero_bubble else 2
+            warmup_ops = warmups_ops_last_stage + multiply_factor * (
+                (self.pp_group_size - 1) - rank
+            )
+
             # We cannot have more warmup operations than there are number of microbatches, so cap it there
             return min(warmup_ops, self._n_microbatches * self.n_local_stages)
 
@@ -1229,6 +1517,22 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
             )
             return (local_index * self.pp_group_size) + rank
 
+        if self.enable_zero_bubble:
+            num_1f1b_microbatches = rank
+
+            return _get_1f1b_rank_ops(
+                self.n_local_stages,
+                self.pp_group_size,
+                warmup_ops,
+                fwd_bwd_ops,
+                cooldown_ops,
+                rank,
+                forward_stage_index,
+                backward_stage_index,
+                num_1f1b_microbatches,
+                enable_zero_bubble=True,
+            )
+
         return _get_1f1b_rank_ops(
             self.n_local_stages,
             self.pp_group_size,
@@ -1239,3 +1543,69 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
             forward_stage_index,
             backward_stage_index,
         )
+
+    def _add_bubbles_to_actions(self, num_stages_global):
+        actions = self.pipeline_order
+        if not self.enable_zero_bubble:
+            return actions
+
+        def need_bubble(stage, op, microbatch, num_stages_global, seen_ops):
+            if op == _ComputationType.FORWARD:
+                if stage != 0 and (stage - 1, op, microbatch) not in seen_ops:
+                    return True
+            elif op == _ComputationType.BACKWARD:
+                if stage == num_stages_global - 1:
+                    return (stage, _ComputationType.FORWARD, microbatch) not in seen_ops
+                return (stage + 1, op, microbatch) not in seen_ops
+            return False
+
+        seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
+        result: Dict[int, List[Optional[_Action]]] = {}
+        next_pointer: Dict[int, int] = {}
+        bubbles_added: Dict[int, int] = {}
+        total_bubbles_added = 0
+
+        for rank in range(self.pp_group_size):
+            result[rank] = []
+            next_pointer[rank] = 0
+            bubbles_added[rank] = 0
+
+        while True:
+            should_stop = True
+
+            temp_seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
+
+            for rank in range(self.pp_group_size):
+                timestamp = next_pointer[rank]
+                if timestamp >= len(actions[rank]):
+                    continue
+
+                should_stop = False
+
+                if actions[rank][timestamp] is not None:
+                    temp_action = actions[rank][timestamp]
+                    assert temp_action is not None
+                    stage_index, op, microbatch = temp_action
+                    if not need_bubble(
+                        stage_index, op, microbatch, num_stages_global, seen_ops
+                    ):
+                        result[rank].append(actions[rank][timestamp])
+                        if microbatch is not None:
+                            temp_seen_ops.add((stage_index, op, microbatch))
+                        next_pointer[rank] += 1
+                    else:
+                        result[rank].append(None)
+                        bubbles_added[rank] += 1
+                else:
+                    next_pointer[rank] += 1
+                    result[rank].append(None)
+
+            seen_ops.update(temp_seen_ops)
+            if should_stop:
+                break
+
+        if total_bubbles_added > 0:
+            logger.warning(
+                f"Non zero bubbles added: {total_bubbles_added=} {bubbles_added=}"  # noqa: G004
+            )
+        return result

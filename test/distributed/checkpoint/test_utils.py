@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-from unittest.mock import MagicMock
 
 import torch
 
@@ -12,6 +11,8 @@ from torch.distributed._shard.sharded_tensor import (
     ShardMetadata,
 )
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
+from torch.distributed.c10d_logger import _c10d_logger
+from torch.distributed.checkpoint.logger import _dcp_logger
 from torch.distributed.checkpoint.metadata import MetadataIndex
 from torch.distributed.checkpoint.utils import find_state_dict_object
 
@@ -123,13 +124,9 @@ class TestMedatadaIndex(TestCase):
         with self.assertRaisesRegex(ValueError, "Could not find shard"):
             find_state_dict_object(state_dict, MetadataIndex("st", [1]))
 
-
-class TestTensorProperties(TestCase):
-    def test_create_from_tensor_correct_device(self):
-        t = torch.randn([10, 2], device="cpu")
-        t.is_pinned = MagicMock(return_value=True)
-        TensorProperties.create_from_tensor(t)
-        t.is_pinned.assert_called_with(device=torch.device("cpu"))
+    def test_dcp_logger(self):
+        self.assertTrue(_c10d_logger is not _dcp_logger)
+        self.assertEqual(1, len(_c10d_logger.handlers))
 
 
 if __name__ == "__main__":
