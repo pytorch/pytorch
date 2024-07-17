@@ -126,6 +126,16 @@ joint_custom_post_pass: Optional[Callable[[torch.fx.Graph], None]] = None
 # use post-grad passes.
 pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 
+# Registers a custom pass to be run right before fusion in Inductor scheduler.
+# WARNING: Inductor scheduler IR is at prototype stage and subject to change,
+# hence custom IR passes built on top of it might break in the future.
+_pre_fusion_custom_pass: Optional[
+    Callable[
+        [List["torch._inductor.scheduler.BaseSchedulerNode"]],
+        List["torch._inductor.scheduler.BaseSchedulerNode"],
+    ]
+] = None
+
 # Deprecated
 split_cat_fx_passes = True
 
@@ -219,6 +229,8 @@ reorder_for_compute_comm_overlap = False
 
 # passes (in execution order) for increasing overlap between compute and communication
 # for built-in passes, use string name; for user-defined passes, pass in the function handle
+# WARNING: Inductor scheduler IR is at prototype stage and subject to change,
+# hence custom IR passes built on top of it might break in the future.
 reorder_for_compute_comm_overlap_passes = [
     "reorder_compute_for_overlap",
     "sink_waits",
@@ -309,6 +321,19 @@ coordinate_descent_check_all_directions = (
 )
 coordinate_descent_search_radius = int(
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
+)
+
+# AutoHeuristic is a framework that allows one to collect data from autotuning, use the data to learn a heuristic, and
+# generate the learned heursitic to code which is shipped with the compiler. For now, this is only enabled for pad_mm.
+# If set to "OFF", this will not run AutoHeuristic.
+# If set to "COLLECT_DATA", this will store data about the inputs and autotuning results.
+# If set to "USE_HEURISTIC", this will use the learned heuristic to make a choice in pad_mm.
+autoheuristic_mode = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_MODE", "OFF")
+
+# If set to "DEFAULT", this will use the default log path specified in autoheuristic.py.
+# If set to another path, autoheuristic will instead log results to the given path.
+autoheuristic_log_path = os.environ.get(
+    "TORCHINDUCTOR_AUTOHEURISTIC_LOG_PATH", "DEFAULT"
 )
 
 # Disabled by default on ROCm, opt-in if model utilises NHWC convolutions
@@ -417,16 +442,15 @@ optimize_scatter_upon_const_tensor = (
 
 
 # The multiprocessing start method to use for inductor workers in the codecache.
-# "subprocess", "fork", or "spawn"
+# Can be "subprocess" or "fork".
 def decide_worker_start_method():
     start_method = os.environ.get(
         "TORCHINDUCTOR_WORKER_START", "fork" if is_fbcode() else "subprocess"
     )
-    assert start_method in [
+    assert start_method in (
         "subprocess",
         "fork",
-        "spawn",
-    ], f"Invalid start method: {start_method}"
+    ), f"Invalid start method: {start_method}"
     return start_method
 
 
@@ -677,6 +701,13 @@ class triton:
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
     cudagraph_support_input_mutation = False if is_fbcode() else True
 
+    # Maximal number of allowed cudagraph re-record for a function and
+    # a cudagraph node due to static input tensor address changes or
+    # cudagraph managed tensor data pointer changed.
+    # i.e., allow num_recording <= cudagraph_unexpected_rerecord_limit
+    # note: we are conservative here and choose a large limit.
+    cudagraph_unexpected_rerecord_limit = 128
+
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
 
@@ -799,6 +830,8 @@ class aot_inductor:
     # flag to force weight to be appened to the shared library and mmaped  by the runtime
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
+
+    package: bool = False
 
 
 class cuda:
