@@ -77,6 +77,7 @@ class TestMetrics(TestCase):
             "INNER", metrics._parse_reduction_hint(kernel_category, example_kernel)
         )
 
+    @config.patch("fx_graph_remote_cache", False)
     def test_atomic_add(self):
         @torch.compile
         def f(lhs, index, rhs):
@@ -95,6 +96,7 @@ class TestMetrics(TestCase):
         self.assertEqual(metrics._count_pattern(kernel_code, "tl.atomic_add"), 1)
 
     @largeTensorTest(25e7 * 2 * 4, device=GPU_TYPE)
+    @config.patch("fx_graph_remote_cache", False)
     @config.patch("benchmark_kernel", True)
     def test_kernel_args_num_gb(self):
         @torch.compile
