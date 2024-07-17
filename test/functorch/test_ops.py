@@ -31,7 +31,6 @@ from functorch_additional_op_db import additional_op_db
 
 import torch
 import torch.autograd.forward_ad as fwAD
-
 from functorch import grad, jacfwd, jacrev, vjp, vmap
 from torch import Tensor
 from torch._functorch.eager_transforms import _as_tuple, jvp
@@ -44,7 +43,6 @@ from torch.testing._internal.common_device_type import (
     toleranceOverride,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     IS_MACOS,
@@ -59,10 +57,10 @@ from torch.testing._internal.common_utils import (
     TestCase,
     unMarkDynamoStrictTest,
 )
-
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+
 
 aten = torch.ops.aten
 
@@ -459,11 +457,7 @@ class TestOperators(TestCase):
                 {torch.float32: tol(atol=1e-04, rtol=1e-04)},
             ),
             tol1("masked.cumprod", {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
-            tol1(
-                "svd_lowrank",
-                {torch.float32: tol(atol=3e-04, rtol=3e-04)},
-                device_type="cuda",
-            ),
+            tol1("svd_lowrank", {torch.float32: tol(atol=3e-04, rtol=3e-04)}),
             tol1(
                 "linalg.multi_dot",
                 {torch.float32: tol(atol=1e-05, rtol=8e-04)},
