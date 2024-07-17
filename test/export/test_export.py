@@ -2178,7 +2178,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     @testing.expectedFailureSerDer  # we don't save placeholder metadata
     @testing.expectedFailureNonStrict
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193692674
+    @testing.expectedFailureTrainingIRToRunDecomp  # source_fn_stack failure
     @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
@@ -2969,8 +2969,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             export(Module(), (torch.tensor(1, dtype=torch.float),))
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193692674
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_module(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -3016,8 +3014,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             )
         )
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193701564
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_module_with_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -3861,9 +3857,6 @@ def forward(self, b_a_buffer, x):
         ):
             graph_module.eval()
 
-    # TODO Retracing a module with constant attrs don't work.(T193692674)
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     @testing.expectedFailureRetraceability  # T183144788
     def test_lifted_constants(self) -> None:
         class Module(torch.nn.Module):
@@ -4247,7 +4240,7 @@ graph():
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
     @testing.expectedFailureRetraceability  # Retracing tensor constants results in buffers
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193692674
+    @testing.expectedFailureTrainingIRToRunDecomp  # detach() is not present
     @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_nested_module_with_constant_buffer(self):
         class M1(torch.nn.Module):
@@ -4397,9 +4390,6 @@ graph():
         inp = (torch.tensor(6), torch.randn(13))
         self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
 
-    # TODO Retracing a module with constant attrs don't work.(T193692674)
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     @unittest.skip("Test is only supposed to work with non-strict mode")
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
@@ -5265,8 +5255,6 @@ def forward(self, x, b_t, y):
         self.assertEqual(copied_m.state_dict(), m.state_dict())
         self.assertEqual(ep.state_dict, m.state_dict())
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193692674
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -5332,9 +5320,6 @@ def forward(self, x, b_t, y):
         for n1, n2 in zip(list(ep.graph.nodes), list(ep2.graph.nodes)):
             self.assertEqual(n1.meta.get("stack_trace"), n2.meta.get("stack_trace"))
 
-    # TODO Retracing a module with constant attrs don't work.(T193692674)
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_fake_weights(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -5544,10 +5529,7 @@ def forward(self, x):
 
     # original input names aren't retraceable:
     # compilation will succeed, but names won't match forward() signature.
-    # TODO Retracing a module with constant attrs don't work.(T193692674)
     @testing.expectedFailureRetraceability
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
         class Foo(torch.nn.Module):
