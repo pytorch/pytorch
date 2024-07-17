@@ -1138,7 +1138,7 @@ def main():
     install_requires = [
         "filelock",
         "typing-extensions>=4.8.0",
-        "sympy",
+        "sympy>=1.13.0",
         "networkx",
         "jinja2",
         "fsspec",
