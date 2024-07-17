@@ -2808,7 +2808,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         nccl_debug_file_content = nccl_debug_file.read()
         max_ctas = re.search(rb"Max CTAs.*(\d+)|$", nccl_debug_file_content).group(1)
         min_ctas = re.search(rb"Min CTAs.*(\d+)|$", nccl_debug_file_content).group(1)
-        split_share = re.search(rb"Split share.*(\d+)|$", nccl_debug_file_content).group(1)
+        split_share = re.search(
+            rb"Split share.*(\d+)|$", nccl_debug_file_content
+        ).group(1)
         cga_cluster_size = re.search(
             rb"CGA cluster.*(\d+)|$", nccl_debug_file_content
         ).group(1)
