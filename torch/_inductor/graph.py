@@ -999,6 +999,7 @@ class GraphLowering(torch.fx.Interpreter):
             if value.shape == ():
                 return Constant(value.item(), value.dtype, value.device)
             if self.can_inline_constant(value):
+                log.debug("Inlining constant: %s ", str(target))
                 # tensor lowering has constant inlining logic
                 from .lowering import tensor
 

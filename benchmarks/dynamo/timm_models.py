@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import importlib
 import logging
 import os
@@ -7,15 +8,16 @@ import subprocess
 import sys
 import warnings
 
+
 try:
     from .common import BenchmarkRunner, download_retry_decorator, main
 except ImportError:
     from common import BenchmarkRunner, download_retry_decorator, main
 
 import torch
-
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
+
 
 # Enable FX graph caching
 if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:

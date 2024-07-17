@@ -19,6 +19,7 @@ from torch.distributed import DistError, DistNetworkError, DistStoreError
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
 
+
 if not dist.is_available():
     print("torch.distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -37,6 +38,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -275,12 +277,26 @@ class TCPStoreTest(TestCase, StoreTestBase):
             addr, world_size, wait_for_workers=False, use_libuv=self._use_libuv
         )
 
-    def test_address_already_in_use(self):
-        err_msg_reg = "^The server socket has failed to listen on any local "
-        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
-            addr = DEFAULT_HOSTNAME
-            port = common.find_free_port()
+    def test_invalid_port(self):
+        addr = DEFAULT_HOSTNAME
+        port = 1
 
+        err_msg_reg = f"^(The server socket has failed to listen on any local|The server socket has failed to bind).*{port}"
+        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
+            # Use noqa to silence flake8.
+            # Need to store in an unused variable here to ensure the first
+            # object is not destroyed before the second object is created.
+            store1 = dist.TCPStore(
+                addr, port, 1, True, use_libuv=self._use_libuv
+            )  # noqa: F841
+            self.assertEqual(store1.libuvBackend, self._use_libuv)
+
+    def test_address_already_in_use(self):
+        addr = DEFAULT_HOSTNAME
+        port = common.find_free_port()
+
+        err_msg_reg = f"^The server socket has failed to listen on any local .*{port}"
+        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
             # object is not destroyed before the second object is created.
