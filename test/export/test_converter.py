@@ -5,13 +5,12 @@ from collections import OrderedDict
 from typing import Dict, List, Tuple, Union
 
 import torch
-
 import torch.utils._pytree as pytree
-
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
 from torch.testing._internal.common_utils import run_tests
+
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
@@ -797,7 +796,18 @@ class TestConverter(TestCase):
             torch.randn([2, 3, 4]).to(torch.float32),
             torch.randn([2, 3, 4]).to(torch.float64),
         )
-        self._check_equal_ts_ep_converter(func6, inp)
+        ep_list = self._check_equal_ts_ep_converter(func6, inp)
+
+        # TODO: Additional check once dynamic shape is supported.
+        # for ep in ep_list:
+        #     self.assertEqual(
+        #         ep.module()(
+        #             torch.randn([1, 1, 1]).to(torch.int8),
+        #             torch.randn([1, 1, 1]).to(torch.int32),
+        #             torch.randn([1, 1, 1]).to(torch.float32),
+        #             torch.randn([1, 1, 1]).to(torch.float64),
+        #         )[0], 1
+        #     )
 
     def test_prim_tolist(self):
         class Module(torch.nn.Module):
