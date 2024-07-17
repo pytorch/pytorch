@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
-
 import torch
 from ..._dynamo.utils import counters
 from ..ir import FixedLayout
@@ -13,9 +11,9 @@ from ..pattern_matcher import (
 )
 from ..select_algorithm import (
     autotune_select_algorithm,
+    ExternKernelChoice,
     TritonTemplate,
     TritonTemplateCaller,
-    ExternKernelChoice,
 )
 from ..utils import ceildiv
 
@@ -105,15 +103,20 @@ b2b_gemm_template = TritonTemplate(
 )
 
 
-# numbers of loads and stores in baseline and b2bgemm
-# M, N, O, P are matrix sizes
-# m, n, o, p are block sizes
-# |       | baseline                      | b2bgemm
-# | load  | M * N + N * O + M * O + O * P | M / m * P / p * N / n * (m * n + O / o * (n * o + o * p))
-# | store | M * O + M * P                 | M * P
-# b2bgemm is always better on stores, but for loads we need to find out beneficial cases using this function
 def load_ratio(M: int, N: int, O: int, P: int, m: int, n: int, o: int, p: int) -> float:
-    cdiv = lambda x, y: x // y + (1 if x % y != 0 else 0)
+    """
+    compute the ratio of estimated numbers of loads in baseline and b2bgemm
+    M, N, O, P are matrix sizes
+    m, n, o, p are block sizes
+    |       | baseline (lower bound)        | b2bgemm
+    | load  | M * N + N * O + M * O + O * P | M / m * P / p * N / n * (m * n + O / o * (n * o + o * p))
+    | store | M * O + M * P                 | M * P
+    b2bgemm is always better on stores, but for loads we need to find out beneficial cases using this function
+    """
+
+    def cdiv(x: int, y: int):
+        return x // y + (1 if x % y != 0 else 0)
+
     base = M * N + N * O + M * O + O * P
     gemm = cdiv(M, m) * cdiv(P, p) * cdiv(N, n) * (m * n + cdiv(O, o) * (n * o + o * p))
     return base / gemm
@@ -219,7 +222,7 @@ def tuned_b2b_gemm(
     mat2: torch._inductor.ir.TensorBox,
     mat3: torch._inductor.ir.TensorBox,
     *,
-    layout=None
+    layout=None,
 ) -> torch._inductor.ir.TensorBox:
     # call .realize() to get rid of Pointwise
     mat1.realize()
@@ -245,7 +248,9 @@ def tuned_b2b_gemm(
 # TODO: later will change to matching (A @ B) in (epilogue2 ((epilogue1 (A @ B)) @ C)) and inspecting the graph
 # TODO: match more cases such as bmm and addmm, and (A @ (B @ C)), etc.
 @register_graph_pattern(
-    CallFunction(torch.ops.aten.mm, CallFunction(torch.ops.aten.mm, Arg(), Arg()), Arg()),
+    CallFunction(
+        torch.ops.aten.mm, CallFunction(torch.ops.aten.mm, Arg(), Arg()), Arg()
+    ),
     extra_check=can_apply_b2b_gemm,
     pass_dict=B2B_GEMM_PASS,
 )
