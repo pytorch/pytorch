@@ -2289,8 +2289,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         def f(x, y):
             return add(x, y)
 
-        x = torch.randn(3, device="cuda")
-        y = torch.randn(3, device="cuda")
+        x = torch.randn(3, device=GPU_TYPE)
+        y = torch.randn(3, device=GPU_TYPE)
 
         out = f(x, y)
         expected = x + y
