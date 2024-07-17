@@ -2591,7 +2591,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     work->stashed_for_allocator_safety_->push_back(input);
   }
 
-  at::cuda::OptionalCUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard(device.index());
 
   // Start event should only be recorded before the ncclGroupStart()
   if (work->timingEnabled_) {
@@ -3021,7 +3021,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 
   // is gpuGuard needed for the if block below, or can i swap them
-  at::cuda::OptionalCUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard(device.index());
 
   if (!coalescing_state_) {
     // Start event should only be recorded before the ncclGroupStart()
@@ -3929,8 +3929,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
 
   // Use one device only
   auto device = devices.back();
+  at::cuda::OptionalCUDAGuard gpuGuard(device.index());
   at::Tensor barrierTensor =
-      at::empty({1}, at::TensorOptions().device(device).dtype(at::kByte));
+      at::empty({1}, at::TensorOptions().device(at::DeviceType::CUDA).dtype(at::kByte));
   // All reduce to achieve the barrier
   auto work = allreduce_impl(barrierTensor);
 
