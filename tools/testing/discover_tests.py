@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 
+
 CPP_TEST_PREFIX = "cpp"
 CPP_TEST_PATH = "build/bin"
 CPP_TESTS_DIR = os.path.abspath(os.getenv("CPP_TESTS_DIR", default=CPP_TEST_PATH))
@@ -132,6 +133,8 @@ TESTS = discover_tests(
         "distributed/elastic/utils/distributed_test",
         "distributed/elastic/multiprocessing/api_test",
         "doctests",
+        "test_autoload_enable",
+        "test_autoload_disable",
     ],
 )
 

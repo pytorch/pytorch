@@ -40,8 +40,8 @@ _TransformParam: TypeAlias = Tuple[
 _Range: TypeAlias = Tuple[int, int]
 
 
-PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
-POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
+PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
+POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
 
 pre_grad_pass_names = [
     "normalization_pass",
@@ -67,7 +67,6 @@ for pass_name in pre_grad_pass_names:
     if pass_name in PRE_GRAD_FUSIONS:
         continue
     PRE_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
-        prevent_match_across_mutations=True,
         pass_name=pass_name,
     )
 
@@ -77,7 +76,6 @@ for pass_name in post_grad_pass_names:
     if pass_name in POST_GRAD_FUSIONS:
         continue
     POST_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
-        prevent_match_across_mutations=True,
         pass_name=pass_name,
     )
 

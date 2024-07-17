@@ -19,7 +19,7 @@ struct StashTorchDispatchModeGuard {
   }
 
   ~StashTorchDispatchModeGuard() {
-    if (saved_mode_key_ != c10::nullopt) {
+    if (saved_mode_key_ != std::nullopt) {
       c10::impl::TorchDispatchModeTLS::set_mode(
           saved_mode_, saved_mode_key_.value());
     } else {
