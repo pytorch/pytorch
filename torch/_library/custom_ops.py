@@ -740,17 +740,20 @@ class CustomOpDef:
         from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
 
         def register(func):
+            need_register = self._vmap_fn is None
             self._vmap_fn = func
 
-            def wrapped_func(keyset, *args, **kwargs):
-                interpreter = retrieve_current_functorch_interpreter()
-                return custom_function_call_vmap_helper(
-                    interpreter, self._vmap_fn, self._opoverload, *args, **kwargs
-                )
+            if need_register:
 
-            self._lib.impl(
-                self._name, wrapped_func, "FuncTorchBatched", with_keyset=True
-            )
+                def wrapped_func(keyset, *args, **kwargs):
+                    interpreter = retrieve_current_functorch_interpreter()
+                    return custom_function_call_vmap_helper(
+                        interpreter, self._vmap_fn, self._opoverload, *args, **kwargs
+                    )
+
+                self._lib.impl(
+                    self._name, wrapped_func, "FuncTorchBatched", with_keyset=True
+                )
 
         if func is None:
             return register

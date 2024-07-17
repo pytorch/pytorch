@@ -3492,6 +3492,146 @@ Please use `add.register_fake` to add an fake impl.""",
             self.assertEqual(result, (x * y).T)
             self.assertTrue(called)
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_vmap_library_decorator(self):
+
+        @torch.library.custom_op("mylib::f", mutates_args=())
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            return x * y
+
+        called = False
+
+        @torch.library.register_vmap("mylib::f")
+        def fvmap(info, in_dims, x, y):
+            nonlocal called
+            called = True
+            x_bdim, y_bdim = in_dims
+            x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+            y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+            result = x * y
+            result = result.movedim(-1, 0)
+            return result, 0
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+
+        result = torch.vmap(f)(x, y)
+        self.assertTrue(called)
+        self.assertEqual(result, x * y)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_vmap_op_decorator(self):
+
+        @torch.library.custom_op("mylib::f", mutates_args=())
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            return x * y
+
+        called = False
+
+        @f.register_vmap
+        def fvmap(info, in_dims, x, y):
+            nonlocal called
+            called = True
+            x_bdim, y_bdim = in_dims
+            x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+            y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+            result = x * y
+            result = result.movedim(-1, 0)
+            return result, 0
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+
+        result = torch.vmap(f)(x, y)
+        self.assertTrue(called)
+        self.assertEqual(result, x * y)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_vmap_register_multiple_times(self):
+
+        @torch.library.custom_op("mylib::f", mutates_args=())
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            return x * y
+
+        called = False
+
+        @f.register_vmap
+        def fvmap(info, in_dims, x, y):
+            nonlocal called
+            called = True
+            x_bdim, y_bdim = in_dims
+            x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+            y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+            result = x * y
+            result = result.movedim(-1, 0)
+            return result, 0
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+
+        result = torch.vmap(f)(x, y)
+        self.assertTrue(called)
+        self.assertEqual(result, x * y)
+        called = False
+
+        @f.register_vmap
+        def fvmap2(info, in_dims, x, y):
+            nonlocal called
+            called = True
+            x_bdim, y_bdim = in_dims
+            x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+            y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+            result = x + y
+            result = result.movedim(-1, 0)
+            return result, 0
+
+        result = torch.vmap(f)(x, y)
+        self.assertTrue(called)
+        self.assertEqual(result, x + y)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_vmap_register_multiple_times_2(self):
+
+        @torch.library.custom_op("mylib::f", mutates_args=())
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            return x * y
+
+        called = False
+
+        @torch.library.register_vmap("mylib::f")
+        def fvmap(info, in_dims, x, y):
+            nonlocal called
+            called = True
+            x_bdim, y_bdim = in_dims
+            x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+            y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+            result = x * y
+            result = result.movedim(-1, 0)
+            return result, 0
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+
+        result = torch.vmap(f)(x, y)
+        self.assertTrue(called)
+        self.assertEqual(result, x * y)
+        called = False
+
+        @torch.library.register_vmap("mylib::f")
+        def fvmap2(info, in_dims, x, y):
+            nonlocal called
+            called = True
+            x_bdim, y_bdim = in_dims
+            x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+            y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+            result = x + y
+            result = result.movedim(-1, 0)
+            return result, 0
+
+        result = torch.vmap(f)(x, y)
+        self.assertTrue(called)
+        self.assertEqual(result, x + y)
+
 
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"
