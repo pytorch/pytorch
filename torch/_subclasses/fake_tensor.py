@@ -90,6 +90,7 @@ class _Unassigned:
 
 _UNASSIGNED = _Unassigned()
 
+_py_sym_type = (SymInt, SymFloat, SymBool)
 _PySymType = Union[SymInt, SymFloat, SymBool]
 
 DimList = List
@@ -1105,6 +1106,9 @@ class _DeconstructedSymType:
         return NotImplemented
 
 
+_InputBackref = int
+
+
 @dataclass
 class _PySymInputStub:
     """
@@ -1114,22 +1118,36 @@ class _PySymInputStub:
 
     __slots__ = ("value",)
 
-    value: Union[_PySymType, _DeconstructedSymType]
+    # value can be:
+    #   _PySymType: This is the 'normal' SymInt value, wrapped so we can use
+    #               hash/eq as value hash/eq (normally SymInt does object
+    #               hash/eq).
+    #   _DeconstructedSymType: This is used when storing the _PySymInputStub in
+    #                          the cache to avoid cyclic ShapeEnv references.
+    #   _InputBackref: This is a back-reference to a previous _PySymInputStub in
+    #                  the key.
+    value: Union[_PySymType, _DeconstructedSymType, _InputBackref]
 
-    def __init__(self, value: Union[_PySymType, _DeconstructedSymType]) -> None:
+    def __init__(
+        self, value: Union[_PySymType, _DeconstructedSymType, _InputBackref]
+    ) -> None:
         # For inputs (values in the `key`) we need to keep the _PySymType intact
         # - this way if we need to reuse it as an output we can properly copy
         # the original value.
         self.value = value
 
     def strip_shape_env(self) -> None:
-        if not isinstance(self.value, _DeconstructedSymType):
+        if isinstance(self.value, _py_sym_type):
             self.value = _DeconstructedSymType.from_sym_type(self.value)
 
     def extract(self, shape_env: ShapeEnv) -> _PySymType:
         if isinstance(self.value, _DeconstructedSymType):
             return self.value.extract(shape_env)
         else:
+            # We should never see an _InputBackref here - anyone extracting a
+            # value should be pulling from the original entry (the one this
+            # backref points at).
+            assert not isinstance(self.value, _InputBackref)
             return self.value
 
     def __str__(self) -> str:
@@ -1141,10 +1159,18 @@ class _PySymInputStub:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _PySymInputStub):
             return False
-        return self.value.node._value_eq(other.value.node)
+        elif isinstance(self.value, _InputBackref) or isinstance(
+            other.value, _InputBackref
+        ):
+            return self.value == other.value
+        else:
+            return self.value.node._value_eq(other.value.node)
 
     def __hash__(self) -> int:
-        return self.value.node._value_hash()
+        if isinstance(self.value, _InputBackref):
+            return hash(self.value)
+        else:
+            return self.value.node._value_hash()
 
 
 @dataclass
@@ -1241,7 +1267,7 @@ class _CacheKeyState:
     # about which node's ShapeEnv it will be.
     shape_env: Optional[ShapeEnv]
 
-    def __init__(self, shape_env: Optional[ShapeEnv]) -> None:
+    def __init__(self, shape_env: Optional[ShapeEnv] = None) -> None:
         self.sym_node_lookup = {}
         self.shape_env = shape_env
 
@@ -1253,10 +1279,13 @@ class _CacheKeyState:
         return bool(self.sym_node_lookup)
 
     def convert_sym_int(self, result: List[object], arg: SymInt) -> None:
-        self.sym_node_lookup[id(arg.node)] = len(result)
-        if self.shape_env is None:
-            self.shape_env = arg.node.shape_env
-        result.append(_PySymInputStub(arg))
+        if id(arg.node) in self.sym_node_lookup:
+            result.append(_InputBackref(len(result)))
+        else:
+            self.sym_node_lookup[id(arg.node)] = len(result)
+            if self.shape_env is None:
+                self.shape_env = arg.node.shape_env
+            result.append(_PySymInputStub(arg))
 
     def convert_input(
         self, result: List[object], arg: Optional[_MetadataIntLike]
