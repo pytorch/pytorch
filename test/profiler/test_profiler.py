@@ -1902,8 +1902,8 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_user_annotation(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
-        with profile(activities=supported_activities()):
-            with torch.profiler.record_function("test_user_annotation") as p:
+        with profile(activities=supported_activities()) as p:
+            with torch.profiler.record_function("test_user_annotation"):
                 self.payload(use_cuda=use_cuda)
 
         for evt in p.key_averages():
