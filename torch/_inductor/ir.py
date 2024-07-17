@@ -1672,9 +1672,8 @@ class Scan(Loops):
         combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         *,
-        # Whether we should fallback if split criteria is met but the backend
-        # feature is not available
-        require_split_scan: bool = True,
+        # Whether we have the option to fallback to aten
+        can_fallback_to_aten: bool = True,
         **kwargs,
     ) -> List[Optional[TensorBox]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
@@ -1719,7 +1718,7 @@ class Scan(Loops):
         if num_splits > 1:
             supports_split = torch.version.hip is None and len(dtypes) == 1
             if not supports_split:
-                if require_split_scan:
+                if can_fallback_to_aten:
                     # Fallback to ATen
                     return [None] * len(dtypes)
                 else:

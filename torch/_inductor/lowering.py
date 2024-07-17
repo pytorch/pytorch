@@ -6265,8 +6265,7 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
     kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
     result = ir.Scan.create(
         combine_fn=wrapped_combine_fn,
-        # If split scan is not supported, just use a non-split scan
-        require_split_scan=False,
+        can_fallback_to_aten=False,
         **kwargs,
     )
     if result[0] is None:
