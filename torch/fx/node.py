@@ -645,29 +645,10 @@ class Node(_NodeBase):
         if self.op in {"placeholder", "output"}:
             return True
 
-
-        def arg_is_view(arg):
-            from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import is_view_op
-            schema = getattr(arg.target, "_schema", None)
-            return schema is not None and is_view_op(schema)
-
-        def check_arg(arg):
-            return len(arg.users) > 1 or arg.op in {"placeholder", "get_attr"} or arg_is_view(arg)
-
         # Check if an impure function based on schema.
-        # A call_function is impure if it has at least one mutable argument that has more
-        # than 1 users (all arguments have `self` as a user).
         if self.op == "call_function":
             schema = getattr(self.target, "_schema", None)
-            schema_mutable = False
-            if schema is not None and schema.is_mutable:
-                for (idx, arg) in enumerate(schema.arguments):
-                    if arg.alias_info is not None and arg.alias_info.is_write:  # `arg` is mutable
-                        # a kwarg or arg has other users except self
-                        if arg.name in self.kwargs and check_arg(self.kwargs[arg.name]):
-                            schema_mutable = True
-                        elif not arg.kwarg_only and idx < len(self.args) and check_arg(self.args[idx]):
-                            schema_mutable = True
+            schema_mutable = schema is not None and schema.is_mutable
             return schema_mutable or self.target in _side_effectful_functions
 
         # Check if an impure module.
