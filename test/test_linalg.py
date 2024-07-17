@@ -3696,7 +3696,6 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     "The derivative of linalg.qr depends on Q"):
             b.backward()
-        #
         inp = torch.randn((7, 5), device=device, dtype=dtype, requires_grad=True)
         q, r = torch.linalg.qr(inp, mode='complete')
         b = torch.sum(r)
