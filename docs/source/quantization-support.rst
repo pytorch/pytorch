@@ -636,7 +636,7 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 .. automodule:: torch.quantization
 .. automodule:: torch.nn.intrinsic.modules
 .. automodule:: torch.ao.quantization.generate_numeric_debug_handle
-.. automodule:: torch.ao.quantization.NUMERIC_DEBUG_HANDLE_KEY                
+.. automodule:: torch.ao.quantization.NUMERIC_DEBUG_HANDLE_KEY
 .. automodule:: torch.ao.quantization.prepare_for_propagation_comparison
 .. automodule:: torch.ao.quantization.extract_results_from_loggers
 .. automodule:: torch.ao.quantization.compare_results
