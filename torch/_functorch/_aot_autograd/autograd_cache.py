@@ -234,6 +234,7 @@ def autograd_cache_key(
     """
     Generate a unique hash of the FX graph for caching.
     """
+    print(f"gm: {gm}")
     check_cacheable(gm)
     details = AOTAutogradCacheDetails(gm, example_inputs, config)
     # The prefix distinguishes among the other kinds of objects we cache

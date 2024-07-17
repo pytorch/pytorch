@@ -732,13 +732,13 @@ def forward(self, primals_1):
             c = torch.arange(9, dtype=a.dtype).view(3, 3)
             d = torch.arange(9, dtype=a.dtype).view(3, 3)
             with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(a):
-                torch.ops.fsdp.set_(a, b)
+                torch.ops.fsdp.set_.default(a, b)
             x = a * a
             with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(a):
-                torch.ops.fsdp.set_(a, c)
+                torch.ops.fsdp.set_.default(a, c)
             y = a * a
             with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(a):
-                torch.ops.fsdp.set_(a, c)
+                torch.ops.fsdp.set_.default(a, c)
             z = a * a
             return x + y + z
 
