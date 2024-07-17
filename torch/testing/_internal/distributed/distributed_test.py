@@ -1740,8 +1740,8 @@ class DistributedTest:
             rank = dist.get_rank()
             send_recv_size = 10
             tensor = _build_tensor(send_recv_size, value=rank)
-            recv_ranks = list()
-            irecv_ranks = list()
+            recv_ranks = []
+            irecv_ranks = []
 
             ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
@@ -4107,7 +4107,7 @@ class DistributedTest:
                     self.assertGreaterAlmostEqual(
                         float(time.time()),
                         float(expected_time[0]),
-                        "destination rank: %d, my rank: %d" % (dest, rank)
+                        msg="destination rank: %d, my rank: %d" % (dest, rank)
                         + " (if you see this failure, please report in #14554)",
                     )
 
@@ -7866,16 +7866,16 @@ class DistributedTest:
             }
 
             class ToyModel(torch.nn.Module):
-                def __init__(_self):  # noqa: B902
+                def __init__(self_):  # noqa: B902
                     super().__init__()
-                    _self.lin = nn.Linear(10, 10, bias=False)
+                    self_.lin = nn.Linear(10, 10, bias=False)
 
-                def forward(_self, x, expected_type):  # noqa: B902
+                def forward(self_, x, expected_type):  # noqa: B902
                     # Similar to scatter, the recursive to in the single-device
                     # case does not move tensors if they are in a custom type.
                     self.assertTrue(isinstance(x, expected_type))
                     fwd_tensor = validators[expected_type](x)
-                    return _self.lin(fwd_tensor)
+                    return self_.lin(fwd_tensor)
 
             model = torch.nn.parallel.DistributedDataParallel(
                 ToyModel().to(self.rank), device_ids=[self.rank]
@@ -7929,11 +7929,11 @@ class DistributedTest:
             b = torch.rand(batch, dim, device=self.rank)
 
             class NamedTupleModule(torch.nn.Module):
-                def __init__(_self):  # noqa: B902
+                def __init__(self_):  # noqa: B902
                     super().__init__()
-                    _self.lin = nn.Linear(10, 1)
+                    self_.lin = nn.Linear(10, 1)
 
-                def forward(_self, input, expected_type):  # noqa: B902
+                def forward(self_, input, expected_type):  # noqa: B902
                     # Without NamedTuple support, this would be of type tuple.
                     self.assertTrue(
                         isinstance(input, expected_type),
@@ -7942,7 +7942,7 @@ class DistributedTest:
                     self.assertEqual(input._fields, EXPECTED_FIELDS)
                     self.assertEqual(a, input.a)
                     self.assertEqual(b, input.b)
-                    return _self.lin(torch.mul(input.a, input.b))
+                    return self_.lin(torch.mul(input.a, input.b))
 
             model = torch.nn.parallel.DistributedDataParallel(
                 NamedTupleModule().cuda(self.rank), device_ids=[self.rank]

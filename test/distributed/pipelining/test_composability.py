@@ -20,10 +20,12 @@ from torch.distributed.pipelining import PipelineStage
 from torch.distributed.pipelining.schedules import (
     PipelineScheduleSingle,
     Schedule1F1B,
+    ScheduleFlexibleInterleaved1F1B,
     ScheduleGPipe,
+    ScheduleInterleaved1F1B,
+    ScheduleLoopedBFS,
 )
 from torch.nn.parallel import DistributedDataParallel as DDP
-
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
@@ -57,7 +59,16 @@ class ComposabilityTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["DDP", "FSDP"])
-    @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
+    @parametrize(
+        "ScheduleClass",
+        [
+            ScheduleGPipe,
+            Schedule1F1B,
+            ScheduleInterleaved1F1B,
+            ScheduleLoopedBFS,
+            ScheduleFlexibleInterleaved1F1B,
+        ],
+    )
     def test_manual_with_data_parallel(self, dp_type, ScheduleClass):
         device_mesh = init_device_mesh(
             "cuda", mesh_shape=(2, 2), mesh_dim_names=("dp", "pp")

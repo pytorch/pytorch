@@ -3,22 +3,18 @@
 from copy import deepcopy
 
 import torch
-import torch.distributed.checkpoint as DCP
-
+import torch.distributed.checkpoint as dcp
 from torch.distributed._tensor import init_device_mesh
-
 from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
     DefaultSavePlanner,
 )
-
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
 )
 from torch.testing._internal.common_utils import run_tests
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
@@ -61,9 +57,9 @@ class TestTpCheckpoint(DTensorTestBase):
         optimizer = torch.optim.SGD(model.parameters(), lr=0.25)
         original_state_dict = deepcopy(model.state_dict())
 
-        DCP.save_state_dict(
+        dcp.save(
             state_dict=original_state_dict,
-            storage_writer=DCP.FileSystemWriter(CHECKPOINT_DIR),
+            storage_writer=dcp.FileSystemWriter(CHECKPOINT_DIR),
             planner=DefaultSavePlanner(),
         )
 
@@ -79,9 +75,9 @@ class TestTpCheckpoint(DTensorTestBase):
         for param1, param2 in zip(original_state_dict.values(), state_dict.values()):
             self.assertNotEqual(param1.to_local(), param2.to_local())
 
-        DCP.load_state_dict(
+        dcp.load(
             state_dict=state_dict,
-            storage_reader=DCP.FileSystemReader(CHECKPOINT_DIR),
+            storage_reader=dcp.FileSystemReader(CHECKPOINT_DIR),
             planner=DefaultLoadPlanner(),
         )
 
@@ -107,9 +103,9 @@ class TestTpCheckpoint(DTensorTestBase):
         model = parallelize_module(model, tp_mesh, parallelize_plan=parallelize_plan)
         original_state_dict = deepcopy(model.state_dict())
 
-        DCP.save_state_dict(
+        dcp.save(
             state_dict=original_state_dict,
-            storage_writer=DCP.FileSystemWriter(CHECKPOINT_DIR),
+            storage_writer=dcp.FileSystemWriter(CHECKPOINT_DIR),
         )
 
         model2 = parallelize_module(
@@ -117,9 +113,9 @@ class TestTpCheckpoint(DTensorTestBase):
         )
         state_dict_to_load = model2.state_dict()
 
-        DCP.load_state_dict(
+        dcp.load(
             state_dict=state_dict_to_load,
-            storage_reader=DCP.FileSystemReader(CHECKPOINT_DIR),
+            storage_reader=dcp.FileSystemReader(CHECKPOINT_DIR),
         )
         model2.load_state_dict(state_dict_to_load, assign=True)
         state_dict_after_load = model2.state_dict()
