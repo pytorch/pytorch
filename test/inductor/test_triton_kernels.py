@@ -634,7 +634,7 @@ def forward(self, x_1, output_1):
             block_start = pid * BLOCK_SIZE
             offsets = block_start + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
-            x = tl.load(in_ptr1 + offsets, mask=mask)
+            x = tl.load(in_ptr0 + offsets, mask=mask)
             if CONSTANT_NAME == STRING_CONSTANT_C:
                 output = CONSTANT_C * x
             if BOOL_CONSTANT_C:
