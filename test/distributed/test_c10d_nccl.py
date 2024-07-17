@@ -575,6 +575,33 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=252), pg)
         self._check_nccl_timeout(timedelta(seconds=252))
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("backend", [None, "nccl"])
+    def test_extend_nccl_pg_timeout(self, backend):
+        torch.cuda.set_device(self.rank)
+        store = c10d.FileStore(self.file_name, self.world_size)
+        opts = dict(
+            backend=backend,
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=1),
+        )
+        dist.init_process_group(**opts)
+        pg = dist.distributed_c10d._get_default_group()
+        # print(self.rank, id(pg._get_backend(torch.device(f"cuda:{self.rank}"))), id(pg._get_backend(torch.device(f"cuda:{self.rank}"))))
+        pg.allreduce(torch.rand(10).cuda(self.rank))
+        if self.rank == 0:
+            time.sleep(3)
+            pg.allreduce(torch.rand(10).cuda(self.rank))
+            self._check_nccl_timeout(timedelta(seconds=1))
+        else:
+            dist.distributed_c10d._extend_timeout_all_pgs(timedelta(seconds=100))
+            pg.allreduce(torch.rand(10).cuda(self.rank))
+            dist.distributed_c10d._extend_timeout_all_pgs(timedelta(seconds=-10000))
+            self._check_nccl_timeout(timedelta(seconds=600))
+
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_optimization(self):
