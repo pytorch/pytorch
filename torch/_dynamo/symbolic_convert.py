@@ -1497,8 +1497,15 @@ class InstructionTranslatorBase(
             argsvars = self.pop()
         else:
             unimplemented("CALL_FUNCTION_EX")
+
+        if sys.version_info >= (3, 13):
+            # 3.13 swapped null and callable
+            null = self.pop()
+            assert isinstance(null, NullVariable)
+
         fn = self.pop()
-        if sys.version_info >= (3, 11):
+
+        if sys.version_info >= (3, 11) and sys.version_info < (3, 13):
             null = self.pop()
             assert isinstance(null, NullVariable)
 
