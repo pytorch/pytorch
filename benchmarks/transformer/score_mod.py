@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 import torch
 import torch.nn.functional as F
-from torch.nn.attention._flex_attention import flex_attention, create_block_mask
+from torch.nn.attention._flex_attention import create_block_mask, flex_attention
 
 torch._dynamo.config.automatic_dynamic_shapes = False
 # Needed since changing args to function causes recompiles
@@ -145,8 +145,10 @@ def run_single_experiment(
     score_mod = config.score_mod
 
     if enable_mask:
-        block_mask = create_block_mask(score_mod, 1, 1, q_seq_len*(q_heads//kv_heads), kv_seq_len, query.device)
-    else: 
+        block_mask = create_block_mask(
+            score_mod, 1, 1, q_seq_len * (q_heads // kv_heads), kv_seq_len, query.device
+        )
+    else:
         block_mask = None
 
     forward_eager_time = benchmark_torch_function_in_microseconds(
@@ -213,9 +215,9 @@ def calculate_bandwidth(
             * 2
         )
         output_size = query_size
-        total_size = (query_size + kv_size + output_size) / 1024 / 1024 / 1024  # In GB
+        total_size = (query_size + kv_size + output_size) / 1000 / 1000 / 1000  # In GB
         time_in_seconds = results.fwd_times.compiled_time / 1e6
-        return total_size / time_in_seconds / 1024
+        return total_size / time_in_seconds / 1000
     else:
         raise ValueError(f"Invalid type {type}")
 
@@ -232,6 +234,7 @@ def calculate_gflops(config: ExperimentConfig, results: ExperimentResults) -> fl
 
 def get_func_name(func):
     return func.__name__.split("<locals>.")[-1].split(" at ")[0]
+
 
 def set_func_name(func, name):
     func.__name__ = name
@@ -340,16 +343,17 @@ def generate_score_mods(score_mods: List[str]) -> List[Callable]:
     }
     return [function_dict[name] for name in score_mods]
 
+
 def get_gqa_score_mod(score_mod, G, q_seq_len):
     def score_mod_gqa(score, b, hkv, m, n):
         g = m // q_seq_len
         new_m = m % q_seq_len
         hq = hkv * G + g
         return score_mod(score, b, hq, new_m, n)
-    score_mod_name = get_func_name(score_mod)
-    set_func_name(score_mod_gqa, score_mod_name+"_gqa")
-    return score_mod_gqa
 
+    score_mod_name = get_func_name(score_mod)
+    set_func_name(score_mod_gqa, score_mod_name + "_gqa")
+    return score_mod_gqa
 
 
 def generate_experiment_configs(
@@ -434,7 +438,10 @@ def main(args):
             Experiment(
                 config,
                 run_single_experiment(
-                    config, dynamic=args.dynamic, max_autotune=args.max_autotune, enable_mask=args.mask
+                    config,
+                    dynamic=args.dynamic,
+                    max_autotune=args.max_autotune,
+                    enable_mask=args.mask,
                 ),
                 args.cal_bandwidth,
             )
@@ -502,7 +509,7 @@ if __name__ == "__main__":
         nargs="+",
         required=False,
         help="""
-key/value cache size in MB.
+key/value cache size in MiB.
 Ignores -b batch size and calculate batch size from kv_cache size instead when specified.
 """,
     )
@@ -511,7 +518,9 @@ Ignores -b batch size and calculate batch size from kv_cache size instead when s
         action="store_true",
         help="Calculate kernel memory bandwidth & computational throughput. ",
     )
-    parser.add_argument("--mask", action="store_true", help="Enables block sparsity mask. ")
+    parser.add_argument(
+        "--mask", action="store_true", help="Enables block sparsity mask. "
+    )
 
     # Parse arguments
     args = parser.parse_args()
