@@ -11,7 +11,6 @@ from benchmark_runner import BenchmarkRunner  # type: ignore[import-not-found]
 from benchmark_utils import (  # type: ignore[import-not-found]
     fits_in_memory,
     get_mm_tensors,
-    transpose_tensors,
 )
 
 import torch
@@ -32,7 +31,7 @@ class BenchmarkRunnerMixedMM(BenchmarkRunner):  # type: ignore[misc, no-any-unim
     def create_input(self) -> Tuple[Any, ...]:
         dtype1, dtype2 = self.get_dtypes()
         m, k, n = self.get_m_k_n(dtype1)
-        transpose_left, transpose_right = transpose_tensors()
+        transpose_left, transpose_right = False, True
         return (m, k, n, transpose_left, transpose_right, dtype1, dtype2)
 
     def run_benchmark(
@@ -72,14 +71,8 @@ class BenchmarkRunnerMixedMM(BenchmarkRunner):  # type: ignore[misc, no-any-unim
         random_multiple = random.randint(start, end)
         return random_multiple * 128
 
-    def get_random_pow2_weighted(self, min_power2: int = 1, max_power2: int = 17):
-        choices = []
-        choices.append(range(1, 6))
-        choices.append(range(6, 10))
-        choices.append(range(10, max_power2 + 1))
-        weights = [0.05, 0.1, 0.85]
-        group = random.choices(choices, weights)[0]
-        return 2 ** random.choice(group)
+    def get_random_pow2(self, min_power2: int, max_power2: int):
+        return 2 ** random.randint(min_power2, max_power2)
 
     def get_distr_type(self) -> str:
         # 85%: choose a random multiple of 128 between 2^10 and 2^17
@@ -96,7 +89,7 @@ class BenchmarkRunnerMixedMM(BenchmarkRunner):  # type: ignore[misc, no-any-unim
         if distr_type == "mult_128":
             return self.random_multiple_of_128(min_num=10, max_num=17)
         if distr_type == "pow2":
-            return self.get_random_pow2_weighted(min_power2=10, max_power2=17)
+            return self.get_random_pow2(min_power2=10, max_power2=17)
         elif distr_type == "uniform-between-pow2":
             return self.get_random_between_pow2(min_power2=10, max_power2=17)
         elif distr_type == "uniform":
@@ -119,6 +112,9 @@ class BenchmarkRunnerMixedMM(BenchmarkRunner):  # type: ignore[misc, no-any-unim
             m = self.get_random_num_small()
             k = self.get_random_dim()
             n = self.get_random_dim()
+            if k % 256 != 0:
+                continue
+
             assert k >= 1024 and n >= 1024, "k and n must be at least 1024"
 
             if m * k >= numel_max or m * n >= numel_max or k * n >= numel_max:
