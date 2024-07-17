@@ -67,7 +67,7 @@ class LearnedHeuristicDecision(LearnedHeuristic):
     def get_decision(
         self, context: AHContext, choices: List[Choice]
     ) -> Optional[Choice]:
-        best_choices = self.get_best_choices(context, choices)
+        best_choices = self.get_best_choices(context)
         if not best_choices:
             return None
         (best_choice_proba, best_choice_idx) = best_choices[0]
@@ -75,7 +75,5 @@ class LearnedHeuristicDecision(LearnedHeuristic):
             return None
         return self.get_choice(best_choice_idx)
 
-    def get_best_choices(
-        self, context: AHContext, choices: List[Choice]
-    ) -> List[Tuple[float, int]]:
+    def get_best_choices(self, context: AHContext) -> List[Tuple[float, int]]:
         return []

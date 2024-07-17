@@ -549,11 +549,16 @@ class AHTrainDecisionTree(AHTrain):
         class_probas = tree_.value[node][0]
         return f"{indent}return {self.best_probas_and_indices(class_probas)}"
 
+    def gen_predict_fn_def(self):
+        return (
+            "def get_best_choices(self, context: AHContext) -> List[Tuple[float, int]]:"
+        )
+
     def codegen_boilerplate(
         self, heuristic_name, opt_name, threshold, shared_memory, device_capa, dt
     ):
         boiler_plate = f"""# flake8: noqa: B950
-from typing import Any, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,

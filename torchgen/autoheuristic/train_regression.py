@@ -335,6 +335,9 @@ class AHTrainRegressionTree(AHTrain):
         value = tree_.value[node][0][0]
         return f"{indent}return {str(value)}"
 
+    def gen_predict_fn_def(self):
+        return "def predict(self, context: AHContext) -> float:"
+
     def codegen_boilerplate(
         self, heuristic_name, opt_name, threshold, shared_memory, device_capa, dt
     ):
