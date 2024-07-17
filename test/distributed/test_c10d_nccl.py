@@ -586,17 +586,23 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             store=store,
             rank=self.rank,
             world_size=self.world_size,
-            timeout=timedelta(seconds=1),
+            timeout=timedelta(seconds=123),
         )
         dist.init_process_group(**opts)
         pg = dist.distributed_c10d._get_default_group()
         pg.allreduce(torch.rand(10).cuda(self.rank))
+        pg._get_backend(torch.device(f"cuda:{self.rank}"))._set_default_timeout(
+            timedelta(seconds=3)
+        )
         if self.rank == 0:
-            time.sleep(3)
+            # Ideally we want to sleep for a very long time, but this is not
+            # feasible in unit test. So this is only a very tiny case.
+            time.sleep(6)
             pg.allreduce(torch.rand(10).cuda(self.rank))
-            self._check_nccl_timeout(timedelta(seconds=1))
+            self._check_nccl_timeout(timedelta(seconds=3))
         else:
             dist.distributed_c10d._extend_timeout_all_pgs(timedelta(seconds=100))
+            self._check_nccl_timeout(timedelta(seconds=103))
             pg.allreduce(torch.rand(10).cuda(self.rank))
             dist.distributed_c10d._extend_timeout_all_pgs(timedelta(seconds=-10000))
             self._check_nccl_timeout(timedelta(seconds=600))
