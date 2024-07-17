@@ -887,11 +887,31 @@ class FakeTensor(Tensor):
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
 
 
-@dataclass(slots=True)
+@dataclass
 class TensorMetadata:
     """
     The Tensor metadata relevant to hashing FakeTensors when caching.
     """
+
+    __slots__ = (
+        "dtype",
+        "shape",
+        "stride",
+        "device",
+        "layout",
+        "memory_format",
+        "storage_offset",
+        "storage_bytes",
+        "requires_grad",
+        "is_quantized",
+        "is_conj",
+        "is_neg",
+        "is_inference",
+        "is_sparse",
+        "is_coalesced",
+        "dense_dim",
+        "sparse_dim",
+    )
 
     dtype: torch.dtype
     shape: Tuple[_MetadataIntLike, ...]
@@ -971,11 +991,13 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     )
 
 
-@dataclass(slots=True)
+@dataclass
 class _DispatchCacheKey:
     """
     Key for the FakeTensor dispatch cache.
     """
+
+    __slots__ = ("key", "hashvalue")
 
     key: Tuple[object, ...]
     hashvalue: int
@@ -998,11 +1020,13 @@ class _DispatchCacheKey:
                 v.strip_shape_env()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class _DeconstructedSymNode:
     """
     Represents a SymNode without the associated ShapeEnv
     """
+
+    __slots__ = ("_expr", "pytype", "_hint", "constant", "fx_node")
 
     # n.b. keep the same names as SymNode
     _expr: sympy.Expr
@@ -1050,11 +1074,13 @@ class _DeconstructedSymNode:
         return hash((self._expr, self.pytype, self._hint, self.constant, self.fx_node))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class _DeconstructedSymType:
     """
     Represents a SymInt, SymFloat, SymBool without the associated ShapeEnv
     """
+
+    __slots__ = ("ty", "node")
 
     ty: Type[_PySymType]
     node: _DeconstructedSymNode
@@ -1079,12 +1105,14 @@ class _DeconstructedSymType:
         return NotImplemented
 
 
-@dataclass(slots=True)
+@dataclass
 class _PySymInputStub:
     """
     Represents a SymInt in the cached key. Needed because SymInt doesn't
     support __eq__ or __hash__ directly.
     """
+
+    __slots__ = ("value",)
 
     value: Union[_PySymType, _DeconstructedSymType]
 
@@ -1119,11 +1147,13 @@ class _PySymInputStub:
         return self.value.node._value_hash()
 
 
-@dataclass(slots=True)
+@dataclass
 class _SymIntOutputStub:
     """
     Represents a SymInt in the cached output.
     """
+
+    __slots__ = ("value",)
 
     # This is either an `int` which represents the index in the key to copy the
     # SymNode from or it's the deconstructed SymNode itself.
@@ -1153,7 +1183,7 @@ class _SymIntOutputStub:
         raise NotImplementedError
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class _DispatchCacheEntry:
     """
     Entry type for the FakeTensor dispatch cache. Accounts for two possibilities:
@@ -1163,9 +1193,11 @@ class _DispatchCacheEntry:
        ops, we further capture the index of the arg to alias.
     """
 
-    inplace_idx: Optional[int] = None
-    metadata: Optional[TensorMetadata] = None
-    view_idx: Optional[int] = None
+    __slots__ = ("inplace_idx", "metadata", "view_idx")
+
+    inplace_idx: Optional[int]
+    metadata: Optional[TensorMetadata]
+    view_idx: Optional[int]
 
 
 @dataclass(frozen=True)
@@ -1173,6 +1205,8 @@ class _BypassDispatchCache(Exception):
     """
     Signals cases that should skip FakeTensor caching.
     """
+
+    __slots__ = ("reason",)
 
     reason: str
 
@@ -1183,17 +1217,21 @@ class DispatchCacheInfo:
     Information about the state of the FakeTensor dispatch cache.
     """
 
+    __slots__ = ("hits", "misses", "bypasses", "size")
+
     hits: int
     misses: int
     bypasses: Dict[str, int]
     size: int
 
 
-@dataclass(slots=True)
+@dataclass
 class _CacheKeyState:
     """
     State used while building our cache key.
     """
+
+    __slots__ = ("sym_node_lookup", "shape_env")
 
     # We track the SymNodes so when we get the output we can see if it exactly
     # matches one of the inputs so we can uncache it properly.
