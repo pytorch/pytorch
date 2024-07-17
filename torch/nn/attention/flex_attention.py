@@ -420,6 +420,8 @@ def _broadcast_to_dim(x, dim):
         x = x.unsqueeze(0)
     return x
 
+def round_up_to_multiple(x, multiple):
+    return (x + multiple - 1) // multiple * multiple
 
 def _convert_mask_to_block_mask(
     mask: Tensor,
@@ -595,6 +597,8 @@ def create_block_mask(
     """
     mod_type = _get_mod_type(fn)
     inner_func = _create_block_mask_inner
+    M = round_up_to_multiple(M, Q_BLOCK_SIZE)
+    N = round_up_to_multiple(N, KV_BLOCK_SIZE)
     # This is kind of a temporary hack to workaround some issues
     if _compile:
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
@@ -615,8 +619,8 @@ def create_block_mask(
 
 def _create_empty_block_mask(query, key, value) -> BlockMask:
     device = query.device
-    kv_len = key.size()[-2]
-    q_len = query.size()[-2]
+    kv_len = round_up_to_multiple(key.size()[-2], 128)
+    q_len = round_up_to_multiple(query.size()[-2], 128)
     return BlockMask(
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
@@ -686,11 +690,11 @@ def flex_attention(
     """
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
-    if query.size(-2) >= 32:  # use Attention Kernel
-        if query.size(-2) >= 128 and query.size(-2) % 128 != 0:
-            raise NotImplementedError("NYI: S must be <128 or a multiple of 128")
-    if key.size(-2) % 128 != 0:
-        raise NotImplementedError("NYI: L must be a multiple of 128")
+    # if query.size(-2) >= 32:  # use Attention Kernel
+    #     if query.size(-2) >= 128 and query.size(-2) % 128 != 0:
+    #         raise NotImplementedError("NYI: S must be <128 or a multiple of 128")
+    # if key.size(-2) % 128 != 0:
+    #     raise NotImplementedError("NYI: L must be a multiple of 128")
 
     if score_mod is None:
         score_mod = _identity
