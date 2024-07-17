@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import re
 from unittest.mock import patch
 
 import functorch
@@ -10,6 +11,7 @@ import torch.autograd
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 
 ########################
 # Explanation of Tests #
@@ -849,6 +851,99 @@ class InplacingTests(TestCase):
 
         inp = (T(10, 10), TI(2, mx=5))
         self.assertExpectedInline(count_numel(f, *inp), """42""")
+
+    @requires_cuda
+    def test_inplace_custom_op(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("foo(Tensor x, Tensor(a!) out) -> ()")
+
+            def foo(x: torch.Tensor, out: torch.Tensor) -> None:
+                out.copy_(x.sin())
+
+            m.impl("foo", foo, "CompositeExplicitAutograd")
+
+            def f(x, out):
+                torch.ops.mylib.foo(x, out)
+                torch.ops.mylib.foo(out, out)
+                torch.ops.mylib.foo(out, out)
+                return out
+
+            x = T(3)
+            out = T(3)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, fullgraph=True), x, out
+            )
+            self.assertEqual(compiled_out, x.sin().sin().sin())
+
+            # Check that we are allocating the minimum number of intermediate buffers
+            matches = re.findall(r"empty_strided_\w+\(", code)
+            self.assertEqual(len(matches), 0)
+
+            self.assertExpectedInline(count_numel(f, x, out), """12""")
+
+    @requires_cuda
+    def test_inplace_custom_op_intermediate(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("foo(Tensor x, Tensor(a!) out) -> ()")
+
+            def foo(x: torch.Tensor, out: torch.Tensor) -> None:
+                out.copy_(x.sin())
+
+            m.impl("foo", foo, "CompositeExplicitAutograd")
+
+            def f(x, out):
+                out = torch.empty_like(x)
+                torch.ops.mylib.foo(x, out)
+                torch.ops.mylib.foo(out, out)
+                torch.ops.mylib.foo(out, out)
+                return out
+
+            x = T(3)
+            out = T(3)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, fullgraph=True), x, out
+            )
+            self.assertEqual(compiled_out, x.sin().sin().sin())
+
+            # Check that we are allocating the minimum number of intermediate buffers
+            matches = re.findall(r"empty_strided_\w+\(", code)
+            self.assertEqual(len(matches), 1)
+
+            self.assertExpectedInline(count_numel(f, x, out), """12""")
+
+    @requires_cuda
+    def test_inplace_custom_op_two_mutated_inputs(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("foo(Tensor q, Tensor(a!) k_cache, Tensor(b!) v_cache) -> Tensor")
+
+            def foo(q, k_cache, v_cache):
+                k_cache.add_(1)
+                v_cache.add_(1)
+                return q + 1
+
+            m.impl("foo", foo, "CompositeExplicitAutograd")
+
+            q = T(3)
+            k_cache = T(3)
+            v_cache = torch.rand_like(k_cache)
+
+            def f():
+                x = 0
+                for _ in range(2):
+                    x = x + torch.ops.mylib.foo(q, k_cache, v_cache)
+                return x
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, fullgraph=True),
+            )
+
+            # Check that we are allocating the minimum number of intermediate buffers
+            matches = re.findall(r"empty_strided_\w+\(", code)
+            self.assertEqual(len(matches), 1)
+
+            self.assertExpectedInline(count_numel(f), """27""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v1(self):

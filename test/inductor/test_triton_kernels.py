@@ -2,7 +2,6 @@
 # flake8: noqa: E731
 # Skip do not assign a lambda expression, use a def
 import functools
-import re
 from unittest.mock import patch
 
 import torch
@@ -491,36 +490,6 @@ def forward(self, x_1, output_1):
         torch_result = call_triton(t1, t2)
         compiled_result = torch.compile(call_triton)(t1, t2)
         self.assertEqual(torch_result, compiled_result)
-
-    @requires_gpu
-    @common_utils.parametrize("intermediate", [False, True])
-    def test_reinplace(self, intermediate):
-        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
-            m.define("foo(Tensor x, Tensor(a!) out) -> ()")
-
-            def foo(x: torch.Tensor, out: torch.Tensor) -> None:
-                out.copy_(x.sin())
-
-            m.impl("foo", foo, "CompositeExplicitAutograd")
-
-            def f(x, out):
-                if intermediate:
-                    out = torch.empty_like(x)
-                torch.ops.mylib.foo(x, out)
-                torch.ops.mylib.foo(out, out)
-                torch.ops.mylib.foo(out, out)
-                return out
-
-            x = torch.randn(3, device=GPU_TYPE)
-            out = torch.randn(3, device=GPU_TYPE)
-            compiled_out, (code,) = run_and_get_code(
-                torch.compile(f, fullgraph=True), x, out
-            )
-            self.assertEqual(compiled_out, x.sin().sin().sin())
-
-            # Check that we are allocating the minimum number of intermediate buffers
-            matches = re.findall(r"empty_strided_\w+\(", code)
-            self.assertEqual(len(matches), int(intermediate))
 
     @requires_gpu
     def test_triton_kernel_reinplace_inplaceable_pass(self):
