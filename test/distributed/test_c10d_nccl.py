@@ -590,7 +590,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         )
         dist.init_process_group(**opts)
         pg = dist.distributed_c10d._get_default_group()
-        # print(self.rank, id(pg._get_backend(torch.device(f"cuda:{self.rank}"))), id(pg._get_backend(torch.device(f"cuda:{self.rank}"))))
         pg.allreduce(torch.rand(10).cuda(self.rank))
         if self.rank == 0:
             time.sleep(3)

@@ -1348,13 +1348,13 @@ def _extend_timeout_all_pgs(timeout: timedelta) -> None:
             if timeout + current_timeout > zero_delta:
                 backend._set_default_timeout(timeout + current_timeout)
             else:
-                timeout = (
+                reset_timeout = (
                     default_pg_nccl_timeout
                     if torch.device("cuda") in pg._device_types
                     and default_pg_nccl_timeout
                     else default_pg_timeout
                 )
-                backend._set_default_timeout(timeout)
+                backend._set_default_timeout(reset_timeout)
 
 
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:

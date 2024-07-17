@@ -89,8 +89,6 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
     c10::DeviceType deviceType) {
   // If there is a backend associated with this device type then return it
   if (deviceTypeToBackend_.find(deviceType) != deviceTypeToBackend_.end()) {
-    LOG(ERROR) << "Address of return: " << &deviceTypeToBackend_[deviceType]
-               << "\n";
     return deviceTypeToBackend_.at(deviceType);
   }
 
