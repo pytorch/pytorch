@@ -966,22 +966,24 @@ def register_vmap(
     In order for an operator to work with :func:`torch.vmap`, you may need to register a
     vmap implementation in the following signature:
 
-        `vmap_func(info, in_dims: Tuple[Optional[int]], *args, **kwargs)`,
+        ``vmap_func(info, in_dims: Tuple[Optional[int]], *args, **kwargs)``,
 
-    where `*args` and `**kwargs` are the arguments and kwargs for `op`.
+    where ``*args`` and ``**kwargs`` are the arguments and kwargs for ``op``.
 
-    It specifies how do we compute the batched version of `op` given inputs with an additional
+    It specifies how do we compute the batched version of ``op`` given inputs with an additional
     dimension (specified by ``in_dims``).
 
-    - For each arg in ``args``, ``in_dims`` has a corresponding ``Optional[int]``. It is ``None``
+    For each arg in ``args``, ``in_dims`` has a corresponding ``Optional[int]``. It is ``None``
     if the arg is not a Tensor or if the arg is not being vmapped over, otherwise, it is an integer
     specifying what dimension of the Tensor is being vmapped over.
-    - ``info`` is a collection of additional metadata that may be helpful:
+
+    ``info`` is a collection of additional metadata that may be helpful:
     ``info.batch_size`` specifies the size of the dimension being vmapped over, while
     ``info.randomness`` is the ``randomness`` option that was passed to :func:`torch.vmap`.
-    - The return of the function is a tuple of ``(output, out_dims)``. Similar to ``in_dims``,
-        ``out_dims`` should be of the same structure as ``output`` and contain one ``out_dim``
-        per output that specifies if the output has the vmapped dimension and what index it is in.
+
+    The return of the function is a tuple of ``(output, out_dims)``. Similar to ``in_dims``,
+    ``out_dims`` should be of the same structure as ``output`` and contain one ``out_dim``
+    per output that specifies if the output has the vmapped dimension and what index it is in.
 
     Examples:
         >>> import torch
@@ -1004,10 +1006,10 @@ def register_vmap(
         >>>     return result, (in_dims[0], in_dims[0])
         >>>
         >>> numpy_cube.register_vmap(numpy_cube_vmap)
-
+        >>>
         >>> x = torch.randn(3)
         >>> torch.vmap(numpy_cube)(x)
-
+        >>>
         >>> @torch.library.custom_op("mylib::numpy_mul", mutates_args=())
         >>> def numpy_mul(x: Tensor, y: Tensor) -> Tensor:
         >>>     return torch.tensor(to_numpy(x) * to_numpy(y), device=x.device)
@@ -1026,13 +1028,11 @@ def register_vmap(
         >>> torch.vmap(numpy_mul)(x, y)
 
     .. note::
+        The vmap function should aim to preserve the semantics of the entire custom operator.
+        That is, ``grad(vmap(op))`` should be replaceable with a ``grad(map(op))``.
 
-    The vmap function should aim to preserve the semantics of the
-    entire custom operator. That is, (pseudocode) ``grad(vmap(op))``
-    should be replaceable with a ``grad(map(op))``.
-
-    If your autograd.Function has any custom behavior in the backward pass, please
-    keep this in mind.
+        If your custom operator has any custom behavior in the backward pass, please
+        keep this in mind.
 
 
     """
