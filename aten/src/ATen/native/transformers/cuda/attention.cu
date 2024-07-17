@@ -837,7 +837,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                       cudnn_offset/*Tensor dropoutoffset*/);
 
   // TODO(eqy): support debug_attn_mask
-  return std::make_tuple(std::move(attention), std::move(log_sumexp), std::move(Tensor()), std::move(Tensor()), max_seqlen_batch_q, max_seqlen_batch_k, std::move(cudnn_seed), std::move(cudnn_offset), std::move(Tensor()));
+  return std::make_tuple(std::move(attention), std::move(log_sumexp), Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
