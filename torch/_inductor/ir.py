@@ -252,7 +252,7 @@ def ir_node_to_tensor(x, guard_shape=True):
 def may_convert_to_optional(value):
     if isinstance(value, list) and not value:
         # [None] makes sure the cpp wrapper codegen will generate something like
-        # {c10::nullopt} instead of {}
+        # {std::nullopt} instead of {}
         return [None]
     return value
 
@@ -4073,9 +4073,9 @@ class ConcatKernel(NopKernel):
 
 def get_aten_cpp_kernel_name(kernel):
     # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=std::nullopt)
     # repeat_interleave(const at::Tensor & self, int64_t repeats,
-    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+    #       c10::optional<int64_t> dim=std::nullopt, c10::optional<int64_t> output_size=std::nullopt)
     if not isinstance(kernel, torch._ops.OpOverload) or kernel.namespace != "aten":
         return None
     opname = (
