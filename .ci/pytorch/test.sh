@@ -1225,6 +1225,15 @@ test_linux_aarch64(){
        inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes --verbose
 }
 
+test_operator_benchmark() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  TEST_DIR=$(pwd)
+  cd benchmarks/operator_benchmark/pt_extension
+  python setup.py install
+  cd ${TEST_DIR}
+  taskset -c 0-"$end_core" python -m benchmarks/operator_benchmark/benchmark_all_test.py --output "${TEST_REPORTS_DIR}/operator_benchmark.csv"
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -1257,6 +1266,8 @@ elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
+elif [[ "${TEST_CONFIG}" == *cpu_operator_benchmark* ]]; then
+  test_operator_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
