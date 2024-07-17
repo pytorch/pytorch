@@ -291,6 +291,7 @@ __all__ = [
     "take_along_dim",
     "tensor_split",
     "transpose",
+    "transpose_copy",
     "unfold",
     "unfold_copy",
     "unsqueeze",
@@ -6325,6 +6326,7 @@ expand_copy = _make_copy_from_view(expand)
 narrow_copy = _make_copy_from_view(narrow)
 squeeze_copy = _make_copy_from_view(squeeze)
 t_copy = _make_copy_from_view(t)
+transpose_copy = _make_copy_from_view(transpose)
 unsqueeze_copy = _make_copy_from_view(unsqueeze)
 view_copy = _make_copy_from_view(view)
 

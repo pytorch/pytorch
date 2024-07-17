@@ -1436,6 +1436,7 @@ class TestOperators(TestCase):
                 xfail("renorm"),  # hit vmap fallback, which is disabled
                 xfail("squeeze_copy"),
                 xfail("t_copy"),
+                xfail("transpose_copy"),
                 xfail("unsqueeze_copy"),
             }
         ),
@@ -1576,6 +1577,7 @@ class TestOperators(TestCase):
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
                 xfail("squeeze_copy"),
                 xfail("t_copy"),
+                xfail("transpose_copy"),
                 xfail("unsqueeze_copy"),
             }
         ),
