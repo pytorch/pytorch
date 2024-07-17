@@ -3,9 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <atomic>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 using worker_id_t = int16_t;
 using local_id_t = int64_t;
@@ -61,6 +59,4 @@ struct TORCH_API SerializedPyObj final {
   std::vector<at::Tensor> tensors_;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
