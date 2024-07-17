@@ -265,6 +265,7 @@ void index_put_kernel_quantized_cuda(TensorIterator& iter, const IntArrayRef ind
       // The following replaces std::clamp(qvalue, qmin, qmax) and is a viable solution for
       // both CUDA and ROCm since std::clamp and this replacement generates the same PTX.
       // Using #ifdef USE_ROCM to differentiate caused Windows build failures.
+      // The replacement should generate the same PTX as std::clamp. See https://godbolt.org/z/Wde9KW3v4
       qvalue = (qvalue < qmin) ? qmin : (qmax < qvalue) ? qmax : qvalue;
       *(scalar_t*)(out_data + offset) = static_cast<scalar_t>(qvalue);
     });
