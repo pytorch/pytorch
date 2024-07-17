@@ -462,7 +462,7 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 template <typename To, typename From>
 std::enable_if_t<std::is_same_v<From, bool>, bool> overflows(
     From /*f*/,
-    bool strict_unsigned = false) {
+    bool strict_unsigned [[maybe_unused]] = false) {
   return false;
 }
 
