@@ -42,7 +42,6 @@ using S = ck::Sequence<Is...>;
 using Row = ck::tensor_layout::gemm::RowMajor;
 using Col = ck::tensor_layout::gemm::ColumnMajor;
 using PassThrough = ck::tensor_operation::element_wise::PassThrough;
-using Add = ck::tensor_operation::element_wise::Add;
 
 namespace at::native {
 
@@ -76,6 +75,25 @@ struct CkMathType<at::Half> {
   using dtype = ck::half_t;
 };
 
+// Elementwise Operators
+struct AlphaBetaAdd
+{
+  AlphaBetaAdd(float alpha, float beta) : alpha_(alpha), beta_(beta){};
+
+  template <typename C, typename AB>
+  __host__ __device__ constexpr void operator()(C& c, const AB& ab) const;
+
+  template<>
+  __host__ __device__ constexpr void operator()<float, float>
+    (float& c, const float& ab) const
+    {
+      c = alpha_ * ab;
+    };
+
+    float alpha_;
+    // TODO: Leaving for now, will use later
+    float beta_;
+};
 
 template <
     typename Dtype,
@@ -83,6 +101,8 @@ template <
     int MBLOCK,
     int NBLOCK,
     int KBLOCK,
+    int AK1,
+    int BK1,
     int MPER_XDL,
     int NPER_XDL,
     int MPER_WAVE,
@@ -99,32 +119,30 @@ void float_gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   int StrideB = ldb;
   int StrideC = ldc;
 
+  float falpha = alpha;
+  float fbeta = beta;
+
+
   using ADataType = typename CkMathType<Dtype>::dtype;
   using BDataType = typename CkMathType<Dtype>::dtype;
+  using CDataType = typename CkMathType<Dtype>::dtype;
   using DDataType = typename CkMathType<Dtype>::dtype;
-  using DsDataType = ck::Tuple<>;
-  using AccDataType = float;
-  using CShuffleDataType = typename CkMathType<Dtype>::dtype;;
-  using CDataType = typename CkMathType<Dtype>::dtype;;
 
-#if 0
+  using AccDataType = float;
+  using CShuffleDataType = typename CkMathType<Dtype>::dtype;
+
+
+  // NOTE: in our example, transa = t and transb = n;
+  // since default for cublas is Column-major, since the value is T, ALayout is Row
+  // same for B. transb = N = NO Transpose so B is column Major
   using ALayout = Row;
   using BLayout = Col;
   using DLayout = Row;
-  using DsLayout = ck::Tuple<>;
-  using DsDataType = ck::Tuple<>;
   using CLayout = Row;
-#else
-  using ALayout = Col;
-  using BLayout = Col;
-  using DLayout = Col;
-  using DsLayout = ck::Tuple<>;
-  using CLayout = Col;
-#endif
 
   using AElementOp = PassThrough;
   using BElementOp = PassThrough;
-  using CElementOp = PassThrough;
+  using CElementOp = AlphaBetaAdd;
 
   static constexpr auto GemmDefault =
       ck::tensor_operation::device::GemmSpecialization::Default;
@@ -132,128 +150,108 @@ void float_gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
       ck::tensor_operation::device::GemmSpecialization::MNKPadding;
   static constexpr auto GemmSpec = PADDING ? GemmMNKPadding : GemmDefault;
 
-  // Define derivative constants based on template parameters.
-  static constexpr int BLOCK_CLUSTER = BLOCK_SIZE / 4;
-  static constexpr int CBLOCK_N = NBLOCK / 16;
-  static constexpr int CBLOCK_M = BLOCK_SIZE / CBLOCK_N;
 
-  using DeviceGemmV2Instance =
-      ck::tensor_operation::device::DeviceGemmMultiD_Xdl_CShuffle_V3<
-          ALayout,
-          BLayout,
-          DsLayout,
-          CLayout,
-          ADataType,
-          BDataType,
-          DsDataType,
-          CDataType,
-          AccDataType,
-          CShuffleDataType,
-          AElementOp,
-          BElementOp,
-          CElementOp,
-          GemmSpec,
-          BLOCK_SIZE,
-          MBLOCK,
-          NBLOCK,
-          KBLOCK,
-          8, // AK1
-          8, // BK1
-          MPER_XDL, // MPerXDL
-          NPER_XDL, // NPerXDL
-          MPER_WAVE, // MXdlPerWave
-          NPER_WAVE, // NXdlPerWave
-          S<4, BLOCK_CLUSTER, 1>, // ABlockTransferThreadClusterLengths
-          S<1, 0, 2>, // ABlockTransferThreadClusterOrder
-          S<1, 0, 2>, // ABlockTransferSrcAccessOrder
-          2, // ABlockTransferSrcVectorDim
-          8, // ABlockTransferSrcScalarPerVector
-          8, // ABlockTransferDstScalarPerVector
-          0, // ABlockLdsExtraM
-          S<4, BLOCK_CLUSTER, 1>, // BBlockTransferThreadClusterLengths
-          S<1, 0, 2>, // BBlockTransferThreadClusterArrangeOrder
-          S<1, 0, 2>, // BBlockTransferSrcAccessOrder
-          2, // BBlockTransferSrcVectorDim
-          8, // BBlockTransferSrcScalarPerVector
-          8, // BBlockTransferDstScalarPerVector
-          0, // BBlockLdsExtraN
-          1, // CShuffleMXdlPerWavePerShuffle
-          CNPER_WAVE, // CShuffleNXdlPerWavePerShuffle
-          S<1, CBLOCK_M, 1, CBLOCK_N>, // CShuffleBlockTransferClusterLengths
-          S<8, 8, 1>, // CShuffleBlockTransferScalarPerVector
-          ck::BlockGemmPipelineScheduler::Intrawave, // Pipeline Schedule
-          ck::BlockGemmPipelineVersion::v3>; // Pipeline Version
+  // TODO: Flesh out template parameters
+  using DeviceGemmInstance =
+    ck::tensor_operation::device::DeviceGemmMultiD_Xdl_CShuffle_V3<ALayout,
+                                                                   BLayout,
+                                                                   ck::Tuple<>,
+                                                                   CLayout,
+                                                                   ADataType,
+                                                                   BDataType,
+                                                                   ck::Tuple<>,
+                                                                   CDataType,
+                                                                   AccDataType,
+                                                                   CShuffleDataType,
+                                                                   AElementOp,
+                                                                   BElementOp,
+                                                                   CElementOp,
+                                                                   GemmSpec,
+                                                                   BLOCK_SIZE, //256,
+                                                                   MBLOCK, //256,
+                                                                   NBLOCK, //128,
+                                                                   KBLOCK, //32,
+                                                                   AK1, //4,
+                                                                   BK1, //4,
+                                                                   MPER_XDL, //32,
+                                                                   NPER_XDL, //32,
+                                                                   MPER_WAVE, //4,
+                                                                   NPER_WAVE, //2,
+                                                                   S<8, 32, 1>,
+                                                                   S<1, 0, 2>,
+                                                                   S<1, 0, 2>,
+                                                                   2,
+                                                                   4,
+                                                                   4,
+                                                                   0,
+                                                                   S<8, 32, 1>,
+                                                                   S<1, 0, 2>,
+                                                                   S<1, 0, 2>,
+                                                                   2,
+                                                                   4,
+                                                                   4,
+                                                                   0,
+                                                                   1,
+                                                                   1,
+                                                                   S<1, 32, 1, 8>,
+                                                                   S<4>>;
 
-  // Create gemm launcher and arguments.
-  auto gemm = DeviceGemmV2Instance{};
+
+  auto gemm = DeviceGemmInstance{};
   auto invoker = gemm.MakeInvoker();
 
   auto a_element_op = AElementOp{};
   auto b_element_op = BElementOp{};
-  auto c_element_op = CElementOp{};
+  auto c_element_op = CElementOp{alpha, beta};
 
   using DDataArrayType = std::array<const void*, 0>;
-  using DStrideArrayType = std::array<ck::index_t, 0>;
-
   DDataArrayType DDataArray;
-  DStrideArrayType DStrideArray;
 
-  auto arguments = gemm.MakeArgument(
-      reinterpret_cast<const ADataType*>(a),
-      reinterpret_cast<const BDataType*>(b),
-      DDataArray,
-      reinterpret_cast<CDataType*>(c),
-      M,
-      N,
-      K,
-      StrideA,
-      StrideB,
-      DStrideArray,
-      StrideC,
-      a_element_op,
-      b_element_op,
-      c_element_op);
+  // Note: CK only supports row-major output.
+  // We swap A and B inputs here as a temporary workaround
+  auto argument = gemm.MakeArgument(
+     reinterpret_cast<const void*>(b),
+     reinterpret_cast<const void*>(a),
+     DDataArray,
+     reinterpret_cast<void*>(c),
+     N,
+     M,
+     K,
+     StrideB,
+     StrideA,
+     std::array<ck::index_t, 0>{},
+     StrideC,
+     a_element_op,
+     b_element_op,
+     c_element_op);
 
-  auto stream = at::cuda::getCurrentHIPStream().stream();
-  invoker.Run(arguments, StreamConfig{stream, false});
+
+ if(!gemm.IsSupportedArgument(argument))
+ {
+        throw std::runtime_error(
+            "wrong! device_gemm with the specified compilation parameters does "
+            "not support this GEMM problem");
+ }
+
+
+ auto stream = at::cuda::getCurrentHIPStream().stream();
+ invoker.Run(argument, StreamConfig{stream, false});
 }
 
-#if 0
-    int BLOCK_SIZE,
-    int MBLOCK,
-    int NBLOCK,
-    int KBLOCK,
-    int MPER_XDL,
-    int NPER_XDL,
-    int MPER_WAVE,
-    int NPER_WAVE,
-    int CNPER_WAVE = 1,
-    bool PADDING = false>
-#endif
 void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
   // If any of the shapes cant be tiled, we must use padding.
   bool use_padding = ((m % 256 != 0) || (n % 128 != 0) || (k % 64 != 0));
-  // Dispatch to best implementation. TODO add more configurations.
+  // Dispatch to best implementation. 
+  // TODO add more configurations. Optimize.
   if (use_padding) {
     if (m <= 128) {
-      float_gemm_impl<float, 256, 128, 64, 32, 32, 32, 2, 1, 1, true>(CUDABLAS_GEMM_ARGS(float));
-#if 0
-    // as float type, get error: local memory (98304) exceeds limit (65536)
-    } else if ((m >= 8192 && n >= 4096) || (n >= 8192 && m >= 4096)) {
-      float_gemm_impl<float, 256, 256, 128, 64, 16, 16, 8, 4, 2, true>(CUDABLAS_GEMM_ARGS(float));
-#endif
+      float_gemm_impl<float, 256, 256, 128, 32, 4, 4, 32, 32, 4, 2, 1, true>(CUDABLAS_GEMM_ARGS(float));
     } else {
-      float_gemm_impl<float, 256, 128, 128, 64, 16, 16, 4, 4, 2, true>(CUDABLAS_GEMM_ARGS(float));
+      float_gemm_impl<float, 256, 256, 128, 32, 4, 4, 32, 32, 4, 2, 1, true>(CUDABLAS_GEMM_ARGS(float));
     }
   } else {
-#if 0
-    // as float type, get error: local memory (98304) exceeds limit (65536)
-    if ((m >= 8192 && n >= 4096) || (n >= 8192 && m >= 4096)) {
-      float_gemm_impl<float, 256, 256, 128, 64, 16, 16, 8, 4, 2, false>(CUDABLAS_GEMM_ARGS(float));
-    } else
-#endif
     {
-      float_gemm_impl<float, 256, 128, 128, 64, 16, 16, 4, 4, 2, false>(CUDABLAS_GEMM_ARGS(float));
+      float_gemm_impl<float, 256, 256, 128, 32, 4, 4, 32, 32, 4, 2, 1, false>(CUDABLAS_GEMM_ARGS(float));
     }
   }
 }
