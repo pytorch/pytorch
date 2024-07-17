@@ -21,6 +21,7 @@ from unittest import mock, SkipTest
 import torch
 import torch.distributed as c10d
 
+
 if not c10d.is_available() or not c10d.is_nccl_available():
     print("c10d NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -64,6 +65,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -624,6 +626,40 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # no additional comm split happens after a collective.
         self.assertEqual(backend.comm_split_count(), 1)
         self.assertEqual(tensor, original_tensor)
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_comm_split_group(self):
+        # Test `ncclCommSplit` for smaller subgroups of the world when
+        # we've passed a specific device_id to init_process_group.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        backend = pg._get_backend(torch.device(device))
+
+        tensor = torch.full((1,), self.rank).cuda(device)
+        ng1 = c10d.split_group(pg, [[0, 1]])
+        backend1 = pg._get_backend(torch.device(device))
+
+        # check basic options are the same between parent and child
+        self.assertEqual(backend.options._timeout, backend1.options._timeout)
+        self.assertEqual(
+            backend.options.is_high_priority_stream,
+            backend1.options.is_high_priority_stream,
+        )
+        self.assertEqual(ng1.group_desc, "default_pg:split:0")
+
+        # comm split happens eagerly since device_id is passed to init_process_group.
+        self.assertEqual(backend.comm_split_count(), 1)
+        dist.broadcast(tensor, 0, group=ng1)
+        self.assertEqual(tensor, torch.full((1,), 0))
+
+        ng2 = c10d.split_group(pg, [[0, 1]])
+        self.assertEqual(ng2.group_desc, "default_pg:split:1")
+        self.assertEqual(backend.comm_split_count(), 2)
+
+        dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -645,6 +681,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         broadcast_tensor = torch.tensor([self.rank]).cuda(device)
         new_pg.broadcast(broadcast_tensor, 0).wait()
         self.assertEqual(backend.comm_split_count(), 1)
+        dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -664,11 +701,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # but allreduce is issued to CUDA STREAM only after the initialization is a success
         pg.allreduce(reduce_tensor).wait()
         new_pg = c10d.new_group()
-        # even after pg's collective call, new pg's comm is not initialized until its own collectcive calls
-        self.assertEqual(backend.comm_split_count(), 0)
+        # new pg's comm is initialized eagerly
+        self.assertEqual(backend.comm_split_count(), 1)
         broadcast_tensor = torch.tensor([self.rank]).cuda(device)
         new_pg.broadcast(broadcast_tensor, 0).wait()
         self.assertEqual(backend.comm_split_count(), 1)
+        dist.destroy_process_group()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -3517,33 +3555,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 
 
 class NCCLTraceTest(NCCLTraceTestBase):
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("timing_enabled", [True, False])
-    @parametrize("include_collectives", [True, False])
-    def test_short(self, timing_enabled, include_collectives):
-        if self.rank == self.MAIN_PROCESS_RANK:
-            return
-        pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
-        device = self.local_device
-        a = torch.full((3, 4), float(self.rank), device=device)
-        for i in range(2):
-            f = pg.allreduce(a)
-        f.wait()
-        torch.cuda.synchronize(device=device)
-
-        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
-        time.sleep(1)
-        if include_collectives:
-            t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        else:
-            t = pickle.loads(
-                torch._C._distributed_c10d._dump_nccl_trace(
-                    includeCollectives=False, includeStackTraces=None, onlyActive=None
-                )
-            )
+    def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
         ver = t["version"]
         self.assertEqual(ver, "2.2")
         pg_config = t["pg_config"]
@@ -3557,7 +3569,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
         if include_collectives:
             self.assertEqual(len(t["entries"]), 2)
             t = t["entries"]
-            self.assertEqual(len(t), 2)
             last = t[-1]
             self.assertEqual(last["process_group"], ("0", "default_pg"))
             self.assertEqual(last["state"], "completed")
@@ -3568,7 +3579,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
             if timing_enabled:
                 self.assertIsNotNone(s)
                 self.assertTrue(s <= f)
-            self.assertIn("test_c10d_nccl.py", str(last["frames"]))
+            # we don't collect stack traces in JSON at the moment
+            if not is_json:
+                self.assertIn("test_c10d_nccl.py", str(last["frames"]))
             self.assertEqual(last["input_sizes"], ((3, 4),))
             self.assertEqual(last["input_dtypes"], ["Float"])
             self.assertEqual(last["output_sizes"], ((3, 4),))
@@ -3588,6 +3601,63 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertTrue("duration_ms" not in last)
         else:
             self.assertTrue("entries" not in t)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("timing_enabled", [True, False])
+    @parametrize("include_collectives", [True, False])
+    def test_short_json(self, timing_enabled, include_collectives):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+        device = self.local_device
+        a = torch.full((3, 4), float(self.rank), device=device)
+        for i in range(2):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
+        time.sleep(1)
+        t = json.loads(
+            torch._C._distributed_c10d._dump_nccl_trace_json(
+                includeCollectives=include_collectives
+            )
+        )
+        self._verify_trace(t, include_collectives, timing_enabled, True)
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("timing_enabled", [True, False])
+    @parametrize("include_collectives", [True, False])
+    def test_short_pickle(self, timing_enabled, include_collectives):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+        device = self.local_device
+        a = torch.full((3, 4), float(self.rank), device=device)
+        for i in range(2):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
+        time.sleep(1)
+        t = pickle.loads(
+            torch._C._distributed_c10d._dump_nccl_trace(
+                includeCollectives=include_collectives
+            )
+        )
+        self._verify_trace(
+            t,
+            include_collectives=include_collectives,
+            timing_enabled=timing_enabled,
+            is_json=True,
+        )
+        dist.destroy_process_group()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -3661,6 +3731,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(last["output_dtypes"], ["Float"])
         self.assertEqual(last["timeout_ms"], 600000)
         self.assertEqual(last["collective_seq_id"] - first["collective_seq_id"], 9)
+        dist.destroy_process_group()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -4223,6 +4294,140 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
             # Clean up structures (ex: files for FileStore before going down)
             del process_group
             sys.exit(1)
+
+
+# tests that needs to be run with a larger world size
+class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
+    def _create_process_group_nccl(self, store, opts, device_id=None):
+        # create nccl processgroup with opts
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            pg_options=opts,
+            device_id=device_id,
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+        return pg
+
+    def opts(self, high_priority_stream=False):
+        opts = c10d.ProcessGroupNCCL.Options()
+        opts.is_high_priority_stream = high_priority_stream
+        return opts
+
+    def setUp(self):
+        super().setUp()
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        # self.num_gpus = torch.cuda.device_count()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def world_size(self):
+        return 8
+
+    @property
+    def rank_to_GPU(self):
+        # return rank to GPU map
+        return init_multigpu_helper(self.world_size, "nccl")
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_if_lt_x_gpu(8)
+    def test_comm_split_group_larger_scale(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        backend = pg._get_backend(torch.device(device))
+
+        tensor = torch.full((1,), self.rank).cuda(device)
+        ng1 = c10d.split_group(pg, [[0, 1], [2, 3, 4, 5, 6, 7]])
+        backend1 = ng1._get_backend(torch.device(device))
+
+        # comm split happens eagerly since device_id is passed to init_process_group.
+        self.assertEqual(backend.comm_split_count(), 1)
+        # dist.broadcast take Source rank on global process group
+        if self.rank < 2:
+            dist.broadcast(tensor, 0, group=ng1)
+            self.assertEqual(tensor, torch.full((1,), 0))
+        else:
+            dist.broadcast(tensor, 2, group=ng1)
+            self.assertEqual(tensor, torch.full((1,), 2))
+
+        # test split with only one colored group, other ranks should be no color split.
+        ng2 = c10d.split_group(pg, [[5, 6, 7]])
+        self.assertEqual(backend.comm_split_count(), 2)
+
+        if self.rank >= 5:
+            tensor2 = torch.full((1,), self.rank).cuda(device)
+            dist.broadcast(tensor2, 7, group=ng2)
+            self.assertEqual(tensor2, torch.full((1,), 7))
+        else:
+            self.assertEqual(ng2, None)
+        # a barrier and a cuda sync before destroying all pgs.
+        dist.barrier(pg)
+        torch.cuda.synchronize()
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_if_lt_x_gpu(8)
+    def test_comm_recursive_split_group(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        backend = pg._get_backend(torch.device(device))
+
+        # split the default PG into 2 subgroups, each subgroup (ng1) has 4 ranks.
+        tensor1 = torch.full((1,), self.rank).cuda(device)
+        ng1 = c10d.split_group(pg, [[0, 1, 2, 3], [4, 5, 6, 7]])
+        backend1 = ng1._get_backend(torch.device(device))
+        if self.rank < 4:
+            dist.broadcast(tensor1, 0, group=ng1)
+            self.assertEqual(tensor1, torch.full((1,), 0))
+        else:
+            dist.broadcast(tensor1, 4, group=ng1)
+            self.assertEqual(tensor1, torch.full((1,), 4))
+
+        # comm split happens eagerly since device_id is passed to init_process_group.
+        self.assertEqual(backend.comm_split_count(), 1)
+        self.assertEqual(backend1.comm_split_count(), 0)
+
+        # further split ng1 into 2 subgroups, each subgroup (ng2) has 2 ranks.
+        tensor2 = torch.full((1,), self.rank).cuda(device)
+        ng2 = c10d.split_group(ng1, [[0, 1], [2, 3]])
+        backend2 = ng2._get_backend(torch.device(device))
+        self.assertEqual(backend.comm_split_count(), 1)
+        self.assertEqual(backend1.comm_split_count(), 1)
+        self.assertEqual(backend2.comm_split_count(), 0)
+
+        # execute collective calls within each 2-rank pg
+        if self.rank == 0 or self.rank == 1:
+            dist.broadcast(tensor2, 1, group=ng2)
+            self.assertEqual(tensor2, torch.full((1,), 1))
+
+        if self.rank == 2 or self.rank == 3:
+            dist.broadcast(tensor2, 2, group=ng2)
+            self.assertEqual(tensor2, torch.full((1,), 2))
+
+        if self.rank == 4 or self.rank == 5:
+            dist.broadcast(tensor2, 5, group=ng2)
+            self.assertEqual(tensor2, torch.full((1,), 5))
+
+        if self.rank == 6 or self.rank == 7:
+            dist.broadcast(tensor2, 6, group=ng2)
+            self.assertEqual(tensor2, torch.full((1,), 6))
+        # a barrier and a cuda sync before destroying all pgs.
+        dist.barrier(pg)
+        torch.cuda.synchronize()
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":

@@ -11,11 +11,11 @@ from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
 from torch.distributed.device_mesh import init_device_mesh
 
 from torch.testing._internal.common_utils import run_tests
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+
 
 funcol = torch.ops.c10d_functional
 

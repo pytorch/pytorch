@@ -4,9 +4,10 @@ import gzip
 import io
 import json
 import os
+import time
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Dict, List, Optional
 
 import boto3  # type: ignore[import]
 import requests
@@ -139,6 +140,24 @@ def upload_to_rockset(
         index += BATCH_SIZE
 
     print("Done!")
+
+
+def upload_to_dynamodb(
+    dynamodb_table: str,
+    repo: str,
+    docs: List[Any],
+    generate_partition_key: Optional[Callable[[str, Dict[str, Any]], str]],
+) -> None:
+    print(f"Writing {len(docs)} documents to DynamoDB {dynamodb_table}")
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/dynamodb.html#batch-writing
+    with boto3.resource("dynamodb").Table(dynamodb_table).batch_writer() as batch:
+        for doc in docs:
+            if generate_partition_key:
+                doc["dynamoKey"] = generate_partition_key(repo, doc)
+            # This is to move away the _event_time field from Rockset, which we cannot use when
+            # reimport the data
+            doc["timestamp"] = int(round(time.time() * 1000))
+            batch.put_item(Item=doc)
 
 
 def upload_to_s3(

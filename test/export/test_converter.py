@@ -5,13 +5,12 @@ from collections import OrderedDict
 from typing import Dict, List, Tuple, Union
 
 import torch
-
 import torch.utils._pytree as pytree
-
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
 from torch.testing._internal.common_utils import run_tests
+
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
@@ -449,7 +448,6 @@ class TestConverter(TestCase):
         inp = (torch.ones(3),)
         orig_m = NestedM(3)
         self._check_equal_ts_ep_converter(orig_m, inp)
-
         orig_m = SuperNestedM(3)
         self._check_equal_ts_ep_converter(orig_m, inp)
 
@@ -631,17 +629,19 @@ class TestConverter(TestCase):
                 orig_m(*inp),
             )
 
-        # # Super nested module testing.
-        # inp = (torch.ones(3),)
-        # orig_m = SuperNestedM2(3)
-        # ep = self._check_equal_ts_ep_converter(orig_m, inp)
+        # Super nested module testing.
+        inp = (torch.ones(3),)
+        orig_m = SuperNestedM2(3)
+        # TODO: fix trace: state_dict is not equal.
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
 
-        # t = inp[0]
-        # t -= 0.8
-        # torch.testing.assert_close(
-        #     ep.module()(*inp),
-        #     orig_m(*inp),
-        # )
+        t = inp[0]
+        t -= 0.8
+        for ep in ep_list:
+            torch.testing.assert_close(
+                ep.module()(*inp),
+                orig_m(*inp),
+            )
 
     def test_ts2ep_converter_contains(self):
         class MIn(torch.nn.Module):
@@ -796,7 +796,18 @@ class TestConverter(TestCase):
             torch.randn([2, 3, 4]).to(torch.float32),
             torch.randn([2, 3, 4]).to(torch.float64),
         )
-        self._check_equal_ts_ep_converter(func6, inp)
+        ep_list = self._check_equal_ts_ep_converter(func6, inp)
+
+        # TODO: Additional check once dynamic shape is supported.
+        # for ep in ep_list:
+        #     self.assertEqual(
+        #         ep.module()(
+        #             torch.randn([1, 1, 1]).to(torch.int8),
+        #             torch.randn([1, 1, 1]).to(torch.int32),
+        #             torch.randn([1, 1, 1]).to(torch.float32),
+        #             torch.randn([1, 1, 1]).to(torch.float64),
+        #         )[0], 1
+        #     )
 
     def test_prim_tolist(self):
         class Module(torch.nn.Module):
@@ -930,6 +941,29 @@ class TestConverter(TestCase):
 
         inp = (torch.ones(1),)
         self._check_equal_ts_ep_converter(M, inp, ["script"], check_persistent=True)
+
+    def test_hidden_input_name(self):
+        @torch.jit.script
+        def func1(x):
+            return x + 1
+
+        def func2(*args):
+            v = torch.cat(args, dim=1)
+            return v * v
+
+        inp = (torch.randn([1, 1]),)
+        self._check_equal_ts_ep_converter(func1, inp)
+
+        inp = (torch.ones(5, 5),)
+        # Cannot script again.
+        self._check_equal_ts_ep_converter(torch.ops.aten.relu, inp, ["trace"])
+
+        M = 2
+        Ns = [4, 2, 1]
+        empty = torch.tensor([], dtype=torch.double)
+        values = [empty] + [torch.randn(M, N) for N in Ns]
+        # Cannot script variable length inputs.
+        self._check_equal_ts_ep_converter(func2, tuple(values), ["trace"])
 
 
 if __name__ == "__main__":

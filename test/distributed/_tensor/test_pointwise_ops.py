@@ -5,10 +5,8 @@ from typing import Any, Callable, Dict, Optional, Sequence
 from unittest import skip
 
 import torch
-
 import torch.utils._pytree as pytree
 from torch import Tensor
-
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed._tensor.placement_types import (
     Partial,
@@ -76,7 +74,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         placements: Sequence[Placement],
         op: Callable,
         pre_op_fn: Optional[Callable] = None,
-        args: Sequence[Any] = tuple(),
+        args: Sequence[Any] = (),
         kwargs: Optional[Dict[str, Any]] = None,
     ):
         if pre_op_fn is None:
