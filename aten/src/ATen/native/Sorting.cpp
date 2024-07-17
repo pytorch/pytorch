@@ -219,7 +219,7 @@ void quantile_checks(const Tensor& self, const Tensor& q) {
 }
 
 std::vector<int64_t> quantile_output_shape(
-    const optional<int64_t> original_dim,
+    const std::optional<int64_t> original_dim,
     const Tensor& self,
     const Tensor& q,
     const bool keepdim,
@@ -246,7 +246,7 @@ std::vector<int64_t> quantile_output_shape(
 Tensor quantile_compute(
     const Tensor& self,
     const Tensor& q,
-    const optional<int64_t> orginal_dim,
+    const std::optional<int64_t> orginal_dim,
     const bool keepdim,
     const QUANTILE_INTERPOLATION_MODE& interpolation,
     const bool ignore_nan,
@@ -372,7 +372,7 @@ void quantile_out_impl(
     Tensor& out,
     const Tensor& self,
     const Tensor& q,
-    const optional<int64_t> original_dim,
+    const std::optional<int64_t> original_dim,
     const bool keepdim,
     const QUANTILE_INTERPOLATION_MODE& interpolation,
     const bool ignore_nan) {
@@ -397,7 +397,7 @@ void quantile_out_impl(
 Tensor quantile_impl(
     const Tensor& self,
     const Tensor& q,
-    const optional<int64_t> original_dim,
+    const std::optional<int64_t> original_dim,
     const bool keepdim,
     const QUANTILE_INTERPOLATION_MODE& interpolation,
     const bool ignore_nan) {
@@ -653,7 +653,7 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
 Tensor& quantile_out(
     const Tensor& self,
     const Tensor& q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation,
     Tensor& out) {
@@ -671,7 +671,7 @@ Tensor& quantile_out(
 Tensor& quantile_out(
     const Tensor& self,
     double q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation,
     Tensor& out) {
@@ -689,7 +689,7 @@ Tensor& quantile_out(
 Tensor quantile(
     const Tensor& self,
     const Tensor& q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation) {
   return quantile_impl(
@@ -704,7 +704,7 @@ Tensor quantile(
 Tensor quantile(
     const Tensor& self,
     double q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation) {
   TORCH_CHECK(
@@ -716,7 +716,7 @@ Tensor quantile(
 Tensor& nanquantile_out(
     const Tensor& self,
     const Tensor& q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation,
     Tensor& out) {
@@ -734,7 +734,7 @@ Tensor& nanquantile_out(
 Tensor& nanquantile_out(
     const Tensor& self,
     double q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation,
     Tensor& out) {
@@ -752,7 +752,7 @@ Tensor& nanquantile_out(
 Tensor nanquantile(
     const Tensor& self,
     const Tensor& q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation) {
   return quantile_impl(
@@ -767,7 +767,7 @@ Tensor nanquantile(
 Tensor nanquantile(
     const Tensor& self,
     double q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation) {
   TORCH_CHECK(
