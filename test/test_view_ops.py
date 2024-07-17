@@ -1,6 +1,5 @@
 # Owner(s): ["module: tests"]
 import random
-
 import unittest
 from functools import partial
 from itertools import combinations, permutations, product
@@ -8,7 +7,6 @@ from itertools import combinations, permutations, product
 import numpy as np
 
 import torch
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
