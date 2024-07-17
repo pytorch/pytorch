@@ -351,10 +351,10 @@ def enforce_comm_ordering_for_fsdp(
 
     name_to_fused_node = kwargs["name_to_fused_node"]  # op name to (maybe fused) op
     graph_inputs = kwargs["graph_inputs"]
-    name_to_buf = kwargs["name_to_buf"]
+    # name_to_buf = kwargs["name_to_buf"]
 
-    def buf_name_to_snode(buf_name):
-        return name_to_buf[buf_name].defining_op
+    # def buf_name_to_snode(buf_name):
+    #     return name_to_buf[buf_name].defining_op
 
     def _find_all_recursive_deps_of_node_up_to_criteria(
         snode, collected_node_set, criteria_cb=None
@@ -363,7 +363,8 @@ def enforce_comm_ordering_for_fsdp(
         if criteria_cb and criteria_cb(snode):
             return
         for dep in snode.unmet_dependencies:
-            dep_node = name_to_fused_node[buf_name_to_snode(dep.name).get_name()]
+            # dep_node = name_to_fused_node[buf_name_to_snode(dep.name).get_name()]
+            dep_node = name_to_fused_node[dep.name]
             if dep_node in collected_node_set:
                 continue
             _find_all_recursive_deps_of_node_up_to_criteria(
@@ -374,6 +375,7 @@ def enforce_comm_ordering_for_fsdp(
     scheduled = set()
     ag_nodes = []
     rs_nodes = []
+    ag_wait_op_to_ag_code_block = {}
     snode_name_to_final_snode = {}
 
     def _create_group_node(snodes_to_group):
@@ -385,39 +387,39 @@ def enforce_comm_ordering_for_fsdp(
     # Create grouped nodes for specific ops
     for snode in snodes:
         if (
+            # isinstance(snode.node, ir.FallbackKernel)
+            # and snode.node.op_overload is torch.ops.fsdp.split_with_sizes_copy.default
             isinstance(snode.node, ir.FallbackKernel)
-            and snode.node.op_overload is torch.ops.fsdp.split_with_sizes_copy.default
+            and snode.node.op_overload is torch.ops.aten.set_.source_Tensor
+            and any(
+                is_fallback_op(
+                    name_to_fused_node[x].node,
+                    op=torch.ops.fsdp.split_with_sizes_copy.default,
+                )
+                for x in snode.ancestors
+            )
         ):
             # Case 1: Handle AllGather
 
-            # Find the "cast + copy_in + getitem + all_gather + all_gather_wait_tensor + copy_out" block
+            # Find the "cast + copy_in + getitem + all_gather + all_gather_wait_tensor + copy_out + set_" block
             collected_node_set: set[scheduler.BaseSchedulerNode] = set()
             _find_all_recursive_deps_of_node_up_to_criteria(
                 snode,
                 collected_node_set,
             )
 
-            # sort nodes by original operation order
-            collected_nodes = sorted(
-                collected_node_set, key=lambda x: int(x.get_name()[2:])
-            )
-
-            # Group "cast + copy_in + getitem + all_gather" into one GroupedSchedulerNode
             wait_node_idx = None
             for i in range(len(collected_nodes) - 1):
                 if isinstance(collected_nodes[i + 1].node, ir._WaitKernel):
                     wait_node_idx = i + 1
                     break
-            ag_group_node = _create_group_node(collected_nodes[:wait_node_idx])
 
-            # Group "all_gather_wait_tensor + copy_out" into one GroupedSchedulerNode
-            wait_group_node = _create_group_node(collected_nodes[wait_node_idx:])
-            ag_nodes.append(
-                (
-                    ag_group_node,
-                    wait_group_node,
-                )
-            )
+            wait_node = collected_nodes[wait_node_idx]
+            # This is needed in order to collect all .set_ nodes
+            if wait_node in ag_wait_op_to_ag_code_block:
+                ag_wait_op_to_ag_code_block[wait_node].update(collected_node_set)
+            else:
+                ag_wait_op_to_ag_code_block[wait_node] = collected_node_set
         elif (
             isinstance(snode.node, ir._WaitKernel)
             and any(
@@ -447,7 +449,7 @@ def enforce_comm_ordering_for_fsdp(
             )
             # sort nodes by original operation order
             collected_nodes = sorted(
-                collected_node_set, key=lambda x: int(x.get_name()[2:])
+                collected_node_set, key=lambda x: int(x.get_name()[3:])
             )
             for n in collected_nodes:
                 torch_log.warning(f"n: {n}, n.debug_str(): {n.debug_str()}")
@@ -477,6 +479,24 @@ def enforce_comm_ordering_for_fsdp(
                     wait_group_node,
                 )
             )
+
+    assert len(ag_wait_op_to_ag_code_block) > 0
+    for ag_wait_node, collected_node_set in ag_wait_op_to_ag_code_block.items():
+        # sort nodes by original operation order
+        collected_nodes = sorted(
+            collected_node_set, key=lambda x: int(x.get_name()[3:])
+        )
+        wait_node_idx = collected_nodes.index(ag_wait_node)
+        # Group "cast + copy_in + getitem + all_gather" into one GroupedSchedulerNode
+        ag_group_node = _create_group_node(collected_nodes[:wait_node_idx])
+        # Group "all_gather_wait_tensor + copy_out + set_" into one GroupedSchedulerNode
+        wait_group_node = _create_group_node(collected_nodes[wait_node_idx:])
+        ag_nodes.append(
+            (
+                ag_group_node,
+                wait_group_node,
+            )
+        )
 
     for snode in snodes:
         if snode.get_name() in snode_name_to_final_snode:
