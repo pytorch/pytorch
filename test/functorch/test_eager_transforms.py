@@ -79,8 +79,8 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
-
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+
 
 USE_TORCHVISION = False
 try:
@@ -3404,7 +3404,7 @@ class TestComposability(TestCase):
     @onlyCPU
     def test_no_warning_on_import_functorch(self, device):
         out = subprocess.check_output(
-            [sys.executable, "-W", "always", "-c", "import functorch"],
+            [sys.executable, "-W", "all", "-c", "import functorch"],
             stderr=subprocess.STDOUT,
             cwd=os.path.dirname(os.path.realpath(__file__)),
         ).decode("utf-8")
@@ -5085,9 +5085,8 @@ def traceable(f):
 @markDynamoStrictTest
 class TestCompileTransforms(TestCase):
     @skipIfRocm(msg="test leaks memory on ROCm")
-    # torch.compile is not supported on Windows
     # Triton only supports GPU with SM70 or later.
-    @expectedFailureIf(IS_WINDOWS or (TEST_CUDA and not SM70OrLater))
+    @expectedFailureIf(TEST_CUDA and not SM70OrLater)
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:
