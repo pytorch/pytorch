@@ -69,7 +69,7 @@ class MemoryDep(Dep):
         """
         Return the offset by setting every variable to be 0.
         """
-        return sympy_subs(self.index, {v: 0 for v in self.var_names})
+        return sympy_subs(self.index, dict.fromkeys(self.var_names, 0))
 
     def normalize_with_stride_order(self, prefix="t"):
         r"""
@@ -456,7 +456,7 @@ class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
 # TODO: check call sites
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
     cnt = itertools.count()
-    var_ranges: VarRanges = dict()
+    var_ranges: VarRanges = {}
 
     def add_var(length: sympy.Expr) -> sympy.Symbol:
         v = sympy_index_symbol(f"{prefix}{next(cnt)}")
@@ -557,18 +557,20 @@ def extract_input_node_reduction_ranges(
             buffer = V.graph.get_buffer(read.name)
             if buffer is None:
                 continue
-            op = buffer.get_defining_op()
-            if op is None:
-                continue
-
-            if isinstance(op, ComputedBuffer) and len(op.get_reduction_size()) > 0:
+            if (
+                isinstance(buffer, ComputedBuffer)
+                and len(buffer.get_reduction_size()) > 0
+            ):
                 if reduction_size is None:
-                    reduction_size = op.get_reduction_size()
-                    size = op.get_size()
-                elif reduction_size != op.get_reduction_size() or size != op.get_size():
+                    reduction_size = buffer.get_reduction_size()
+                    size = buffer.get_size()
+                elif (
+                    reduction_size != buffer.get_reduction_size()
+                    or size != buffer.get_size()
+                ):
                     return (None, None)
             else:
-                new_reads.extend(op.get_reads())
+                new_reads.extend(buffer.get_reads())
         if reads == new_reads:
             return (size, reduction_size)
         else:

@@ -104,7 +104,7 @@ Tensor _to_copy_nested(
     options = options.device(ensure_has_index(options.device()));
   }
   // memory_format is handled separately due to MemoryFormat::Preserve logic
-  options = self.options().merge_in(options).memory_format(c10::nullopt);
+  options = self.options().merge_in(options).memory_format(std::nullopt);
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
 
   bool pin_out =

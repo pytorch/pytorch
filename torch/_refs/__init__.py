@@ -6,12 +6,14 @@ import itertools
 import math
 import operator
 import warnings
+
 from collections.abc import Iterable
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
 from typing import Any, Callable, Dict, List, Optional, overload, Sequence, Tuple, Union
 
 import torch
+
 import torch._prims as prims
 import torch._prims_common as utils
 from torch import sym_float, sym_int
@@ -46,7 +48,6 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
-
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -353,9 +354,7 @@ aten = torch._ops.ops.aten
 
 
 def is_noncontiguous_supported(device):
-    if device is not None and device.type == "hpu":
-        return False
-    return True
+    return device is None or device.type != "hpu"
 
 
 def handle_noncontiguous_outputs(input_tlist, output):
@@ -442,7 +441,6 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
 
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
-
 
 #
 # Elementwise unary references
@@ -3778,9 +3776,7 @@ def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
 
 @register_decomposition(aten.roll)
 @out_wrapper()
-def roll(
-    a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
-) -> TensorLikeType:
+def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
     dims = utils.canonicalize_dims(a.ndim, dims)
     # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
@@ -3940,7 +3936,7 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
         lambda: "Dimension specified as 0 but tensor has no dimensions",
     )
     if guard_size_oblivious(t.shape[dim] == 0):
-        return tuple()
+        return ()
     else:
         return tuple(
             torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim)
