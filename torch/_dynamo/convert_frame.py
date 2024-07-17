@@ -44,6 +44,7 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils._python_dispatch import _disable_current_modes
 from torch.utils._traceback import format_traceback_short
+import torch.distributed as dist
 
 from . import config, exc, trace_rules
 from .backends.registry import CompilerFn

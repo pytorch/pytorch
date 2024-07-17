@@ -28,6 +28,7 @@ except ModuleNotFoundError:
 
 import torch
 
+import torch.distributed as dist
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
@@ -2227,38 +2228,53 @@ def _automatic_dynamic(
         )
 
     # Prep for automatic dynamic
-    frame_state_entry = None
-    if name not in tx.output.frame_state:
-        # If there is no entry for this source, add the tensor to frame state with its current static size.
-        # E.g., {} -> {"x": [2, 4]}
-        frame_state_entry = FrameStateSizeEntry(None, None)
-        frame_state_entry.size = list(e.size())
+    def update_frame_state(size):
+        frame_state_entry = None
+        if name not in tx.output.frame_state:
+            # If there is no entry for this source, add the tensor to frame state with its current static size.
+            # E.g., {} -> {"x": [2, 4]}
+            frame_state_entry = FrameStateSizeEntry(None, None)
+            frame_state_entry.size = list(size)
+        else:
+            frame_state_entry = tx.output.frame_state[name]
+            if frame_state_entry.size is not None:
+                if len(size) != len(frame_state_entry.size):
+                    # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
+                    # E.g. {"x": [2, 3, 4]} -> {"x": None}
+                    log.debug(
+                        "automatic dynamic %s dim %s != %s",
+                        name,
+                        len(size),
+                        frame_state_entry.size,
+                    )
+                    frame_state_entry.size = None
+                else:
+                    # If there is already an entry, and the dim matches, for every size in the frame state which
+                    # disagrees with the current static size, replace it with None. E.g., {"x": [2, 3]} -> {"x": [2, None]}
+                    for i, dim in enumerate(frame_state_entry.size):
+                        if dim is not None and size[i] != dim:
+                            log.debug(
+                                "automatic dynamic %s size(%s) %s != %s",
+                                name,
+                                i,
+                                size[i],
+                                dim,
+                            )
+                            frame_state_entry.size[i] = None
+        tx.output.frame_state[name] = frame_state_entry
+
+    if config.enable_sync_dist_compilation and dist.is_available() and dist.is_initialized():
+        # TODO: handle if device is always 0
+        with torch.cuda.device(dist.get_rank()):
+            size_list = [None] * dist.get_world_size()
+            log.info("compiler collective: automatic_dynamic %s", e.size(0))
+            dist.all_gather_object(size_list, e.size())
+            for s in size_list:
+                update_frame_state(s)
     else:
-        frame_state_entry = tx.output.frame_state[name]
-        if frame_state_entry.size is not None:
-            if e.ndim != len(frame_state_entry.size):
-                # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
-                # E.g. {"x": [2, 3, 4]} -> {"x": None}
-                log.debug(
-                    "automatic dynamic %s dim %s != %s",
-                    name,
-                    e.ndim,
-                    frame_state_entry.size,
-                )
-                frame_state_entry.size = None
-            else:
-                # If there is already an entry, and the dim matches, for every size in the frame state which
-                # disagrees with the current static size, replace it with None. E.g., {"x": [2, 3]} -> {"x": [2, None]}
-                for i, dim in enumerate(frame_state_entry.size):
-                    if dim is not None and e.size()[i] != dim:
-                        log.debug(
-                            "automatic dynamic %s size(%s) %s != %s",
-                            name,
-                            i,
-                            e.size(i),
-                            dim,
-                        )
-                        frame_state_entry.size[i] = None
+        update_frame_state(e.size())
+
+    frame_state_entry = tx.output.frame_state[name]
 
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
@@ -2374,8 +2390,6 @@ def _automatic_dynamic(
             dynamic = DimDynamic.DUCK
 
         dynamic_dims.append(dynamic)
-
-    tx.output.frame_state[name] = frame_state_entry
 
     return StatefulSymbolicContext(
         dynamic_sizes=dynamic_dims,
