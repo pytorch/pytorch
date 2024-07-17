@@ -26,7 +26,6 @@ from unittest.mock import patch
 import numpy as np
 
 import torch
-
 import torch._dynamo.config as dynamo_config
 import torch._inductor.aoti_eager
 import torch.nn as nn
@@ -67,7 +66,6 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDNN,
     with_tf32_off,
 )
-
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
     expectedFailureXPU,
@@ -95,6 +93,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.weak import WeakTensorKeyDictionary
 
+
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 if IS_WINDOWS and IS_CI:
@@ -109,14 +108,12 @@ importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from torch._inductor import config, test_operators
-
 from torch._inductor.compile_fx import (
     compile_fx,
     compile_fx_inner,
     complex_memory_overlap,
 )
 from torch._inductor.utils import has_torchvision_roi_align
-
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -127,6 +124,7 @@ from torch.testing._internal.inductor_utils import (
     skipCPUIf,
     skipCUDAIf,
 )
+
 
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
 
