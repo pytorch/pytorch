@@ -1740,8 +1740,8 @@ class DistributedTest:
             rank = dist.get_rank()
             send_recv_size = 10
             tensor = _build_tensor(send_recv_size, value=rank)
-            recv_ranks = list()
-            irecv_ranks = list()
+            recv_ranks = []
+            irecv_ranks = []
 
             ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
@@ -4107,7 +4107,7 @@ class DistributedTest:
                     self.assertGreaterAlmostEqual(
                         float(time.time()),
                         float(expected_time[0]),
-                        "destination rank: %d, my rank: %d" % (dest, rank)
+                        msg="destination rank: %d, my rank: %d" % (dest, rank)
                         + " (if you see this failure, please report in #14554)",
                     )
 
