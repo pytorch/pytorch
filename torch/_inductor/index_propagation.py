@@ -30,6 +30,7 @@ import sympy
 import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
+from torch.utils._sympy.symbol import free_symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .utils import generate_assert
 
@@ -324,29 +325,30 @@ class IndexPropagation:
 
             expr = sympy.sympify(index.value.expr)
 
-            # TODO Perhaps move this logic to the simplify indexing pass
-            def wrap_expr(expr):
-                # Positive, negative, mixed
-                if self.statically_true(0 <= expr):
-                    return expr
-                elif self.statically_true(expr < 0):
-                    return expr + size
-                else:
-                    return Where(expr < 0, expr + size, expr)
+            if not free_symbol_is_type(expr, SymT.INDIRECT):
+                # TODO Perhaps move this logic to the simplify indexing pass
+                def wrap_expr(expr):
+                    # Positive, negative, mixed
+                    if self.statically_true(0 <= expr):
+                        return expr
+                    elif self.statically_true(expr < 0):
+                        return expr + size
+                    else:
+                        return Where(expr < 0, expr + size, expr)
 
-            # Sometimes it's easier to prove 0 <= expr than the weaker -size <= expr
-            can_prove_lower = self.statically_true(0 <= expr) or self.statically_true(
-                -size <= expr
-            )
-            can_prove_upper = self.statically_true(expr < size)
-            expr = wrap_expr(expr)
-            if generate_assert(check):
-                self.fallback(
-                    "check_bounds",
-                    (expr, size),
-                    dict(lower=not can_prove_lower, upper=not can_prove_upper),
+                # Sometimes it's easier to prove 0 <= expr than the weaker -size <= expr
+                can_prove_lower = self.statically_true(0 <= expr) or self.statically_true(
+                    -size <= expr
                 )
-            return expr
+                can_prove_upper = self.statically_true(expr < size)
+                expr = wrap_expr(expr)
+                if generate_assert(check):
+                    self.fallback(
+                        "check_bounds",
+                        (expr, size),
+                        dict(lower=not can_prove_lower, upper=not can_prove_upper),
+                    )
+                return expr
 
         indirect_var = self.fallback(
             "indirect_indexing", (index, size, check), {}
