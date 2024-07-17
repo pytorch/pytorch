@@ -100,27 +100,27 @@ def _schedule_for_comm(
     # When only sink_waits is True, only score_1 and score_2 are considered.
     # When neither is True, the original order is yielded.
     name_to_snode = {}
+    name_to_maybe_grouped_snode = {}
+    # maybe grouped node -> scores
     scores_0, scores_1, scores_2 = {}, {}, {}
     for idx, snode in enumerate(snodes):
-        if isinstance(snode, _inductor.scheduler.GroupedSchedulerNode):
-            name = snode.get_name()
-            name_to_snode[name] = snode
-            scores_0[name] = sys.maxsize
-            scores_1[name] = 0
-            scores_2[name] = idx
-        else:
-            for name in snode.get_names():
-                name_to_snode[name] = snode
-                scores_0[name] = sys.maxsize
-                scores_1[name] = 0
-                scores_2[name] = idx
+        if isinstance(snode, (_inductor.scheduler.FusedSchedulerNode, _inductor.scheduler.GroupedSchedulerNode)):
+            for sub_snode in snode.snodes:
+                name_to_maybe_grouped_snode[sub_snode.get_name()] = snode
+        name_to_maybe_grouped_snode[snode.get_name()] = snode
+        name = snode.get_name()
+        name_to_snode[name] = snode
+        scores_0[name] = sys.maxsize
+        scores_1[name] = 0
+        scores_2[name] = idx
 
     comm_idx = 0
     for snode in snodes:
         if raise_comms and contains_collective(snode):
             scores_0[snode.get_name()] = comm_idx
             for anc in snode.ancestors:
-                scores_0[anc] = min(scores_0[anc], comm_idx)
+                maybe_grouped_snode_name = name_to_maybe_grouped_snode[anc].get_name()
+                scores_0[maybe_grouped_snode_name] = min(scores_0[maybe_grouped_snode_name], comm_idx)
             comm_idx += 1
         elif sink_waits and contains_wait(snode):
             scores_1[snode.get_name()] = 1
@@ -128,7 +128,7 @@ def _schedule_for_comm(
     class Runnable:
         def __init__(self, snode):
             self.snode = snode
-            name = next(iter(snode.get_names()))
+            name = snode.get_name()
             self.score = (
                 scores_0[name],
                 scores_1[name],
@@ -150,28 +150,28 @@ def _schedule_for_comm(
     for snode in snodes:
         if isinstance(snode.node, ir.MutationOutput):
             src_name = snode.node.node_doing_mutating.get_name()
-            src_snode = name_to_snode[src_name]
+            src_snode = name_to_maybe_grouped_snode[src_name]
             assert src_snode in unmet_deps
             unmet_deps[src_snode] |= {
-                dep.name for dep in snode.unmet_dependencies if dep.name != src_name
+                name_to_maybe_grouped_snode[dep.name].get_name() for dep in snode.unmet_dependencies if dep.name != src_name
             }
         assert snode not in unmet_deps
-        unmet_deps[snode] = {dep.name for dep in snode.unmet_dependencies}
+        unmet_deps[snode] = {name_to_maybe_grouped_snode[dep.name].get_name() for dep in snode.unmet_dependencies}
+
+    # Sanity check: deps in unmet_deps should only be grouped nodes, not grouped nodes' constituent nodes.
+    # e.g. if bufY depends on bufX1_bufX2, bufY's unmet_deps cannot have bufX1 or bufX2, instead it can only have bufX1_bufX2.
     for snode in unmet_deps:
-        if isinstance(snode, _inductor.scheduler.GroupedSchedulerNode):
-            for dep_name in list(unmet_deps[snode]):
-                if isinstance(name_to_snode[dep_name], _inductor.scheduler.NopKernelSchedulerNode) and isinstance(name_to_snode[dep_name].node, ir.MutationOutput):
-                    unmet_deps[snode].remove(dep_name)
-        # deps = list(unmet_deps[snode])
-        # if len(deps) == 1:
-        #     print(f"deps: {deps}")
-        #     if isinstance(name_to_snode[deps[0]], _inductor.scheduler.NopKernelSchedulerNode) and isinstance(name_to_snode[deps[0]].node, ir.MutationOutput):
-        #         nop_node = name_to_snode[deps[0]]
-        #         nop_node_deps = list(unmet_deps[nop_node])
-        #         print(f"nop_node_deps[0]: {nop_node_deps[0]}")
-        #         if len(nop_node_deps) == 1 and nop_node_deps[0] in snode.get_names():
-        #             # unbreak the cycle between grouped node and its associated mutation output node
-        #             unmet_deps[snode] = set()
+        deps = unmet_deps[snode]
+        for dep in deps:
+            maybe_grouped_snode_for_dep = name_to_maybe_grouped_snode[dep]
+            assert not (_inductor.scheduler.is_group_snode(maybe_grouped_snode_for_dep) and dep in maybe_grouped_snode_for_dep.get_names()), \
+                f"dep: {dep}, maybe_grouped_snode_for_dep: {maybe_grouped_snode_for_dep}, maybe_grouped_snode_for_dep.get_names(): {maybe_grouped_snode_for_dep.get_names()}"
+
+    # for snode in unmet_deps:
+    #     if isinstance(snode, _inductor.scheduler.GroupedSchedulerNode):
+    #         for dep_name in list(unmet_deps[snode]):
+    #             if isinstance(name_to_maybe_grouped_snode[dep_name], _inductor.scheduler.NopKernelSchedulerNode) and isinstance(name_to_maybe_grouped_snode[dep_name].node, ir.MutationOutput):
+    #                 unmet_deps[snode].remove(dep_name)
 
     ready: List[Runnable] = []
     buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(set)
@@ -239,7 +239,7 @@ def _schedule_for_comm(
     for snode, deps in unmet_deps.items():
         if len(deps) == 1:
             dep_node = name_to_snode[list(deps)[0]]
-            print(f"dep snode: {dep_node}, dep_node.debug_str(): {dep_node.debug_str()}, unmet_deps[dep_node]: {unmet_deps[dep_node]}" )
+            print(f"dep snode: {dep_node}, unmet_deps[dep_node]: {unmet_deps[dep_node]}" )
         assert len(deps) == 0, (
             "Detected unscheduled nodes. "
             f"Nodes with unmet dependencies: {snode}, deps: {deps}"
@@ -352,13 +352,7 @@ def reorder_compute_and_comm_for_overlap(
 def get_all_reads(snode):
     reads = set()
     reads.update(snode.read_writes.reads)
-    if isinstance(
-        snode,
-        (
-            _inductor.scheduler.FusedSchedulerNode,
-            _inductor.scheduler.GroupedSchedulerNode,
-        ),
-    ):
+    if _inductor.scheduler.is_group_snode(snode):
         for sub_snode in snode.snodes:
             reads.update(get_all_reads(sub_snode))
     return reads

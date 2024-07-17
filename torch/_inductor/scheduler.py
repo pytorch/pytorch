@@ -902,12 +902,16 @@ class SchedulerNode(BaseSchedulerNode):
         return buffers_store_as_atomic_add
 
 
-def init_group_node(
+def is_group_snode(snode: BaseSchedulerNode):
+    return isinstance(snode, (FusedSchedulerNode, GroupedSchedulerNode))
+
+
+def init_group_snode(
     group_snode: BaseSchedulerNode,
     scheduler: Scheduler,
     snodes: List[BaseSchedulerNode],
 ) -> None:
-    assert isinstance(group_snode, (FusedSchedulerNode, GroupedSchedulerNode))
+    assert is_group_snode(group_snode)
     group_snode.snodes = snodes
     group_snode.scheduler = scheduler
     group_snode.node = None
@@ -950,7 +954,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     def __init__(self, scheduler: Scheduler, snodes: List[BaseSchedulerNode]) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
-        init_group_node(self, scheduler, snodes)
+        init_group_snode(self, scheduler, snodes)
         self.users: List[NodeUser] = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
 
@@ -1328,7 +1332,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 
     def __init__(self, scheduler: Scheduler, snodes: List[BaseSchedulerNode]) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
-        init_group_node(self, scheduler, snodes)
+        init_group_snode(self, scheduler, snodes)
 
     def unpack(self) -> List[BaseSchedulerNode]:
         """
