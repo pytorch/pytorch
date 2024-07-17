@@ -16,7 +16,7 @@ from torch._higher_order_ops.flex_attention import flex_attention as flex_attent
 from torch._inductor import metrics
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
-from torch.nn.attention._flex_attention import (
+from torch.nn.attention.flex_attention import (
     _causal,
     _compose,
     _create_empty_block_mask,
@@ -1376,14 +1376,8 @@ class GraphModule(torch.nn.Module):
         return (out,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, child: "f64[]", child_2: "i32[]", child_4: "i32[]", child_6: "i32[]", child_8: "i32[]"):
-            child_1 = child
-            child_3 = child_2
-            child_5 = child_4
-            child_7 = child_6
-            child_9 = child_8
-
-            mul: "f64[]" = child_1 * child_1;  child_1 = None
+        def forward(self, child: "f64[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]", child_4: "i32[]"):
+            mul: "f64[]" = child * child;  child = None
             return mul
 
     class GraphModule(torch.nn.Module):
