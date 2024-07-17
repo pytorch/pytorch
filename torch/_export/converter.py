@@ -943,9 +943,14 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
 
         self.name_to_param: Dict[str, torch.Tensor] = {}
         self.name_to_buffer: Dict[str, torch.Tensor] = {}
+        params_list = (
+            list(self.ts_model.parameters())
+            if not isinstance(self.ts_model, torch._C.ScriptFunction)
+            else []
+        )
         if not isinstance(self.ts_model, torch._C.ScriptFunction):
             for k, tensor in self.ts_model.state_dict().items():  # type: ignore[union-attr]
-                if tensor.requires_grad:
+                if tensor in params_list:
                     self.name_to_param[k] = tensor
                 else:
                     self.name_to_buffer[k] = tensor
