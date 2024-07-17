@@ -567,7 +567,7 @@ struct ExpandableSegment {
       cudaStream_t stream,
       size_t address_space_size,
       size_t segment_size,
-      std::vector<c10::DeviceIndex> peers){
+      std::vector<c10::DeviceIndex> peers) {
     TORCH_INTERNAL_ASSERT(false, "expandable segment not supported");
   }
   SegmentRange map(SegmentRange range) {
