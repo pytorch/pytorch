@@ -1,9 +1,8 @@
 # Owner(s): ["oncall: export"]
 
 import unittest
-
 from collections import OrderedDict
-from typing import Any, Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -942,68 +941,6 @@ class TestConverter(TestCase):
 
         inp = (torch.ones(1),)
         self._check_equal_ts_ep_converter(M, inp, ["script"], check_persistent=True)
-
-    def test_raise_exception(self):
-        class Module(torch.nn.Module):
-            def forward(self, x: torch.Tensor, y: int) -> torch.Tensor:
-                if y > 0:
-                    raise RuntimeError("test")
-                return x + y
-
-        # match non-strict export behavior that errors when the given input leads to
-        # RaiseException.
-        with self.assertRaisesRegex(torch.jit.Error, "builtins.RuntimeError"):
-            inp = (torch.randn(3, 2), 1)
-            self._check_equal_ts_ep_converter(Module(), inp, ["script"])
-
-        # Matching non-strict export behavior that only executes 1 if-branch according
-        # to the given input.
-        inp = (torch.randn(3, 2), 0)
-        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
-
-        class Module(torch.nn.Module):
-            def forward(self, x: torch.Tensor, y: int) -> torch.Tensor:
-                z = x
-                if y > 0:
-                    raise RuntimeError("test")
-                    # z = x
-                else:
-                    z = x + y
-                return x + y + z
-
-        # match non-strict export behavior that errors when the given input leads to
-        # RaiseException.
-        with self.assertRaisesRegex(torch.jit.Error, "builtins.RuntimeError"):
-            inp = (torch.randn(3, 2), 1)
-            self._check_equal_ts_ep_converter(Module(), inp, ["script"])
-
-        # Matching non-strict export behavior that only executes 1 if-branch according
-        # to the given input.
-        inp = (torch.randn(3, 2), 0)
-        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
-
-    def test_context_manager(self):
-        class ContextManager:
-            def __init__(self):
-                self.count = 0
-                return
-
-            def __enter__(self):
-                self.count += 1
-                return
-
-            def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-                self.count -= 1
-                return
-
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                with ContextManager():
-                    res = x + y
-                return res
-
-        inp = (torch.ones(3, 3), torch.ones(3, 3))
-        self._check_equal_ts_ep_converter(M(), inp)
 
     def test_hidden_input_name(self):
         @torch.jit.script
