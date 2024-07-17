@@ -394,6 +394,13 @@ def was_tensor_metadata_updated(arg, new_arg):
 
 # Returns the number of detected copy_
 def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
+    allowed_mutation_ops = [
+        torch.ops.aten.copy_.default,
+        torch.ops.aten.set_.source_Tensor,
+    ]
+    if hasattr(torch.ops.fsdp, "set_"):
+        allowed_mutation_ops.append(torch.ops.fsdp.set_.default)
+
     placeholders = set()
     mutation_count = 0
     # NB: It would also be nice to verify that the mutations all happen at the
@@ -403,11 +410,7 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
         if n.op == "placeholder":
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
-            if n.target in [
-                torch.ops.aten.copy_.default,
-                torch.ops.aten.set_.source_Tensor,
-                torch.ops.fsdp.set_.default,
-            ]:
+            if n.target in allowed_mutation_ops:
                 suffix = True
                 # Can only copy_/set_ into an input
                 # this is mostly a hack to avoid failing XLA tests.
