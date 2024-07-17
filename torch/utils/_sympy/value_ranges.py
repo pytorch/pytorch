@@ -179,10 +179,16 @@ class ValueRanges(Generic[_T]):
         object.__setattr__(
             self,
             "is_int",
-            not self.is_bool
-            and (
-                isinstance(lower, (sympy.Integer, NegativeIntInfinity))
-                and isinstance(upper, (sympy.Integer, IntInfinity))
+            (
+                not self.is_bool
+                and (
+                    lower == -sympy.oo  # in simple_sympify() we use -oo for integer
+                    or isinstance(lower, (sympy.Integer, NegativeIntInfinity))
+                )
+                and (
+                    upper == sympy.oo  # in simple_sympify() we use oo for integer
+                    or isinstance(upper, (sympy.Integer, IntInfinity))
+                )
             ),
         )
         """
