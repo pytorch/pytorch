@@ -326,8 +326,11 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
         import torch.distributed._composable.fsdp._fsdp_collectives
 
         assert torch.distributed.is_available()
-        _ = torch.ops._c10d_functional.all_gather_into_tensor
-        _ = torch.ops._c10d_functional.all_gather_into_tensor_out
+        # Assert existence of these ops
+        assert (
+            torch.ops._c10d_functional.all_gather_into_tensor
+            and torch.ops._c10d_functional.all_gather_into_tensor_out
+        )
     except (ImportError, AttributeError, AssertionError):
         return
 
