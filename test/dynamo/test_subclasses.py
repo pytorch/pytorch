@@ -318,6 +318,74 @@ class OptionalScaledTensor(torch.Tensor):
         )
 
 
+class CtxSubclassTensor(torch.Tensor):
+    """
+    Class used to verify guarding on the subclass metadata
+    """
+
+    @staticmethod
+    def __new__(cls, a, constant):
+        shape = a.shape
+        kwargs = {}
+        kwargs["strides"] = a.stride()
+        kwargs["storage_offset"] = a.storage_offset()
+        kwargs["device"] = a.device
+        kwargs["layout"] = a.layout
+        kwargs["requires_grad"] = a.requires_grad
+        kwargs["dtype"] = a.dtype
+        out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+        return out
+
+    def __init__(self, a, constant):
+        self.a = a
+        self.constant = constant
+
+    def __repr__(self):
+        a_repr = repr(self.a)
+        return f"CtxSubclassTensor({a_repr})"
+
+    def __tensor_flatten__(self):
+        return ["a"], (self.constant,)
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, sizes, strides):
+        constant = meta[0]
+        a = inner_tensors["a"]
+        return CtxSubclassTensor(a, constant)
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        from torch.utils._python_dispatch import return_and_correct_aliasing
+
+        if kwargs is None:
+            kwargs = {}
+        biggest_constant = max(
+            [
+                x.constant
+                for x in pytree.tree_flatten(args)[0]
+                if isinstance(x, CtxSubclassTensor)
+            ]
+        )
+        args_a = pytree.tree_map(
+            lambda x: x.a if isinstance(x, CtxSubclassTensor) else x, args
+        )
+        kwargs_a = pytree.tree_map(
+            lambda x: x.a if isinstance(x, CtxSubclassTensor) else x, kwargs
+        )
+        out_a = func(*args_a, **kwargs_a)
+        out = pytree.tree_map(
+            lambda x: CtxSubclassTensor(x, biggest_constant)
+            if isinstance(x, torch.Tensor)
+            else x,
+            out_a,
+        )
+
+        if func == torch.ops.aten.mul.Tensor:
+            out = out + out.constant
+
+        return return_and_correct_aliasing(func, args, kwargs, out)
+
+
 def func(a):
     return a.sin()
 
@@ -1304,74 +1372,53 @@ s1 > 3""",
         self.assertEqual(ref, res)
 
     def test_tensor_subclass_ctx_guards(self):
-        from torch.utils._python_dispatch import return_and_correct_aliasing
-
-        class SubclassTensor(torch.Tensor):
-            @staticmethod
-            def __new__(cls, a, constant):
-                shape = a.shape
-                kwargs = {}
-                kwargs["strides"] = a.stride()
-                kwargs["storage_offset"] = a.storage_offset()
-                kwargs["device"] = a.device
-                kwargs["layout"] = a.layout
-                kwargs["requires_grad"] = a.requires_grad
-                kwargs["dtype"] = a.dtype
-                out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
-                return out
-
-            def __init__(self, a, constant):
-                self.a = a
-                self.constant = constant
-
-            def __repr__(self):
-                a_repr = repr(self.a)
-                return f"SubclassTensor({a_repr})"
-
-            def __tensor_flatten__(self):
-                return ["a"], (self.constant,)
-
-            @staticmethod
-            def __tensor_unflatten__(inner_tensors, meta, sizes, strides):
-                constant = meta[0]
-                a = inner_tensors["a"]
-                return SubclassTensor(a, constant)
-
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args, kwargs):
-                if kwargs is None:
-                    kwargs = {}
-                biggest_constant = max(
-                    [
-                        x.constant
-                        for x in pytree.tree_flatten(args)[0]
-                        if isinstance(x, SubclassTensor)
-                    ]
-                )
-                args_a = pytree.tree_map(
-                    lambda x: x.a if isinstance(x, SubclassTensor) else x, args
-                )
-                kwargs_a = pytree.tree_map(
-                    lambda x: x.a if isinstance(x, SubclassTensor) else x, kwargs
-                )
-                out_a = func(*args_a, **kwargs_a)
-                out = pytree.tree_map(
-                    lambda x: SubclassTensor(x, biggest_constant)
-                    if isinstance(x, torch.Tensor)
-                    else x,
-                    out_a,
-                )
-
-                if func == torch.ops.aten.mul.Tensor:
-                    out = out + out.constant
-
-                return return_and_correct_aliasing(func, args, kwargs, out)
-
-        x = SubclassTensor(torch.ones(2), 3)
-        x2 = SubclassTensor(torch.ones(2), 3)
-        x3 = SubclassTensor(torch.ones(2), 4)
+        x = CtxSubclassTensor(torch.ones(2), 3)
+        x2 = CtxSubclassTensor(torch.ones(2), 3)
+        x3 = CtxSubclassTensor(torch.ones(2), 4)
         _check_recompiles(self, lambda x: x * x, (x,), (x2,), False)
         _check_recompiles(self, lambda x: x * x, (x,), (x3,), True)
+
+    def test_tensor_subclass_ctx_custom_guards_override(self):
+        class CtxSubclassTensorCustomGuardFn(CtxSubclassTensor):
+            @classmethod
+            def __metadata_guard__(cls, orig_data, other):
+                return orig_data[0] <= other[0]
+
+        x = CtxSubclassTensorCustomGuardFn(torch.ones(2), 2)
+        x2 = CtxSubclassTensorCustomGuardFn(torch.ones(2), 3)
+        x3 = CtxSubclassTensorCustomGuardFn(torch.ones(2), 1)
+        _check_recompiles(self, lambda x: x * x, (x,), (x2,), False)
+        _check_recompiles(self, lambda x: x * x, (x,), (x3,), True)
+
+    def test_tensor_subclass_ctx_custom_guards_error_arg_num(self):
+        import torch._dynamo.exc
+
+        class CtxSubclassTensorCustomGuardFn(CtxSubclassTensor):
+            @classmethod
+            def __metadata_guard__(cls, y):
+                # Shouldn't reach here
+                return False
+
+        x = CtxSubclassTensorCustomGuardFn(torch.ones(2), 3)
+        self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Tensor subclass method __metadata_guard__ must take exactly two subclass metadata arguments",
+            lambda: torch.compile(lambda x: x * x)(x),
+        )
+
+    def test_tensor_subclass_ctx_custom_guards_error_not_classmethod(self):
+        import torch._dynamo.exc
+
+        class CtxSubclassTensorCustomGuardFn(CtxSubclassTensor):
+            def __metadata_guard__(self, x, y):
+                return False
+
+        x = CtxSubclassTensorCustomGuardFn(torch.ones(2), 3)
+        self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Tensor subclass method __metadata_guard__ must be a classmethod",
+            lambda: torch.compile(lambda x: x * x)(x),
+        )
 
     def test_torch_function_subclass_survives_into_aot_autograd(self):
         # If you have a tensor subclass that relies on dispatch into the same op
