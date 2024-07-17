@@ -2928,7 +2928,7 @@ def forward(self, x):
         dynamic_shapes = {"x": (dim0,)}
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "must be specialized.*guards generated.*too complex",
+            r"Constraints violated \(dim0\)",
         ):
             torch.export.export(foo, (x,), dynamic_shapes=dynamic_shapes)
 
@@ -2936,7 +2936,7 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Not all values.*satisfy the generated guard",
+            r"Constraints violated \(dim0\)",
         ):
             torch.export.export(qux, (x,), dynamic_shapes=dynamic_shapes)
 
