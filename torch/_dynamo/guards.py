@@ -85,6 +85,7 @@ from .source import (
     GlobalStateSource,
     GlobalWeakRefSource,
     GradSource,
+    is_unspecialized_builtin_nnmodule_attr,
     LocalSource,
     NNModuleSource,
     NumpyTensorSource,
@@ -103,6 +104,7 @@ from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # no
 from .utils import (
     common_constant_types,
     dict_keys_repr,
+    get_custom_getattr,
     guard_failures,
     istype,
     key_is_id,
@@ -111,6 +113,7 @@ from .utils import (
     tensor_always_has_static_shape,
     tuple_iterator_getitem,
     tuple_iterator_len,
+    unpatched_nn_module_getattr,
     verify_guard_fn_signature,
 )
 
@@ -879,7 +882,11 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, AttrSource):
             assert base_guard_manager  # to make mypy happy
 
-            if isinstance(base_example_value, torch.nn.Module):
+            if (
+                isinstance(base_example_value, torch.nn.Module)
+                and get_custom_getattr(base_example_value)
+                is unpatched_nn_module_getattr
+            ):
                 out = self.getattr_on_nn_module(
                     source,
                     base_guard_manager,
@@ -1164,7 +1171,11 @@ class GuardBuilder(GuardBuilderBase):
 
                 # if the base value is nn.Module, check if we can speedup the
                 # guard by going through __dict__ attrs.
-                if isinstance(base_example_value, torch.nn.Module):
+                if (
+                    isinstance(base_example_value, torch.nn.Module)
+                    and get_custom_getattr(base_example_value)
+                    is unpatched_nn_module_getattr
+                ):
                     return self.getattr_on_nn_module(
                         source,
                         base_manager,
@@ -2101,6 +2112,22 @@ class DeletedGuardFn:
     pass
 
 
+def is_nn_module_hook(source: Source) -> bool:
+    # Note that we only skip guards on builtin nn modules like Conv2D etc. But still this is a soundness issue if one
+    # adds/removes a hook after the model is compiled.
+    return (
+        is_unspecialized_builtin_nnmodule_attr(source)
+        and isinstance(source, AttrSource)
+        and source.member
+        in (
+            "_backward_hooks",
+            "_backward_pre_hooks",
+            "_forward_hooks",
+            "_forward_pre_hooks",
+        )
+    )
+
+
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -2161,6 +2188,11 @@ class CheckFunctionManager:
             ):
                 continue
 
+            # This is unsafe if you add/remove a hook on unspecialized nn module variable
+            if config.skip_nnmodule_hook_guards and is_nn_module_hook(
+                guard.originating_source
+            ):
+                continue
             guard.create(builder)
 
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)

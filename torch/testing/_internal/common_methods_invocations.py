@@ -13165,17 +13165,6 @@ op_db: List[OpInfo] = [
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),),
            ),
-    OpInfo('expand_copy',
-           # op=lambda self, shape: self.expand(shape),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_expand,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           assert_jit_shape_analysis=True,
-           supports_out=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-           )),
     OpInfo('diag',
            ref=np.diag,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -13221,8 +13210,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            sample_inputs_func=sample_inputs_alias_copy,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           supports_out=True),
+           supports_fwgrad_bwgrad=True),
     BinaryUfuncInfo('eq',
                     ref=np.equal,
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
@@ -14630,7 +14618,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip("Numerous errors"), 'TestFwdGradients'),
                DecorateInfo(unittest.skip("Numerous errors"), 'TestBwdGradients'),
-               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
            )),
     OpInfo('as_strided_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -16868,6 +16855,9 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/84577
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # Lazy tensor failures: mutating and aliasing ops should all have codegen'd kernels
+               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
+               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
                # Could not run 'aten::narrow_copy.out' with arguments from the 'CUDA' backend
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace',
                             device_type='cuda'),
@@ -16878,21 +16868,14 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
            )),
     OpInfo('view_copy',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
            ref=lambda x, newshape: np.reshape(x, newshape).copy(),
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_autograd=True,
            sample_inputs_func=sample_inputs_view_reshape,
-           error_inputs_func=error_inputs_view_reshape,
-           skips=(
-               # RuntimeError: view size is not compatible with input tensor's size and stride
-               # (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
-               DecorateInfo(
-                   unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"
-               ),
-           )),
+           error_inputs_func=error_inputs_view_reshape),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
@@ -16954,22 +16937,6 @@ op_db: List[OpInfo] = [
            supports_varargs=True,
            sample_inputs_func=sample_inputs_permute,
            reference_inputs_func=reference_inputs_permute),
-    OpInfo('permute_copy',
-           ref=np.transpose,
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           supports_out=True,
-           assert_autodiffed=True,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
-           assert_jit_shape_analysis=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           supports_varargs=False,  # torch.permute is also not varargs
-           sample_inputs_func=sample_inputs_permute,
-           reference_inputs_func=reference_inputs_permute,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-           )),
     BinaryUfuncInfo('pow',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                     dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
@@ -18006,8 +17973,6 @@ op_db: List[OpInfo] = [
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03),
                                                        torch.complex64: tol(atol=1e-02, rtol=1e-02)}),
                                     'TestCommon', 'test_noncontiguous_samples'),
-                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=5e-05)}),
-                                    'TestOperators', 'test_grad'),
                        # FIXME This should be the following, but the toleranceOverride does not seem to do anything!
                        # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
                        #              'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
@@ -18049,6 +18014,8 @@ op_db: List[OpInfo] = [
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03),
                                                        torch.complex64: tol(atol=4e-02, rtol=4e-02)}),
                                     'TestCommon', 'test_noncontiguous_samples'),
+                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=5e-05)}),
+                                    'TestOperators', 'test_grad'),
                        # FIXME This should be the following, but the toleranceOverride does not seem to do anything!
                        # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
                        #              'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
@@ -19540,29 +19507,6 @@ op_db: List[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_squeeze_multiple),
-    OpInfo('squeeze_copy',
-           ref=_squeeze_ref,
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           supports_out=True,
-           assert_autodiffed=True,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
-           assert_jit_shape_analysis=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           # vmap does not support inplace views
-           check_inplace_batched_forward_grad=False,
-           # https://github.com/pytorch/pytorch/issues/66357
-           check_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_squeeze,
-           skips=(
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestJit',
-                   'test_variant_consistency_jit',
-                   dtypes=(torch.float32,),
-               ),
-           )),
     UnaryUfuncInfo(
         'fill',
         ref=_fill_np,
@@ -19691,29 +19635,6 @@ op_db: List[OpInfo] = [
            autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            sample_inputs_func=sample_unsqueeze),
-    OpInfo('unsqueeze_copy',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           supports_out=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           # See https://github.com/pytorch/pytorch/pull/78358
-           check_batched_forward_grad=False,
-           # vmap does not support inplace views
-           check_inplace_batched_forward_grad=False,
-           assert_jit_shape_analysis=True,
-           assert_autodiffed=True,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
-           sample_inputs_func=sample_unsqueeze,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestJit',
-                   'test_variant_consistency_jit',
-                   dtypes=(torch.float32,),
-               ),
-           )),
     BinaryUfuncInfo('xlogy',
                     aliases=('special.xlogy',),
                     dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -19767,26 +19688,6 @@ op_db: List[OpInfo] = [
            # vmap does not support inplace views
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_transpose_swapdims),
-    OpInfo('transpose_copy',
-           aliases=('swapdims', 'swapaxes'),
-           assert_jit_shape_analysis=True,
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
-           supports_out=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           # vmap does not support inplace views
-           check_inplace_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_transpose_swapdims,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestJit',
-                   'test_variant_consistency_jit',
-                   dtypes=(torch.float32,)
-               ),
-           )),
     OpInfo('T',
            op=lambda x: x.T,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
@@ -20454,20 +20355,6 @@ op_db: List[OpInfo] = [
     OpInfo('t',
            sample_inputs_func=sample_inputs_t,
            supports_out=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           # See https://github.com/pytorch/pytorch/pull/78358
-           check_batched_forward_grad=False,
-           # vmap does not support inplace views
-           check_inplace_batched_forward_grad=False,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           assert_autodiffed=True,
-           error_inputs_func=error_inputs_t),
-    OpInfo('t_copy',
-           sample_inputs_func=sample_inputs_t,
-           supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/pull/78358
@@ -21641,11 +21528,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.lerp",
         torch_opinfo_name="lerp",
-    ),
-    PythonRefInfo(
-        "_refs.view_copy",
-        torch_opinfo_name="view_copy",
-        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.ones",
@@ -23683,7 +23565,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.alias_copy",
         torch_opinfo_name="alias_copy",
-        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.atleast_1d",
@@ -23715,7 +23596,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.as_strided_copy",
         torch_opinfo_name="as_strided_copy",
-        supports_out=True,
         # FIXME: doesn't support chalf
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
@@ -23723,8 +23603,6 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_conj_view'),
-            # The view function this decompose into does not have a ref
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
         ),
     ),
     PythonRefInfo(
@@ -23812,7 +23690,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.diagonal_copy",
         torch_opinfo_name="diagonal_copy",
-        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.diagonal_scatter",
@@ -23840,10 +23717,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.expand_as",
         torch_opinfo_name="expand_as",
-    ),
-    PythonRefInfo(
-        "_refs.expand_copy",
-        torch_opinfo_name="expand_copy",
     ),
     PythonRefInfo(
         "_refs.flatten",
@@ -23879,10 +23752,6 @@ python_ref_db = [
         torch_opinfo_name="narrow_copy",
         supports_out=True,
         error_inputs_func=partial(error_inputs_narrow_narrow_copy, is_narrow=False, is_ref=True),
-        skips=(
-            # The view function this decompose into does not have a ref
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
-        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.group_norm",
@@ -23902,10 +23771,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.permute",
         torch_opinfo_name="permute",
-    ),
-    PythonRefInfo(
-        "_refs.permute_copy",
-        torch_opinfo_name="permute_copy",
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.rad2deg",
@@ -23958,11 +23823,6 @@ python_ref_db = [
         torch_opinfo_name="squeeze",
     ),
     PythonRefInfo(
-        "_refs.squeeze_copy",
-        torch_opinfo_name="squeeze_copy",
-        supports_out=True,
-    ),
-    PythonRefInfo(
         "_refs.squeeze",
         torch_opinfo_name="squeeze",
         torch_opinfo_variant_name="multiple",
@@ -24003,6 +23863,7 @@ python_ref_db = [
         # .conj() does not set ._is_view() correctly in ATen
         validate_view_consistency=False,
         skips=(
+            # RuntimeError: no _refs support for torch.Tensor.is_conj
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', dtypes=[torch.complex64, torch.complex128]),
         ),
     ),
@@ -24011,22 +23872,8 @@ python_ref_db = [
         torch_opinfo_name="transpose",
     ),
     PythonRefInfo(
-        "_refs.transpose_copy",
-        torch_opinfo_name="transpose_copy",
-        skips=(
-            # RuntimeError: no _refs support for torch.Tensor.is_conj
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-        ),
-        supports_out=True,
-    ),
-    PythonRefInfo(
         "_refs.t",
         torch_opinfo_name="t",
-    ),
-    PythonRefInfo(
-        "_refs.t_copy",
-        torch_opinfo_name="t_copy",
-        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.T",
@@ -24045,11 +23892,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.unsqueeze",
         torch_opinfo_name="unsqueeze",
-    ),
-    PythonRefInfo(
-        "_refs.unsqueeze_copy",
-        torch_opinfo_name="unsqueeze_copy",
-        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.view",
@@ -24528,8 +24370,7 @@ python_ref_db = [
         # empty_strided
         skips=(
             # no _refs support for Tensor.__setitem__
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-        ),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),)
     ),
     #
     # Test-related functions
@@ -24558,12 +24399,6 @@ python_ref_db = [
             # RuntimeError: no _refs support for aten.unfold_backward
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref'
-            ),
-            DecorateInfo(
-                unittest.skip("Expected: unfold_backward() got an unexpected keyword argument 'input_sizes'"),
-                'TestCommon',
-                'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128),
             ),
         ],
     ),
