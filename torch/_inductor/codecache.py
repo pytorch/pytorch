@@ -575,7 +575,7 @@ class FxGraphCachePickler(pickle.Pickler):
         return sha256_hash(serialized_data)
 
     @classmethod
-    def debug_str(cls, inp: Any) -> str:
+    def debug_lines(cls, inp: Any) -> List[str]:
         """
         Get a printable string describing in more detail all the attributes
         comprising an object. Useful for debugging when one graph hashes
@@ -606,7 +606,7 @@ class FxGraphCachePickler(pickle.Pickler):
             else:
                 h = cls.get_hash(obj)
                 lines.append(f"[{h}] {attr}: {get_str(obj)}")
-        return "\n".join(lines)
+        return lines
 
 
 def build_code_hash(roots, prefix, hasher):
@@ -732,13 +732,13 @@ class FxGraphHashDetails:
         self.system_info = CacheBase.get_system()
         self.inductor_config = config.save_config_portable()
 
-    def debug_str(self) -> str:
+    def debug_lines(self) -> List[str]:
         """
         Get a printable string describing in more detail all the attributes
         comprising this object. Useful for debugging when one graph hashes
         to a different value than another.
         """
-        return FxGraphCachePickler.debug_str(self)
+        return FxGraphCachePickler.debug_lines(self)
 
 
 def compiled_fx_graph_hash(
@@ -746,7 +746,7 @@ def compiled_fx_graph_hash(
     example_inputs: List[torch.Tensor],
     fx_kwargs: Dict[str, Any],
     inputs_to_check: Sequence[int],
-) -> str:
+) -> Tuple[str, List[str]]:
     """
     Generate a unique hash of the FX graph for caching.
     """
@@ -754,20 +754,10 @@ def compiled_fx_graph_hash(
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
     key = "f" + FxGraphCachePickler.get_hash(details)
-    debug_str = details.debug_str()
+    debug_lines = details.debug_lines()
+    debug_str = "\n".join(debug_lines)
     log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "fx_graph_cache_hash",
-            "encoding": "json",
-        },
-        payload_fn=lambda: json.dumps(
-            {"key": key, "components": debug_str.split("\n")}
-        ),
-    )
-
-    return key
+    return key, debug_lines
 
 
 class FxGraphCache:
@@ -1075,9 +1065,12 @@ class FxGraphCache:
         """
         assert local or remote, "at least one of them needs to be enabled"
         compiled_graph = None
+        cache_state = None
         try:
             FxGraphCache._check_can_cache(gm)
-            key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs, inputs_to_check)
+            key, debug_lines = compiled_fx_graph_hash(
+                gm, example_inputs, fx_kwargs, inputs_to_check
+            )
 
             remote_cache = None
             if remote:
@@ -1104,6 +1097,7 @@ class FxGraphCache:
             if compiled_graph is None:
                 log.debug("fx graph cache miss for key %s", key)
                 counters["inductor"]["fxgraph_cache_miss"] += 1
+                cache_state = "miss"
                 start_time = time_ns()
                 compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
                 time_taken_ns = time_ns() - start_time
@@ -1118,11 +1112,24 @@ class FxGraphCache:
             else:
                 log.debug("fx graph cache hit for key %s", key)
                 counters["inductor"]["fxgraph_cache_hit"] += 1
+                cache_state = "hit"
             compiled_graph._fx_graph_cache_key = key
         except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
+            cache_state = "bypass"
             if not compiled_graph:
                 compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
+
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "fx_graph_cache_hash",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(
+                {"key": key, "cache_state": cache_state, "components": debug_lines}
+            ),
+        )
 
         return compiled_graph
 
