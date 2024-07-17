@@ -9,14 +9,6 @@ from torch.fx import GraphModule, Node
 from torch.nn import functional as F
 
 
-__all__ = [
-    "generate_numeric_debug_handle",
-    "NUMERIC_DEBUG_HANDLE_KEY",
-    "prepare_for_propagation_comparison",
-    "extract_results_from_loggers",
-    "compare_results",
-]
-
 NUMERIC_DEBUG_HANDLE_KEY = "_numeric_debug_handle"
 
 log = logging.getLogger(__name__)

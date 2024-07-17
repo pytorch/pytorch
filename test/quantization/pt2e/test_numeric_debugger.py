@@ -134,7 +134,7 @@ class TestNumericDebugger(TestCase):
         ref = m(*example_inputs)
         res = m_logger(*example_inputs)
 
-        from torch.ao.quantization.pt2e.numeric_debugger import OutputLogger
+        from torch.ao.quantization.pt2e._numeric_debugger import OutputLogger
 
         loggers = [m for m in m_logger.modules() if isinstance(m, OutputLogger)]
         self.assertEqual(len(loggers), 8)
