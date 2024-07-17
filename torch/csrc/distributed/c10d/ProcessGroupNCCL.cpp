@@ -575,6 +575,11 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
 
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   // Checking the work's corresponding CUDA event's status
+  // It calls `cudaEventQuery` eventually. Although this seems to be a
+  // non-blocking call, but we did notice hangs in the past. It can
+  // hang if another thread is holding the CUDA global context lock. For
+  // example, when doing a `cudaDeviceSynchronize` or even
+  // `cudaStreamSynchronize`.
   if (!ncclEndEvent_->query()) {
     return false;
   }
