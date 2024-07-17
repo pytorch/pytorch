@@ -943,14 +943,19 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
 
         self.name_to_param: Dict[str, torch.Tensor] = {}
         self.name_to_buffer: Dict[str, torch.Tensor] = {}
-        params_list = (
+        param_list = (
             list(self.ts_model.parameters())
             if not isinstance(self.ts_model, torch._C.ScriptFunction)
             else []
         )
         if not isinstance(self.ts_model, torch._C.ScriptFunction):
             for k, tensor in self.ts_model.state_dict().items():  # type: ignore[union-attr]
-                if tensor in params_list:
+                # Check if tensor belongs to any parameter.
+                if any(
+                    (tensor == param).all()
+                    for param in param_list
+                    if tensor.shape == param.shape
+                ):
                     self.name_to_param[k] = tensor
                 else:
                     self.name_to_buffer[k] = tensor
