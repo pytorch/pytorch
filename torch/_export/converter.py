@@ -832,9 +832,6 @@ class TS2FXGraphConverter:
         except Exception as e:
             raise RuntimeError(f"TS2EPConverter failed for node {node_kind}") from e
 
-    def convert_prim_RaiseException(self, node: torch._C.Node):
-        pass
-
     def convert_graph_outputs(self):
         args = []
         for graph_output in self.ts_graph.outputs():
