@@ -353,6 +353,7 @@ def mps_ops_modifier(ops):
         'view_as',
         'view_as_real',
         'view',
+        'view_copy',
         'vsplit',
         'zero_',
         'zeros',

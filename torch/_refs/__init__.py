@@ -293,6 +293,7 @@ __all__ = [
     "unsqueeze",
     "view",
     "view_as",
+    "view_copy",
     "vsplit",
     "vstack",
     "view_as_complex",
@@ -6317,6 +6318,7 @@ diagonal_copy = _make_copy_from_view(diagonal)
 # TODO: This must return a sparse tensor if the input is sparse, but refs have
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(narrow)
+view_copy = _make_copy_from_view(view)
 
 
 # xref: isStorage in torch/csrc/DynamicTypes.cpp

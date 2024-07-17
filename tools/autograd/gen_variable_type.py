@@ -181,6 +181,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "reshape",
     "reshape_as",
     "view_as",
+    "view_copy",
     "roll",
     "clone",
     "block_diag",
