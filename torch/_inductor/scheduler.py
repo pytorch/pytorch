@@ -531,6 +531,9 @@ class BaseSchedulerNode:
         """
         Returns estimated op runtime in nanoseconds (ns)
         """
+        if isinstance(self, GroupedSchedulerNode):
+            return sum(snode.get_estimated_runtime() for snode in self.snodes)
+
         layout = None
         dtype = None
         if not hasattr(self, "node") or not self.node:
@@ -1343,6 +1346,10 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 
     def get_first_name(self) -> str:
         return self.snodes[0].get_name()
+
+    @cache_on_self
+    def get_names(self) -> Set[str]:
+        return set.union(*[x.get_names() for x in self.snodes])
 
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:

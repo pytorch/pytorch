@@ -375,7 +375,7 @@ def enforce_comm_ordering_for_fsdp(
     scheduled = set()
     ag_nodes = []
     rs_nodes = []
-    ag_wait_op_to_ag_code_block = {}
+    ag_wait_op_to_ag_related_ops = defaultdict(set)
     snode_name_to_final_snode = {}
 
     def _create_group_node(snodes_to_group):
@@ -387,10 +387,7 @@ def enforce_comm_ordering_for_fsdp(
     # Create grouped nodes for specific ops
     for snode in snodes:
         if (
-            # isinstance(snode.node, ir.FallbackKernel)
-            # and snode.node.op_overload is torch.ops.fsdp.split_with_sizes_copy.default
-            isinstance(snode.node, ir.FallbackKernel)
-            and snode.node.op_overload is torch.ops.aten.set_.source_Tensor
+            isinstance(snode.node, ir.SetSourceTensorKernel)
             and any(
                 is_fallback_op(
                     name_to_fused_node[x].node,
@@ -401,34 +398,23 @@ def enforce_comm_ordering_for_fsdp(
         ):
             # Case 1: Handle AllGather
 
-            # Find the "cast + copy_in + getitem + all_gather + all_gather_wait_tensor + copy_out + set_" block
+            # Find the "cast + copy_in + getitem + all_gather + all_gather_wait_tensor + copy_out + set_" code block
             collected_node_set: set[scheduler.BaseSchedulerNode] = set()
             _find_all_recursive_deps_of_node_up_to_criteria(
                 snode,
                 collected_node_set,
             )
 
-            wait_node_idx = None
-            for i in range(len(collected_nodes) - 1):
-                if isinstance(collected_nodes[i + 1].node, ir._WaitKernel):
-                    wait_node_idx = i + 1
+            # Multiple .set_ nodes could recursively go up to the same all_gather op,
+            # so we use a set in `ag_wait_op_to_ag_related_ops` to deduplicate.
+            wait_node = None
+            for n in collected_node_set:
+                if isinstance(n.node, ir._WaitKernel):
+                    wait_node = n
                     break
-
-            wait_node = collected_nodes[wait_node_idx]
-            # This is needed in order to collect all .set_ nodes
-            if wait_node in ag_wait_op_to_ag_code_block:
-                ag_wait_op_to_ag_code_block[wait_node].update(collected_node_set)
-            else:
-                ag_wait_op_to_ag_code_block[wait_node] = collected_node_set
+            ag_wait_op_to_ag_related_ops[wait_node].update(collected_node_set)
         elif (
             isinstance(snode.node, ir._WaitKernel)
-            and any(
-                is_collective(
-                    name_to_fused_node[x].node,
-                    op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
-                )
-                for x in snode.ancestors
-            )
             and any(
                 is_fallback_op(
                     name_to_fused_node[x].node, torch.ops.fsdp.chunk_cat.default
@@ -438,7 +424,7 @@ def enforce_comm_ordering_for_fsdp(
         ):
             # Case 2: Handle ReduceScatter
 
-            # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" block
+            # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" code block
             collected_node_set = set()
             _find_all_recursive_deps_of_node_up_to_criteria(
                 snode,
@@ -451,9 +437,6 @@ def enforce_comm_ordering_for_fsdp(
             collected_nodes = sorted(
                 collected_node_set, key=lambda x: int(x.get_name()[3:])
             )
-            for n in collected_nodes:
-                torch_log.warning(f"n: {n}, n.debug_str(): {n.debug_str()}")
-            # torch_log.warning(f"collected_nodes: {collected_nodes}")
 
             # Group "reduce_scatter copy-in + reduce_scatter comm" into one GroupedSchedulerNode
             wait_node_idx = None
@@ -462,15 +445,9 @@ def enforce_comm_ordering_for_fsdp(
                     wait_node_idx = i + 1
                     break
             assert wait_node_idx is not None
-            torch_log.warning(
-                f"collected_nodes[:wait_node_idx]: {collected_nodes[:wait_node_idx]}"
-            )
             rs_group_node = _create_group_node(collected_nodes[:wait_node_idx])
 
             # Group "reduce_scatter wait + related output nodes" into one GroupedSchedulerNode
-            torch_log.warning(
-                f"collected_nodes[wait_node_idx:]: {collected_nodes[wait_node_idx:]}"
-            )
             wait_group_node = _create_group_node(collected_nodes[wait_node_idx:])
 
             rs_nodes.append(
@@ -480,8 +457,7 @@ def enforce_comm_ordering_for_fsdp(
                 )
             )
 
-    assert len(ag_wait_op_to_ag_code_block) > 0
-    for ag_wait_node, collected_node_set in ag_wait_op_to_ag_code_block.items():
+    for ag_wait_node, collected_node_set in ag_wait_op_to_ag_related_ops.items():
         # sort nodes by original operation order
         collected_nodes = sorted(
             collected_node_set, key=lambda x: int(x.get_name()[3:])
@@ -506,20 +482,20 @@ def enforce_comm_ordering_for_fsdp(
         new_order.append(snode)
         scheduled.add(snode)
 
-    # # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
-    # # before next AllGather's "copy_in then AG" group node
-    # prev_ag_wait = None
-    # for ag_group_node, wait_group_node in ag_nodes:
-    #     if prev_ag_wait is not None:
-    #         ag_group_node.add_fake_dep(WeakDep(item(prev_ag_wait.get_buffer_names())))
-    #     prev_ag_wait = wait_group_node
+    # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
+    # before next AllGather's "copy_in then AG" group node
+    prev_ag_wait = None
+    for ag_group_node, wait_group_node in ag_nodes:
+        if prev_ag_wait is not None:
+            ag_group_node.add_fake_dep(WeakDep(prev_ag_wait.get_name()))
+        prev_ag_wait = wait_group_node
 
-    # # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
-    # # before next ReduceScatter's "copy_in then RS" group node
-    # prev_rs_wait = None
-    # for rs_group_node, wait_group_node in rs_nodes:
-    #     if prev_rs_wait is not None:
-    #         rs_group_node.add_fake_dep(WeakDep(item(prev_rs_wait.get_buffer_names())))
-    #     prev_rs_wait = wait_group_node
+    # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
+    # before next ReduceScatter's "copy_in then RS" group node
+    prev_rs_wait = None
+    for rs_group_node, wait_group_node in rs_nodes:
+        if prev_rs_wait is not None:
+            rs_group_node.add_fake_dep(WeakDep(prev_rs_wait.get_name()))
+        prev_rs_wait = wait_group_node
 
     return new_order  # type: ignore[return-value]
