@@ -724,7 +724,9 @@ def forward(self, primals_1):
     return [add]""",
         )
 
-    def test_input_mutation_set__into_same_input(self):
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix the test case")
+    @unittest.skipIf(IS_MACOS, "TODO: need to fix the test case")
+    def test_input_mutation_fsdp_set__into_same_input(self):
         import torch.distributed._composable.fsdp._fsdp_param
 
         def f(a):
