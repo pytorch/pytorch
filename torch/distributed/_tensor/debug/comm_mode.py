@@ -8,11 +8,14 @@ from typing import Any, Dict
 
 import torch
 
+import torch.nn
+
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed._tensor.api import DTensor
 from torch.nn.modules.module import (
     register_module_forward_hook,
     register_module_forward_pre_hook,
+    register_module_full_backward_pre_hook,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
@@ -76,10 +79,23 @@ class CommModeModuleTracker(ModuleTracker):
         super().__init__()
         self.module_helper_dict = {}
         self.module_parameters_dict = {}
+        self.module_parents_dict = {}
         self.parent_dict = {}
         self.parent_list = []
         self.sharding_dict = {}
         self.name = ""
+
+    def _fw_set_module_hook(self, mod, input, output):
+        """
+        Updates the current module after module finishes running and
+        all other hooks are resolved
+        """
+
+        # module is no longer parent of next modules
+        self.parent_list.pop()
+
+        # set current module to previous parent module
+        self.name = self.parent_list[-1]
 
     def _fw_pre_hook(self, mod, input):
         """
@@ -122,6 +138,10 @@ class CommModeModuleTracker(ModuleTracker):
                     param.data.placements
                 )
 
+        # used to store module's parents to ensure correctness in backward pass/checkpointing
+        if self.name not in self.module_parents_dict:
+            self.module_parents_dict[self.name] = self.parents
+
         # used to create parent-child module associations for json dumps
         parent = self.parent_list[-1]
         if parent not in self.parent_dict:
@@ -130,6 +150,8 @@ class CommModeModuleTracker(ModuleTracker):
         self.parent_dict[parent].append(self.name)
         self.parent_list.append(self.name)
 
+        self._fw_set_module_handle = mod.register_forward_hook(self._fw_set_module_hook)
+
     def _fw_post_hook(self, mod, input, output):
         """
         This function is called when the forward pass of a module is called.
@@ -137,8 +159,13 @@ class CommModeModuleTracker(ModuleTracker):
         """
         super()._fw_post_hook(mod, input, output)
 
-        # module is no longer parent of next modules
-        self.parent_list.pop()
+    def _bw_hook(self, mod, output):
+        """
+        This function is called when the backward pass of a module is called. It
+        updates the current module for backward passes
+        """
+
+        self.name = super()._get_mod_name(mod)
 
     def __enter__(self):
         self.module_parameters_dict.clear()
@@ -147,11 +174,20 @@ class CommModeModuleTracker(ModuleTracker):
         self.parent_list = ["Global"]
         self.module_helper_dict.clear()
         self.module_helper_dict["Global"] = {"depth": 0}
+        self.module_parents_dict.clear()
+        self.module_parents_dict["Global"] = set()
         self._fw_pre_handle = register_module_forward_pre_hook(self._fw_pre_hook)
         self._fw_post_handle = register_module_forward_hook(self._fw_post_hook)
+        self._fw_set_module_handle = None
+        self._bw_handle = register_module_full_backward_pre_hook(self._bw_hook)
+        self.name = "Global"
 
     def __exit__(self, *args):
         super().__exit__(*args)
+        self._bw_handle.remove()
+
+        if self._fw_set_module_handle is not None:
+            self._fw_set_module_handle.remove()
 
     def print_paramater_info(self):
         print(self.module_parameters_dict)
@@ -560,7 +596,9 @@ class CommDebugMode(TorchDispatchMode):
             ] += 1
 
             # adds collective count to parent modules
-            for par in self.advanced_module_tracker.parents:
+            for par in self.advanced_module_tracker.module_parents_dict[
+                self.advanced_module_tracker.name
+            ]:
                 # makes sure we aren't double counting when current sub-module hasn't been removed from parents
                 if par != self.advanced_module_tracker.name:
                     if par not in self.comm_module_counts:
