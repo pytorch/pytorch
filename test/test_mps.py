@@ -339,6 +339,7 @@ def mps_ops_modifier(ops):
         'sub',
         'svd',
         't',
+        't_copy',
         'tanh',
         'tensor_split',
         'transpose',
