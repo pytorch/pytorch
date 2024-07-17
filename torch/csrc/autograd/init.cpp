@@ -16,6 +16,7 @@
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/profiler_python.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -184,6 +185,23 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("NO_GRAD_MODE", CreationMeta::NO_GRAD_MODE)
       .value("INFERENCE_MODE", CreationMeta::INFERENCE_MODE);
 
+  py::class_<torch::autograd::InputMetadata>(m, "_InputMetadata")
+      .def_property_readonly(
+          "dtype",
+          [](const torch::autograd::InputMetadata& m) {
+            PyObject* raw_obj =
+                (PyObject*)torch::getTHPDtype(m.dtype().toScalarType());
+            return py::reinterpret_borrow<py::object>(raw_obj);
+          })
+      .def_property_readonly("device", &torch::autograd::InputMetadata::device)
+      .def_property_readonly(
+          "shape", &torch::autograd::InputMetadata::shape_as_dim_vector)
+      .def_property_readonly(
+          "is_nested_tensor", &torch::autograd::InputMetadata::is_nested_tensor)
+      .def_property_readonly(
+          "is_cpp_nested_tensor",
+          &torch::autograd::InputMetadata::is_cpp_nested_tensor);
+
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
       .def("name", [](const KinetoEvent& e) { return e.name(); })
@@ -227,6 +245,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
                   return torch::jit::toPyObject(val);
                 });
             return as_pyobj;
+          })
+      .def(
+          "kwinputs",
+          [](const KinetoEvent& e) {
+            std::unordered_map<std::string, py::object> inputs;
+            for (const auto& [key, value] : e.kwinputs()) {
+              inputs[key] = torch::jit::toPyObject(value);
+            }
+            return inputs;
           })
       // stack traces of the PyTorch CPU events
       .def("stack", [](const KinetoEvent& e) { return e.stack().vec(); })

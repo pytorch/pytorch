@@ -425,6 +425,12 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, r'input.size\(-2\) should match other.size\(-2\)'):
             torch.linalg.lstsq(a, b.unsqueeze(-1))
 
+        a = torch.randn(1, 1, 1, dtype=dtype, device=device)
+        b = torch.randn(3, 1, dtype=dtype, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, r'input.size\(-2\) should match other.size\(-2\)'):
+            torch.linalg.lstsq(a, b)
+
         def complement_device(device):
             if device == 'cpu' and torch.cuda.is_available():
                 return 'cuda'
@@ -3690,7 +3696,6 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     "The derivative of linalg.qr depends on Q"):
             b.backward()
-        #
         inp = torch.randn((7, 5), device=device, dtype=dtype, requires_grad=True)
         q, r = torch.linalg.qr(inp, mode='complete')
         b = torch.sum(r)
