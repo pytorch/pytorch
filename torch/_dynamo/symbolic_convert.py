@@ -2262,6 +2262,16 @@ class InstructionTranslatorBase(
     def CALL_KW(self, inst):
         self._call(inst, call_kw=True)
 
+    def TO_BOOL(self, inst):
+        # TO_BOOL only precedes a conditional jump or UNARY_NOT (see compile.c in CPython)
+        # So we can skip this instruction as long as we remember to codegen a TO_BOOL
+        # before conditional jumps/UNARY_NOT.
+        assert self.next_instruction.opname in (
+            "POP_JUMP_IF_TRUE",
+            "POP_JUMP_IF_FALSE",
+            "UNARY_NOT",
+        )
+
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
             # perf optimization only
