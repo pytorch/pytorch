@@ -252,6 +252,23 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_range_tree_divisor(self, device):
+        def fn(x, num):
+            u0 = num.item()
+            torch._check_is_size(u0)
+            zeros = torch.zeros(u0, device=device, dtype=torch.int)
+            return (torch.ops.aten.index(x, [None, zeros]),)
+
+        example_inputs = (
+            torch.randn(16, 16, device=device),
+            torch.tensor(3, device=device),
+        )
+
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(
     TestUnbackedSymints, globals(), only_for=(GPU_TYPE, "cpu")
