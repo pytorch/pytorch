@@ -1204,7 +1204,7 @@ def gen_pyi(
             ],
             "set_": [
                 "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage], "
-                "offset: _int, size: _size, stride: _size) -> Tensor: ...",
+                "offset: _int, size: _symsize, stride: _symsize) -> Tensor: ...",
                 "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage]) -> Tensor: ...",
             ],
             "split": [
@@ -1426,36 +1426,22 @@ def gen_pyi(
     fm.write_with_template(
         "torch/_C/__init__.pyi",
         "torch/_C/__init__.pyi.in",
-        lambda: {
-            "generated_comment": "@" + "generated from torch/_C/__init__.pyi.in",
-            **env,
-        },
+        lambda: env,
     )
     fm.write_with_template(
         "torch/_C/_VariableFunctions.pyi",
         "torch/_C/_VariableFunctions.pyi.in",
-        lambda: {
-            "generated_comment": "@"
-            + "generated from torch/_C/_VariableFunctions.pyi.in",
-            **env,
-        },
+        lambda: env,
     )
     fm.write_with_template(
         "torch/_VF.pyi",
         "torch/_C/_VariableFunctions.pyi.in",
-        lambda: {
-            "generated_comment": "@"
-            + "generated from torch/_C/_VariableFunctions.pyi.in",
-            **env,
-        },
+        lambda: env,
     )
     fm.write_with_template(
         "torch/return_types.pyi",
         "torch/_C/return_types.pyi.in",
-        lambda: {
-            "generated_comment": "@" + "generated from torch/_C/return_types.pyi",
-            **env,
-        },
+        lambda: env,
     )
     gen_nn_functional(fm)
 
