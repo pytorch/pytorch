@@ -2334,7 +2334,7 @@ class InstructionTranslatorBase(
     def FORMAT_SIMPLE(self, inst):
         self._format_value_313(ConstantVariable.create(""))
 
-    def FORMAT_SPEC(self, inst):
+    def FORMAT_WITH_SPEC(self, inst):
         self._format_value_313(self.pop())
 
     def is_non_empty_graph(self):
