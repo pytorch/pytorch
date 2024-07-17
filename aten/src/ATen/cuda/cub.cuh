@@ -159,25 +159,18 @@ inline void segmented_sort_pairs(
 }
 
 #if CUB_SUPPORTS_UNIQUE_BY_KEY()
-template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename KeysOutputIteratorT, typename ValuesOutputIteratorT, typename NumSelectedIteratorT>
+template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT, typename NumSelectedIteratorT>
 inline void unique_by_key(
   KeysInputIteratorT keys_in, ValuesInputIteratorT values_in,
-  KeysOutputIteratorT keys_out, ValuesOutputIteratorT values_out,
+  ValuesOutputIteratorT values_out,
   NumSelectedIteratorT num_selected, int64_t num_input_items)
 {
   // TODO: use thrust::discard_iterator to handle null keys_out when https://github.com/NVIDIA/cub/issues/406 is fixed.
-  constexpr bool null_keys_out = std::is_same<KeysOutputIteratorT, std::nullptr_t>::value;
   using KeyT = typename std::iterator_traits<KeysInputIteratorT>::value_type;
-  using RealKeysOutputIteratorT = typename std::conditional<null_keys_out, KeyT *, KeysOutputIteratorT>::type;
-  RealKeysOutputIteratorT keys_out_;
   auto allocator = c10::cuda::CUDACachingAllocator::get();
   c10::DataPtr keys_out_owner;
-  if constexpr (null_keys_out) {
-    keys_out_owner = allocator->allocate(num_input_items * sizeof(KeyT));
-    keys_out_ = static_cast<KeyT *>(keys_out_owner.get());
-  } else {
-    keys_out_ = keys_out;
-  }
+  keys_out_owner = allocator->allocate(num_input_items * sizeof(KeyT));
+  auto keys_out_ = static_cast<KeyT *>(keys_out_owner.get());
   CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceSelect::UniqueByKey,
     keys_in, values_in, keys_out_, values_out, num_selected, num_input_items, c10::cuda::getCurrentCUDAStream());
 }
