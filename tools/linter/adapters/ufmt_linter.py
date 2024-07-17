@@ -29,21 +29,14 @@ ISORT_WHITELIST = re.compile(
                 fnmatch.translate,
                 [
                     # **
-                    "**",
                     # .ci/**
-                    ".ci/**",
                     # .github/**
-                    ".github/**",
                     # benchmarks/**
-                    "benchmarks/**",
                     # functorch/**
                     "functorch/**",
                     # tools/**
-                    "tools/**",
                     # torchgen/**
-                    "torchgen/**",
                     # test/**
-                    "test/**",
                     # test/[a-c]*/**
                     "test/[a-c]*/**",
                     # test/d*/**
@@ -51,7 +44,6 @@ ISORT_WHITELIST = re.compile(
                     # test/dy*/**
                     "test/dy*/**",
                     # test/[e-h]*/**
-                    "test/[e-h]*/**",
                     # test/i*/**
                     "test/i*/**",
                     # test/j*/**
