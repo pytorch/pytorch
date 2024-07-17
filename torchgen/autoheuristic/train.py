@@ -5,14 +5,13 @@ import sys
 import warnings
 
 import numpy as np
-
 import pandas as pd  # type: ignore[import-untyped]
-
 from scipy.stats import gmean  # type: ignore[import-untyped]
 from sklearn.model_selection import train_test_split  # type: ignore[import-untyped]
 from sklearn.tree import DecisionTreeRegressor  # type: ignore[import-untyped]
 
 from torch._inductor.autoheuristic.autoheuristic import deserialize_data
+
 
 # TODO (AlnisM): Fix these warnings
 warnings.filterwarnings(
