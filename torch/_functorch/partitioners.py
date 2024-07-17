@@ -26,11 +26,9 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.passes import graph_drawer
 from torch.utils.checkpoint import CheckpointPolicy
-
 from . import config
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from .compile_utils import fx_graph_cse, get_aten_target
-
 
 if TYPE_CHECKING:
     import sympy
@@ -647,7 +645,7 @@ def functionalize_rng_ops(
     joint_graph_rng_ops = get_rng_ops(joint_module)
     fw_graph_rng_ops = get_rng_ops(fw_module)
     bw_graph_rng_ops = get_rng_ops(bw_module)
-    recomputable_rng_ops_map = dict()
+    recomputable_rng_ops_map = {}
     for node in joint_module.graph.nodes:
         if (
             must_recompute(node)
