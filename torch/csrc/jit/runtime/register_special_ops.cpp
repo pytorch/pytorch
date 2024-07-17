@@ -301,9 +301,9 @@ RegisterOperators reg({
             at::native::scalar_tensor(
                 scalar_val,
                 typeMetaToScalarType(c10::get_default_dtype()),
-                c10::nullopt /* layout */,
+                std::nullopt /* layout */,
                 at::kCPU,
-                c10::nullopt /* pin_memory*/))
+                std::nullopt /* pin_memory*/))
             DEFINE_TORCH_TENSOR_OP(
                 int,
                 int64_t,
@@ -314,9 +314,9 @@ RegisterOperators reg({
                     at::native::scalar_tensor(
                         scalar_val,
                         typeMetaToScalarType(c10::get_default_complex_dtype()),
-                        c10::nullopt /* layout */,
+                        std::nullopt /* layout */,
                         at::kCPU,
-                        c10::nullopt /* pin_memory */))
+                        std::nullopt /* pin_memory */))
 
     // reference python implementation: internal_new_from_data in
     // tensor_new.cpp
