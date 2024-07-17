@@ -112,7 +112,7 @@ def build_subgraph_buffer(
 
 compute_next_offset_func = r"""
 @triton.jit
-def get_block_offset(loop_iter, col_indices, total_blocks, SPARSE_BLOCK, SPARSE_BLOCK_MULTIPLE, BLOCK):
+def get_offset_for_next_block(loop_iter, col_indices, total_blocks, SPARSE_BLOCK, SPARSE_BLOCK_MULTIPLE, BLOCK):
     cur_block_idx = loop_iter // SPARSE_BLOCK_MULTIPLE
     cur_block = tl.load(col_indices + cur_block_idx, eviction_policy="evict_last")
     next_block = tl.load(col_indices + cur_block_idx + 1, eviction_policy="evict_last", mask=cur_block_idx + 1 < total_blocks)
@@ -399,7 +399,7 @@ def forward_inner(
         m_i = m_ij
 
         # update pointers
-        offset = get_block_offset(start_n, kv_indices, kv_num_blocks, SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N)
+        offset = get_offset_for_next_block(start_n, kv_indices, kv_num_blocks, SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N)
 
         V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
         K_block_ptr = tl.advance(K_block_ptr, (0, offset))
@@ -1053,12 +1053,7 @@ def bwd_dq_inner(
         dq += tl.dot(ds, tl.trans(kT))
 
         # Increment pointers.
-        indices_idx = start_n // SPARSE_KV_MULTIPLE
-        cur_block = tl.load(kv_indices + indices_idx)
-        next_block = tl.load(kv_indices + indices_idx + 1, mask=indices_idx + 1 < sparse_kv_num_blocks)
-        needs_jump = (start_n + 1) % SPARSE_KV_MULTIPLE == 0
-        jump_to_block = (next_block - cur_block ) * SPARSE_KV_BLOCK_SIZE - (SPARSE_KV_MULTIPLE - 1) * BLOCK_N2
-        offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_N2
+        offset = get_offset_for_next_block(start_n, kv_indices, sparse_kv_num_blocks, SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N2)
 
         kT_ptrs += offset * stride_kn
         vT_ptrs += offset * stride_vn
@@ -1157,12 +1152,7 @@ def bwd_dkdv_inner(
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
         # Increment pointers.
-        indices_idx = q_start // SPARSE_Q_MULTIPLE
-        cur_block = tl.load(q_indices + indices_idx)
-        next_block = tl.load(q_indices + indices_idx + 1, mask=indices_idx + 1 < sparse_q_num_blocks)
-        needs_jump = (q_start + 1) % SPARSE_Q_MULTIPLE == 0
-        jump_to_block = (next_block - cur_block ) * SPARSE_Q_BLOCK_SIZE - (SPARSE_Q_MULTIPLE - 1) * BLOCK_M1
-        offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK_M1
+        offset = get_offset_for_next_block(q_start, q_indices, sparse_q_num_blocks, SPARSE_Q_MULTIPLE, SPARSE_Q_BLOCK_SIZE, BLOCK_M1)
 
         qT_ptrs += offset * stride_qm
         do_ptrs += offset * stride_dom
@@ -1170,7 +1160,8 @@ def bwd_dkdv_inner(
         curr_m += offset
 
     return dk, dv
- """,
+ """ + compute_next_offset_func,
+
 )
 
 
