@@ -1731,7 +1731,7 @@ class Kernel(CodeGen):
         var: Union[CSEVariable, str],
         lower: Optional[str],
         upper: Optional[str],
-        mask: Optional[str] = None,
+        mask: Optional[Union[CSEVariable, str]] = None,
     ) -> str:
         if isinstance(var, CSEVariable):
             var = str(var)
