@@ -659,7 +659,7 @@ def pformat(obj: Any) -> str:
         obj = sorted(obj, key=str)
     result = pprint.pformat(obj, indent=4)
     if "\n" in result:
-        return f"\n{textwrap.indent(result, ' '*4)}"
+        return f"\n{textwrap.indent(result, ' ' * 4)}"
     return result
 
 
@@ -1675,7 +1675,7 @@ class Scheduler:
                 NodeUser(user_node, can_inplace, is_weak)
             )
 
-        unbacked_symbol_to_origin_node = {}
+        unbacked_symbol_to_origin_node: Dict[sympy.Symbol, Optional[str]] = {}
 
         # NB: None means that the dependency is on an input.  Don't actually
         # generate a dependency because if we do, Inductor will start trying

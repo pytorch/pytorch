@@ -2122,21 +2122,29 @@ def wrap_fx_proxy_cls(
     ):
         set_example_value(proxy.node, example_value)
         return EventVariable(proxy, example_value, **options)
-    elif isinstance(example_value, int) and proxy.node.target in [
-        torch.sym_int,
-        getattr,
-        operator.getitem,
-        torch._utils._element_size,
-        torch.seed,
-        operator.mod,
-        torch._functorch.vmap._validate_and_get_batch_size,
-        # some mac builds are missing torch.distributed.get_rank()
-        getattr(torch.distributed, "get_rank", _missing),
-        getattr(torch.distributed, "get_world_size", _missing),
-        # This always wants to be in the graph, even if the constraint
-        # results in a constant int
-        torch._constrain_as_size,
-    ]:
+    elif isinstance(example_value, int) and (
+        proxy.node.target
+        in [
+            torch.sym_int,
+            getattr,
+            operator.getitem,
+            torch._utils._element_size,
+            torch.seed,
+            operator.mod,
+            torch._functorch.vmap._validate_and_get_batch_size,
+            # some mac builds are missing torch.distributed.get_rank()
+            getattr(torch.distributed, "get_rank", _missing),
+            getattr(torch.distributed, "get_world_size", _missing),
+            # This always wants to be in the graph, even if the constraint
+            # results in a constant int
+            torch._constrain_as_size,
+        ]
+        or (
+            # TODO: this is a little sus, because we didn't check what the self is
+            proxy.node.op == "call_method"
+            and proxy.node.target in ["bit_length"]
+        )
+    ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     elif isinstance(example_value, torch.backends.cuda.SDPAParams):
