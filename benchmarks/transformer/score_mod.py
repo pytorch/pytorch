@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 import torch
 import torch.nn.functional as F
-from torch.nn.attention.flex_attention import flex_attention
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 
 torch._dynamo.config.automatic_dynamic_shapes = False
@@ -35,6 +35,7 @@ class ExperimentConfig:
     score_mod: Callable
     dtype: torch.dtype
     calculate_bwd_time: bool
+    cal_bandwidth: bool
 
     def __post_init__(self):
         assert (
@@ -44,8 +45,9 @@ class ExperimentConfig:
     def asdict(self):
         # Convert the dataclass instance to a dictionary
         d = asdict(self)
-        # Remove the 'calculate_bwd_time' key
+        # Remove the 'calculate_bwd_time' and `cal_bandwidth` key
         d.pop("calculate_bwd_time", None)
+        d.pop("cal_bandwidth", None)
         d["shape(B,Hq,M,Hkv,N,D)"] = d.pop("shape")
         return d
 
@@ -66,7 +68,6 @@ class ExperimentResults:
 class Experiment:
     config: ExperimentConfig
     results: ExperimentResults
-    cal_bandwidth: bool
 
     def asdict(self):
         dict1 = self.config.asdict()
@@ -117,7 +118,7 @@ def generate_inputs(
 
 
 def run_single_experiment(
-    config: ExperimentConfig, dynamic=False, max_autotune=False
+    config: ExperimentConfig, dynamic=False, max_autotune=False, enable_mask=False
 ) -> ExperimentResults:
     device = torch.device("cuda")
     batch_size, q_heads, q_seq_len, kv_heads, kv_seq_len, head_dim = config.shape
@@ -145,11 +146,18 @@ def run_single_experiment(
 
     score_mod = config.score_mod
 
+    if enable_mask:
+        block_mask = create_block_mask(
+            score_mod, 1, 1, q_seq_len * (q_heads // kv_heads), kv_seq_len, query.device
+        )
+    else:
+        block_mask = None
+
     forward_eager_time = benchmark_torch_function_in_microseconds(
         eager_sdpa, query, key, value, score_mod
     )
     forward_compiled_time = benchmark_torch_function_in_microseconds(
-        compiled_sdpa, query, key, value, score_mod
+        compiled_sdpa, query, key, value, score_mod, block_mask
     )
 
     if config.calculate_bwd_time:
@@ -209,25 +217,29 @@ def calculate_bandwidth(
             * 2
         )
         output_size = query_size
-        total_size = (query_size + kv_size + output_size) / 1024 / 1024 / 1024  # In GB
+        total_size = (query_size + kv_size + output_size) / 1e9  # In GB
         time_in_seconds = results.fwd_times.compiled_time / 1e6
-        return total_size / time_in_seconds / 1024
+        return total_size / time_in_seconds / 1e3
     else:
         raise ValueError(f"Invalid type {type}")
 
 
-def calculate_gflops(config: ExperimentConfig, results: ExperimentResults) -> float:
+def calculate_tflops(config: ExperimentConfig, results: ExperimentResults) -> float:
     (B, Hq, M, Hkv, N, D) = config.shape
     qk_flops = M * N * D * 2
     softmax_flops = M * N * 2  # Not counting online softmax overhead
     o_flops = M * D * N * 2
     # Not counting split k overhead
     total_flops = B * Hq * (qk_flops + softmax_flops + o_flops)
-    return total_flops / results.fwd_times.compiled_time / 1e3  # in GFLOPs/
+    return total_flops / results.fwd_times.compiled_time / 1e6  # in TFLOPs/
 
 
 def get_func_name(func):
     return func.__name__.split("<locals>.")[-1].split(" at ")[0]
+
+
+def set_func_name(func, name):
+    func.__name__ = name
 
 
 def get_average_speedups(results: List[Experiment], type: str):
@@ -283,13 +295,13 @@ def print_results(results: List[Experiment]):
     table_data["fwd_speedup"] = fwd_speedups
 
     # Calculate mem + computational throughput
-    if results[0].cal_bandwidth:
+    if results[0].config.cal_bandwidth:
         fwd_bandwidth = [
             calculate_bandwidth(r.config, r.results, type="fwd") for r in results
         ]
         table_data["fwd_mem_bw (TB/s)"] = fwd_bandwidth
-        fwd_gflops = [calculate_gflops(r.config, r.results) for r in results]
-        table_data["GFlops/s"] = fwd_gflops
+        fwd_tflops = [calculate_tflops(r.config, r.results) for r in results]
+        table_data["TFlops/s"] = fwd_tflops
 
     if results[0].config.calculate_bwd_time:
         bwd_speedups = [calculate_speedup(r.results, type="bwd") for r in results]
@@ -334,6 +346,18 @@ def generate_score_mods(score_mods: List[str]) -> List[Callable]:
     return [function_dict[name] for name in score_mods]
 
 
+def get_gqa_score_mod(score_mod, G, q_seq_len):
+    def score_mod_gqa(score, b, hkv, m, n):
+        g = m // q_seq_len
+        new_m = m % q_seq_len
+        hq = hkv * G + g
+        return score_mod(score, b, hq, new_m, n)
+
+    score_mod_name = get_func_name(score_mod)
+    set_func_name(score_mod_gqa, score_mod_name + "_gqa")
+    return score_mod_gqa
+
+
 def generate_experiment_configs(
     calculate_bwd: bool,
     dtype: torch.dtype,
@@ -344,6 +368,7 @@ def generate_experiment_configs(
     score_mods: List[str],
     decoding: bool,
     kv_cache_size: List[int],
+    cal_bandwidth: bool,
 ) -> List[ExperimentConfig]:
     assert not (calculate_bwd and decoding), "Decoding does not support backward"
 
@@ -377,12 +402,18 @@ def generate_experiment_configs(
             if bsz <= 0:
                 continue
 
+        if q_heads != kv_heads:  # GQA work around before it's explicitly supported
+            assert q_heads % kv_heads == 0
+            G = q_heads // kv_heads
+            score_mod = get_gqa_score_mod(score_mod, G, q_seq_len)
+
         all_configs.append(
             ExperimentConfig(
                 shape=(bsz, q_heads, q_seq_len, kv_heads, kv_seq_len, head_dim),
                 score_mod=score_mod,
                 dtype=dtype,
                 calculate_bwd_time=calculate_bwd,
+                cal_bandwidth=cal_bandwidth,
             )
         )
 
@@ -405,19 +436,30 @@ def main(args):
             args.mods,
             args.decoding,
             args.kv_cache_size,
+            args.cal_bandwidth,
         )
     ):
         results.append(
             Experiment(
                 config,
                 run_single_experiment(
-                    config, dynamic=args.dynamic, max_autotune=args.max_autotune
+                    config,
+                    dynamic=args.dynamic,
+                    max_autotune=args.max_autotune,
+                    enable_mask=args.mask,
                 ),
-                args.cal_bandwidth,
             )
         )
 
     print_results(results)
+
+
+def heads_input_type(s):
+    try:
+        hq, hkv = map(int, s.split(","))
+        return hq, hkv
+    except Exception as e:
+        raise argparse.ArgumentTypeError("Heads must be Hq,Hkv") from e
 
 
 if __name__ == "__main__":
@@ -441,9 +483,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-nh",
-        type=int,
+        type=heads_input_type,
         nargs="+",
-        help="# of (q heads, kv heads)",
+        help="# of q-heads,kv-heads",
         default=[(16, 16), (16, 2)],
     )
     parser.add_argument(
@@ -471,7 +513,7 @@ if __name__ == "__main__":
         nargs="+",
         required=False,
         help="""
-key/value cache size in MB.
+key/value cache size in MiB.
 Ignores -b batch size and calculate batch size from kv_cache size instead when specified.
 """,
     )
@@ -479,6 +521,9 @@ Ignores -b batch size and calculate batch size from kv_cache size instead when s
         "--cal-bandwidth",
         action="store_true",
         help="Calculate kernel memory bandwidth & computational throughput. ",
+    )
+    parser.add_argument(
+        "--mask", action="store_true", help="Enables block sparsity mask. "
     )
 
     # Parse arguments
