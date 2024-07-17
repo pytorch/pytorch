@@ -315,16 +315,18 @@ def create_flex_decoding_kernel(*args, **kwargs):
     (
         sparse_kv_num_blocks,
         sparse_kv_indices,
-        _,  # sparse_q_num_blocks,
-        _,  # sparse_q_indices,
-        _,  # full_kv_num_blocks,
+        full_kv_num_blocks,  # full_kv_num_blocks,
         _,  # full_kv_indices,
+        _,  # q_num_blocks
+        _,  # q_indices
         _,  # full_q_num_blocks,
         _,  # full_q_indices,
         SPARSE_KV_BLOCK_SIZE,
         _,  # SPARSE_Q_BLOCK_SIZE,
         mask_graph,
     ) = block_mask
+    if full_kv_num_blocks is not None:
+        raise RuntimeError("NYI: Flex decoding only supports full mask. ")
     for buf in [
         query,
         key,
