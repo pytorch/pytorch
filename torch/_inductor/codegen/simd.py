@@ -200,7 +200,11 @@ class IterationRangesRoot(IterationRanges):
         """Figure out vars from this tree used in index"""
         nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
         nodes = [n for n in nodes if n and n.prefix == self.prefix]
-        nodes.sort(key=lambda x: V.graph.sizevars.size_hint(x.divisor))
+        nodes.sort(
+            key=lambda x: V.graph.sizevars.size_hint(
+                x.divisor, fallback=config.unbacked_symint_fallback
+            )
+        )
         divisor = sympy.Integer(1)
         index_vars = []
         sizes = []
@@ -1461,6 +1465,7 @@ class SIMDScheduling(BaseScheduling):
 
         if not isinstance(partial_code, str):
             partial_code.finalize_hook("<DEF_KERNEL>")
+            partial_code.finalize_hook("<ARGDEFS>", strict=False)
         # finalize must be called after adding epilogue above
         with V.set_kernel_handler(kernel):
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.

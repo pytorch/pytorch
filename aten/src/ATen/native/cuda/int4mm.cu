@@ -981,14 +981,17 @@ void launch_tinygemm_kernel(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   cudaFuncAttributes funcAttr;
+#if defined(USE_ROCM)
   C10_CUDA_CHECK(cudaFuncGetAttributes(
       &funcAttr,
-#if defined(USE_ROCM)
       (void *)func
-#else
-      func
-#endif
   ));
+#else
+  C10_CUDA_CHECK(cudaFuncGetAttributes(
+      &funcAttr,
+      func
+  ));
+#endif
 }
 
 // FIXME: parallelize better, smem staging etc?
@@ -1038,7 +1041,7 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
 
     auto kBase1 = kBase0 + kKTileSize / 2;
     ks[2] = kBase1 + (t / kNTileSize) * 2;
-    ks[3] = ks[4] + 1;
+    ks[3] = ks[2] + 1;
 #else
     ks[0] = kBase0 + t % 4;
     ks[1] = ks[0] + 4;
