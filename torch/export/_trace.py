@@ -632,7 +632,7 @@ def _export_to_aten_ir(
     from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
 
     flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    fake_mode = torch.export._trace._detect_fake_mode_from_gm(gm)
+    fake_mode = torch._export.utils._detect_fake_mode_from_gm(gm)
     assert fake_mode is not None, "Cannot detect fake mode from graph"
 
     if not _dynamo_config.do_not_emit_runtime_asserts:

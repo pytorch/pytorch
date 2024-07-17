@@ -5521,8 +5521,6 @@ def forward(self, x):
     return (foo_functional,)""",
         )
 
-    # original input names aren't retraceable:
-    # compilation will succeed, but names won't match forward() signature.
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
         class Foo(torch.nn.Module):
