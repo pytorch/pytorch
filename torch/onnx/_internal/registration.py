@@ -15,7 +15,7 @@ from typing import (
 )
 
 from torch.onnx import _constants, errors
-
+from torch.onnx._internal import _beartype
 
 OpsetVersion = int
 
@@ -265,6 +265,7 @@ class SymbolicRegistry:
         return set(self._registry)
 
 
+@_beartype.beartype
 def onnx_symbolic(
     name: str,
     opset: Union[OpsetVersion, Sequence[OpsetVersion]],
@@ -313,6 +314,7 @@ def onnx_symbolic(
     return wrapper
 
 
+@_beartype.beartype
 def custom_onnx_symbolic(
     name: str,
     opset: Union[OpsetVersion, Sequence[OpsetVersion]],
