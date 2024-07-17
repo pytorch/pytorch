@@ -697,8 +697,6 @@ class NNModuleVariable(VariableTracker):
                         ),
                     )
                     return new_module_variable
-                    new_module = module[args[0].as_python_constant()]
-                    return variables.UnspecializedNNModuleVariable(new_module)
                 else:
                     # slice on nn module results in a creation of new module instance, so we need to make it sourceless.
                     # Convert to unspecialized so that UnspecializedNNModule variable can take care of it.
