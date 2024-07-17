@@ -77,6 +77,7 @@ class CommModeModuleTracker(ModuleTracker):
 
     def __init__(self):
         super().__init__()
+        self.active_checkpointing = False
         self.module_helper_dict = {}
         self.module_parameters_dict = {}
         self.module_parents_dict = {}
@@ -103,16 +104,13 @@ class CommModeModuleTracker(ModuleTracker):
         collects the parameters and sharding information of a module and
         stores it in a dictionary.
         """
+        if super().is_bw:
+            self.active_checkpointing = True
+        else:
+            self.active_checkpointing = False
+
         self.name = super()._get_mod_name(mod)
 
-        # contains information about module ordering and depth in the module tree
-        if self.name not in self.module_helper_dict:
-            self.module_helper_dict[self.name] = {}
-
-        self.module_helper_dict[self.name]["module_type"] = (
-            str(type(mod)).replace("<", "").replace(">", "")
-        )
-        self.module_helper_dict[self.name]["depth"] = len(self.parents)
         # adds current sub-module to module tracker parent class
         super()._get_append_fn(self.name, False)()
 
@@ -121,34 +119,44 @@ class CommModeModuleTracker(ModuleTracker):
         if tensors:
             register_multi_grad_hook(tensors, super()._get_pop_fn(self.name, True))
 
-        for param_name, param in mod.named_parameters(recurse=False):
-            if self.name not in self.module_parameters_dict:
-                self.module_parameters_dict[self.name] = {}
+        if not self.active_checkpointing:
+            # contains information about module ordering and depth in the module tree
+            if self.name not in self.module_helper_dict:
+                self.module_helper_dict[self.name] = {}
 
-            self.module_parameters_dict[self.name][param_name] = param.data
+            self.module_helper_dict[self.name]["module_type"] = (
+                str(type(mod)).replace("<", "").replace(">", "")
+            )
+            self.module_helper_dict[self.name]["depth"] = len(self.parents) - 1
+            
+            for param_name, param in mod.named_parameters(recurse=False):
+                if self.name not in self.module_parameters_dict:
+                    self.module_parameters_dict[self.name] = {}
 
-            if isinstance(param.data, DTensor):
-                key_name = self.name + "." + param_name
-                self.sharding_dict[key_name] = param.data.placements
+                self.module_parameters_dict[self.name][param_name] = param.data
 
-                if "parameters" not in self.module_helper_dict[self.name]:
-                    self.module_helper_dict[self.name]["parameters"] = {}
+                if isinstance(param.data, DTensor):
+                    key_name = self.name + "." + param_name
+                    self.sharding_dict[key_name] = param.data.placements
 
-                self.module_helper_dict[self.name]["parameters"][param_name] = str(
-                    param.data.placements
-                )
+                    if "parameters" not in self.module_helper_dict[self.name]:
+                        self.module_helper_dict[self.name]["parameters"] = {}
 
-        # used to store module's parents to ensure correctness in backward pass/checkpointing
-        if self.name not in self.module_parents_dict:
-            self.module_parents_dict[self.name] = self.parents
+                    self.module_helper_dict[self.name]["parameters"][param_name] = str(
+                        param.data.placements
+                    )
 
-        # used to create parent-child module associations for json dumps
-        parent = self.parent_list[-1]
-        if parent not in self.parent_dict:
-            self.parent_dict[parent] = []
+            # used to store module's parents to ensure correctness in backward pass/checkpointing
+            if self.name not in self.module_parents_dict:
+                self.module_parents_dict[self.name] = self.parents
 
-        self.parent_dict[parent].append(self.name)
-        self.parent_list.append(self.name)
+            # used to create parent-child module associations for json dumps
+            parent = self.parent_list[-1]
+            if parent not in self.parent_dict:
+                self.parent_dict[parent] = []
+
+            self.parent_dict[parent].append(self.name)
+            self.parent_list.append(self.name)
 
         self._fw_set_module_handle = mod.register_forward_hook(self._fw_set_module_hook)
 
@@ -157,6 +165,11 @@ class CommModeModuleTracker(ModuleTracker):
         This function is called when the forward pass of a module is called.
         It updates the module tracker and removes the module from parent data
         """
+        if super().is_bw:
+            self.active_checkpointing = True
+        else:
+            self.active_checkpointing = False
+
         super()._fw_post_hook(mod, input, output)
 
     def _bw_hook(self, mod, output):
@@ -181,6 +194,7 @@ class CommModeModuleTracker(ModuleTracker):
         self._fw_set_module_handle = None
         self._bw_handle = register_module_full_backward_pre_hook(self._bw_hook)
         self.name = "Global"
+        self.active_checkpointing = False
 
     def __exit__(self, *args):
         super().__exit__(*args)
@@ -414,6 +428,8 @@ class CommDebugMode(TorchDispatchMode):
 
             forward_operations = []
             backward_operations = []
+            checkpointing_operations = []
+
             if include_ops:
                 if fqn in self.comm_module_operation_counts:
                     forward_operations = [
@@ -428,7 +444,14 @@ class CommDebugMode(TorchDispatchMode):
                         for op in self.comm_module_operation_counts[fqn][
                             "operations_list"
                         ]
-                        if op["is_bw"]
+                        if (op["is_bw"] and not op["is_active_checkpointing"])
+                    ]
+                    checkpointing_operations = [
+                        op
+                        for op in self.comm_module_operation_counts[fqn][
+                            "operations_list"
+                        ]
+                        if op["is_active_checkpointing"]
                     ]
 
             # adds tracing information for module's forward or backward
@@ -467,6 +490,12 @@ class CommDebugMode(TorchDispatchMode):
                 table += f"{indent}BACKWARD PASS\n"
                 table = add_tracing_information(
                     table, backward_collectives, backward_operations
+                )
+
+            if len(checkpointing_operations):
+                table += f"{indent}ACTIVE CHECKPOINTING\n"
+                table = add_tracing_information(
+                    table, {}, checkpointing_operations
                 )
 
         return table
@@ -547,6 +576,9 @@ class CommDebugMode(TorchDispatchMode):
         # tracks if the operation is part of the backward pass
         operation_dict["is_bw"] = self.advanced_module_tracker.is_bw
 
+        # tracks if the operation is part of activation checkpointing
+        operation_dict["is_activation_checkpointing"] = self.advanced_module_tracker.active_checkpointing
+        
         if any(t == DTensor for t in types):
             for ele in args:
                 if isinstance(ele, DTensor):
