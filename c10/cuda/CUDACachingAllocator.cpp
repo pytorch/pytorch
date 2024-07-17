@@ -3683,4 +3683,3 @@ std::atomic<CUDAAllocator*> allocator;
 BackendStaticInitializer backend_static_initializer;
 } // namespace cuda::CUDACachingAllocator
 } // namespace c10
-  
