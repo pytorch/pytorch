@@ -46,6 +46,7 @@ def find_input_mutations(g):
                 operator.getitem,
                 operator.ge,
                 operator.le,  # runtime asserts
+                operator.mul, # support symints from dynamic shapes
             ]:
                 continue
             schema = n.target._schema
