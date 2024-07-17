@@ -22,6 +22,7 @@ from torch.nn.attention._flex_attention import (
     _identity,
     _rel_bias,
     _rel_causal,
+    create_block_mask,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -47,6 +48,13 @@ def create_attention(score_mod, block_mask):
     return functools.partial(
         _flex_attention, score_mod=score_mod, block_mask=block_mask
     )
+
+
+def create_block_mask_test(score_mod, query, key):
+    block_mask = create_block_mask(
+        score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
+    )
+    return block_mask
 
 
 test_dtypes = (
@@ -243,7 +251,7 @@ class TestFlexAttention(InductorTestCase):
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
-        block_mask = None
+        block_mask = create_block_mask_test(score_mod, q, k)
         sdpa_partial = create_attention(score_mod, block_mask)
         compiled_sdpa = torch.compile(sdpa_partial)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
@@ -789,15 +797,22 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_logsumexp_only_return(self):
-        make_tensor = functools.partial(
+        make_q = functools.partial(
             torch.randn,
             (B, Hkv, Hq // Hkv, D),
             dtype=torch.float32,
             device="cuda",
             requires_grad=True,
         )
+        make_kv = functools.partial(
+            torch.randn,
+            (B, Hkv, S, D),
+            dtype=torch.float32,
+            device="cuda",
+            requires_grad=True,
+        )
 
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        q, k, v = make_q(), make_kv(), make_kv()
         block_mask = _create_empty_block_mask(q, k, v)
 
         @torch.compile

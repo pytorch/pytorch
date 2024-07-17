@@ -546,21 +546,6 @@ def flex_attention(
         SPARSE_Q_BLOCK_SIZE,
         mask_graph,
     ) = block_mask
-    for buf in [
-        query,
-        key,
-        value,
-        kv_num_blocks,
-        kv_indices,
-        q_num_blocks,
-        q_indices,
-        full_kv_num_blocks,
-        full_kv_indices,
-        full_q_num_blocks,
-        full_q_indices,
-    ]:
-        if buf is not None:
-            buf.realize()
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -581,6 +566,7 @@ def flex_attention(
             key,
             value,
             subgraph,
+            block_mask,
             scale,
             *score_mod_other_buffers,
         )
@@ -596,6 +582,22 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_fn_other_buffers), mask_graph
     )
+    for buf in [
+        query,
+        key,
+        value,
+        kv_num_blocks,
+        kv_indices,
+        q_num_blocks,
+        q_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        full_q_num_blocks,
+        full_q_indices,
+    ]:
+        if buf is not None:
+            buf.realize()
+
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
