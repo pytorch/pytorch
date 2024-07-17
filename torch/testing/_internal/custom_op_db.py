@@ -237,16 +237,7 @@ def sample_inputs_numpy_nonzero(opinfo, device, dtype, requires_grad, **kwargs):
     yield SampleInput(result, args=())
 
 def numpy_nonzero_vmap(info, in_dims, x):
-    x_bdim, = in_dims
-    x = x.movedim(x_bdim, 0)
-    res = numpy_nonzero(x)
-    # Get unique values in the first column
-    unique_values = torch.unique(res[:, 0])
-    # Split the tensor into groups based on the first column
-    groups = [res[res[:, 0] == val][:, 1:] for val in unique_values]
-    # Stack the groups into a single tensor
-    result = torch.stack(groups)
-    return result, 0
+    raise NotImplementedError("Operator is data-dependent and cannot be vmapped.")
 
 numpy_nonzero.register_vmap(numpy_nonzero_vmap)
 
@@ -450,19 +441,7 @@ def _(boxes, scores, iou_threshold):
     return result
 
 def numpy_nms_vmap(info, in_dims, boxes, scores, iou_threshold):
-    boxes_bdim, scores_bdim , _ = in_dims
-    boxes = boxes.movedim(boxes_bdim, 0) if boxes_bdim is not None else boxes.unsqueeze(0)
-    scores = scores.movedim(scores_bdim, 0) if scores_bdim is not None else scores.unsqueeze(0)
-    results = []
-    if boxes_bdim is not None and scores_bdim is not None:
-        for (box, score) in zip(boxes, scores):
-            results.append(numpy_nms(box, score, iou_threshold))
-    else:
-        for box in boxes:
-            for score in scores:
-                results.append(numpy_nms(box, score, iou_threshold))
-    result = torch.stack(results)
-    return result, 0
+    raise NotImplementedError("Operator is data-dependent and cannot be vmapped.")
 
 numpy_nms.register_vmap(numpy_nms_vmap)
 

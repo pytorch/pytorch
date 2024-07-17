@@ -4138,6 +4138,9 @@ class TestVmapOperatorsOpInfo(TestCase):
             "linalg.eigh", ""
         ),  # not always return the same result for the same input, see test_linalg_eigh for manual test
         skip("to"),  # RuntimeError: required rank 4 tensor to use channels_last format
+        # UnimplementedError: data-dependent operators cannot be vmapped
+        xfail("NumpyNonzeroCustomOp"),
+        xfail("NumpyNMSCustomOp"),
         # ----------------------------------------------------------------------
         # ---------------------------- BUGS ------------------------------------
         # entries in here don't work and need to be fixed.

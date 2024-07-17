@@ -956,12 +956,14 @@ def register_torch_dispatch(
 
 def register_vmap(
     op: _op_identifier,
-    func: Callable,
+    func: Optional[Callable] = None,
     /,
     *,
     lib=None,
-) -> None:
+):
     r"""Register a vmap implementation to support :func:`torch.vmap` for this custom op.
+
+    This API may be used as a decorator (see examples).
 
     In order for an operator to work with :func:`torch.vmap`, you may need to register a
     vmap implementation in the following signature:
@@ -969,6 +971,7 @@ def register_vmap(
         ``vmap_func(info, in_dims: Tuple[Optional[int]], *args, **kwargs)``,
 
     where ``*args`` and ``**kwargs`` are the arguments and kwargs for ``op``.
+    We do not support kwarg-only Tensor args.
 
     It specifies how do we compute the batched version of ``op`` given inputs with an additional
     dimension (specified by ``in_dims``).
@@ -981,7 +984,7 @@ def register_vmap(
     ``info.batch_size`` specifies the size of the dimension being vmapped over, while
     ``info.randomness`` is the ``randomness`` option that was passed to :func:`torch.vmap`.
 
-    The return of the function is a tuple of ``(output, out_dims)``. Similar to ``in_dims``,
+    The return of the function ``func`` is a tuple of ``(output, out_dims)``. Similar to ``in_dims``,
     ``out_dims`` should be of the same structure as ``output`` and contain one ``out_dim``
     per output that specifies if the output has the vmapped dimension and what index it is in.
 
@@ -1005,7 +1008,7 @@ def register_vmap(
         >>>     result = numpy_cube(x)
         >>>     return result, (in_dims[0], in_dims[0])
         >>>
-        >>> numpy_cube.register_vmap(numpy_cube_vmap)
+        >>> torch.library.register_vmap(numpy_cube, numpy_cube_vmap)
         >>>
         >>> x = torch.randn(3)
         >>> torch.vmap(numpy_cube)(x)
@@ -1014,6 +1017,7 @@ def register_vmap(
         >>> def numpy_mul(x: Tensor, y: Tensor) -> Tensor:
         >>>     return torch.tensor(to_numpy(x) * to_numpy(y), device=x.device)
         >>>
+        >>> @torch.library.register_vmap("mylib::numpy_mul")
         >>> def numpy_mul_vmap(info, in_dims, x, y):
         >>>     x_bdim, y_bdim = in_dims
         >>>     x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
@@ -1022,7 +1026,7 @@ def register_vmap(
         >>>     result = result.movedim(-1, 0)
         >>>     return result, 0
         >>>
-        >>> numpy_mul.register_vmap(numpy_mul_vmap)
+        >>>
         >>> x = torch.randn(3)
         >>> y = torch.randn(3)
         >>> torch.vmap(numpy_mul)(x, y)
@@ -1034,7 +1038,6 @@ def register_vmap(
         If your custom operator has any custom behavior in the backward pass, please
         keep this in mind.
 
-
     """
     if not isinstance(
         op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
@@ -1044,26 +1047,41 @@ def register_vmap(
         op = op._name
     opdef = _maybe_get_opdef(op)
     if opdef is not None:
-        opdef.register_vmap(func)
-        return
-
+        return opdef.register_vmap(func)
     assert isinstance(op, str)
     qualname = op
     op = torch._library.utils.lookup_op(qualname)
+    schema = op._schema
+    if _library.utils.has_kwarg_only_tensors(schema):
+        raise NotImplementedError(
+            f"register_vmap with kwarg-only Tensor args. In the original "
+            f"definition of the op, please make your tensors not kwarg-only. "
+            f"Got: {schema}"
+        )
 
-    namespace, opname = torch._library.utils.parse_namespace(qualname)
-    if lib is None:
-        lib = Library(namespace, "FRAGMENT")
-        _keep_alive.append(lib)
+    def register(func):
+        nonlocal op, lib
 
-    from torch._functorch.autograd_function import custom_function_call_vmap_helper
-    from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
+        namespace, opname = torch._library.utils.parse_namespace(qualname)
+        if lib is None:
+            lib = Library(namespace, "FRAGMENT")
+            _keep_alive.append(lib)
 
-    def wrapped_func(keyset, *args, **kwargs):
-        interpreter = retrieve_current_functorch_interpreter()
-        return custom_function_call_vmap_helper(interpreter, func, op, *args, **kwargs)
+        from torch._functorch.autograd_function import custom_function_call_vmap_helper
+        from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
 
-    lib.impl(opname, wrapped_func, "FuncTorchBatched", with_keyset=True)
+        def wrapped_func(keyset, *args, **kwargs):
+            interpreter = retrieve_current_functorch_interpreter()
+            return custom_function_call_vmap_helper(
+                interpreter, func, op, *args, **kwargs
+            )
+
+        lib.impl(opname, wrapped_func, "FuncTorchBatched", with_keyset=True)
+
+    if func is None:
+        return register
+    else:
+        return register(func)
 
 
 # If the op was defined in C++, then we want to make sure there was an
