@@ -13,7 +13,7 @@
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <cstdint>
 #include <iosfwd>
@@ -132,9 +132,9 @@ inline bool pinned_memory_or_default(std::optional<bool> pinned_memory) {
 /// resolution is done before template resolution, our problem is solved.
 
 DispatchKey computeDispatchKey(
-    optional<ScalarType> dtype,
-    optional<Layout> layout,
-    optional<Device> device);
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device);
 
 struct C10_API TensorOptions {
   TensorOptions()
@@ -284,10 +284,10 @@ struct C10_API TensorOptions {
     return has_device_;
   }
 
-  /// Returns the device of the `TensorOptions`, or `c10::nullopt` if
+  /// Returns the device of the `TensorOptions`, or `std::nullopt` if
   /// device is not specified.
   std::optional<Device> device_opt() const noexcept {
-    return has_device_ ? c10::make_optional(device_) : c10::nullopt;
+    return has_device_ ? std::make_optional(device_) : std::nullopt;
   }
 
   /// Returns the device index of the `TensorOptions`.
@@ -305,10 +305,10 @@ struct C10_API TensorOptions {
     return has_dtype_;
   }
 
-  /// Returns the dtype of the `TensorOptions`, or `c10::nullopt` if
+  /// Returns the dtype of the `TensorOptions`, or `std::nullopt` if
   /// device is not specified.
   std::optional<caffe2::TypeMeta> dtype_opt() const noexcept {
-    return has_dtype_ ? c10::make_optional(dtype_) : c10::nullopt;
+    return has_dtype_ ? std::make_optional(dtype_) : std::nullopt;
   }
 
   /// Returns the layout of the `TensorOptions`.
@@ -321,10 +321,10 @@ struct C10_API TensorOptions {
     return has_layout_;
   }
 
-  /// Returns the layout of the `TensorOptions`, or `c10::nullopt` if
+  /// Returns the layout of the `TensorOptions`, or `std::nullopt` if
   /// layout is not specified.
   std::optional<Layout> layout_opt() const noexcept {
-    return has_layout_ ? c10::make_optional(layout_) : c10::nullopt;
+    return has_layout_ ? std::make_optional(layout_) : std::nullopt;
   }
 
   /// Returns the `requires_grad` property of the `TensorOptions`.
@@ -338,10 +338,10 @@ struct C10_API TensorOptions {
   }
 
   /// Returns the `requires_grad` property of the `TensorOptions`, or
-  /// `c10::nullopt` if `requires_grad` is not specified.
+  /// `std::nullopt` if `requires_grad` is not specified.
   std::optional<bool> requires_grad_opt() const noexcept {
-    return has_requires_grad_ ? c10::make_optional(requires_grad_)
-                              : c10::nullopt;
+    return has_requires_grad_ ? std::make_optional(requires_grad_)
+                              : std::nullopt;
   }
 
   /// Returns the `pinned_memory` property of the `TensorOptions`.
@@ -378,10 +378,10 @@ struct C10_API TensorOptions {
   }
 
   /// Returns the `pinned_memory` property of the `TensorOptions`, or
-  /// `c10::nullopt` if `pinned_memory` is not specified.
+  /// `std::nullopt` if `pinned_memory` is not specified.
   std::optional<bool> pinned_memory_opt() const noexcept {
-    return has_pinned_memory_ ? c10::make_optional(pinned_memory_)
-                              : c10::nullopt;
+    return has_pinned_memory_ ? std::make_optional(pinned_memory_)
+                              : std::nullopt;
   }
 
   /// Returns whether the `memory_layout` is specified
@@ -393,10 +393,10 @@ struct C10_API TensorOptions {
   // behavior of memory_format varies from function to function.
 
   /// Returns the `memory_layout` property of `TensorOptions, or
-  /// `c10::nullopt` if `memory_format` is not specified.
+  /// `std::nullopt` if `memory_format` is not specified.
   std::optional<MemoryFormat> memory_format_opt() const noexcept {
-    return has_memory_format_ ? c10::make_optional(memory_format_)
-                              : c10::nullopt;
+    return has_memory_format_ ? std::make_optional(memory_format_)
+                              : std::nullopt;
   }
 
   // Resolves the ATen backend specified by the current construction axes.

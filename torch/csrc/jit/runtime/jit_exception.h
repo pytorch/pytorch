@@ -2,8 +2,8 @@
 
 #include <stdexcept>
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/Export.h>
+#include <optional>
 #include <string>
 
 namespace torch::jit {
@@ -11,8 +11,8 @@ namespace torch::jit {
 struct TORCH_API JITException : public std::runtime_error {
   explicit JITException(
       const std::string& msg,
-      std::optional<std::string> python_class_name = c10::nullopt,
-      std::optional<std::string> original_msg = c10::nullopt);
+      std::optional<std::string> python_class_name = std::nullopt,
+      std::optional<std::string> original_msg = std::nullopt);
 
   std::optional<std::string> getPythonClassName() const {
     return python_class_name_;
