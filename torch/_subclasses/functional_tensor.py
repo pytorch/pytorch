@@ -15,7 +15,6 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 
-
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
 
@@ -359,7 +358,7 @@ class FunctionalTensorMode(TorchDispatchMode):
 
             # If we are here, it means we are seeing functional composite op.
             # For pre-dispatch IR or export inference IR, we wont' decompose them
-            if self.export or self.pre_dispatch:
+            if (self.export or self.pre_dispatch) and func._can_decompose():
                 if func.namespace not in ["aten", "prim"]:
                     # TODO (tmanlaibaatar) check if the op is PT2 compliant
                     warnings.warn(
