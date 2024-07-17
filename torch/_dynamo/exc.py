@@ -1,14 +1,18 @@
+# mypy: allow-untyped-defs
 import os
 import textwrap
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import Any, cast, NoReturn, Optional
+from typing import Any, cast, NoReturn, Optional, Tuple, TYPE_CHECKING
 
 import torch._guards
 
 from . import config
 
 from .utils import counters
+
+if TYPE_CHECKING:
+    from torch._guards import CompileId
 
 
 def exportdb_error_message(case_name):
@@ -183,6 +187,10 @@ class IncorrectUsage(Exception):
     pass
 
 
+class ObservedException(TorchDynamoException):
+    pass
+
+
 # These exceptions are ok to fallback to eager/graph_break.
 exceptions_allowed_to_be_fallback = (
     torch._subclasses.fake_tensor.DataDependentOutputException,
@@ -281,6 +289,18 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
     else:
         new_msg = old_msg + msg
         exc.args = (new_msg,) + exc.args[1:]
+
+
+def get_exc_message(
+    e: Exception, compile_id: "CompileId"
+) -> Tuple[Optional[str], Optional[int]]:
+    filename = None
+    lineno = None
+    if e.innermost_user_frame_summary is not None:  # type: ignore[attr-defined]
+        filename = e.innermost_user_frame_summary.filename  # type: ignore[attr-defined]
+        lineno = e.innermost_user_frame_summary.lineno  # type: ignore[attr-defined]
+    e.compile_id = compile_id  # type: ignore[attr-defined]
+    return filename, lineno
 
 
 def get_real_stack(exc: Exception, frame=None) -> Optional[StackSummary]:

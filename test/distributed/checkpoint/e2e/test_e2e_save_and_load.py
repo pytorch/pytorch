@@ -18,7 +18,9 @@ from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
     get_model_state_dict,
+    get_optimizer_state_dict,
     get_state_dict,
+    set_state_dict,
 )
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
 from torch.distributed.checkpoint.utils import CheckpointException
@@ -415,6 +417,48 @@ class TestNoCPU(DTensorTestBase):
         ):
             f = saver.async_save({})
             f.result()
+
+
+class TestInitStateDict(DTensorTestBase):
+    @with_temp_dir
+    def test_init_state_dict(self):
+        temp_dir = self.temp_dir
+        model = TestDummyModel()
+        optim = torch.optim.Adam(model.parameters(), lr=0.1)
+
+        state_dict_to_save = {
+            "model": get_model_state_dict(model),
+            "optimizer": get_optimizer_state_dict(model, optim),
+        }
+        DCP.save(state_dict_to_save, checkpoint_id=temp_dir)
+
+        torch.manual_seed(0)
+        model_2 = TestDummyModel()
+        # Changing the learning rate for optimizer, which is not a tensor.
+        optim_2 = torch.optim.Adam(model_2.parameters(), lr=0.2)
+
+        msd = get_model_state_dict(model_2)
+        osd = get_optimizer_state_dict(model_2, optim_2)
+
+        state_dict_to_load = {"model": msd, "optimizer": osd}
+        DCP.load(state_dict_to_load, checkpoint_id=temp_dir)
+
+        # We need to check that the two variables point to the same object in memory,
+        # since we claim DCP is in-place loading.
+        self.assertTrue(msd is state_dict_to_load["model"])
+        self.assertTrue(osd is state_dict_to_load["optimizer"])
+
+        # set_state_dict calls load_state_dict for model and optimizer.
+        # so we should see the optim_2.param_groups learning rate is 0.1 instead of 0.2 now.
+        set_state_dict(
+            model_2,
+            optim_2,
+            model_state_dict=state_dict_to_load["model"],
+            optim_state_dict=state_dict_to_load["optimizer"],
+        )
+        self.assertEqual(msd, get_model_state_dict(model_2))
+        self.assertEqual(osd, get_optimizer_state_dict(model_2, optim_2))
+        self.assertEqual(optim_2.param_groups[0]["lr"], 0.1)
 
 
 instantiate_parametrized_tests(TestE2ESaveAndLoad)

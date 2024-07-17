@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """This file exports ONNX ops for opset 16.
 
 Note [ONNX Operators that are added/updated in opset 16]
@@ -70,9 +71,6 @@ def grid_sampler(
 @symbolic_helper.parse_args("v", "i", "v", "v")
 @_beartype.beartype
 def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at("scatter", self, dim, index, src, overload_name="src")
-
     src_type = _type_utils.JitScalarType.from_value(
         src, _type_utils.JitScalarType.UNDEFINED
     )

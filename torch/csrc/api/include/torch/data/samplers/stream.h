@@ -45,7 +45,7 @@ class TORCH_API StreamSampler : public Sampler<BatchSize> {
   /// next batch. This number is the minimum of the supplied `batch_size` and
   /// the difference between the `epoch_size` and the current index. If the
   /// `epoch_size` has been reached, returns an empty optional.
-  optional<BatchSize> next(size_t batch_size) override;
+  std::optional<BatchSize> next(size_t batch_size) override;
 
   /// Serializes the `StreamSampler` to the `archive`.
   void save(serialize::OutputArchive& archive) const override;

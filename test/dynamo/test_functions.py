@@ -27,6 +27,8 @@ from torch._dynamo.testing import (
     normalize_gm,
 )
 from torch._dynamo.utils import ifdynstaticdefault, same
+from torch._dynamo.variables import ConstantVariable
+from torch._dynamo.variables.lists import RangeVariable
 
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
@@ -111,8 +113,8 @@ def inline_lru_cache_fn_with_default_args(x, y, _=None):
 
 
 @torch.jit.script_if_tracing
-def inline_script_if_tracing_fn_with_default_args(x, y, _=None):
-    return torch.cos(x * y)
+def inline_script_if_tracing_fn_with_default_args(x, y, c=1.2):
+    return torch.cos(x * y) + c
 
 
 class FunctionTests(torch._dynamo.test_case.TestCase):
@@ -125,7 +127,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_inline_script_if_tracing_fn_with_default_args(a, b):
-        return inline_script_if_tracing_fn_with_default_args(a, 2, b)
+        return inline_script_if_tracing_fn_with_default_args(a, b)
 
     @make_test
     def test_inline_lru_cache_fn_with_default_args(a, b):
@@ -327,6 +329,40 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_methodcall3(a, b):
         return constant3(a, b=1.0) + b
+
+    def test_is_integer(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def forward(t, m):
+            return 2 * t if m.is_integer() else t
+
+        t = torch.tensor([1])
+        self.assertEqual(forward(t, 1.0).item(), 2)
+        self.assertEqual(forward(t, 1.5).item(), 1)
+
+    @parametrize(
+        "method, num_type",
+        (
+            ("as_integer_ratio", int),
+            ("bit_length", int),
+            ("conjugate", int),
+            ("as_integer_ratio", float),
+            ("conjugate", float),
+            ("hex", float),
+            ("is_integer", float),
+        ),
+    )
+    def test_number_method(self, method, num_type):
+        def forward(t, m):
+            return 2 * t if getattr(m, method)() else t
+
+        wrapped = torch.compile(backend="eager", fullgraph=True)(forward)
+
+        for i in (0, 1, 2.5):
+            m = num_type(i)
+            t = torch.tensor([1])
+            actual = wrapped(t, m)
+            expected = forward(t, m)
+            self.assertEqual(actual, expected)
 
     @make_test
     def test_device_constant(a):
@@ -954,15 +990,24 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref[1]["c"], res[1]["c"]))
         self.assertTrue(same(ref[1][param], res[1][param]))
 
-    def test_default_dict(self):
+    def test_default_dict_dict(self):
         self._test_default_dict_helper(dict)
 
+    def test_default_dict_list(self):
+        self._test_default_dict_helper(list)
+
+    def test_default_dict_tuple(self):
+        self._test_default_dict_helper(tuple)
+
+    def test_default_dict_set(self):
+        self._test_default_dict_helper(set)
+
     def test_default_dict_lambda(self):
-        self._test_default_dict_helper(lambda: dict())
+        self._test_default_dict_helper(lambda: dict())  # noqa: C408
 
     def test_default_dict_closure(self):
         def factory():
-            return dict()
+            return dict()  # noqa: C408
 
         self._test_default_dict_helper(factory)
 
@@ -970,7 +1015,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         param = torch.nn.Parameter(torch.ones([2, 2]))
 
         def fn(x):
-            dd = collections.defaultdict(lambda: dict())
+            dd = collections.defaultdict(lambda: dict())  # noqa: C408
             dd["a"] = x + 1
             dd[param] = 123
             dd["c"] = x * 2
@@ -1009,7 +1054,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_call_dict1(x):
-        d1 = dict()
+        d1 = dict()  # noqa: C408
         d1["x"] = x + 1
         d2 = collections.OrderedDict()
         d2["x"] = x + 2
@@ -1017,7 +1062,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_call_dict2(x):
-        d1 = dict()
+        d1 = dict()  # noqa: C408
         d1["x"] = x
         d2 = collections.OrderedDict(d1)
         if isinstance(d2, collections.OrderedDict):
@@ -1215,6 +1260,51 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         test = make_test(fn)
         test(self)
+
+    @make_test
+    def test_set_intersection(a, b):
+        set1 = {"apple", "banana", "cherry"}
+        set2 = {"google", "microsoft", "apple"}
+        intersection_set = set1.intersection(set2)
+        if "apple" in intersection_set:
+            x = a + b
+        else:
+            x = a - b
+        if "banana" in intersection_set:
+            y = a + b
+        else:
+            y = a - b
+        return x, y
+
+    @make_test
+    def test_set_union(a, b):
+        set1 = {"apple", "banana", "cherry"}
+        set2 = {"google", "microsoft", "apple"}
+        union_set = set1.union(set2)
+        if "apple" in union_set:
+            x = a + b
+        else:
+            x = a - b
+        if "banana" in union_set:
+            y = a + b
+        else:
+            y = a - b
+        return x, y
+
+    @make_test
+    def test_set_difference(a, b):
+        set1 = {"apple", "banana", "cherry"}
+        set2 = {"google", "microsoft", "apple"}
+        difference_set = set1.difference(set2)
+        if "apple" in difference_set:
+            x = a + b
+        else:
+            x = a - b
+        if "banana" in difference_set:
+            y = a + b
+        else:
+            y = a - b
+        return x, y
 
     @make_test
     def test_tuple_iadd(a, b):
@@ -1613,6 +1703,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_numpy_dtype_argument_to_function(x):
         return np.ones_like(x, dtype=np.float64)
+
+    @make_test
+    def test_numpy_dtype_call_in_function(x):
+        dt = np.dtype("float")
+        return np.full_like(x, 2.4, dtype=dt)
 
     @make_test
     def test_numpy_linalg(x):
@@ -2192,6 +2287,84 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(same(program(input1, input2), input1 + input1))
 
+    @parametrize("int_or_float", ("int", "float"))
+    def test_np_constant_collections_as_input(self, int_or_float):
+        info_func = getattr(np, f"{int_or_float[0]}info")
+        dt_string_arg = f"{int_or_float}16"
+        np_dt_attr = getattr(np, dt_string_arg)
+
+        dt_args = [dt_string_arg, np_dt_attr]
+        arg_variants_iter = itertools.chain(
+            dt_args, map(np.dtype, dt_args), map(info_func, dt_args)
+        )
+
+        def func(a, b, info_or_dt):
+            return a + info_func(info_or_dt).max
+
+        opt_fn = torch.compile(func)
+
+        a = torch.randn(2)
+        b = torch.randn(2)
+        eager_result = func(a, b, dt_args[0])
+
+        for arg in arg_variants_iter:
+            opt_result = opt_fn(a, b, arg)
+            self.assertTrue(same(opt_result, eager_result))
+
+    @parametrize(
+        "typ, info_func",
+        [
+            (int, np.iinfo),
+            (float, np.finfo),
+        ],
+        name_fn=lambda t, _: t.__name__,
+    )
+    def test_np_constant_collections_guards(self, typ, info_func):
+        def func_info(a, info):
+            return a + info.max
+
+        def func_dtype(a, dt):
+            return a + info_func(dt).max
+
+        dt_args = [
+            np.dtype(typ),
+            np.ones((1,), dtype=typ).dtype,
+            np.dtype(np.dtype(typ).name),
+            np.dtype(typ.__name__),
+        ]
+        cnts_1 = torch._dynamo.testing.CompileCounter()
+        opt_fn_dtype = torch._dynamo.optimize(cnts_1)(func_dtype)
+        a = torch.zeros(3, dtype=typ)
+        for arg in dt_args:
+            r = opt_fn_dtype(a, arg)
+        # each should produce an identical arg
+        self.assertEqual(cnts_1.frame_count, 1)
+
+        cnts_2 = torch._dynamo.testing.CompileCounter()
+        opt_fn_info = torch._dynamo.optimize(cnts_2)(func_info)
+        info_args = [info_func(dt) for dt in dt_args]
+        for arg in info_args:
+            r = opt_fn_info(a, arg)
+
+        # each should produce an identical arg
+        self.assertEqual(cnts_2.frame_count, 1)
+
+        if typ is float:
+            dt_extra = np.dtype(np.float16)
+        else:
+            dt_extra = np.dtype(np.int16)
+        info_extra = info_func(dt_extra)
+
+        eager_result_dtype = func_dtype(a, dt_extra)
+        compile_result_dtype = opt_fn_dtype(a, dt_extra)
+        self.assertEqual(cnts_1.frame_count, 2)
+        self.assertEqual(eager_result_dtype, compile_result_dtype)
+
+        eager_result_info = func_info(a, info_extra)
+        compile_result_info = opt_fn_info(a, info_extra)
+        self.assertEqual(cnts_2.frame_count, 2)
+        self.assertEqual(eager_result_info, compile_result_info)
+
     def test_compare_constant_and_tensor(self):
         for op in [
             operator.lt,
@@ -2228,6 +2401,24 @@ class GraphModule(torch.nn.Module):
         test(-1.1, 1.1)
         test(True, False)
         test(torch.ones(4, dtype=torch.float32), 1.1)
+
+    def test_index(self):
+        def fn(x, t):
+            v = operator.index(x)
+            torch.mul(t, v)
+
+        def test(a, b):
+            self.assertEqual(opt_fn(a, b), fn(a, b))
+
+        for dynamic in [True, False]:
+            torch._dynamo.reset()
+            opt_fn = torch._dynamo.optimize(dynamic=dynamic)(fn)
+            t = torch.ones(1)
+            test(10, t)
+            test(-100, t)
+            test(10, t)
+            test(False, t)
+            test(True, t)
 
     def test_truth(self):
         def fn(x, y):
@@ -2267,6 +2458,157 @@ class GraphModule(torch.nn.Module):
 
                 opt_fn = torch._dynamo.optimize(nopython=True)(fn)
                 self.assertEqual(opt_fn(), fn())
+
+    def gen_random_range_args(self):
+        args_count = random.randint(1, 3)
+        args = [random.randint(-10, 10) for _ in range(args_count)]
+        if args_count == 3 and args[2] == 0:
+            args[2] = 1
+        return args
+
+    def test_range_length(self):
+        def test(*args, expected=None):
+            r = range(*args)
+            range_variable = RangeVariable([ConstantVariable.create(v) for v in args])
+
+            self.assertEqual(len(r), range_variable.range_length())
+
+            if expected is not None:
+                self.assertEqual(len(r), expected)
+
+        test(1, 1, 1, expected=0)
+        test(1, 0, expected=0)
+        test(-10, expected=0)
+
+        test(4, expected=4)
+        test(10, expected=10)
+
+        # step >1
+        test(1, 10, 2, expected=5)
+
+        # negative step
+        test(10, 1, -1, expected=9)
+        test(10, 1, -3)
+
+        # Fuzz testing
+        for i in range(100):
+            args = self.gen_random_range_args()
+            print("testing :", args)
+            test(*args)
+
+    def test_indexed_range(self):
+        def test(range, index, expected=None):
+            range_variable = RangeVariable(
+                [
+                    ConstantVariable.create(v)
+                    for v in [range.start, range.stop, range.step]
+                ]
+            )
+
+            self.assertEqual(
+                range[index],
+                range_variable.apply_index(index).as_python_constant(),
+            )
+
+            if expected is not None:
+                self.assertEqual(range[index], expected)
+
+        test(range(10), 1, expected=1)
+        test(range(10, 20, 2), 1, expected=12)
+
+        # Fuzz testing
+        for i in range(100):
+            range_args = self.gen_random_range_args()
+            r = range(*range_args)
+
+            if len(r) == 0:
+                continue
+
+            index = random.randint(0, len(r) - 1)
+
+            print("testing:", r, index)
+            test(r, index)
+
+    def test_sliced_range(self):
+        def test(range, slice, expected=None):
+            range_variable = RangeVariable(
+                [
+                    ConstantVariable.create(v)
+                    for v in [range.start, range.stop, range.step]
+                ]
+            )
+
+            self.assertEqual(
+                range[slice],
+                range_variable.apply_slice(slice).as_python_constant(),
+            )
+
+            if expected is not None:
+                self.assertEqual(
+                    range[slice],
+                    expected,
+                )
+
+        test(range(10), slice(1, 10, 2), expected=range(1, 10, 2))
+        test(range(10), slice(None, 10, None), expected=range(0, 10))
+        test(range(10), slice(-1, 7, None), expected=range(9, 7))
+        test(range(10), slice(-1, 7, 2), expected=range(9, 7, 2))
+        test(range(1, 10, 2), slice(3, 7, 2), expected=range(7, 11, 4))
+        test(range(1, 10, 2), slice(-3, 7, 2), expected=range(5, 11, 4))
+        test(range(-1, -5, -3), slice(5, None, -3), expected=range(-4, 2, 9))
+
+        def rand_slice():
+            def flip_coin():
+                # 1 out of 10
+                return random.randint(1, 10) == 5
+
+            def r_item(allow_zero=True):
+                i = random.randint(-10, 10)
+                if not allow_zero and i == 0:
+                    i = 1
+                if flip_coin():
+                    i = None
+                return i
+
+            arg_count = random.randint(1, 3)
+
+            if arg_count == 1:
+                return slice(r_item())
+            elif arg_count == 2:
+                return slice(r_item(), r_item())
+            else:
+                return slice(r_item(), r_item(), r_item(False))
+
+        # Fuzz testing
+        for i in range(100):
+            range_args = self.gen_random_range_args()
+            r = range(*range_args)
+            # generate random slice
+            s = rand_slice()
+
+            print("testing:", r, s)
+            test(r, s)
+
+    def test_range_with_slice_index(self):
+        def fn(x):
+            acc = 1
+            for k in range(2)[1::2]:
+                acc *= acc * k
+            return x * acc
+
+        opt_fn = torch.compile(fullgraph=True)(fn)
+        x = torch.ones(1)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_range_with_index(self):
+        def fn(x):
+            acc = 1
+            acc *= acc * range(10, 20, 2)[2]
+            return x * acc
+
+        opt_fn = torch.compile(fullgraph=True)(fn)
+        x = torch.ones(1)
+        self.assertEqual(opt_fn(x), fn(x))
 
     def test_rand_inlined(self):
         @torch.compile(backend="eager", dynamic=True)

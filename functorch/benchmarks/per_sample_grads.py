@@ -1,10 +1,11 @@
 import time
 
-import torch
-import torch.nn as nn
 import torchvision.models as models
 from opacus import PrivacyEngine
 from opacus.utils.module_modification import convert_batchnorm_modules
+
+import torch
+import torch.nn as nn
 
 from functorch import grad, make_functional, vmap
 

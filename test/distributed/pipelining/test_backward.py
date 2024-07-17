@@ -2,9 +2,9 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 
-import torch
-
 from model_registry import MLPModule
+
+import torch
 from torch.distributed.pipelining._backward import stage_backward
 from torch.testing._internal.common_utils import run_tests, TestCase
 
