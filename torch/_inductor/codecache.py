@@ -1068,7 +1068,7 @@ class FxGraphCache:
         compiled_graph = None
         cache_state = None
         key = None
-        debug_lines = []
+        debug_lines = None
         try:
             FxGraphCache._check_can_cache(gm)
             key, debug_lines = compiled_fx_graph_hash(
