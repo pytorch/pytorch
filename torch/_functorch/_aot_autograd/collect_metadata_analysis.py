@@ -160,9 +160,10 @@ def run_functionalized_fw_and_collect_metadata(
 
         # NB: emulate idempotence during metadata collection by preventing the nested
         # int ID counter from advancing.
-        from torch.nested._internal.nested_tensor import freeze_nested_int_id_counter
+        # TODO: Determine how to use branch_nested_int_registry() instead!
+        from torch.nested._internal.nested_tensor import freeze_nested_int_counter
 
-        with disable_above, mode, freeze_nested_int_id_counter():
+        with disable_above, mode, freeze_nested_int_counter():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)
@@ -637,10 +638,10 @@ from a multi-output view call"
 
                 # indicate that the viewed tensor has the same associated nested int
                 # as the source tensor within the nested int registry
-                from torch.nested._internal.nested_tensor import _tensor_symint_registry
+                from torch.nested._internal.nested_tensor import _nested_int_registry
 
-                if t in _tensor_symint_registry:
-                    _tensor_symint_registry[out] = _tensor_symint_registry[t]
+                if t in _nested_int_registry:
+                    _nested_int_registry.set(out, _nested_int_registry.get(t))
 
                 return out
             return t

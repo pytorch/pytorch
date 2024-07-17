@@ -8,44 +8,90 @@ from torch._prims_common import is_expandable_to
 from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
 
-_tensor_id_counter = 0
-_tensor_symint_registry = WeakTensorKeyDictionary()
 
+class NestedIntRegistry:
+    _counter: int
+    # maps tensor -> nested int
+    _registry: WeakTensorKeyDictionary
 
-@contextmanager
-def freeze_nested_int_id_counter():
-    global _tensor_id_counter
-    orig_counter = _tensor_id_counter
-    try:
-        yield
-    finally:
-        _tensor_id_counter = orig_counter
+    def __init__(self, counter=0, registry=WeakTensorKeyDictionary()):
+        self._counter = counter
+        self._registry = registry
 
-
-def get_tensor_symint(tensor, *, coeff=1):
-    global _tensor_id_counter
-    tensor_symint = _tensor_symint_registry.get(tensor)
-    if tensor_symint is None:
-        from torch._subclasses.fake_tensor import FakeTensor
+    # Returns any nested int associated with the given tensor. If none exists, one is created
+    # if create_new=True. For fake tensors, the created nested int is immediately made symbolic.
+    def get(self, tensor, *, create_new=True, coeff=1):
         from torch._subclasses.functional_tensor import FunctionalTensor
-        from torch.fx.experimental.symbolic_shapes import _create_symbolic_nested_int
 
         if isinstance(tensor, FunctionalTensor):
             tensor = torch._from_functional_tensor(tensor.elem)
-            return get_tensor_symint(tensor, coeff=coeff)
+            return self.get(tensor, coeff=coeff)
 
-        # allocate new nested int
-        tensor_symint = torch._C._get_nested_int(_tensor_id_counter, coeff)
-        _tensor_id_counter += 1
-
-        if isinstance(tensor, FakeTensor):
-            tensor_symint = _create_symbolic_nested_int(
-                tensor_symint, base_source=None, shape_env=tensor.fake_mode.shape_env
+        tensor_symint = self._registry.get(tensor)
+        if tensor_symint is None and create_new:
+            from torch._subclasses.fake_tensor import FakeTensor
+            from torch.fx.experimental.symbolic_shapes import (
+                _create_symbolic_nested_int,
             )
 
-        # associate (possibly symbolic) nested int with this tensor in the registry
-        _tensor_symint_registry[tensor] = tensor_symint
-    return tensor_symint
+            # allocate new nested int
+            tensor_symint = torch._C._get_nested_int(self._counter, coeff)
+            self._counter += 1
+
+            if isinstance(tensor, FakeTensor):
+                old = tensor_symint
+                tensor_symint = _create_symbolic_nested_int(
+                    tensor_symint,
+                    base_source=None,
+                    shape_env=tensor.fake_mode.shape_env,
+                )
+
+            # associate (possibly symbolic) nested int with this tensor in the registry
+            self._registry[tensor] = tensor_symint
+        return tensor_symint
+
+    def set(self, tensor, nested_int):
+        from torch._subclasses.functional_tensor import FunctionalTensor
+
+        if isinstance(tensor, FunctionalTensor):
+            tensor = torch._from_functional_tensor(tensor.elem)
+            return self.set(tensor, nested_int)
+
+        self._registry[tensor] = nested_int
+
+    def clone(self) -> "NestedIntRegistry":
+        return NestedIntRegistry(counter=self._counter, registry=self._registry.copy())
+
+    def items(self):
+        return self._registry.items()
+
+    def __contains__(self, item):
+        return item in self._registry
+
+
+# registry instance to use
+_nested_int_registry = NestedIntRegistry()
+
+
+@contextmanager
+def freeze_nested_int_counter():
+    global _nested_int_registry
+    orig_counter = _nested_int_registry._counter
+    try:
+        yield
+    finally:
+        _nested_int_registry._counter = orig_counter
+
+
+@contextmanager
+def branch_nested_int_registry():
+    global _nested_int_registry
+    orig_registry = _nested_int_registry
+    _nested_int_registry = _nested_int_registry.clone()
+    try:
+        yield
+    finally:
+        _nested_int_registry = orig_registry
 
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash
@@ -107,7 +153,8 @@ class NestedTensor(torch.Tensor):
         # Query cache for the symint associated with offsets or lengths
         # (create a new one if needed).
         ragged_source = offsets if lengths is None else lengths
-        ragged_size = get_tensor_symint(ragged_source, coeff=1)
+        global _nested_int_registry
+        ragged_size = _nested_int_registry.get(ragged_source, coeff=1)
         _ragged_idx = kwargs.get("_ragged_idx", 1)
         B = offsets.shape[0] - 1
         if lengths is not None:

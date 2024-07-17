@@ -299,7 +299,7 @@ class MetaTensorDescriber:
             }
             type_v = type(t)
 
-        from torch.nested._internal.nested_tensor import _tensor_symint_registry
+        from torch.nested._internal.nested_tensor import _nested_int_registry
 
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
@@ -329,7 +329,7 @@ class MetaTensorDescriber:
             is_parameter=isinstance(t, torch.nn.Parameter),
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
-            nested_int=_tensor_symint_registry.get(t, None),
+            nested_int=_nested_int_registry.get(t, create_new=False),
             is_functional=is_functional,
             layout=layout,
             device=t.device,
@@ -834,11 +834,14 @@ class MetaConverter:
                             _create_symbolic_nested_int,
                         )
                         from torch.nested._internal.nested_tensor import (
-                            _tensor_symint_registry,
+                            _nested_int_registry,
                         )
 
-                        _tensor_symint_registry[r] = _create_symbolic_nested_int(
-                            t.nested_int, source, shape_env
+                        _nested_int_registry.set(
+                            r,
+                            _create_symbolic_nested_int(
+                                t.nested_int, source, shape_env
+                            ),
                         )
 
                     return r
@@ -1589,10 +1592,11 @@ class MetaConverter:
                 from torch.fx.experimental.symbolic_shapes import (
                     _create_symbolic_nested_int,
                 )
-                from torch.nested._internal.nested_tensor import _tensor_symint_registry
+                from torch.nested._internal.nested_tensor import _nested_int_registry
 
-                _tensor_symint_registry[r] = _create_symbolic_nested_int(
-                    t.nested_int, source, shape_env
+                _nested_int_registry.set(
+                    r,
+                    _create_symbolic_nested_int(t.nested_int, source, shape_env),
                 )
 
             self.set_tensor_memo(t, r)
