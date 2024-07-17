@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
 )
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.distributed.multi_threaded_pg import (
     _install_threaded_pg,
     _uninstall_threaded_pg,
@@ -513,7 +514,7 @@ DEFAULT_WORLD_SIZE = 4
 # subprocesses to join.
 
 
-class MultiProcessTestCase(TestCase):
+class MultiProcessTestCaseBase:
     MAIN_PROCESS_RANK = -1
     # This exit code is used to indicate that the test code had an error and
     # exited abnormally. There are certain tests that might use sys.exit() to
@@ -840,6 +841,18 @@ class MultiProcessTestCase(TestCase):
     @property
     def is_master(self) -> bool:
         return self.rank == 0
+
+
+class MultiProcessTestCase(MultiProcessTestCaseBase, TestCase):
+    pass
+
+
+class MultiProcessInductorTestCase(MultiProcessTestCaseBase, InductorTestCase):
+    """
+    A version of MultiProcessTestCase that derives from the Inductor TestCase
+    which handles isolation of the cache dir.
+    """
+    pass
 
 
 def run_subtests(
