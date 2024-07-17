@@ -284,6 +284,7 @@ __all__ = [
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
+    "squeeze_copy",
     "t",
     "t_copy",
     "T",
@@ -6321,6 +6322,7 @@ expand_copy = _make_copy_from_view(expand)
 # TODO: This must return a sparse tensor if the input is sparse, but refs have
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(narrow)
+squeeze_copy = _make_copy_from_view(squeeze)
 t_copy = _make_copy_from_view(t)
 view_copy = _make_copy_from_view(view)
 
