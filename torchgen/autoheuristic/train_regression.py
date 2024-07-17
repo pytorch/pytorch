@@ -331,7 +331,7 @@ class AHTrainRegressionTree(AHTrain):
             "wrong_max_ratio": wrong_max_ratio,
         }
 
-    def handle_leaf(self, tree_, node, indent):
+    def handle_leaf(self, tree_, node, indent, unsafe_leaves):
         value = tree_.value[node][0][0]
         return f"{indent}return {str(value)}"
 

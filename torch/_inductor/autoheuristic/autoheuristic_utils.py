@@ -194,7 +194,8 @@ def between_ops() -> List[AHOperation]:
             between_op_fn = functools.partial(
                 between_op, dim=dim, lower=lower, upper=upper
             )
-            between_op_name = f"{lower}<={dim}<={upper}"
+            # using 'LEQ' instead of '<=' because '<=' cannot be exported to dot
+            between_op_name = f"{lower}LEQ{dim}LEQ{upper}"
             ah_operations.append(
                 AHOperation(between_op_name, between_op_fn, is_categorical=True)
             )
@@ -205,21 +206,10 @@ def pow2_op(data: Any, dim: str, exponent: int) -> bool:
     return data[dim] == 2**exponent
 
 
-def pow2_ops() -> List[AHOperation]:
-    dims = ["m", "k", "n"]
-    exponents = [4, 5, 6, 7, 8]
-    ah_operations = []
-    for dim in dims:
-        for e in exponents:
-            pow2_op_fn = functools.partial(pow2_op, dim=dim, exponent=e)
-            ah_operations.append(AHOperation(f"{dim}=={2**e}", pow2_op_fn))
-    return ah_operations
-
-
 def mixed_mm_operations() -> List[AHOperation]:
     mult_dims_ops = get_mult_dims_ops()
     arith_intensity_op = AHOperation("arith_intensity", get_arith_intensity)
-    return mult_dims_ops + [arith_intensity_op] + between_ops() + pow2_ops()
+    return mult_dims_ops + [arith_intensity_op] + between_ops()
 
 
 def is_multiple(data: Any, dim: str, mult: int) -> bool:
