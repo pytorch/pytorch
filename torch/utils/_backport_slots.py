@@ -1,18 +1,21 @@
 # This code is backported from python 3.10 dataclasses. Once 3.10 becomes the
 # minimum supported we should use dataclass(slots=True) instead.
 
+from __future__ import annotations
+
 import dataclasses
 import itertools
-from typing import Generator, List, Type, TypeVar
+from typing import Generator, List, Type, TYPE_CHECKING, TypeVar
 
-from _typeshed import DataclassInstance
+if TYPE_CHECKING:
+    from _typeshed import DataclassInstance
 
-__all__ = ("dataclass_backport_slots",)
+__all__ = ("dataclass_slots",)
 
-_T = TypeVar("_T", bound=DataclassInstance)
+_T = TypeVar("_T", bound="DataclassInstance")
 
 
-def dataclass_backport_slots(cls: Type[_T]) -> Type[DataclassInstance]:
+def dataclass_slots(cls: Type[_T]) -> Type[DataclassInstance]:
     assert dataclasses.is_dataclass(cls), "Can only be used on dataclasses."
 
     def _get_slots(cls: Type[DataclassInstance]) -> Generator[str, None, None]:
