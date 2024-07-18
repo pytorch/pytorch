@@ -258,6 +258,21 @@ class MultiKernelTest(TestCase):
             act = torch.compile(f)(x)
         self.assertEqual(ref, act)
 
+    def test_sort_disables_multi_kernel(self, force_multi_kernel=1):
+        """
+        Sort currently requires a persistent kernel, so multi-kernel is not
+        possible. Make sure this falls back gracefully.
+        """
+
+        def f(x):
+            return x.sort(-1).values
+
+        x = torch.rand(32, 32, device="cuda")
+        expect = f(x)
+        with config.patch("triton.multi_kernel", force_multi_kernel):
+            actual = torch.compile(f)(x)
+        self.assertEqual(expect, actual)
+
     # Use benchmarking to pick the faster kernel
     test_reduction_scratch_buffer_cpp_wrapper = make_cpp_wrapper_test(
         test_reduction_scratch_buffer, force_multi_kernel=1
