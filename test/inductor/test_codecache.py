@@ -40,6 +40,7 @@ from torch.testing._internal.inductor_utils import (
 )
 from torch.utils._triton import has_triton
 
+
 HAS_TRITON = has_triton()
 
 if HAS_TRITON:
@@ -450,8 +451,8 @@ class TestFxGraphCache(TestCase):
         def fn(a, b):
             return torch.mm(a, b)
 
-        a = torch.rand(8, 32, device="cuda")
-        b = torch.rand(32, 8, device="cuda")
+        a = torch.rand(8, 32, device=GPU_TYPE)
+        b = torch.rand(32, 8, device=GPU_TYPE)
 
         compiled_fn = torch.compile(fn)
 
