@@ -31,7 +31,7 @@ flex_decoding_template = TritonTemplate(
     name="flex_decoding",
     grid=flex_decoding_grid,
     source=r"""
-    {{def_kernel("Q", "K", "V", "M", "L", "SPARSE_KV_NUM_BLKS", "SPARSE_KV_IDX")}}
+    {{def_kernel("Q", "K", "V", "M", "L", "KV_NUM_BLKS", "KV_IDX")}}
     # Sub notation for this kernel:
     # Q: Query, K: Key, V: Value
     # reduction buffers: M rowmax across local KV split, L local sumexp across local KV split
@@ -53,8 +53,9 @@ flex_decoding_template = TritonTemplate(
     # PRESCALE_QK: Whether to pre-scale QK by 1/sqrt(d) and change of base.
     #
     # SPARSE_KV_BLOCK_SIZE: sparse mask block size along KV seqlen dim.
-    # SPARSE_KV_NUM_BLKS: The number of unmasked K/V blocks for each query.
-    # SPARSE_KV_IDX: The indices of unmasked K/V blocks for each query.
+    # KV_NUM_BLKS: The number of KV blocks (that may or may not require masking) for each query.
+    # KV_IDX: The indices of KV blocks (that may or may not require masking) for each query.
+    #
     #
     # Output: ACC output accumulated across local KV split.
 
@@ -96,8 +97,8 @@ flex_decoding_template = TritonTemplate(
 
     TILE_KV_MULTIPLE: tl.constexpr = (TILE_KV // BLOCK_N)
 
-    SPARSE_Z = {{size("SPARSE_KV_NUM_BLKS", 0)}}
-    SPARSE_H = {{size("SPARSE_KV_NUM_BLKS", 1)}}
+    SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
+    SPARSE_H = {{size("KV_NUM_BLKS", 1)}}
 
     tl.static_assert(SPARSE_KV_BLOCK_SIZE >= BLOCK_N and SPARSE_KV_BLOCK_SIZE % BLOCK_N == 0)
     SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
@@ -113,8 +114,8 @@ flex_decoding_template = TritonTemplate(
     sparse_idx_h = off_h % SPARSE_H
 
     sparse_hz_offset = sparse_idx_z * SPARSE_H + sparse_idx_h
-    kv_indices = SPARSE_KV_IDX + sparse_hz_offset * SPARSE_KV_BLOCK_CNT
-    sparse_block_num = tl.load(SPARSE_KV_NUM_BLKS + sparse_hz_offset)
+    kv_indices = KV_IDX + sparse_hz_offset * SPARSE_KV_BLOCK_CNT
+    sparse_block_num = tl.load(KV_NUM_BLKS + sparse_hz_offset)
 
 
     block_n_start = off_t * TILE_KV_MULTIPLE                       # n_offset inside sparse block

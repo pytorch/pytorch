@@ -14,8 +14,8 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     _identity,
-    flex_attention,
     create_block_mask,
+    flex_attention,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -311,7 +311,7 @@ class TestFlexAttention(InductorTestCase):
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
-        block_mask = create_block_mask_test(score_mod, q, k)
+        block_mask = None
         sdpa_partial = create_attention(score_mod, block_mask)
         compiled_sdpa = torch.compile(sdpa_partial)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
@@ -345,6 +345,7 @@ class TestFlexAttention(InductorTestCase):
     def run_test_with_call(
         self,
         sdpa_call: Callable,
+        golden_call: Optional[Callable] = None,
         dtype: torch.dtype = torch.float16,
         Q_B: int = B,
         Q_H: int = Hq,
@@ -355,6 +356,8 @@ class TestFlexAttention(InductorTestCase):
         KV_S: int = S,
         KV_D: int = D,
     ):
+        if not golden_call:
+            golden_call = sdpa_call
         q = torch.randn(
             (Q_B, KV_H, Q_S * (Q_H // KV_H), Q_D),
             dtype=dtype,
@@ -371,8 +374,8 @@ class TestFlexAttention(InductorTestCase):
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
         compiled_sdpa = torch.compile(sdpa_call)
-        golden_out = sdpa_call(q_gold, k_gold, v_gold)
-        ref_out = sdpa_call(q_ref, k_ref, v_ref)
+        golden_out = golden_call(q_gold, k_gold, v_gold)
+        ref_out = golden_call(q_ref, k_ref, v_ref)
         compiled_out = compiled_sdpa(q, k, v)
 
         self._check_out_and_grad(
@@ -830,17 +833,46 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test(bias_mod)
 
-    @expectedFailure  # TODO: add support for partial mask.
     @supported_platform
-    def test_causal_block(self):
+    def test_causal_no_mask_vs_sdpa(self):
+        attention = functools.partial(flex_attention, score_mod=_causal)
+
+        sdpa_attention = functools.partial(
+            torch.nn.functional.scaled_dot_product_attention, is_causal=True
+        )
+
+        self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
+
+    @supported_platform
+    def test_causal_full_mask_vs_sdpa(self):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        gqa_mask_mod = get_gqa_mask_fn(mask_mod, Hq // Hkv, 1)
-        block_mask = create_block_mask(gqa_mask_mod, 1, 1, 1, S)
+        block_mask = create_block_mask(mask_mod, 1, 1, 8, S)
+        attention = functools.partial(
+            flex_attention, block_mask=block_mask, score_mod=_causal
+        )
+
+        sdpa_attention = functools.partial(
+            torch.nn.functional.scaled_dot_product_attention, is_causal=True
+        )
+
+        self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
+
+    @expectedFailure  # TODO: add support for partial mask.
+    @supported_platform
+    def test_causal_partial_block_vs_sdpa(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, 8, S)
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
-        self.run_test_with_call(attention)
+        sdpa_attention = functools.partial(
+            torch.nn.functional.scaled_dot_product_attention, is_causal=True
+        )
+
+        self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
