@@ -2073,7 +2073,10 @@ class SubgraphTracer(fx.Tracer):
         if name in self.input_name_to_proxy or name in self.illegal_input_names:
             for i in itertools.count():
                 candidate_name = f"{name}_{i}"
-                if candidate_name not in self.input_name_to_proxy and candidate_name not in self.illegal_input_names:
+                if (
+                    candidate_name not in self.input_name_to_proxy
+                    and candidate_name not in self.illegal_input_names
+                ):
                     name = candidate_name
                     break
 
