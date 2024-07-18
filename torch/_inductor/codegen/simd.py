@@ -1342,7 +1342,7 @@ class SIMDScheduling(BaseScheduling):
         kernel.buf_accesses = buf_accesses
 
         kernel2: Optional[SIMDKernel] = None
-        if kernel.persistent_reduction and config.triton.multi_kernel:
+        if kernel.persistent_reduction and config.triton.multi_kernel and not has_sort:
             kernel2 = self.kernel_type(
                 *kernel_args,
                 **kernel_kwargs,
