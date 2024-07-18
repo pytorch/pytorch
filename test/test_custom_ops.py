@@ -1,29 +1,47 @@
 # Owner(s): ["module: custom-operators"]
 
-from torch.testing._internal.common_utils import *  # noqa: F403
-from torch.testing._internal.common_device_type import *  # noqa: F403
 import collections
-
 import itertools
 import os
 import re
+import subprocess
+import sys
 import typing
+import unittest
+from typing import *  # noqa: F403
+
+import numpy as np
 
 import torch._custom_ops as custom_ops
-
 import torch.testing._internal.optests as optests
+import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
-
 from functorch import make_fx
 from torch import Tensor
-from torch._custom_op.impl import custom_op, CustomOp, infer_schema
+from torch._custom_op.impl import CustomOp, infer_schema
 from torch._library.infer_schema import tuple_to_list
 from torch._utils_internal import get_file_path_2
 from torch.testing._internal import custom_op_db
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    OpDTypes,
+    ops,
+)
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_WINDOWS,
+    parametrize,
+    run_tests,
+    skipIfTorchDynamo,
+    subtest,
+    TestCase,
+)
 from torch.testing._internal.custom_op_db import numpy_nonzero
-from typing import *  # noqa: F403
-import numpy as np
+
+
+# Shadowed by `torch.testing._internal.common_utils.custom_op`
+from torch._custom_op.impl import custom_op  # usort: skip
 
 
 def requires_compile(fun):
@@ -608,24 +626,19 @@ class TestCustomOp(CustomOpTestCaseBase):
         def a(x: Tensor) -> Tensor:
             return torch.empty([])
 
-        self.assertExpectedInline(
-            infer_schema(a, mutates_args=()), """(Tensor x) -> Tensor"""
-        )
+        self.assertExpectedInline(infer_schema(a), """(Tensor x) -> Tensor""")
 
         def kwonly1(x: Tensor, *, y: int, z: float) -> Tensor:
             return torch.empty([])
 
         self.assertExpectedInline(
-            infer_schema(kwonly1, mutates_args=()),
-            """(Tensor x, *, SymInt y, float z) -> Tensor""",
+            infer_schema(kwonly1), """(Tensor x, *, SymInt y, float z) -> Tensor"""
         )
 
         def kwonly2(*, y: Tensor) -> Tensor:
             return torch.empty([])
 
-        self.assertExpectedInline(
-            infer_schema(kwonly2, mutates_args=()), """(*, Tensor y) -> Tensor"""
-        )
+        self.assertExpectedInline(infer_schema(kwonly2), """(*, Tensor y) -> Tensor""")
 
         def b(
             x: Tensor,
@@ -639,7 +652,7 @@ class TestCustomOp(CustomOpTestCaseBase):
             return torch.empty([]), 1, 0.1, True
 
         self.assertExpectedInline(
-            infer_schema(b, mutates_args=()),
+            infer_schema(b),
             """(Tensor x, SymInt y, bool z, float a, ScalarType b, Device c, Scalar d) -> (Tensor, SymInt, float, bool)""",
         )
 
@@ -652,7 +665,7 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [torch.empty([])]
 
         self.assertExpectedInline(
-            infer_schema(c, mutates_args=()),
+            infer_schema(c),
             """(Tensor x, Tensor[] y, Tensor? z, Tensor?[] w) -> Tensor[]""",
         )
 
@@ -660,20 +673,18 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [torch.empty([])], torch.empty([])
 
         self.assertExpectedInline(
-            infer_schema(d, mutates_args=()), """(Tensor x) -> (Tensor[], Tensor)"""
+            infer_schema(d), """(Tensor x) -> (Tensor[], Tensor)"""
         )
 
         def e() -> Tensor:
             return torch.empty([])
 
-        self.assertExpectedInline(infer_schema(e, mutates_args=()), """() -> Tensor""")
+        self.assertExpectedInline(infer_schema(e), """() -> Tensor""")
 
         def f(x: Tensor) -> None:
             pass
 
-        self.assertExpectedInline(
-            infer_schema(f, mutates_args=()), """(Tensor x) -> ()"""
-        )
+        self.assertExpectedInline(infer_schema(f), """(Tensor x) -> ()""")
 
         def g(
             x: Tensor, y: List[Tensor], z: List[Tensor], w: List[Optional[Tensor]]
@@ -681,8 +692,7 @@ class TestCustomOp(CustomOpTestCaseBase):
             pass
 
         self.assertExpectedInline(
-            infer_schema(g, mutates_args=()),
-            """(Tensor x, Tensor[] y, Tensor[] z, Tensor?[] w) -> ()""",
+            infer_schema(g), """(Tensor x, Tensor[] y, Tensor[] z, Tensor?[] w) -> ()"""
         )
 
         self.assertExpectedInline(
@@ -711,7 +721,7 @@ class TestCustomOp(CustomOpTestCaseBase):
             pass
 
         self.assertExpectedInline(
-            infer_schema(h, mutates_args=()),
+            infer_schema(h),
             (
                 """(Tensor x, SymInt? a=None, float b=3.14, bool c=True, SymInt d=3, str e="foo", """
                 """ScalarType f=float32, ScalarType g=float32, ScalarType h=int32, Device i="cpu:0", Device j="cpu") -> ()"""
@@ -730,28 +740,28 @@ class TestCustomOp(CustomOpTestCaseBase):
             def foo(*args):
                 raise NotImplementedError
 
-            infer_schema(foo, mutates_args=())
+            infer_schema(foo)
 
         with self.assertRaisesRegex(ValueError, "varkwargs"):
 
             def foo(**kwargs):
                 raise NotImplementedError
 
-            infer_schema(foo, mutates_args=())
+            infer_schema(foo)
 
         with self.assertRaisesRegex(ValueError, "must have a type annotation"):
 
             def foo(x):
                 raise NotImplementedError
 
-            infer_schema(foo, mutates_args=())
+            infer_schema(foo)
 
         with self.assertRaisesRegex(ValueError, "unsupported"):
 
             def foo(x: Tensor) -> Tuple[Tensor, ...]:
                 raise NotImplementedError
 
-            infer_schema(foo, mutates_args=())
+            infer_schema(foo)
 
         with self.assertRaisesRegex(ValueError, "can be mutated"):
 

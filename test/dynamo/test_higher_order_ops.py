@@ -334,14 +334,10 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_d_x_: "f32[]", l_d_y_0_: "f32[]", l_d_y_1_2_: "f32[]"):
-            l_d_x__1 = l_d_x_
-            l_d_y_0__1 = l_d_y_0_
-            l_d_y_1_2__1 = l_d_y_1_2_
-
-            sin: "f32[]" = l_d_x__1.sin();  l_d_x__1 = None
-            cos: "f32[]" = l_d_y_0__1.cos();  l_d_y_0__1 = None
+            sin: "f32[]" = l_d_x_.sin();  l_d_x_ = None
+            cos: "f32[]" = l_d_y_0_.cos();  l_d_y_0_ = None
             add: "f32[]" = sin + cos;  sin = cos = None
-            sin_1: "f32[]" = l_d_y_1_2__1.sin();  l_d_y_1_2__1 = None
+            sin_1: "f32[]" = l_d_y_1_2_.sin();  l_d_y_1_2_ = None
             sub: "f32[]" = add - sin_1;  add = sin_1 = None
             return (sub,)
 """,  # NOQA: B950
@@ -376,9 +372,7 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3, 1]"):
-            l_x__1 = l_x_
-
-            view: "f32[3]" = l_x__1.view(3);  l_x__1 = None
+            view: "f32[3]" = l_x_.view(3);  l_x_ = None
             add: "f32[3]" = view + 0.5;  view = None
             return (add,)
 """,
@@ -389,20 +383,16 @@ class GraphModule(torch.nn.Module):
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, s0: "Sym(s0)", L_x_: "f32[s0, 1]"):
-        s0_1 = s0
         l_x_ = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, s0_1);  wrap_body_0 = l_x_ = s0_1 = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, s0);  wrap_body_0 = l_x_ = s0 = None
         getitem: "f32[s0]" = wrap[0];  wrap = None
         return (getitem,)
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[s0, 1]", size: "Sym(s0)"):
-            l_x__1 = l_x_
-            size_1 = size
-
-            view: "f32[s0]" = l_x__1.view(size_1);  l_x__1 = size_1 = None
+            view: "f32[s0]" = l_x_.view(size);  l_x_ = size = None
             add: "f32[s0]" = view + 0.5;  view = None
             return (add,)
 """,
@@ -1204,11 +1194,9 @@ def forward(self, L_xs_ : torch.Tensor, L_y_ : torch.Tensor):
                 body_graph,
                 """\
 def forward(self, child, l_y_):
-    child_1 = child
-    l_y__1 = l_y_
-    child_2 = child_1[0]
+    child_1 = child[0]
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, [child_1], [l_y__1]);  map_body_0 = child_1 = l_y__1 = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, [child], [l_y_]);  map_body_0 = child = l_y_ = None
     getitem_1 = map_impl[0];  map_impl = None
     return (getitem_1,)""",
             )
@@ -1238,10 +1226,9 @@ def forward(self, L_x_ : torch.Tensor):
                 body_graph,
                 """\
 def forward(self, child):
-    child_1 = child
-    child_2 = child_1.sin()
-    child_3 = child_1.sin();  child_1 = None
-    return (child_2, child_3)""",
+    child_1 = child.sin()
+    child_2 = child.sin();  child = None
+    return (child_1, child_2)""",
             )
 
     def test_map_pytree_return(self):
@@ -1280,8 +1267,7 @@ def forward(self, L_x_ : torch.Tensor):
                 body_graph,
                 """\
 def forward(self, child):
-    child_1 = child
-    return (child_1, child_1, child_1, child_1, child_1, child_1, child_1)""",
+    return (child, child, child, child, child, child, child)""",
             )
 
     def test_map_kwargs(self):
@@ -1324,9 +1310,7 @@ def forward(self, L_x_ : torch.Tensor):
                 body_graph,
                 """\
 def forward(self, child, const_unused):
-    child_1 = child
-    const_unused_1 = const_unused
-    add = child_1 + 3;  child_1 = None
+    add = child + 3;  child = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
             )
@@ -1360,9 +1344,7 @@ def forward(self, L_x_ : torch.Tensor):
                 body_graph,
                 """\
 def forward(self, child, const_unused):
-    child_1 = child
-    const_unused_1 = const_unused
-    add = child_1 + 3;  child_1 = None
+    add = child + 3;  child = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
             )
@@ -1618,16 +1600,16 @@ def forward(self, L_x_ : torch.Tensor):
                 true_graph,
                 """\
 def forward(self, l_x_):
-    l_x__2 = l_x_
-    sin = torch.sin(l_x__2);  l_x__2 = None
+    l_x__1 = l_x_
+    sin = torch.sin(l_x__1);  l_x__1 = None
     return (sin,)""",
             )
             self.assertExpectedInline(
                 false_graph,
                 """\
 def forward(self, l_x_):
-    l_x__2 = l_x_
-    cos = torch.cos(l_x__2);  l_x__2 = None
+    l_x__1 = l_x_
+    cos = torch.cos(l_x__1);  l_x__1 = None
     return (cos,)""",
             )
 
@@ -1868,12 +1850,9 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_arg1_0_: "f32[3]", l_arg2_0_: "f32[3]"):
-            l_arg1_0__1 = l_arg1_0_
-            l_arg2_0__1 = l_arg2_0_
+            child: "f32[3]" = l_arg1_0_ + 1;  l_arg1_0_ = None
 
-            child: "f32[3]" = l_arg1_0__1 + 1;  l_arg1_0__1 = None
-
-            child_1: "f32[3]" = l_arg2_0__1 + 1;  l_arg2_0__1 = None
+            child_1: "f32[3]" = l_arg2_0_ + 1;  l_arg2_0_ = None
             return (child, child_1)
 """,
         )
@@ -2070,10 +2049,8 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[2, 3]"):
-            l_x__1 = l_x_
-
-            child: "f32[2, 3]" = l_x__1.sin()
-            child_1: "f32[2, 3]" = l_x__1.cos();  l_x__1 = None
+            child: "f32[2, 3]" = l_x_.sin()
+            child_1: "f32[2, 3]" = l_x_.cos();  l_x_ = None
             return (child, child_1)
 """,
         )
@@ -2107,9 +2084,7 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3]"):
-            l_x__1 = l_x_
-
-            child: "f32[3]" = -l_x__1;  l_x__1 = None
+            child: "f32[3]" = -l_x_;  l_x_ = None
             return (child,)
 """,
         )

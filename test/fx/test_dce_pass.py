@@ -5,7 +5,6 @@ from typing import Set, Type
 
 import torch
 import torch.fx
-
 from torch.testing._internal.common_utils import TestCase
 
 
