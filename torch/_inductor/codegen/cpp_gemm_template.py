@@ -254,16 +254,24 @@ class CppPackedGemmTemplate(CppTemplate):
             B_size_limit = L1_cache_size * L1_limit_factor
             A_size_limit = L2_cache_size * L2_limit_factor
 
-            num_byte = torch.tensor([], dtype=self.layout.dtype).element_size()
+            def get_num_byte(dtype):
+                return torch.tensor([], dtype=dtype).element_size()
 
-            size_cache_B = K0 * Kc_blocks * N0 * Nc_blocks * num_byte
+            num_byte_A = get_num_byte(self.input_nodes[0].get_dtype())
+            num_byte_B = get_num_byte(self.input_nodes[1].get_dtype())
+
+            size_cache_B = K0 * Kc_blocks * N0 * Nc_blocks * num_byte_B
 
             if size_cache_B > B_size_limit:
-                Kc_blocks = math.floor(B_size_limit / (K0 * N0 * Nc_blocks * num_byte))
+                Kc_blocks = math.floor(
+                    B_size_limit / (K0 * N0 * Nc_blocks * num_byte_B)
+                )
 
-            size_cache_A = M0 * Mc_blocks * K0 * Kc_blocks * num_byte
+            size_cache_A = M0 * Mc_blocks * K0 * Kc_blocks * num_byte_A
             if size_cache_A > A_size_limit:
-                Mc_blocks = math.floor(A_size_limit / (M0 * Kc_blocks * K0 * num_byte))
+                Mc_blocks = math.floor(
+                    A_size_limit / (M0 * Kc_blocks * K0 * num_byte_A)
+                )
 
             return Mc_blocks, Nc_blocks, Kc_blocks
 
