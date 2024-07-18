@@ -1488,6 +1488,7 @@ class VariableBuilder:
         # We install TYPE_MATCH guards for traceable wrapper subclass object,
         # and recursively install corresponding guard for each inner attribute.
         if is_traceable_wrapper_subclass(value):
+            self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
             self.install_guards(GuardBuilder.TYPE_MATCH)
             install_guard(
                 SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
