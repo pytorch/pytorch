@@ -14,10 +14,9 @@ import torch
 import torch.jit._trace
 import torch.serialization
 from torch.onnx import _constants, _exporter_states, errors
-from torch.onnx._internal import _beartype, jit_utils, registration
+from torch.onnx._internal import jit_utils, registration
 
 
-@_beartype.beartype
 def export_as_test_case(
     model_bytes: bytes, inputs_data, outputs_data, name: str, dir: str
 ) -> str:
@@ -73,7 +72,6 @@ def export_as_test_case(
     return test_case_dir
 
 
-@_beartype.beartype
 def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
     """Load a self contained ONNX test case from a directory.
 
@@ -124,7 +122,6 @@ def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
     return model_bytes, inputs, outputs
 
 
-@_beartype.beartype
 def export_data(data, value_info_proto, f: str) -> None:
     """Export data to ONNX protobuf format.
 
@@ -163,7 +160,6 @@ def export_data(data, value_info_proto, f: str) -> None:
             )
 
 
-@_beartype.beartype
 def _export_file(
     model_bytes: bytes,
     f: Union[io.BytesIO, str],
@@ -210,7 +206,6 @@ def _export_file(
         raise ValueError("Unknown export type")
 
 
-@_beartype.beartype
 def _add_onnxscript_fn(
     model_bytes: bytes,
     custom_opsets: Mapping[str, int],
@@ -243,7 +238,6 @@ def _add_onnxscript_fn(
     return model_bytes
 
 
-@_beartype.beartype
 def _find_onnxscript_op(
     graph_proto,
     included_node_func: Set[str],
