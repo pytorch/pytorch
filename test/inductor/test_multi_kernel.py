@@ -13,12 +13,12 @@ from torch._inductor.codegen.multi_kernel import MultiKernelCall
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
-from torch.testing import make_tensor
 
 
 class TransformerSnippet(nn.Module):
