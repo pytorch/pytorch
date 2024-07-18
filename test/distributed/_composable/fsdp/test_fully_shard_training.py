@@ -5,6 +5,7 @@ import copy
 import functools
 import itertools
 import unittest
+from collections import defaultdict
 from typing import Iterable, List, Tuple, Type, Union
 
 import torch
@@ -817,18 +818,25 @@ class TestFullyShardGradientAccumulation(FSDPTest):
 
         torch.manual_seed(42 + self.rank + 1)
         for iter_idx in range(5):
-            with CommDebugMode() as comm_mode:
-                for microbatch_idx in range(num_microbatches):
-                    is_last_microbatch = microbatch_idx == num_microbatches - 1
-                    set_backward_flags(model, is_last_microbatch)
-                    inp = torch.randn(batch_size, lin_dim, device="cuda")
-                    losses: List[torch.Tensor] = []
-                    for _model in (ref_model, model):
+            comm_count_list = []
+
+            for microbatch_idx in range(num_microbatches):
+                is_last_microbatch = microbatch_idx == num_microbatches - 1
+                set_backward_flags(model, is_last_microbatch)
+                inp = torch.randn(batch_size, lin_dim, device="cuda")
+                losses: List[torch.Tensor] = []
+                for _model in (ref_model, model):
+                    with CommDebugMode() as comm_mode:
                         losses.append(_model(inp).sum())
                         losses[-1].backward()
-                    self.assertEqual(losses[0], losses[1])
+                    comm_count_list.append(comm_mode.get_comm_counts())
+                self.assertEqual(losses[0], losses[1])
 
-            comm_counts = comm_mode.get_comm_counts()
+            comm_counts = defaultdict(int)
+            for comm_count_dict in comm_count_list:
+                for collective, count in comm_count_dict.items():
+                    comm_counts[collective] += count
+
             all_gather_count = comm_counts[c10d_ops._allgather_base_]
             reduce_scatter_count = comm_counts[c10d_ops._reduce_scatter_base_]
             all_reduce_count = comm_counts[c10d_ops.allreduce_]

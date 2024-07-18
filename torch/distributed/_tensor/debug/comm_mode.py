@@ -80,6 +80,7 @@ class CommModeModuleTracker(ModuleTracker):
         self.module_helper_dict = {}
         self.module_parameters_dict = {}
         self.module_parents_dict = {}
+        self.register_forward_hook_handles = {}
         self.parent_dict = {}
         self.parent_list = []
         self.sharding_dict = {}
@@ -105,14 +106,6 @@ class CommModeModuleTracker(ModuleTracker):
         """
         self.name = super()._get_mod_name(mod)
 
-        # contains information about module ordering and depth in the module tree
-        if self.name not in self.module_helper_dict:
-            self.module_helper_dict[self.name] = {}
-
-        self.module_helper_dict[self.name]["module_type"] = (
-            str(type(mod)).replace("<", "").replace(">", "")
-        )
-        self.module_helper_dict[self.name]["depth"] = len(self.parents)
         # adds current sub-module to module tracker parent class
         super()._get_append_fn(self.name, False)()
 
@@ -120,6 +113,15 @@ class CommModeModuleTracker(ModuleTracker):
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
         if tensors:
             register_multi_grad_hook(tensors, super()._get_pop_fn(self.name, True))
+
+        # contains information about module ordering and depth in the module tree
+        if self.name not in self.module_helper_dict:
+            self.module_helper_dict[self.name] = {}
+
+        self.module_helper_dict[self.name]["module_type"] = (
+            str(type(mod)).replace("<", "").replace(">", "")
+        )
+        self.module_helper_dict[self.name]["depth"] = len(self.parents) - 1
 
         for param_name, param in mod.named_parameters(recurse=False):
             if self.name not in self.module_parameters_dict:
@@ -140,7 +142,7 @@ class CommModeModuleTracker(ModuleTracker):
 
         # used to store module's parents to ensure correctness in backward pass/checkpointing
         if self.name not in self.module_parents_dict:
-            self.module_parents_dict[self.name] = self.parents
+            self.module_parents_dict[self.name] = copy.deepcopy(self.parents)
 
         # used to create parent-child module associations for json dumps
         parent = self.parent_list[-1]
@@ -150,7 +152,9 @@ class CommModeModuleTracker(ModuleTracker):
         self.parent_dict[parent].append(self.name)
         self.parent_list.append(self.name)
 
-        self._fw_set_module_handle = mod.register_forward_hook(self._fw_set_module_hook)
+        self.register_forward_hook_handles[self.name] = mod.register_forward_hook(
+            self._fw_set_module_hook
+        )
 
     def _fw_post_hook(self, mod, input, output):
         """
@@ -164,7 +168,6 @@ class CommModeModuleTracker(ModuleTracker):
         This function is called when the backward pass of a module is called. It
         updates the current module for backward passes
         """
-
         self.name = super()._get_mod_name(mod)
 
     def __enter__(self):
@@ -178,7 +181,7 @@ class CommModeModuleTracker(ModuleTracker):
         self.module_parents_dict["Global"] = set()
         self._fw_pre_handle = register_module_forward_pre_hook(self._fw_pre_hook)
         self._fw_post_handle = register_module_forward_hook(self._fw_post_hook)
-        self._fw_set_module_handle = None
+        self.register_forward_hook_handles.clear()
         self._bw_handle = register_module_full_backward_pre_hook(self._bw_hook)
         self.name = "Global"
 
@@ -186,8 +189,8 @@ class CommModeModuleTracker(ModuleTracker):
         super().__exit__(*args)
         self._bw_handle.remove()
 
-        if self._fw_set_module_handle is not None:
-            self._fw_set_module_handle.remove()
+        for handle in self.register_forward_hook_handles.values():
+            handle.remove()
 
     def print_paramater_info(self):
         print(self.module_parameters_dict)
@@ -497,6 +500,10 @@ class CommDebugMode(TorchDispatchMode):
     def __enter__(self):
         self.comm_counts.clear()
         self.comm_module_counts.clear()
+        self.comm_module_counts["Global"] = {}
+        self.comm_module_counts["Global"]["forward"] = defaultdict(int)
+        self.comm_module_counts["Global"]["backward"] = defaultdict(int)
+
         self.comm_module_operation_counts.clear()
 
         super().__enter__()
