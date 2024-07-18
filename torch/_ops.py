@@ -7,14 +7,14 @@ import sys
 import types
 from typing import Any, Callable, Dict, List, Set, Type, Union
 
-import torch._C
+import torch
 import torch.utils._pytree as pytree
 from torch import _utils_internal
 from torch._functorch.pyfunctorch import dispatch_functorch
 from torch.utils._python_dispatch import TorchDispatchMode
 
-# Query `hasattr` only once.
 
+# Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
 
 
@@ -418,7 +418,6 @@ class HigherOrderOperator(OperatorBase):
     def __call__(self_, *args, **kwargs):  # noqa: B902
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
-        import torch._dynamo
         from torch._dynamo import disable
 
         @disable
@@ -721,15 +720,15 @@ class OpOverload(OperatorBase):
             *self._schema.name.split("::"), self._overloadname
         )
 
-    def __call__(self_, *args, **kwargs):  # noqa: B902
-        # use `self_` to avoid naming collide with aten ops arguments that
-        # are named "self". This way, all the aten ops can be called by kwargs.
-        return self_._op(*args, **kwargs)
+    # Use positional-only argument to avoid naming collision with aten ops arguments
+    # that are named "self". This way, all the aten ops can be called by kwargs.
+    def __call__(self, /, *args, **kwargs):
+        return self._op(*args, **kwargs)
 
-    def redispatch(self_, keyset, *args, **kwargs):  # noqa: B902
-        # use `self_` to avoid naming collide with aten ops arguments that
-        # are named "self". This way, all the aten ops can be called by kwargs.
-        return self_._handle.redispatch_boxed(keyset, *args, **kwargs)
+    # Use positional-only argument to avoid naming collision with aten ops arguments
+    # that are named "self". This way, all the aten ops can be called by kwargs.
+    def redispatch(self, /, keyset, *args, **kwargs):
+        return self._handle.redispatch_boxed(keyset, *args, **kwargs)
 
     def __hash__(self):
         return hash(self._op)
@@ -945,9 +944,9 @@ class TorchBindOpOverload(OpOverload):
             if self in SIDE_EFFECTS:
                 del SIDE_EFFECTS[self]
 
-    # use `self_` to avoid naming collide with arguments that
-    # are named "self". This way, they can be called by kwargs.
-    def __call__(self_, *args, **kwargs):  # noqa: B902
+    # Use positional-only argument to avoid naming collision with aten ops arguments
+    # that are named "self". This way, all the aten ops can be called by kwargs.
+    def __call__(self, /, *args, **kwargs):
         if _must_dispatch_in_python(args, kwargs):
             # When any inputs are FakeScriptObject, we need to
             # skip c++ dispatcher and dispatch in python through _get_dispatch of python_dispatcher
@@ -959,11 +958,9 @@ class TorchBindOpOverload(OpOverload):
             #    of the eagerly executing the op might change after tracing.
             # 2. We don't want to register the op as effectful for all torchbind ops in ctor because this might
             #    cause unexpected behavior for some autograd.profiler ops e.g. profiler._record_function_exit._RecordFunction.
-            with self_._register_as_effectful_op_temporarily():
-                return self_._dispatch_in_python(
-                    args, kwargs, self_._fallthrough_keys()
-                )
-        return self_._op(*args, **kwargs)
+            with self._register_as_effectful_op_temporarily():
+                return self._dispatch_in_python(args, kwargs, self._fallthrough_keys())
+        return self._op(*args, **kwargs)
 
     def _dispatch_in_python(self, args, kwargs, fallthrough_keys):
         non_fallthrough_keys = torch._C._dispatch_keyset_full()
@@ -1107,10 +1104,9 @@ class OpOverloadPacket:
     def __iter__(self):
         return iter(self._dir)
 
-    def __call__(self_, *args, **kwargs):  # noqa: B902
-        # use `self_` to avoid naming collide with aten ops arguments that
-        # named "self". This way, all the aten ops can be called by kwargs.
-
+    # Use positional-only argument to avoid naming collision with aten ops arguments
+    # that are named "self". This way, all the aten ops can be called by kwargs.
+    def __call__(self, /, *args, **kwargs):
         # overloading __call__ to ensure torch.ops.foo.bar()
         # is still callable from JIT
         # We save the function ptr as the `op` attribute on
@@ -1119,9 +1115,9 @@ class OpOverloadPacket:
         # Directly calling OverloadPacket goes into C++, which will check
         # the schema and cause an error for torchbind op when inputs consist of FakeScriptObject so we
         # intercept it here and call TorchBindOpverload instead.
-        if self_._has_torchbind_op_overload and _must_dispatch_in_python(args, kwargs):
-            return _call_overload_packet_from_python(self_, args, kwargs)
-        return self_._op(*args, **(kwargs or {}))
+        if self._has_torchbind_op_overload and _must_dispatch_in_python(args, kwargs):
+            return _call_overload_packet_from_python(self, args, kwargs)
+        return self._op(*args, **(kwargs or {}))
 
     # TODO: use this to make a __dir__
     def overloads(self):
