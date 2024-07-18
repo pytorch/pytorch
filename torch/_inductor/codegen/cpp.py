@@ -17,6 +17,7 @@ import torch
 import torch.fx
 from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -3296,7 +3297,12 @@ class TilingSelect:
                 # the threshold.
                 return [], []
 
-            if not reduction_group and group and group[-1] < tiling_factor / 2:
+            if (
+                not reduction_group
+                and group
+                and not has_free_symbols(group[-1])
+                and group[-1] < tiling_factor / 2
+            ):
                 # For case of Multi Thread AMP Static shape of pyhpc_isoneutral_mixing,
                 # the inner dim doesn't have enough elements to do vectorization
                 # explicitly. Found that `#pragma GCC ivdep` has better performance than
