@@ -3109,6 +3109,7 @@ def forward(self, x):
     bn_bias = self.bn.bias
     bn_running_mean = self.bn.running_mean
     bn_running_var = self.bn.running_var
+    bn_num_batches_tracked = self.bn.num_batches_tracked
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
     _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
@@ -4234,9 +4235,9 @@ graph():
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
-    @testing.expectedFailureRetraceability  # Retracing tensor constants results in buffers
-    @testing.expectedFailureTrainingIRToRunDecomp  # detach() is not present
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    @testing.expectedFailureRetraceability  # expectedInline graph doesn't match
+    @testing.expectedFailureTrainingIRToRunDecomp  # expectedInline graph doesn't match
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # expectedInline graph doesn't match
     def test_nested_module_with_constant_buffer(self):
         class M1(torch.nn.Module):
             def __init__(self):
