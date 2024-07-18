@@ -6742,6 +6742,30 @@ class TestExportCustomClass(TorchTestCase):
 
         ep = torch.export.export(M(), (torch.ones(3),), strict=False)
 
+    def test_preserve_bilinear(self):
+        class StaticResizeBilinear2dModule(torch.nn.Module):
+            def forward(self, x):
+                a = torch.nn.functional.interpolate(
+                    x,
+                    size=(x.shape[2] * 2, x.shape[3] * 3),
+                    mode="bilinear",
+                    align_corners=False,
+                    antialias=False,
+                )
+                return a
+
+        ep = export(StaticResizeBilinear2dModule(), (torch.randn(2, 3, 4, 5),))
+        FileCheck().check_count(
+            "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True
+        ).run(ep.graph_module.code)
+
+        ep = ep.run_decompositions(
+            decomp_table=None, _preserve_ops=[torch.ops.aten.upsample_bilinear2d.vec]
+        )
+        FileCheck().check_count(
+            "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True
+        ).run(ep.graph_module.code)
+
 
 if __name__ == "__main__":
     run_tests()
