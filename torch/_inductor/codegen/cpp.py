@@ -3202,7 +3202,6 @@ class TilingSelect:
         self,
         fn_list,
         var_sizes_list,
-        dtype: torch.dtype = torch.float,
     ):
         # TODO(jgong5): support alternative tiling factors and data types
         loop_bodies = None
