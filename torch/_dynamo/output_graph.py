@@ -1869,6 +1869,9 @@ class SubgraphTracer(fx.Tracer):
             flat_args, tree_spec = pytree.tree_flatten((args, kwargs))
             new_flat_args = []
             for arg in flat_args:
+                if isinstance(arg, torch.fx.proxy.Proxy):
+                    self.graph._graph_namespace._used_names.add(arg.node.name)
+            for arg in flat_args:
                 maybe_new_arg = self.maybe_lift_tracked_freevar_to_input(arg)
                 new_flat_args.append(maybe_new_arg)
 
