@@ -43,6 +43,7 @@ Tensor = torch.Tensor
 def get_gqa_score_mod(score_mod, G, q_seq_len):
     def score_mod_gqa(score, b, hkv, m, n):
         g = m // q_seq_len
+        g = torch.where(g < G, g, 0)
         new_m = m % q_seq_len
         hq = hkv * G + g
         return score_mod(score, b, hq, new_m, n)
@@ -142,7 +143,7 @@ def _squared(score, b, h, m, n):
 
 def _head_offset(dtype: torch.dtype):
     """Captured Buffer"""
-    head_offset = torch.rand(Hkv, device="cuda", dtype=dtype)
+    head_offset = torch.rand(Hq, device="cuda", dtype=dtype)
 
     def score_mod(score, b, h, m, n):
         return score * head_offset[h]
@@ -526,7 +527,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     def test_captured_buffers(self, dtype: torch.dtype):
-        head_offset = torch.rand(Hkv, device="cuda", dtype=dtype)
+        head_offset = torch.rand(Hq, device="cuda", dtype=dtype)
 
         def score_mod(score, b, h, m, n):
             return score + head_offset[h]
@@ -536,17 +537,16 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     def test_captured_buffers_all_dims(self, dtype: torch.dtype):
-        head_scale = torch.randn(Hkv, device="cuda")
+        head_scale = torch.randn(Hq, device="cuda")
         batch_scale = torch.randn(B, device="cuda")
         kv_scale = torch.randn(S, device="cuda")
-        q_scale = torch.randn(Hq // Hkv, device="cuda")
-        if q_scale.shape[-1] < 16:
-            q_scale = torch.nn.functional.pad(q_scale, (0, 16 - Hq // Hkv))
+        q_scale = torch.randn(1, device="cuda")
 
         def all_bias(score, batch, head, token_q, token_kv):
             score = score + kv_scale[token_kv]
             score = score + q_scale[token_q]
             score = score + head_scale[head]
+            score = score + batch_scale[batch]
             return score
 
         self.run_test(all_bias, dtype)
@@ -565,9 +565,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_seq_only(self, dtype):
-        bias = torch.randn(Hq // Hkv, S, device="cuda", dtype=dtype)
-        if bias.shape[-2] < 16:
-            bias = torch.nn.functional.pad(bias, (0, 16 - Hq // Hkv))
+        bias = torch.randn(1, S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
             return score + bias[q, kv]
@@ -577,10 +575,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_seq_batch(self, dtype):
-        bias = torch.randn(B, Hq // Hkv, S, device="cuda", dtype=dtype)
-
-        if bias.shape[-2] < 16:
-            bias = torch.nn.functional.pad(bias, (0, 16 - Hq // Hkv, 0, 0))
+        bias = torch.randn(B, 1, S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
             return score + bias[b, q, kv]
@@ -592,14 +587,12 @@ class TestFlexAttention(InductorTestCase):
     def test_load_from_bias_head_seq_batch(self, dtype):
         bias = torch.randn(
             B,
-            Hkv,
-            Hq // Hkv,
+            Hq,
+            1,
             S,
             device="cuda",
             dtype=dtype,
         )
-        if bias.shape[-2] < 16:
-            bias = torch.nn.functional.pad(bias, (0, 16 - Hq // Hkv, 0, 0))
 
         def bias_mod(score, b, h, q, kv):
             return score + bias[b, h, q, kv]
