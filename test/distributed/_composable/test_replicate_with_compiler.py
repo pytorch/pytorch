@@ -26,7 +26,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
+    MultiProcessInductorTestCase,
     skip_if_lt_x_gpu,
     skip_if_rocm,
 )
@@ -69,7 +69,7 @@ def compiler_fn(no_inductor=False):
     return _compiler_fn
 
 
-class ReplicateTest(MultiProcessTestCase):
+class ReplicateTest(MultiProcessInductorTestCase):
     @property
     def world_size(self) -> int:
         return min(2, torch.cuda.device_count())
@@ -350,7 +350,7 @@ class ReplicateTest(MultiProcessTestCase):
         fc.run(code)
 
 
-class DDP_TP_Test(MultiProcessTestCase):
+class DDP_TP_Test(MultiProcessInductorTestCase):
     @property
     def world_size(self) -> int:
         return min(4, torch.cuda.device_count())
