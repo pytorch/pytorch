@@ -451,8 +451,8 @@ class TestFxGraphCache(TestCase):
         def fn(a, b):
             return torch.mm(a, b)
 
-        a = torch.rand(8, 32, device=GPU_TYPE)
-        b = torch.rand(32, 8, device=GPU_TYPE)
+        a = torch.rand(8, 32, device="cuda")
+        b = torch.rand(32, 8, device="cuda")
 
         compiled_fn = torch.compile(fn)
 
