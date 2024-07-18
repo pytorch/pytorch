@@ -2197,6 +2197,8 @@ make_fallback(aten.upsample_trilinear3d_backward)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten._pdist_backward)
 
+make_fallback(aten.igamma_self_backward)
+make_fallback(aten.igammac_self_backward)
 
 # 5) Impossible (missing triton/CPU features)
 
