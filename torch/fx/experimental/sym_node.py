@@ -47,7 +47,7 @@ sym_node_log = torch._logging.getArtifactLogger(__name__, "sym_node")
 __all__ = ["SymNode", "method_to_operator", "magic_methods"]
 
 
-SymTypes = (SymInt, SymFloat, SymBool)
+from torch.types import py_sym_types as SymTypes
 
 
 def _to_symtype(t):

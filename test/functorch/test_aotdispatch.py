@@ -80,6 +80,7 @@ from torch.testing._internal.optests import (
 )
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 
+
 USE_TORCHVISION = False
 try:
     import torchvision
@@ -6277,7 +6278,7 @@ class MockFXGraphCache:
         self.cache[key] = gm
 
     def load(self, gm, inputs):
-        key = compiled_fx_graph_hash(gm, inputs, {}, {})
+        key, _ = compiled_fx_graph_hash(gm, inputs, {}, {})
         if key in self.cache:
             gm = make_boxed_func(gm)
             gm._fx_graph_cache_key = key
