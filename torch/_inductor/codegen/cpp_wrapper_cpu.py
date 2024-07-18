@@ -1659,6 +1659,7 @@ class CppWrapperCpu(WrapperCodeGen):
             # Because the memory planning is done in two passes (see the implementation
             # of self.generate), the writeline behavior is different in the two passes.
             final_tmp_name = None
+            final_tmp_name_is_RAIIAtenTensorHandle = False
 
             def create_reinterpret_call():
                 tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
@@ -1689,10 +1690,10 @@ class CppWrapperCpu(WrapperCodeGen):
                 return tmp_name, call_str
 
             def create_dtypeview_call(reinterpret_call):
-                tmp_output_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
-                call_strs = [
-                    f"AtenTensorHandle {tmp_output_name}= {data.get_name()}.get();"
-                ]
+                tmp_output_name = (
+                    f"tmp_{data.get_name()}_handle_{next(self.tmp_tensor_id)}"
+                )
+                call_strs = [f"AtenTensorHandle {tmp_output_name};"]
                 dtype_name = str(dtype).split(".")[-1]
                 # @TODO how to check if it is real?
                 dtypeview_suffix = "_dtype" if not dtype.is_complex else "_as_complex"
@@ -1700,9 +1701,16 @@ class CppWrapperCpu(WrapperCodeGen):
                 device_name = "cuda" if data.layout.device.type == "cuda" else "cpu"
                 dtypeview_function = f"aoti_torch_{device_name}_view{dtypeview_suffix}"
                 call_strs.append(
-                    f"{dtypeview_function}({reinterpret_call}, {get_dtype_function}(), &{tmp_output_name});"
+                    f"AOTI_TORCH_ERROR_CODE_CHECK({dtypeview_function}"
+                    "({reinterpret_call}, {get_dtype_function}(), &{tmp_output_name}));"
                 )
-                return tmp_output_name, call_strs
+                tmp_RAIIAtenTensorHandle = (
+                    f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
+                )
+                call_strs.append(
+                    f"RAIIAtenTensorHandle {tmp_RAIIAtenTensorHandle}({tmp_output_name});"
+                )
+                return tmp_RAIIAtenTensorHandle, call_strs
 
             if (
                 size_list == data.layout.size
@@ -1716,6 +1724,7 @@ class CppWrapperCpu(WrapperCodeGen):
                     )
                     call_strs.extend(tmp_call_strs)
                     final_tmp_name = tmp_output_name
+                    final_tmp_name_is_RAIIAtenTensorHandle = True
                 else:
                     return f"{data.get_name()}"
             else:
@@ -1770,7 +1779,10 @@ class CppWrapperCpu(WrapperCodeGen):
             #     }.data()
             # );
             # ```
-            return f"wrap_with_raii_handle_if_needed({final_tmp_name})"
+            if not final_tmp_name_is_RAIIAtenTensorHandle:
+                return f"wrap_with_raii_handle_if_needed({final_tmp_name})"
+            else:
+                return final_tmp_name
         else:
             args = [data.get_name(), size, stride, offset]
             return f"reinterpret_tensor({', '.join(args)})"
