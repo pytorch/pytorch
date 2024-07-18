@@ -794,13 +794,13 @@ flex_attention_backward_template = TritonTemplate(
     off_z = off_hz // H # batch idx
     off_h = off_hz % H # head idx
 
-    SM_Z = {{size("KV_NUM_BLKS", 0)}}
-    SM_H = {{size("KV_NUM_BLKS", 1)}}
+    SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
+    SPARSE_H = {{size("KV_NUM_BLKS", 1)}}
 
-    sparse_idx_z = off_z % SM_Z
-    sparse_idx_h = off_h % SM_H
+    sparse_idx_z = off_z % SPARSE_Z
+    sparse_idx_h = off_h % SPARSE_H
 
-    sparse_hz_offset = sparse_idx_z * SM_H + sparse_idx_h
+    sparse_hz_offset = sparse_idx_z * SPARSE_H + sparse_idx_h
 
     off_chz = (off_hz * Q_LEN).to(tl.int64)
     q_adj = (stride_qh * (off_hz % H) + stride_qz * (off_hz // H)).to(tl.int64)
@@ -1140,7 +1140,6 @@ def bwd_dkdv_inner(
         Di = tl.load(DELTA + offs_m1, mask=offs_m1 < Q_LEN)
         # Compute dP and dS.
         dpT = tl.dot(v, tl.trans(do))
-        # dpT = tl.where(offs_m1[None, :] < Q_LEN, dpT, 0.0)
         dsT = pT * (dpT - Di[None, :])
         # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m1[None, :]
