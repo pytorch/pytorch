@@ -38,19 +38,17 @@ class AutoHeuristicTest(TestCase):
         return path
 
     def test_autoheuristic_pad_mm_default(self):
-        # this test ensure that data is not collected for pad_mm when autoheuristic_mode is set to its default value ("OFF")
+        # this test ensures that data is not collected for pad_mm when autoheuristic config is set to its default value
         self.run_mm()
         self.assertFalse(os.path.exists(self.get_path_to_autoheuristic_log("pad_mm")))
 
-    @inductor_config.patch(autoheuristic_mode="OFF")
+    @inductor_config.patch(autoheuristic_collect="foo")
     def test_autoheuristic_pad_mm_off(self):
-        # this test ensure that data is not collected for pad_mm when autoheuristic_mode="OFF"
+        # this test ensures that data is not collected for pad_mm when autoheuristic_collect does not contain "pad_mm"
         self.run_mm()
         self.assertFalse(os.path.exists(self.get_path_to_autoheuristic_log("pad_mm")))
 
-    @inductor_config.patch(autoheuristic_mode="COLLECT_DATA")
-    def test_autoheuristic_pad_mm_collect_data(self):
-        # this test ensure that data is collected for pad_mm when autoheuristic_mode="COLLECT_DATA"
+    def assert_autoheuristic_collected_data(self):
         self.run_mm()
         device_name = AutoHeuristic.get_device_identifier()
         path = self.get_path_to_autoheuristic_log("pad_mm")
@@ -60,7 +58,17 @@ class AutoHeuristicTest(TestCase):
         # 1 line for metadata, 1 line for header, 1 line per choice (orig, padded)
         self.assertEqual(num_lines, 4)
 
-    @inductor_config.patch(autoheuristic_mode="COLLECT_DATA")
+    @inductor_config.patch(autoheuristic_collect="pad_mm")
+    def test_autoheuristic_pad_mm_collect_data(self):
+        # this test ensures that data is collected for pad_mm when autoheuristic_collect="pad_mm"
+        self.assert_autoheuristic_collected_data()
+
+    @inductor_config.patch(autoheuristic_collect="foo,pad_mm")
+    def test_autoheuristic_pad_mm_collect_data2(self):
+        # this test ensures that data is collected for "pad_mm" when autoheuristic_collect contains "pad_mm"
+        self.assert_autoheuristic_collected_data()
+
+    @inductor_config.patch(autoheuristic_collect="test")
     def test_autoheuristic(self):
         # test basic functionality of autoheuristic
         def fallback():
@@ -84,7 +92,7 @@ class AutoHeuristicTest(TestCase):
         name = "test"
         autoheuristic = AutoHeuristic(fallback, choices, feedback, context, name)
 
-        # when autoheuristic_mode is COLLECT_DATA, we always return fallback
+        # when autoheuristic is configured to only collect data, we always return fallback
         self.assertEqual(autoheuristic.get_choice(), "fallback")
         self.assertEqual(autoheuristic.get_collected_feedback("a"), 1)
         self.assertEqual(autoheuristic.get_collected_feedback("b"), 2)
@@ -112,14 +120,14 @@ class AutoHeuristicTest(TestCase):
             self.assertEqual("5,c,3", lines[4].rstrip())
 
     @unittest.skipIf(not IS_A100, "heuristic only run on A100")
-    @inductor_config.patch(autoheuristic_mode="USE_HEURISTIC")
+    @inductor_config.patch(autoheuristic_use="pad_mm")
     def test_autoheuristic_a100(self):
         # Make sure heuristic does not break anything
         # TODO (AlnisM): Find a way to check whether heuristic is used
         self.run_mm()
 
     @unittest.skipIf(not IS_H100, "heuristic only run on H100")
-    @inductor_config.patch(autoheuristic_mode="USE_HEURISTIC")
+    @inductor_config.patch(autoheuristic_use="pad_mm")
     def test_autoheuristic_h100(self):
         # Make sure heuristic does not break anything
         # TODO (AlnisM): Find a way to check whether heuristic is used

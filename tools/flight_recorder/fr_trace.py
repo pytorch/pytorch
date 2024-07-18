@@ -31,24 +31,23 @@ import argparse
 import os
 import pickle
 import sys
-from typing import (
+from typing import (  # type: ignore[attr-defined]
     _eval_type,
     Any,
     Dict,
     Generic,
     List,
     NamedTuple,
-    Set,
     Tuple,
     Type,
     TypeVar,
     Union,
 )
-from typing_extensions import TypeGuard
 
-import tabulate
+import tabulate  # type: ignore[import-untyped]
 
-T = TypeVar("T")
+
+T = TypeVar("T", bound=NamedTuple)
 
 
 class Ref(Generic[T]):
@@ -57,17 +56,19 @@ class Ref(Generic[T]):
 
 class TypeInfo(NamedTuple):
     name: str
-    fields: List[Tuple[str, Type]]
+    fields: List[Tuple[str, Type]]  # type: ignore[type-arg]
 
     @classmethod
     def from_type(cls, c: T) -> "TypeInfo":
+        if hasattr(c, "__name__"):
+            name = c.__name__
+        else:
+            name = str(c)
         return cls(
-            c.__name__,
-            [
-                (f, _eval_type(c.__annotations__[f], globals(), {}, frozenset()))
-                for f in c._fields
-            ],
+            name,
+            [(f, _eval_type(c.__annotations__[f], globals(), {})) for f in c._fields],
         )
+
 
 """
 Schema for flat DB
@@ -132,7 +133,7 @@ class Database(NamedTuple):
 
 
 types = [
-    TypeInfo.from_type(t)
+    TypeInfo.from_type(t)  # type: ignore[type-var]
     for t in globals().values()
     if (
         isinstance(t, type)
@@ -178,7 +179,7 @@ class Op:
         nccl:recv 3<-0
     """
 
-    def __init__(self, event: Dict[Any, Any], memberships: Dict[str, Membership]):
+    def __init__(self, event: Dict[Any, Any], memberships: Dict[str, List[Membership]]):
         profiling_name = event["profiling_name"]
         nccl, name = profiling_name.split(":")
         assert nccl == "nccl", f"name formatting error? {nccl} != 'nccl'"
@@ -200,7 +201,7 @@ class Op:
             d, s = meta.split("<-")
             self._dst, self._src = int(d), int(s)
         else:
-            self._src, self._dst = None, None
+            self._src, self._dst = -1, -1
         pg_name, pg_desc = event["process_group"]
         self._init_global_src_dst(memberships[pg_name])
 
@@ -212,63 +213,75 @@ class Op:
         self.collective_seq_id = event["collective_seq_id"]
         self.p2p_seq_id = event["p2p_seq_id"]
 
-    def _init_global_src_dst(self, pg_ranks):
+    def _init_global_src_dst(self, pg_ranks: List[Membership]) -> None:
         pg_ranks = sorted(pg_ranks)
         self._src_g = pg_ranks[self._src] if self._src is not None else None
         self._dst_g = pg_ranks[self._dst] if self._dst is not None else None
 
     @property
-    def src(self):
+    def src(self) -> int:
         assert self.type in P2P, "can't get src of non-p2p op"
         return self._src
 
     @property
-    def dst(self):
+    def dst(self) -> int:
         assert self.type in P2P, "can't get dst of non-p2p op"
         return self._dst
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if self.type in P2P:
             return (
                 f"{self.type}(s={self._src_g} d={self._dst_g}, sz={self.input_sizes})"
             )
         return f"{self.type}(input_sizes={self.input_sizes}, {self.state})"
 
-    def match(self, other):
+    def match(self, other) -> bool:  # type: ignore[no-untyped-def]
         # TODO: I think this can validly not match,
         # e.g. if one PG was used for p2p ops between only some of the peers?
         # if self.seq_id != other.seq_id:
         # return False
 
         if self.type == "send":
-            return (
+            return bool(
                 other.type == "recv"
                 and self.src == other.src
                 and self.dst == other.dst
                 and self.input_sizes == other.output_sizes
             )
         elif self.type == "recv":
-            return (
+            return bool(
                 other.type == "send"
                 and self.src == other.src
                 and self.dst == other.dst
                 and self.output_sizes == other.input_sizes
             )
         elif self.type in COLLECTIVES:
-            return self.type == other.type and self.input_sizes == other.input_sizes
+            return bool(
+                self.type == other.type and self.input_sizes == other.input_sizes
+            )
             # TODO(whc) - output sizes dont have to match for e.g. gather, not sure if they ever have to match?
             # and self.output_sizes == other.output_sizes)
         elif self.type == "coalesced":
-            return other.type == "coalesced"
+            return bool(other.type == "coalesced")
+        return False
 
 
-def match_one_event(event_a: Dict[Any, Any], event_b: Dict[Any, Any], memberships) -> bool:
+def match_one_event(
+    event_a: Dict[Any, Any],
+    event_b: Dict[Any, Any],
+    memberships: Dict[str, List[Membership]],
+) -> bool:
     op_a = Op(event_a, memberships)
     op_b = Op(event_b, memberships)
     return op_a.match(op_b)
 
 
-def match_coalesced_groups(all_rank_events: Dict[Any, Any], group_size: int, groups: Dict[str, Group], memberships: Dict[str, Membership]) -> bool:
+def match_coalesced_groups(
+    all_rank_events: Dict[Any, Any],
+    group_size: int,
+    groups: Dict[str, Group],
+    memberships: Dict[str, List[Membership]],
+) -> bool:
     """
     all_rank_events: {
         rank: [
@@ -297,7 +310,7 @@ def match_coalesced_groups(all_rank_events: Dict[Any, Any], group_size: int, gro
         for rank in all_rank_events
     }
 
-    def visualize_ops(match):
+    def visualize_ops(match: bool) -> None:
         all_ops = {
             rank: [Op(e, memberships) for i, e in all_rank_events[rank]]
             for rank in all_rank_events
@@ -315,7 +328,7 @@ def match_coalesced_groups(all_rank_events: Dict[Any, Any], group_size: int, gro
                     row.append(Op(event, memberships))
                     progress = True
                 else:
-                    row.append(None)
+                    row.append(None)  # type: ignore[arg-type]
             table.append(row)
             row = []
             i += 1
@@ -368,16 +381,14 @@ def match_coalesced_groups(all_rank_events: Dict[Any, Any], group_size: int, gro
     return True
 
 
-
-
 """
 Flat DB builder
 """
 
 
 def build_groups_memberships(
-    pg_config,
-) -> Tuple[List[Group], Dict[str, Group], List[Membership], Dict[str, Membership]]:
+    pg_config: Any,
+) -> Tuple[List[Group], Dict[Any, Group], List[Membership], Dict[str, Any]]:
     """
     pg_config: {
         global_rank: {
@@ -428,19 +439,27 @@ def build_groups_memberships(
     return groups, _groups, memberships, _memberships
 
 
-def build_nccl_call(entry: Dict[Any, Any], id: int, collective_id: Ref[Collective], group_id: int, global_rank: int) -> NCCLCall:
+def build_nccl_call(
+    entry: Dict[Any, Any],
+    id: int,
+    collective_id: Any,
+    group_id: int,
+    global_rank: Any,
+) -> NCCLCall:
     return NCCLCall(
         id=id,
         collective_id=collective_id,
-        group_id=group_id,
+        group_id=group_id,  # type: ignore[arg-type]
         global_rank=global_rank,
-        traceback_id=0, # type: ignore
+        traceback_id=0,  # type: ignore[arg-type]
         collective_type=entry["profiling_name"],
         sizes=entry["input_sizes"],
     )
 
 
-def find_coalesced_group(pg_name: str, entries: List[Dict[str, Any]]) -> List[Tuple[int, Dict[str, Any]]]:
+def find_coalesced_group(
+    pg_name: str, entries: List[Dict[str, Any]]
+) -> List[Tuple[int, Dict[str, Any]]]:
     """Given a list of entries, if the collective_seq_id of the first entry matches that of subsequent ones,
     build an return a list of entries terminating in a 'coalesced' op entry all sharing a collective_seq_id
     TODO: handle p2p_seq_id v/s collective_seq_id separately here.
@@ -464,7 +483,11 @@ def find_coalesced_group(pg_name: str, entries: List[Dict[str, Any]]) -> List[Tu
     return []
 
 
-def just_print_entries(all_entries: Dict[int, List[Dict[str, Any]]], _groups: Dict[str, Group] , _memberships: Dict[str, Membership]) -> None:
+def just_print_entries(
+    all_entries: Dict[int, List[Dict[str, Any]]],
+    _groups: Dict[str, Group],
+    _memberships: Dict[str, List[Membership]],
+) -> None:
     rows = []
     ranks = sorted(all_entries.keys())
     headers = [f"Rank {rank}" for rank in ranks]
@@ -488,7 +511,7 @@ def just_print_entries(all_entries: Dict[int, List[Dict[str, Any]]], _groups: Di
 def build_collectives(
     all_entries: Dict[int, List[Dict[str, Any]]],
     _groups: Dict[str, Group],
-    _memberships: Dict[str, Membership],
+    _memberships: Dict[str, List[Membership]],
 ) -> Tuple[List[Traceback], List[Collective], List[NCCLCall]]:
     """
     groups, memberships are the non-flat dicts that are indexable
@@ -518,7 +541,7 @@ def build_collectives(
         ]
     }
     """
-    tracebacks:List[Traceback] = []
+    tracebacks: List[Traceback] = []
 
     collectives: List[Collective] = []
     nccl_calls: List[NCCLCall] = []
@@ -558,11 +581,11 @@ def build_collectives(
             done_ranks = set()
             all_coalesced_entries = {}
             while expected_ranks:
-                curr = expected_ranks.pop() 
+                curr = expected_ranks.pop()
                 done_ranks.add(curr)
                 grp = (
-                        find_coalesced_group(pg_name, all_entries[curr]) #type: ignore
-                    if curr in all_entries
+                    find_coalesced_group(pg_name, all_entries[curr])  # type: ignore[index]
+                    if curr in all_entries  # type: ignore[comparison-overlap]
                     else []
                 )
                 all_coalesced_entries[curr] = grp
@@ -595,18 +618,18 @@ def build_collectives(
                 for i, _ in reversed(all_coalesced_entries[r]):
                     reversed_calls.append(
                         build_nccl_call(
-                            all_entries[r].pop(i), #type: ignore
+                            all_entries[r].pop(i),  # type: ignore[index]
                             id=len(nccl_calls),
                             collective_id=collectives[-1].id if match else None,
                             group_id=pg_name,
-                            global_rank=int(r),
+                            global_rank=r,
                         )
                     )
                 nccl_calls.extend(reversed(reversed_calls))
 
         else:
             for o in expected_ranks.intersection(set(other_ranks)):
-                for i, e in enumerate(all_entries[o]): #type: ignore
+                for i, e in enumerate(all_entries[o]):  # type: ignore[index]
                     # step over ops from other PGs
                     if e["process_group"] == (pg_name, desc):
                         if (
@@ -632,7 +655,7 @@ def build_collectives(
                     i = found_idx[r] if r != first_rank else 0
                     nccl_calls.append(
                         build_nccl_call(
-                            all_entries[r].pop(i), #type: ignore
+                            all_entries[r].pop(i),  # type: ignore[index]
                             id=len(nccl_calls),
                             collective_id=collectives[-1].id,
                             group_id=pg_name,
@@ -663,7 +686,9 @@ def build_collectives(
     return tracebacks, collectives, nccl_calls
 
 
-def check_no_missing_dump_files(entries: Dict[str, Any], memberships: List[Membership]) -> None:
+def check_no_missing_dump_files(
+    entries: Dict[str, Any], memberships: List[Membership]
+) -> None:
     all_ranks = set()
     for membership in memberships:
         all_ranks.add(str(membership.global_rank))
@@ -674,7 +699,7 @@ def check_no_missing_dump_files(entries: Dict[str, Any], memberships: List[Membe
 
 
 def check_version(versions: Dict[str, Any]) -> None:
-    for rank, version in versions.items():
+    for rank, version in versions.items():  # noqa: PERF102
         major, minor = map(int, version.split("."))
         # assert major == 2, f"Rank {rank} unsupported version {version}"
         # assert minor >= 0, f"Rank {rank} unsupported version {version}"
@@ -704,11 +729,6 @@ def build_db(details: Dict[str, Dict[str, Any]], args: argparse.Namespace) -> Da
         entries[rank] = dump["entries"]
         version[rank] = dump["version"]
         pg_config[rank] = dump["pg_config"]
-    print("XXXXXXXXXXXX entries is")
-    types1 = [type(k) for k in entries.keys()]
-    print(types1)
-    print("XXXXXXXXXXXX")
-    
 
     check_version(version)
     check_trace_from_beginning(entries)
@@ -741,9 +761,7 @@ def build_db(details: Dict[str, Dict[str, Any]], args: argparse.Namespace) -> Da
     return db
 
 
-def read_dump(
-    prefix: str, filename: str
-) -> Dict[str, Union[str, int, List[Any]]]:
+def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Any]]]:
     basename = os.path.basename(filename)
     assert (
         basename.find(prefix) == 0
@@ -760,9 +778,6 @@ def read_dump(
         dump = pickle.load(infile)
 
     entries = dump["entries"]
-    print("XXX printing type")
-    print(type(entries))
-    print("XXX done")
     version = dump["version"]
     pg_config = dump["pg_config"]
 
@@ -775,7 +790,7 @@ def read_dump(
     }
 
 
-def read_dir(prefix: str, folder: str) -> Dict[Any,Any]: #TODO; fix types
+def read_dir(prefix: str, folder: str) -> Dict[Any, Any]:  # TODO; fix types
     import gc
     import time
 
@@ -786,9 +801,6 @@ def read_dir(prefix: str, folder: str) -> Dict[Any,Any]: #TODO; fix types
         for f in files:
             ta = time.time()
             details[f] = read_dump(prefix, os.path.join(root, f))
-            print("YYY")
-            print(type(details[f]))
-            print("YYY")
             tb = time.time()
             # print(f"read file {f} in {tb - ta}s")
     print(f"loaded {len(files)} files in {tb - t0}s")
