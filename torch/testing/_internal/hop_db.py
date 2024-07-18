@@ -197,6 +197,20 @@ hop_db = [
         supports_autograd=True,
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
+        skips=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestEagerFusionOpInfo",
+                "test_aot_autograd_exhaustive",
+                active_if=IS_WINDOWS,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestEagerFusionOpInfo",
+                "test_aot_autograd_symbolic_exhaustive",
+                active_if=IS_WINDOWS,
+            ),
+        ),
     ),
     OpInfo(
         name="while_loop",

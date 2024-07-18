@@ -1246,6 +1246,20 @@ class TestControlFlowTraced(TestCase):
         gm = backend.graphs[0]
 
         self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
+    l_pred_ = L_pred_
+    l_x_ = L_x_
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_x_]);  l_pred_ = cond_true_0 = cond_false_0 = l_x_ = None
+    result = cond[0];  cond = None
+    grad_out = torch.ones_like(result)
+    return (result, grad_out)""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
             gm.cond_true_0.code.strip(),
             """\
 def forward(self, l_x_):
@@ -1262,30 +1276,19 @@ def forward(self, l_x_):
     return (cos,)""",  # noqa: B950
         )
 
-        gm = backend.graphs[1]
-
+        backward_gm = backend.graphs[1]
         self.assertExpectedInline(
-            gm.cond_true_0.code.strip(),
+            backward_gm.code.strip(),
             """\
-def forward(self, l_ctx_saved_tensors_0_, l_flat_grads_0_):
-    l_ctx_saved_tensors_0__1 = l_ctx_saved_tensors_0_
-    l_flat_grads_0__1 = l_flat_grads_0_
-    sin = torch.ops.aten.sin.default(l_ctx_saved_tensors_0__1)
-    cos = torch.ops.aten.cos.default(l_ctx_saved_tensors_0__1);  l_ctx_saved_tensors_0__1 = None
-    mul = torch.ops.aten.mul.Tensor(l_flat_grads_0__1, cos);  l_flat_grads_0__1 = cos = None
-    return (mul,)""",  # noqa: B950
-        )
-        self.assertExpectedInline(
-            gm.cond_false_0.code.strip(),
-            """\
-def forward(self, l_ctx_saved_tensors_0_, l_flat_grads_0_):
-    l_ctx_saved_tensors_0__1 = l_ctx_saved_tensors_0_
-    l_flat_grads_0__1 = l_flat_grads_0_
-    cos = torch.ops.aten.cos.default(l_ctx_saved_tensors_0__1)
-    sin = torch.ops.aten.sin.default(l_ctx_saved_tensors_0__1);  l_ctx_saved_tensors_0__1 = None
-    neg = torch.ops.aten.neg.default(sin);  sin = None
-    mul = torch.ops.aten.mul.Tensor(l_flat_grads_0__1, neg);  l_flat_grads_0__1 = neg = None
-    return (mul,)""",  # noqa: B950
+def forward(self, L_ctx_saved_tensors_0_ : torch.Tensor, L_ctx_pred : torch.Tensor, L_flat_grads_0_ : torch.Tensor):
+    l_ctx_saved_tensors_0_ = L_ctx_saved_tensors_0_
+    l_ctx_pred = L_ctx_pred
+    l_flat_grads_0_ = L_flat_grads_0_
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.higher_order.cond(l_ctx_pred, cond_true_0, cond_false_0, [l_ctx_saved_tensors_0_, l_flat_grads_0_]);  l_ctx_pred = cond_true_0 = cond_false_0 = l_ctx_saved_tensors_0_ = l_flat_grads_0_ = None
+    getitem = cond[0];  cond = None
+    return (getitem,)""",  # noqa: B950
         )
 
     def test_while_loop_nested_traced(self):
