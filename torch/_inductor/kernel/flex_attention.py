@@ -290,6 +290,7 @@ flex_attention_template = TritonTemplate(
 
 
     # Store output and logsumexp
+    l_i = tl.where(l_i == 0, 1, l_i)
     acc = acc / l_i[:, None]
     idx_z = tl.program_id(1) // H
     idx_h = tl.program_id(1) % H
@@ -380,13 +381,14 @@ def forward_inner(
 
         # -- compute scaling constant ---
         m_ij = tl.maximum(m_i, tl.max(post_mod_scores, 1))
-
-        alpha = tl.math.exp2(m_i - m_ij)
-        p = tl.math.exp2(post_mod_scores - m_ij[:, None])
         if not ROWS_GUARANTEED_SAFE:
             masked_out_rows = (m_ij == float("-inf"))
-            alpha = tl.where(masked_out_rows, 0, alpha)
-            p = tl.where(masked_out_rows[:, None], 0, p)
+            m_ij_masked = tl.where(masked_out_rows, 0, m_ij)
+        else:
+            m_ij_masked = m_ij
+
+        alpha = tl.math.exp2(m_i - m_ij_masked)
+        p = tl.math.exp2(post_mod_scores - m_ij_masked[:, None])
 
         # NB: l_i update is pulled up here since it's a bit faster
         # NB: For headdim=256, it's faster to move it back down to after m_i =
