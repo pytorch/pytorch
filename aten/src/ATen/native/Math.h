@@ -1241,25 +1241,25 @@ calc_igamma(scalar_t a, scalar_t x) {
 } // calc_igamma
 
 template <>
-C10_UNUSED inline c10::BFloat16
+C10_UNUSED C10_HOST_DEVICE inline c10::BFloat16
 calc_igamma<c10::BFloat16, false>(c10::BFloat16 a, c10::BFloat16 x) {
   return calc_igamma<float, false>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::Half
+C10_UNUSED C10_HOST_DEVICE inline c10::Half
 calc_igamma<c10::Half, false>(c10::Half a, c10::Half x) {
   return calc_igamma<float, false>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::BFloat16
+C10_UNUSED C10_HOST_DEVICE inline c10::BFloat16
 calc_igammac<c10::BFloat16, false>(c10::BFloat16 a, c10::BFloat16 x) {
   return calc_igammac<float, false>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::Half
+C10_UNUSED C10_HOST_DEVICE inline c10::Half
 calc_igammac<c10::Half, false>(c10::Half a, c10::Half x) {
   return calc_igammac<float, false>(float(a), float(x));
 }
@@ -1550,25 +1550,25 @@ calc_igamma_grada(scalar_t a, scalar_t x) {
 } // calc_igamma_grada
 
 template <>
-C10_UNUSED inline c10::BFloat16
+C10_UNUSED C10_HOST_DEVICE inline c10::BFloat16
 calc_igamma_grada<c10::BFloat16, false>(c10::BFloat16 a, c10::BFloat16 x) {
   return calc_igamma_grada<float, false>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::Half
+C10_UNUSED C10_HOST_DEVICE inline c10::Half
 calc_igamma_grada<c10::Half, false>(c10::Half a, c10::Half x) {
   return calc_igamma_grada<float, false>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::BFloat16
+C10_UNUSED C10_HOST_DEVICE inline c10::BFloat16
 calc_igammac_grada<c10::BFloat16, false>(c10::BFloat16 a, c10::BFloat16 x) {
   return calc_igammac_grada<float, false>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::Half
+C10_UNUSED C10_HOST_DEVICE inline c10::Half
 calc_igammac_grada<c10::Half, false>(c10::Half a, c10::Half x) {
   return calc_igammac_grada<float, false>(float(a), float(x));
 }

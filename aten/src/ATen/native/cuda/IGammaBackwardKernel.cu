@@ -8,16 +8,16 @@ namespace at::native {
 
 namespace {
 
-void igamma_grada_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igamma_grada_cuda", [&]() {
+void igamma_self_backward_kernel_cuda(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igamma_self_backward_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t x) -> scalar_t {
       return calc_igamma_grada<scalar_t, /*is_cuda=*/true>(a, x);
     });
   });
 }
 
-void igammac_grada_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igammac_grada_cuda", [&]() {
+void igammac_self_backward_kernel_cuda(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igammac_self_backward_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t x) -> scalar_t {
       return calc_igammac_grada<scalar_t, /*is_cuda=*/true>(a, x);
     });
@@ -26,7 +26,7 @@ void igammac_grada_kernel_cuda(TensorIteratorBase& iter) {
 
 }  // anonymous namespace
 
-REGISTER_DISPATCH(igamma_grada_stub, &igamma_grada_kernel_cuda);
-REGISTER_DISPATCH(igammac_grada_stub, &igammac_grada_kernel_cuda);
+REGISTER_DISPATCH(igamma_self_backward_stub, &igamma_self_backward_kernel_cuda);
+REGISTER_DISPATCH(igammac_self_backward_stub, &igammac_self_backward_kernel_cuda);
 
 } // namespace at::native

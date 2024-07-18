@@ -1177,18 +1177,18 @@ void igammac_kernel(TensorIteratorBase& iter) {
       });
 }
 
-void igamma_grada_kernel(TensorIteratorBase& iter) {
+void igamma_self_backward_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
-    kHalf, kBFloat16, iter.dtype(), "igamma_grada_cpu", [&]() {
+    kHalf, kBFloat16, iter.dtype(), "igamma_self_backward_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t x) -> scalar_t {
         return calc_igamma_grada<scalar_t, /*is_cuda=*/false>(a, x);
       });
   });
 }
 
-void igammac_grada_kernel(TensorIteratorBase& iter) {
+void igammac_self_backward_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
-    kHalf, kBFloat16, iter.dtype(), "igammac_grada_cpu", [&]() {
+    kHalf, kBFloat16, iter.dtype(), "igammac_self_backward_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t x) -> scalar_t {
         return calc_igammac_grada<scalar_t, /*is_cuda=*/false>(a, x);
       });
@@ -1439,8 +1439,8 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel);
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel);
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel);
-REGISTER_DISPATCH(igamma_grada_stub, &igamma_grada_kernel);
-REGISTER_DISPATCH(igammac_grada_stub, &igammac_grada_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(igamma_self_backward_stub, &igamma_self_backward_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(igammac_self_backward_stub, &igammac_self_backward_kernel);
 
 ALSO_REGISTER_AVX512_DISPATCH(atan2_stub, &atan2_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
