@@ -2752,7 +2752,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
         std::make_shared<std::vector<at::Tensor>>(inputs);
   }
 
-  at::cuda::OptionalCUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard(device.index());
 
   // Start event should only be recorded before the ncclGroupStart() (which
   // happens inside AutoNcclGroup guard below)
@@ -3912,13 +3912,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
     // ensure that each process is on a different GPU
     auto numGPUs = at::cuda::getNumGPUs();
     int16_t deviceIdx = static_cast<int16_t>(rank_ % numGPUs);
-    LOG(INFO)
+    LOG(WARNING)
         << logPrefix()
         << c10::str(
-               " using GPU ",
+               "using GPU ",
                deviceIdx,
                " to perform barrier as devices used by this process are currently unknown. ",
-               "This can potentially cause a hang if this rank to GPU mapping is incorrect.",
+               "This can potentially cause a hang if this rank to GPU mapping is incorrect. ",
                "Specify device_ids in barrier() to force use of a particular device.");
     devices.emplace_back(guessDeviceForRank());
   } else {
