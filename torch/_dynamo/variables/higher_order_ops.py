@@ -1250,6 +1250,19 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
         return super().call_function(tx, args, kwargs)
 
 
+class FunctionalCallVariable(FunctorchHigherOrderVariable):
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+            unimplemented(
+                "torch.func.functional_call capture is disabled, "
+                "it can be turned on by setting "
+                "`torch._dynamo.config.inline_inbuilt_nn_modules=True`"
+            )
+        return super().call_function(tx, args, kwargs)
+
+
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def create_wrapped_node(self, tx, args, kwargs, description):
         # See NOTE [HigherOrderOperator tracing design] for more details

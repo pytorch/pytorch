@@ -3610,6 +3610,7 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(actual, expected)
 
+    @config.patch(inline_inbuilt_nn_modules=True)
     def test_functional_call(self):
         def wrapper_fn(model, params, inputs, targets):
             prediction = torch.func.functional_call(model, params, (inputs,))
@@ -3659,6 +3660,7 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    @config.patch(inline_inbuilt_nn_modules=True)
     def test_functional_call_sequential_params_and_buffers(self):
         # copied from test/test_stateless.py
         class MockModule(torch.nn.Module):
@@ -3693,15 +3695,15 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_self_modules_l1_parameters_weight_: "f32[1, 1]", L_self_modules_l1_parameters_bias_: "f32[1]", L_x_: "f32[1, 1]", L_self_buffers_buffer_: "f32[1]"):
-        l_self_modules_l1_parameters_weight_ = L_self_modules_l1_parameters_weight_
-        l_self_modules_l1_parameters_bias_ = L_self_modules_l1_parameters_bias_
-        l_x_ = L_x_
-        l_self_buffers_buffer_ = L_self_buffers_buffer_
+    def forward(self, L_params_l1_weight_: "f32[1, 1]", L_params_l1_bias_: "f32[1]", L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
+        l_params_l1_weight_ = L_params_l1_weight_
+        l_params_l1_bias_ = L_params_l1_bias_
+        l_buffers_buffer_ = L_buffers_buffer_
+        l_inputs_ = L_inputs_
 
-        linear: "f32[1, 1]" = torch._C._nn.linear(l_x_, l_self_modules_l1_parameters_weight_, l_self_modules_l1_parameters_bias_);  l_x_ = l_self_modules_l1_parameters_weight_ = l_self_modules_l1_parameters_bias_ = None
+        linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_params_l1_weight_, l_params_l1_bias_);  l_inputs_ = l_params_l1_weight_ = l_params_l1_bias_ = None
 
-        add: "f32[1, 1]" = linear + l_self_buffers_buffer_;  linear = l_self_buffers_buffer_ = None
+        add: "f32[1, 1]" = linear + l_buffers_buffer_;  linear = l_buffers_buffer_ = None
         return (add,)
 """,
             )
@@ -3720,6 +3722,7 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    @config.patch(inline_inbuilt_nn_modules=True)
     def test_functional_call_disable_capture(self):
         counters.clear()
 
@@ -3748,6 +3751,33 @@ class GraphModule(torch.nn.Module):
                 dict(counters["graph_break"]),
             )
             self.assertEqual(actual, expected)
+
+    @config.patch(inline_inbuilt_nn_modules=False)
+    def test_functional_call_disable_inline_nn_module(self):
+        counters.clear()
+
+        def wrapper_fn(model, params, inputs, targets):
+            prediction = torch.func.functional_call(model, params, (inputs,))
+            return torch.nn.functional.mse_loss(prediction, targets)
+
+        model = torch.nn.Linear(3, 3)
+        params = dict(model.named_parameters())
+        inputs = torch.randn(64, 3)
+        targets = torch.randn(64, 3)
+
+        actual = wrapper_fn(model, params, inputs, targets)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+            model, params, inputs, targets
+        )
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            {
+                "torch.func.functional_call capture is disabled, it can be "
+                "turned on by setting `torch._dynamo.config.inline_inbuilt_nn_modules=True`": 1,
+            },
+            dict(counters["graph_break"]),
+        )
+        self.assertEqual(actual, expected)
 
     def test_grad(self):
         counters.clear()
