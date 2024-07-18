@@ -52,9 +52,11 @@ class TestBenchmarking(TestCase):
     
     def sanity_check_gpu_benchmark(self, _callable):
         start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
         for _ in range(10):
             _callable()
-        end_event = torch.cuda.Event(enable_timing=True)
+        end_event.record()
         torch.cuda.synchronize()
         return start_event.elapsed_time(end_event) / 10
     

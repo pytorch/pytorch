@@ -328,7 +328,7 @@ class Benchmarker:
         total_allotted_time = num_callables * max_benchmark_duration
 
         # adjusting benchmarking duration to account for total memory warmup duration (cpu launch overhead + gpu time)
-        memory_warmup_duration = memory_warmup_iters * (self.get_cpu_launch_overhead_per_gpu_cache_clear() + self.get_gpu_time_per_gpu_cache_clear())
+        memory_warmup_duration = memory_warmup_iters * (self.cpu_launch_overhead_per_gpu_cache_clear + self.gpu_time_per_gpu_cache_clear)
         allotted_time_for_benchmark_iters = total_allotted_time - memory_warmup_duration
 
         # calculate reduced benchmark iters based on remaining allotted time
@@ -340,7 +340,7 @@ class Benchmarker:
     
     def get_required_gpu_sleep_cycles(self, memory_warmup_iters: int, benchmark_iters: int, cpu_launch_overhead_per_iter: float) -> int:
         # calculate the total cpu launch overhead including memory warmup and benchmarking stages
-        cpu_launch_overhead_for_memory_warmup = memory_warmup_iters * self.get_cpu_launch_overhead_per_gpu_cache_clear()
+        cpu_launch_overhead_for_memory_warmup = memory_warmup_iters * self.cpu_launch_overhead_per_gpu_cache_clear
         cpu_launch_overhead_for_benchmarking = benchmark_iters * cpu_launch_overhead_per_iter
         total_cpu_launch_overhead = cpu_launch_overhead_for_memory_warmup + cpu_launch_overhead_for_benchmarking
 
