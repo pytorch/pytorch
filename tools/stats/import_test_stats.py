@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, cast, Dict
 from urllib.request import urlopen
 
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
