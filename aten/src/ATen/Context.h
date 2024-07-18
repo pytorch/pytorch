@@ -385,32 +385,10 @@ class TORCH_API Context {
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
   bool _deterministic_fill_uninitialized_memory = true;
-
-#ifdef USE_CUDA
-#ifdef USE_FLASH_ATTENTION
-  bool enabled_flashSDP = true;
-#else
-  bool enabled_flashSDP = false;
-#endif
-
-#ifdef USE_MEM_EFF_ATTENTION
-  bool enabled_mem_efficientSDP = true;
-#else
-  bool enabled_mem_efficientSDP = false;
-#endif
-
-#ifdef USE_CUDNN_ATTENTION
-  bool enabled_cudnnSDP = true;
-#else
-  bool enabled_cudnnSDP = false;
-#endif
-#else
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
-  bool enabled_cudnnSDP = true;
-#endif
-
   bool enabled_mathSDP = true;
+  bool enabled_cudnnSDP = true;
   bool enabled_overrideable = true;
 #ifdef USE_ROCM
   bool benchmark_cudnn = true;

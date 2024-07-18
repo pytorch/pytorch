@@ -74,7 +74,7 @@ def _vmap_for_bhqkv(
     Args:
         fn (callable): The function to vmap.
         prefix (tuple): The prefix of the vmap. For score mod functions,
-                        this should be set to (0,).
+                        this should be set to (0,). For mask_mods = ()
         suffix (tuple): We need to add (0,) if gradOut is being mapped over,
                         and (None,) * len(other_buffers).
         out_dims (tuple): For forward cases, keep this as the default 0 since
