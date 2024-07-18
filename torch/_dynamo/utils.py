@@ -2871,3 +2871,20 @@ def _disable_saved_tensors_hooks_during_tracing():
 
 def is_parameter_freezing():
     return torch._inductor.config.freezing and not torch.is_grad_enabled()
+
+
+def verify_guard_fn_signature(value):
+    fn = value.__metadata_guard__
+    sig = inspect.signature(fn)
+    if len(sig.parameters) != 2:
+        from .exc import InternalTorchDynamoError
+
+        raise InternalTorchDynamoError(
+            "Tensor subclass method __metadata_guard__ must take exactly two subclass metadata arguments"
+        )
+    if fn.__self__ != value.__class__:
+        from .exc import InternalTorchDynamoError
+
+        raise InternalTorchDynamoError(
+            "Tensor subclass method __metadata_guard__ must be a classmethod"
+        )
