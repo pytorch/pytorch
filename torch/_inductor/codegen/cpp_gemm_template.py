@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import math
 from typing import Any, Callable, cast, List, Optional, Set, Union
 from unittest.mock import patch
 
@@ -42,7 +43,6 @@ extern "C"
     constexpr int64_t N0_blocks = (N + N0 - 1) / N0;
     constexpr int64_t K0_blocks = (K + K0 - 1) / K0;
 
-    // TODO(jgong5): improve cache blocking with CPU info (Mc, Kc)
     {%- if is_dynamic_M %}
     const int64_t M = {{kernel.size(GemmOut, 0)}};
     const int64_t M0_blocks = (M + M0 - 1) / M0;
@@ -174,10 +174,18 @@ class CppPackedGemmTemplate(CppTemplate):
 
     @cache_on_self
     def thread_blocking(self) -> GemmBlocking:
-        # TODO(jgong5): allow tuning various blocking options
+        """
+        NOTE [Thread blocking in Cpp GEMM]
+        We use simple heuristics to decide the thread blocking:
+        1. Make sure all threads are occupied as much as possible.
+        2. Favor more square-sized thread blocks for better data reuse.
+        TODO(jgong5): we only do blocking on on M and N now, add blocking on K
+                      after supporting k-slicing.
+        TODO(jgong5): allow tuning various blocking options
+        """
+
         def get_factors(number):
             factors = []
-            # priorize more evenly divided factors
             for i in range(int(number**0.5), 0, -1):
                 if number % i == 0:
                     factors.append(number // i)
@@ -199,31 +207,110 @@ class CppPackedGemmTemplate(CppTemplate):
         k_blocks = (self.k + register_blocking.block_k - 1) // register_blocking.block_k
         factors = get_factors(self.num_threads)
         assert len(factors) > 0
+
+        # we favor square-sized thread blocks for good data reuse
+        def get_better_blocking(blocking, best_blocking):
+            if best_blocking is None:
+                best_blocking = blocking
+            else:
+                block_m_size = blocking.block_m * register_blocking.block_m
+                block_n_size = blocking.block_n * register_blocking.block_n
+                best_block_m_size = best_blocking.block_m * register_blocking.block_m
+                best_block_n_size = best_blocking.block_n * register_blocking.block_n
+                if block_m_size + block_n_size < best_block_m_size + best_block_n_size:
+                    best_blocking = blocking
+            return best_blocking
+
+        best_blocking = None
+        # check if we can have a thread-blocking to occupy all threads
         for factor in factors:
-            if n_blocks % factor == 0 and m_blocks % (self.num_threads // factor) == 0:
-                return get_blocking(
-                    self.num_threads, factor, m_blocks, n_blocks, k_blocks
-                )
-        for factor in factors:
-            if n_blocks % factor == 0:
-                return get_blocking(
-                    self.num_threads, factor, m_blocks, n_blocks, k_blocks
-                )
             cofactor = self.num_threads // factor
-            if m_blocks % cofactor == 0:
-                return get_blocking(
+            if n_blocks >= factor and m_blocks >= cofactor:
+                blocking = get_blocking(
                     self.num_threads, factor, m_blocks, n_blocks, k_blocks
                 )
-        raise AssertionError("Should not reach here.")
+                best_blocking = get_better_blocking(blocking, best_blocking)
+
+        if best_blocking is not None:
+            return best_blocking
+
+        for factor in factors:
+            if n_blocks >= factor:
+                blocking = get_blocking(
+                    self.num_threads, factor, m_blocks, n_blocks, k_blocks
+                )
+                best_blocking = get_better_blocking(blocking, best_blocking)
+            cofactor = self.num_threads // factor
+            if m_blocks >= cofactor:
+                blocking = get_blocking(
+                    self.num_threads, factor, m_blocks, n_blocks, k_blocks
+                )
+                best_blocking = get_better_blocking(blocking, best_blocking)
+        assert best_blocking is not None
+        return best_blocking
 
     @cache_on_self
     def cache_blocking(self) -> GemmBlocking:
-        # TODO(jgong5): improve cache blocking with CPU info
+        def get_cache_blocking(register_blocking, thread_blocking):
+            M0 = register_blocking.block_m
+            N0 = register_blocking.block_n
+            K0 = register_blocking.block_k
+
+            Mc_blocks = thread_blocking.block_m
+            # Nc_blocks is always 1
+            Nc_blocks = 1
+            Kc_blocks = thread_blocking.block_k
+
+            # TODO: tune the factor here
+            L1_limit_factor = 1
+            L2_limit_factor = 0.5
+
+            L1_cache_size = (
+                torch._C._cpu._L1d_cache_size()
+            )  # per core cache size in Bytes
+            assert (
+                L1_cache_size > 0
+            ), f"Expect L1_cache_size > 0 but got {L1_cache_size}"
+            L2_cache_size = (
+                torch._C._cpu._L2_cache_size()
+            )  # per core cache size in Bytes
+            assert (
+                L2_cache_size > 0
+            ), f"Expect L2_cache_size > 0 but got {L2_cache_size}"
+            B_size_limit = L1_cache_size * L1_limit_factor
+            A_size_limit = L2_cache_size * L2_limit_factor
+
+            def get_num_byte(dtype):
+                return torch.tensor([], dtype=dtype).element_size()
+
+            num_byte_A = get_num_byte(self.input_nodes[0].get_dtype())
+            num_byte_B = get_num_byte(self.input_nodes[1].get_dtype())
+
+            size_cache_B = K0 * Kc_blocks * N0 * Nc_blocks * num_byte_B
+
+            if size_cache_B > B_size_limit:
+                Kc_blocks = math.floor(
+                    B_size_limit / (K0 * N0 * Nc_blocks * num_byte_B)
+                )
+
+            size_cache_A = M0 * Mc_blocks * K0 * Kc_blocks * num_byte_A
+            if size_cache_A > A_size_limit:
+                Mc_blocks = math.floor(
+                    A_size_limit / (M0 * Kc_blocks * K0 * num_byte_A)
+                )
+
+            return Mc_blocks, Nc_blocks, Kc_blocks
+
         assert (
             not self.is_dynamic_M
         ), "Unable to determine cache blocking for dynamic M."
+        register_blocking = self.register_blocking
         thread_blocking = self.thread_blocking()
-        return GemmBlocking(thread_blocking.block_m, 1, thread_blocking.block_k)
+
+        Mc_blocks, Nc_blocks, Kc_blocks = get_cache_blocking(
+            register_blocking, thread_blocking
+        )
+        return GemmBlocking(Mc_blocks, Nc_blocks, Kc_blocks)
 
     @staticmethod
     def add_choices(
