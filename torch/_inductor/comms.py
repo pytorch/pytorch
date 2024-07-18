@@ -101,7 +101,7 @@ def _schedule_for_comm(
     # When only sink_waits is True, only score_1 and score_2 are considered.
     # When neither is True, the original order is yielded.
     name_to_maybe_grouped_snode = {}
-    # maybe grouped node -> scores
+    # maybe_grouped_snode -> scores
     scores_0, scores_1, scores_2 = {}, {}, {}
     for idx, snode in enumerate(snodes):
         if isinstance(
@@ -486,15 +486,6 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
 
     remove_unused_getitem(graph)
     graph_pass.apply(graph)  # type: ignore[arg-type]
-
-
-def get_all_reads(snode):
-    reads = set()
-    reads.update(snode.read_writes.reads)
-    if _inductor.scheduler.is_group_snode(snode):
-        for sub_snode in snode.snodes:
-            reads.update(get_all_reads(sub_snode))
-    return reads
 
 
 def is_fallback_op(node, op):
