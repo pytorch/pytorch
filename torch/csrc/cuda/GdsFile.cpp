@@ -1,13 +1,15 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/utils/pybind.h>
 
-#if !defined(USE_ROCM) && defined(USE_CUFILE)
+#if defined(USE_CUFILE)
 #include <c10/cuda/CUDAGuard.h>
 
 #include <cuda_runtime.h>
 #include <cufile.h>
 
-// POSIX
+namespace {
+// To get error message for cuFileRead/Write APIs that return ssize_t (-1 for
+// filesystem error and a negative CUfileOpError enum value otherwise).
 template <
     class T,
     typename std::enable_if<std::is_integral<T>::value, std::nullptr_t>::type =
@@ -18,6 +20,7 @@ std::string cuGDSFileGetErrorString(T status) {
                                : std::string(std::strerror(errno));
 }
 
+// To get error message for Buf/Handle registeration APIs that return
 // CUfileError_t
 template <
     class T,
@@ -30,6 +33,7 @@ std::string cuGDSFileGetErrorString(T status) {
         cudaGetErrorString(static_cast<cudaError_t>(status.cu_err)));
   return errStr;
 }
+} // namespace
 
 void gds_load_storage(
     int64_t handle,
@@ -55,7 +59,6 @@ void gds_save_storage(
   CUfileHandle_t cf_handle = reinterpret_cast<CUfileHandle_t>(handle);
   c10::cuda::CUDAGuard gpuGuard(storage.device());
 
-  // FIXME: check whether storage.mutable_data() is the correct API to call here
   void* dataPtr = storage.mutable_data();
   const size_t nbytes = storage.nbytes();
 
@@ -118,7 +121,7 @@ namespace torch::cuda::shared {
 void initGdsBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
-#if !defined(USE_ROCM) && defined(USE_CUFILE)
+#if defined(USE_CUFILE)
   m.def("_gds_register_handle", &gds_register_handle);
   m.def("_gds_deregister_handle", &gds_deregister_handle);
   m.def("_gds_register_buffer", &gds_register_buffer);

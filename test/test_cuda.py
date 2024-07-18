@@ -17,6 +17,8 @@ from copy import deepcopy
 from itertools import product
 from random import randint
 
+import psutil
+
 import torch
 import torch.cuda
 from torch import inf, nan
@@ -5180,25 +5182,37 @@ class TestCudaOptims(TestCase):
 
 
 class TestGDS(TestCase):
-    # can't run in CI due to lack of ext4/xfs mount on CI docker containers
-    def _test_gds_read_write_tensors(self):
+    def _get_tmp_dir_fs_type(self):
+        my_path = os.path.realpath()
+        root_type = ""
+        for part in psutil.disk_partitions():
+            if part.mountpoint == "/":
+                root_type = part.fstype
+                continue
+            if part.mountpoint == my_path:
+                return part.fstype
+        return root_type
+
+    @unittest.skipIf(IS_WINDOWS or TEST_WITH_ROCM, "Not supported on Windows or ROCm")
+    def test_gds_read_write_tensors(self):
+        if self._get_tmp_dir_fs_type() not in ("ext4", "xfs"):
+            self.skipTest("GPUDirect Storage requires ext4/xfs for local filesystem")
         src1 = torch.randn(1024, device="cuda")
         src2 = torch.randn(2, 1024, device="cuda")
-        torch.cuda.gds_register_buffer(src1.untyped_storage())
-        torch.cuda.gds_register_buffer(src2.untyped_storage())
+        torch.cuda.gds._gds_register_buffer(src1.untyped_storage())
+        torch.cuda.gds._gds_register_buffer(src2.untyped_storage())
         dest1 = torch.empty(1024, device="cuda")
         dest2 = torch.empty(2, 1024, device="cuda")
-        # local ext4 mount
-        with TemporaryFileName(dir="./mnt/loopfs/") as f:
-            file = torch.cuda.GdsFile(f, os.O_CREAT | os.O_RDWR)
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
             file.save_storage(src1.untyped_storage(), offset=0)
             file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
             file.load_storage(dest1.untyped_storage(), offset=0)
             file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
         self.assertEqual(src1, dest1)
         self.assertEqual(src2, dest2)
-        torch.cuda.gds_deregister_buffer(src1.untyped_storage())
-        torch.cuda.gds_deregister_buffer(src2.untyped_storage())
+        torch.cuda.gds._gds_deregister_buffer(src1.untyped_storage())
+        torch.cuda.gds._gds_deregister_buffer(src2.untyped_storage())
 
 
 instantiate_parametrized_tests(TestCuda)

@@ -32,7 +32,7 @@ def _gds_register_buffer(s: Storage) -> None:
     """Registers a buffer.
 
     Args:
-        s (Tensor or Storage): Buffer to register.
+        s (Storage): Buffer to register.
     """
     torch._C._gds_register_buffer(s)
 
@@ -70,9 +70,9 @@ class _GdsFile:
         self.register_handle()
 
     def __del__(self) -> None:
-        os.close(self.fd)
         if self.handle is not None:
             self.deregister_handle()
+        os.close(self.fd)
 
     def register_handle(self) -> None:
         """Registers file descriptor to cuFile Driver.

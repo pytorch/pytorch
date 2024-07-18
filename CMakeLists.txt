@@ -251,6 +251,8 @@ cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
                        "USE_CUDNN" OFF)
 cmake_dependent_option(USE_CUSPARSELT "Use cuSPARSELt" ON "USE_CUDA" OFF)
+# Binary builds will fail for cufile due to https://github.com/pytorch/builder/issues/1924
+# Using TH_BINARY_BUILD to check whether is binary build.
 if(DEFINED ENV{TH_BINARY_BUILD})
   cmake_dependent_option(USE_CUFILE "Use cuFile" ON "USE_CUDA AND NOT $ENV{TH_BINARY_BUILD} AND NOT WIN32" OFF)
 else()
