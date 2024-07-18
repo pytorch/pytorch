@@ -167,7 +167,7 @@ _SYM_TYPE_TO_TORCH_DTYPE = {
 
 _SCALAR_TYPE_TO_TORCH_DTYPE: dict[type, torch.dtype] = {
     **_PYTHON_TYPE_TO_TORCH_DTYPE,
-    **_SYM_TYPE_TO_TORCH_DTYPE,
+    **_SYM_TYPE_TO_TORCH_DTYPE,  # type: ignore[dict-item]
 }
 
 _TORCH_DTYPE_TO_ABBREVIATION = {

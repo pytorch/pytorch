@@ -8,7 +8,6 @@ import unittest
 import warnings
 
 import torch
-
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dynamo.utils import counters
@@ -19,7 +18,6 @@ from torch._inductor.cudagraph_utils import FunctionID
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -33,6 +31,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 
+
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
         "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
@@ -45,6 +44,7 @@ importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
 
 aten = torch.ops.aten
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
@@ -882,15 +882,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo2(x):
                 return x[2:]
 
-            x = torch.rand([10, 10], device="cuda", requires_grad=True)
             param_c = cdata(m.weight)
             for _ in range(3):
+                x = torch.rand([10, 10], device="cuda", requires_grad=True)
+                torch.compiler.cudagraph_mark_step_begin()
                 out1, alias_1, alias_2 = foo(m, x)
                 self.assertEqual(len({param_c, cdata(alias_1), cdata(alias_2)}), 1)
 
                 out2 = foo2(out1)
                 out2.sum().backward()
                 self.assertEqual(cdata(out1), cdata(out2))
+                m.weight.grad = None
+                m.bias.grad = None
 
             node = self.curr_node()
             first_node = next(node._path_from_root)
@@ -1151,7 +1154,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             for _ in range(3):
                 out = foo(inp)
                 node = self.curr_node()
-                self.assertEqual(len(list(node.path_live_weakrefs())), 2)
+                self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
             @torch.compile(mode="reduce-overhead")
             def foo(x):
@@ -1495,12 +1498,37 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out = foo(inp)
             out2 = foo(inp)
 
-            with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
+            with self.assertRaisesRegex(
+                Exception, "overwritten by a subsequent forward run."
+            ):
                 out + out
 
             foo(inp)
 
-            with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
+            with self.assertRaisesRegex(
+                Exception, "overwritten by a subsequent forward run."
+            ):
+                out2 + out2
+
+        def test_error_on_dealloc_use2(self):
+            @torch.compile()
+            def foo(x):
+                return x * x * x
+
+            inp = torch.rand([4], device="cuda")
+            out = foo(inp).detach()
+            out2 = foo(inp).detach()
+
+            with self.assertRaisesRegex(
+                Exception, "overwritten by a subsequent forward run."
+            ):
+                out + out
+
+            foo(inp)
+
+            with self.assertRaisesRegex(
+                Exception, "overwritten by a subsequent forward run."
+            ):
                 out2 + out2
 
         @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
@@ -1527,6 +1555,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             streams_init = {seg["stream"] for seg in get_all_cudagraph_segments()}
             for _ in range(4):
                 foo(inp).sum().backward()
+                inp.grad = None
 
             streams = {
                 seg["stream"] for seg in get_all_cudagraph_segments()
@@ -1614,6 +1643,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out2.sum().backward()
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
+            ones.grad = None
             del out
             del out2
 
@@ -1825,7 +1855,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 self.assertEqual(self.get_manager().new_graph_id().id, num_graphs)
 
-        def _module_test(self, mod):
+        def _module_test(self, mod, name="weight", param_wrapping=True):
             with torch.device("cuda"):
 
                 def fn(x, mod):
@@ -1848,11 +1878,14 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                         self.assertEqual(exp_grad, compiled_grad)
 
                 run_test()
-                old = mod.weight.data
-                mod.weight.data = torch.rand_like(mod.weight.data)
+                old_attr = getattr(mod, name)
+                modified_attr = torch.rand_like(old_attr)
+                if param_wrapping:
+                    modified_attr = torch.nn.Parameter(modified_attr)
+                setattr(mod, name, modified_attr)
                 run_test()
                 # Run original version to verify we reuse the other recording
-                mod.weight.data = old
+                setattr(mod, name, old_attr)
                 run_test()
 
                 # Fwd + bwd graphs for each version of the function => 4 graphs
@@ -1879,6 +1912,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+        def test_multi_dispatch_single_compile_builtin_module_buffers(self):
+            # Verify that we don't recompile when changing the buffer of a builtin module
+            # and that we record another cudagraph
+            self._module_test(
+                torch.nn.BatchNorm1d(2, device="cuda"),
+                name="running_mean",
+                param_wrapping=False,
+            )
+
+        @torch._inductor.config.patch("triton.cudagraphs", True)
+        @torch._dynamo.config.patch("error_on_recompile", True)
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_custom_module(self):
             # Test that we can correctly dispatch multiple graphs
             # if params of a custom module change
@@ -1894,6 +1939,30 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 TestModule(torch.nn.Parameter(torch.rand([2, 2], device="cuda")))
             )
 
+        @torch._dynamo.config.patch("error_on_recompile", True)
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+        def test_multi_dispatch_custom_module_buffer(self):
+            # Test that we can correctly dispatch multiple graphs
+            # if buffers of a custom module change
+            class TestModule(torch.nn.Module):
+                def __init__(self, param, buf) -> None:
+                    super().__init__()
+                    self.weight = param
+                    self.register_buffer("buf", buf)
+
+                def forward(self, x):
+                    return x * self.weight + self.buf
+
+            self._module_test(
+                TestModule(
+                    torch.nn.Parameter(torch.rand([2, 2], device="cuda")),
+                    torch.rand([2, 2], device="cuda"),
+                ),
+                name="buf",
+                param_wrapping=False,
+            )
+
+        @torch._inductor.config.patch("triton.cudagraphs", True)
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_child_node(self):
@@ -1956,6 +2025,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 fn_compiled = torch.compile(Foo(), mode="reduce-overhead")
                 for _ in range(3):
                     fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
+                    fn_compiled.param.grad = None
 
                 # Change static tensor address
                 fn_compiled.param.data = torch.rand([2, 2], device="cuda")
@@ -1992,11 +2062,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     fn_compiled = torch.compile(Foo(), mode="reduce-overhead")
                     for _ in range(3):
                         fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
+                        fn_compiled.param.grad = None
 
                     for _ in range(5):
                         # Change static tensor address
                         fn_compiled.param.data = torch.rand([2, 2], device="cuda")
                         fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
+                        fn_compiled.param.grad = None
 
             FileCheck().check_count(
                 "skipping cudagraph due to function 0 exceeding max re-recording limit (=0) "

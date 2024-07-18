@@ -335,9 +335,9 @@ class DiagnosticContext(Generic[_Diagnostic]):
             raise TypeError(
                 f"Expected diagnostic of type {self._bound_diagnostic_type}, got {type(diagnostic)}"
             )
-        if self.options.warnings_as_errors and diagnostic.level == infra.Level.WARNING:
-            diagnostic.level = infra.Level.ERROR
-        self.diagnostics.append(diagnostic)
+        if self.options.warnings_as_errors and diagnostic.level == infra.Level.WARNING:  # type: ignore[attr-defined]
+            diagnostic.level = infra.Level.ERROR  # type: ignore[attr-defined]
+        self.diagnostics.append(diagnostic)  # type: ignore[attr-type]
 
     def log_and_raise_if_error(self, diagnostic: _Diagnostic) -> None:
         """Logs a diagnostic and raises an exception if it is an error.

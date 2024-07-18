@@ -631,15 +631,15 @@ class FxOnnxInterpreter:
         ):
             onnx_tensor_tuple = fx_name_to_onnxscript_value[node.args[0].name]  # type: ignore[union-attr,index]
             index = node.args[1]
-            output = onnx_tensor_tuple[index]  # type: ignore[index]
+            value = onnx_tensor_tuple[index]  # type: ignore[index]
             assert (
-                output is not None
+                value is not None
             ), f"Node creates None with target={node.target} and name={node.name}"
             assert isinstance(
-                output, (onnxscript_graph_building.TorchScriptTensor, tuple)
-            ), type(output)
+                value, (onnxscript_graph_building.TorchScriptTensor, tuple)
+            ), type(value)
 
-            fx_name_to_onnxscript_value[node.name] = output
+            fx_name_to_onnxscript_value[node.name] = value
             return
 
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
