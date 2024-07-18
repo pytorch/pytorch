@@ -117,6 +117,12 @@ Welford<T> welford_combine(const Welford<T> &acc, T data, const WeightRecp<T>* w
   return result;
 }
 
+template <typename T>
+struct IndexValue {
+  int64_t index;
+  T value;
+};
+
 // Refer to https://github.com/pytorch/pytorch/blob/b5b36cf0c4e1958f1ff25120f5d4beeef3288187/
 // aten/src/ATen/native/SharedReduceOps.h#L419-L445
 template <typename scalar_t>
@@ -143,7 +149,60 @@ inline bool less_or_nan(scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) {
   return (a == b) ? idx_a < idx_b : (a < b);
 }
 
+template <typename T>
+inline IndexValue<T>& argmin_combine(IndexValue<T>& a, T next_value, int64_t next_index){
+  if(!(less_or_nan(a.value, next_value, a.index, next_index))){
+    a.value = next_value;
+    a.index = next_index;
+  }
+  return a;
+}
+template <typename T>
+inline IndexValue<T>& argmax_combine(IndexValue<T>& a, T next_value, int64_t next_index){
+  if(!(greater_or_nan(a.value, next_value, a.index, next_index))){
+    a.value = next_value;
+    a.index = next_index;
+  }
+  return a;
+}
+template <typename T>
+inline IndexValue<T>& argmin_combine(IndexValue<T>& a, IndexValue<T>& next){
+  if(!(less_or_nan(a.value, next.value, a.index, next.index))){
+    a.value = next.value;
+    a.index = next.index;
+  }
+  return a;
+}
+template <typename T>
+inline IndexValue<T>& argmax_combine(IndexValue<T>& a, IndexValue<T>& next){
+  if(!(greater_or_nan(a.value, next.value, a.index, next.index))){
+    a.value = next.value;
+    a.index = next.index;
+  }
+  return a;
+}
+
 #if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+inline IndexValue<T>& argmin_combine(IndexValue<T>& a, at::vec::Vectorized<T> next_value, int64_t next_index){
+  constexpr int len = at::vec::Vectorized<T>::size();
+  __at_align__ std::array<T, len> tmpbuf;
+  next_value.store(tmpbuf.data());
+  for (int i = 0; i < len; i++){
+    a = argmin_combine(a, tmpbuf[i], next_index + i);
+  }
+  return a;
+}
+template <typename T>
+inline IndexValue<T>& argmax_combine(IndexValue<T>& a, at::vec::Vectorized<T> next_value, int64_t next_index){
+  constexpr int len = at::vec::Vectorized<T>::size();
+  __at_align__ std::array<T, len> tmpbuf;
+  next_value.store(tmpbuf.data());
+  for (int i = 0; i < len; i++){
+    a = argmax_combine(a, tmpbuf[i], next_index + i);
+  }
+  return a;
+}
 template <typename scalar_t>
 inline at::vec::Vectorized<scalar_t> vec_shuffle_down(at::vec::Vectorized<scalar_t> x, size_t n) {
   using Vec = at::vec::Vectorized<scalar_t>;

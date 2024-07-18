@@ -98,6 +98,8 @@ VECTORIZABLE_RTYPES = {
     "xor_sum",
     "welford_reduce",
     "welford_combine",
+    "argmin",
+    "argmax",
 }
 
 PYTHON_TO_CPP = {
@@ -136,17 +138,23 @@ def reduction_init(reduction_type, dtype):
         return 0
     if reduction_type == "prod":
         return 1
-    if reduction_type in {"max", "argmax"}:
-        return (
-            f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+    if reduction_type in ("max", "argmax", "min", "argmin"):
+        cdtype = DTYPE_TO_CPP[dtype]
+        min_var = (
+            f"-std::numeric_limits<{cdtype}>::infinity()"
             if is_float_dtype(dtype)
-            else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::min()"
+            else f"std::numeric_limits<{cdtype}>::min()"
         )
-    if reduction_type in {"min", "argmin"}:
-        return (
-            f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        max_var = (
+            f"std::numeric_limits<{cdtype}>::infinity()"
             if is_float_dtype(dtype)
-            else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::max()"
+            else f"std::numeric_limits<{cdtype}>::max()"
+        )
+        init_var = min_var if reduction_type in ("max", "argmax") else max_var
+        return (
+            init_var
+            if reduction_type in ("max", "min")
+            else f"IndexValue<{cdtype}>{{0, {init_var}}}"
         )
     if is_welford_reduction(reduction_type):
         return f"Welford<{DTYPE_TO_CPP[dtype]}>()"
@@ -154,15 +162,17 @@ def reduction_init(reduction_type, dtype):
 
 
 def reduction_acc_type(reduction_type, dtype):
-    assert reduction_type not in {"argmin", "argmax"}
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
     if is_welford_reduction(reduction_type):
         return f"Welford<{scalar_type}>"
-
+    if reduction_type in {"argmin", "argmax"}:
+        return f"IndexValue<{scalar_type}>"
     return scalar_type
 
 
-def reduction_combine(reduction_type, var, next_value):
+def reduction_combine(
+    reduction_type, var, next_value, index: Optional[sympy.Symbol] = None
+):
     if reduction_type == "sum":
         return f"{var} + {next_value}"
     if reduction_type == "prod":
@@ -181,6 +191,11 @@ def reduction_combine(reduction_type, var, next_value):
         else:
             mean, m2, weight = reduction_project(reduction_type, next_value)
         return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
+    if reduction_type in ("argmin", "argmax"):
+        if index is not None:
+            return f"{reduction_type}_combine({var}, {next_value}, {index})"
+        else:
+            return f"{reduction_type}_combine({var}, {next_value})"
     raise AssertionError(reduction_type)
 
 
@@ -190,32 +205,6 @@ def reduction_project(reduction_type, acc):
     elif reduction_type in {"argmin", "argmax"}:
         return f"{acc}.index"
     return acc
-
-
-index_value_name_counter = 1
-
-
-def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
-    global index_value_name_counter
-    num_threads = (
-        "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
-    )
-    struct_name = f"IndexValue_{index_value_name_counter}"
-    index_value_name_counter += 1
-
-    # A small annoyance, due to it being a little cumbersome to just throw {} into strings
-    prefix = [
-        f"struct {struct_name} {{size_t index; {DTYPE_TO_CPP[src_dtype]} value;}};",
-        f"{struct_name} {tmpvar}{{0, {reduction_init(reduction_type, src_dtype)}}};",
-    ]
-    local_init = [
-        f"{struct_name} {tmpvar}_local{{0, {reduction_init(reduction_type, src_dtype)}}};",
-    ]
-    tmpvar_per_thd = f"{tmpvar}_arr[{num_threads}]"
-    parallel_prefix = [
-        f"{struct_name} {tmpvar_per_thd};",
-    ]
-    return prefix, parallel_prefix, local_init
 
 
 @functools.lru_cache
@@ -1771,7 +1760,6 @@ class CppKernel(Kernel):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
-
         reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
@@ -1780,56 +1768,15 @@ class CppKernel(Kernel):
             self.loads, f"reduction {reduction_key}", write=False
         )
         self.is_reduction = True
-        if argmax_or_argmin:
-            prefix, parallel_prefix, local_init = argmax_argmin_prefix(
-                reduction_type, src_dtype, acc
-            )
-            self.local_reduction_init.writelines(local_init)
-            self.reduction_prefix.writelines(prefix)
-            self.parallel_reduction_prefix.writelines(parallel_prefix)
-            compare_op = (
-                "greater_or_nan" if reduction_type == "argmax" else "less_or_nan"
-            )
-            assert self.reduction_depth is not None
-            index = self.itervars[self.reduction_depth]
-            for i in range(self.reduction_depth + 1, len(self.itervars)):
-                index = index * self.ranges[i] + self.itervars[i]
-            self.stores.writelines(
-                [
-                    f"if(!({compare_op}({acc}.value, {value}, {acc}.index, {cexpr_index(index)}))) {{",
-                    f"    {acc}.index = {cexpr_index(index)}; {acc}.value = {value};",
-                    "}",
-                ]
-            )
-            acc_local = f"{acc}_local"
-            num_threads = parallel_num_threads()
-            acc_per_thread = f"{acc}_arr[{num_threads}]"
-            acc_local_in_array = acc_per_thread.replace(f"[{num_threads}]", "[tid]")
-            self.parallel_reduction_suffix.writelines(
-                [
-                    f"for (int tid = 0; tid < {num_threads}; tid++)",
-                    "{",
-                    f"    if(!({compare_op}({acc}.value, {acc_local_in_array}.value, {acc}.index, {acc_local_in_array}.index))) {{",
-                    f"        {acc}.index = {acc_local_in_array}.index; {acc}.value = {acc_local_in_array}.value;",
-                    "    }",
-                    "}",
-                ],
-            )
-            self.local_reduction_stores.writelines(
-                [
-                    f"{acc_local_in_array} = {acc_local};",
-                ]
-            )
-        else:
-            acc_type = reduction_acc_type(reduction_type, dtype)
-
-            self.reduction_prefix.writeline(
-                f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
-            )
-            self.stores.writeline(
-                f"{acc} = {reduction_combine(reduction_type, acc, value)};"
-            )
-            self._gen_parallel_reduction_buffers(acc, acc_type, reduction_type, dtype)
+        init_dtype = src_dtype if argmax_or_argmin else dtype
+        acc_type = reduction_acc_type(reduction_type, init_dtype)
+        self.reduction_prefix.writeline(
+            f"{acc_type} {acc} = {reduction_init(reduction_type, init_dtype)};"
+        )
+        self.stores.writeline(
+            f"{acc} = {reduction_combine(reduction_type, acc, value, self.itervars[self.reduction_depth])};"
+        )
+        self._gen_parallel_reduction_buffers(acc, acc_type, reduction_type, init_dtype)
         result = reduction_project(reduction_type, acc)
         self.reduction_cse.reduction_cache[reduction_key] = result
         return result
@@ -2387,17 +2334,17 @@ class CppVecKernel(CppKernel):
         self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        assert reduction_type in {
-            "max",
-            "min",
-            "sum",
-            "prod",
-            "xor_sum",
-            "welford_reduce",
-            "welford_combine",
-        }
-        assert dtype == src_dtype
+        assert reduction_type in VECTORIZABLE_RTYPES
+        argmax_or_argmin = reduction_type in {"argmax", "argmin"}
+        if argmax_or_argmin:
+            assert src_dtype in (
+                torch.float32,
+                torch.int64,
+            )
+        else:
+            assert dtype == src_dtype
         assert dtype in [torch.float, torch.int64]
+        init_dtype = src_dtype if argmax_or_argmin else dtype
         assert isinstance(value, CppCSEVariable), value
 
         if not value.is_vec:
@@ -2409,8 +2356,8 @@ class CppVecKernel(CppKernel):
 
         vec_ns = "at::vec"
         vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
-        acc_type = reduction_acc_type(reduction_type, dtype)
-        acc_type_vec = self.reduction_acc_type_vec(reduction_type, dtype)
+        acc_type = reduction_acc_type(reduction_type, init_dtype)
+        acc_type_vec = self.reduction_acc_type_vec(reduction_type, init_dtype)
 
         acc = self.reduction_cse.generate(
             self.loads, f"reduction {reduction_key}", write=False
@@ -2418,10 +2365,10 @@ class CppVecKernel(CppKernel):
         acc_vec = f"{acc}_vec"
         self.is_reduction = True
         self.reduction_prefix.writeline(
-            f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
+            f"{acc_type} {acc} = {reduction_init(reduction_type, init_dtype)};"
         )
         self.reduction_prefix.writeline(
-            f"{acc_type_vec} {acc_vec} = {self.reduction_init_vec(reduction_type, dtype)};"
+            f"{acc_type_vec} {acc_vec} = {self.reduction_init_vec(reduction_type, init_dtype)};"
         )
         # save the reciprocal of weights for welford reduce if using static shape
         reduction_size = functools.reduce(
@@ -2439,20 +2386,21 @@ class CppVecKernel(CppKernel):
                 f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value, True)};"
             )
         else:
+            index = self.itervars[self.reduction_depth]
             self.stores.writeline(
-                f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value)};"
+                f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value, index=index)};"
             )
         self._gen_parallel_reduction_buffers(
             acc,
             acc_type,
             reduction_type,
-            dtype,
+            init_dtype,
         )
         self._gen_parallel_reduction_buffers(
             acc_vec,
             acc_type_vec,
             reduction_type,
-            dtype,
+            init_dtype,
             reduction_combine_fn=self.reduction_combine_vec,
             reduction_init_fn=self.reduction_init_vec,
             welford_weight_reciprocal_vec_fn=self.welford_weight_reciprocal_vec,
@@ -2465,6 +2413,8 @@ class CppVecKernel(CppKernel):
                     self._get_num_vectors(dtype) == 1
                 ), "Welford reduction does not support VectorizedN (N>1)"
                 next_value = f"welford_vec_reduce_all({acc_vec})"
+            elif argmax_or_argmin:
+                next_value = acc_vec
             else:
                 reduce_all_body = (
                     "{ return "
@@ -2546,15 +2496,17 @@ class CppVecKernel(CppKernel):
             return f"Welford<{vec_type}>()"
 
         scalar_init = reduction_init(reduction_type, dtype)
+        if reduction_type in {"argmin", "argmax"}:
+            return scalar_init
         return f"{vec_type}({scalar_init})"
 
     def reduction_acc_type_vec(self, reduction_type, dtype):
-        assert reduction_type not in {"argmin", "argmax"}
         scalar_type = DTYPE_TO_COMPUTATION_DTYPE[dtype]
         vec_type = self._get_vec_type(scalar_type)
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>"
-
+        if reduction_type in {"argmin", "argmax"}:
+            return f"IndexValue<{DTYPE_TO_CPP[scalar_type]}>"
         return vec_type
 
     def welford_weight_reciprocal_vec(self, dtype, num_threads=None):
@@ -2567,7 +2519,12 @@ class CppVecKernel(CppKernel):
         return f"static WeightRecp<{self._get_vec_type(dtype)}> weight_recps({vec_num_range_thread_expr});"
 
     def reduction_combine_vec(
-        self, reduction_type, var, next_value, use_weight_recps=False
+        self,
+        reduction_type,
+        var,
+        next_value,
+        use_weight_recps=False,
+        index: Optional[sympy.Symbol] = None,
     ):
         if reduction_type == "max":
             return f"at::vec::maximum({var}, {next_value})"
@@ -2592,6 +2549,8 @@ class CppVecKernel(CppKernel):
                 # When combining intermediate accumulators we have a Welford<T> struct
                 mean, m2, weight = reduction_project(reduction_type, next_value)
             return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
+        elif reduction_type in ("argmin", "argmax"):
+            return reduction_combine(reduction_type, var, next_value, index=index)
         else:
             raise NotImplementedError
 
@@ -2887,8 +2846,16 @@ class CppVecKernelChecker(CppVecKernel):
             return self.simd_vec
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
+        argmin_argmax_vec = False
+        if reduction_type in ("argmin", "argmax") and src_dtype in (
+            torch.float,
+            torch.int64,
+        ):
+            assert dtype == torch.int64
+            argmin_argmax_vec = True
         if not (
-            (dtype == torch.float and src_dtype == torch.float)
+            argmin_argmax_vec
+            or (dtype == torch.float and src_dtype == torch.float)
             or (dtype == torch.int64 and src_dtype == torch.int64)
             and reduction_type in VECTORIZABLE_RTYPES
         ):
