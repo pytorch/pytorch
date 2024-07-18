@@ -1282,6 +1282,7 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "cuda") -> int
 
 from .memory import *  # noqa: F403
 
+from .mem_pool import *  # noqa: F403
 
 from .random import *  # noqa: F403
 
@@ -1621,6 +1622,9 @@ __all__ = [
     "memory_stats_as_nested_dict",
     "memory_summary",
     "memory_usage",
+    "MemPool",
+    "MemPoolContext",
+    "mem_pool",
     "temperature",
     "power_draw",
     "clock_rate",

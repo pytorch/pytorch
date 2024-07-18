@@ -34,6 +34,7 @@ set(C10_CUDA_SRCS
     CUDAMallocAsyncAllocator.cpp
     CUDAMiscFunctions.cpp
     CUDAStream.cpp
+    MemPool.cpp
     impl/CUDAGuardImpl.cpp
     impl/CUDATest.cpp
     driver_api.cpp
@@ -49,6 +50,7 @@ set(C10_CUDA_HEADERS
     CUDAMathCompat.h
     CUDAMiscFunctions.h
     CUDAStream.h
+    MemPool.h
     impl/CUDAGuardImpl.h
     impl/CUDATest.h
 )
