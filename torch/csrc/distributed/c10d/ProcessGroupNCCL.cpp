@@ -2752,8 +2752,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
         std::make_shared<std::vector<at::Tensor>>(inputs);
   }
 
-  at::cuda::OptionalCUDAGuard gpuGuard(device.index());
-
   // Start event should only be recorded before the ncclGroupStart() (which
   // happens inside AutoNcclGroup guard below)
   if (work->timingEnabled_) {
