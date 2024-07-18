@@ -34,7 +34,6 @@
     - [Building Binaries / Promotion to Stable](#building-binaries--promotion-to-stable)
 - [Hardware / Software Support in Binary Build Matrix](#hardware--software-support-in-binary-build-matrix)
   - [Python](#python)
-    - [TL;DR](#tldr)
   - [Accelerator Software](#accelerator-software)
     - [Special support cases](#special-support-cases)
   - [Operating Systems](#operating-systems)
