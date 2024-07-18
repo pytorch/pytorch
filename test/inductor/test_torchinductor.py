@@ -9002,6 +9002,26 @@ class CommonTemplate:
         x = torch.rand(128, 32, 63)
         self.common(fn, (x,))
 
+    def test_vectorized_ops_masked(self):
+        def fn(x):
+            index = torch.arange(64, device=x.device)
+            mask = index.view(1, 1, 64) < 63
+            indices = [None, None, index]
+            return torch.ops.aten._unsafe_masked_index(x, mask, indices, 7)
+
+        x = torch.rand(128, 32, 63)
+        self.common(fn, (x,))
+
+    def test_vectorized_ops_masked_var_novec(self):
+        def fn(x):
+            index = torch.arange(10, device=x.device)
+            mask = (index < 5).view(1, 1, 1, 10)
+            indices = [None, None, None, index]
+            return torch.ops.aten._unsafe_masked_index(x, mask, indices, 7)
+
+        x = torch.rand(1, 1, 8, 8)
+        self.common(fn, (x,))
+
     def test_diagonal_copy(self):
         def fn(x):
             return torch.diagonal_copy(x)
@@ -11450,10 +11470,10 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 x[:, mask] = -math.inf
                 return x
 
-            x_tmp = torch.randn(512, 19, device="cuda")
+            x_tmp = torch.randn(512, 19, device=GPU_TYPE)
             x = x_tmp.permute(1, 0).view(-1, 128, 4)[:, :, 1:]
 
-            mask_tmp = torch.ones(128, 3, dtype=torch.int32, device="cuda")
+            mask_tmp = torch.ones(128, 3, dtype=torch.int32, device=GPU_TYPE)
             mask = mask_tmp == mask_tmp
             f(x, mask)
             code = run_and_get_triton_code(f, x, mask)
