@@ -217,13 +217,9 @@ class CodeGen::CallArg {
   char buffer_[8] = {0}; // 64bits
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class RegisterCodeGenList {
  public:
-  TORCH_API static RegisterCodeGenList& GetInstance() {
-    static RegisterCodeGenList codegen_list;
-    return codegen_list;
-  }
+  TORCH_API static RegisterCodeGenList& GetInstance();
 
   using StmtFactoryMethod = std::function<std::unique_ptr<CodeGen>(
       StmtPtr stmt,
@@ -238,7 +234,6 @@ class RegisterCodeGenList {
  private:
   template <class CodeGenType>
   friend class RegisterCodeGen;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   RegisterCodeGenList() = default;
   TORCH_API void AddStmtFactoryMethod(
       const std::string& name,
