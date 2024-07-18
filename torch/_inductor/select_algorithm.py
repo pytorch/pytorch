@@ -906,6 +906,19 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
     def get_make_kernel_render(self):
         return self.make_kernel_render
 
+    def autoheuristic_id(self):
+        type_name = "triton"
+        info = self.info_dict()
+        # TODO(AlnisM): Does tile_shape always exist?
+        tile = info["tile_shape"]
+        tile_vals = eval(tile)  # type: ignore[arg-type]
+        BLOCK_M = tile_vals[0]
+        BLOCK_K = tile_vals[1]
+        BLOCK_N = tile_vals[2]
+        num_stages = info["num_stages"]
+        num_warps = info["num_warps"]
+        return f"type={type_name}_BLOCK-M={BLOCK_M}_BLOCK-K={BLOCK_K}_BLOCK-N={BLOCK_N}_numstages={num_stages}_numwarps={num_warps}"
+
 
 class ExternKernelCaller(ChoiceCaller):
     def __init__(
@@ -989,6 +1002,9 @@ class ExternKernelCaller(ChoiceCaller):
             "backend": "extern",
             "kernel_call_name": self.choice.call_name(),
         }
+
+    def autoheuristic_id(self):
+        return f"extern_{self.choice.name}"
 
 
 @functools.lru_cache(None)
@@ -1117,6 +1133,25 @@ def get_env_num_workers() -> Optional[int]:
     return None
 
 
+# keeps track of the situations where autotuning results should be transfered to AutoHeuristic
+autoheuristic_registry: Dict[str, Callable[[List[Tuple[str, float]]], None]] = {}
+
+
+def create_inputs_key(input_nodes):
+    return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes])
+
+
+def create_precompile_key(name: str, inputs_key: str) -> str:
+    return ":".join(
+                [
+                    name,
+                    inputs_key,
+                    torch.get_float32_matmul_precision(),
+                ]
+                + [choice.hash_key() for choice in choices]
+            )
+
+
 class AlgorithmSelectorCache(PersistentCache):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1176,7 +1211,7 @@ class AlgorithmSelectorCache(PersistentCache):
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
-        inputs_key = repr([self.key_of(x) for x in input_nodes])
+        inputs_key = create_inputs_key(input_nodes)
 
         def precompile(choices) -> Callable[[], None]:
             def no_op(*args, **kwargs):
@@ -1218,14 +1253,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
-            precompile_key = ":".join(
-                [
-                    name,
-                    inputs_key,
-                    torch.get_float32_matmul_precision(),
-                ]
-                + [choice.hash_key() for choice in choices]
-            )
+            precompile_key = create_precompile_key(name, inputs_key)
             if precompile_func := self.precompile_cache.get(precompile_key):
                 return precompile_func
 
@@ -1313,6 +1341,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 self.log_results(
                     name, input_nodes, timings, autotune_elapse, precompile_elapse
                 )
+
+            precompile_key = create_precompile_key(name, inputs_key)
+            if precompile_key in autoheuristic_registry:
+                ah_feedback = []
+                for choice, timing in timings.items():
+                    ah_feedback.append((choice.autoheuristic_id(), timing))
+                autoheuristic_registry[precompile_key](ah_feedback)
 
             return timings
 

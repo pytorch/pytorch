@@ -45,11 +45,8 @@ class _Feedback:
     This is a base class for Feedback objects. It takes a function that calculates the feedback for a given choice.
     """
 
-    def __init__(self, feedback_fn: Callable[[Choice], Feedback]) -> None:
-        self.feedback_fn = feedback_fn
-
-    def __call__(self, choice: Choice) -> Feedback:
-        return self.feedback_fn(choice)
+    def __init__(self) -> None:
+        pass
 
 
 class LocalFeedback(_Feedback):
@@ -60,19 +57,27 @@ class LocalFeedback(_Feedback):
     """
 
     def __init__(self, feedback_fn: Callable[[Choice], Feedback]) -> None:
-        super().__init__(feedback_fn)
+        super().__init__()
+        self.feedback_fn = feedback_fn
+
+    def __call__(self, choice: Choice) -> Feedback:
+        return self.feedback_fn(choice)
 
 
 class GlobalFeedback(_Feedback):
     """
     In contrast to LocalFeedback, GlobalFeedback can be used when it is not possible to immediately collect feedback for
-    the provided choices. GlobalFeedback will be required for example for kernel choice selection, where the feedback
+    the provided choices. GlobalFeedback is required for example for kernel choice selection, where the feedback
     will be provided later after autotuning has happened in select_algorithm.py.
     """
 
-    # TODO: will be supported later
-    def __init__(self, feedback_fn: Callable[[Choice], Feedback]) -> None:
-        super().__init__(feedback_fn)
+    def __init__(self, inputs: List[Any]) -> None:
+        """
+        Args:
+            inputs: List of inputs. This has to match the input_nodes that are passed to autotune_select_algorithm().
+        """
+        super().__init__()
+        self.inputs = inputs
 
 
 class InconsistentMetadata(Exception):
@@ -139,12 +144,13 @@ class AutoHeuristic:
         else:
             self.log_path = torch._inductor.config.autoheuristic_log_path
 
-        if torch._inductor.config.collect_autoheuristic(self.name) and isinstance(
-            self.feedback, LocalFeedback
-        ):
-            for choice in self.choices:
-                feedback_val = self.feedback(choice)
-                self.save_data(choice, feedback_val)
+        if torch._inductor.config.collect_autoheuristic(self.name):
+            if isinstance(self.feedback, LocalFeedback):
+                for choice in self.choices:
+                    feedback_val = self.feedback(choice)
+                    self.save_data(choice, feedback_val)
+            elif isinstance(self.feedback, GlobalFeedback):
+                self.register_global_feedback(self.feedback.inputs)
 
     def satisfies_precondition(self) -> bool:
         return self.precondition is None or self.precondition(
@@ -175,6 +181,22 @@ class AutoHeuristic:
 
     def get_collected_feedback(self, choice: Choice) -> Any:
         return self.collected_feedback.get(choice, None)
+
+    def register_global_feedback(self, inputs: List[Any]) -> None:
+        from torch._inductor.select_algorithm import (
+            autoheuristic_registry,
+            create_inputs_key,
+            create_precompile_key,
+        )
+
+        inputs_key = create_inputs_key(inputs)
+        precompile_key = create_precompile_key(self.name, inputs_key)
+
+        def store_global_feedback(ah_feedback: List[Tuple[str, float]]) -> None:
+            for choice, time in ah_feedback:
+                self.save_data(choice, time)
+
+        autoheuristic_registry[precompile_key] = store_global_feedback
 
     @staticmethod
     def get_device_identifier() -> str:
