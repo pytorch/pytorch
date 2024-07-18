@@ -227,11 +227,13 @@ class CppPackedGemmTemplate(CppTemplate):
             K0 = register_blocking.block_k
 
             Mc_blocks = thread_blocking.block_m
+            # Nc_blocks is always 1
+            Nc_blocks = 1
             Kc_blocks = thread_blocking.block_k
 
             # TODO: support multi-thread
             if self.num_threads != 1:
-                return Mc_blocks, Kc_blocks
+                return Mc_blocks, Nc_blocks, Kc_blocks
 
             # TODO: tune the factor here
             L1_limit_factor = 1
@@ -254,15 +256,16 @@ class CppPackedGemmTemplate(CppTemplate):
 
             num_byte = torch.tensor([], dtype=self.layout.dtype).element_size()
 
-            size_cache_B = K0 * Kc_blocks * N0 * num_byte
+            size_cache_B = K0 * Kc_blocks * N0 * Nc_blocks * num_byte
 
             if size_cache_B > B_size_limit:
-                Kc_blocks = math.floor(B_size_limit / (K0 * N0 * num_byte))
+                Kc_blocks = math.floor(B_size_limit / (K0 * N0 * Nc_blocks * num_byte))
 
             size_cache_A = M0 * Mc_blocks * K0 * Kc_blocks * num_byte
             if size_cache_A > A_size_limit:
                 Mc_blocks = math.floor(A_size_limit / (M0 * Kc_blocks * K0 * num_byte))
-            return Mc_blocks, Kc_blocks
+
+            return Mc_blocks, Nc_blocks, Kc_blocks
 
         assert (
             not self.is_dynamic_M
@@ -270,8 +273,10 @@ class CppPackedGemmTemplate(CppTemplate):
         register_blocking = self.register_blocking
         thread_blocking = self.thread_blocking()
 
-        Mc_blocks, Kc_blocks = get_cache_blocking(register_blocking, thread_blocking)
-        return GemmBlocking(Mc_blocks, 1, Kc_blocks)
+        Mc_blocks, Nc_blocks, Kc_blocks = get_cache_blocking(
+            register_blocking, thread_blocking
+        )
+        return GemmBlocking(Mc_blocks, Nc_blocks, Kc_blocks)
 
     @staticmethod
     def add_choices(
