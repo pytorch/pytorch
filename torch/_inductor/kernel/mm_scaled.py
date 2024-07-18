@@ -259,6 +259,8 @@ def tuned_scaled_mm(
     static_shape, is_nonzero = _is_static_problem([mat_a, mat_b], layout)
     if is_nonzero and use_triton_template(layout, enable_float8=True):
         for config in scaled_mm_configs(m, n, k):
+            if k == 16 and config.kwargs["BLOCK_M"] >= 64:
+                continue  # Triton crashes in this case
             kwargs = scaled_mm_options(
                 config, m, n, k, layout, scale_a, scale_b, use_fast_accum
             )
