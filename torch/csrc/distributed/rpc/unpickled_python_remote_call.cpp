@@ -2,9 +2,7 @@
 
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 UnpickledPythonRemoteCall::UnpickledPythonRemoteCall(
     const SerializedPyObj& serializedPyObj,
@@ -23,6 +21,4 @@ const ForkId& UnpickledPythonRemoteCall::forkId() const {
   return forkId_;
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

@@ -20,7 +20,6 @@ from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
-
 from torch.export import Dim, export
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -37,9 +36,9 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ROCM,
 )
-
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 from torch.utils import _pytree as pytree
+
 
 if HAS_CUDA:
     import triton
@@ -714,7 +713,7 @@ class AOTInductorTestsTemplate:
 
             def forward(self, x, weight, bias, scale_a, scale_b):
                 weight = weight.to(torch.float8_e4m3fn)
-                output, updated_amax = torch._scaled_mm(
+                output = torch._scaled_mm(
                     x,
                     weight,
                     bias=input_bias,
@@ -1502,15 +1501,24 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, x: Dict[str, torch.Tensor]):
-                add_ = torch.zeros(5)
-                mul_ = torch.ones(5)
+                device = next(iter(x.values())).device
+                add_ = torch.zeros(5, device=device)
+                mul_ = torch.ones(5, device=device)
                 for v in x.values():
                     add_ += v
                     mul_ *= v
 
                 return [add_, mul_]
 
-        self.check_model(M(), ({"x": torch.ones(5), "y": torch.ones(5)},))
+        self.check_model(
+            M(),
+            (
+                {
+                    "x": torch.ones(5, device=self.device),
+                    "y": torch.ones(5, device=self.device),
+                },
+            ),
+        )
 
     @requires_multigpu()
     def test_non_default_cuda_device(self):

@@ -2958,6 +2958,6 @@ def _generate_qdq_quantized_model(
             else prepare_pt2e(export_model, quantizer)
         )
         prepare_model(*inputs)
+        torch.ao.quantization.move_exported_model_to_eval(prepare_model)
         convert_model = convert_pt2e(prepare_model)
-        torch.ao.quantization.move_exported_model_to_eval(convert_model)
         return convert_model
