@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
+import itertools
 from contextlib import contextmanager
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
 from torch._C import DispatchKey, DispatchKeySet
@@ -13,21 +14,34 @@ class NestedIntRegistry:
     _counter: int
     # maps tensor -> nested int
     _registry: WeakTensorKeyDictionary
+    _parent: Optional["NestedIntRegistry"]
 
-    def __init__(self, counter=0, registry=WeakTensorKeyDictionary()):
+    def __init__(self, counter=0, parent=None):
         self._counter = counter
-        self._registry = registry
+        self._registry = WeakTensorKeyDictionary()
+        self._parent = parent
 
     # Returns any nested int associated with the given tensor. If none exists, one is created
-    # if create_new=True. For fake tensors, the created nested int is immediately made symbolic.
+    # if create_new=True; otherwise, None is returned. For fake tensors, the created nested
+    # int is immediately made symbolic.
     def get(self, tensor, *, create_new=True, coeff=1):
         from torch._subclasses.functional_tensor import FunctionalTensor
 
+        # unwrap functional tensors
         if isinstance(tensor, FunctionalTensor):
             tensor = torch._from_functional_tensor(tensor.elem)
             return self.get(tensor, coeff=coeff)
 
-        tensor_symint = self._registry.get(tensor)
+        tensor_symint = self._registry.get(
+            tensor,
+            # check parent registry if not found here
+            (
+                None
+                if self._parent is None
+                else self._parent.get(tensor, create_new=False, coeff=coeff)
+            ),
+        )
+
         if tensor_symint is None and create_new:
             from torch._subclasses.fake_tensor import FakeTensor
             from torch.fx.experimental.symbolic_shapes import (
@@ -39,7 +53,6 @@ class NestedIntRegistry:
             self._counter += 1
 
             if isinstance(tensor, FakeTensor):
-                old = tensor_symint
                 tensor_symint = _create_symbolic_nested_int(
                     tensor_symint,
                     base_source=None,
@@ -53,20 +66,27 @@ class NestedIntRegistry:
     def set(self, tensor, nested_int):
         from torch._subclasses.functional_tensor import FunctionalTensor
 
+        # unwrap functional tensors
         if isinstance(tensor, FunctionalTensor):
             tensor = torch._from_functional_tensor(tensor.elem)
             return self.set(tensor, nested_int)
 
         self._registry[tensor] = nested_int
 
-    def clone(self) -> "NestedIntRegistry":
-        return NestedIntRegistry(counter=self._counter, registry=self._registry.copy())
+    # Returns a new NestedIntRegistry that references this instance as a parent. Any
+    # registry entries on this instance will be considered part of the new instance's
+    # registry as well. Note that this doesn't copy registry entries to the new instance.
+    def branch(self) -> "NestedIntRegistry":
+        return NestedIntRegistry(counter=self._counter, parent=self)
 
     def items(self):
-        return self._registry.items()
+        all_items = self._registry.items()
+        if self._parent is not None:
+            all_items = itertools.chain(self._parent.items(), all_items)
+        return all_items
 
     def __contains__(self, item):
-        return item in self._registry
+        return self.get(item, create_new=False) is not None
 
 
 # registry instance to use
@@ -74,20 +94,10 @@ _nested_int_registry = NestedIntRegistry()
 
 
 @contextmanager
-def freeze_nested_int_counter():
-    global _nested_int_registry
-    orig_counter = _nested_int_registry._counter
-    try:
-        yield
-    finally:
-        _nested_int_registry._counter = orig_counter
-
-
-@contextmanager
 def branch_nested_int_registry():
     global _nested_int_registry
     orig_registry = _nested_int_registry
-    _nested_int_registry = _nested_int_registry.clone()
+    _nested_int_registry = _nested_int_registry.branch()
     try:
         yield
     finally:

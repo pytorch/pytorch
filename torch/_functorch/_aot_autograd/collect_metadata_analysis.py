@@ -25,6 +25,7 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
+from torch.utils.weak import WeakTensorKeyDictionary
 from .functional_utils import (
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,
@@ -138,6 +139,14 @@ def run_functionalized_fw_and_collect_metadata(
         else:
             return t
 
+    # NB: emulate idempotence by doing metadata collection in a freshly-branched nested int
+    # registry that is discarded at the end. There is one quirk to this: AOTAutograd depends
+    # on traced tangents to remain in the registry between invocations of
+    # run_functionalized_fw_and_collect_metadata(). To accomplish this, the corresponding
+    # registry entries for traced tangents are included in the returned ViewAndMutationMeta.
+    from torch.nested._internal.nested_tensor import branch_nested_int_registry
+
+    @branch_nested_int_registry()
     @wraps(f)
     def inner(*flat_args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
@@ -158,12 +167,7 @@ def run_functionalized_fw_and_collect_metadata(
         # only for figuring out metadata
         mode = FunctionalTensorMode(_allow_token_discovery=True)
 
-        # NB: emulate idempotence during metadata collection by preventing the nested
-        # int ID counter from advancing.
-        # TODO: Determine how to use branch_nested_int_registry() instead!
-        from torch.nested._internal.nested_tensor import freeze_nested_int_counter
-
-        with disable_above, mode, freeze_nested_int_counter():
+        with disable_above, mode:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)
@@ -733,12 +737,31 @@ from a multi-output view call"
                 grad_enabled_mutation,
             )
 
+        from torch.nested._internal.nested_tensor import _nested_int_registry
+
+        traced_tangents_registry = WeakTensorKeyDictionary()
+
+        def _populate_registry(t):
+            if is_traceable_wrapper_subclass(t):
+                attrs, _ = t.__tensor_flatten__()
+                for attr in attrs:
+                    _populate_registry(getattr(t, attr))
+                return
+
+            n = _nested_int_registry.get(t, create_new=False)
+            if n is not None:
+                traced_tangents_registry[t] = n
+
+        for t in traced_tangents:
+            _populate_registry(t)
+
         metadata = ViewAndMutationMeta(
             input_info=input_info,
             output_info=output_info,
             num_intermediate_bases=len(intermediate_bases),
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
+            traced_tangents_registry=traced_tangents_registry,
             subclass_inp_meta=create_subclass_meta(flat_args),
             subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
             subclass_tangent_meta=create_subclass_meta(traced_tangents),

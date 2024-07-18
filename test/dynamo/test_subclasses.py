@@ -1595,7 +1595,13 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
         def _validate_compile(fn, arg_fn):
             with branch_nested_int_registry():
+                from torch.nested._internal.nested_tensor import _nested_int_registry
+
+                registry_before = list(_nested_int_registry.items())
                 compiled = torch.compile(fn, fullgraph=True, backend="aot_eager")
+                registry_after = list(_nested_int_registry.items())
+                self.assertEqual(registry_before, registry_after)
+
                 args = arg_fn()
                 compile_out = compiled(*args)
                 compile_grads = []
@@ -1653,6 +1659,17 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
         offsets2 = torch.tensor([0, 1, 4, 10], dtype=torch.int64)
         _validate_compile(fn, arg_fn=lambda: (values, offsets, offsets2))
+
+        # === Construct an NJT with cloned offsets ===
+        # NB: AOTAutograd runs multiple fw passes for metadata collection analysis, so
+        # dynamically generating an offsets is a good test case to ensure we're handling
+        # shapes correctly here.
+        def fn(values, offsets):
+            return torch.nested.nested_tensor_from_jagged(values * 2, offsets.clone())
+
+        values = torch.randn(10, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+        _validate_compile(fn, arg_fn=lambda: (values, offsets))
 
         # === Construct two NJTs with cloned offsets ===
         def fn(values, offsets):

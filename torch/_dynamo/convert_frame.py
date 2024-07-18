@@ -577,7 +577,14 @@ def _compile(
         )
 
         try:
-            with tracing(tracer.output.tracing_context), tracer.set_current_tx():
+            from torch.nested._internal.nested_tensor import branch_nested_int_registry
+
+            with (
+                tracing(tracer.output.tracing_context),
+                tracer.set_current_tx(),
+                # ensure compile doesn't affect nested int registry state
+                branch_nested_int_registry(),
+            ):
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()

@@ -17,6 +17,7 @@ from torch._guards import Source
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils.weak import WeakTensorKeyDictionary
 
 from .. import config
 
@@ -277,6 +278,7 @@ class ViewAndMutationMeta:
     # Stashing them as part of our "metadata" makes it simpler if we want to run our analysis
     # pass once, and re-use the output throughout AOTAutograd
     traced_tangents: List[Any]
+    traced_tangents_registry: WeakTensorKeyDictionary
 
     # Each of these is a list telling us about subclasses for the inputs/outputs/grad_outs
     # They are used throughout AOTDispatch to tell us how to generate a list of subclass tensors,
@@ -508,6 +510,7 @@ class ViewAndMutationMeta:
         self.traced_tangent_metas = [extract_metadata(t) for t in self.traced_tangents]
         # Clear traced tangents at runtime
         self.traced_tangents = []
+        self.traced_tangents_registry = WeakTensorKeyDictionary()
         new_output_info = []
         for out in self.output_info:
             if config.view_replay_for_aliased_outputs:
