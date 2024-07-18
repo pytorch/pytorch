@@ -27,7 +27,9 @@
 
 using namespace torch::autograd::profiler;
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 namespace {
 void processRemoteProfiledEvents(
     autograd::RpcWithProfilingResp& rpcWithProfilingResp) {
@@ -577,4 +579,6 @@ void populateRemoteProfiledEvents(
   }
 }
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

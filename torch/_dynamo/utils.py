@@ -1410,10 +1410,6 @@ def same(
                 log_error("Accuracy failed for key name %s", k)
                 return False
         return True
-    elif isinstance(ref, set):
-        assert isinstance(res, set)
-        assert set(ref) == set(res), f"elements mismatch {set(ref)} == {set(res)}"
-        return True
     elif isinstance(ref, (torch.Tensor, float)):
         assert not isinstance(ref, torch._subclasses.FakeTensor)
         assert not isinstance(res, torch._subclasses.FakeTensor)
@@ -2844,7 +2840,3 @@ def _disable_saved_tensors_hooks_during_tracing():
         yield
     finally:
         torch._C._autograd._saved_tensors_hooks_set_tracing(prior)
-
-
-def is_parameter_freezing():
-    return torch._inductor.config.freezing and not torch.is_grad_enabled()

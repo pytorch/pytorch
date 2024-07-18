@@ -11,7 +11,9 @@
 #include <mutex>
 #include <thread>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 using DeviceMap = std::unordered_map<c10::Device, c10::Device>;
 
@@ -324,7 +326,9 @@ class TORCH_API RpcAgent {
   std::mutex rpcRetryMutex_;
 };
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
 
 namespace std {
 template <>

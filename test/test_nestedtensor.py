@@ -3761,11 +3761,7 @@ class TestNestedTensorSubclass(TestCase):
 
     def test_softmax(self, device):
         nt = random_nt_from_dims(
-            [3, None, 5],
-            device=device,
-            dtype=torch.float32,
-            layout=torch.jagged,
-            requires_grad=True,
+            [3, None, 5], device=device, dtype=torch.float32, layout=torch.jagged
         )
 
         # operate on dim=2
@@ -3783,15 +3779,6 @@ class TestNestedTensorSubclass(TestCase):
         output2 = nt.softmax(dim=-1)
         torch._dynamo.disable(self.assertEqual)(output, output2)
         _compare_to_ref(nt, output2, dim=-1)
-
-        def grad_test_func(a, b):
-            nt = torch.nested.as_nested_tensor([a, b], layout=torch.jagged)
-            out = nt.softmax(dim=-1)
-            return out.values()
-
-        a = torch.rand(4, 5, requires_grad=True, dtype=torch.float64, device=device)
-        b = torch.rand(8, 5, requires_grad=True, dtype=torch.float64, device=device)
-        gradcheck(grad_test_func, inputs=(a, b), check_batched_grad=False)
 
     def test_views_inherit_ragged_dim(self, device):
         # view

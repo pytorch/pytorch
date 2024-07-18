@@ -3,7 +3,9 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 // Base class for all RPC request and responses.
 class RpcCommandBase {
@@ -20,4 +22,6 @@ class RpcCommandBase {
 
 inline RpcCommandBase::~RpcCommandBase() = default;
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

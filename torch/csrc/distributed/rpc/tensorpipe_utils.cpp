@@ -9,7 +9,9 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <tensorpipe/tensorpipe.h>
 C10_DIAGNOSTIC_POP()
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 namespace {
 
 // The TensorPipe agent splits the RPC message's information across multiple
@@ -130,7 +132,7 @@ TensorpipeDeviceTypeConverterRegistrar::TensorpipeDeviceTypeConverterRegistrar(
 }
 
 std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
-    const c10::intrusive_ptr<Message>& rpcMessage,
+    c10::intrusive_ptr<Message> rpcMessage,
     std::vector<c10::Device> devices,
     const std::vector<c10::Stream>& streams) {
   tensorpipe::Message tpMessage;
@@ -341,6 +343,8 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
       *buffers.type,
       *buffers.id);
 }
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
 
 #endif // USE_TENSORPIPE

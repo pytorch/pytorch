@@ -1,6 +1,8 @@
 #include <torch/csrc/distributed/rpc/types.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 // Thread local flag to enforce rref JIT pickling to be allowed only
 // in the scope of an rpc call. For other scopes like when model is
@@ -108,4 +110,6 @@ SerializedPyObj SerializedPyObj::fromIValues(std::vector<at::IValue> values) {
   return SerializedPyObj(std::move(payload), std::move(tensors));
 }
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

@@ -1,6 +1,8 @@
 #include <torch/csrc/distributed/rpc/python_resp.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 PythonResp::PythonResp(SerializedPyObj&& serializedPyObj)
     : serializedPyObj_(std::move(serializedPyObj)) {}
@@ -25,4 +27,6 @@ const SerializedPyObj& PythonResp::serializedPyObj() const {
   return serializedPyObj_;
 }
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

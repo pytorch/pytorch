@@ -1,6 +1,10 @@
 #include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
 
-namespace torch::distributed::rpc::profiler::processglobal {
+namespace torch {
+namespace distributed {
+namespace rpc {
+namespace profiler {
+namespace processglobal {
 
 using namespace torch::autograd::profiler;
 
@@ -54,4 +58,8 @@ std::vector<thread_event_lists> disableServer() {
   return statePtr->results();
 }
 
-} // namespace torch::distributed::rpc::profiler::processglobal
+} // namespace processglobal
+} // namespace profiler
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

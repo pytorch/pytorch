@@ -3,7 +3,9 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/python_compat.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 namespace {
 
@@ -194,4 +196,6 @@ const PythonRpcHandler::RRefTypeFunctions& PythonRpcHandler::
   return rrefTypeFunctions_;
 }
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

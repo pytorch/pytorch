@@ -10,7 +10,9 @@
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 c10::intrusive_ptr<JitFuture> rpcTorchscript(
     const std::string& dstWorkerName,
@@ -152,4 +154,6 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
   }
 }
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

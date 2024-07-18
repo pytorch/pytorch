@@ -4,7 +4,9 @@
 
 #include <limits>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 namespace {
 
@@ -186,4 +188,6 @@ std::unique_ptr<RRefAck> RRefAck::fromMessage(const Message& message) {
   return std::make_unique<RRefAck>();
 }
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
