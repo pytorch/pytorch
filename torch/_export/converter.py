@@ -40,8 +40,19 @@ def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
     replaced_patterns = subgraph_rewriter.replace_pattern(gm, pattern, replacement)
 
 
-def normalize_name(name: str) -> str:
-    return name.replace(".", "_")
+def is_valid_for_codegen(name):
+    if len(name) == 0:
+        raise RuntimeError("Empty argument name for codegen")
+    if name[0].isdigit():
+        return False
+    return True
+
+
+def normalize_name(name: str, prefix: str = "rename") -> str:
+    name = name.replace(".", "_")
+    if is_valid_for_codegen(name):
+        return name
+    return f"{prefix}_{name}"
 
 
 def ir_name_to_func_name(name: str) -> str:
@@ -96,6 +107,12 @@ kind_to_standard_operators = {
     "aten::__contains__": operator.contains,
     "prim::dtype": get_dtype_as_int,
     "aten::len": len,
+    # Mapping from specialized op to its symbolic counterpart.
+    # They currently do not have any other overrides.
+    "aten::numel": torch.ops.aten.sym_numel,
+    "aten::size": torch.ops.aten.sym_size,
+    "aten::storage_offset": torch.ops.aten.sym_storage_offset,
+    "aten::stride": torch.ops.aten.sym_stride,
 }
 
 
@@ -314,6 +331,7 @@ class TS2FXGraphConverter:
 
     def get_fx_value(self, value: torch._C.Value):
         value_name = value.debugName()
+
         if value_name in self.name_to_node:
             input_node = self.name_to_node[value_name]
             return input_node
@@ -351,9 +369,9 @@ class TS2FXGraphConverter:
     def convert_graph_inputs(self):
         for graph_input in self.ts_graph.inputs():
             name = graph_input.debugName()
-            normalized_name = normalize_name(name)
 
             if name in self.name_to_param_map:
+                normalized_name = normalize_name(name)
                 self.input_specs.append(
                     InputSpec(
                         InputKind.PARAMETER,
@@ -365,6 +383,7 @@ class TS2FXGraphConverter:
                     self.fx_graph, name, self.is_top_level_graph()
                 )
             elif name in self.name_to_buffer_map:
+                normalized_name = normalize_name(name)
                 self.input_specs.append(
                     InputSpec(
                         InputKind.BUFFER,
@@ -377,6 +396,7 @@ class TS2FXGraphConverter:
                     self.fx_graph, name, self.is_top_level_graph()
                 )
             else:
+                normalized_name = normalize_name(name, prefix="input")
                 self.input_specs.append(
                     InputSpec(
                         InputKind.USER_INPUT,
@@ -483,9 +503,6 @@ class TS2FXGraphConverter:
     def convert_call_function_op(self, node: torch._C.Node):
         target = get_op_overload(node)
 
-        if target is torch.ops.aten.size.int:
-            target = torch.ops.aten.sym_size.int
-
         args, kwargs = self.get_args_kwargs(node, target._schema)
 
         fx_node = self.fx_graph.call_function(target, args, kwargs)
@@ -493,8 +510,12 @@ class TS2FXGraphConverter:
         # TODO: covnert sourceRange() into stack_trace
         # fx_node.meta["stack_trace"] = node.sourceRange()
 
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = fx_node
+        outs = tuple(node.outputs())
+        if len(outs) == 1:
+            output_name = node.output().debugName()
+            self.name_to_node[output_name] = fx_node
+        elif len(outs) > 1:
+            raise RuntimeError("Number of outputs > 1 is not supported yet")
 
     def convert_prim_TupleConstruct(self, node: torch._C.Node):
         self._convert_prim_iterator(node)
@@ -650,19 +671,30 @@ class TS2FXGraphConverter:
         assert len(inputs) == 1
         predicate = self.get_fx_value(inputs[0])
 
-        # Get union of inputs to blocks
-        arguments = set()
-        for block in node.blocks():
-            block_args = set()
+        def _identify_inputs_as_arguments(entry):
+            """
+            Identify inputs from the innermost sub-block. This is needed
+            for nested sub-blocks when the input is hidden in the nested sub-block.
+            E.g., example IR of input is hidden in the nested sub-block.
+            Graph[x.1]
+            %1 = ...
+                Block[]
+                    Block[x.1]
+                        %2 = x.1 ...
+            """
+            arguments: Set[str] = set()
+            for block in entry.blocks():
+                for block_node in block.nodes():
+                    for block_node_in in block_node.inputs():
+                        if block_node_in.debugName() in self.name_to_node:
+                            arguments.add(block_node_in.debugName())
+                    arguments = arguments.union(
+                        _identify_inputs_as_arguments(block_node)
+                    )
+            return arguments
 
-            # TODO: block.inputs(), not sure what theyre used for
-
-            for block_node in block.nodes():
-                for block_node_in in block_node.inputs():
-                    if block_node_in.debugName() in self.name_to_node:
-                        block_args.add(block_node_in.debugName())
-
-            arguments.update(block_args)
+        # Find inputs.
+        arguments = _identify_inputs_as_arguments(node)
 
         # Lift parameters as inputs.
         for block in node.blocks():
@@ -715,11 +747,26 @@ class TS2FXGraphConverter:
 
         cond_node = self.fx_graph.call_function(torch.cond, args, {})
 
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = cond_node
+        outs = tuple(node.outputs())
+        if len(outs) == 1:
+            output_name = node.output().debugName()
+            self.name_to_node[output_name] = cond_node
+        elif len(outs) > 1:
+            raise RuntimeError("Number of outputs > 1 is not supported yet")
 
     def convert_aten_Bool(self, node: torch._C.Node):
         self._convert_as_noop(node)
+
+    def convert_prim_Enter(self, node: torch._C.Node):
+        # export generally treats prim::Enter as noop
+        # The only context manager export supports is aten::enable_grad.
+        # Unfortunately, TorchScript does not support aten::enable_grad yet.
+        # TODO: support aten::enable_grad in both TorchScript and Converter.
+        return
+
+    def convert_prim_Exit(self, node: torch._C.Node):
+        # export treats prim::Exit as noop
+        return
 
     def _convert_as_noop(self, node: torch._C.Node):
         # Converts the node as a no-op by mapping its output node as arg[0]
@@ -731,13 +778,6 @@ class TS2FXGraphConverter:
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = args[0]
-
-    def convert_profiler__record_function_enter_new(self, node: torch._C.Node):
-        target = torch.ops.profiler._record_function_enter_new
-        args = tuple(self.get_fx_value(input) for input in node.inputs())
-        fx_node = self.fx_graph.call_function(target, args)
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = fx_node
 
     def convert_profiler__record_function_exit(self, node: torch._C.Node):
         # _record_function_exit has side effect so we keep it in fx.graph
@@ -755,6 +795,14 @@ class TS2FXGraphConverter:
         fx_node = self.fx_graph.call_method(target, args)
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
+
+    def convert_prim_Uninitialized(self, node: torch._C.Node):
+        # `prim::Uninitialized` is inserted by the compiler when it can prove
+        # the value will never be used. It can be introduced by exceptions,
+        # breaks, continues, and returns.
+        # So we add a dummy constant to the graph.
+        output_name = node.output().debugName()
+        self.constant_map[output_name] = torch.Tensor()
 
     def _convert_standard_operators(self, node: torch._C.Node):
         target = kind_to_standard_operators[node.kind()]
@@ -808,10 +856,10 @@ class TS2FXGraphConverter:
                 )
             else:
                 raise ValueError(f"Output {output_name} not found")
-
-        self.fx_graph.output(
-            args[0]
-        )  # Get rid of an extra list wrapped around final output.
+        if args:
+            self.fx_graph.output(
+                args[0]
+            )  # Get rid of an extra list wrapped around final output.
 
 
 class ExplainTS2FXGraphConverter(TS2FXGraphConverter):

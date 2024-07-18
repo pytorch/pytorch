@@ -136,7 +136,7 @@ def _math_attention_inner(
     n = torch.arange(0, scores.size(3), device=scores.device)
 
     captured_buffers_in_dim = (None,) * len(score_mod_other_buffers)
-    from torch.nn.attention._flex_attention import _vmap_for_bhqkv
+    from torch.nn.attention.flex_attention import _vmap_for_bhqkv
 
     # first input is score
     score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,), suffix=captured_buffers_in_dim)
@@ -558,10 +558,10 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             logsumexp,
             kv_num_blocks,
             kv_indices,
-            q_num_blocks,
-            q_indices,
             full_kv_num_blocks,
             full_kv_indices,
+            q_num_blocks,
+            q_indices,
             full_q_num_blocks,
             full_q_indices,
             *other_buffers,
@@ -590,10 +590,10 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             (
                 kv_num_blocks,
                 kv_indices,
-                q_num_blocks,
-                q_indices,
                 full_kv_num_blocks,
                 full_kv_indices,
+                q_num_blocks,
+                q_indices,
                 full_q_num_blocks,
                 full_q_indices,
                 KV_BLOCK_SIZE,
@@ -690,7 +690,7 @@ def sdpa_dense_backward(
     # Gradient of the inline score_mod function, with respect to the scores
     captured_buffers_in_dim = (None,) * len(score_mod_other_buffers)
     out_dims = [0, None, None, None, None] + [None] * len(score_mod_other_buffers)
-    from torch.nn.attention._flex_attention import _vmap_for_bhqkv
+    from torch.nn.attention.flex_attention import _vmap_for_bhqkv
 
     # inputs are [score, b, h, q_idx, kv_idx, gradOut, ...]
     # score and gradOut are "fully" batched

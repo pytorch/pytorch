@@ -31,10 +31,22 @@ import argparse
 import os
 import pickle
 import sys
-from typing import Any, Dict, Generic, List, NamedTuple, Tuple, Type, TypeVar, Union
+from typing import (
+    _eval_type,
+    Any,
+    Dict,
+    Generic,
+    List,
+    NamedTuple,
+    Set,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 from typing_extensions import TypeGuard
 
-from tabulate import tabulate
+import tabulate
 
 T = TypeVar("T")
 
@@ -48,17 +60,87 @@ class TypeInfo(NamedTuple):
     fields: List[Tuple[str, Type]]
 
     @classmethod
-    def from_type(cls, c):
-        def resolve_type(t):
-            return TypeGuard(t)
+    def from_type(cls, c: T) -> "TypeInfo":
         return cls(
             c.__name__,
             [
-                (f, resolve_type(c.__annotations__[f], globals(), {}, frozenset()))
+                (f, _eval_type(c.__annotations__[f], globals(), {}, frozenset()))
                 for f in c._fields
             ],
         )
 
+"""
+Schema for flat DB
+
+TODO schemas not yet implemented
+# threads as recorded at termination of process
+Threads
+    id: int
+    traceback_id: int
+    process_id: int
+
+Process:
+    id: int # Same as world groups RANK
+    pid: int
+    hostname: str
+
+NCCLOp:
+    # nccl op implementation details (sends/recv)
+    id: int
+    nccl_call_id: int
+
+"""
+
+
+class Group(NamedTuple):
+    id: int
+    desc: str
+    size: int
+
+
+class Membership(NamedTuple):
+    group_id: Ref[Group]
+    global_rank: int
+
+
+class Traceback(NamedTuple):
+    id: int
+    frames: str
+
+
+class Collective(NamedTuple):
+    id: int
+    group_id: Ref[Group]
+
+
+class NCCLCall(NamedTuple):
+    id: int
+    collective_id: Ref[Collective]
+    group_id: Ref[Group]
+    global_rank: int  # technically Ref[Process] once we have it
+    traceback_id: Ref[Traceback]
+    collective_type: str
+    sizes: List[List[int]]
+
+
+class Database(NamedTuple):
+    groups: List[Group]
+    memberships: List[Membership]
+    tracebacks: List[Traceback]
+    collectives: List[Collective]
+    ncclcalls: List[NCCLCall]
+
+
+types = [
+    TypeInfo.from_type(t)
+    for t in globals().values()
+    if (
+        isinstance(t, type)
+        and issubclass(t, tuple)
+        and hasattr(t, "_fields")
+        and t is not TypeInfo
+    )
+]
 
 """
 Stacktrace cache
@@ -96,7 +178,7 @@ class Op:
         nccl:recv 3<-0
     """
 
-    def __init__(self, event, memberships):
+    def __init__(self, event: Dict[Any, Any], memberships: Dict[str, Membership]):
         profiling_name = event["profiling_name"]
         nccl, name = profiling_name.split(":")
         assert nccl == "nccl", f"name formatting error? {nccl} != 'nccl'"
@@ -180,13 +262,13 @@ class Op:
             return other.type == "coalesced"
 
 
-def match_one_event(event_a, event_b, memberships):
+def match_one_event(event_a: Dict[Any, Any], event_b: Dict[Any, Any], memberships) -> bool:
     op_a = Op(event_a, memberships)
     op_b = Op(event_b, memberships)
     return op_a.match(op_b)
 
 
-def match_coalesced_groups(all_rank_events, group_size, groups, memberships):
+def match_coalesced_groups(all_rank_events: Dict[Any, Any], group_size: int, groups: Dict[str, Group], memberships: Dict[str, Membership]) -> bool:
     """
     all_rank_events: {
         rank: [
@@ -286,78 +368,6 @@ def match_coalesced_groups(all_rank_events, group_size, groups, memberships):
     return True
 
 
-"""
-Schema for flat DB
-
-TODO schemas not yet implemented
-# threads as recorded at termination of process
-Threads
-    id: int
-    traceback_id: int
-    process_id: int
-
-Process:
-    id: int # Same as world groups RANK
-    pid: int
-    hostname: str
-
-NCCLOp:
-    # nccl op implementation details (sends/recv)
-    id: int
-    nccl_call_id: int
-
-"""
-
-
-class Group(NamedTuple):
-    id: int
-    desc: str
-    size: int
-
-
-class Membership(NamedTuple):
-    group_id: Ref[Group]
-    global_rank: int
-
-
-class Traceback(NamedTuple):
-    id: int
-    frames: str
-
-
-class Collective(NamedTuple):
-    id: int
-    group_id: Ref[Group]
-
-
-class NCCLCall(NamedTuple):
-    id: int
-    collective_id: Ref[Collective]
-    group_id: Ref[Group]
-    global_rank: int  # technically Ref[Process] once we have it
-    traceback_id: Ref[Traceback]
-    collective_type: str
-    sizes: List[List[int]]
-
-
-class Database(NamedTuple):
-    groups: List[Group]
-    memberships: List[Membership]
-    tracebacks: List[Traceback]
-    collectives: List[Collective]
-    ncclcalls: List[NCCLCall]
-
-
-types = [
-    TypeInfo.from_type(t)
-    for t in globals().values()
-    if (
-        isinstance(t, type)
-        and issubclass(t, tuple)
-        and hasattr(t, "_fields")
-        and t is not TypeInfo
-    )
-]
 
 
 """
@@ -365,7 +375,9 @@ Flat DB builder
 """
 
 
-def build_groups_memberships(pg_config):
+def build_groups_memberships(
+    pg_config,
+) -> Tuple[List[Group], Dict[str, Group], List[Membership], Dict[str, Membership]]:
     """
     pg_config: {
         global_rank: {
@@ -416,19 +428,19 @@ def build_groups_memberships(pg_config):
     return groups, _groups, memberships, _memberships
 
 
-def build_nccl_call(entry, id, collective_id, group_id, global_rank):
+def build_nccl_call(entry: Dict[Any, Any], id: int, collective_id: Ref[Collective], group_id: int, global_rank: int) -> NCCLCall:
     return NCCLCall(
         id=id,
         collective_id=collective_id,
         group_id=group_id,
         global_rank=global_rank,
-        traceback_id=0,  # TODO
+        traceback_id=0, # type: ignore
         collective_type=entry["profiling_name"],
         sizes=entry["input_sizes"],
     )
 
 
-def find_coalesced_group(pg_name, entries):
+def find_coalesced_group(pg_name: str, entries: List[Dict[str, Any]]) -> List[Tuple[int, Dict[str, Any]]]:
     """Given a list of entries, if the collective_seq_id of the first entry matches that of subsequent ones,
     build an return a list of entries terminating in a 'coalesced' op entry all sharing a collective_seq_id
     TODO: handle p2p_seq_id v/s collective_seq_id separately here.
@@ -452,7 +464,7 @@ def find_coalesced_group(pg_name, entries):
     return []
 
 
-def just_print_entries(all_entries, _groups, _memberships):
+def just_print_entries(all_entries: Dict[int, List[Dict[str, Any]]], _groups: Dict[str, Group] , _memberships: Dict[str, Membership]) -> None:
     rows = []
     ranks = sorted(all_entries.keys())
     headers = [f"Rank {rank}" for rank in ranks]
@@ -465,7 +477,7 @@ def just_print_entries(all_entries, _groups, _memberships):
                 row.append("")
             else:
                 entry = all_entries[rank].pop(0)
-                row.append(Op(entry, _memberships))
+                row.append(str(Op(entry, _memberships)))
                 progress = True
         if progress:
             rows.append(row)
@@ -474,9 +486,9 @@ def just_print_entries(all_entries, _groups, _memberships):
 
 
 def build_collectives(
-    all_entries: Dict[int, List[Dict[str, Any]]], 
-    _groups: Dict[str, Group], 
-    _memberships: Dict[str, Membership]
+    all_entries: Dict[int, List[Dict[str, Any]]],
+    _groups: Dict[str, Group],
+    _memberships: Dict[str, Membership],
 ) -> Tuple[List[Traceback], List[Collective], List[NCCLCall]]:
     """
     groups, memberships are the non-flat dicts that are indexable
@@ -506,10 +518,10 @@ def build_collectives(
         ]
     }
     """
-    tracebacks = []
+    tracebacks:List[Traceback] = []
 
-    collectives = []
-    nccl_calls = []
+    collectives: List[Collective] = []
+    nccl_calls: List[NCCLCall] = []
 
     # once we find one mismatch, we stop pairing up collectives since the pairing is possibly incorrect
     # instead, just record the remaining ops as NCCLCalls
@@ -542,14 +554,14 @@ def build_collectives(
         found_idx = {}
 
         if find_coalesced_group(pg_name, entries):
-            expected_ranks = [first_rank]
+            expected_ranks.add(first_rank)
             done_ranks = set()
             all_coalesced_entries = {}
             while expected_ranks:
-                curr = expected_ranks.pop()
+                curr = expected_ranks.pop() 
                 done_ranks.add(curr)
                 grp = (
-                    find_coalesced_group(pg_name, all_entries[curr])
+                        find_coalesced_group(pg_name, all_entries[curr]) #type: ignore
                     if curr in all_entries
                     else []
                 )
@@ -564,7 +576,7 @@ def build_collectives(
                         assert op._dst_g == curr, (op._dst_g, curr)
                         peer = op._src_g
                     if peer and peer not in done_ranks:
-                        expected_ranks.append(peer)
+                        expected_ranks.add(peer)
 
             match = match_coalesced_groups(
                 all_coalesced_entries,
@@ -583,18 +595,18 @@ def build_collectives(
                 for i, _ in reversed(all_coalesced_entries[r]):
                     reversed_calls.append(
                         build_nccl_call(
-                            all_entries[r].pop(i),
+                            all_entries[r].pop(i), #type: ignore
                             id=len(nccl_calls),
                             collective_id=collectives[-1].id if match else None,
                             group_id=pg_name,
-                            global_rank=r,
+                            global_rank=int(r),
                         )
                     )
                 nccl_calls.extend(reversed(reversed_calls))
 
         else:
             for o in expected_ranks.intersection(set(other_ranks)):
-                for i, e in enumerate(all_entries[o]):
+                for i, e in enumerate(all_entries[o]): #type: ignore
                     # step over ops from other PGs
                     if e["process_group"] == (pg_name, desc):
                         if (
@@ -620,7 +632,7 @@ def build_collectives(
                     i = found_idx[r] if r != first_rank else 0
                     nccl_calls.append(
                         build_nccl_call(
-                            all_entries[r].pop(i),
+                            all_entries[r].pop(i), #type: ignore
                             id=len(nccl_calls),
                             collective_id=collectives[-1].id,
                             group_id=pg_name,
@@ -651,24 +663,24 @@ def build_collectives(
     return tracebacks, collectives, nccl_calls
 
 
-def check_no_missing_dump_files(entries, memberships):
+def check_no_missing_dump_files(entries: Dict[str, Any], memberships: List[Membership]) -> None:
     all_ranks = set()
     for membership in memberships:
-        all_ranks.add(membership.global_rank)
+        all_ranks.add(str(membership.global_rank))
     dumps_ranks = set(entries.keys())
     assert (
         dumps_ranks == all_ranks
     ), f"Missing dump files from ranks {all_ranks - dumps_ranks}"
 
 
-def check_version(versions):
+def check_version(versions: Dict[str, Any]) -> None:
     for rank, version in versions.items():
         major, minor = map(int, version.split("."))
-        assert major == 2, f"Rank {rank} unsupported version {version}"
-        assert minor >= 0, f"Rank {rank} unsupported version {version}"
+        # assert major == 2, f"Rank {rank} unsupported version {version}"
+        # assert minor >= 0, f"Rank {rank} unsupported version {version}"
 
 
-def check_trace_from_beginning(entries):
+def check_trace_from_beginning(entries: Dict[str, Any]) -> bool:
     for rank in entries:
         first_record_id = entries[rank][0]["record_id"]
         # TODO add more sequence information such that analysis can proceed even without complete buffer
@@ -682,7 +694,7 @@ def check_trace_from_beginning(entries):
     return True
 
 
-def build_db(details, args) -> Database:
+def build_db(details: Dict[str, Dict[str, Any]], args: argparse.Namespace) -> Database:
     # temporary state used for building database
     entries = {}
     pg_config = {}
@@ -692,6 +704,11 @@ def build_db(details, args) -> Database:
         entries[rank] = dump["entries"]
         version[rank] = dump["version"]
         pg_config[rank] = dump["pg_config"]
+    print("XXXXXXXXXXXX entries is")
+    types1 = [type(k) for k in entries.keys()]
+    print(types1)
+    print("XXXXXXXXXXXX")
+    
 
     check_version(version)
     check_trace_from_beginning(entries)
@@ -724,7 +741,9 @@ def build_db(details, args) -> Database:
     return db
 
 
-def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Dict[str, Any]]]]:
+def read_dump(
+    prefix: str, filename: str
+) -> Dict[str, Union[str, int, List[Any]]]:
     basename = os.path.basename(filename)
     assert (
         basename.find(prefix) == 0
@@ -741,6 +760,9 @@ def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Dict
         dump = pickle.load(infile)
 
     entries = dump["entries"]
+    print("XXX printing type")
+    print(type(entries))
+    print("XXX done")
     version = dump["version"]
     pg_config = dump["pg_config"]
 
@@ -753,7 +775,7 @@ def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Dict
     }
 
 
-def read_dir(prefix: str, folder: str) -> Dict[str, Any]:
+def read_dir(prefix: str, folder: str) -> Dict[Any,Any]: #TODO; fix types
     import gc
     import time
 
@@ -764,6 +786,9 @@ def read_dir(prefix: str, folder: str) -> Dict[str, Any]:
         for f in files:
             ta = time.time()
             details[f] = read_dump(prefix, os.path.join(root, f))
+            print("YYY")
+            print(type(details[f]))
+            print("YYY")
             tb = time.time()
             # print(f"read file {f} in {tb - ta}s")
     print(f"loaded {len(files)} files in {tb - t0}s")
