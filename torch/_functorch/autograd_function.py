@@ -147,6 +147,61 @@ def generate_single_level_function(interpreter, autograd_function):
     )
     return Generated
 
+def make_jvp_impl(interpreter, info, setup_context):
+
+    def generate_single_level_function():
+        level = interpreter.level()
+
+        def forward(*operands):
+            unwrapped_operands = pytree.tree_map_only(
+                torch.Tensor, lambda x: _unwrap_for_grad(x, level), operands
+            )
+            # Both enable_grad() and _set_fwd_grad_enabled() are necessary no matter
+            # the transform. _SingleLevelFunction will turn off both fwd and bwd
+            # gradient computation and we need to turn it back on here.
+            with torch.enable_grad(), _set_fwd_grad_enabled(True), interpreter.lower():
+                unwrapped_output = info.op(*unwrapped_operands)
+
+            # See NOTE [mark_dirty object identity check]
+            def wrap_fn(output):
+                return _wrap_for_grad(output, level)
+
+            return wrap_outputs_maintaining_identity(
+                unwrapped_output, unwrapped_operands, operands, wrap_fn
+            )
+
+        def setup_context(ctx, inputs, output):
+            return info.setup_context(ctx, inputs, output)
+
+        def jvp(ctx, *tangents):
+            result = info._jvp_fn(ctx, *tangents)
+            return result
+
+        # This is the sequence of magic words to dynamically generate a Subclass with
+        # a given name. A Tensor's .grad_fn field has a class name that is the original
+        # autograd.Function's name + Backward, so we do this to generate some
+        # meaningful name.
+        name = f"{info.__name__}Generated"
+        Generated = type(
+            name,
+            (torch.autograd.function._SingleLevelFunction,),
+            {
+                "forward": staticmethod(forward),
+                "jvp": staticmethod(jvp),
+                "setup_context": staticmethod(setup_context),
+            },
+        )
+        return Generated
+
+    Generated = generate_single_level_function()
+
+    def wrapped_func(keyset, *args, **kwargs):
+        from torch._functorch.utils import enable_single_level_autograd_function
+        with enable_single_level_autograd_function():
+            flat_out = Generated.apply(*args, **kwargs)
+        return flat_out
+
+    return wrapped_func
 
 # wrap_outputs_maintaining_identity handles outputs from the vmap,
 # backward (vjp), and jvp staticmethod. The way it distinguishes

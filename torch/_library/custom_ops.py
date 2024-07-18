@@ -181,6 +181,7 @@ class CustomOpDef:
         self._backward_fn: Optional[Callable] = None
         self._torch_dispatch_fns: Dict[type, Callable] = {}
         self._vmap_fn: Optional[Callable] = None
+        self._jvp_fn: Optional[Callable] = None
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher()
@@ -754,6 +755,33 @@ class CustomOpDef:
                 self._lib.impl(
                     self._name, wrapped_func, "FuncTorchBatched", with_keyset=True
                 )
+
+        if func is None:
+            return register
+        else:
+            return register(func)
+
+    def register_jvp(self, func: Optional[Callable] = None):
+        from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
+        from torch._functorch.autograd_function import make_jvp_impl
+
+        def register(func):
+            need_register = self._jvp_fn is None
+            self._jvp_fn = func
+
+            if need_register:
+                # interpreter = retrieve_current_functorch_interpreter()
+                # info(self._opoverload, setup_context, jvp, name)
+                # wrapped_func = make_jvp_impl(interpreter, self)
+
+                def wrapped_func(*args):
+                    return 1
+
+
+                self._lib.impl(
+                    self._name, wrapped_func, "FuncTorchDynamicLayerFrontMode", with_keyset=True
+                )
+                print("registered")
 
         if func is None:
             return register
