@@ -4219,18 +4219,18 @@ def meta_max_pool2d_with_indices(
 
 
 @register_meta(aten.fractional_max_pool2d.default)
-def meta_fractional_max_pool2d(self_, kernel_size, output_size, random_samples):
+def meta_fractional_max_pool2d(self, kernel_size, output_size, random_samples):
     torch._check(
-        self_.ndim in (3, 4),
-        lambda: f"fractional_max_pool2d: Expected 3D or 4D tensor, but got: {self_.ndim}",
+        self.ndim in (3, 4),
+        lambda: f"fractional_max_pool2d: Expected 3D or 4D tensor, but got: {self.ndim}",
     )
-    ndim = self_.ndim
+    ndim = self.ndim
 
     for d in range(ndim - 3, ndim):
         torch._check(
-            self_.size(d) > 0,
+            self.size(d) > 0,
             f"fractional_max_pool2d: Expected input to have non-zero "
-            f" size for non-batch dimenions, but got {self_.size()} with dimension {d} empty",
+            f" size for non-batch dimenions, but got {self.size()} with dimension {d} empty",
         )
 
     # the check and message are out of sync, but this matches the structured meta
@@ -4245,16 +4245,16 @@ def meta_fractional_max_pool2d(self_, kernel_size, output_size, random_samples):
         "either be a single int or tuple of Ints",
     )
 
-    input_channels = self_.size(-3)
-    input_height = self_.size(-2)
-    input_width = self_.size(-1)
+    input_channels = self.size(-3)
+    input_height = self.size(-2)
+    input_width = self.size(-1)
     if ndim == 4:
-        input_batch = self_.size(0)
+        input_batch = self.size(0)
     else:
         input_batch = 1
 
     torch._check(
-        self_.dtype == random_samples.dtype,
+        self.dtype == random_samples.dtype,
         lambda: "Expect _random_samples to have the same dtype as input",
     )
     torch._check(
@@ -4284,7 +4284,7 @@ def meta_fractional_max_pool2d(self_, kernel_size, output_size, random_samples):
         lambda: f"fractional_max_pool2d: kernel width {kernel_size[1]} is too large relative to input width {input_width}",
     )
 
-    if self_.dim() == 4:
+    if self.dim() == 4:
         size = [input_batch, input_channels, output_size[0], output_size[1]]
     else:
         size = [input_channels, output_size[0], output_size[1]]
@@ -4292,20 +4292,20 @@ def meta_fractional_max_pool2d(self_, kernel_size, output_size, random_samples):
     return (
         torch.empty(
             size,
-            dtype=self_.dtype,
-            device=self_.device,
+            dtype=self.dtype,
+            device=self.device,
         ),
         torch.empty(
             size,
             dtype=torch.int64,
-            device=self_.device,
+            device=self.device,
         ),
     )
 
 
 @register_meta(aten.max_unpool2d)
 @out_wrapper()
-def meta_max_unpool2d(self_, indices, output_size):
+def meta_max_unpool2d(self, indices, output_size):
     utils.alert_not_deterministic("max_unpooling2d_forward_out")
 
     torch._check(
@@ -4323,33 +4323,33 @@ def meta_max_unpool2d(self_, indices, output_size):
     oheight, owidth = output_size
 
     torch._check(
-        self_.ndim in (3, 4),
+        self.ndim in (3, 4),
         lambda: (
             f"Input to max_unpooling2d should be a 3d or 4d Tensor, "
-            f"but got a tensor with {self_.ndim} dimensions."
+            f"but got a tensor with {self.ndim} dimensions."
         ),
     )
     torch._check(
-        self_.shape == indices.shape,
+        self.shape == indices.shape,
         lambda: (
-            f"Expected shape of indices to be same as that of the input tensor ({self_.shape}) "
+            f"Expected shape of indices to be same as that of the input tensor ({self.shape}) "
             f"but got indices tensor with shape: {indices.shape}"
         ),
     )
 
-    for i in range(1, self_.ndim):
+    for i in range(1, self.ndim):
         torch._check(
-            self_.size(i) > 0,
+            self.size(i) > 0,
             lambda: (
                 f"max_unpooling2d(): "
                 f"Expected input to have non-zero size for non-batch dimensions, "
-                f"but got {self_.shape} with dimension {i} being empty."
+                f"but got {self.shape} with dimension {i} being empty."
             ),
         )
 
-    self = self_.contiguous()
+    self = self.contiguous()
 
-    if self_.ndim == 3:
+    if self.ndim == 3:
         nchannels = self.size(0)
         result = self.new_empty((nchannels, oheight, owidth))
     else:
@@ -4409,18 +4409,18 @@ def _max_unpooling3d_shape_check(input, indices, output_size, stride, padding, f
 
 @register_meta(aten.max_unpool3d)
 @out_wrapper()
-def meta_max_unpool3d(self_, indices, output_size, stride, padding):
+def meta_max_unpool3d(self, indices, output_size, stride, padding):
     utils.alert_not_deterministic("max_unpooling3d_forward_out")
 
     _max_unpooling3d_shape_check(
-        self_, indices, output_size, stride, padding, "max_unpooling3d()"
+        self, indices, output_size, stride, padding, "max_unpooling3d()"
     )
 
-    self = self_.contiguous()
+    self = self.contiguous()
 
     odepth, oheight, owidth = output_size
 
-    if self_.ndim == 4:
+    if self.ndim == 4:
         nchannels = self.size(0)
         result = self.new_empty((nchannels, odepth, oheight, owidth))
     else:
