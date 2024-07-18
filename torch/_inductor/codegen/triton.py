@@ -2384,8 +2384,9 @@ class TritonKernel(SIMDKernel):
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
                     device = V.graph.scheduler.get_current_device_or_throw()
+                    nbytes = V.graph.sizevars.size_hint(arg_sig.nbytes)
                     result.writeline(
-                        f"{var_name} = torch.zeros({V.graph.sizevars.size_hint(arg_sig.nbytes)}, device='{device}', dtype=torch.uint8)"
+                        f"{var_name} = torch.zeros({nbytes}, device='{device}', dtype=torch.uint8)"
                     )
                 else:
                     raise KeyError(
