@@ -29,7 +29,7 @@ static PyObject* THPStream_pynew(
   int64_t priority = 0;
 
   static torch::PythonArgParser parser({
-      "Steram(Device device=None, *, int64_t priority=0)",
+      "Stream(Device device=None, *, int64_t priority=0)",
       "Stream(int64_t stream_id, int64_t device_index, int64_t device_type, *, int64_t priority=0)",
   });
 
