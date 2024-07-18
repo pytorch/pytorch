@@ -132,8 +132,8 @@ class AutoHeuristicTest(TestCase):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
-        a = torch.randn(8, 8, device="cuda")
-        b = torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda")
+        a = torch.randn(8, 1024, device="cuda", dtype=torch.float16)
+        b = torch.randint(-128, 127, (1024, 1024), dtype=torch.int8, device="cuda").t()
         torch.compile(fn, mode="max-autotune-no-cudagraphs")(a, b)
         path = self.get_path_to_autoheuristic_log("mixed_mm")
         self.assertTrue(os.path.exists(path))
