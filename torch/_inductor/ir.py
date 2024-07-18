@@ -6786,7 +6786,14 @@ class _CollectiveKernel(FallbackKernel):
         packed.cpp_kernel_name = cpp_kernel_name
         packed.python_kernel_name = python_kernel_name
 
-        mark_node_as_mutating(packed, *pytree.tree_leaves(inputs))
+        inps = pytree.tree_leaves(inputs)
+        mark_node_as_mutating(packed, *inps)
+        # For inplace collective ops, the input is guaranteed to be alias of the returned value of op.
+        packed.alias_names.extend([inp.get_name() for inp in inps])
+        if "out" in kwargs:
+            mark_node_as_mutating(packed, kwargs["out"])
+            # For out-variant collective ops, the `out=` arg is guaranteed to be alias of the returned value of op.
+            packed.alias_names.append(kwargs["out"].get_name())
 
     # NOTE: [Out-of-Place Collective Safety]
     # Between the initiation and completion of an out-of-place collective:

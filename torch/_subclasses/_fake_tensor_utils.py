@@ -217,8 +217,10 @@ class _CacheKeyState:
     # matches one of the inputs so we can uncache it properly.
     sym_node_lookup: Dict[int, int]  # id(SymNode) -> index
 
-    # This is the ShapeEnv for one of the cached SymNodes. There is no guarantee
-    # about which node's ShapeEnv it will be.
+    # There are cases where we're asked to perform an op when we have no
+    # ShapeEnv on the FakeTensorMode - but for SymNodes we MUST have a
+    # ShapeEnv. So as we scan if we see a SymNode (with a ShapeEnv) we record it
+    # here.
     shape_env: Optional[ShapeEnv]
 
     def __init__(self, shape_env: Optional[ShapeEnv] = None) -> None:
@@ -229,6 +231,12 @@ class _CacheKeyState:
         """
         Returns true if the CacheKey needs to be cached on the ShapeEnv
         rather than the global cache.
+
+        If our inputs contain a SymNode then we can't cache this operation on
+        the global cache because the cached output will implicitly depend on
+        guard values which might not be true on some other ShapeEnv. So unless
+        we're also going to cache the guards we need to cache this operation on
+        the ShapeEnv instead of globally.
         """
         return bool(self.sym_node_lookup)
 
