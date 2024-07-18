@@ -1624,15 +1624,6 @@ class CppKernel(Kernel):
                 "}",
             ],
         )
-        if (
-            reduction_type == "welford_reduce"
-            and welford_weight_reciprocal_vec_fn
-            and "vec" in f"{acc_type}"
-            and getattr(self, "gen_weight_recps", None)
-        ):
-            self.local_reduction_init.writeline(
-                welford_weight_reciprocal_vec_fn(dtype, num_threads)
-            )
 
     def get_reduction_var_pattern(self, line: str):
         return re.search("tmp_acc[0-9]+", line)
@@ -2496,6 +2487,15 @@ class CppVecKernel(CppKernel):
                 self.non_parallel_reduction_prefix.writeline(
                     self.welford_weight_reciprocal_vec(dtype)
                 )
+                # generate weight_recps for parallel reduction
+                num_threads = (
+                    "max_threads"
+                    if config.cpp.dynamic_threads
+                    else parallel_num_threads()
+                )
+                self.local_reduction_init.writeline(
+                    self.welford_weight_reciprocal_vec(dtype, num_threads)
+                )
             else:
                 self.gen_weight_recps = False
                 self.weight_recps_val = self.weight_recps_cse.reduction_cache[
@@ -2533,7 +2533,6 @@ class CppVecKernel(CppKernel):
                 dtype,
                 reduction_combine_fn=self.reduction_combine_vec,
                 reduction_init_fn=self.reduction_init_vec,
-                welford_weight_reciprocal_vec_fn=self.welford_weight_reciprocal_vec,
             )
         tmpvar: Union[str, CSEVariable]
         if self.tiling_idx >= self.reduction_depth:
