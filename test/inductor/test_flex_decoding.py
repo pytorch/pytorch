@@ -44,6 +44,27 @@ torch.set_float32_matmul_precision("high")
 index = torch.ops.aten.index
 
 
+# score_mod / gqa_mask convert for GQA inputs before GQA is explictly supported
+def get_gqa_score_mod(score_mod, G, q_seq_len):
+    def score_mod_gqa(score, b, hkv, m, n):
+        g = m // q_seq_len
+        new_m = m % q_seq_len
+        hq = hkv * G + g
+        return score_mod(score, b, hq, new_m, n)
+
+    return score_mod_gqa
+
+
+def get_gqa_mask_fn(mask_fn, G, q_seq_len):
+    def mask_fn_gqa(b, hkv, m, n):
+        g = m // q_seq_len
+        new_m = m % q_seq_len
+        hq = hkv * G + g
+        return mask_fn(b, hq, new_m, n)
+
+    return mask_fn_gqa
+
+
 def create_attention(score_mod, block_mask):
     return functools.partial(
         _flex_attention, score_mod=score_mod, block_mask=block_mask
@@ -54,6 +75,7 @@ def create_block_mask_test(score_mod, query, key):
     block_mask = create_block_mask(
         score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
     )
+    print(block_mask.as_tuple())
     return block_mask
 
 
@@ -235,6 +257,7 @@ class TestFlexAttention(InductorTestCase):
         KV_D: int = D,
     ):
         assert Q_H % KV_H == 0
+        score_mod = get_gqa_score_mod(score_mod, G=Q_H // KV_H, q_seq_len=Q_S)
 
         q = torch.randn(
             (Q_B, KV_H, Q_S * (Q_H // KV_H), Q_D),
@@ -266,6 +289,54 @@ class TestFlexAttention(InductorTestCase):
         # golden_out.backward(backward_grad.to(torch.float64))
         # ref_out.backward(backward_grad)
         # compiled_out.backward(backward_grad)
+
+        self._check_out_and_grad(
+            golden_out,
+            ref_out,
+            compiled_out,
+            q_gold,
+            q_ref,
+            q,
+            k_gold,
+            k_ref,
+            k,
+            v_gold,
+            v_ref,
+            v,
+        )
+
+    def run_test_with_call(
+        self,
+        sdpa_call: Callable,
+        dtype: torch.dtype = torch.float16,
+        Q_B: int = B,
+        Q_H: int = Hq,
+        Q_S: int = 1,
+        Q_D: int = D,
+        KV_B: int = B,
+        KV_H: int = Hkv,
+        KV_S: int = S,
+        KV_D: int = D,
+    ):
+        q = torch.randn(
+            (Q_B, KV_H, Q_S * (Q_H // KV_H), Q_D),
+            dtype=dtype,
+            device="cuda",
+            requires_grad=False,
+        )
+        k = torch.randn(
+            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=False
+        )
+        v = torch.randn(
+            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=False
+        )
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+
+        compiled_sdpa = torch.compile(sdpa_call)
+        golden_out = sdpa_call(q_gold, k_gold, v_gold)
+        ref_out = sdpa_call(q_ref, k_ref, v_ref)
+        compiled_out = compiled_sdpa(q, k, v)
 
         self._check_out_and_grad(
             golden_out,
@@ -720,6 +791,18 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return score
 
         self.run_test(bias_mod)
+
+    @expectedFailure  # TODO: add support for partial mask.
+    @supported_platform
+    def test_causal_block(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        gqa_mask_mod = get_gqa_mask_fn(mask_mod, Hq // Hkv, 1)
+        block_mask = create_block_mask(gqa_mask_mod, 1, 1, 1, S)
+        attention = functools.partial(_flex_attention, block_mask=block_mask)
+
+        self.run_test_with_call(attention)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)

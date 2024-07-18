@@ -326,7 +326,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         mask_graph,
     ) = block_mask
     if full_kv_num_blocks is not None:
-        raise RuntimeError("NYI: Flex decoding only supports full mask. ")
+        raise NotImplementedError("NYI: Flex decoding only supports full mask. ")
     for buf in [
         query,
         key,
