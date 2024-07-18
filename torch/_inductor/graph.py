@@ -1325,6 +1325,7 @@ class GraphLowering(torch.fx.Interpreter):
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
                 if not unbacked_symbols_in_strides and len(strides):
+                    stride_order = []
                     if dense:
                         stride_order = ir.get_stride_order(strides)
                         if (
@@ -1334,15 +1335,13 @@ class GraphLowering(torch.fx.Interpreter):
                             and not is_input_for_as_strided
                         ):
                             stride_order = ir.NHWC_STRIDE_ORDER
-                    else:
-                        stride_order = []
                     allow_padding = (
                         n.name not in self.user_visible_outputs
                         and not is_input_for_as_strided
                     )
                     result = ir.ExternKernel.require_stride_order(
                         result,
-                        stride_order,
+                        stride_order if stride_order else None,
                         allow_padding=allow_padding,
                         actual_strides=strides,
                     )
