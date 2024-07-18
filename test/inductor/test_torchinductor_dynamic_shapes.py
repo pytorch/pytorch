@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import importlib
+
 import math
 import operator
 import os
@@ -36,7 +37,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
-
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
         "Windows CI does not have necessary dependencies for test_torchinductor_dynamic_shapes yet\n"
@@ -55,7 +55,6 @@ from inductor.test_torchinductor import (
     copy_tests,
     TestFailure,
 )
-
 
 importlib.import_module("filelock")
 
