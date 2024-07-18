@@ -277,12 +277,7 @@ def _create_stateful_graph_module(
     # We fix this by de-registering these buffers in lifted_tensor_constants
     # and call _assign_attr(attr_kind=CONSTANT) to register them as constants.
     for constant_fqn in graph_signature.lifted_tensor_constants:
-        try:
-            buffer = stateful_gm.get_buffer(constant_fqn)
-        except AttributeError:
-            breakpoint()
-            pass
-
+        buffer = stateful_gm.get_buffer(constant_fqn)
         *prefix, field = constant_fqn.rsplit(".")
         submod = _recursive_getattr(stateful_gm, prefix)
         delattr(submod, field)
