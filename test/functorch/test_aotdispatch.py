@@ -774,7 +774,7 @@ def forward(self, primals_1):
     mul_2 = torch.ops.aten.mul.Tensor(primals_1, primals_1)
     add = torch.ops.aten.add.Tensor(mul, mul_1);  mul = mul_1 = None
     add_1 = torch.ops.aten.add.Tensor(add, mul_2);  add = mul_2 = None
-    return [add_1, primals_1]""",
+    return (add_1, primals_1)""",
         )
         self.assertEqual(torch.compile(f, backend="inductor")(*inp), f(*inp))
 
