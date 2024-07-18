@@ -17,7 +17,9 @@ from _pytest.python import Module
 from _pytest.reports import TestReport
 from _pytest.stash import StashKey
 from _pytest.terminal import _get_raw_skip_reason
+
 from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestShardPlugin
+
 
 if TYPE_CHECKING:
     from _pytest._code.code import ReprFileLocation
