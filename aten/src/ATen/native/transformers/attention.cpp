@@ -609,6 +609,15 @@ bool should_compute_logsumexp(const Tensor& query, const Tensor& key, const Tens
 
 } // namespace
 
+Tensor masked_softmax(
+    const Tensor& self,
+    const Tensor& mask,
+    int64_t dim,
+    const c10::optional<ScalarType> dtype) {
+  auto out = at::softmax(self, dim);
+  return out.masked_fill(~mask, 0);
+}
+
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
 // greater than 0.0 is specified.

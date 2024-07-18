@@ -14709,6 +14709,10 @@
     CUDA, NestedTensorCUDA: native_multi_head_attention_cuda
   autogen: _native_multi_head_attention.out
 
+- func: masked_softmax.int(Tensor self, Tensor mask, int dim, ScalarType? dtype=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: masked_softmax
+
 - func: scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> Tensor
   python_module: nn
   variants: function

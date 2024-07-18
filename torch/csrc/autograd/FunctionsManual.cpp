@@ -237,6 +237,18 @@ std::tuple<Tensor, Tensor> _euclidean_dist_backward(
       x2 * ratio.sum(-2, false).unsqueeze(-1) - ratio.mT().matmul(x1)};
 }
 
+Tensor masked_softmax_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& mask,
+    const Tensor& result,
+    int64_t dim) {
+  auto grad_input = grad * result;
+  auto grad_sum = grad_input.sum(dim, /*keepdim=*/true);
+  grad_input -= result * grad_sum;
+  return grad_input;
+}
+
 Tensor norm_backward(
     const Tensor& grad,
     const Tensor& self,
