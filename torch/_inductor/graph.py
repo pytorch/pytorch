@@ -1335,13 +1335,16 @@ class GraphLowering(torch.fx.Interpreter):
                         ):
                             stride_order = ir.NHWC_STRIDE_ORDER
                     else:
-                        stride_order = None
+                        stride_order = []
                     allow_padding = (
                         n.name not in self.user_visible_outputs
                         and not is_input_for_as_strided
                     )
                     result = ir.ExternKernel.require_stride_order(
-                        result, stride_order, allow_padding=allow_padding, actual_strides=strides
+                        result,
+                        stride_order,
+                        allow_padding=allow_padding,
+                        actual_strides=strides,
                     )
 
             # Realize if (1) any user need inputs realized, or (2) there is
