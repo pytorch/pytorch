@@ -10621,6 +10621,7 @@ class CommonTemplate:
                         check_lowp=False,
                     )
 
+    @torch._inductor.config.patch(abi_compatible=True)
     def test_dtypeview_fusion(self):
         @torch.compile
         def fn(x):
