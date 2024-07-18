@@ -161,13 +161,24 @@ class ValueRanges(Generic[_T]):
                 raise ValueRangeError(f"Invalid ranges [{lower}:{upper}]")
         except TypeError as e:
             raise TypeError(f"Could not compare {lower} <= {upper}") from e
+
+        is_bool_upper = isinstance(lower, SympyBoolean)
+        is_bool_lower = isinstance(upper, SympyBoolean)
+        # NB: [-int_oo, -int_oo] and [int_oo, int_oo] are allowed
+        integer_types = (sympy.Integer, NegativeIntInfinity, IntInfinity)
+        is_int_upper = isinstance(lower, integer_types)
+        is_int_lower = isinstance(upper, integer_types)
+
+        assert is_bool_upper == is_bool_lower, (lower, upper)
+        assert is_int_upper == is_int_lower, (lower, upper)
+
         # Because this is a frozen class
         object.__setattr__(self, "lower", lower)
         object.__setattr__(self, "upper", upper)
         # Unlike bool/int in Python, we don't report bools are ints
-        object.__setattr__(self, "is_bool", isinstance(lower, SympyBoolean))
-        if self.is_bool:
-            assert isinstance(upper, SympyBoolean), (lower, upper)
+        #
+        # NB: is_bool_upper == is_bool_lower, so we only need to check one
+        object.__setattr__(self, "is_bool", is_bool_upper)
 
         # Warning: is_int/is_float is best effort.  We do pretty well in
         # Dynamo, but in Inductor these attributes are often wrong because we
@@ -175,16 +186,9 @@ class ValueRanges(Generic[_T]):
         # the flexible analysis for is_int: sometimes a sympy.oo pops in for
         # an integer bound. I would /like/ for us not to do this, but it's
         # too hard to push the invariant through right now.
-
-        object.__setattr__(
-            self,
-            "is_int",
-            not self.is_bool
-            and (
-                isinstance(lower, (sympy.Integer, NegativeIntInfinity))
-                and isinstance(upper, (sympy.Integer, IntInfinity))
-            ),
-        )
+        #
+        # NB: is_int_upper == is_int_lower, so we only need to check one
+        object.__setattr__(self, "is_int", not self.is_bool and is_int_upper)
         """
         # This assert is just impossible right now, too many sympy bugs
         if self.is_int:
