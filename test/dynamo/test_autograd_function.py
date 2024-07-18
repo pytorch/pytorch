@@ -225,7 +225,7 @@ class ModuleWithGradFunc(torch.nn.Module):
         return self.f(x)
 
 
-@torch.library.custom_op("mylib::custom_op_forward", mutates_args=())
+@torch.library.custom_op("_torch_testing::custom_op_forward", mutates_args=())
 def custom_op_forward(
     foo: torch.Tensor,
     bar: torch.Tensor,
@@ -239,7 +239,7 @@ def _(foo, bar, weight):
     return torch.empty_like(foo)
 
 
-@torch.library.custom_op("mylib::custom_op_backward", mutates_args=())
+@torch.library.custom_op("_torch_testing::custom_op_backward", mutates_args=())
 def custom_op_backward(
     grad_output: torch.Tensor,
     foo: torch.Tensor,
