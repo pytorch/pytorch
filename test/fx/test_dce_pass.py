@@ -2,6 +2,7 @@
 
 import copy
 from typing import Set, Type
+import os
 
 import torch
 import torch.fx
@@ -220,3 +221,25 @@ class TestDCE(TestCase):
 
         # %add_out node should not be removed because it has side effects.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False, custom=True)
+
+    def test_keep_collectives(self):
+        """
+        Test that DCE doesn't remote collective ops even the results are not used.
+        """
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                os.environ['MASTER_ADDR'] = '127.0.0.1'
+                os.environ['MASTER_PORT'] = '29500'
+                torch.distributed.init_process_group("gloo", rank=0, world_size=1)
+
+            def forward(self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+                d = torch.ops.aten.mul.Tensor(a, b)
+                e = torch.ops.aten.mul.Tensor(a, c)
+                future = torch.ops._c10d_functional.all_reduce.default(e, "sum", "0")
+                synced_e = torch.ops._c10d_functional.wait_tensor.default(future)  # synced_e is not used
+                return d
+
+        # collective nodes should not be removed because they have side effects.
+        self._run_dce_and_test(TestModule(), expect_dce_changes=False, custom=False)
