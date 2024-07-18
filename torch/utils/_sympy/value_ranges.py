@@ -183,11 +183,13 @@ class ValueRanges(Generic[_T]):
                 not self.is_bool
                 and (
                     isinstance(lower, (sympy.Integer, NegativeIntInfinity))
-                    or lower in (-int_oo, -sympy.oo)  # in simple_sympify() we use -oo for integer
+                    # -oo is a valid lower bound for integers
+                    or lower in (-int_oo, -sympy.oo)
                 )
                 and (
                     isinstance(upper, (sympy.Integer, IntInfinity))
-                    or upper in (int_oo, sympy.oo)  # in simple_sympify() we use oo for integer
+                    # oo is a valid upper bound for integers
+                    or upper in (int_oo, sympy.oo)
                 )
                 and (lower, upper) != (-sympy.oo, sympy.oo)  # (-oo, oo) is float
             ),
