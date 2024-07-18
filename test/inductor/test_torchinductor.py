@@ -1435,6 +1435,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn(1024),))
 
     @config.patch(debug_index_asserts=False)
+    @config.patch("cpp.disable_tiling_select_heuristic_flag", True)
     def test_neg_index(self):
         def test(
             fn, inps, has_assert: bool, has_wrapping: bool, vectorize: bool = True

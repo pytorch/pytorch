@@ -3210,104 +3210,115 @@ class TilingSelect:
             fn_list, var_sizes_list, tiling_factor
         )
         if tiling_indices:
+            if not config.cpp.disable_tiling_select_heuristic_flag:
 
-            def _try_get_stride(
-                index,
-                tiling_factor,
-                tiling_indices,
-            ):
-                assert len(tiling_indices) == 1, "Doesn't support Tile2D yet."
-                free_symbols = sorted(index.free_symbols, key=lambda s: s.name)
-                if len(free_symbols) <= 0 or tiling_indices[0] > (
-                    len(free_symbols) - 1
+                def _try_get_stride(
+                    index,
+                    tiling_factor,
+                    tiling_indices,
                 ):
-                    return None
-                itervar = free_symbols[tiling_indices[0]]
-                return stride_at_vec_range(index, itervar, tiling_factor)
+                    assert len(tiling_indices) == 1, "Doesn't support Tile2D yet."
+                    free_symbols = sorted(index.free_symbols, key=lambda s: s.name)
+                    if len(free_symbols) <= 0 or tiling_indices[0] > (
+                        len(free_symbols) - 1
+                    ):
+                        return None
+                    itervar = free_symbols[tiling_indices[0]]
+                    try:
+                        return stride_at_vec_range(index, itervar, tiling_factor)
+                    except Exception:
+                        # see test_torchinductor.py::test_full_boolean which has
+                        # tmp0 = ops.index_expr(s0 >= 1024, torch.bool)
+                        return None
 
-            def _update_negative_op_count(node_name, negative_op_type_count):
-                if node_name not in negative_op_type_count:
-                    negative_op_type_count[node_name] = 1
-                else:
-                    negative_op_type_count[node_name] += 1
+                def _update_negative_op_count(node_name, negative_op_type_count):
+                    if node_name not in negative_op_type_count:
+                        negative_op_type_count[node_name] = 1
+                    else:
+                        negative_op_type_count[node_name] += 1
 
-            group, reduction_group = max(
-                var_sizes_list, key=lambda sizes: len(sizes[1])
-            )
-            op_type_count: Dict[str, int] = {}
-            # ops may not cause overhead with vectorization, like non-contiguous
-            # index_expr, load, store
-            negative_op_type_count: Dict[str, int] = {}
+                group, reduction_group = max(
+                    var_sizes_list, key=lambda sizes: len(sizes[1])
+                )
+                op_type_count: Dict[str, int] = {}
+                # ops may not cause overhead with vectorization, like non-contiguous
+                # index_expr, load, store
+                negative_op_type_count: Dict[str, int] = {}
 
-            for _body in loop_bodies:
-                sub_blocks = [_body.root_block] + list(_body.subblocks.values())
-                for sub_block in sub_blocks:
-                    for _node in sub_block.graph.nodes:
-                        if _node.target == "index_expr":
-                            index = sub_block.body.indexing_exprs[
-                                _node.args[-2].args[0]
-                            ]
-                            if len(tiling_indices) == 1:
-                                stride = _try_get_stride(
-                                    index, tiling_factor, tiling_indices
-                                )
-                                if stride is not None and not stride.is_number:
-                                    _update_negative_op_count(
-                                        _node.target, negative_op_type_count
+                for _body in loop_bodies:
+                    sub_blocks = [_body.root_block] + list(_body.subblocks.values())
+                    for sub_block in sub_blocks:
+                        for _node in sub_block.graph.nodes:
+                            if _node.target == "index_expr":
+                                index = sub_block.body.indexing_exprs[
+                                    _node.args[-2].args[0]
+                                ]
+                                if len(tiling_indices) == 1:
+                                    stride = _try_get_stride(
+                                        index, tiling_factor, tiling_indices
                                     )
-                        elif _node.target == "load":
-                            index = sub_block.body.indexing_exprs[
-                                _node.args[-1].args[0]
-                            ]
-                            if len(tiling_indices) == 1:
-                                stride = _try_get_stride(
-                                    index, tiling_factor, tiling_indices
-                                )
-                                if stride is not None and stride not in [0, 1]:
-                                    _update_negative_op_count(
-                                        _node.target, negative_op_type_count
+                                    if stride is not None and not stride.is_number:
+                                        _update_negative_op_count(
+                                            _node.target, negative_op_type_count
+                                        )
+                            elif _node.target == "load":
+                                index = sub_block.body.indexing_exprs[
+                                    _node.args[-1].args[0]
+                                ]
+                                if len(tiling_indices) == 1:
+                                    stride = _try_get_stride(
+                                        index, tiling_factor, tiling_indices
                                     )
-                        elif _node.target == "store":
-                            index = sub_block.body.indexing_exprs[_node.args[2].args[0]]
-                            if len(tiling_indices) == 1:
-                                stride = _try_get_stride(
-                                    index, tiling_factor, tiling_indices
-                                )
-                                if stride is not None and stride != 1:
-                                    _update_negative_op_count(
-                                        _node.target, negative_op_type_count
+                                    if stride is not None and stride not in [0, 1]:
+                                        _update_negative_op_count(
+                                            _node.target, negative_op_type_count
+                                        )
+                            elif _node.target == "store":
+                                index = sub_block.body.indexing_exprs[
+                                    _node.args[2].args[0]
+                                ]
+                                if len(tiling_indices) == 1:
+                                    stride = _try_get_stride(
+                                        index, tiling_factor, tiling_indices
                                     )
+                                    if stride is not None and stride != 1:
+                                        _update_negative_op_count(
+                                            _node.target, negative_op_type_count
+                                        )
 
-                        if isinstance(_node.target, str) and not (
-                            _node.target.startswith("masked_subblock")
-                            or _node.target
-                            in ["ops", "output", "constant", "get_index"]
-                        ):
-                            if _node.target not in op_type_count:
-                                op_type_count[_node.target] = 1
-                            else:
-                                op_type_count[_node.target] += 1
+                            if isinstance(_node.target, str) and not (
+                                _node.target.startswith("masked_subblock")
+                                or _node.target
+                                in ["ops", "output", "constant", "get_index"]
+                            ):
+                                if _node.target not in op_type_count:
+                                    op_type_count[_node.target] = 1
+                                else:
+                                    op_type_count[_node.target] += 1
 
-            total_op_count = sum(op_type_count.values())
-            negative_op_count = sum(negative_op_type_count.values())
-            threshold = 0.03
-            if total_op_count > 0 and negative_op_count / total_op_count >= threshold:
-                # Too many non-contiguous load/store/index_expr which hurts the
-                # vectorization performance. Disable vectorization when exceeding
-                # the threshold.
-                return [], []
+                total_op_count = sum(op_type_count.values())
+                negative_op_count = sum(negative_op_type_count.values())
+                threshold = 0.03
+                if (
+                    total_op_count > 0
+                    and negative_op_count / total_op_count >= threshold
+                ):
+                    # Too many non-contiguous load/store/index_expr which hurts the
+                    # vectorization performance. Disable vectorization when exceeding
+                    # the threshold.
+                    return [], []
 
-            if (
-                not reduction_group
-                and group
-                and not has_free_symbols(group[-1])
-                and group[-1] < tiling_factor / 2
-            ):
-                # For case of Multi Thread AMP Static shape of pyhpc_isoneutral_mixing,
-                # the inner dim doesn't have enough elements to do vectorization
-                # explicitly. Found that `#pragma GCC ivdep` has better performance than
-                # `#pragma omp simd simdlen(8)`. Disable vectorization for this case.
-                return [], []
+                if (
+                    not reduction_group
+                    and group
+                    and not has_free_symbols(group[-1])
+                    and group[-1] < tiling_factor / 2
+                ):
+                    # For case of Multi Thread AMP Static shape of pyhpc_isoneutral_mixing,
+                    # the inner dim doesn't have enough elements to do vectorization
+                    # explicitly. Found that `#pragma GCC ivdep` has better performance than
+                    # `#pragma omp simd simdlen(8)`. Disable vectorization for this case.
+                    return [], []
 
             if len(tiling_indices) == 1:
                 return [tiling_factor], tiling_indices
