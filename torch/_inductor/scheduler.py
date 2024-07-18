@@ -1505,7 +1505,11 @@ class Scheduler:
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.logged_slow_fusion: Set[Tuple[str, str]] = set()
         if config._pre_fusion_custom_pass is not None:
-            self.nodes = config._pre_fusion_custom_pass(self.nodes, **{"name_to_fused_node": self.name_to_fused_node, "graph_inputs": V.graph.graph_inputs})
+            self.nodes = config._pre_fusion_custom_pass(
+                self.nodes,
+                name_to_fused_node=self.name_to_fused_node,
+                graph_inputs=V.graph.graph_inputs,
+            )
         self.nodes = self.fuse_nodes(self.nodes)
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:

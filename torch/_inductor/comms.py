@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import heapq
+import operator
 
 import sys
 from collections import defaultdict
@@ -99,17 +100,21 @@ def _schedule_for_comm(
     # When only raise_comms is True, only score_0 and score_2 are considered.
     # When only sink_waits is True, only score_1 and score_2 are considered.
     # When neither is True, the original order is yielded.
-    name_to_snode = {}
     name_to_maybe_grouped_snode = {}
     # maybe grouped node -> scores
     scores_0, scores_1, scores_2 = {}, {}, {}
     for idx, snode in enumerate(snodes):
-        if isinstance(snode, (_inductor.scheduler.FusedSchedulerNode, _inductor.scheduler.GroupedSchedulerNode)):
+        if isinstance(
+            snode,
+            (
+                _inductor.scheduler.FusedSchedulerNode,
+                _inductor.scheduler.GroupedSchedulerNode,
+            ),
+        ):
             for sub_snode in snode.snodes:
                 name_to_maybe_grouped_snode[sub_snode.get_name()] = snode
-        name_to_maybe_grouped_snode[snode.get_name()] = snode
         name = snode.get_name()
-        name_to_snode[name] = snode
+        name_to_maybe_grouped_snode[name] = snode
         scores_0[name] = sys.maxsize
         scores_1[name] = 0
         scores_2[name] = idx
@@ -120,7 +125,9 @@ def _schedule_for_comm(
             scores_0[snode.get_name()] = comm_idx
             for anc in snode.ancestors:
                 maybe_grouped_snode_name = name_to_maybe_grouped_snode[anc].get_name()
-                scores_0[maybe_grouped_snode_name] = min(scores_0[maybe_grouped_snode_name], comm_idx)
+                scores_0[maybe_grouped_snode_name] = min(
+                    scores_0[maybe_grouped_snode_name], comm_idx
+                )
             comm_idx += 1
         elif sink_waits and contains_wait(snode):
             scores_1[snode.get_name()] = 1
@@ -153,25 +160,45 @@ def _schedule_for_comm(
             src_snode = name_to_maybe_grouped_snode[src_name]
             assert src_snode in unmet_deps
             unmet_deps[src_snode] |= {
-                name_to_maybe_grouped_snode[dep.name].get_name() for dep in snode.unmet_dependencies if dep.name != src_name
+                name_to_maybe_grouped_snode[dep.name].get_name()
+                for dep in snode.unmet_dependencies
+                if dep.name != src_name
             }
         assert snode not in unmet_deps
-        unmet_deps[snode] = {name_to_maybe_grouped_snode[dep.name].get_name() for dep in snode.unmet_dependencies}
+        unmet_deps[snode] = {
+            name_to_maybe_grouped_snode[dep.name].get_name()
+            for dep in snode.unmet_dependencies
+        }
+
+    for snode, deps in unmet_deps.items():
+        for dep in list(deps):
+            dep_snode = name_to_maybe_grouped_snode[dep]
+
+            # A node should not depend on itself
+            if dep_snode is snode:
+                unmet_deps[snode].remove(dep)
+
+            # The comm node should not depend on the wait node
+            if contains_collective(snode):
+                if (
+                    contains_wait(dep_snode)
+                    and snode.get_name() in unmet_deps[dep_snode]
+                ):
+                    unmet_deps[snode].remove(dep)
+
+            # No-op node should not be depended on
+            if isinstance(dep_snode, _inductor.scheduler.NopKernelSchedulerNode):
+                unmet_deps[snode].remove(dep)
 
     # Sanity check: deps in unmet_deps should only be grouped nodes, not grouped nodes' constituent nodes.
     # e.g. if bufY depends on bufX1_bufX2, bufY's unmet_deps cannot have bufX1 or bufX2, instead it can only have bufX1_bufX2.
-    for snode in unmet_deps:
-        deps = unmet_deps[snode]
+    for snode, deps in unmet_deps.items():
         for dep in deps:
             maybe_grouped_snode_for_dep = name_to_maybe_grouped_snode[dep]
-            assert not (_inductor.scheduler.is_group_snode(maybe_grouped_snode_for_dep) and dep in maybe_grouped_snode_for_dep.get_names()), \
-                f"dep: {dep}, maybe_grouped_snode_for_dep: {maybe_grouped_snode_for_dep}, maybe_grouped_snode_for_dep.get_names(): {maybe_grouped_snode_for_dep.get_names()}"
-
-    # for snode in unmet_deps:
-    #     if isinstance(snode, _inductor.scheduler.GroupedSchedulerNode):
-    #         for dep_name in list(unmet_deps[snode]):
-    #             if isinstance(name_to_maybe_grouped_snode[dep_name], _inductor.scheduler.NopKernelSchedulerNode) and isinstance(name_to_maybe_grouped_snode[dep_name].node, ir.MutationOutput):
-    #                 unmet_deps[snode].remove(dep_name)
+            assert not (
+                _inductor.scheduler.is_group_snode(maybe_grouped_snode_for_dep)
+                and dep in maybe_grouped_snode_for_dep.get_names()
+            )
 
     ready: List[Runnable] = []
     buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(set)
@@ -190,11 +217,11 @@ def _schedule_for_comm(
         Schedules `snode` and put all unblocked nodes onto the ready queue.
         """
         scheduled.append(snode)
-        for buf_name in snode.get_names():
-            for snode in buffer_users[buf_name]:
-                unmet_deps[snode].remove(buf_name)
-                if len(unmet_deps[snode]) == 0:
-                    heapq.heappush(ready, Runnable(snode))
+        buf_name = snode.get_name()
+        for snode in buffer_users[buf_name]:
+            unmet_deps[snode].remove(buf_name)
+            if len(unmet_deps[snode]) == 0:
+                heapq.heappush(ready, Runnable(snode))
 
     def get_overlapping_candidate():
         """
@@ -237,9 +264,10 @@ def _schedule_for_comm(
             schedule(snode)
 
     for snode, deps in unmet_deps.items():
-        if len(deps) == 1:
-            dep_node = name_to_snode[list(deps)[0]]
-            print(f"dep snode: {dep_node}, unmet_deps[dep_node]: {unmet_deps[dep_node]}" )
+        if len(deps) > 0:
+            torch_log.warning(f"snode: {snode}, deps: {deps}")
+
+    for snode, deps in unmet_deps.items():
         assert len(deps) == 0, (
             "Detected unscheduled nodes. "
             f"Nodes with unmet dependencies: {snode}, deps: {deps}"
@@ -349,6 +377,117 @@ def reorder_compute_and_comm_for_overlap(
     return order
 
 
+def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
+    try:
+        import torch.distributed._composable.fsdp._fsdp_collectives
+
+        assert torch.distributed.is_available()
+        # Assert existence of these ops
+        assert (
+            torch.ops._c10d_functional.all_gather_into_tensor
+            and torch.ops._c10d_functional.all_gather_into_tensor_out
+        )
+    except (ImportError, AttributeError, AssertionError):
+        return
+
+    from .pattern_matcher import (
+        CallFunction,
+        KeywordArg,
+        Match,
+        PatternMatcherPass,
+        register_graph_pattern,
+    )
+
+    """
+    all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(...);
+    getitem = all_gather_copy_in[0];
+    (getitem_1 = all_gather_copy_in[1];)  # optional
+
+    all_gather_into_tensor = torch.ops._c10d_functional.all_gather_into_tensor.default(getitem, ...);
+
+    ->
+
+    all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(...);
+    getitem = all_gather_copy_in[0];
+    getitem_1 = all_gather_copy_in[1];
+
+    all_gather_into_tensor = torch.ops._c10d_functional.all_gather_into_tensor_out.default(getitem, ..., out=getitem_1);
+    """
+
+    def remove_unused_getitem(g):
+        # Remove `getitem_X = all_gather_copy_in[1]` which is never used.
+        node_list = list(g.nodes)
+        for n in node_list:
+            if (
+                n.target == operator.getitem
+                and n.args[0].target is torch.ops.fsdp.all_gather_copy_in.default
+                and n.args[1] == 1
+            ):
+                g.erase_node(n)
+
+    graph_pass = PatternMatcherPass()
+
+    @register_graph_pattern(
+        CallFunction(
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            CallFunction(
+                operator.getitem,
+                CallFunction(
+                    torch.ops.fsdp.all_gather_copy_in.default,
+                    KeywordArg("all_gather_inputs"),
+                    KeywordArg("inp_split_sizes"),
+                    KeywordArg("all_gather_input_numel"),
+                    KeywordArg("world_size"),
+                    KeywordArg("rank"),
+                    KeywordArg("dtype"),
+                    KeywordArg("device"),
+                ),
+                KeywordArg("item_idx"),
+            ),
+            KeywordArg("group_size"),
+            KeywordArg("group_name"),
+        ),
+        pass_dict=graph_pass,
+        extra_check=lambda match: match.kwargs["item_idx"] == 0,
+    )
+    def reinplace_all_gather(match: Match, *args, **kwargs):
+        def repl(
+            *args,
+        ):
+            copy_in_args = args[:-2]
+            group_size = args[-2]
+            group_name = args[-1]
+            all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(
+                *copy_in_args
+            )
+            getitem = all_gather_copy_in[0]
+            getitem_1 = all_gather_copy_in[1]
+            all_gather_into_tensor = (
+                torch.ops._c10d_functional.all_gather_into_tensor_out.default(
+                    getitem, group_size, group_name, out=getitem_1
+                )
+            )
+            return all_gather_into_tensor
+
+        match.replace_by_example(
+            repl,
+            [
+                kwargs["all_gather_inputs"],
+                kwargs["inp_split_sizes"],
+                kwargs["all_gather_input_numel"],
+                kwargs["world_size"],
+                kwargs["rank"],
+                kwargs["dtype"],
+                kwargs["device"],
+                kwargs["group_size"],
+                kwargs["group_name"],
+            ],
+        )
+
+    remove_unused_getitem(graph)
+    graph_pass.apply(graph)  # type: ignore[arg-type]
+
+
 def get_all_reads(snode):
     reads = set()
     reads.update(snode.read_writes.reads)
@@ -390,6 +529,22 @@ def enforce_comm_ordering_for_fsdp(
                 dep_node, collected_node_set, criteria_cb
             )
 
+    def _find_all_recursive_users_of_node_down_to_criteria(
+        snode, collected_node_set, criteria_cb=None
+    ):
+        collected_node_set.add(snode)
+        if criteria_cb and criteria_cb(snode):
+            return
+        for user in snode.users:
+            if user.node.get_name() == "OUTPUT":
+                continue
+            user_node = name_to_fused_node[user.node.get_name()]
+            if user_node in collected_node_set:
+                continue
+            _find_all_recursive_users_of_node_down_to_criteria(
+                user_node, collected_node_set, criteria_cb
+            )
+
     new_order: list[BaseSchedulerNode] = []
     scheduled = set()
     ag_nodes = []
@@ -405,15 +560,12 @@ def enforce_comm_ordering_for_fsdp(
 
     # Create grouped nodes for specific ops
     for snode in snodes:
-        if (
-            isinstance(snode.node, ir.SetSourceTensorKernel)
-            and any(
-                is_fallback_op(
-                    name_to_fused_node[x].node,
-                    op=torch.ops.fsdp.split_with_sizes_copy.default,
-                )
-                for x in snode.ancestors
+        if isinstance(snode.node, ir.SetSourceTensorKernel) and any(
+            is_fallback_op(
+                name_to_fused_node[x].node,
+                op=torch.ops.fsdp.split_with_sizes_copy.default,
             )
+            for x in snode.ancestors
         ):
             # Case 1: Handle AllGather
 
@@ -432,29 +584,19 @@ def enforce_comm_ordering_for_fsdp(
                     wait_node = n
                     break
             ag_wait_op_to_ag_related_ops[wait_node].update(collected_node_set)
-        elif (
-            isinstance(snode.node, ir._WaitKernel)
-            and any(
-                is_fallback_op(
-                    name_to_fused_node[x].node, torch.ops.fsdp.chunk_cat.default
-                )
-                for x in snode.ancestors
-            )
-        ):
+        elif is_fallback_op(snode.node, torch.ops.fsdp.chunk_cat.default):
             # Case 2: Handle ReduceScatter
 
             # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" code block
-            collected_node_set = set()
-            _find_all_recursive_deps_of_node_up_to_criteria(
+            collected_node_set: set[scheduler.BaseSchedulerNode] = set()
+            _find_all_recursive_users_of_node_down_to_criteria(
                 snode,
                 collected_node_set,
-                criteria_cb=lambda snode: is_fallback_op(
-                    snode.node, torch.ops.fsdp.chunk_cat.default
-                ),
             )
+
             # sort nodes by original operation order
             collected_nodes = sorted(
-                collected_node_set, key=lambda x: int(x.get_name()[3:])
+                collected_node_set, key=lambda x: int(x.get_name().split("_")[0][3:])
             )
 
             # Group "reduce_scatter copy-in + reduce_scatter comm" into one GroupedSchedulerNode
