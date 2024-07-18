@@ -333,7 +333,7 @@ def match_coalesced_groups(
             row = []
             i += 1
         title = "Match" if match else "MISMATCH"
-        print(f"{title}\n", tabulate(table))
+        print(f"{title}\n", tabulate(table))  # type: ignore[operator]
 
     # TODO can't verify seq_id bc there might have been valid seq deltas between ranks even within a pg.
     for op_list in all_ops.values():
@@ -505,7 +505,7 @@ def just_print_entries(
         if progress:
             rows.append(row)
 
-    print(tabulate(rows, headers=headers))
+    print(tabulate(rows, headers=headers))  # type: ignore[operator]
 
 
 def build_collectives(
@@ -553,8 +553,8 @@ def build_collectives(
     """
     - it doesn't matter what order I put collectives/ncclops into their table. we can later on re-sort it by start time
     - there could be multiple options for the "first" collective to pair up (rank 0,1 might do a bcast while rank 2,3 do a bcast)
-    - within a group, the first collective must be the same on all ranks in the group, then it can be marked as a collective and removed
-    - iterate
+    - within a group, the first collective must be the same on all ranks in the group, then it can be marked as a
+    collective and removed
     """
     while all_entries:
         # we greedily match collectives, starting arbitrarily with the trace from the first rank
@@ -747,10 +747,11 @@ def build_db(details: Dict[str, Dict[str, Any]], args: argparse.Namespace) -> Da
         entries, _groups, _memberships
     )
     print("built collectives, nccl_calls")
-    # print("Groups\n", tabulate(groups, headers=Group._fields))
-    # print("Memberships\n", tabulate(memberships, headers=Membership._fields))
-    # print("Collectives\n", tabulate(collectives, headers=Collective._fields))
-    # print("NCCLCalls\n", tabulate(nccl_calls, headers=NCCLCall._fields))
+    if args.verbose:
+        print("Groups\n", tabulate(groups, headers=Group._fields))  # type: ignore[operator]
+        print("Memberships\n", tabulate(memberships, headers=Membership._fields))  # type: ignore[operator]
+        print("Collectives\n", tabulate(collectives, headers=Collective._fields))  # type: ignore[operator]
+        print("NCCLCalls\n", tabulate(nccl_calls, headers=NCCLCall._fields))  # type: ignore[operator]
     db = Database(
         tracebacks=tracebacks,
         collectives=collectives,
@@ -767,11 +768,6 @@ def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Any]
         basename.find(prefix) == 0
     ), f"args.prefix ({prefix}) must match the beginning of each filename ({basename})"
     rank = int(basename[len(prefix) :])
-    #     host_name, _, rank = os.path.basename(filename).split("_", 2)
-    # except ValueError:
-    #     _, rank = os.path.basename(filename).split("_", 1)
-    #     host_name = "host0"
-    # rank = int(rank)
     host_name = f"host_rank{rank}"
 
     with open(filename, "rb") as infile:
@@ -818,6 +814,7 @@ def main() -> None:
         default="rank_",
     )
     parser.add_argument("-j", "--just_print_entries", action="store_true")
+    parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
     details = read_dir(args.prefix, args.dir)
