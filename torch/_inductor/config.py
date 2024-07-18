@@ -1260,6 +1260,9 @@ _cache_config_ignore_prefix = [
     "compile_threads",
 ]
 
+# External callable for matmul tuning candidates
+external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
