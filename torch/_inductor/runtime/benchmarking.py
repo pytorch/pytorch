@@ -87,6 +87,7 @@ class Benchmarker:
     def get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear(self) -> Tuple[float, float]:
         counters["inductor"]["benchmarking_get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear"] += 1
         buffer = torch.empty(int(self.L2_cache_size // 4), dtype=torch.int, device="cuda")
+        buffer.zero_()
         torch.cuda.synchronize()
         start_event = torch.cuda.Event(enable_timing=True)
         end_event = torch.cuda.Event(enable_timing=True)
@@ -94,11 +95,11 @@ class Benchmarker:
         start_time = time.perf_counter()
         for _ in range(100):
             buffer.zero_()
-        cpu_launch_overhead = ((time.perf_counter() - start_time) / 1000) / 100
+        cpu_launch_overhead = ((time.perf_counter() - start_time) * 1000) / 100
         end_event.record()
         torch.cuda.synchronize()
         del buffer
-        return cpu_launch_overhead, start_event.elapsed_time(end_event)
+        return cpu_launch_overhead, start_event.elapsed_time(end_event) / 100
     
     @cached_property
     def cpu_launch_overhead_per_gpu_cache_clear(self) -> float:
@@ -156,7 +157,6 @@ class Benchmarker:
     @time_and_log
     def benchmark_gpu(self, _callable: Callable[[], Any], estimation_iters: int = 5, memory_warmup_iters: int = 100, benchmark_iters: int = 100, max_benchmark_duration: int = 25) -> float:        
         counters["inductor"]["benchmarking_benchmark_gpu"] += 1
-        
         self.get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear()
         
         def benchmark(_callable, buffer, iters):
@@ -195,12 +195,11 @@ class Benchmarker:
         
         del buffer
 
-        return timing
+        return min(estimated_timing, timing)
     
     @time_and_log
     def benchmark_many_gpu(self, callables: List[Callable[[], Any]], estimation_iters: int = 5, memory_warmup_iters: int = 100, benchmark_iters: int = 100, max_benchmark_duration: int = 25, ranking_key: Optional[str] = None, pruning_key: Optional[str] = None) -> List[float]:        
-        counters["inductor"]["benchmarking_benchmark_many_gpu"] += 1
-        
+        counters["inductor"]["benchmarking_benchmark_many_gpu"] += 1             
         self.get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear()
         
         def benchmark(callables, buffer, iters):
@@ -283,7 +282,6 @@ class Benchmarker:
 
     def lazy_benchmark(self, fn: Callable[..., Any], fn_args: List[Any], fn_kwargs: Dict[str, Any], **kwargs: Dict[str, Any]) -> LazyBenchmark:
         counters["inductor"]["benchmarking_lazy_benchmark"] += 1
-
         _callable = lambda: fn(*fn_args, **fn_kwargs)
         fn_args_and_kwargs = list(fn_args) + list(fn_kwargs.values())
         if is_cpu_device(fn_args_and_kwargs):
@@ -324,28 +322,20 @@ class Benchmarker:
         return LazyBenchmark(initialize)
 
     def get_reduced_benchmark_iters(self, memory_warmup_iters: int, benchmark_iters: int, cpu_launch_overhead_per_iter: float, gpu_time_per_iter: float, num_callables: int, max_benchmark_duration: int) -> int:
-        # client-prescribed maximum allotted benchmarking duration
         total_allotted_time = num_callables * max_benchmark_duration
-
-        # adjusting benchmarking duration to account for total memory warmup duration (cpu launch overhead + gpu time)
-        memory_warmup_duration = memory_warmup_iters * (self.cpu_launch_overhead_per_gpu_cache_clear + self.gpu_time_per_gpu_cache_clear)
+        memory_warmup_duration = memory_warmup_iters * self.cpu_launch_overhead_per_gpu_cache_clear
         allotted_time_for_benchmark_iters = total_allotted_time - memory_warmup_duration
-
-        # calculate reduced benchmark iters based on remaining allotted time
         time_per_benchmark_iter = cpu_launch_overhead_per_iter + gpu_time_per_iter
         reduced_benchmark_iters = int(allotted_time_for_benchmark_iters / time_per_benchmark_iter)
-
         reduced_benchmark_iters = max(min(benchmark_iters, reduced_benchmark_iters), 1)
         return reduced_benchmark_iters
     
     def get_required_gpu_sleep_cycles(self, memory_warmup_iters: int, benchmark_iters: int, cpu_launch_overhead_per_iter: float) -> int:
-        # calculate the total cpu launch overhead including memory warmup and benchmarking stages
         cpu_launch_overhead_for_memory_warmup = memory_warmup_iters * self.cpu_launch_overhead_per_gpu_cache_clear
         cpu_launch_overhead_for_benchmarking = benchmark_iters * cpu_launch_overhead_per_iter
         total_cpu_launch_overhead = cpu_launch_overhead_for_memory_warmup + cpu_launch_overhead_for_benchmarking
-
-        # calculate required gpu sleep cycles to approximately match the total cpu launch overhead
-        required_gpu_sleep_cycles = int(total_cpu_launch_overhead / self.gpu_time_per_gpu_clock_cycle)
+        target_gpu_sleep_end = total_cpu_launch_overhead - (self.gpu_time_per_gpu_cache_clear * memory_warmup_iters)
+        required_gpu_sleep_cycles = int(target_gpu_sleep_end / self.gpu_time_per_gpu_clock_cycle)
         return required_gpu_sleep_cycles
 
     def get_event_pairs(self, num_pairs: int) -> List[Tuple[torch.cuda.Event, torch.cuda.Event]]:
@@ -366,5 +356,5 @@ class Benchmarker:
     def get_interleaved_min_timings(self, interleaved_event_pairs: List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]]) -> float:
         return [self.get_min_timing(event_pairs) for event_pairs in zip(*interleaved_event_pairs)]
 
-    
+
 benchmarker = Benchmarker()
