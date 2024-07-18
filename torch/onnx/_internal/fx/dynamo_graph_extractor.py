@@ -26,7 +26,7 @@ import torch._dynamo
 import torch.export as torch_export
 import torch.fx
 import torch.onnx
-from torch.onnx._internal import _beartype, exporter, io_adapter
+from torch.onnx._internal import exporter, io_adapter
 from torch.utils import _pytree as pytree
 
 
@@ -53,7 +53,6 @@ class _PyTreeExtensionContext:
         for class_type in self._extensions:
             pytree.SUPPORTED_NODES.pop(class_type)
 
-    @_beartype.beartype
     def register_pytree_node(
         self,
         class_type: Type,
@@ -83,13 +82,11 @@ class _PyTreeExtensionContext:
         except ImportError as e:
             return
 
-        @_beartype.beartype
         def model_output_flatten(
             output: modeling_outputs.ModelOutput,
         ) -> Tuple[List[Any], pytree.Context]:
             return list(output.values()), (type(output), list(output.keys()))
 
-        @_beartype.beartype
         def model_output_unflatten(
             values: List[Any], context: pytree.Context
         ) -> modeling_outputs.ModelOutput:
@@ -108,7 +105,7 @@ class _PyTreeExtensionContext:
 
         for _, class_type in named_model_output_classes:
             self.register_pytree_node(
-                class_type, model_output_flatten, model_output_unflatten
+                class_type, model_output_flatten, model_output_unflatten  # type: ignore[arg-type ]
             )
 
 
@@ -232,7 +229,6 @@ class DynamoExport(exporter.FXGraphExtractor):
 
         return self.pre_export_passes(options, model, graph_module, updated_model_args)  # type: ignore[return-value]
 
-    @_beartype.beartype
     def pre_export_passes(
         self,
         options: exporter.ResolvedExportOptions,
