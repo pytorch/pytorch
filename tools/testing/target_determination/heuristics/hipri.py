@@ -19,7 +19,7 @@ class HiPri(HeuristicInterface):
         super().__init__(**kwargs)
 
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
-        test_ratings = {TestRun(k): 1 for k in self.hi_pri if k in tests}
+        test_ratings = {TestRun(k): 1.0 for k in self.hi_pri if k in tests}
         return TestPrioritizations(
             tests, test_ratings
         )
