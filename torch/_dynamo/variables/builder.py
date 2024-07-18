@@ -1278,9 +1278,7 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            if value.__module__.startswith(
-                ("torch.nn.", "torch.ao.")
-            ) and not value.__module__.startswith("torch.nn.modules.container"):
+            if value.__module__.startswith(("torch.nn.", "torch.ao.")):
                 result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
             else:
                 result = UnspecializedNNModuleVariable(value, source=self.source)
@@ -1488,6 +1486,7 @@ class VariableBuilder:
         # We install TYPE_MATCH guards for traceable wrapper subclass object,
         # and recursively install corresponding guard for each inner attribute.
         if is_traceable_wrapper_subclass(value):
+            self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
             self.install_guards(GuardBuilder.TYPE_MATCH)
             install_guard(
                 SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
