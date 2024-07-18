@@ -197,7 +197,7 @@ This module provides wrappers around GPUDirect Storage (``cufile``) APIs.
 .. py:module:: torch.cuda.comm
 .. py:module:: torch.cuda.error
 .. py:module:: torch.cuda.graphs
-.. py::module:: torch.cuda.gds
+.. py:module:: torch.cuda.gds
 .. py:module:: torch.cuda.jiterator
 .. py:module:: torch.cuda.memory
 .. py:module:: torch.cuda.nccl

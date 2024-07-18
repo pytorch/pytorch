@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_FILESYSTEM_UTF8_ENCODING,
     IS_WINDOWS,
+    TEST_WITH_ROCM,
     parametrize,
     run_tests,
     serialTest,
@@ -4164,11 +4165,6 @@ class TestSerialization(TestCase, SerializationMixin):
             sd_loaded_ref = torch.load(f)
             self.assertEqual(sd_loaded, sd_loaded_ref)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "testing")
-    def test_can_test_gds_in_ci(self):
-        with TemporaryFileName() as f:
-            torch.cuda.GdsFile(f, os.O_RDWR)
-
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)
@@ -4352,6 +4348,34 @@ class TestSubclassSerialization(TestCase):
             self.assertTrue(sd_loaded['t'].a.device == torch.device('cpu'))
             self.assertTrue(sd_loaded['t'].b.device == torch.device('cpu'))
 
+    def test_gds_fails_in_ci(self):
+        if not torch.cuda.is_available() or IS_WINDOWS or TEST_WITH_ROCM:
+            error_msg = "torch._C._gds_register_handle is not supported on this platform"
+        else:
+            error_msg = "cuFileHandleRegister failed"
+        with TemporaryFileName() as f:
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                file = torch.cuda.GdsFile(f, os.O_CREAT | os.O_RDWR)
+
+
+class TestGDS(TestCase):
+    # ran locally
+    def _test_read_write_tensors(self):
+        src1 = torch.randn(1024, device='cuda')
+        src2 = torch.randn(2, 1024, device='cuda')
+        torch.cuda.gds_register_buffer(src1.untyped_storage())
+        torch.cuda.gds_register_buffer(src2.untyped_storage())
+        dest1 = torch.empty(1024, device='cuda')
+        dest2 = torch.empty(2, 1024, device='cuda')
+        # local ext4 mount
+        with TemporaryFileName(dir='./mnt/loopfs/') as f:
+            file = torch.cuda.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            file.save_storage(src1.untyped_storage(), offset=0)
+            file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
+            file.load_storage(dest1.untyped_storage(), offset=0)
+            file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
+        self.assertEqual(src1, dest1)
+        self.assertEqual(src2, dest2)
 
 instantiate_device_type_tests(TestBothSerialization, globals())
 instantiate_parametrized_tests(TestSubclassSerialization)

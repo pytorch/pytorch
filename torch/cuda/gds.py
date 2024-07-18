@@ -65,9 +65,11 @@ class GdsFile:
         self.fd = os.open(filename, flags | os.O_DIRECT)
         self.handle: Optional[int] = None
         self.register_handle()
-    
-    def __del__(self):
+
+    def __del__(self) -> None:
         os.close(self.fd)
+        if self.handle is not None:
+            self.deregister_handle()
 
     def register_handle(self) -> None:
         """Registers file descriptor to cuFile Driver.
