@@ -1012,7 +1012,7 @@ class Pipe(torch.nn.Module):
                     example_kwargs,
                     strict=True,
                     pre_dispatch=False,
-                    )
+                )
         except Exception as e:
             raise RuntimeError(
                 "It seems that we cannot capture your model as a full graph. "
