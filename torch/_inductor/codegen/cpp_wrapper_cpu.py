@@ -1702,7 +1702,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 dtypeview_function = f"aoti_torch_{device_name}_view{dtypeview_suffix}"
                 call_strs.append(
                     f"AOTI_TORCH_ERROR_CODE_CHECK({dtypeview_function}"
-                    "({reinterpret_call}, {get_dtype_function}(), &{tmp_output_name}));"
+                    f"({reinterpret_call}, {get_dtype_function}(), &{tmp_output_name}));"
                 )
                 tmp_RAIIAtenTensorHandle = (
                     f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"

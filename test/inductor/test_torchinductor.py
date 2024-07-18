@@ -10561,6 +10561,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     @fresh_inductor_cache()
+    # We only support dtypeview for abi_conpatible aoti
     @torch._inductor.config.patch(abi_compatible=True)
     def test_dtypeview(self):
         # https://github.com/pytorch/pytorch/issues/126338
