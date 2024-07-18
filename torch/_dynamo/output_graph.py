@@ -1787,6 +1787,7 @@ class SubgraphTracer(fx.Tracer):
         # map's keys give all current placeholder node names and can be used to
         # create unique node names
         self.input_name_to_proxy: Dict[str, fx.Proxy] = {}
+        self.illegal_input_names: Set[str] = set()
         # Node => computed real value (see utils.get_real_value)
         self.real_value_cache: Dict[fx.Node, torch.Tensor] = {}
 
@@ -1870,7 +1871,7 @@ class SubgraphTracer(fx.Tracer):
             new_flat_args = []
             for arg in flat_args:
                 if isinstance(arg, torch.fx.proxy.Proxy):
-                    self.graph._graph_namespace._used_names.add(arg.node.name)
+                    self.illegal_input_names.add(arg.node.name)
             for arg in flat_args:
                 maybe_new_arg = self.maybe_lift_tracked_freevar_to_input(arg)
                 new_flat_args.append(maybe_new_arg)
@@ -2069,10 +2070,10 @@ class SubgraphTracer(fx.Tracer):
                 )
 
         # unique
-        if name in self.input_name_to_proxy:
+        if name in self.input_name_to_proxy or name in self.illegal_input_names:
             for i in itertools.count():
                 candidate_name = f"{name}_{i}"
-                if candidate_name not in self.input_name_to_proxy:
+                if candidate_name not in self.input_name_to_proxy and candidate_name not in self.illegal_input_names:
                     name = candidate_name
                     break
 
