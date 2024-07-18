@@ -25,19 +25,6 @@ from typing import *  # noqa: F403
 # so they can easily be consumed by OpInfo-based tests to check if subsystems
 # support them correctly.
 
-CUSTOM_OPS_VMAP_OUT_DIMS_INPUT_EXAMPLE : Dict[str, Union[Callable, int, Tuple, List]] = {}
-
-def add_vmap_out_dims_example_custom_op(op, out_dims):
-    CUSTOM_OPS_VMAP_OUT_DIMS_INPUT_EXAMPLE[op] = out_dims
-
-def get_vmap_out_dims_example_custom_op(op):
-    """
-    Returns a valid example of out_dim for torch.vmap(op).
-    It's either a callable that takes the inputs of the op or
-    a valid example itself.
-    """
-    return CUSTOM_OPS_VMAP_OUT_DIMS_INPUT_EXAMPLE.get(op, 0)
-
 def to_numpy(tensor):
     return tensor.cpu().numpy()
 
@@ -378,11 +365,6 @@ def numpy_split_copy_with_int_vmap(info, in_dims, x, splits, dim):
     return (result, len_split), ([0 for _ in range(len(result))], None)
 
 numpy_split_copy_with_int.register_vmap(numpy_split_copy_with_int_vmap)
-
-def sample_vmap_out_dim_numpy_split_copy_with_int(x, splits, dim):
-    return [0 for _ in range(len(splits) + 1)], None
-
-add_vmap_out_dims_example_custom_op('NumpySplitCopyWithIntCustomOp', sample_vmap_out_dim_numpy_split_copy_with_int)
 
 @torch.library.custom_op("_torch_testing::numpy_nms", mutates_args=())
 def numpy_nms(boxes: Tensor, scores: Tensor, iou_threshold: Number) -> Tensor:
