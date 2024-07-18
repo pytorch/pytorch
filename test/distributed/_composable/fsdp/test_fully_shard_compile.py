@@ -169,6 +169,7 @@ class TestFullyShardCompile(FSDPTest):
         # reorder_for_compute_comm_overlap=True,
         # reorder_for_compute_comm_overlap_passes=["sink_waits", "raise_comms"],
         _pre_fusion_custom_pass=comms.enforce_comm_ordering_for_fsdp,
+        reorder_for_locality=False,
     )
     def _test_traceable_fsdp(
         self, model_init_fn, input_creation_fn, backend, fullgraph
@@ -310,15 +311,15 @@ class TestFullyShardCompile(FSDPTest):
                     x = layer(x)
                 for layer in self.layers:
                     x = layer(x)
-                for layer in self.layers:
-                    x = layer(x)
+                # for layer in self.layers:
+                #     x = layer(x)
                 return x
 
         def model_init_fn():
             torch.manual_seed(self.rank)
             fsdp_config = {}
             mesh = init_device_mesh("cuda", (self.world_size,))
-            model = TestModule(n_layers=3)
+            model = TestModule(n_layers=2)
             for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(

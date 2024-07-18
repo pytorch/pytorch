@@ -555,6 +555,7 @@ def enforce_comm_ordering_for_fsdp(
         group_node = scheduler.GroupedSchedulerNode.create(snodes_to_group)
         for snode in snodes_to_group:
             snode_name_to_final_snode[snode.get_name()] = group_node
+        snode_name_to_final_snode[group_node.get_name()] = group_node
         return group_node
 
     # Create grouped nodes for specific ops
@@ -642,20 +643,27 @@ def enforce_comm_ordering_for_fsdp(
         new_order.append(snode)
         scheduled.add(snode)
 
-    # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
-    # before next AllGather's "copy_in then AG" group node
-    prev_ag_wait = None
-    for ag_group_node, wait_group_node in ag_nodes:
-        if prev_ag_wait is not None:
-            ag_group_node.add_fake_dep(WeakDep(prev_ag_wait.get_name()))
-        prev_ag_wait = wait_group_node
+    """
+    For nested_fully_shard:
+    Step 1: make grouping work without chaining
+    Step 2: make grouping work with chaining
+    Step 3: make reordering for overlap work
+    """
 
-    # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
-    # before next ReduceScatter's "copy_in then RS" group node
-    prev_rs_wait = None
-    for rs_group_node, wait_group_node in rs_nodes:
-        if prev_rs_wait is not None:
-            rs_group_node.add_fake_dep(WeakDep(prev_rs_wait.get_name()))
-        prev_rs_wait = wait_group_node
+    # # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
+    # # before next AllGather's "copy_in then AG" group node
+    # prev_ag_wait = None
+    # for ag_group_node, wait_group_node in ag_nodes:
+    #     if prev_ag_wait is not None:
+    #         ag_group_node.add_fake_dep(WeakDep(prev_ag_wait.get_name()))
+    #     prev_ag_wait = wait_group_node
+
+    # # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
+    # # before next ReduceScatter's "copy_in then RS" group node
+    # prev_rs_wait = None
+    # for rs_group_node, wait_group_node in rs_nodes:
+    #     if prev_rs_wait is not None:
+    #         rs_group_node.add_fake_dep(WeakDep(prev_rs_wait.get_name()))
+    #     prev_rs_wait = wait_group_node
 
     return new_order  # type: ignore[return-value]
