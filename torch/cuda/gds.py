@@ -80,7 +80,7 @@ class _GdsFile:
         This is a wrapper around ``cuFileHandleRegister``.
         """
         assert (
-            self.handle is not None
+            self.handle is None
         ), "Cannot register a handle that is already registered."
         self.handle = torch._C._gds_register_handle(self.fd)
 
