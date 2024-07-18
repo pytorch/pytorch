@@ -2202,7 +2202,7 @@ def _make_copy_from_view(fn):
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
     aten_fn = getattr(aten, fn.__name__)
-    annotations = fn.__annotations__
+    annotations = getattr(fn, '__annotations__', {})
     fn = out_wrapper()(aten_fn)
 
     @wraps(fn)
@@ -6313,14 +6313,14 @@ geometric_ = _make_inplace(geometric)
 log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
 
-alias_copy = _make_copy_from_view(alias)
-as_strided_copy = _make_copy_from_view(as_strided)
-diagonal_copy = _make_copy_from_view(diagonal)
+alias_copy = _make_copy_from_view(aten.alias)
+as_strided_copy = _make_copy_from_view(aten.as_strided)
+diagonal_copy = _make_copy_from_view(aten.diagonal)
 # TODO: This must return a sparse tensor if the input is sparse, but refs have
 # no sparse support. See narrow_copy_sparse in core.
-narrow_copy = _make_copy_from_view(narrow)
-t_copy = _make_copy_from_view(t)
-view_copy = _make_copy_from_view(view)
+narrow_copy = _make_copy_from_view(aten.narrow)
+t_copy = _make_copy_from_view(aten.t)
+view_copy = _make_copy_from_view(aten.view)
 
 
 # xref: isStorage in torch/csrc/DynamicTypes.cpp
