@@ -1158,7 +1158,7 @@ Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const std:
       input.scalar_type(),
       "masked_softmax",
       [&] {
-        output = at::softmax(input, dim).masked_fill(mask, 0);
+        output = at::softmax(input.masked_fill(mask, -std::numeric_limits<scalar_t>::infinity()), dim);
       });
     return output;
   }
