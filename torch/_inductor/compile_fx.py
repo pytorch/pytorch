@@ -748,7 +748,11 @@ def fx_codegen_and_compile(
         return fd.getvalue()
 
     torch._logging.trace_structured(
-        "fx_graph_runnable",
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "fx_graph_runnable",
+            "encoding": "string",
+        },
         payload_fn=lambda: log_graph_runnable(),
     )
 
