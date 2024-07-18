@@ -1894,16 +1894,16 @@ def forward(self, x):
                 out_graph.cond_true_0.code.strip(),
                 """\
 def forward(self, l_x_):
-    l_x__1 = l_x_
-    add = l_x__1 + l_x__1;  l_x__1 = None
+    l_x__2 = l_x_
+    add = l_x__2 + l_x__2;  l_x__2 = None
     return (add,)""",
             )
             self.assertExpectedInline(
                 out_graph.cond_false_0.code.strip(),
                 """\
 def forward(self, l_x_):
-    l_x__1 = l_x_
-    getitem = l_x__1[slice(None, 2, None)];  l_x__1 = None
+    l_x__2 = l_x_
+    getitem = l_x__2[slice(None, 2, None)];  l_x__2 = None
     return (getitem,)""",
             )
             with self.assertRaisesRegex(
@@ -3947,13 +3947,13 @@ def forward(self, pred, x):
             out_graph.cond_true_0.code.strip(),
             """\
 def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
-    a_1 = a
-    b_1 = b
-    l_x__1 = l_x_
-    add = l_x__1 + l_x__1;  l_x__1 = None
-    cos = a_1.cos();  a_1 = None
+    a_2 = a
+    b_2 = b
+    l_x__2 = l_x_
+    add = l_x__2 + l_x__2;  l_x__2 = None
+    cos = a_2.cos();  a_2 = None
     add_1 = add + cos;  add = cos = None
-    cos_1 = b_1.cos();  b_1 = None
+    cos_1 = b_2.cos();  b_2 = None
     add_2 = add_1 + cos_1;  add_1 = cos_1 = None
     cos_2 = d_true_branch.cos();  d_true_branch = None
     add_3 = add_2 + cos_2;  add_2 = cos_2 = None
@@ -3964,13 +3964,13 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
             out_graph.cond_false_0.code.strip(),
             """\
 def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
-    a_1 = a
-    b_1 = b
-    l_x__1 = l_x_
-    mul = l_x__1 * l_x__1;  l_x__1 = None
-    sin = a_1.sin();  a_1 = None
+    a_2 = a
+    b_2 = b
+    l_x__2 = l_x_
+    mul = l_x__2 * l_x__2;  l_x__2 = None
+    sin = a_2.sin();  a_2 = None
     add = mul + sin;  mul = sin = None
-    sin_1 = b_1.sin();  b_1 = None
+    sin_1 = b_2.sin();  b_2 = None
     add_1 = add + sin_1;  add = sin_1 = None
     sin_2 = c_false_branch.sin();  c_false_branch = None
     add_2 = add_1 + sin_2;  add_1 = sin_2 = None
