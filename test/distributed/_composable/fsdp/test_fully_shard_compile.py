@@ -166,8 +166,8 @@ class TestFullyShardCompile(FSDPTest):
     @torch._functorch.config.patch(recompute_views=True)
     @torch._functorch.config.patch(cse=False)
     @torch._inductor.config.patch(
-        reorder_for_compute_comm_overlap=True,
-        reorder_for_compute_comm_overlap_passes=["sink_waits", "raise_comms"],
+        # reorder_for_compute_comm_overlap=True,
+        # reorder_for_compute_comm_overlap_passes=["sink_waits", "raise_comms"],
         _pre_fusion_custom_pass=comms.enforce_comm_ordering_for_fsdp,
     )
     def _test_traceable_fsdp(
@@ -354,11 +354,29 @@ class TestFullyShardCompile(FSDPTest):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_nested_fully_shard_fullgraph_backend_inductor(self):
-        self._test_traceable_fsdp(
-            *self._create_nested_fully_shard_factory_fns(),
-            "inductor",
-            fullgraph=True,
+        with mock.patch.object(
+            comms,
+            "reinplace_fsdp_all_gather",
+            functools.partial(
+                self._reinplace_all_gather_with_checks,
+                orig_fn=comms.reinplace_fsdp_all_gather,
+            ),
+        ):
+            _, triton_codes = run_and_get_code(
+                lambda: self._test_traceable_fsdp(
+                    *self._create_nested_fully_shard_factory_fns(),
+                    "inductor",
+                    fullgraph=True,
+                )
+            )
+        self.assertTrue(
+            len(triton_codes) == 2,
+            "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
         )
+        for code in triton_codes:
+            FileCheck().check(
+                "torch.ops._c10d_functional.all_gather_into_tensor_out."
+            ).run(code)
 
     def _create_transformer_factory_fns(self):
         seq_len = 16

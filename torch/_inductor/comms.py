@@ -153,7 +153,7 @@ def _schedule_for_comm(
     # TODO(yifu): this is needed due to a mutation handling bug in the
     # scheduler. It should be fixed by https://github.com/pytorch/pytorch/pull/128893.
     # We can remove this logic once the fix is landed.
-    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {}
+    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = defaultdict(set)
     for snode in snodes:
         if isinstance(snode.node, ir.MutationOutput):
             src_name = snode.node.node_doing_mutating.get_name()
@@ -165,10 +165,15 @@ def _schedule_for_comm(
                 if dep.name != src_name
             }
         assert snode not in unmet_deps
-        unmet_deps[snode] = {
-            name_to_maybe_grouped_snode[dep.name].get_name()
-            for dep in snode.unmet_dependencies
-        }
+        for dep in snode.unmet_dependencies:
+            # if dep.name not in name_to_maybe_grouped_snode:
+            #     for sn in snodes:
+            #         torch_log.warning(f"sn: {sn}, sn.node: {sn.node}")
+            unmet_deps[snode].add(name_to_maybe_grouped_snode[dep.name].get_name())
+        # unmet_deps[snode] = {
+        #     name_to_maybe_grouped_snode[dep.name].get_name()
+        #     for dep in snode.unmet_dependencies
+        # }
 
     for snode, deps in unmet_deps.items():
         for dep in list(deps):
@@ -268,6 +273,9 @@ def _schedule_for_comm(
             torch_log.warning(f"snode: {snode}, deps: {deps}")
 
     for snode, deps in unmet_deps.items():
+        if not len(deps) == 0:
+            for sub_sn in snode.snodes:
+                torch_log.warning(f"sub_sn: {sub_sn}, sub_sn.debug_str(): {sub_sn.debug_str()}")
         assert len(deps) == 0, (
             "Detected unscheduled nodes. "
             f"Nodes with unmet dependencies: {snode}, deps: {deps}"
