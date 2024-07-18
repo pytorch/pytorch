@@ -90,6 +90,24 @@ def _clear_safe_globals():
     _marked_safe_globals_list = []
 
 
+def _remove_safe_globals(globals_to_remove: List[Any]):
+    global _marked_safe_globals_list
+    _marked_safe_globals_list = list(
+        set(_marked_safe_globals_list) - set(globals_to_remove)
+    )
+
+
+class _safe_globals:
+    def __init__(self, safe_globals: List[Any]):
+        self.safe_globals = safe_globals
+
+    def __enter__(self):
+        _add_safe_globals(self.safe_globals)
+
+    def __exit__(self, type, value, tb):
+        _remove_safe_globals(self.safe_globals)
+
+
 # Separate from _get_allowed_globals because of the lru_cache on _get_allowed_globals
 # For example if user had a script like
 #   torch.load(file_a)
@@ -210,8 +228,8 @@ class Unpickler:
                 else:
                     raise RuntimeError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
-                        "Please use `torch.serialization.add_safe_globals` to allowlist this global "
-                        "if you trust this class/function."
+                        f"Please use `torch.serialization.add_safe_globals([{name}])` to allowlist "
+                        "this global if you trust this class/function."
                     )
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()

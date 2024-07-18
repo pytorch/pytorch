@@ -288,8 +288,8 @@ def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
     return (
         input.reshape(n, groups, cg, *dhw)
         .transpose(1, 2)
+        .reshape(input.shape)
         .contiguous()
-        .view(input.shape)
     )
 
 
@@ -1133,7 +1133,7 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
         weight = weight[0] if weight.ndim == 1 else weight
     else:
         weight = prims.broadcast_in_dim(
-            weight, a.shape, tuple() if weight.ndim == 0 else (0 if a.ndim == 1 else 1,)
+            weight, a.shape, () if weight.ndim == 0 else (0 if a.ndim == 1 else 1,)
         )
 
     return torch.where(a > 0, a, a * weight)

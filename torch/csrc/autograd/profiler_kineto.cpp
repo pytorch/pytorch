@@ -64,6 +64,7 @@ using torch::profiler::impl::EventType;
 using torch::profiler::impl::ExtraFields;
 using torch::profiler::impl::get_record_concrete_inputs_enabled;
 using torch::profiler::impl::ivalueListToStr;
+using torch::profiler::impl::ivalueToStr;
 using torch::profiler::impl::op_input_t;
 using torch::profiler::impl::ProfilerStateBase;
 using torch::profiler::impl::PyExtraFieldsBase;
@@ -258,6 +259,10 @@ struct AddGenericMetadata : public MetadataBase {
       }
     }
 
+    // Add metadata for kwinputs if exist
+    for (const auto& [key, val] : op_event.kwinputs_) {
+      addMetadata(key, ivalueToStr(val));
+    }
     // Add extra metadata if any
     for (const auto& [key, val] : op_event.extra_meta_) {
       addMetadata(key, val);
@@ -518,6 +523,12 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
   }
 }
 
+struct ProfilerStateInfo {
+  std::shared_ptr<KinetoThreadLocalState> state_ptr;
+  std::unordered_set<at::RecordScope> scopes;
+};
+std::shared_ptr<ProfilerStateInfo> profiler_state_info_ptr{nullptr};
+
 } // namespace
 
 void reportBackendEventToActiveKinetoProfiler(
@@ -650,8 +661,8 @@ void enableProfiler(
       has_cpu || !config.global(),
       "Ondemand profiling must enable CPU tracing");
 
-  KinetoThreadLocalState::push(
-      std::make_shared<KinetoThreadLocalState>(config, activities));
+  auto state_ptr = std::make_shared<KinetoThreadLocalState>(config, activities);
+  KinetoThreadLocalState::push(state_ptr);
 
   if (has_cpu) {
     config.global() ? pushProfilingCallbacks</*global=*/true>(scopes)
@@ -661,9 +672,42 @@ void enableProfiler(
   if (!config.global()) {
     torch::profiler::impl::kineto::startTrace();
   }
+
+  if (has_cpu) {
+    auto state_info_ptr = std::make_shared<ProfilerStateInfo>();
+    state_info_ptr->state_ptr = state_ptr;
+    state_info_ptr->scopes = scopes;
+    profiler_state_info_ptr = state_info_ptr;
+  }
+}
+
+bool isProfilerEnabledInMainThread() {
+  return profiler_state_info_ptr != nullptr;
+}
+
+void enableProfilerInChildThread() {
+  auto state_info_ptr = profiler_state_info_ptr;
+  TORCH_CHECK(state_info_ptr, "Profiler is not enabled in main thread.");
+  TORCH_CHECK(
+      KinetoThreadLocalState::get(/*global=*/false) == nullptr,
+      "Profiler is already enabled in this thread.");
+
+  KinetoThreadLocalState::push(state_info_ptr->state_ptr);
+  pushProfilingCallbacks</*global=*/false>(state_info_ptr->scopes);
+}
+
+void disableProfilerInChildThread() {
+  auto state_ptr = ProfilerStateBase::pop();
+  TORCH_CHECK(
+      state_ptr,
+      "Can't disable Kineto profiler when it's not running in this thread");
+  state_ptr->removeCallback();
 }
 
 std::unique_ptr<ProfilerResult> disableProfiler() {
+  // releasing to inform child threads to stop profiling
+  profiler_state_info_ptr = nullptr;
+
   auto state_ptr = ProfilerStateBase::pop();
   const auto& config = state_ptr->config();
   TORCH_CHECK(
@@ -731,6 +775,7 @@ KinetoEvent::KinetoEvent(
     shapes_ = std::move(arg_data.shapesForKinetoEvent);
     dtypes_ = std::move(arg_data.dtypes);
     concrete_inputs_ = std::move(arg_data.concreteInputs);
+    kwinputs_ = std::move(op.kwinputs_);
   });
 }
 
@@ -762,6 +807,15 @@ bool KinetoEvent::hasConcreteInputs() const {
 
 const c10::ArrayRef<c10::IValue> KinetoEvent::concreteInputs() const {
   return concrete_inputs_;
+}
+
+bool KinetoEvent::hasKwinputs() const {
+  return !kwinputs_.empty();
+}
+
+const std::unordered_map<std::string, c10::IValue> KinetoEvent::kwinputs()
+    const {
+  return kwinputs_;
 }
 
 const c10::ArrayRef<std::string> KinetoEvent::stack() const {

@@ -5,7 +5,6 @@ import unittest
 
 import torch
 import torch.utils._pytree as pytree
-
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
 from torch._higher_order_ops.while_loop import while_loop
@@ -17,7 +16,6 @@ from torch._subclasses.functional_tensor import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
@@ -710,9 +708,9 @@ def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_lin
                 gm.body_fn_0.code.strip(),
                 """\
 def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
-    sub = l_iter_ - 1;  l_iter_ = None
-    linear = torch._C._nn.linear(l_x_, l_self_modules_linear_parameters_weight__body_fn, l_self_modules_linear_parameters_bias__body_fn);  l_x_ = l_self_modules_linear_parameters_weight__body_fn = l_self_modules_linear_parameters_bias__body_fn = None
-    return (sub, linear)""",  # noqa: B950
+    child = l_iter_ - 1;  l_iter_ = None
+    child_1 = torch._C._nn.linear(l_x_, l_self_modules_linear_parameters_weight__body_fn, l_self_modules_linear_parameters_bias__body_fn);  l_x_ = l_self_modules_linear_parameters_weight__body_fn = l_self_modules_linear_parameters_bias__body_fn = None
+    return (child, child_1)""",  # noqa: B950
             )
         else:
             self.assertExpectedInline(
@@ -743,9 +741,9 @@ def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_bo
                 gm.body_fn_0.code.strip(),
                 """\
 def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
-    sub = l_iter_ - 1;  l_iter_ = None
-    linear = torch._C._nn.linear(l_x_, l__self___linear_weight_body_fn, l__self___linear_bias_body_fn);  l_x_ = l__self___linear_weight_body_fn = l__self___linear_bias_body_fn = None
-    return (sub, linear)""",  # noqa: B950
+    child = l_iter_ - 1;  l_iter_ = None
+    child_1 = torch._C._nn.linear(l_x_, l__self___linear_weight_body_fn, l__self___linear_bias_body_fn);  l_x_ = l__self___linear_weight_body_fn = l__self___linear_bias_body_fn = None
+    return (child, child_1)""",  # noqa: B950
             )
 
     def test_while_loop_nested2_traced(self):
@@ -1433,8 +1431,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
+            torch._dynamo.exc.CondOpArgsMismatchError,
+            "Expected to return same number of outputs but got:",
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -1606,8 +1604,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
+            torch._dynamo.exc.CondOpArgsMismatchError,
+            "Expected to return same number of outputs but got:",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -2699,14 +2697,14 @@ def forward(self, arg0_1):
 def forward(self, l_inp_, l_tmp_):
     l_inp__1 = l_inp_
     l_tmp__1 = l_tmp_
-    clone = l_inp__1.clone();  l_inp__1 = None
-    view = clone.view(-1)
-    clone_1 = l_tmp__1.clone();  l_tmp__1 = None
+    a = l_inp__1.clone();  l_inp__1 = None
+    a_view = a.view(-1)
+    tmp = l_tmp__1.clone();  l_tmp__1 = None
     _set_grad_enabled = torch._C._set_grad_enabled(False)
-    set_ = clone.set_(clone_1)
-    mul_ = view.mul_(2);  view = None
+    set_ = a.set_(tmp)
+    mul_ = a_view.mul_(2);  a_view = None
     _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
-    add = clone + clone_1;  clone = clone_1 = None
+    add = a + tmp;  a = tmp = None
     return (add,)
     """,
         )

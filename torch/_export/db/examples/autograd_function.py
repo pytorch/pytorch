@@ -19,5 +19,5 @@ class AutogradFunction(torch.nn.Module):
     def forward(self, x):
         return MyAutogradFunction.apply(x)
 
-example_inputs = (torch.randn(3, 2),)
+example_args = (torch.randn(3, 2),)
 model = AutogradFunction()

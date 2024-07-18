@@ -12,6 +12,6 @@ class ListContains(torch.nn.Module):
         assert "monkey" not in ["cow", "pig"]
         return x + x
 
-example_inputs = (torch.randn(3, 2),)
+example_args = (torch.randn(3, 2),)
 tags = {"torch.dynamic-shape", "python.data-structure", "python.assert"}
 model = ListContains()

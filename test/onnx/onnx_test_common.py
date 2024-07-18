@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+
 import copy
 import dataclasses
 import io
@@ -25,6 +26,7 @@ from typing import (
 )
 
 import numpy as np
+
 import onnxruntime
 import pytest
 import pytorch_test_common
@@ -38,7 +40,6 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
 
-
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
 _InputArgsType = Optional[
@@ -47,7 +48,8 @@ _InputArgsType = Optional[
 _OutputsType = Sequence[_NumericType]
 
 onnx_model_dir = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+    os.path.dirname(os.path.realpath(__file__)),
+    os.pardir,
     "repos",
     "onnx",
     "onnx",
@@ -55,7 +57,11 @@ onnx_model_dir = os.path.join(
     "test",
     "data",
 )
+
+
 pytorch_converted_dir = os.path.join(onnx_model_dir, "pytorch-converted")
+
+
 pytorch_operator_dir = os.path.join(onnx_model_dir, "pytorch-operator")
 
 
@@ -243,6 +249,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 This is needed because Torch Dynamo uses the dynamic_shapes flag as a hint, only.
 
         """
+        from torch._dynamo import config as _dynamo_config
 
         # avoid mutable data structure
         if input_kwargs is None:
@@ -269,7 +276,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             self.model_type
             == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
         ):
-            ref_model = torch.export.export(ref_model, args=ref_input_args)
+            with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
+                ref_model = torch.export.export(ref_model, args=ref_input_args)
             if (
                 self.dynamic_shapes
             ):  # TODO: Support dynamic shapes for torch.export.ExportedProgram
@@ -283,18 +291,19 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         # since ONNX doesn't represent kwargs.
         export_error: Optional[torch.onnx.OnnxExporterError] = None
         try:
-            onnx_program = torch.onnx.dynamo_export(
-                ref_model,
-                *ref_input_args,
-                **ref_input_kwargs,
-                export_options=torch.onnx.ExportOptions(
-                    op_level_debug=self.op_level_debug,
-                    dynamic_shapes=self.dynamic_shapes,
-                    diagnostic_options=torch.onnx.DiagnosticOptions(
-                        verbosity_level=logging.DEBUG
+            with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
+                onnx_program = torch.onnx.dynamo_export(
+                    ref_model,
+                    *ref_input_args,
+                    **ref_input_kwargs,
+                    export_options=torch.onnx.ExportOptions(
+                        op_level_debug=self.op_level_debug,
+                        dynamic_shapes=self.dynamic_shapes,
+                        diagnostic_options=torch.onnx.DiagnosticOptions(
+                            verbosity_level=logging.DEBUG
+                        ),
                     ),
-                ),
-            )
+                )
         except torch.onnx.OnnxExporterError as e:
             export_error = e
             onnx_program = e.onnx_program

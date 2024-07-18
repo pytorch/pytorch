@@ -15,7 +15,6 @@ import torch._dynamo
 import torch._dynamo.testing
 import torch.nn
 import torch.nn.functional as F
-
 from torch.nested._internal.nested_tensor import (
     buffer_from_jagged,
     jagged_from_list,
@@ -57,6 +56,8 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
+from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
+
 
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
@@ -559,16 +560,9 @@ class TestNestedTensor(TestCase):
         nested_namespace_result = torch.nested.to_padded_tensor(nt, 4)
         self.assertEqual(result, nested_namespace_result)
 
-    @parametrize(
-        "layout",
-        [torch.strided, torch.jagged],
-        name_fn=lambda l: f"_with_{layout_name(l)}_layout",
-    )
-    def test_to(self, layout):
+    def test_to(self):
         ntensors = 4
-        nt = random_nt_from_dims(
-            (7, None, 10), torch.device("cpu"), torch.float32, layout=layout
-        )
+        nt = random_nt(torch.device("cpu"), torch.float32, ntensors, (4, 4))
 
         def test_copy_behavior(t, non_blocking=False):
             self.assertIs(t, t.to(t, non_blocking=non_blocking))
@@ -642,15 +636,6 @@ class TestNestedTensor(TestCase):
                     )
                     self.assertIs(torch.int32, nt2.to(dtype=torch.int32).dtype)
                     self.assertEqual(nt2.device, nt2.to(dtype=torch.int32).device)
-
-        # Jagged <-> strided
-        new_layout = torch.jagged if layout == torch.strided else torch.strided
-        new_layout_nt = torch.ops.aten._to_copy(nt, layout=new_layout)
-        self.assertIs(new_layout_nt.layout, new_layout)
-        self.assertEqual(new_layout_nt.device, nt.device)
-        self.assertEqual(new_layout_nt.size(2), nt.size(2))
-        self.assertEqual(new_layout_nt.unbind(), nt.unbind())
-        self.assertNotEqual(new_layout_nt.data_ptr(), nt.data_ptr())
 
     def test_copy_(self):
         ntensors = 4
@@ -3775,7 +3760,11 @@ class TestNestedTensorSubclass(TestCase):
 
     def test_softmax(self, device):
         nt = random_nt_from_dims(
-            [3, None, 5], device=device, dtype=torch.float32, layout=torch.jagged
+            [3, None, 5],
+            device=device,
+            dtype=torch.float32,
+            layout=torch.jagged,
+            requires_grad=True,
         )
 
         # operate on dim=2
@@ -3793,6 +3782,15 @@ class TestNestedTensorSubclass(TestCase):
         output2 = nt.softmax(dim=-1)
         torch._dynamo.disable(self.assertEqual)(output, output2)
         _compare_to_ref(nt, output2, dim=-1)
+
+        def grad_test_func(a, b):
+            nt = torch.nested.as_nested_tensor([a, b], layout=torch.jagged)
+            out = nt.softmax(dim=-1)
+            return out.values()
+
+        a = torch.rand(4, 5, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.rand(8, 5, requires_grad=True, dtype=torch.float64, device=device)
+        gradcheck(grad_test_func, inputs=(a, b), check_batched_grad=False)
 
     def test_views_inherit_ragged_dim(self, device):
         # view
@@ -4027,7 +4025,7 @@ class TestNestedTensorSubclass(TestCase):
             ((2, 3), (3, None), (3, None, 1, 1)),
             ((0, 1, 3), (3,), (1, 1, 3, 1)),
             ((0, 1, 2), (4,), (1, 1, 1, 4)),
-            ((0, 1, 2, 3), tuple(), (1, 1, 1, 1)),
+            ((0, 1, 2, 3), (), (1, 1, 1, 1)),
         )
         for rd, ref_shape_no_keepdim, ref_shape_keepdim in reduce_dims:
             if (0 in rd) ^ (1 in rd):
@@ -4108,7 +4106,19 @@ class TestNestedTensorSubclass(TestCase):
 
     @torch.compiler.disable
     def _validate_nt(
-        self, nt, device, dtype, layout, requires_grad, dim, batch_size, base=None
+        self,
+        nt,
+        device,
+        dtype,
+        layout,
+        requires_grad,
+        dim,
+        batch_size,
+        contiguous,
+        cached_min_seqlen=None,
+        cached_max_seqlen=None,
+        base=None,
+        ref_nt=None,
     ):
         # Validate a bunch of properties after NT construction.
         device = torch.device(device)
@@ -4117,6 +4127,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.dtype, dtype)
         self.assertEqual(nt.layout, layout)
         self.assertEqual(nt.requires_grad, requires_grad)
+        self.assertEqual(nt.is_contiguous(), contiguous)
 
         if layout == torch.jagged:
             self.assertEqual(nt._values.device, device)
@@ -4124,8 +4135,33 @@ class TestNestedTensorSubclass(TestCase):
             self.assertEqual(nt.shape[0], batch_size)
             self.assertTrue(isinstance(nt.shape[1], torch.SymInt))
 
-        if base is not None:
-            self.assertTrue(nt._is_view() and nt._base is base)
+            if base is not None:
+                self.assertTrue(nt._is_view() and nt._base is base)
+                replay_cache = nt._view_func(torch.randn_like(nt._base))._metadata_cache
+                self.assertEqual(
+                    "min_seqlen" in replay_cache, cached_min_seqlen is not None
+                )
+                self.assertEqual(
+                    "max_seqlen" in replay_cache, cached_max_seqlen is not None
+                )
+
+            self.assertEqual(
+                "min_seqlen" in nt._metadata_cache, cached_min_seqlen is not None
+            )
+            self.assertEqual(
+                "max_seqlen" in nt._metadata_cache, cached_max_seqlen is not None
+            )
+
+            if cached_min_seqlen is not None:
+                self.assertEqual(nt._min_seqlen, cached_min_seqlen)
+
+            if cached_max_seqlen is not None:
+                self.assertEqual(nt._max_seqlen, cached_max_seqlen)
+
+        if ref_nt is not None:
+            self.assertEqual(nt.size(0), ref_nt.size(0))
+            for n1, n2 in zip(nt.unbind(), ref_nt.unbind()):
+                self.assertEqual(n1, n2)
 
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
@@ -4146,6 +4182,19 @@ class TestNestedTensorSubclass(TestCase):
 
             expected_dim = torch.as_tensor(tensor_list[0]).dim() + 1
             expected_batch_size = len(tensor_list)
+            expected_contiguous = True
+            expected_min_seqlen = min(
+                [
+                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                    for t in tensor_list
+                ]
+            )
+            expected_max_seqlen = max(
+                [
+                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                    for t in tensor_list
+                ]
+            )
             self._validate_nt(
                 nt,
                 device,
@@ -4154,6 +4203,9 @@ class TestNestedTensorSubclass(TestCase):
                 requires_grad,
                 expected_dim,
                 expected_batch_size,
+                expected_contiguous,
+                expected_min_seqlen,
+                expected_max_seqlen,
             )
 
             # Make sure grads -don't- flow back into original tensors for nested_tensor()
@@ -4179,6 +4231,19 @@ class TestNestedTensorSubclass(TestCase):
             # nt.requires_grad=True should be set if at least one component requires grad
             expected_dim = tensor_list[0].dim() + 1
             expected_batch_size = len(tensor_list)
+            expected_contiguous = True
+            expected_min_seqlen = min(
+                [
+                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                    for t in tensor_list
+                ]
+            )
+            expected_max_seqlen = max(
+                [
+                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                    for t in tensor_list
+                ]
+            )
             self._validate_nt(
                 nt,
                 device,
@@ -4187,6 +4252,9 @@ class TestNestedTensorSubclass(TestCase):
                 components_require_grad,
                 expected_dim,
                 expected_batch_size,
+                expected_contiguous,
+                expected_min_seqlen,
+                expected_max_seqlen,
             )
 
             # Make sure grads flow back into original tensors for as_nested_tensor()
@@ -4211,6 +4279,18 @@ class TestNestedTensorSubclass(TestCase):
 
             expected_dim = torch.as_tensor(tensor_list[0]).dim() + 1
             expected_batch_size = len(tensor_list)
+            expected_min_seqlen = min(
+                [
+                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                    for t in tensor_list
+                ]
+            )
+            expected_max_seqlen = max(
+                [
+                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                    for t in tensor_list
+                ]
+            )
             self._validate_nt(
                 nt,
                 device="cpu",
@@ -4219,6 +4299,9 @@ class TestNestedTensorSubclass(TestCase):
                 requires_grad=False,
                 dim=expected_dim,
                 batch_size=expected_batch_size,
+                contiguous=True,
+                cached_min_seqlen=expected_min_seqlen,
+                cached_max_seqlen=expected_max_seqlen,
             )
             self.assertTrue(nt.is_pinned())
 
@@ -4245,6 +4328,7 @@ class TestNestedTensorSubclass(TestCase):
         expected_dim = values.dim() + 1
         expected_batch_size = offsets.shape[0] - 1
         expected_base = base if values_is_view else values
+        lengths = offsets.diff()
         self._validate_nt(
             nt,
             device,
@@ -4255,6 +4339,10 @@ class TestNestedTensorSubclass(TestCase):
             expected_batch_size,
             # ensure NT is a proper view
             base=expected_base,
+            contiguous=True,
+            # if no min / max are passed, expect the metadata cache to be empty
+            cached_min_seqlen=None,
+            cached_max_seqlen=None,
         )
 
         if requires_grad:
@@ -4269,56 +4357,128 @@ class TestNestedTensorSubclass(TestCase):
             _check_grad(base if values_is_view else values)
 
     @dtypes(torch.float)
-    def test_nested_tensor_from_jagged(self, device, dtype):
-        # construct from (values, offsets)
+    @parametrize("pass_min_max", [False, True])
+    def test_nested_tensor_from_jagged(self, device, dtype, pass_min_max):
+        # === construct from (values, offsets) ===
         values = torch.randn(10, 5, device=device, dtype=dtype)
         offsets = torch.tensor([0, 2, 4, 6, 10], device=device, dtype=torch.int64)
-        nt = torch.nested.nested_tensor_from_jagged(values, offsets=offsets)
-        self.assertTrue(isinstance(nt, NestedTensor))
-        self.assertTrue(nt._is_view() and nt._base is values)
-        self.assertEqual(nt.dim(), 3)
-        self.assertEqual(nt.size(0), offsets.size(0) - 1)
-        self.assertEqual(nt.size(-1), values.size(-1))
-        self.assertIsNone(nt._lengths)
-        self.assertTrue(nt.is_contiguous())
 
-        # construct from (values, offsets, lengths)
-        lengths = torch.tensor([2, 1, 1, 2], device=device)
-        nt = torch.nested.nested_tensor_from_jagged(
-            values, offsets=offsets, lengths=lengths
+        # compute min / max seqlen
+        lengths = offsets.diff()
+        min_seqlen = lengths.min().item()
+        max_seqlen = lengths.max().item()
+
+        if pass_min_max:
+            nt = torch.nested.nested_tensor_from_jagged(
+                values, offsets=offsets, min_seqlen=min_seqlen, max_seqlen=max_seqlen
+            )
+        else:
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets=offsets)
+        self._validate_nt(
+            nt,
+            device,
+            dtype,
+            torch.jagged,
+            requires_grad=False,
+            dim=3,
+            batch_size=4,
+            contiguous=True,
+            cached_min_seqlen=(min_seqlen if pass_min_max else None),
+            cached_max_seqlen=(max_seqlen if pass_min_max else None),
+            base=values,
         )
-        self.assertTrue(isinstance(nt, NestedTensor))
-        self.assertTrue(nt._is_view() and nt._base is values)
-        self.assertEqual(nt.dim(), 3)
-        self.assertEqual(nt.size(0), offsets.size(0) - 1)
-        self.assertEqual(nt.size(-1), values.size(-1))
-        self.assertEqual(nt._lengths, lengths)
-        # when both offsets / lengths are specified, expect non-contiguous
-        self.assertFalse(nt.is_contiguous())
 
-        # construct from (values, lengths)
+        # === construct from (values, offsets, lengths) ===
+        lengths = torch.tensor([2, 1, 1, 2], device=device)
+
+        # compute min / max seqlen
+        min_seqlen = lengths.min().item()
+        max_seqlen = lengths.max().item()
+
+        if pass_min_max:
+            nt = torch.nested.nested_tensor_from_jagged(
+                values,
+                offsets=offsets,
+                lengths=lengths,
+                min_seqlen=min_seqlen,
+                max_seqlen=max_seqlen,
+            )
+        else:
+            nt = torch.nested.nested_tensor_from_jagged(
+                values, offsets=offsets, lengths=lengths
+            )
+
+        # when both offsets / lengths are specified, expect non-contiguous
+        self._validate_nt(
+            nt,
+            device,
+            dtype,
+            torch.jagged,
+            requires_grad=False,
+            dim=3,
+            batch_size=4,
+            contiguous=False,
+            cached_min_seqlen=(min_seqlen if pass_min_max else None),
+            cached_max_seqlen=(max_seqlen if pass_min_max else None),
+            base=values,
+        )
+        self.assertIs(nt.lengths(), lengths)
+
+        # === construct from (values, lengths) ===
         values = torch.randn(14, 5, device=device, dtype=dtype)
         lengths = torch.tensor([2, 3, 4, 5], device=device)
-        nt = torch.nested.nested_tensor_from_jagged(values, lengths=lengths)
-        self.assertTrue(isinstance(nt, NestedTensor))
-        self.assertTrue(nt._is_view() and nt._base is values)
-        self.assertEqual(nt.dim(), 3)
-        self.assertEqual(nt.size(0), lengths.size(0))
-        self.assertEqual(nt.size(-1), values.size(-1))
+
+        # compute min / max seqlen
+        min_seqlen = lengths.min().item()
+        max_seqlen = lengths.max().item()
+
+        if pass_min_max:
+            nt = torch.nested.nested_tensor_from_jagged(
+                values, lengths=lengths, min_seqlen=min_seqlen, max_seqlen=max_seqlen
+            )
+        else:
+            nt = torch.nested.nested_tensor_from_jagged(values, lengths=lengths)
+
         # for now, if only lengths is specified, convert to offsets to integrate best with the
         # existing kernels
         expected_offsets = torch.tensor([0, 2, 5, 9, 14], device=device)
         expected_nt = torch.nested.nested_tensor_from_jagged(
             values, offsets=expected_offsets
         )
-        for n1, n2 in zip(nt.unbind(), expected_nt.unbind()):
-            self.assertEqual(n1, n2)
+        self._validate_nt(
+            nt,
+            device,
+            dtype,
+            torch.jagged,
+            requires_grad=False,
+            dim=3,
+            batch_size=4,
+            contiguous=True,
+            cached_min_seqlen=(min_seqlen if pass_min_max else None),
+            cached_max_seqlen=(max_seqlen if pass_min_max else None),
+            base=values,
+            ref_nt=expected_nt,
+        )
 
         # error case: no offsets or lengths
         with self.assertRaisesRegex(
             RuntimeError, "At least one of offsets or lengths is required"
         ):
             torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
+
+    @onlyCPU
+    def test_nested_tensor_from_jagged_fx_trace(self, device):
+        def fn(x, y):
+            return torch.nested.nested_tensor_from_jagged(x, y)
+
+        def user_unwrapped(x, y):
+            return fn(x, y)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "torch.nested.nested_tensor_from_jagged does not support tracing with fx.symbolic_trace",
+        ):
+            torch.fx.symbolic_trace(user_unwrapped)
 
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("dim", range(5))
@@ -4355,8 +4515,18 @@ class TestNestedTensorSubclass(TestCase):
         nt = torch.nested.as_nested_tensor(t, device=device, dtype=dtype, layout=layout)
         expected_dim = t.dim()
         expected_batch_size = t.size(0)
+        expected_seqlen = t.size(1) if layout == torch.jagged else None
         self._validate_nt(
-            nt, device, dtype, layout, requires_grad, expected_dim, expected_batch_size
+            nt,
+            device,
+            dtype,
+            layout,
+            requires_grad=requires_grad,
+            dim=dim,
+            batch_size=expected_batch_size,
+            contiguous=True,
+            cached_min_seqlen=expected_seqlen,
+            cached_max_seqlen=expected_seqlen,
         )
 
         if torch.device(device) == t.device and dtype == t.dtype and contiguous:
@@ -4374,6 +4544,26 @@ class TestNestedTensorSubclass(TestCase):
             nt, device=device, dtype=dtype, layout=layout
         )
         self.assertTrue(nt is nt2)
+
+        # ensure call with device=None uses input tensor device
+        nt3 = torch.nested.as_nested_tensor(
+            t.to(device=device, dtype=dtype),
+            device=None,
+            dtype=None,
+            layout=layout,
+        )
+        self._validate_nt(
+            nt3,
+            device,
+            dtype,
+            layout,
+            requires_grad=requires_grad,
+            dim=dim,
+            batch_size=expected_batch_size,
+            contiguous=True,
+            cached_min_seqlen=expected_seqlen,
+            cached_max_seqlen=expected_seqlen,
+        )
 
         # we don't support conversion between layouts this way atm
         other_layout = torch.strided if layout == torch.jagged else torch.jagged
@@ -5041,6 +5231,15 @@ class TestNestedTensorSubclass(TestCase):
         d1_grads = torch.autograd.grad(attn_d1.sum(), (q_d1, k_d1, v_d1))
         d2_grads = torch.autograd.grad(attn_d2.sum(), (q_d2, k_d2, v_d2))
 
+        # Simple case 3: batch_size = 1, seq_len = 1
+        q_3 = torch.randn(1, 8, 16, dtype=dtype, device=device)
+        q_nt_3 = torch.nested.as_nested_tensor([q_3], layout=torch.jagged)
+        q_nt_3 = q_nt_3.transpose(1, 2)
+        attn_out = torch.nn.functional.scaled_dot_product_attention(
+            q_nt_3, q_nt_3, q_nt_3
+        )
+        self.assertEqual(attn_out.shape, q_nt_3.shape)
+
         def check_forward_backward():
             attn_nt = torch.nn.functional.scaled_dot_product_attention(
                 q_nt_t, k_nt_t, v_nt_t
@@ -5311,6 +5510,40 @@ class TestNestedTensorSubclass(TestCase):
         output = f(values, offsets)
         output.sum().backward()
         self.assertEqual(values.grad, torch.ones_like(values))
+
+    @skipIfTorchDynamo()
+    def test_nested_tensor_activation_checkpoint(self, device):
+        values = torch.randn(
+            9, 3, 256, requires_grad=True, device=device, dtype=torch.float32
+        )
+        lengths = torch.tensor([1, 2, 3, 3], device=device, dtype=torch.int64)
+        offsets = F.pad(lengths, pad=(1, 0)).cumsum(dim=0)
+
+        def fn(values, offsets):
+            nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
+            return convert_nt_to_jagged(nt).sum()
+
+        checkpoint(fn, values, offsets, use_reentrant=False).backward()
+        self.assertIsNotNone(values.grad)
+
+        context_fn = partial(
+            create_selective_checkpoint_contexts,
+            [
+                torch.ops.aten.cumsum.default,
+            ],
+        )
+
+        values.grad = None
+
+        def fn(values, lengths):
+            offsets = F.pad(lengths, pad=(1, 0)).cumsum(dim=0)
+            nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
+            return convert_nt_to_jagged(nt).sum()
+
+        checkpoint(
+            fn, values, lengths, use_reentrant=False, context_fn=context_fn
+        ).backward()
+        self.assertIsNotNone(values.grad)
 
     # Internally-defined NT use cases are lifted to here for maximum test realism.
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
@@ -5666,40 +5899,6 @@ class TestNestedTensorSubclass(TestCase):
         expected_grad = torch.zeros_like(nt)
         expected_grad.unbind()[1].add_(1.0)
         torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
-
-    def test_layout_conversion(self, device):
-        nt = torch.nested.nested_tensor(
-            [
-                torch.randn(2, 4, device=device),
-                torch.randn(5, 4, device=device),
-                torch.randn(3, 4, device=device),
-            ],
-            layout=torch.jagged,
-        )
-        strided_nt = torch.ops.aten._nested_jagged_to_strided(nt)
-        self.assertEqual(strided_nt.unbind(), nt.unbind())
-        self.assertEqual(strided_nt.data_ptr(), nt.data_ptr())
-
-        jagged_nt = torch.ops.aten._nested_strided_to_jagged(strided_nt)
-        self.assertEqual(jagged_nt.unbind(), nt.unbind())
-        self.assertEqual(jagged_nt.data_ptr(), nt.data_ptr())
-
-    def test_layout_conversion_backward(self, device):
-        nt = torch.nested.nested_tensor(
-            [
-                torch.randn(2, 4, device=device),
-                torch.randn(5, 4, device=device),
-                torch.randn(3, 4, device=device),
-            ],
-            layout=torch.jagged,
-            requires_grad=True,
-        )
-        strided_nt = torch.ops.aten._nested_jagged_to_strided(nt)
-        jagged_nt = torch.ops.aten._nested_strided_to_jagged(strided_nt)
-
-        jagged_nt.backward(torch.ones_like(jagged_nt))
-        expected_grad = torch.ones_like(nt)
-        torch._dynamo.disable(self.assertEqual)(expected_grad, nt.grad)
 
 
 instantiate_parametrized_tests(TestNestedTensor)

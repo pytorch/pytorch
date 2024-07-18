@@ -493,8 +493,8 @@ class Module:
         super().__setattr__ for all other attributes.
         """
         super().__setattr__("training", True)
-        super().__setattr__("_parameters", OrderedDict())
-        super().__setattr__("_buffers", OrderedDict())
+        super().__setattr__("_parameters", {})
+        super().__setattr__("_buffers", {})
         super().__setattr__("_non_persistent_buffers_set", set())
         super().__setattr__("_backward_pre_hooks", OrderedDict())
         super().__setattr__("_backward_hooks", OrderedDict())
@@ -508,7 +508,7 @@ class Module:
         super().__setattr__("_state_dict_pre_hooks", OrderedDict())
         super().__setattr__("_load_state_dict_pre_hooks", OrderedDict())
         super().__setattr__("_load_state_dict_post_hooks", OrderedDict())
-        super().__setattr__("_modules", OrderedDict())
+        super().__setattr__("_modules", {})
 
         if self.call_super_init:
             super().__init__(*args, **kwargs)
@@ -777,8 +777,10 @@ class Module:
 
             mod = getattr(mod, item)
 
-            if type(mod) is not torch.nn.Module:
+            # Use isinstance instead of type here to also handle subclass of nn.Module
+            if not isinstance(mod, torch.nn.Module):
                 raise AttributeError("`" + item + "` is not an nn.Module")
+
         setattr(mod, name, module)
 
     def get_parameter(self, target: str) -> "Parameter":
@@ -2868,7 +2870,7 @@ class Module:
 
         # replicas do not have parameters themselves, the replicas reference the original
         # module.
-        replica._parameters = OrderedDict()
+        replica._parameters = {}
         replica._buffers = replica._buffers.copy()
         replica._modules = replica._modules.copy()
         replica._is_replica = True  # type: ignore[assignment]

@@ -68,7 +68,7 @@ c10::intrusive_ptr<c10::TensorImpl> MPSGeneratorImpl::get_state() const {
   static const size_t total_size = states_size + seed_size;
 
   auto state_tensor = at::detail::empty_cpu(
-      {(int64_t)total_size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
+      {(int64_t)total_size}, ScalarType::Byte, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
   auto rng_state = state_tensor.data_ptr<uint8_t>();
   auto current_seed = this->current_seed();
   memcpy(rng_state, this->data_.state.data(), states_size);

@@ -96,6 +96,7 @@ aten::_efficientzerotensor
 aten::_efficientzerotensor.out
 aten::_embedding_bag
 aten::_embedding_bag.out
+aten::_embedding_bag_backward
 aten::_embedding_bag_dense_backward
 aten::_embedding_bag_dense_backward.out
 aten::_embedding_bag_forward_only
@@ -453,13 +454,7 @@ aten::_nested_get_ragged_idx
 aten::_nested_get_values
 aten::_nested_get_values_copy
 aten::_nested_get_values_copy.out
-aten::_nested_jagged_to_strided
-aten::_nested_jagged_to_strided_copy
-aten::_nested_jagged_to_strided_copy.out
 aten::_nested_select_backward
-aten::_nested_strided_to_jagged
-aten::_nested_strided_to_jagged_copy
-aten::_nested_strided_to_jagged_copy.out
 aten::_nested_sum_backward
 aten::_nested_tensor_from_mask
 aten::_nested_tensor_from_mask.out
@@ -508,6 +503,8 @@ aten::_scaled_dot_product_efficient_attention_backward
 aten::_scaled_dot_product_flash_attention
 aten::_scaled_dot_product_flash_attention_backward
 aten::_scaled_dot_product_flash_attention_for_cpu_backward
+aten::_scaled_dot_product_fused_attention_overrideable
+aten::_scaled_dot_product_fused_attention_overrideable_backward
 aten::_scaled_mm
 aten::_scaled_mm.out
 aten::_segment_reduce_backward
@@ -1107,12 +1104,6 @@ aten::range.out
 aten::range.out_
 aten::range.step
 aten::record_stream
-aten::reflection_pad1d_backward
-aten::reflection_pad1d_backward.grad_input
-aten::reflection_pad2d_backward
-aten::reflection_pad2d_backward.grad_input
-aten::reflection_pad3d_backward
-aten::reflection_pad3d_backward.grad_input
 aten::repeat_interleave.Tensor
 aten::repeat_interleave.Tensor_out
 aten::replication_pad1d_backward
@@ -1169,8 +1160,6 @@ aten::set_.source_Tensor
 aten::slice_copy.Tensor
 aten::slice_copy.Tensor_out
 aten::slice_inverse
-aten::slice_scatter
-aten::slice_scatter.out
 aten::slow_conv3d_forward
 aten::slow_conv3d_forward.output
 aten::slow_conv_dilated2d
