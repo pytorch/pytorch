@@ -3851,6 +3851,31 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         self.assertIs(next(iter(a.users.keys())), output_node)
         m.graph.lint()
 
+    def test_delete_unused_values(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        # disable mutable checking temporarily
+        orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
+        torch.fx.proxy.TracerBase.check_mutable_operations = False
+
+        def fn(a, b, c, d):
+            x = a + b
+            y = c + d
+            y.copy_(x)
+            x = torch.relu(x)
+            return x
+
+        a, b, c, d = [torch.randn(2, 4, requires_grad=False) for _ in range(4)]
+        fx_fn = make_fx(fn)(a, b, c, d)
+        print(fx_fn)
+
+        fx_fn.graph.eliminate_dead_code()
+        py_code = fx_fn.recompile()
+        self.assertTrue("copy_ = torch.ops.aten.copy_.default" in py_code.src)
+        self.assertTrue("copy_ = None" in py_code.src)
+
+        # recorver mutable checking flag
+        torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
