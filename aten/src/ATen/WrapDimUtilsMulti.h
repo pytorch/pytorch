@@ -13,7 +13,7 @@ namespace at {
 
 constexpr size_t dim_bitset_size = 64;
 
-static inline std::bitset<dim_bitset_size> dim_list_to_bitset(
+inline std::bitset<dim_bitset_size> dim_list_to_bitset(
     OptionalIntArrayRef opt_dims,
     size_t ndims) {
   TORCH_CHECK(
