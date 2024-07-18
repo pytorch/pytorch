@@ -29,7 +29,7 @@ import sympy
 import torch
 import torch._logging
 
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
@@ -200,7 +200,11 @@ class IterationRangesRoot(IterationRanges):
         """Figure out vars from this tree used in index"""
         nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
         nodes = [n for n in nodes if n and n.prefix == self.prefix]
-        nodes.sort(key=lambda x: V.graph.sizevars.size_hint(x.divisor))
+        nodes.sort(
+            key=lambda x: V.graph.sizevars.size_hint(
+                x.divisor, fallback=config.unbacked_symint_fallback
+            )
+        )
         divisor = sympy.Integer(1)
         index_vars = []
         sizes = []
@@ -690,7 +694,16 @@ class SIMDKernel(Kernel):
                     replacements = {a: V.graph.sizevars.lookup_precomputed_size(a)}
                     index = sympy_subs(index, replacements)
 
-        return self.codegen_indexing(self.simplify_indexing(index))
+        simp_index = self.simplify_indexing(index)
+
+        # Now that we are done simplifying we can unwrap Identity so that downstream handling
+        # for its contained expression will work. previously, tl.full wrapping of sympy.Integer
+        # would not occur
+        simp_index = (
+            simp_index if not isinstance(simp_index, Identity) else simp_index.args[0]
+        )
+
+        return self.codegen_indexing(simp_index)
 
     def active_range_trees(self, reorder=False):
         trees = [
