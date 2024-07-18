@@ -47,6 +47,9 @@ _side_effectful_functions: Set[Callable] = {
     torch._assert_async,
     _ops.aten._assert_async.msg,
     _ops.aten._assert_scalar.default,
+    _ops.aten.copy_.default,
+    _ops.aten.set_.source_Tensor,
+    _ops.aten.index_put_.default,
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
     _ops.profiler._record_function_enter,
@@ -645,11 +648,9 @@ class Node(_NodeBase):
         if self.op in {"placeholder", "output"}:
             return True
 
-        # Check if an impure function based on schema.
+        # Check if an impure function.
         if self.op == "call_function":
-            schema = getattr(self.target, "_schema", None)
-            schema_mutable = schema is not None and schema.is_mutable
-            return schema_mutable or self.target in _side_effectful_functions
+            return self.target in _side_effectful_functions
 
         # Check if an impure module.
         if self.op == "call_module":
