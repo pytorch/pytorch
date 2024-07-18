@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import functools
+
 import sys
 import unittest
 from typing import Optional
@@ -19,8 +20,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_quantization import _generate_qdq_quantized_model
-from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
 
+from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
 
 try:
     try:
