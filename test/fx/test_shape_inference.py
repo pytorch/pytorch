@@ -7,6 +7,7 @@ from collections import defaultdict
 import torch
 import torch.fx as fx
 from torch._dynamo.source import LocalSource
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.shape_inference.infer_shape import infer_shape
 from torch.fx.experimental.shape_inference.infer_symbol_values import (
     infer_symbol_values,
@@ -108,3 +109,17 @@ class TestShapeInference(unittest.TestCase):
         gm = generate_graph_module(m)
         input_tensors = [torch.randn(1, 1)]
         infer_shape(gm, input_tensors)
+
+    def test_fx_trace_under_real_tensor_mode(self):
+        def true_fn(x):
+            return x.sin()
+
+        def false_fn(x):
+            return x.cos()
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.cond(torch.sum(x) > 1, true_fn, false_fn, (x,))
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            make_fx(M(), tracing_mode="symbolic")(torch.ones(5, 4))
