@@ -679,6 +679,12 @@ class cpp:
         == "1"
     )
 
+    # Disable the tiling select heuristic
+    disable_tiling_select_heuristic_flag = (
+        os.environ.get("TORCHINDUCTOR_CPP_DISABLE_TILING_SELECT_HEURISTIC_FLAG", "0")
+        == "1"
+    )
+
 
 # config specific to codegen/triton.py
 class triton:
