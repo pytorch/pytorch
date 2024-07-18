@@ -2,6 +2,7 @@ import os
 import random
 import sys
 
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from typing import Any, Tuple
@@ -14,7 +15,6 @@ from benchmark_utils import (  # type: ignore[import-not-found]
 )
 
 import torch
-
 from torch._inductor.fx_passes.pad_mm import (  # type: ignore[import-not-found]
     get_alignment_size_dtype,
 )
