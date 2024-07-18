@@ -7,6 +7,7 @@ with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
 import collections
 import contextlib
 import copy
+import dataclasses
 import functools
 import gc
 import inspect
@@ -3524,6 +3525,35 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             gm(torch.zeros(6, 4), torch.tensor(2)),
         )
 
+    def test_dataclass_init_with_default_factory_with_inputs(self):
+        @dataclasses.dataclass
+        class DClass:
+            sharding_contexts: Any = dataclasses.field(default_factory=list)
+            a: int = 1
+
+        def fn(x, inp_list):
+            d = DClass(inp_list)
+            d.sharding_contexts.append(x.sin() + d.a)
+            return d
+
+        x = torch.randn(4)
+        inp_list1 = [1, 2, 3]
+        inp_list2 = [2, 3, 4]
+        inp_list3 = [1, 2]
+        ref1 = fn(x, inp_list1)
+        ref2 = fn(x, inp_list2)
+        ref3 = fn(x, inp_list3)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, fullgraph=True)
+
+        opt_ret1 = opt_fn(x, inp_list1)
+        opt_ret2 = opt_fn(x, inp_list2)
+        opt_ret3 = opt_fn(x, inp_list3)
+        self.assertEqual(ref1.sharding_contexts, opt_ret1.sharding_contexts)
+        self.assertEqual(ref2.sharding_contexts, opt_ret2.sharding_contexts)
+        self.assertEqual(ref3.sharding_contexts, opt_ret3.sharding_contexts)
+
     def test_list_index(self):
         for i, list_type in enumerate(
             (
@@ -4631,8 +4661,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             str(graph.code).strip(),
             """\
 def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
-    s0_1 = s0
-    s1_1 = s1
     l_x_ = L_x_
     getitem_2 = l_x_[0]
     sum_1 = getitem_2.sum();  getitem_2 = None
@@ -5328,6 +5356,27 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         params = {"from": -10, "to": 10}
         tensor = torch.randn([2, 3])
         res = random_op(tensor, params)
+
+    # https://github.com/pytorch/pytorch/issues/128072
+    def test_map_with_multiple_args(self):
+        def f(a, b):
+            return a[0] * b[0] + a[1] * b[1]
+
+        def gen_inps(len_x, len_y):
+            x = [torch.randn(5) for _ in range(len_x)]
+            y = [torch.randn(5) for _ in range(len_y)]
+            return x, y
+
+        def g(x, y):
+            return tuple(map(f, x, y))
+
+        opt_g = torch.compile(g, fullgraph=True, backend="eager")
+
+        inps = gen_inps(3, 3)
+        self.assertEqual(g(*inps), opt_g(*inps))
+
+        inps = gen_inps(3, 5)
+        self.assertEqual(g(*inps), opt_g(*inps))
 
 
 instantiate_parametrized_tests(ReproTests)
