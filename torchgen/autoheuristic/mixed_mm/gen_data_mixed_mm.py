@@ -3,6 +3,7 @@ import os
 import random
 import sys
 
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from typing import Any, Tuple
@@ -14,15 +15,18 @@ from benchmark_utils import (  # type: ignore[import-not-found]
 )
 
 import torch
-
 from torch._inductor.utils import fresh_inductor_cache
 
 
 class BenchmarkRunnerMixedMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimported]
     """
     BenchmarkRunner for mixed mm. Used to generate collect training data with AutoHeuristic to learn a heuristic.
-    We generate inputs where m <=128, and n and k >= 1024. This allows us to learn a heuristic that works well e.g.
-    for gpt-fast.
+    Currently, we are generating inputs with the following restrictions:
+    - m <= 128, and n and k >= 1024 (for these inputs one of the triton kernels wins in most cases)
+    - k % 256 == 0 (if k is not a multiple of the block size, this can have a huge negative impact on performance)
+    - mat1 not transposed
+    - mat2 transposed
+    This allows us to learn a heuristic that works well e.g. for gpt-fast.
     """
 
     def __init__(self) -> None:

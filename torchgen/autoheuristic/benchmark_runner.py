@@ -1,7 +1,6 @@
 import argparse
 import random
 import time
-
 from abc import abstractmethod
 from typing import Any, Tuple
 
@@ -11,6 +10,11 @@ import torch
 
 
 class BenchmarkRunner:
+    """
+    BenchmarkRunner is a base class for all benchmark runners. It provides an interface to run benchmarks in order to
+    collect data with AutoHeuristic.
+    """
+
     def __init__(self, name: str) -> None:
         self.name = name
         self.parser = argparse.ArgumentParser()
