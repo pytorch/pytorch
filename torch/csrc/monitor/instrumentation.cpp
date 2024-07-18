@@ -20,11 +20,12 @@ WaitCounterHandle::WaitCounterHandle(std::string_view key)
   // implement
 }
 
-void WaitCounterHandle::start(std::chrono::steady_clock::time_point now) {
+WaitCounterHandle::WaitGuard WaitCounterHandle::start() {
   // implement
+  return WaitCounterHandle::WaitGuard(*this, 0);
 }
 
-void WaitCounterHandle::stop(std::chrono::steady_clock::time_point now) {
+void WaitCounterHandle::stop(intptr_t) {
   // implement
 }
 

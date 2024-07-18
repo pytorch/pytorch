@@ -10,6 +10,7 @@ import os
 
 import pandas as pd
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parse output files")
     parser.add_argument("--csv", type=str, help="Path to csv file")

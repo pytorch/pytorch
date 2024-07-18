@@ -13,7 +13,7 @@ import torch
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
-from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey
+from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 from .. import config, ir
 from ..utils import _align, ALIGN_BYTES, cache_on_self, sympy_product
 from ..virtualized import V
@@ -2313,6 +2313,10 @@ if (py_{buf_name}.get() == NULL) {{
         elif isinstance(val, (list, tuple)):
             # FIXME: This happens because type_ is not always properly set to torch.ListType
             return f"{{{', '.join(self.val_to_arg_str(x, None) for x in val)}}}"
+        elif isinstance(val, SymTypes):
+            return self.expr_printer(val.node.expr)
+        elif isinstance(val, sympy.Expr):
+            return self.expr_printer(val)
         else:
             return repr(val)
 
