@@ -1918,6 +1918,29 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             else:
                 self.assertEqual(cnts.frame_count, num_submodules)
 
+    @patch.object(torch._dynamo.config, "accumulated_cache_size_limit", 2)
+    def test_recompile_limit_on_freed_module(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        def fn(x, mod):
+            return mod(x)
+
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        opt_mod = torch.compile(fn, backend=cnts)
+        for i in range(8):
+            mod = Mod()
+            opt_mod(torch.randn(5, 5), mod)
+
+        # fn compiles twice, and forward twice
+        # (since forward is inlined when fn is compiled)
+        self.assertEqual(cnts.frame_count, 4)
+
     @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
     def test_inline_inbuilt_nn_modules(self):
         size = (10, 10)
