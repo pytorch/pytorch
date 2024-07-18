@@ -624,8 +624,8 @@ def create_block_mask(
         mod_type == _ModificationType.MASK_MOD
     ), "create-block_mask requires a mask_mod function!"
     inner_func = _create_block_mask_inner
-    M = round_up_to_multiple(M, Q_BLOCK_SIZE)
-    N = round_up_to_multiple(N, KV_BLOCK_SIZE)
+    Q_LEN = round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
+    KV_LEN = round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
     with TransformGetItemToIndex():
@@ -715,11 +715,11 @@ def flex_attention(
     _validate_sdpa_input(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
-    if query.size(-2) >= 32:  # use Attention Kernel
-        if query.size(-2) >= 128 and query.size(-2) % 128 != 0:
-            raise NotImplementedError("NYI: S must be <128 or a multiple of 128")
-    if key.size(-2) % 128 != 0:
-        raise NotImplementedError("NYI: L must be a multiple of 128")
+    # if query.size(-2) >= 32:  # use Attention Kernel
+    #     if query.size(-2) >= 128 and query.size(-2) % 128 != 0:
+    #         raise NotImplementedError("NYI: S must be <128 or a multiple of 128")
+    # if key.size(-2) % 128 != 0:
+    #     raise NotImplementedError("NYI: L must be a multiple of 128")
 
     if score_mod is None:
         score_mod = _identity
