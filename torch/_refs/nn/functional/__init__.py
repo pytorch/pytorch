@@ -272,11 +272,19 @@ def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
     from torch._meta_registrations import device_hint
 
     torch._check(
+        input.dim() > 2,
+        lambda: f"channel_shuffle expects input with > 2 dims, but got input with sizes {list(input.size())}",
+    )
+    c = input.shape[1]
+    torch._check(
         groups > 0,
         lambda: f"Number of groups to divide channels in must be positive. Value of groups:{groups}",
     )
+    torch._check(
+        (c % groups) == 0,
+        lambda: f"Number of channels must be divisible by groups. Got {c} channels and {groups} groups.",
+    )
     n = input.shape[0]
-    c = input.shape[1]
     cg = c // groups
     dhw = input.shape[2:]
 
