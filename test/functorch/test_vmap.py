@@ -12,7 +12,6 @@ import itertools
 import os
 import random
 import types
-import typing
 import unittest
 import warnings
 from collections import namedtuple
@@ -70,10 +69,8 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 
-from torch.testing._internal.custom_op_db import (
-    custom_op_db,
-    get_vmap_out_dims_example_custom_op,
-)
+from torch.testing._internal.custom_op_db import custom_op_db
+
 from torch.utils import _pytree as pytree
 
 FALLBACK_REGEX = "There is a performance drop"
@@ -4025,12 +4022,12 @@ class TestVmapOperatorsOpInfo(TestCase):
                 kwargs = sample_input.kwargs
                 is_batch_norm_and_training = is_batch_norm_training(op.name, kwargs)
                 out_dim = 0
-                if op.name.endswith("CustomOp"):
-                    out_dim_example = get_vmap_out_dims_example_custom_op(op.name)
-                    if isinstance(out_dim_example, typing.Callable):
-                        out_dim = out_dim_example(*args, **kwargs)
-                    else:
-                        out_dim = out_dim_example
+                if op.name == "NumpySplitCopyWithIntCustomOp":
+                    # special case for this custom op
+                    def sample_vmap_out_dim_numpy_split_copy_with_int(x, splits, dim):
+                        return [0 for _ in range(len(splits) + 1)], None
+
+                    out_dim = sample_vmap_out_dim_numpy_split_copy_with_int(*args)
                 for batched_args, in_dims, _ in generate_vmap_inputs(
                     args, {}, is_batch_norm_and_training=is_batch_norm_and_training
                 ):
