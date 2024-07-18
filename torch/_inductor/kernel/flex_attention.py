@@ -214,7 +214,7 @@ flex_attention_template = TritonTemplate(
         order=(1, 0)
     )
     # load q: it stays in SRAM throughout the inner loop.
-    q = tl.load(Q_block_ptr, boundary_check=(0,))
+    q = tl.load(Q_block_ptr)
 
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # We don't know anything "special" about these blocks, so we need to apply
@@ -342,7 +342,7 @@ def forward_inner(
 
     for start_n in range(0, hi):
         # -- load k --
-        k = tl.load(K_block_ptr, boundary_check=(1,))
+        k = tl.load(K_block_ptr)
         # -- compute qk ---
         qk = tl.dot(q, k)
         if not PRESCALE_QK:
@@ -396,7 +396,7 @@ def forward_inner(
         l_i = l_i * alpha + tl.sum(p, 1)
         # # -- scale and update acc --
         acc = acc * alpha[:, None]
-        v = tl.load(V_block_ptr, boundary_check=(0,))
+        v = tl.load(V_block_ptr)
         acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
 
         # -- update m_i

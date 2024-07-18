@@ -1097,16 +1097,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_call(attention)
 
     @supported_platform
-    def test_causal_block_non_multiple(self):
-        def mask_mod(b, h, q, kv):
-            return q >= kv
-
-        block_mask = create_block_mask(mask_mod, 1, 1, S - 1, S - 1)
-        attention = functools.partial(flex_attention, block_mask=block_mask)
-
-        self.run_test_with_call(attention, Q_S=S - 1, KV_S=S - 1)
-
-    @supported_platform
     def test_custom_block_mask_generator(self):
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -1561,6 +1551,29 @@ class GraphModule(torch.nn.Module):
             return full
 """,  # noqa: B950
         )
+
+    @supported_platform
+    def test_nyi_for_non_divisible_seq_lens(self):
+        with self.assertRaisesRegex(
+            NotImplementedError, "NYI: L must be a multiple of 128"
+        ):
+            flex_attention(
+                torch.randn((2, 3, 4)),
+                torch.randn((2, 10, 5)),
+                torch.randn((2, 10, 5)),
+                score_mod=_identity,
+            )
+
+        with self.assertRaisesRegex(
+            NotImplementedError, "NYI: L must be a multiple of 128"
+        ):
+            compiled_flex = torch.compile(flex_attention)
+            compiled_flex(
+                torch.randn((2, 3, 4)),
+                torch.randn((2, 10, 5)),
+                torch.randn((2, 10, 5)),
+                score_mod=_identity,
+            )
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
