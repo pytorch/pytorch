@@ -49,6 +49,8 @@ template <typename T>
 struct Welford {
   T mean = T(0);
   T m2 = T(0);
+  // Use weight for tail cases since the index of each element in the vec may be
+  // different. A single index can not express masked welford reduction.
   T weight = T(0);
   uint64_t index = 0;
 };
