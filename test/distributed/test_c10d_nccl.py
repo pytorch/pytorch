@@ -21,6 +21,7 @@ from unittest import mock, SkipTest
 import torch
 import torch.distributed as c10d
 
+
 if not c10d.is_available() or not c10d.is_nccl_available():
     print("c10d NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -64,6 +65,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -2111,12 +2113,12 @@ class WorkHookTest(MultiProcessTestCase):
         self._spawn_processes()
 
     def tearDown(self):
+        super().tearDown()
         del os.environ["TORCH_NCCL_ENABLE_TIMING"]
         try:
             os.remove(self.file_name)
         except OSError:
             pass
-        super().tearDown()
 
     def _get_store(self):
         return dist.FileStore(self.file_name, self.world_size)
