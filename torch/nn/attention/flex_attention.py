@@ -624,8 +624,8 @@ def create_block_mask(
         mod_type == _ModificationType.MASK_MOD
     ), "create-block_mask requires a mask_mod function!"
     inner_func = _create_block_mask_inner
-    M = round_up_to_multiple(M, Q_BLOCK_SIZE)
-    N = round_up_to_multiple(N, KV_BLOCK_SIZE)
+    Q_LEN = round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
+    KV_LEN = round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
     with TransformGetItemToIndex():
