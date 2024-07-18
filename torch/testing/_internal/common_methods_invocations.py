@@ -16873,14 +16873,21 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
            )),
     OpInfo('view_copy',
-           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            ref=lambda x, newshape: np.reshape(x, newshape).copy(),
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_autograd=True,
            sample_inputs_func=sample_inputs_view_reshape,
-           error_inputs_func=error_inputs_view_reshape),
+           error_inputs_func=error_inputs_view_reshape,
+           skips=(
+               # RuntimeError: view size is not compatible with input tensor's size and stride
+               # (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
+               DecorateInfo(
+                   unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"
+               ),
+           )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
@@ -23912,6 +23919,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.view_as",
         torch_opinfo_name="view_as",
+    ),
+    PythonRefInfo(
+        "_refs.view_copy",
+        torch_opinfo_name="view_copy",
+        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.vstack",
