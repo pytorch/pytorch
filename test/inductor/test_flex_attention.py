@@ -1621,9 +1621,9 @@ class GraphModule(torch.nn.Module):
             NotImplementedError, "NYI: L must be a multiple of 128"
         ):
             flex_attention(
-                torch.randn((2, 3, 4)),
-                torch.randn((2, 10, 5)),
-                torch.randn((2, 10, 5)),
+                torch.randn((1, 2, 3, 4)),
+                torch.randn((1, 2, 10, 5)),
+                torch.randn((1, 2, 10, 5)),
                 score_mod=_identity,
             )
 
@@ -1632,9 +1632,9 @@ class GraphModule(torch.nn.Module):
         ):
             compiled_flex = torch.compile(flex_attention)
             compiled_flex(
-                torch.randn((2, 3, 4)),
-                torch.randn((2, 10, 5)),
-                torch.randn((2, 10, 5)),
+                torch.randn((1, 2, 3, 4)),
+                torch.randn((1, 2, 10, 5)),
+                torch.randn((1, 2, 10, 5)),
                 score_mod=_identity,
             )
 
