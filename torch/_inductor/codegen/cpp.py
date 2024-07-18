@@ -2818,7 +2818,7 @@ class CppTile2DKernel(CppVecKernel):
         src = f"{var} + {cexpr_index(index)}"
         dst = "__place_holder__"
         ld_src = f"{cexpr_index(stride_at_vec_range(index, self.itervars[self.tiling_idx], self.tiling_factor))}"
-        ld_dst = f"{factor}"
+        ld_dst = f"{self.num_elems}"
         if is_store:
             src, dst = dst, src
             ld_src, ld_dst = ld_dst, ld_src
@@ -2843,7 +2843,10 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            define_line = f"{DTYPE_TO_CPP[dtype]} {tile_var}[{factor}*{factor}] __attribute__ ((aligned ({factor})));"
+            define_line = (
+                f"{DTYPE_TO_CPP[dtype]} {tile_var}[{self.outer_num_elems}*{self.inner_num_elems}] "
+                f"__attribute__ ((aligned ({factor})));"
+            )
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
@@ -2865,7 +2868,7 @@ class CppTile2DKernel(CppVecKernel):
                 name, var, index, is_store=False
             )
             # vector load inside the kernel inner loop
-            loadbuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
+            loadbuf = f"{tile_var} + {cexpr_index(inner * self.num_elems)}"
             dtype = V.graph.get_dtype(name)
             line = self._get_vec_load_line(loadbuf, 0, dtype)  # type: ignore[arg-type]
             csevar = self.cse.generate(self.loads, line)
@@ -2890,13 +2893,12 @@ class CppTile2DKernel(CppVecKernel):
                 name, var, index, is_store=True
             )
             # vector store inside the kernel inner loop
-            storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
-            if self.tail_size:
-                line = f"{value}.store({storebuf}, {self.tail_size});"
-            elif V.graph.get_dtype(name) in DTYPE_LOWP_FP:
-                line = f"{value}.store({storebuf}, {self.tiling_factor});"
-            elif V.graph.get_dtype(name) in (torch.uint8, torch.int8):
-                line = f"{value}.store({storebuf}, {self.tiling_factor});"
+            storebuf = f"{tile_var} + {cexpr_index(inner * self.num_elems)}"
+            if self.tail_size or V.graph.get_dtype(name) in DTYPE_LOWP_FP + [
+                torch.uint8,
+                torch.int8,
+            ]:
+                line = f"{value}.store({storebuf}, {self.num_elems});"
             else:
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
