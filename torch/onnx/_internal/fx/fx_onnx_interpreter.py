@@ -16,7 +16,7 @@ from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
 import torch
 import torch.fx
 from torch.onnx import _type_utils as jit_type_utils
-from torch.onnx._internal import _beartype
+
 from torch.onnx._internal.fx import (
     _pass,
     diagnostics,
@@ -27,7 +27,6 @@ from torch.onnx._internal.fx import (
 from torch.utils import _pytree
 
 
-@_beartype.beartype
 def _fx_node_to_onnx_message_formatter(
     fn: Callable,
     self,
@@ -38,7 +37,6 @@ def _fx_node_to_onnx_message_formatter(
     return f"FX Node: {node.op}:{node.target}[name={node.name}]. "
 
 
-@_beartype.beartype
 def _fx_graph_to_onnx_message_formatter(
     fn: Callable,
     self,
@@ -87,7 +85,6 @@ def _location_from_fx_stack_trace(
     return None
 
 
-@_beartype.beartype
 def _retrieve_or_adapt_input_to_graph_set(
     fx_node_arg: fx_type_utils.Argument,
     fx_name_to_onnxscript_value: Dict[
@@ -197,7 +194,7 @@ def _retrieve_or_adapt_input_to_graph_set(
             )
         return sequence_elements
     if isinstance(onnx_tensor, torch.dtype):
-        onnx_tensor = int(
+        onnx_tensor = int(  # type: ignore[call-overload]
             jit_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type()
         )
     # NOTE: if device is specified in kwargs (not consumed), it's free to ignored. But
@@ -229,12 +226,11 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
                 # default case.
                 continue
             else:
-                value = int(jit_type_utils.JitScalarType.from_dtype(value).onnx_type())
+                value = int(jit_type_utils.JitScalarType.from_dtype(value).onnx_type())  # type: ignore[call-overload]
         filtered[key] = value
     return filtered
 
 
-@_beartype.beartype
 def _fill_tensor_shape_type(
     onnxscript_values: Union[
         onnxscript_graph_building.TorchScriptTensor,
@@ -313,7 +309,6 @@ def _fill_tensor_shape_type(
             onnxscript_value.name = name
 
 
-@_beartype.beartype
 def _fill_in_default_kwargs(
     node: torch.fx.Node,
 ) -> Tuple[List[fx_type_utils.Argument], Dict[str, fx_type_utils.Argument]]:
@@ -348,7 +343,6 @@ def _fill_in_default_kwargs(
     return complete_args, complete_kwargs
 
 
-@_beartype.beartype
 def _wrap_fx_args_as_onnxscript_args(
     complete_args: List[fx_type_utils.Argument],
     complete_kwargs: Dict[str, fx_type_utils.Argument],
@@ -411,7 +405,6 @@ class FxOnnxInterpreter:
         # DO NOT add other class-level attributes.
         self.diagnostic_context = diagnostic_context
 
-    @_beartype.beartype
     @diagnostics.diagnose_call(
         diagnostics.rules.fx_node_to_onnx,
         diagnostic_message_formatter=_fx_node_to_onnx_message_formatter,
@@ -493,7 +486,6 @@ class FxOnnxInterpreter:
         else:
             raise RuntimeError(f"Found node type not defined in torch.fx: {node.op}")
 
-    @_beartype.beartype
     @diagnostics.diagnose_call(
         diagnostics.rules.fx_graph_to_onnx,
         diagnostic_message_formatter=_fx_graph_to_onnx_message_formatter,
@@ -589,7 +581,6 @@ class FxOnnxInterpreter:
 
         return onnxscript_graph
 
-    @_beartype.beartype
     def placeholder(
         self,
         node: torch.fx.Node,
@@ -645,7 +636,6 @@ class FxOnnxInterpreter:
 
         fx_name_to_onnxscript_value[node.name] = output
 
-    @_beartype.beartype
     def call_function(
         self,
         node: torch.fx.Node,
@@ -730,7 +720,6 @@ class FxOnnxInterpreter:
             )
         fx_name_to_onnxscript_value[node.name] = output
 
-    @_beartype.beartype
     def output(
         self,
         node: torch.fx.Node,
@@ -757,12 +746,10 @@ class FxOnnxInterpreter:
                 onnx_tensor_or_tensor_tuple = fx_name_to_onnxscript_value[arg.name]
                 onnxscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
 
-    @_beartype.beartype
     def call_method(self, node: torch.fx.Node):
         # TODO(wechi): Support call_method.
         raise RuntimeError("call_method is not supported yet.")
 
-    @_beartype.beartype
     def call_module(
         self,
         node: torch.fx.Node,
@@ -840,7 +827,6 @@ class FxOnnxInterpreter:
 
         # Skip op_level_validation for call_module. Subgraph nodes are validated individually.
 
-    @_beartype.beartype
     def get_attr(
         self,
         node: torch.fx.Node,
