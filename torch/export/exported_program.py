@@ -160,7 +160,7 @@ _AUTOGRAD_ALIAS_BACKEND_KEYS_TO_OVERRIDE = [
 
 
 @contextmanager
-def _override_composite_implicit_decomp(ops_to_preserve):
+def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops that user specified. Ideally we want to not-decompose
     # ALL composite ops but today's C++ functinalization relies on
@@ -170,6 +170,7 @@ def _override_composite_implicit_decomp(ops_to_preserve):
     # functional but not really aka dropout), for these cases, we just decompose.
     saved_tables = {}
     patched_ops = set()
+    removed_decomps = {}
     for op_overload in ops_to_preserve:
         # Our strategy for deciding if we can preserve CIA is following:
         # 1. The op should be known statically that it is functional
@@ -239,6 +240,15 @@ def _override_composite_implicit_decomp(ops_to_preserve):
             op_overload.py_impl(torch._C.DispatchKey.Meta)(
                 functools.partial(_register_cia_to_meta, kernel=op_overload)
             )
+
+        if op_overload in decomp_table:
+            warnings.warn(
+                f"Deleting decomposition registered for operator `{op_overload}`, "
+                "which was sepecified in the `preserve_ops` list."
+            )
+            removed_decomps[op_overload] = decomp_table[op_overload]
+            del decomp_table[op_overload]
+
     try:
         yield
     finally:
@@ -246,6 +256,9 @@ def _override_composite_implicit_decomp(ops_to_preserve):
             op.py_kernels.clear()
             op.py_kernels.update(saved_tables[op])
             op._dispatch_cache.clear()
+
+        for op, decomp in removed_decomps.items():
+            decomp_table[op] = decomp
 
 
 def _rename_without_collisions(
@@ -442,11 +455,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
     from torch._guards import detect_fake_mode
 
     # TODO(zhxhchen17) Return the new graph_signature directly.
-
     fake_mode = detect_fake_mode(fake_args)
     fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode
     with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
-        _preserve_ops
+        _preserve_ops,
+        decomp_table,
     ):
         gm, graph_signature = aot_export_module(
             ep.graph_module,
