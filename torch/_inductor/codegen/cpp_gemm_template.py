@@ -34,15 +34,13 @@ extern "C"
 {
     {{kernel.maybe_codegen_profile()}}
     constexpr int64_t num_threads = {{num_threads}};
-    constexpr int64_t N = {{kernel.size(GemmOut, 1)}};
-    constexpr int64_t K = {{kernel.size(X, 1)}};
+    constexpr int64_t N = {{N}};
+    constexpr int64_t K = {{K}};
     constexpr int64_t M0 = {{micro_gemm.register_blocking.block_m}};
     constexpr int64_t N0 = {{micro_gemm.register_blocking.block_n}};
     constexpr int64_t K0 = {{micro_gemm.register_blocking.block_k}};
     constexpr int64_t N0_blocks = (N + N0 - 1) / N0;
     constexpr int64_t K0_blocks = (K + K0 - 1) / K0;
-
-    static_assert(N % N0 == 0, "N dimension must be multiple of N0");
 
     // TODO(jgong5): improve cache blocking with CPU info (Mc, Kc)
     {%- if is_dynamic_M %}
@@ -103,7 +101,7 @@ extern "C"
             {%- endif %}
             for (int64_t nc = n_block_start; nc < n_block_end; ++nc) {
                 const int64_t n_start = nc * N0;
-                const int64_t n_size = N0;
+                const int64_t n_end = std::min((nc + 1) * N0, N);
                 {%- if use_local_acc %}
                 {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {%- else %}
@@ -121,9 +119,15 @@ extern "C"
                         {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(24, false) }}
                     }
                 }
-                {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
+                {%- if N == PADDED_N %}
+                    {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
+                    {%- set tile_acc = acc %}
+                {%- else %}
+                    {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
+                    {%- set tile_acc = kernel.slice_nd(acc, [(), ("0", "n_end - n_start")]) %}
+                {%- endif %}
                 {{ kernel.store_output(
-                      tile_Y, acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
+                      tile_Y, tile_acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                    )|indent(16, false)
                 }}
             }
@@ -132,6 +136,10 @@ extern "C"
     }
 }
 """
+
+
+def get_padded_n(n, block_n):
+    return (n + block_n - 1) // block_n * block_n
 
 
 class CppPackedGemmTemplate(CppTemplate):
@@ -161,6 +169,7 @@ class CppPackedGemmTemplate(CppTemplate):
         m, n = layout.size
         _, k = input_nodes[0].get_size()
         self.m, self.n, self.k = m, n, k
+        self.padded_n = get_padded_n(n, self.register_blocking.block_n)
         self.is_dynamic_M = has_free_symbols((m,))
 
     @cache_on_self
@@ -308,38 +317,30 @@ class CppPackedGemmTemplate(CppTemplate):
         )
         assert micro_gemm is not None
         _, block_n, _ = micro_gemm.register_blocking
+        padded_n = get_padded_n(n, block_n)
 
         def pack_weight(inputs, layout_or_out):
             W = inputs[1]
             new_inputs = list(inputs)
+            blocked_w: Union[ir.IRNode, torch.Tensor] = W
             if isinstance(W, ir.IRNode):
-                if not isinstance(W, ir.TensorBox):
-                    W = ir.TensorBox(W)
-                k, n = W.get_size()
-                assert (
-                    n % block_n == 0
-                ), f"The last dimension of W must be a multiple of {block_n}."
-                blocked_w = L.permute(
-                    L.view(W, (k, n // block_n, block_n)),
-                    [1, 0, 2],
+                new_size = [padded_n // block_n, k, block_n]
+                blocked_w = ir.Buffer(
+                    W.get_name(),  # Borrow the registered buffer name
+                    ir.FixedLayout(
+                        W.get_device(),
+                        W.get_dtype(),
+                        new_size,
+                        ir.FlexibleLayout.contiguous_strides(new_size),
+                        0,
+                    ),
                 )
-                blocked_w = ir.ExternKernel.realize_input(blocked_w)
-                blocked_w = ir.ExternKernel.require_contiguous(blocked_w)
-                if isinstance(blocked_w, ir.ReinterpretView):
-                    # normalize stride to be "contiguous_strides" per size
-                    # this avoids the problems in L.view during template codegen
-                    assert isinstance(blocked_w.layout, ir.FixedLayout)
-                    blocked_w.layout = ir.FixedLayout(
-                        blocked_w.layout.device,
-                        blocked_w.layout.dtype,
-                        blocked_w.layout.size,
-                        ir.FlexibleLayout.contiguous_strides(blocked_w.layout.size),
-                        blocked_w.layout.offset,
-                    )
             else:
-                k, n = list(W.shape)
                 blocked_w = (
-                    W.reshape(k, n // block_n, block_n).transpose(0, 1).contiguous()
+                    torch.nn.functional.pad(W, (0, padded_n - n))
+                    .reshape(k, padded_n // block_n, block_n)
+                    .transpose(0, 1)
+                    .contiguous()
                 )
                 if micro_gemm.get_b_layout() != LayoutType.NORMAL:
                     layout_str = (
@@ -358,10 +359,12 @@ class CppPackedGemmTemplate(CppTemplate):
                         k % vnni_size == 0
                     ), f"k should be divisible by vnni_size for {layout_str} layout"
                     blocked_w = (
-                        blocked_w.view(n // block_n, k // vnni_size, vnni_size, block_n)
+                        blocked_w.view(
+                            padded_n // block_n, k // vnni_size, vnni_size, block_n
+                        )
                         .transpose(-1, -2)
                         .contiguous()
-                        .view(n // block_n, k, block_n)
+                        .view(padded_n // block_n, k, block_n)
                     )
                 # normalize stride to be "contiguous_strides" per size
                 # this avoids the problems in L.view during template codegen
@@ -539,7 +542,9 @@ class CppPackedGemmTemplate(CppTemplate):
                     )
 
         Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
-        use_local_acc = self.layout.dtype != torch.float or int8_gemm
+        use_local_acc = (
+            self.layout.dtype != torch.float or int8_gemm or self.padded_n != self.n
+        )
         acc_buf_name = "local_acc_buf"
         if epilogue_nodes:
             epilogues.extend(epilogue_nodes)
@@ -595,6 +600,9 @@ class CppPackedGemmTemplate(CppTemplate):
             W=W,
             inp=inp,
             Y=Y,
+            N=self.n,
+            K=self.k,
+            PADDED_N=self.padded_n,
             GemmOut=gemm_output_buffer,
             aliases={alias: Y.get_name() for alias in Y_aliases},
             beta=self.beta,
