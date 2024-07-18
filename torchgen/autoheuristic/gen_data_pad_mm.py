@@ -187,9 +187,10 @@ if __name__ == "__main__":
         help="torch.cuda.set_device(device) will be used",
     )
     parser.add_argument(
-        "--use-heuristic",
-        action="store_true",
-        help="Use learned heuristic instead of collecting data.",
+        "--autoheuristic-mode",
+        type=str,
+        default="COLLECT_DATA",
+        help="COLLECT_DATA to collect Data. USE_HEURISTIC to test heuristic.",
     )
     parser.add_argument(
         "-o",
@@ -205,10 +206,7 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    if args.use_heuristic:
-        torch._inductor.config.autoheuristic_use = "pad_mm"
-    else:
-        torch._inductor.config.autoheuristic_collect = "pad_mm"
+    torch._inductor.config.autoheuristic_mode = args.autoheuristic_mode
     torch._inductor.config.autoheuristic_log_path = args.o
     if args.device is not None:
         torch.cuda.set_device(args.device)
