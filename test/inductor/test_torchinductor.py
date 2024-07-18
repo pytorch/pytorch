@@ -1909,6 +1909,8 @@ class CommonTemplate:
         actual = associative_scan(argmax_combine, (a, idx), 0)
         self.assertEqual(expect, actual)
 
+    @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
+    @skip_if_halide  # scan ops
     def test_custom_scan_would_split(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
