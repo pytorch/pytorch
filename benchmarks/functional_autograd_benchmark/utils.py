@@ -2,8 +2,8 @@ from collections import defaultdict
 from typing import Callable, Dict, List, Tuple, Union
 
 import torch
-
 from torch import nn, Tensor
+
 
 # Type helpers
 InputsType = Union[Tensor, Tuple[Tensor, ...]]
