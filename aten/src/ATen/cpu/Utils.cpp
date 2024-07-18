@@ -106,11 +106,10 @@ static uint32_t get_cache_size(int level) {
 #endif
 }
 
-uint32_t L1_cache_size() {
+uint32_t L1d_cache_size() {
   return get_cache_size(1);
 }
 
-// TODO: duplicated mostly with L1_cache_size
 uint32_t L2_cache_size() {
   return get_cache_size(2);
 }

@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import math
 from typing import Any, Callable, cast, List, Optional, Union
 
 import torch
@@ -237,7 +238,7 @@ class CppPackedGemmTemplate(CppTemplate):
             L2_limit_factor = 0.5
 
             L1_cache_size = (
-                torch._C._cpu._L1_cache_size()
+                torch._C._cpu._L1d_cache_size()
             )  # per core cache size in Bytes
             assert (
                 L1_cache_size > 0
@@ -255,17 +256,12 @@ class CppPackedGemmTemplate(CppTemplate):
 
             size_cache_B = K0 * Kc_blocks * N0 * num_byte
 
-            import math
-
-            def round_down(f):
-                return math.floor(f)
-
             if size_cache_B > B_size_limit:
-                Kc_blocks = round_down(B_size_limit / (K0 * N0 * num_byte))
+                Kc_blocks = math.floor(B_size_limit / (K0 * N0 * num_byte))
 
             size_cache_A = M0 * Mc_blocks * K0 * Kc_blocks * num_byte
             if size_cache_A > A_size_limit:
-                Mc_blocks = round_down(A_size_limit / (M0 * Kc_blocks * K0 * num_byte))
+                Mc_blocks = math.floor(A_size_limit / (M0 * Kc_blocks * K0 * num_byte))
             return Mc_blocks, Kc_blocks
 
         assert (

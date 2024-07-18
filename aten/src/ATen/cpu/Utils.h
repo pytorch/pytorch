@@ -19,7 +19,7 @@ TORCH_API bool is_cpu_support_amx_tile();
 TORCH_API bool init_amx();
 
 // Get the L1 cache size per core in Byte
-TORCH_API uint32_t L1_cache_size();
+TORCH_API uint32_t L1d_cache_size();
 
 // Get the L2 cache size per core in Byte
 TORCH_API uint32_t L2_cache_size();
