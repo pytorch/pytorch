@@ -42,7 +42,9 @@ class B2BGEMMTest(TestCase):
         self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.2, rtol=0.01))
         self.assertTrue("B2B_GEMM_TRITON_ENTRANCE" not in code)
 
-    @unittest.skipIf(not (os.environ.get("DO_PERF_TEST") == "1"), "Perf test not enabled")
+    @unittest.skipIf(
+        not (os.environ.get("DO_PERF_TEST") == "1"), "Perf test not enabled"
+    )
     @torch._dynamo.config.patch(cache_size_limit=32)
     def test_b2b_gemm_performance(self):
         """compare torch.compile(f, b2b_gemm = off) with torch.compile(f, b2b_gemm = on)"""
@@ -50,7 +52,6 @@ class B2BGEMMTest(TestCase):
         def run_with_b2b_gemm_off(
             m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor
         ) -> float:
-
             def f(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
                 return torch.mm(torch.mm(m1, m2), m3)
 
@@ -61,7 +62,6 @@ class B2BGEMMTest(TestCase):
         def run_with_b2b_gemm_on(
             m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor
         ) -> float:
-
             def f(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
                 return torch.mm(torch.mm(m1, m2), m3)
 
