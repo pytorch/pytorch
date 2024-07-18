@@ -76,8 +76,10 @@ class Benchmarker:
     def gpu_time_per_gpu_clock_cycle(self) -> float:
         counters["inductor"]["benchmarking_gpu_time_per_gpu_clock_cycle"] += 1
         start_event = torch.cuda.Event(enable_timing=True)
-        torch.cuda._sleep(1000000)
         end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+        torch.cuda._sleep(1000000)
+        end_event.record()
         torch.cuda.synchronize()
         return start_event.elapsed_time(end_event) / 1000000
 
@@ -87,11 +89,13 @@ class Benchmarker:
         buffer = torch.empty(int(self.L2_cache_size // 4), dtype=torch.int, device="cuda")
         torch.cuda.synchronize()
         start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
         start_time = time.perf_counter()
         for _ in range(100):
             buffer.zero_()
         cpu_launch_overhead = ((time.perf_counter() - start_time) / 1000) / 100
-        end_event = torch.cuda.Event(enable_timing=True)
+        end_event.record()
         torch.cuda.synchronize()
         del buffer
         return cpu_launch_overhead, start_event.elapsed_time(end_event)
