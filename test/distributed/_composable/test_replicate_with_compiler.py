@@ -75,6 +75,7 @@ class MultiProcessInductorTestCase(MultiProcessTestCase, InductorTestCase):
     A version of MultiProcessTestCase that derives from the Inductor TestCase
     to handle isolation of the inductor cache dir.
     """
+
     pass
 
 
