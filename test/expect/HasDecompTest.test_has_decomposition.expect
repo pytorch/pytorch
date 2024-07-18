@@ -1345,10 +1345,6 @@ aten::view_as_complex_copy.out
 aten::view_as_real
 aten::view_as_real_copy
 aten::view_as_real_copy.out
-aten::view_copy
-aten::view_copy.dtype
-aten::view_copy.dtype_out
-aten::view_copy.out
 aten::zeros.names
 aten::zeros.names_out
 aten::zeros.out
