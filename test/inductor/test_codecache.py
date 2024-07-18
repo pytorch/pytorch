@@ -26,7 +26,10 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_device_type import (
+    expectedFailureXPU,
+    largeTensorTest,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -99,6 +102,8 @@ class MyModelConv2d(torch.nn.Module):
 
 @instantiate_parametrized_tests
 class TestFxGraphCache(TestCase):
+    device_type = GPU_TYPE
+
     def setUp(self):
         super().setUp()
         counters.clear()
@@ -437,6 +442,7 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(metrics.generated_kernel_count, 2)
 
+    @expectedFailureXPU
     @requires_gpu()
     @requires_triton()
     @config.patch({"max_autotune": True})
@@ -450,8 +456,8 @@ class TestFxGraphCache(TestCase):
         def fn(a, b):
             return torch.mm(a, b)
 
-        a = torch.rand(8, 32, device="cuda")
-        b = torch.rand(32, 8, device="cuda")
+        a = torch.rand(8, 32, device=GPU_TYPE)
+        b = torch.rand(32, 8, device=GPU_TYPE)
 
         compiled_fn = torch.compile(fn)
 
