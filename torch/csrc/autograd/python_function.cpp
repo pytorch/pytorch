@@ -1193,6 +1193,16 @@ PyObject* THPFunction_maybe_clear_saved_tensors(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_is_retain_graph(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS;
+  if (get_current_graph_task_keep_graph()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 namespace {
 
 THPObjectPtr make_ctx_input_tuple(
@@ -1747,6 +1757,10 @@ static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"_set_sequence_nr", THPFunction_set_sequence_nr, METH_O, nullptr},
     {(char*)"maybe_clear_saved_tensors",
      THPFunction_maybe_clear_saved_tensors,
+     METH_NOARGS,
+     nullptr},
+    {(char*)"is_retain_graph",
+     THPFunction_is_retain_graph,
      METH_NOARGS,
      nullptr},
     {(char*)"apply", THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
