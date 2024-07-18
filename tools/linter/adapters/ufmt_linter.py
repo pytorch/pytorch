@@ -33,6 +33,7 @@ ISORT_SKIPLIST = re.compile(
                     # .github/**
                     # benchmarks/**
                     # functorch/**
+                    "functorch/**",
                     # tools/**
                     # torchgen/**
                     # test/**
