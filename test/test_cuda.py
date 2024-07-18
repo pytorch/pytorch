@@ -5079,6 +5079,8 @@ class TestGDS(TestCase):
             file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
         self.assertEqual(src1, dest1)
         self.assertEqual(src2, dest2)
+        torch.cuda.gds_deregister_buffer(src1.untyped_storage())
+        torch.cuda.gds_deregister_buffer(src2.untyped_storage())
 
 
 instantiate_parametrized_tests(TestCuda)

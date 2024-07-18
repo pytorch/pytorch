@@ -46,9 +46,6 @@ def _gds_deregister_buffer(s: Storage) -> None:
     torch._C._gds_deregister_buffer(s)
 
 
-IS_WINDOWS = sys.platform == "win32"
-
-
 class _GdsFile:
     r"""Wrapper around cuFile.
 
@@ -64,7 +61,7 @@ class _GdsFile:
     """
 
     def __init__(self, filename: str, flags: int):
-        if IS_WINDOWS:
+        if sys.platform == "win32":
             raise RuntimeError("GdsFile is not supported on this platform.")
         self.filename = filename
         self.flags = flags
@@ -81,19 +78,16 @@ class _GdsFile:
         """Registers file descriptor to cuFile Driver.
 
         This is a wrapper around ``cuFileHandleRegister``.
-
-        Args:
-            handle (int): Handle to register.
         """
+        assert (
+            self.handle is not None
+        ), "Cannot register a handle that is already registered."
         self.handle = torch._C._gds_register_handle(self.fd)
 
     def deregister_handle(self) -> None:
         """Deregisters file descriptor from cuFile Driver.
 
         This is a wrapper around ``cuFileHandleDeregister``.
-
-        Args:
-            handle (int): Handle to deregister.
         """
         assert (
             self.handle is not None
@@ -109,7 +103,7 @@ class _GdsFile:
 
         Args:
             storage (Storage): Storage to load data into.
-            offset (int, optional): Offset into the file to start loading from.
+            offset (int, optional): Offset into the file to start loading from. (Default: 0)
         """
         assert (
             self.handle is not None
@@ -124,7 +118,7 @@ class _GdsFile:
 
         Args:
             storage (Storage): Storage to save data from.
-            offset (int, optional): Offset into the file to start saving to.
+            offset (int, optional): Offset into the file to start saving to. (Default: 0)
         """
         assert (
             self.handle is not None
