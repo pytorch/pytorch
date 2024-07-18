@@ -12,13 +12,13 @@ from torch.utils._pytree import tree_map
 from .. import config
 from ..ir import (
     ComputedBuffer,
+    ExternKernel,
     FixedLayout,
     FlexibleLayout,
     InputBuffer,
     StorageBox,
     Subgraph,
     TensorBox,
-    ExternKernel
 )
 from ..lowering import empty, empty_strided, lowerings, register_lowering
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
@@ -109,6 +109,7 @@ def build_subgraph_buffer(
             return tree_map(convert_output_node_to_buffer, node.args[0])
 
     raise ValueError("FlexAttention was passed a subgraph with no output node!")
+
 
 compute_next_offset_func = r"""
 @triton.jit
@@ -238,12 +239,13 @@ flex_attention_template = TritonTemplate(
         block_shape=(BLOCK_N, BLOCK_DMODEL),
         order=(1, 0)
     )
+    offs_n = kv_start + tl.arange(0, BLOCK_N)
 
     acc, l_i, m_i = forward_inner(
         q, K_block_ptr, V_block_ptr,
         acc, l_i, m_i,
-        off_z, off_h, offs_m,
-        kv_start, kv_indices, kv_num_blocks,
+        off_z, off_h, offs_m, offs_n,
+        kv_indices, kv_num_blocks,
         MATMUL_PRECISION,
         {{gen_argdefs()}},
         IS_FULL_BLOCKS=False
@@ -274,12 +276,13 @@ flex_attention_template = TritonTemplate(
             block_shape=(BLOCK_N, BLOCK_DMODEL),
             order=(1, 0)
         )
+        offs_n = kv_start + tl.arange(0, BLOCK_N)
 
         acc, l_i, m_i = forward_inner(
             q, K_block_ptr, V_block_ptr,
             acc, l_i, m_i,
-            off_z, off_h, offs_m,
-            kv_start, kv_indices, kv_num_blocks, 
+            off_z, off_h, offs_m, offs_n,
+            kv_indices, kv_num_blocks,
             MATMUL_PRECISION,
             {{gen_argdefs()}},
             IS_FULL_BLOCKS=True
@@ -313,9 +316,9 @@ def forward_inner(
     # accumulated values
     acc, l_i, m_i,
     # Offsets
-    off_z, off_h, offs_m,
+    off_z, off_h, offs_m, offs_n,
     # blocksparse data
-    kv_start, kv_indices, kv_num_blocks,
+    kv_indices, kv_num_blocks,
     MATMUL_PRECISION,
     {{gen_argdefs()}},
     IS_FULL_BLOCKS,
@@ -326,7 +329,6 @@ def forward_inner(
     SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
 
     # initialize offsets
-    offs_n = kv_start + tl.arange(0, BLOCK_N)
 
     RCP_LN2: tl.constexpr = 1.44269504
 
@@ -407,7 +409,8 @@ def forward_inner(
         offs_n = offs_n + offset
 
     return acc, l_i, m_i
- """ + compute_next_offset_func,
+ """
+    + compute_next_offset_func,
 )
 
 
@@ -860,12 +863,14 @@ flex_attention_backward_template = TritonTemplate(
         kv_start = tl.load(KV_IDX + sparse_kv_idx_offset) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
         sparse_kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
+        offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
+        offs_n2 = kv_start + tl.arange(0, BLOCK_N2)
         dq = bwd_dq_inner(
             dq, q, K, V, do, Di, lse,
-            off_z, off_h, offs_m2, offs_k,
+            off_z, off_h, offs_m2, offs_n2,
             stride_kn, stride_kd, stride_vn, stride_vd,
-            kv_start, kv_indices, sparse_kv_num_blocks, SPARSE_KV_MULTIPLE, SPARSE_KV_BLOCK_SIZE,
-            BLOCK_M2, BLOCK_N2, PRESCALE_QK, SM_SCALE, RCP_LN2, MATMUL_PRECISION,
+            kv_indices, sparse_kv_num_blocks,
+            MATMUL_PRECISION,
             {{gen_argdefs()}},
             IS_FULL_BLOCKS=False
         )
@@ -877,12 +882,14 @@ flex_attention_backward_template = TritonTemplate(
             kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
             sparse_kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
+            offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
+            offs_n2 = kv_start + tl.arange(0, BLOCK_N2)
             dq = bwd_dq_inner(
                 dq, q, K, V, do, Di, lse,
-                off_z, off_h, offs_m2, offs_k,
+                off_z, off_h, offs_m2, offs_n2,
                 stride_kn, stride_kd, stride_vn, stride_vd,
-                kv_start, kv_indices, sparse_kv_num_blocks, SPARSE_KV_MULTIPLE, SPARSE_KV_BLOCK_SIZE,
-                BLOCK_M2, BLOCK_N2, PRESCALE_QK, SM_SCALE, RCP_LN2, MATMUL_PRECISION,
+                kv_indices, sparse_kv_num_blocks,
+                MATMUL_PRECISION,
                 {{gen_argdefs()}},
                 IS_FULL_BLOCKS=True
             )
@@ -924,14 +931,15 @@ flex_attention_backward_template = TritonTemplate(
         q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
         sparse_q_num_blocks = tl.load(Q_NUM_BLKS + sparse_q_num_blks_offset)
 
-        start_m1 = q_start
+        offs_m1 = q_start + tl.arange(0, BLOCK_M1)
+        offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
 
         dk, dv = bwd_dkdv_inner(
             dk, dv, Q, k, v, DO, DELTA, LSE,
-            off_z, off_h, offs_n1, offs_k, start_n1, start_m1,
+            off_z, off_h, offs_n1, offs_m1,
             stride_qm, stride_qd, stride_dom, stride_dod,
-            q_start, q_indices, sparse_q_num_blocks, SPARSE_Q_MULTIPLE, SPARSE_Q_BLOCK_SIZE,
-            BLOCK_M1, BLOCK_N1, PRESCALE_QK, SM_SCALE, RCP_LN2, MATMUL_PRECISION,
+            q_indices, sparse_q_num_blocks,
+            MATMUL_PRECISION,
             {{gen_argdefs()}},
             IS_FULL_BLOCKS=False
         )
@@ -944,14 +952,15 @@ flex_attention_backward_template = TritonTemplate(
             q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
             sparse_q_num_blocks = tl.load(FULL_Q_NUM_BLKS + sparse_q_num_blks_offset)
 
-            start_m1 = q_start
+            offs_m1 = q_start + tl.arange(0, BLOCK_M1)
+            offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
 
             dk, dv = bwd_dkdv_inner(
                 dk, dv, Q, k, v, DO, DELTA, LSE,
-                off_z, off_h, offs_n1, offs_k, start_n1, start_m1,
+                off_z, off_h, offs_n1, offs_m1,
                 stride_qm, stride_qd, stride_dom, stride_dod,
-                q_start, q_indices, sparse_q_num_blocks, SPARSE_Q_MULTIPLE, SPARSE_Q_BLOCK_SIZE,
-                BLOCK_M1, BLOCK_N1, PRESCALE_QK, SM_SCALE, RCP_LN2, MATMUL_PRECISION,
+                q_indices, sparse_q_num_blocks,
+                MATMUL_PRECISION,
                 {{gen_argdefs()}},
                 IS_FULL_BLOCKS=True
             )
@@ -971,28 +980,28 @@ flex_attention_backward_template = TritonTemplate(
 @triton.jit
 def bwd_dq_inner(
     dq, q, K, V, do, Di, lse,
-    off_z, off_h, offs_m2, offs_k,
+    off_z, off_h, offs_m2, offs_n2,
     stride_kn, stride_kd, stride_vn, stride_vd,
-    kv_start, kv_indices, sparse_kv_num_blocks, SPARSE_KV_MULTIPLE, SPARSE_KV_BLOCK_SIZE,
-    BLOCK_M2, BLOCK_N2, PRESCALE_QK, SM_SCALE, RCP_LN2, MATMUL_PRECISION,
+    kv_indices, sparse_kv_num_blocks,
+    MATMUL_PRECISION,
     {{gen_argdefs()}}, IS_FULL_BLOCKS
 ):
+    {{gen_defines() | indent_except_first(1) }}
+    SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N2)
+    RCP_LN2: tl.constexpr = 1.44269504
     Q_LEN = {{size("Q", 2)}}
     KV_LEN = {{size("K", 2)}}
 
-    start_n2 = kv_start
-    offs_n2 = start_n2 + tl.arange(0, BLOCK_N2)
+    offs_k = tl.arange(0, BLOCK_DMODEL)
+
     kT_ptrs = K + offs_n2[None, :] * stride_kn + offs_k[:, None] * stride_kd
     vT_ptrs = V + offs_n2[None, :] * stride_vn + offs_k[:, None] * stride_vd
     # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
 
-    curr_n = start_n2
     hi = sparse_kv_num_blocks * SPARSE_KV_MULTIPLE
     for start_n in range(0, hi):
-        offs_n2 = curr_n + tl.arange(0, BLOCK_N2)
         kT = tl.load(kT_ptrs, mask=offs_n2[None, :] < KV_LEN)
-        vT = tl.load(vT_ptrs, mask=offs_n2[None, :] < KV_LEN)
         qk = tl.dot(q, kT)
         if not PRESCALE_QK:
             qk *= SM_SCALE
@@ -1029,6 +1038,7 @@ def bwd_dq_inner(
             post_mod_scores *= RCP_LN2
         p = tl.math.exp2(post_mod_scores - lse)
         # Compute dP and dS.
+        vT = tl.load(vT_ptrs, mask=offs_n2[None, :] < KV_LEN)
         dp = tl.dot(do, vT)
         ds = p * (dp - Di[:, None])
         # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
@@ -1058,7 +1068,7 @@ def bwd_dq_inner(
         kT_ptrs += offset * stride_kn
         vT_ptrs += offset * stride_vn
 
-        curr_n += offset
+        offs_n2 += offset
 
     return dq
 
@@ -1066,27 +1076,27 @@ def bwd_dq_inner(
 @triton.jit
 def bwd_dkdv_inner(
     dk, dv, Q, k, v, DO, DELTA, LSE,
-    off_z, off_h, offs_n1, offs_k, start_n1, start_m1,
+    off_z, off_h, offs_n1, offs_m1,
     stride_qm, stride_qd, stride_dom, stride_dod,
-    q_start, q_indices, sparse_q_num_blocks, SPARSE_Q_MULTIPLE, SPARSE_Q_BLOCK_SIZE,
-    BLOCK_M1, BLOCK_N1, PRESCALE_QK, SM_SCALE, RCP_LN2, MATMUL_PRECISION,
+    q_indices, sparse_q_num_blocks,
+    MATMUL_PRECISION,
     {{gen_argdefs()}}, IS_FULL_BLOCKS
 ):
+    {{gen_defines() | indent_except_first(1) }}
+    SPARSE_Q_MULTIPLE: tl.constexpr = (SPARSE_Q_BLOCK_SIZE // BLOCK_M1)
+    RCP_LN2: tl.constexpr = 1.44269504
     Q_LEN = {{size("Q", 2)}}
     KV_LEN = {{size("K", 2)}}
 
-    offs_m1 = start_m1 + tl.arange(0, BLOCK_M1)
-    offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
+    offs_k = tl.arange(0, BLOCK_DMODEL)
+
     qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
     do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_k[None, :] * stride_dod
     # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
-
-    curr_m = start_m1
     hi = sparse_q_num_blocks * SPARSE_Q_MULTIPLE
-    for q_start in range(0, hi):
+    for start_m in range(0, hi):
         # Load LSE before computing qk to reduce pipeline stall.
-        offs_m1 = curr_m + tl.arange(0, BLOCK_M1)
 
         qT = tl.load(qT_ptrs, mask=offs_m1[None, :] < Q_LEN)
         lse = tl.load(LSE + offs_m1, mask=offs_m1 < Q_LEN)
@@ -1152,16 +1162,16 @@ def bwd_dkdv_inner(
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
         # Increment pointers.
-        offset = get_offset_for_next_block(q_start, q_indices, sparse_q_num_blocks, SPARSE_Q_MULTIPLE, SPARSE_Q_BLOCK_SIZE, BLOCK_M1)
+        offset = get_offset_for_next_block(start_m, q_indices, sparse_q_num_blocks, SPARSE_Q_BLOCK_SIZE, SPARSE_Q_MULTIPLE, BLOCK_M1)
 
         qT_ptrs += offset * stride_qm
         do_ptrs += offset * stride_dom
 
-        curr_m += offset
+        offs_m1 += offset
 
     return dk, dv
- """ + compute_next_offset_func,
-
+ """
+    + compute_next_offset_func,
 )
 
 

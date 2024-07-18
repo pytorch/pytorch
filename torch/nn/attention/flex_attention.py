@@ -420,8 +420,10 @@ def _broadcast_to_dim(x, dim):
         x = x.unsqueeze(0)
     return x
 
+
 def round_up_to_multiple(x, multiple):
     return (x + multiple - 1) // multiple * multiple
+
 
 def _convert_mask_to_block_mask(
     mask: Tensor,
