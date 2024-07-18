@@ -1143,13 +1143,13 @@ def create_inputs_key(input_nodes):
 
 def create_precompile_key(name: str, inputs_key: str) -> str:
     return ":".join(
-                [
-                    name,
-                    inputs_key,
-                    torch.get_float32_matmul_precision(),
-                ]
-                + [choice.hash_key() for choice in choices]
-            )
+        [
+            name,
+            inputs_key,
+            torch.get_float32_matmul_precision(),
+        ]
+        + [choice.hash_key() for choice in choices]
+    )
 
 
 class AlgorithmSelectorCache(PersistentCache):

@@ -4,7 +4,6 @@ import unittest
 
 import torch
 import torch._inductor.config as inductor_config
-
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristic, LocalFeedback
 from torch._inductor.autoheuristic.autoheuristic_utils import AHContext
 from torch._inductor.runtime.runtime_utils import cache_dir
