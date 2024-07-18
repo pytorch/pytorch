@@ -4392,7 +4392,7 @@ graph():
         inp = (torch.tensor(6), torch.randn(13))
         self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
 
-    @unittest.skip("Test is only supposed to work with non-strict mode")
+    @testing.expectedFailureTrainingIRToRunDecomp
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
