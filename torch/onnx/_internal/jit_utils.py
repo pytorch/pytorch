@@ -13,7 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Un
 import torch
 from torch import _C
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, registration
+from torch.onnx._internal import registration
 
 
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
@@ -43,7 +43,7 @@ class GraphContext:
     block: _C.Block
     opset: int
     original_node: _C.Node
-    params_dict: Dict[str, "_C.IValue"]
+    params_dict: Dict[str, _C.IValue]
     env: Dict[_C.Value, _C.Value]
     values_in_env: Set[_C.Value]
     new_nodes: List[_C.Node] = dataclasses.field(default_factory=list)
@@ -53,7 +53,6 @@ class GraphContext:
     def __getattr__(self, name: str) -> Any:
         return getattr(self.graph, name)
 
-    @_beartype.beartype
     def op(
         self,
         opname: str,
@@ -91,7 +90,6 @@ class GraphContext:
         # FIXME(justinchuby): Add the return type back once we know how to handle mypy
         return _add_op(self, opname, *raw_args, outputs=outputs, **kwargs)
 
-    @_beartype.beartype
     def aten_op(self, operator: str, *args, overload_name: str = "", **kwargs):
         """Generates an ONNX ATen op node.
 
@@ -109,7 +107,6 @@ class GraphContext:
     # We are probably going to remove this only after the fx exporter is established.
     at = aten_op
 
-    @_beartype.beartype
     def onnxscript_op(
         self,
         onnx_fn,
@@ -153,7 +150,6 @@ class GraphContext:
         return _add_op(self, symbolic_name, *raw_args, outputs=outputs, **kwargs)
 
 
-@_beartype.beartype
 def add_op_with_blocks(
     graph_context: GraphContext,
     opname: str,
@@ -201,7 +197,6 @@ def add_op_with_blocks(
     return output_values, tuple(new_contexts), node
 
 
-@_beartype.beartype
 def _add_op(
     graph_context: GraphContext,
     opname: str,
@@ -265,7 +260,6 @@ def _add_op(
     return tuple(node.outputs())
 
 
-@_beartype.beartype
 def _const_if_tensor(graph_context: GraphContext, arg):
     if arg is None:
         return arg
@@ -314,21 +308,18 @@ def _create_node(
     return node
 
 
-@_beartype.beartype
 def _is_onnx_list(value):
     return isinstance(value, Iterable) and not isinstance(
         value, (str, bytes, torch.Tensor)
     )
 
 
-@_beartype.beartype
 def _scalar(x: torch.Tensor):
     """Convert a scalar tensor into a Python value."""
     assert x.numel() == 1
     return x[0]
 
 
-@_beartype.beartype
 def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
     r"""Initializes the right attribute based on type of value."""
     m = _ATTR_PATTERN.match(key)
@@ -345,12 +336,10 @@ def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
 
 
 # TODO: Expose this to user when migrating symbolic helper functions to here.
-@_beartype.beartype
 def _is_tensor(x: _C.Value) -> bool:
     return x.type().isSubtypeOf(_C.TensorType.get())
 
 
-@_beartype.beartype
 def get_device_from_value(value: _C.Value) -> Optional[torch.device]:
     if not _is_tensor(value):
         return None
@@ -358,7 +347,6 @@ def get_device_from_value(value: _C.Value) -> Optional[torch.device]:
     return tensor_type.device()
 
 
-@_beartype.beartype
 def parse_node_kind(kind: str) -> Tuple[str, str]:
     """Parse node kind into domain and Op name."""
     if "::" not in kind:
@@ -369,19 +357,16 @@ def parse_node_kind(kind: str) -> Tuple[str, str]:
     return domain, opname
 
 
-@_beartype.beartype
 def is_aten(domain: str) -> bool:
     """Check if the domain is official."""
     return domain == "aten"
 
 
-@_beartype.beartype
 def is_prim(domain: str) -> bool:
     """Check if the domain is official."""
     return domain == "prim"
 
 
-@_beartype.beartype
 def is_onnx(domain: str) -> bool:
     """Check if the domain is official."""
     return domain == "onnx"
