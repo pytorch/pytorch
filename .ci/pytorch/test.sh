@@ -249,9 +249,7 @@ fi
 # This tests that the debug asserts are working correctly.
 if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
     echo "We are in debug mode: $BUILD_ENVIRONMENT. Expect the python assertion to fail"
-    # TODO: Enable the check after we setup the build to run debug asserts without having
-    #       to do a full (and slow) debug build
-    # (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_debug_asserts_fail(424242)")
+    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_debug_asserts_fail(424242)")
 elif [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
     # Noop when debug is disabled. Skip bazel jobs because torch isn't available there yet.
     echo "We are not in debug mode: $BUILD_ENVIRONMENT. Expect the assertion to pass"
@@ -406,7 +404,7 @@ if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--dynamic-shapes --dynamic-batch-only)
 fi
 
-if [[ "${TEST_CONFIG}" == *cpu_inductor* ]]; then
+if [[ "${TEST_CONFIG}" == *cpu_inductor* || "${TEST_CONFIG}" == *cpu_aot_inductor* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--device cpu)
 else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
@@ -531,9 +529,10 @@ test_single_dynamo_benchmark() {
     test_perf_for_dashboard "$suite" \
       "${DYNAMO_BENCHMARK_FLAGS[@]}" "$@" "${partition_flags[@]}"
   else
-    if [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
+    if [[ "${TEST_CONFIG}" == *aot_inductor* && "${TEST_CONFIG}" != *cpu_aot_inductor* ]]; then
       # Test AOTInductor with the ABI-compatible mode on CI
       # This can be removed once the ABI-compatible mode becomes default.
+      # For CPU device, we perfer non ABI-compatible mode on CI when testing AOTInductor.
       export TORCHINDUCTOR_ABI_COMPATIBLE=1
     fi
     python "benchmarks/dynamo/$suite.py" \
@@ -574,7 +573,7 @@ test_dynamo_benchmark() {
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
   else
-    if [[ "${TEST_CONFIG}" == *cpu_inductor* ]]; then
+    if [[ "${TEST_CONFIG}" == *cpu_inductor* || "${TEST_CONFIG}" == *cpu_aot_inductor* ]]; then
       local dt="float32"
       if [[ "${TEST_CONFIG}" == *amp* ]]; then
         dt="amp"
@@ -1267,7 +1266,7 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
-  if [[ "${TEST_CONFIG}" == *cpu_inductor* ]]; then
+  if [[ "${TEST_CONFIG}" == *cpu_inductor* || "${TEST_CONFIG}" == *cpu_aot_inductor* ]]; then
     install_torchaudio cpu
   else
     install_torchaudio cuda
@@ -1293,7 +1292,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     checkout_install_torchbench
     # Do this after checkout_install_torchbench to ensure we clobber any
     # nightlies that torchbench may pull in
-    if [[ "${TEST_CONFIG}" != *cpu_inductor* ]]; then
+    if [[ "${TEST_CONFIG}" != *cpu_inductor* && "${TEST_CONFIG}" != *cpu_aot_inductor* ]]; then
       install_torchrec_and_fbgemm
     fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
@@ -1301,21 +1300,19 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper_abi_compatible* ]]; then
   install_torchvision
   test_inductor_cpp_wrapper_abi_compatible
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  test_inductor_shard 1
-  test_inductor_aoti
-  test_inductor_distributed
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" -gt 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
-elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  test_dynamo_shard 1
-  test_aten
-elif [[ "${TEST_CONFIG}" == *dynamo* && $SHARD_NUMBER -gt 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    test_inductor_aoti
+    test_inductor_distributed
+  fi
+elif [[ "${TEST_CONFIG}" == *dynamo* ]]; then
   install_torchvision
   test_dynamo_shard "${SHARD_NUMBER}"
+  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    test_aten
+  fi
 elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   install_torchvision
   test_python_shard "$SHARD_NUMBER"

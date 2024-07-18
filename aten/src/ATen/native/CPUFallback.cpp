@@ -63,7 +63,7 @@ static std::optional<c10::Device> compute_target_device(std::vector<at::Tensor>&
       }
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 static bool validate_tensor_list(const c10::List<at::Tensor>& tensorlist) {
@@ -89,7 +89,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   std::vector<c10::List<at::Tensor>> tensorlist_args;
   std::vector<int> tensorlist_args_indices;
 
-  std::optional<c10::Device> tgt_device = c10::nullopt;
+  std::optional<c10::Device> tgt_device = std::nullopt;
   // save converted cpu tensor for TensorList
   std::vector<c10::IValue> tensorlist_cpu_args;
 
@@ -188,7 +188,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   auto returns = torch::jit::last(stack, num_returns);
   const auto returns_begin = stack->size() - num_returns;
 
-  if (tgt_device == c10::nullopt) {
+  if (tgt_device == std::nullopt) {
     tgt_device = compute_target_device(tensor_args, tensorlist_args);
   }
 

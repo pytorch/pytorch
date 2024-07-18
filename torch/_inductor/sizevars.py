@@ -56,8 +56,8 @@ class SizeVarAllocator:
         # which potentially could have already had a precomputed replacement
         # on it, we are obligated to invert the precomputed replacements
         # (inv_precomputed_replacements).
-        self.precomputed_replacements: Dict[Expr, sympy.Symbol] = dict()
-        self.inv_precomputed_replacements: Dict[sympy.Symbol, Expr] = dict()
+        self.precomputed_replacements: Dict[Expr, sympy.Symbol] = {}
+        self.inv_precomputed_replacements: Dict[sympy.Symbol, Expr] = {}
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
@@ -69,7 +69,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict[Tuple[Any, ...], Expr] = dict()
+        cache: Dict[Tuple[Any, ...], Expr] = {}
         replacement_count = len(self.replacements)
 
         def simplify_with_ranges(expr: Expr, var_ranges: VarRanges) -> Expr:
@@ -91,7 +91,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict[Tuple[Any, ...], Any] = dict()
+        cache: Dict[Tuple[Any, ...], Any] = {}
         replacement_count = len(self.replacements)
 
         def simplify_loops(index_vars, sizes, index_formulas):
@@ -219,9 +219,12 @@ class SizeVarAllocator:
                     # approximate test passed, try sound version
                     va = index_vars[a]
                     vb = index_vars[b]
-                    v = sympy_index_symbol("_merge_tester")
-                    expr1 = sympy_subs(index_formulas[k], {va: v * sizes[a], vb: 0})
-                    expr2 = sympy_subs(index_formulas[k], {va: 0, vb: v})
+                    m1 = sympy_index_symbol("_merge_tester1")
+                    m2 = sympy_index_symbol("_merge_tester2")
+                    # NOTE: can't sub vb=0 here in case va * vb appears in the expression,
+                    # in which case both expr1 and expr2 would be zero!
+                    expr1 = sympy_subs(index_formulas[k], {va: m1 * sizes[a], vb: m2})
+                    expr2 = sympy_subs(index_formulas[k], {va: 0, vb: (m1 + m2)})
                     if self.simplify(expr1) == self.simplify(expr2):
                         continue
                 return False
@@ -307,11 +310,9 @@ class SizeVarAllocator:
         """
         Returns a bool indicating if it is sound to optimize as if left and right lists are equal.
         """
-        if len(left) != len(right):
-            return False
-        if all(self.statically_known_equals(l, r) for l, r in zip(left, right)):
-            return True
-        return False
+        return len(left) == len(right) and all(
+            self.statically_known_equals(l, r) for l, r in zip(left, right)
+        )
 
     # See Note - [On Statically Known]
     def statically_known_leq(self, left: Expr, right: Union[Expr, int]) -> bool:
@@ -411,6 +412,10 @@ class SizeVarAllocator:
 
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
+        if isinstance(left, Expr):
+            left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
+        if isinstance(right, Expr):
+            right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         try:
             lv = self.size_hint(left)
             rv = self.size_hint(right)
@@ -441,7 +446,9 @@ class SizeVarAllocator:
         min_val = self.evaluate_min(left, right)
         return right if min_val is left else left
 
-    def evaluate_static_shape(self, left: Expr) -> int:
+    def evaluate_static_shape(self, left: Union[Expr, int]) -> int:
+        if isinstance(left, int):
+            return left
         right = self.size_hint(left)
         self.guard_equals(left, sympy.Integer(right))
         return int(right)
@@ -454,7 +461,9 @@ class SizeVarAllocator:
             return sympy_subs(expr, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         return expr
 
-    def symbolic_hint(self, expr: Expr) -> Union[Expr, int]:
+    def symbolic_hint(self, expr: Union[Expr, int]) -> Union[Expr, int]:
+        if isinstance(expr, int):
+            return expr
         # Substitute all hints into expr, but leave unbacked symints alone
         expr = self.simplify(expr)
         if not isinstance(expr, Expr):
@@ -469,7 +478,9 @@ class SizeVarAllocator:
         expr = self.remove_precomputed_replacements(expr)
         return sympy_subs(expr, self.var_to_val)
 
-    def size_hint(self, expr: Expr, *, fallback: Optional[int] = None) -> int:
+    def size_hint(
+        self, expr: Union[Expr, int], *, fallback: Optional[int] = None
+    ) -> int:
         out = self.symbolic_hint(expr)
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
             # Use the provided heuristic fallback hint

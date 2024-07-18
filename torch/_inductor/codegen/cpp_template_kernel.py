@@ -7,14 +7,14 @@ from sympy.parsing.sympy_parser import parse_expr
 
 import torch
 from torch.utils._sympy.symbol import SymT
-from .. import codecache, config, ir, lowering as L
+from .. import config, cpp_builder, ir, lowering as L
 
 from ..autotune_process import CppBenchmarkRequest
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
 from .cpp import CppKernel, CppKernelProxy, KernelGroup
-from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferScope
+from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext
 
 
 def parse_expr_with_index_symbols(expr):
@@ -174,7 +174,7 @@ class CppTemplateKernel(CppKernel):
             return ""
 
     def unroll_pragma(self, unroll):
-        if codecache.is_gcc():
+        if cpp_builder.is_gcc():
             return f"#pragma GCC unroll {unroll}"
         else:
             return f"#pragma unroll {unroll}"
@@ -270,13 +270,16 @@ class CppTemplateKernel(CppKernel):
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
         if epilogue_nodes:
-            with LocalBufferScope(self) as scope:
+            with LocalBufferContext(self.args) as scope:
                 assert orig_src is not None
                 if orig_src.get_name() != src.get_name():
-                    scope.add_local_buffer(src)
-                    epilogue_nodes = scope.localize_buffer(
-                        orig_src, src, epilogue_nodes
+                    scope.add_local_buffer(
+                        src,
+                        [
+                            orig_src,
+                        ],
                     )
+                    epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 return self.store_pointwise_nodes(
                     dst, epilogue_nodes, offsets, reindexers  # type: ignore[arg-type]
                 )
@@ -284,7 +287,7 @@ class CppTemplateKernel(CppKernel):
             if dst.get_name() != src.get_name():
                 # src is local
                 copy = L.copy(dst, src).data.data
-                with LocalBufferScope(self) as scope:
+                with LocalBufferContext(self.args) as scope:
                     scope.add_local_buffer(src)
                     return self.store_pointwise_nodes(dst, [copy])
             else:

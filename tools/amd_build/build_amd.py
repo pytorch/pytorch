@@ -4,11 +4,15 @@
 import argparse
 import os
 import sys
-from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).absolute().parents[2]
-sys.path.append(str(REPO_ROOT / "torch" / "utils"))
+sys.path.append(
+    os.path.realpath(
+        os.path.join(
+            __file__, os.path.pardir, os.path.pardir, os.path.pardir, "torch", "utils"
+        )
+    )
+)
 
 from hipify import hipify_python  # type: ignore[import]
 
@@ -50,7 +54,7 @@ parser.add_argument(
 args = parser.parse_args()
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
-proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
+proj_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)))
 
 if args.project_directory:
     proj_dir = args.project_directory
@@ -157,7 +161,10 @@ hip_platform_files = [
     "third_party/fbgemm/fbgemm_gpu/codegen/embedding_backward_split_host_template.cpp",
     "third_party/fbgemm/fbgemm_gpu/codegen/embedding_backward_split_template.cu",
     "third_party/fbgemm/fbgemm_gpu/codegen/embedding_forward_quantized_split_lookup.cu",
-    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/fbgemm_cuda_utils.cuh",
+    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/cuda_prelude.cuh",
+    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/stochastic_rounding.cuh",
+    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/vec4.cuh",
+    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/weight_row.cuh",
     "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/sparse_ops.cuh",
     "third_party/fbgemm/fbgemm_gpu/src/jagged_tensor_ops.cu",
     "third_party/fbgemm/fbgemm_gpu/src/quantize_ops.cu",

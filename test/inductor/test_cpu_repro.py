@@ -18,7 +18,7 @@ from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
-from torch._inductor import codecache, config, metrics, test_operators
+from torch._inductor import config, cpu_vec_isa, metrics, test_operators
 from torch._inductor.codegen.common import OptimizationContext
 from torch._inductor.codegen.cpp import (
     CppOverrides,
@@ -67,12 +67,12 @@ aten = torch.ops.aten
 check_model = test_torchinductor.check_model
 
 requires_vectorization = unittest.skipUnless(
-    codecache.valid_vec_isa_list(), "Does not support vectorization"
+    cpu_vec_isa.valid_vec_isa_list(), "Does not support vectorization"
 )
 
 
 def check_metrics_vec_kernel_count(num_expected_vec_kernels):
-    if codecache.valid_vec_isa_list():
+    if cpu_vec_isa.valid_vec_isa_list():
         assert metrics.generated_cpp_vec_kernel_count == num_expected_vec_kernels
 
 
@@ -1522,7 +1522,7 @@ class CPUReproTests(TestCase):
     def test_int_div(self):
         def fn(x, y):
             s3 = x.size(1)
-            a = torch.zeros((1 + s3) // 2)
+            a = torch.ones((1 + s3) // 2)
             a += y
             return a, s3
 
@@ -1583,14 +1583,14 @@ class CPUReproTests(TestCase):
             self.common(fn, (value,))
 
     @unittest.skipIf(
-        platform.machine() != "x86_64" or not codecache.valid_vec_isa_list(),
+        platform.machine() != "x86_64" or not cpu_vec_isa.valid_vec_isa_list(),
         "Does not support vectorization or not x86_64 machine",
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_simd(self):
-        vec_amx = codecache.supported_vec_isa_list[0]
-        vec_avx512 = codecache.supported_vec_isa_list[1]
-        vec_avx2 = codecache.supported_vec_isa_list[2]
+        vec_amx = cpu_vec_isa.supported_vec_isa_list[0]
+        vec_avx512 = cpu_vec_isa.supported_vec_isa_list[1]
+        vec_avx2 = cpu_vec_isa.supported_vec_isa_list[2]
         self.assertTrue(vec_amx.bit_width() == 512)
         self.assertTrue(vec_amx.nelements() == 16)
         self.assertTrue(vec_amx.nelements(torch.bfloat16) == 32)
@@ -1602,43 +1602,43 @@ class CPUReproTests(TestCase):
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
 
         with config.patch({"cpp.simdlen": None}):
-            isa = codecache.pick_vec_isa()
-            if vec_amx in codecache.valid_vec_isa_list():
+            isa = cpu_vec_isa.pick_vec_isa()
+            if vec_amx in cpu_vec_isa.valid_vec_isa_list():
                 self.assertTrue(isa == vec_amx)
-            elif vec_avx512 in codecache.valid_vec_isa_list():
+            elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
                 self.assertTrue(isa == vec_avx512)
             else:
                 self.assertTrue(isa == vec_avx2)
 
         with config.patch({"cpp.simdlen": 0}):
-            isa = codecache.pick_vec_isa()
+            isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 1}):
-            isa = codecache.pick_vec_isa()
+            isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 257}):
-            isa = codecache.pick_vec_isa()
+            isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 513}):
-            isa_list = codecache.valid_vec_isa_list()
+            isa_list = cpu_vec_isa.valid_vec_isa_list()
             if vec_avx512 in isa_list:
                 self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 512}):
-            isa_list = codecache.valid_vec_isa_list()
-            isa = codecache.pick_vec_isa()
+            isa_list = cpu_vec_isa.valid_vec_isa_list()
+            isa = cpu_vec_isa.pick_vec_isa()
             if vec_amx in isa_list:
                 self.assertTrue(isa == vec_amx)
             elif vec_avx512 in isa_list:
                 self.assertTrue(isa == vec_avx512)
 
         with config.patch({"cpp.simdlen": 256}):
-            isa_list = codecache.valid_vec_isa_list()
+            isa_list = cpu_vec_isa.valid_vec_isa_list()
             if vec_avx2 in isa_list:
-                isa = codecache.pick_vec_isa()
+                isa = cpu_vec_isa.pick_vec_isa()
                 self.assertTrue(isa == vec_avx2)
 
     @requires_vectorization
@@ -1989,7 +1989,9 @@ class CPUReproTests(TestCase):
         x[0, 0] = torch.nan
         x[1, -1] = torch.nan
 
-        bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()] + [None]
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()] + [
+            None
+        ]
         for item in bit_widths:
             with config.patch({"cpp.simdlen": item}):
                 torch._dynamo.reset()
@@ -2007,7 +2009,7 @@ class CPUReproTests(TestCase):
 
             return fn
 
-        bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()]
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
         ih = [16, 65]
         iw = ih
         oh = ih
@@ -2059,6 +2061,52 @@ class CPUReproTests(TestCase):
                     _fn = wrap_fn2(logical_fn)
                     _args = (x, y)
                 self.common(_fn, _args)
+                check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
+    def test_vec_bitwise(self):
+        for dtype in [
+            torch.bool,
+            torch.uint8,
+            torch.int8,
+            torch.int32,
+            torch.int64,
+        ]:
+            x = torch.randn(64, dtype=torch.float32)
+            y = torch.randn(64, dtype=torch.float32)
+            if dtype == torch.bool:
+                x = x > 0
+                y = y > 0
+            else:
+                x = x.to(dtype)
+                y = y.to(dtype)
+            bitwise_fns = [
+                torch.bitwise_and,
+                torch.bitwise_not,
+                torch.bitwise_or,
+                torch.bitwise_xor,
+                torch.bitwise_left_shift,
+                torch.bitwise_right_shift,
+            ]
+            for bitwise_fn in bitwise_fns:
+                if (
+                    bitwise_fn
+                    in [
+                        torch.bitwise_left_shift,
+                        torch.bitwise_right_shift,
+                    ]
+                    and dtype == torch.bool
+                ):
+                    # Eager doesn't support bool
+                    # https://pytorch.org/docs/stable/generated/torch.bitwise_left_shift.html
+                    continue
+                torch._dynamo.reset()
+                metrics.reset()
+                if bitwise_fn == torch.bitwise_not:
+                    _args = (x,)
+                else:
+                    _args = (x, y)
+                self.common(bitwise_fn, _args)
                 check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
@@ -2266,7 +2314,7 @@ class CPUReproTests(TestCase):
             graph_lowering
         ):
             # The moset inner loop variable is used in the index_expr
-            tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
+            tiling_factor = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.float)
             with CppVecKernelChecker(
                 args=None, num_threads=1, tiling_factor=tiling_factor
             ) as vec_checker:
@@ -2366,7 +2414,7 @@ class CPUReproTests(TestCase):
         ):
             itervars = [sympy.Symbol("i"), sympy.Symbol("j"), sympy.Symbol("k")]
 
-            tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
+            tiling_factor = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.float)
             # The most inner loop variable is used in the index_expr
             with CppVecKernelChecker(
                 args=None, num_threads=1, tiling_factor=tiling_factor
@@ -2508,6 +2556,7 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x,))
                 assert metrics.generated_cpp_vec_kernel_count == 0
 
+    @config.patch(fx_graph_cache=False)
     def test_outer_loop_fusion(self):
         def fn(x):
             max = torch.amax(x, dim=-1, keepdim=True)
@@ -2519,8 +2568,139 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
-            assert len(metrics.cpp_outer_loop_fused_inner_counts) == 1
-            assert metrics.cpp_outer_loop_fused_inner_counts[0] == 2
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                2,
+            )
+
+    @config.patch(fx_graph_cache=False)
+    def test_local_buffer_in_outer_loop_fusion(self):
+        def fn(x):
+            max = torch.nn.functional.softmax(x, dim=-1)
+            return x - max
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                3,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                1,
+            )
+            # Check the number of global buffer allocation
+            torch._dynamo.reset()
+            metrics.reset()
+            _, code = run_and_get_cpp_code(
+                torch._dynamo.optimize("inductor")(fn),
+                x,
+            )
+            self.assertEqual(code.count("empty_strided_cpu("), 3)
+
+    @config.patch(fx_graph_cache=False)
+    def test_two_local_buffers_in_outer_loop_fusion(self):
+        def fn(x):
+            softmax = torch.nn.functional.softmax(x, dim=-1)
+            sum = torch.sum(softmax, dim=-1)
+            sum_broadcast = torch.broadcast_to(
+                sum.unsqueeze(-1), [*(sum.size()[0:3]), 256]
+            )
+            sum_exp = torch.exp(sum_broadcast)
+            sum2 = torch.sum(sum_exp, dim=-1)
+            sub = sum_exp - sum2.unsqueeze(-1)
+            return x[:, :, :, 0:256] - sub
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                5,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                2,
+            )
+
+    @config.patch(fx_graph_cache=False)
+    def test_share_local_buffers_in_outer_loop_fusion(self):
+        def fn(x):
+            max = torch.nn.functional.softmax(x, dim=-1)
+            max = torch.nn.functional.softmax(max, dim=-1)
+            return x - max
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                5,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                1,  # 2 global bufs share 1 local buf
+            )
+
+    @config.patch(fx_graph_cache=False)
+    def test_two_local_buffers_in_outer_loop_fusion_case2(self):
+        # exp and exp2 should be replaced by local buffer
+        # since exp will be used after exp2, exp2 can't share the same
+        # local buffer as exp
+        def fn(x):
+            a_max = torch.amax(x, -1, keepdim=True)
+            exp = torch.exp(x - a_max)
+            sum = torch.sum(exp, -1, keepdim=True)
+            exp2 = torch.exp(exp - sum)
+            sum2 = torch.sum(exp2, -1, keepdim=True)
+            sub = exp2 - sum2
+            sub2 = exp - sub
+            return sub2
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                4,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                2,
+            )
 
     def test_argmin(self):
         def fn(x):
@@ -3816,6 +3996,39 @@ class CPUReproTests(TestCase):
             1,
             exactly=True,
         ).run(code)
+
+    def test_convert_fp32_int64_oob_vec(self):
+        # https://github.com/pytorch/pytorch/issues/129863
+        def fn(x):
+            float32 = x.to(torch.float32)
+            return float32.to(torch.int64)
+
+        x = torch.full((32,), -9223372036854775808, dtype=torch.int64)
+        for simdlen in (None, 256):
+            with config.patch({"cpp.simdlen": simdlen}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x,))
+                check_metrics_vec_kernel_count(1)
+
+    def test_consistent_remove_buffers(self):
+        def fn(x):
+            z = x + x
+            z1 = test_operators.realize(z)
+            return x + z1
+
+        # The shape makes sure we generate both vec and scalar kernels
+        x = torch.randn((65,), dtype=torch.bfloat16)
+        with config.patch(inplace_buffers=False):
+            metrics.reset()
+            self.common(fn, (x,))
+            check_metrics_vec_kernel_count(1)
+            _, code = run_and_get_cpp_code(torch.compile(fn), x)
+            FileCheck().check_count(
+                "tmp1 + tmp2",
+                2,
+                exactly=True,
+            ).run(code)
 
 
 if __name__ == "__main__":

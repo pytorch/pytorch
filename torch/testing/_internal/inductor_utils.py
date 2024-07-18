@@ -9,6 +9,7 @@ from subprocess import CalledProcessError
 import sys
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._inductor.codecache import CppCodeCache
+from torch._inductor.utils import get_gpu_shared_memory
 from torch.utils._triton import has_triton
 from torch.testing._internal.common_utils import (
     LazyVal,
@@ -100,3 +101,13 @@ requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
 skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
 skipCPUIf = functools.partial(skipDeviceIf, device="cpu")
+
+IS_A100 = LazyVal(
+    lambda: HAS_CUDA
+    and get_gpu_shared_memory() == 166912
+)
+
+IS_H100 = LazyVal(
+    lambda: HAS_CUDA
+    and get_gpu_shared_memory() == 232448
+)

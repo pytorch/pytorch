@@ -380,7 +380,7 @@ native_dropout_cuda(const Tensor& self, double p, std::optional<bool> train){
     return std::tuple<Tensor,Tensor>(ret, mask);
   }
 
-  auto gen = get_generator_or_default<CUDAGeneratorImpl>(c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
+  auto gen = get_generator_or_default<CUDAGeneratorImpl>(std::nullopt, cuda::detail::getDefaultCUDAGenerator());
   double p1m = 1. - p;
   return dropout_cuda<bool>(gen, self, p1m);
 }

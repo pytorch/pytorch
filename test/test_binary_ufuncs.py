@@ -12,7 +12,6 @@ from numbers import Number
 import numpy as np
 
 import torch
-
 import torch.autograd.forward_ad as fwAD
 from torch import inf, nan
 from torch.testing import make_tensor
@@ -67,6 +66,7 @@ from torch.testing._internal.common_utils import (
     torch_to_numpy_dtype_dict,
     xfailIfTorchDynamo,
 )
+
 
 if TEST_SCIPY:
     import scipy.integrate
@@ -3907,14 +3907,14 @@ class TestBinaryUfuncs(TestCase):
         def test_dx(sizes, dim, dx, device):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, dx=dx, dim=dim)
-            expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)
+            expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual, exact_dtype=False)
 
         def test_x(sizes, dim, x, device):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, x=torch.tensor(x, device=device), dim=dim)
-            expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)
+            expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual.cpu(), exact_dtype=False)
 

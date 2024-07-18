@@ -17,6 +17,6 @@ class ListUnpack(torch.nn.Module):
         x, *y = args
         return x + y[0]
 
-example_inputs = ([torch.randn(3, 2), torch.tensor(4), torch.tensor(5)],)
+example_args = ([torch.randn(3, 2), torch.tensor(4), torch.tensor(5)],)
 tags = {"python.control-flow", "python.data-structure"}
 model = ListUnpack()

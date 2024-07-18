@@ -242,16 +242,17 @@ def ir_node_to_tensor(x, guard_shape=True):
     device = x.get_device()
     size = convert_shape_to_symint(size)
     stride = convert_shape_to_symint(stride)
-    t = torch.empty_strided(
-        size=size, stride=stride, dtype=dtype, device=device
-    ).zero_()
+    with V.graph.sizevars.shape_env.suppress_guards():
+        t = torch.empty_strided(
+            size=size, stride=stride, dtype=dtype, device=device
+        ).zero_()
     return t
 
 
 def may_convert_to_optional(value):
     if isinstance(value, list) and not value:
         # [None] makes sure the cpp wrapper codegen will generate something like
-        # {c10::nullopt} instead of {}
+        # {std::nullopt} instead of {}
         return [None]
     return value
 
@@ -696,7 +697,7 @@ class Reduction(Loops):
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
         should_split = (
-            is_gpu(get_device_type(device))
+            not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
             and reduction_type
             not in {
                 "argmax",
@@ -4072,9 +4073,9 @@ class ConcatKernel(NopKernel):
 
 def get_aten_cpp_kernel_name(kernel):
     # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=std::nullopt)
     # repeat_interleave(const at::Tensor & self, int64_t repeats,
-    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+    #       c10::optional<int64_t> dim=std::nullopt, c10::optional<int64_t> output_size=std::nullopt)
     if not isinstance(kernel, torch._ops.OpOverload) or kernel.namespace != "aten":
         return None
     opname = (
@@ -4299,9 +4300,14 @@ class ExternKernel(InputsKernel):
         # propagated the graph with, because for some operators running without a
         # constant would trigger an error / DataDependentException
         for x in tensor_args:
-            if x.get_name() in V.graph.constants:
+            # if x is a view of a constant, we need to realize the view
+            # (we can't pass the constant into the kernel directly)
+            if not isinstance(x, BaseView) and x.get_name() in V.graph.constants:
                 example_args.append(V.graph.constants[x.get_name()])
-            elif x.get_name() in V.graph.torchbind_constants:
+            elif (
+                not isinstance(x, BaseView)
+                and x.get_name() in V.graph.torchbind_constants
+            ):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
@@ -4809,25 +4815,13 @@ class UserDefinedTritonKernel(ExternKernel):
         new_name, triton_meta = wrapper.define_user_defined_triton_kernel(
             kernel, configs, self.kwargs
         )
-
-        args = self.codegen_kwargs()
-        raw_args = list(self.kwargs.values())
-
-        if V.graph.cpp_wrapper:
-            # in C++ wrapper, we don't pass constexpr args, as they don't
-            # get added as parameters to the PTX code compiled from the
-            # user-defined Triton kernel (only non-constexpr args do)
-            args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
-            # Unify raw_args computation between cpp wrapper and python wrapper
-            raw_args = []
-            for i, arg_name in enumerate(self.ordered_kwargs_for_cpp_kernel):
-                if i not in kernel.constexprs:
-                    raw_args.append(self.get_kwargs_value(arg_name))
-
+        raw_args = [
+            self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
+        ]
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            new_name, self.grid, configs, args, triton_meta, raw_args
+            new_name, raw_args, self.grid, configs, triton_meta, kernel.constexprs
         )
 
     def should_allocate(self):
@@ -4854,7 +4848,7 @@ class UserDefinedTritonKernel(ExternKernel):
 
     def __init__(self, *, kernel_idx, grid, kernel_args):
         inputs = []
-        kwargs = dict()
+        kwargs = {}
         constant_args = []
         for k, v in kernel_args.items():
             if isinstance(v, TensorBox):
@@ -5342,6 +5336,7 @@ has_c_shim = {
     aten._fft_c2c.default,
     aten._scaled_dot_product_efficient_attention.default,
     aten._scaled_dot_product_flash_attention.default,
+    aten._scaled_dot_product_cudnn_attention.default,
     aten._scaled_mm.default,
     aten.addmm.out,
     aten.bmm.out,
@@ -6791,7 +6786,14 @@ class _CollectiveKernel(FallbackKernel):
         packed.cpp_kernel_name = cpp_kernel_name
         packed.python_kernel_name = python_kernel_name
 
-        mark_node_as_mutating(packed, *pytree.tree_leaves(inputs))
+        inps = pytree.tree_leaves(inputs)
+        mark_node_as_mutating(packed, *inps)
+        # For inplace collective ops, the input is guaranteed to be alias of the returned value of op.
+        packed.alias_names.extend([inp.get_name() for inp in inps])
+        if "out" in kwargs:
+            mark_node_as_mutating(packed, kwargs["out"])
+            # For out-variant collective ops, the `out=` arg is guaranteed to be alias of the returned value of op.
+            packed.alias_names.append(kwargs["out"].get_name())
 
     # NOTE: [Out-of-Place Collective Safety]
     # Between the initiation and completion of an out-of-place collective:
