@@ -5,10 +5,12 @@ import functools
 import string
 from collections import namedtuple
 from typing import Callable, Optional
+
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
 import torch
+
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._inductor import metrics
@@ -30,7 +32,6 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
 from torch.utils._triton import has_triton
-
 
 # Skip tests if Triton is not available
 supported_platform = skipUnless(
