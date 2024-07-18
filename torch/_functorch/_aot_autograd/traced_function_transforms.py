@@ -668,36 +668,27 @@ def aot_dispatch_subclass(
     subclass_meta = SubclassMeta()
 
     def inner_fn(fn, args, *, use_trace_joint: bool):
-        from torch.nested._internal.nested_tensor import (
-            _nested_int_registry,
-            branch_nested_int_registry,
+        # Step 1: wrap tensor inputs into subclasses if necessary
+        all_args = wrap_tensor_subclasses_maybe_joint(
+            args, is_joint_structure=use_trace_joint, meta=meta
         )
 
-        with branch_nested_int_registry():
-            for k, v in meta.traced_tangents_registry.items():
-                _nested_int_registry.set(k, v)
+        # Step 2: call the inner function, with our (maybe subclass) inputs
+        wrapped_outs = fn(*all_args)
 
-            # Step 1: wrap tensor inputs into subclasses if necessary
-            all_args = wrap_tensor_subclasses_maybe_joint(
-                args, is_joint_structure=use_trace_joint, meta=meta
-            )
+        if use_trace_joint:
+            # See Note: [Computing Subclass Metadata about grad_inputs]
+            # We also stash subclass info on our grad_inputs, if we're tracing the joint.
+            nonlocal subclass_meta
+            assert isinstance(wrapped_outs, tuple) and len(wrapped_outs) == 2
+            # Don't need fw outs since we already have subclass metadata on them
+            grad_inputs = wrapped_outs[1]
+            subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
 
-            # Step 2: call the inner function, with our (maybe subclass) inputs
-            wrapped_outs = fn(*all_args)
-
-            if use_trace_joint:
-                # See Note: [Computing Subclass Metadata about grad_inputs]
-                # We also stash subclass info on our grad_inputs, if we're tracing the joint.
-                nonlocal subclass_meta
-                assert isinstance(wrapped_outs, tuple) and len(wrapped_outs) == 2
-                # Don't need fw outs since we already have subclass metadata on them
-                grad_inputs = wrapped_outs[1]
-                subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
-
-            # Step 3: Unwrap any subclass outputs back into dense tensors
-            unwrapped_outs = unwrap_tensor_subclasses(
-                wrapped_outs, is_joint_structure=use_trace_joint
-            )
+        # Step 3: Unwrap any subclass outputs back into dense tensors
+        unwrapped_outs = unwrap_tensor_subclasses(
+            wrapped_outs, is_joint_structure=use_trace_joint
+        )
         return unwrapped_outs
 
     def joint_fn(primals, tangents):

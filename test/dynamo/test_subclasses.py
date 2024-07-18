@@ -1832,6 +1832,41 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         offsets2 = torch.tensor([0, 1, 4, 10], dtype=torch.int64)
         _validate_compile(fn, arg_fn=lambda: (values, offsets, offsets2))
 
+        # === Construct one NJT with offsets of another ===
+        def fn(nt, other_values):
+            nt2 = torch.nested.nested_tensor_from_jagged(other_values, nt.offsets())
+            return nt + nt2
+
+        values = torch.randn(9, 5, requires_grad=True)
+        other_values = torch.randn(9, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 9], dtype=torch.int64)
+
+        def arg_fn(values=values, other_values=other_values, offsets=offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return nt, other_values
+
+        _validate_compile(fn, arg_fn=arg_fn)
+
+        # === Construct an NJT from lengths ===
+        def fn(values, lengths):
+            nt = torch.nested.nested_tensor_from_jagged(values, lengths=lengths)
+            return nt.sin()
+
+        values = torch.randn(9, 5, requires_grad=True)
+        lengths = torch.tensor([2, 4, 3])
+        _validate_compile(fn, arg_fn=lambda: (values, lengths))
+
+        # === Construct an NJT from lengths -> offsets via manual computation ===
+        def fn(values, lengths):
+            offsets = torch.cat([lengths.new_zeros(1), lengths.cumsum(0)])
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return (nt * nt2).sin()
+
+        values = torch.randn(9, 5, requires_grad=True)
+        lengths = torch.tensor([2, 4, 3])
+        _validate_compile(fn, arg_fn=lambda: (values, lengths))
+
         # === Construct an NJT with cloned offsets ===
         # NB: AOTAutograd runs multiple fw passes for metadata collection analysis, so
         # dynamically generating an offsets is a good test case to ensure we're handling

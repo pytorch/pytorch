@@ -94,14 +94,18 @@ _nested_int_registry = NestedIntRegistry()
 
 
 @contextmanager
-def branch_nested_int_registry():
+def branch_nested_int_registry(merge_on_exit=False):
     global _nested_int_registry
     orig_registry = _nested_int_registry
     _nested_int_registry = _nested_int_registry.branch()
     try:
         yield
     finally:
+        new_registry = _nested_int_registry
         _nested_int_registry = orig_registry
+        if merge_on_exit:
+            for k, v in new_registry._registry.items():
+                _nested_int_registry._registry[k] = v
 
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash
