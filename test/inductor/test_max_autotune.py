@@ -2,6 +2,7 @@
 import json
 import os
 import unittest
+
 from typing import Callable, List, Optional
 
 import torch
@@ -23,6 +24,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplateCaller,
 )
 from torch._inductor.test_case import run_tests, TestCase
+
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -32,8 +34,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
