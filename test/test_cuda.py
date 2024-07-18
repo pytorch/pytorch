@@ -62,6 +62,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     slowTest,
     subtest,
+    TemporaryFileName,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
     TEST_NUMPY,
@@ -3910,6 +3911,15 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
+    def test_gds_fails_in_ci(self):
+        if IS_WINDOWS or TEST_WITH_ROCM:
+            error_msg = "is not supported on this platform"
+        else:
+            error_msg = "cuFileHandleRegister failed"
+        with TemporaryFileName() as f:
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                file = torch.cuda.GdsFile(f, os.O_CREAT | os.O_RDWR)
+
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaMallocAsync(TestCase):
@@ -5049,6 +5059,26 @@ class TestCudaOptims(TestCase):
             scaler.update()
             self.assertEqual(scaler._scale, scale)
             self.assertEqual(scaler._growth_tracker, growth_tracker)
+
+
+class TestGDS(TestCase):
+    # can't run in CI due to lack of ext4/xfs mount on CI docker containers
+    def _test_gds_read_write_tensors(self):
+        src1 = torch.randn(1024, device="cuda")
+        src2 = torch.randn(2, 1024, device="cuda")
+        torch.cuda.gds_register_buffer(src1.untyped_storage())
+        torch.cuda.gds_register_buffer(src2.untyped_storage())
+        dest1 = torch.empty(1024, device="cuda")
+        dest2 = torch.empty(2, 1024, device="cuda")
+        # local ext4 mount
+        with TemporaryFileName(dir="./mnt/loopfs/") as f:
+            file = torch.cuda.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            file.save_storage(src1.untyped_storage(), offset=0)
+            file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
+            file.load_storage(dest1.untyped_storage(), offset=0)
+            file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
+        self.assertEqual(src1, dest1)
+        self.assertEqual(src2, dest2)
 
 
 instantiate_parametrized_tests(TestCuda)

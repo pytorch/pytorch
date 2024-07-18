@@ -1,4 +1,5 @@
 import os
+import sys
 from typing import Callable, Optional
 
 import torch
@@ -27,7 +28,7 @@ if not hasattr(torch._C, "_gds_register_buffer"):
     torch._C.__dict__["_gds_save_storage"] = _dummy_fn("_gds_save_storage")
 
 
-def gds_register_buffer(s: Storage) -> None:
+def _gds_register_buffer(s: Storage) -> None:
     """Registers a buffer.
 
     Args:
@@ -36,7 +37,7 @@ def gds_register_buffer(s: Storage) -> None:
     torch._C._gds_register_buffer(s)
 
 
-def gds_deregister_buffer(s: Storage) -> None:
+def _gds_deregister_buffer(s: Storage) -> None:
     """Registers a buffer.
 
     Args:
@@ -45,7 +46,10 @@ def gds_deregister_buffer(s: Storage) -> None:
     torch._C._gds_deregister_buffer(s)
 
 
-class GdsFile:
+IS_WINDOWS = sys.platform == "win32"
+
+
+class _GdsFile:
     r"""Wrapper around cuFile.
 
     cuFile is a file-like interface to the GPUDirect Storage (GDS) API.
@@ -60,6 +64,8 @@ class GdsFile:
     """
 
     def __init__(self, filename: str, flags: int):
+        if IS_WINDOWS:
+            raise RuntimeError("GdsFile is not supported on this platform.")
         self.filename = filename
         self.flags = flags
         self.fd = os.open(filename, flags | os.O_DIRECT)
