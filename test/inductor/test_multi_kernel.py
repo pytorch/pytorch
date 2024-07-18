@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing import make_tensor
 
 
 class TransformerSnippet(nn.Module):
@@ -262,6 +263,17 @@ class MultiKernelTest(TestCase):
         with config.patch("triton.multi_kernel", force_multi_kernel):
             act = torch.compile(f)(x)
         self.assertTrue(torch.allclose(ref, act))
+
+    def test_split_scan(self, force_multi_kernel=1):
+        def f(x):
+            x = x.view(-1)
+            return torch.cumsum(x, 0)
+
+        x = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float32, device="cuda")
+        expect = f(x)
+        with config.patch("triton.multi_kernel", force_multi_kernel):
+            actual = torch.compile(f)(x)
+        self.assertEqual(expect, actual)
 
     def test_sort_disables_multi_kernel(self, force_multi_kernel=1):
         """
