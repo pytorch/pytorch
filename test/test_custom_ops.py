@@ -2327,11 +2327,24 @@ class TestCustomOpAPI(TestCase):
                     setup_context=lambda ctx, inputs, keyword_only_inputs, output: None,
                 )
 
-            with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
-                torch.library.register_vmap(
-                    "_torch_testing::foo",
-                    lambda info, in_dims, x, *, y: (x, 0),
-                )
+            def foo_impl(x: torch.Tensor, *, y: torch.Tensor) -> torch.Tensor:
+                return x + y
+
+            lib.impl("foo", foo_impl, "CPU")
+
+            called = False
+
+            def myvmap(info, in_dims, x, *, y):
+                nonlocal called
+                called = True
+                return x + y, 0
+
+            torch.library.register_vmap("_torch_testing::foo", myvmap)
+            x = torch.randn(2, 3, requires_grad=True) * 2
+            y = torch.randn(3)
+            result = torch.vmap(torch.ops._torch_testing.foo)(x, y=y)
+            self.assertEqual(x + y, result)
+            self.assertTrue(called)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_register_autograd_kwargonly_low_level(self):
