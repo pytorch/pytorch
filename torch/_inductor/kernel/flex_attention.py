@@ -308,7 +308,7 @@ flex_attention_template = TritonTemplate(
         off_hz = tl.program_id(1)
         l_ptrs = LSE + off_hz * Q_LEN + offs_m
         lse = m_i + tl.math.log2(l_i)
-        tl.store(l_ptrs, lse, mask=offs_m < Q_LEN)
+        tl.store(l_ptrs, lse)
 
 
 @triton.jit
@@ -849,14 +849,14 @@ flex_attention_backward_template = TritonTemplate(
         offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
 
         # load Q and do: they stay in SRAM throughout the inner loop.
-        q = tl.load(Q + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd, mask=offs_m2[:, None] < Q_LEN)
-        do = tl.load(DO + offs_m2[:, None] * stride_dom + offs_k[None, :] * stride_dod, mask=offs_m2[:, None] < Q_LEN)
+        q = tl.load(Q + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
+        do = tl.load(DO + offs_m2[:, None] * stride_dom + offs_k[None, :] * stride_dod)
 
         if PRESCALE_QK:
             q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
-        Di = tl.load(DELTA + offs_m2, mask=offs_m2 < Q_LEN)
-        lse = tl.load(LSE + offs_m2, mask=offs_m2 < Q_LEN)
+        Di = tl.load(DELTA + offs_m2)
+        lse = tl.load(LSE + offs_m2)
         lse = lse[:, None]
 
         # ~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -899,7 +899,7 @@ flex_attention_backward_template = TritonTemplate(
         # Write back dQ.
         dq_ptrs = DQ + offs_m2[:, None] * stride_dqm + offs_k[None, :] * stride_dqd
         dq *= SM_SCALE
-        tl.store(dq_ptrs, dq, mask=offs_m2[:, None] < Q_LEN)
+        tl.store(dq_ptrs, dq)
     else:
         # THIS BLOCK DOES DK & DV
         SPARSE_Q_MULTIPLE = (SPARSE_Q_BLOCK_SIZE // BLOCK_M1)
@@ -922,10 +922,10 @@ flex_attention_backward_template = TritonTemplate(
         offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
 
         # load K and V: they stay in SRAM throughout the inner loop.
-        k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd, mask=offs_n1[:, None] < KV_LEN)
+        k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd)
         if PRESCALE_QK:
             k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
-        v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd, mask=offs_n1[:, None] < KV_LEN)
+        v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd)
 
         # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Q_IDX and Q_NUM_BLKS are always contiguous.
@@ -973,7 +973,7 @@ flex_attention_backward_template = TritonTemplate(
         index_n = offs_n1[:, None]
         index_k = offs_k[None, :]
 
-        tl.store(dv_ptrs, dv, mask=index_n < KV_LEN)
+        tl.store(dv_ptrs, dv)
 
         dk *= SM_SCALE
         mask = index_n < KV_LEN
@@ -1003,7 +1003,7 @@ def bwd_dq_inner(
 
     hi = sparse_kv_num_blocks * SPARSE_KV_MULTIPLE
     for start_n in range(0, hi):
-        kT = tl.load(kT_ptrs, mask=offs_n2[None, :] < KV_LEN)
+        kT = tl.load(kT_ptrs)
         qk = tl.dot(q, kT)
         if not PRESCALE_QK:
             qk *= SM_SCALE
@@ -1040,7 +1040,7 @@ def bwd_dq_inner(
             post_mod_scores *= RCP_LN2
         p = tl.math.exp2(post_mod_scores - lse)
         # Compute dP and dS.
-        vT = tl.load(vT_ptrs, mask=offs_n2[None, :] < KV_LEN)
+        vT = tl.load(vT_ptrs)
         dp = tl.dot(do, vT)
         ds = p * (dp - Di[:, None])
         # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
@@ -1100,8 +1100,8 @@ def bwd_dkdv_inner(
     for start_m in range(0, hi):
         # Load LSE before computing qk to reduce pipeline stall.
 
-        qT = tl.load(qT_ptrs, mask=offs_m1[None, :] < Q_LEN)
-        lse = tl.load(LSE + offs_m1, mask=offs_m1 < Q_LEN)
+        qT = tl.load(qT_ptrs)
+        lse = tl.load(LSE + offs_m1)
         qkT = tl.dot(k, qT)
         if not PRESCALE_QK:
             qkT *= SM_SCALE
@@ -1135,11 +1135,11 @@ def bwd_dkdv_inner(
         if not PRESCALE_QK:
             post_mod_scores *= RCP_LN2
         pT = tl.math.exp2(post_mod_scores - lse[None, :])
-        do = tl.load(do_ptrs, mask=offs_m1[:, None] < Q_LEN)
+        do = tl.load(do_ptrs)
         # Compute dV.
         ppT = pT
         dv += tl.dot(ppT.to(MATMUL_PRECISION), do)
-        Di = tl.load(DELTA + offs_m1, mask=offs_m1 < Q_LEN)
+        Di = tl.load(DELTA + offs_m1)
         # Compute dP and dS.
         dpT = tl.dot(v, tl.trans(do))
         # dpT = tl.where(offs_m1[None, :] < Q_LEN, dpT, 0.0)
