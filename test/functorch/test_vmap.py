@@ -36,7 +36,6 @@ from common_utils import (
 from functorch_additional_op_db import additional_op_db
 
 import functorch
-
 import torch
 import torch.nn.functional as F
 from functorch import grad, grad_and_value, jacfwd, jvp, vjp, vmap
@@ -70,6 +69,7 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 from torch.utils import _pytree as pytree
+
 
 FALLBACK_REGEX = "There is a performance drop"
 
