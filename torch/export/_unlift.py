@@ -8,7 +8,7 @@ import torch.utils._pytree as pytree
 from torch._export.utils import _check_input_constraints_for_graph
 from torch.export.unflatten import _assign_attr, _AttrKind, _recursive_getattr
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from ._remove_effect_tokens_pass import _is_impure_node, _remove_effect_tokens
+from ._remove_effect_tokens_pass import _remove_effect_tokens
 
 from .exported_program import (
     ExportedProgram,
@@ -184,7 +184,6 @@ def _unlift(
     )
     gm.graph._codegen = _get_codegen(in_spec, out_spec, forward_arg_names)
     gm.graph.lint()
-    gm.graph.eliminate_dead_code(is_impure_node=_is_impure_node)
     gm.recompile()
     return gm
 
@@ -278,7 +277,12 @@ def _create_stateful_graph_module(
     # We fix this by de-registering these buffers in lifted_tensor_constants
     # and call _assign_attr(attr_kind=CONSTANT) to register them as constants.
     for constant_fqn in graph_signature.lifted_tensor_constants:
-        buffer = stateful_gm.get_buffer(constant_fqn)
+        try:
+            buffer = stateful_gm.get_buffer(constant_fqn)
+        except AttributeError:
+            breakpoint()
+            pass
+
         *prefix, field = constant_fqn.rsplit(".")
         submod = _recursive_getattr(stateful_gm, prefix)
         delattr(submod, field)
