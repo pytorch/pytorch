@@ -9,7 +9,9 @@
 #include <atomic>
 #include <optional>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 namespace callback {
 // It's the callback for RemoteCall.
@@ -332,4 +334,6 @@ class TORCH_API RRefContext {
   static thread_local bool recording_;
 };
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

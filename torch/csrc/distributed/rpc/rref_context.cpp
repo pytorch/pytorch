@@ -4,7 +4,9 @@
 
 #include <sstream>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 thread_local std::vector<std::shared_ptr<RRefContext::PendingUserState>>
     RRefContext::userTable_;
@@ -154,7 +156,8 @@ void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
     for (auto& entry : forks_) {
       const RRefId& rrefId = entry.first;
       for (const auto& forkId : entry.second) {
-        ss << "Leaking RRef " << rrefId << " with fork Id " << forkId << '\n';
+        ss << "Leaking RRef " << rrefId << " with fork Id " << forkId
+           << std::endl;
       }
     }
 
@@ -800,4 +803,6 @@ c10::intrusive_ptr<RRef> RRefContext::delForkOfOwner(
   return deletedRRef;
 }
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

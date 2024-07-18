@@ -20,7 +20,6 @@ import csv
 import subprocess
 import sys
 
-
 parser = argparse.ArgumentParser(
     description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
 )

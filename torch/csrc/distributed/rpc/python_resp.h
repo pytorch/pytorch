@@ -3,7 +3,9 @@
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 // RPC call representing the response of a Python UDF over RPC.
 class TORCH_API PythonResp final : public RpcCommandBase {
@@ -20,4 +22,6 @@ class TORCH_API PythonResp final : public RpcCommandBase {
   SerializedPyObj serializedPyObj_;
 };
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

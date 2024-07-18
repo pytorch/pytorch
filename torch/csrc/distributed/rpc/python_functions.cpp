@@ -18,7 +18,9 @@
 #include <torch/csrc/utils/python_compat.h>
 #include <exception>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 namespace {
 
@@ -419,4 +421,6 @@ PyRRef pyRemoteTorchscript(
   return PyRRef(rrefPtr);
 }
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

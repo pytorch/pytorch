@@ -18,7 +18,9 @@ C10_DIAGNOSTIC_POP()
 #include <c10/core/StreamGuard.h>
 #include <c10/util/irange.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 namespace {
 
@@ -458,7 +460,8 @@ void TensorPipeAgent::startImpl() {
       lowestPriorityTransport = key;
     }
     addresses.push_back(c10::str(key, "://", reg->address));
-    context_->registerTransport(priority, key, reg->transport);
+    context_->registerTransport(
+        priority, std::move(key), std::move(reg->transport));
   }
 
   // Register channels
@@ -482,7 +485,8 @@ void TensorPipeAgent::startImpl() {
     if (priority == -1) {
       priority = reg->priority;
     }
-    context_->registerChannel(priority, key, reg->channel);
+    context_->registerChannel(
+        priority, std::move(key), std::move(reg->channel));
   }
 
   listener_ = context_->listen(addresses);
@@ -1466,6 +1470,8 @@ size_t TensorPipeAgent::messageIdToTimeoutMapSize() {
   return messageIdToTimeout_.size();
 }
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
 
 #endif // USE_TENSORPIPE

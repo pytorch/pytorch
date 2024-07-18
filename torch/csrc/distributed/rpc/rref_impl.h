@@ -10,7 +10,9 @@
 
 #include <atomic>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 class RRef;
 class RRefContext;
@@ -413,4 +415,6 @@ inline TORCH_API c10::intrusive_ptr<c10::RRefInterface> fromOwnerRRef(
   return c10::static_intrusive_pointer_cast<c10::RRefInterface>(ownerRRef);
 }
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

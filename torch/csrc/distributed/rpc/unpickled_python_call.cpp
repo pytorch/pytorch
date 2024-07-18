@@ -2,7 +2,9 @@
 
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 UnpickledPythonCall::UnpickledPythonCall(
     const SerializedPyObj& serializedPyObj,
@@ -31,4 +33,6 @@ const py::object& UnpickledPythonCall::pythonUdf() const {
   return pythonUdf_;
 }
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

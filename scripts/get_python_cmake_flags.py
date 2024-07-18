@@ -16,7 +16,6 @@
 import sys
 import sysconfig
 
-
 flags = [
     f"-DPython_EXECUTABLE:FILEPATH={sys.executable}",
 ]

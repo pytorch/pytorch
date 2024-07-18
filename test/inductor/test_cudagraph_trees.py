@@ -1151,7 +1151,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             for _ in range(3):
                 out = foo(inp)
                 node = self.curr_node()
-                self.assertEqual(len(list(node.path_live_weakrefs())), 1)
+                self.assertEqual(len(list(node.path_live_weakrefs())), 2)
 
             @torch.compile(mode="reduce-overhead")
             def foo(x):
@@ -1825,7 +1825,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 self.assertEqual(self.get_manager().new_graph_id().id, num_graphs)
 
-        def _module_test(self, mod, name="weight", param_wrapping=True):
+        def _module_test(self, mod):
             with torch.device("cuda"):
 
                 def fn(x, mod):
@@ -1848,14 +1848,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                         self.assertEqual(exp_grad, compiled_grad)
 
                 run_test()
-                old_attr = getattr(mod, name)
-                modified_attr = torch.rand_like(old_attr)
-                if param_wrapping:
-                    modified_attr = torch.nn.Parameter(modified_attr)
-                setattr(mod, name, modified_attr)
+                old = mod.weight.data
+                mod.weight.data = torch.rand_like(mod.weight.data)
                 run_test()
                 # Run original version to verify we reuse the other recording
-                setattr(mod, name, old_attr)
+                mod.weight.data = old
                 run_test()
 
                 # Fwd + bwd graphs for each version of the function => 4 graphs
@@ -1882,18 +1879,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-        def test_multi_dispatch_single_compile_builtin_module_buffers(self):
-            # Verify that we don't recompile when changing the buffer of a builtin module
-            # and that we record another cudagraph
-            self._module_test(
-                torch.nn.BatchNorm1d(2, device="cuda"),
-                name="running_mean",
-                param_wrapping=False,
-            )
-
-        @torch._inductor.config.patch("triton.cudagraphs", True)
-        @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_custom_module(self):
             # Test that we can correctly dispatch multiple graphs
             # if params of a custom module change
@@ -1909,30 +1894,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 TestModule(torch.nn.Parameter(torch.rand([2, 2], device="cuda")))
             )
 
-        @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-        def test_multi_dispatch_custom_module_buffer(self):
-            # Test that we can correctly dispatch multiple graphs
-            # if buffers of a custom module change
-            class TestModule(torch.nn.Module):
-                def __init__(self, param, buf) -> None:
-                    super().__init__()
-                    self.weight = param
-                    self.register_buffer("buf", buf)
-
-                def forward(self, x):
-                    return x * self.weight + self.buf
-
-            self._module_test(
-                TestModule(
-                    torch.nn.Parameter(torch.rand([2, 2], device="cuda")),
-                    torch.rand([2, 2], device="cuda"),
-                ),
-                name="buf",
-                param_wrapping=False,
-            )
-
-        @torch._inductor.config.patch("triton.cudagraphs", True)
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_child_node(self):

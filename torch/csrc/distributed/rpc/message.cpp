@@ -1,7 +1,9 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/custom_class.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 Message::Message() = default;
 
@@ -111,4 +113,6 @@ static const auto message = torch::class_<Message>("rpc", "_Message");
 
 } // namespace
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

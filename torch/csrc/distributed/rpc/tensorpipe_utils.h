@@ -10,7 +10,9 @@ class Allocation;
 class Descriptor;
 } // namespace tensorpipe
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 TORCH_API const c10::Stream& getStreamForDevice(
     const std::vector<c10::Stream>& streams,
@@ -94,7 +96,7 @@ struct TensorpipeReadBuffers {
 // data that must be kept alive while the write is performed asynchronously.
 TORCH_API std::tuple<tensorpipe::Message, TensorpipeWriteBuffers>
 tensorpipeSerialize(
-    const c10::intrusive_ptr<Message>& rpcMessage,
+    c10::intrusive_ptr<Message> rpcMessage,
     std::vector<c10::Device> devices,
     const std::vector<c10::Stream>& streams);
 
@@ -114,6 +116,8 @@ TORCH_API c10::intrusive_ptr<Message> tensorpipeDeserialize(
     tensorpipe::Descriptor&& tpDescriptor,
     TensorpipeReadBuffers&& holder);
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
 
 #endif // USE_TENSORPIPE

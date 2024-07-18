@@ -1,6 +1,8 @@
 #include <torch/csrc/distributed/rpc/python_call.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 PythonCall::PythonCall(SerializedPyObj&& serializedPyObj, bool isAsyncExecution)
     : serializedPyObj_(std::move(serializedPyObj)),
@@ -42,4 +44,6 @@ const SerializedPyObj& PythonCall::serializedPyObj() const {
   return serializedPyObj_;
 }
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

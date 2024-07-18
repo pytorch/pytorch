@@ -323,19 +323,6 @@ coordinate_descent_search_radius = int(
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
 )
 
-# AutoHeuristic is a framework that allows one to collect data from autotuning, use the data to learn a heuristic, and
-# generate the learned heursitic to code which is shipped with the compiler. For now, this is only enabled for pad_mm.
-# If set to "OFF", this will not run AutoHeuristic.
-# If set to "COLLECT_DATA", this will store data about the inputs and autotuning results.
-# If set to "USE_HEURISTIC", this will use the learned heuristic to make a choice in pad_mm.
-autoheuristic_mode = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_MODE", "OFF")
-
-# If set to "DEFAULT", this will use the default log path specified in autoheuristic.py.
-# If set to another path, autoheuristic will instead log results to the given path.
-autoheuristic_log_path = os.environ.get(
-    "TORCHINDUCTOR_AUTOHEURISTIC_LOG_PATH", "DEFAULT"
-)
-
 # Disabled by default on ROCm, opt-in if model utilises NHWC convolutions
 layout_opt_default = "1" if not torch.version.hip else "0"
 layout_optimization = (
@@ -442,15 +429,16 @@ optimize_scatter_upon_const_tensor = (
 
 
 # The multiprocessing start method to use for inductor workers in the codecache.
-# Can be "subprocess" or "fork".
+# "subprocess", "fork", or "spawn"
 def decide_worker_start_method():
     start_method = os.environ.get(
         "TORCHINDUCTOR_WORKER_START", "fork" if is_fbcode() else "subprocess"
     )
-    assert start_method in (
+    assert start_method in [
         "subprocess",
         "fork",
-    ), f"Invalid start method: {start_method}"
+        "spawn",
+    ], f"Invalid start method: {start_method}"
     return start_method
 
 

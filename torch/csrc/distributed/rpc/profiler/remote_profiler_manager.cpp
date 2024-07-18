@@ -4,7 +4,9 @@
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/utils/byte_order.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 const std::string REMOTE_PROFILING_KEY_PREFIX = "#remote_op: ";
 constexpr int kAutoIncrementBits = 48;
 /*static */ thread_local std::optional<std::string>
@@ -26,7 +28,7 @@ void RemoteProfilerManager::setCurrentKey(std::string key) {
 }
 
 bool RemoteProfilerManager::isCurrentKeySet() const {
-  return currentThreadLocalKey_.has_value();
+  return currentThreadLocalKey_ ? true : false;
 }
 
 void RemoteProfilerManager::unsetCurrentKey() {
@@ -83,4 +85,6 @@ RemoteProfilerManager::RemoteProfilerManager() {
       static_cast<int64_t>(RpcAgent::getCurrentRpcAgent()->getWorkerInfo().id_);
   currentLocalId_ = workerId << kAutoIncrementBits;
 }
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

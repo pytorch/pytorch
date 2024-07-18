@@ -6,7 +6,9 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <vector>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 class TORCH_API PythonRemoteCall : public RpcCommandBase {
  public:
@@ -42,4 +44,6 @@ class TORCH_API PythonRemoteCall : public RpcCommandBase {
   const bool isAsyncExecution_;
 };
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

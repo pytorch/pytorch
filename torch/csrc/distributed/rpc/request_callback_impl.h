@@ -5,7 +5,9 @@
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/jit/python/pybind.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
  public:
@@ -15,19 +17,19 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
 
   c10::intrusive_ptr<JitFuture> processPythonCall(
       RpcCommandBase& rpc,
-      const std::vector<c10::Stream>& streams) const override;
+      std::vector<c10::Stream> streams) const override;
 
   c10::intrusive_ptr<JitFuture> processScriptCall(
       RpcCommandBase& rpc,
-      const std::vector<c10::Stream>& streams) const override;
+      std::vector<c10::Stream> streams) const override;
 
   c10::intrusive_ptr<JitFuture> processScriptRemoteCall(
       RpcCommandBase& rpc,
-      const std::vector<c10::Stream>& streams) const override;
+      std::vector<c10::Stream> streams) const override;
 
   c10::intrusive_ptr<JitFuture> processPythonRemoteCall(
       RpcCommandBase& rpc,
-      const std::vector<c10::Stream>& streams) const override;
+      std::vector<c10::Stream> streams) const override;
 
   c10::intrusive_ptr<JitFuture> processPythonRRefFetchCall(
       RpcCommandBase& rpc) const override;
@@ -37,7 +39,7 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
   c10::intrusive_ptr<JitFuture> processRpcWithErrors(
       RpcCommandBase& rpc,
       const MessageType& messageType,
-      const std::vector<c10::Stream>& streams) const override;
+      std::vector<c10::Stream> streams) const override;
 
   bool cudaAvailable() const override;
 
@@ -49,13 +51,15 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
   c10::intrusive_ptr<JitFuture> runJitFunction(
       const c10::QualifiedName& name,
       std::vector<at::IValue>& stack,
-      const std::vector<c10::Stream>& streams,
+      std::vector<c10::Stream> streams,
       bool isAsyncExecution) const;
 
   c10::intrusive_ptr<JitFuture> runPythonFunction(
       const py::object& function,
-      const std::vector<c10::Stream>& streams,
+      std::vector<c10::Stream> streams,
       bool isAsyncExecution) const;
 };
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
