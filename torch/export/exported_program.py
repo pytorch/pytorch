@@ -1125,23 +1125,26 @@ class ExportedProgram:
 
     @final
     def _validate(self):
+        assert (
+            len(self.verifiers) > 0
+        ), "ExportedProgram must have at least one verifier."
         for v in self.verifiers:
             v().check(self)
 
     # TODO(zhxchen17) Formalize this.
     def _update(
-        self, graph_module, graph_signature, state_dict=None
+        self, graph_module, graph_signature, *, state_dict=None, verifiers=None
     ) -> "ExportedProgram":
         return ExportedProgram(
             root=graph_module,
             graph=graph_module.graph,
             graph_signature=graph_signature,
-            state_dict=state_dict or self.state_dict,
+            state_dict=state_dict if state_dict is not None else self.state_dict,
             range_constraints=copy.deepcopy(self.range_constraints),
             module_call_graph=copy.deepcopy(self._module_call_graph),
             example_inputs=self.example_inputs,
-            verifier=self.verifier,
-            tensor_constants=self.tensor_constants,
+            verifiers=verifiers if verifiers is not None else self.verifiers,
+            constants=self.constants,
         )
 
 
