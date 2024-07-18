@@ -19,21 +19,21 @@
 #include <ATen/native/hip/ck_gemm.h>
 
 
-#include "ck/ck.hpp"
-#include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
-#include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
-#include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
-#include "ck/utility/data_type.hpp"
+#include <ck/ck.hpp>
+#include <ck/tensor_operation/gpu/device/gemm_specialization.hpp>
+#include <ck/tensor_operation/gpu/device/tensor_layout.hpp>
+#include <ck/tensor_operation/gpu/element/element_wise_operation.hpp>
+#include <ck/utility/data_type.hpp>
 
-#include "ck/library/reference_tensor_operation/cpu/reference_gemm.hpp"
-#include "ck/library/utility/check_err.hpp"
-#include "ck/library/utility/device_memory.hpp"
-#include "ck/library/utility/fill.hpp"
-#include "ck/library/utility/host_tensor.hpp"
-#include "ck/library/utility/host_tensor_generator.hpp"
-#include "ck/library/utility/literals.hpp"
+#include <ck/library/reference_tensor_operation/cpu/reference_gemm.hpp>
+#include <ck/library/utility/check_err.hpp>
+#include <ck/library/utility/device_memory.hpp>
+#include <ck/library/utility/fill.hpp>
+#include <ck/library/utility/host_tensor.hpp>
+#include <ck/library/utility/host_tensor_generator.hpp>
+#include <ck/library/utility/literals.hpp>
 
-#include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle_v3.hpp"
+#include <ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle_v3.hpp>
 
 // Define commonly used types.
 template <ck::index_t... Is>
@@ -312,4 +312,3 @@ void gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
 }
 
 } // namespace at::native
-
