@@ -50,16 +50,6 @@ void gemm_internal_ck<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
   return;
 }
 
-template <>
-void gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
-  return;
-}
-
-template <>
-void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
-  return;
-}
-
 template <typename T>
 struct CkMathType {
   using dtype = T;
@@ -90,6 +80,20 @@ struct AlphaBetaAdd
       c = alpha_ * ab;
     };
 
+  template<>
+  __host__ __device__ constexpr void operator()<ck::bhalf_t, ck::bhalf_t>
+    (ck::bhalf_t& c, const ck::bhalf_t& ab) const
+    {
+      c = alpha_ * ab;
+    };
+
+  template<>
+  __host__ __device__ constexpr void operator()<ck::half_t, ck::half_t>
+    (ck::half_t& c, const ck::half_t& ab) const
+    {
+      c = alpha_ * ab;
+    };
+
     float alpha_;
     // TODO: Leaving for now, will use later
     float beta_;
@@ -109,7 +113,7 @@ template <
     int NPER_WAVE,
     int CNPER_WAVE = 1,
     bool PADDING = false>
-void float_gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
+void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   // Get input information.
   int M = m;
   int N = n;
@@ -241,17 +245,53 @@ void float_gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
 void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
   // If any of the shapes cant be tiled, we must use padding.
   bool use_padding = ((m % 256 != 0) || (n % 128 != 0) || (k % 64 != 0));
-  // Dispatch to best implementation. 
+  // Dispatch to best implementation.
   // TODO add more configurations. Optimize.
   if (use_padding) {
     if (m <= 128) {
-      float_gemm_impl<float, 256, 256, 128, 32, 4, 4, 32, 32, 4, 2, 1, true>(CUDABLAS_GEMM_ARGS(float));
+      gemm_impl<float, 256, 256, 128, 32, 4, 4, 32, 32, 4, 2, 1, true>(CUDABLAS_GEMM_ARGS(float));
     } else {
-      float_gemm_impl<float, 256, 256, 128, 32, 4, 4, 32, 32, 4, 2, 1, true>(CUDABLAS_GEMM_ARGS(float));
+      gemm_impl<float, 256, 256, 128, 32, 4, 4, 32, 32, 4, 2, 1, true>(CUDABLAS_GEMM_ARGS(float));
     }
   } else {
     {
-      float_gemm_impl<float, 256, 256, 128, 32, 4, 4, 32, 32, 4, 2, 1, false>(CUDABLAS_GEMM_ARGS(float));
+      gemm_impl<float, 256, 256, 128, 32, 4, 4, 32, 32, 4, 2, 1, false>(CUDABLAS_GEMM_ARGS(float));
+    }
+  }
+}
+
+void dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
+  // If any of the shapes cant be tiled, we must use padding.
+  bool use_padding = ((m % 256 != 0) || (n % 128 != 0) || (k % 64 != 0));
+  // Dispatch to best implementation.
+  // TODO add more configurations. Optimize.
+  if (use_padding) {
+    if (m <= 128) {
+      gemm_impl<at::BFloat16, 256, 256, 128, 32, 4, 4, 32, 32, 4, 2, 1, true>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+    } else {
+      gemm_impl<at::BFloat16, 256, 256, 128, 32, 4, 4, 32, 32, 4, 2, 1, true>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+    }
+  } else {
+    {
+      gemm_impl<at::BFloat16, 256, 256, 128, 32, 4, 4, 32, 32, 4, 2, 1, false>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+    }
+  }
+}
+
+void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
+  // If any of the shapes cant be tiled, we must use padding.
+  bool use_padding = ((m % 256 != 0) || (n % 128 != 0) || (k % 64 != 0));
+  // Dispatch to best implementation.
+  // TODO add more configurations. Optimize.
+  if (use_padding) {
+    if (m <= 128) {
+      gemm_impl<at::Half, 256, 256, 128, 32, 4, 4, 32, 32, 4, 2, 1, true>(CUDABLAS_GEMM_ARGS(at::Half));
+    } else {
+      gemm_impl<at::Half, 256, 256, 128, 32, 4, 4, 32, 32, 4, 2, 1, true>(CUDABLAS_GEMM_ARGS(at::Half));
+    }
+  } else {
+    {
+      gemm_impl<at::Half, 256, 256, 128, 32, 4, 4, 32, 32, 4, 2, 1, false>(CUDABLAS_GEMM_ARGS(at::Half));
     }
   }
 }
@@ -259,6 +299,16 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
 template <>
 void gemm_internal_ck<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
   dispatch_float_gemm(CUDABLAS_GEMM_ARGS(float));
+}
+
+template <>
+void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
+  dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGS(at::BFloat16));
+}
+
+template <>
+void gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
+  dispatch_half_gemm(CUDABLAS_GEMM_ARGS(at::Half));
 }
 
 } // namespace at::native
