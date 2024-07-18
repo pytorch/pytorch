@@ -326,10 +326,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
     _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
-    from torch._export.non_strict_utils import (
-        _gather_constant_attrs,
-        make_fake_params_buffers,
-    )
+    from torch._export.non_strict_utils import make_fake_params_buffers
+    from torch._export.passes.lift_constants_pass import ConstantAttrMap
     from torch._functorch.aot_autograd import aot_export_module
     from torch._guards import detect_fake_mode
 
@@ -371,10 +369,32 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
         mod.recompile()
 
+        # the exported module will store constants & non-persistent buffers such that
+        # retracing treats them as persistent buffers, so we inform the constants lifting pass
+        # and overwrite the new graph signature using the previous program.
+        constant_attrs = ConstantAttrMap()
+        non_persistent_buffers = {
+            spec.target
+            for spec in ep.graph_signature.input_specs
+            if spec.kind == InputKind.BUFFER and not spec.persistent
+        }
+        for name, value in ep.constants.items():
+            if name in non_persistent_buffers:
+                continue
+            # recursive getattr
+            _mod = mod
+            *atoms, attr = name.split(".")
+            for atom in atoms:
+                _mod = getattr(_mod, atom)
+            # remove as buffer, reassign as constant/non-persistent buffer
+            _mod._buffers.pop(attr, None)
+            setattr(_mod, attr, value)
+            constant_attrs.add(value, name)
+
+        # get params & buffers after excluding constants
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(mod)
         )
-        constant_attrs = _gather_constant_attrs(mod)
         aten_export_artifact = _export_to_aten_ir(
             mod,
             # this requires empty kwargs, but not in pytree.flattened format
@@ -399,6 +419,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
                             fqn,
                             mod_cls.__module__ + "." + mod_cls.__qualname__,
                         )
+
+        # overwrite signature for non-persistent buffers
+        for spec in new_graph_signature.input_specs:
+            if spec.kind == InputKind.BUFFER and spec.target in non_persistent_buffers:
+                spec.persistent = False
 
         _verify_nn_module_stack(gm)
         _verify_stack_trace(gm)
@@ -577,11 +602,6 @@ def _decompose_exported_program(
     _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
-    from torch._export.passes.lift_constants_pass import (
-        ConstantAttrMap,
-        lift_constants_pass,
-    )
-
     gm, new_graph_signature = _decompose_and_get_gm_with_new_signature_constants(
         ep,
         decomp_table=decomp_table,
@@ -599,11 +619,6 @@ def _decompose_exported_program(
         ep.range_constraints,
         _is_executorch=False,
     )
-
-    constants = lift_constants_pass(gm, new_graph_signature, ConstantAttrMap())
-    for k, v in constants.items():
-        assert k not in ep.constants
-        ep.constants[k] = v
 
     exported_program = ExportedProgram(
         root=gm,
