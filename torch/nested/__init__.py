@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch import SymInt, Tensor
 from torch._C import _add_docstr, _nested  # type: ignore[attr-defined]
+from torch._prims_common import is_expandable_to
 
 from torch.types import _device as Device, _dtype as DType
 
@@ -14,6 +15,7 @@ __all__ = [
     "nested_tensor",
     "nested_tensor_from_jagged",
     "narrow",
+    "masked_select",
 ]
 
 # Nested Tensor constructor functions
@@ -410,3 +412,36 @@ Example::
 
     return nested_view_from_values_offsets_lengths(
         values, offsets, lengths, ragged_idx=jagged_dim, min_seqlen=min_seqlen, max_seqlen=max_seqlen)
+
+def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
+    if tensor.layout != torch.strided:
+        raise RuntimeError(
+            f"torch.nested.masked_select requires a strided tensor, given {tensor.layout}"
+        )
+
+    if mask.layout != torch.strided:
+        raise RuntimeError(
+            f"torch.nested.masked_select requires a strided mask, given: {mask.layout}"
+        )
+
+    if not is_expandable_to(mask.shape, tensor.shape):
+        raise RuntimeError(
+            f"Mask shape {mask.shape} is not broadcastable to tensor shape {tensor.shape}"
+        )
+
+    expanded_mask = mask.expand(tensor.shape)
+
+    res_values = tensor.masked_select(mask)
+    res_lengths = expanded_mask.sum(dim=len(tensor.shape) - 1)
+
+    from torch.nested._internal.nested_tensor import (
+        nested_view_from_values_offsets_lengths,
+    )
+
+    return nested_view_from_values_offsets_lengths(
+        values=res_values,
+        lengths=res_lengths,
+        offsets=torch.cat(
+            [torch.zeros(1, device=tensor.device, dtype=res_lengths.dtype), res_lengths.cumsum(dim=0)]
+        ),
+    )

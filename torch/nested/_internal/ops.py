@@ -1261,6 +1261,36 @@ def _nested_get_max_seqlen(func, *args, **kwargs):
     return inp._metadata_cache.get("max_seqlen", None)
 
 
+@register_jagged_func(torch.ops.aten.masked_select.default, "self: jt, mask: jt")
+def masked_select_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+    mask = new_kwargs.pop("mask")
+
+    mask_values = None
+    if mask._offsets.equal(inp._offsets):
+        mask_values = mask.values()
+    elif len(mask._values) == len(inp._offsets) - 1:
+        mask_values = torch.repeat_interleave(
+            mask.values(),
+            (inp._lengths if inp._lengths is not None else torch.diff(inp._offsets)),
+        )
+    else:
+        raise RuntimeError(
+            f"Jagged mask with offsets {mask.offsets()} is not compatible with input's offsets {inp.offsets()}"
+        )
+
+    res_values = inp._values.masked_select(mask_values)
+    mask_cumsum = torch.cat(
+        [torch.tensor([0], device=mask.device), mask_values.cumsum(dim=0)]
+    )
+    res_offsets = mask_cumsum[inp._offsets]
+
+    return NestedTensor(values=res_values, offsets=res_offsets)
+
+
 # Make the dummy available on the C++ side.
 @register_jagged_func(torch.ops.aten._nested_get_jagged_dummy.default, "self: any")
 def _nested_get_jagged_dummy(func, *args, **kwargs):
