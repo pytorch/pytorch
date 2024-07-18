@@ -4,8 +4,8 @@ import functools
 from typing import Callable, Dict, List, Sequence, Tuple, Union
 
 import torch
-from functorch._C import dim as _C
 
+from functorch._C import dim as _C
 from ._parsing import (
     _ellipsis,
     AnonymousAxis,
@@ -13,7 +13,6 @@ from ._parsing import (
     parse_pattern,
     validate_rearrange_expressions,
 )
-
 
 __all__ = ["rearrange"]
 
