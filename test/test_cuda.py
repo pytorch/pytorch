@@ -4032,7 +4032,7 @@ print(f"{{r1}}, {{r2}}")
             error_msg = "cuFileHandleRegister failed"
         with TemporaryFileName() as f:
             with self.assertRaisesRegex(RuntimeError, error_msg):
-                file = torch.cuda.GdsFile(f, os.O_CREAT | os.O_RDWR)
+                file = torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
