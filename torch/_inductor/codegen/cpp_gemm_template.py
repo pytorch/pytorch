@@ -174,10 +174,18 @@ class CppPackedGemmTemplate(CppTemplate):
 
     @cache_on_self
     def thread_blocking(self) -> GemmBlocking:
-        # TODO(jgong5): allow tuning various blocking options
+        """
+        NOTE [Thread blocking in Cpp GEMM]
+        We use simple heuristics to decide the thread blocking:
+        1. Make sure all threads are occupied as much as possible.
+        2. Favor more square-sized thread blocks for better data reuse.
+        TODO(jgong5): we only do blocking on on M and N now, add blocking on K
+                      after supporting k-slicing.
+        TODO(jgong5): allow tuning various blocking options
+        """
+
         def get_factors(number):
             factors = []
-            # priorize more evenly divided factors
             for i in range(int(number**0.5), 0, -1):
                 if number % i == 0:
                     factors.append(number // i)
@@ -199,22 +207,47 @@ class CppPackedGemmTemplate(CppTemplate):
         k_blocks = (self.k + register_blocking.block_k - 1) // register_blocking.block_k
         factors = get_factors(self.num_threads)
         assert len(factors) > 0
+
+        # we favor square-sized thread blocks for good data reuse
+        def get_better_blocking(blocking, best_blocking):
+            if best_blocking is None:
+                best_blocking = blocking
+            else:
+                block_m_size = blocking.block_m * register_blocking.block_m
+                block_n_size = blocking.block_n * register_blocking.block_n
+                best_block_m_size = best_blocking.block_m * register_blocking.block_m
+                best_block_n_size = best_blocking.block_n * register_blocking.block_n
+                if block_m_size + block_n_size < best_block_m_size + best_block_n_size:
+                    best_blocking = blocking
+            return best_blocking
+
+        best_blocking = None
+        # check if we can have a thread-blocking to occupy all threads
         for factor in factors:
-            if n_blocks % factor == 0 and m_blocks % (self.num_threads // factor) == 0:
-                return get_blocking(
-                    self.num_threads, factor, m_blocks, n_blocks, k_blocks
-                )
-        for factor in factors:
-            if n_blocks % factor == 0:
-                return get_blocking(
-                    self.num_threads, factor, m_blocks, n_blocks, k_blocks
-                )
             cofactor = self.num_threads // factor
-            if m_blocks % cofactor == 0:
-                return get_blocking(
+            if n_blocks >= factor and m_blocks >= cofactor:
+                blocking = get_blocking(
                     self.num_threads, factor, m_blocks, n_blocks, k_blocks
                 )
-        raise AssertionError("Should not reach here.")
+                best_blocking = get_better_blocking(blocking, best_blocking)
+
+        if best_blocking is not None:
+            return best_blocking
+
+        for factor in factors:
+            if n_blocks >= factor:
+                blocking = get_blocking(
+                    self.num_threads, factor, m_blocks, n_blocks, k_blocks
+                )
+                best_blocking = get_better_blocking(blocking, best_blocking)
+            cofactor = self.num_threads // factor
+            if m_blocks >= cofactor:
+                blocking = get_blocking(
+                    self.num_threads, factor, m_blocks, n_blocks, k_blocks
+                )
+                best_blocking = get_better_blocking(blocking, best_blocking)
+        assert best_blocking is not None
+        return best_blocking
 
     @cache_on_self
     def cache_blocking(self) -> GemmBlocking:
@@ -227,10 +260,6 @@ class CppPackedGemmTemplate(CppTemplate):
             # Nc_blocks is always 1
             Nc_blocks = 1
             Kc_blocks = thread_blocking.block_k
-
-            # TODO: support multi-thread
-            if self.num_threads != 1:
-                return Mc_blocks, Nc_blocks, Kc_blocks
 
             # TODO: tune the factor here
             L1_limit_factor = 1
