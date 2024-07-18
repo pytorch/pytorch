@@ -14,14 +14,9 @@ from torch._higher_order_ops.flex_attention import flex_attention as flex_attent
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.flex_attention import (
-    _causal,
-    _compose,
     _create_empty_block_mask,
-    _flex_attention,
-    _generate_alibi_bias,
     _identity,
-    _rel_bias,
-    _rel_causal,
+    flex_attention,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -41,12 +36,11 @@ Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
 torch.set_float32_matmul_precision("high")
 
 index = torch.ops.aten.index
+Tensor = torch.Tensor
 
 
 def create_attention(score_mod, block_mask):
-    return functools.partial(
-        _flex_attention, score_mod=score_mod, block_mask=block_mask
-    )
+    return functools.partial(flex_attention, score_mod=score_mod, block_mask=block_mask)
 
 
 test_dtypes = (
@@ -59,6 +53,50 @@ test_dtypes_fast = [torch.float16]
 
 
 # --------- Useful score mod functions for testing ---------
+def _causal(
+    score: Tensor,
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
+    return torch.where(token_q >= token_kv, score, float("-inf"))
+
+
+def _rel_bias(
+    score: Tensor,
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
+    return score + (token_q - token_kv)
+
+
+def _rel_causal(
+    score: Tensor,
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
+    return torch.where(token_q >= token_kv, score + (token_q - token_kv), float("-inf"))
+
+
+def _generate_alibi_bias(num_heads: int):
+    def _alibi_bias(
+        score: Tensor,
+        batch: Tensor,
+        head: Tensor,
+        token_q: Tensor,
+        token_kv: Tensor,
+    ) -> Tensor:
+        scale = torch.exp2(-((head + 1) * 8.0 / num_heads))
+        return score + (token_kv - token_q) * scale
+
+    return _alibi_bias
+
+
 def _inverse_causal(score, b, h, m, n):
     return torch.where(m <= n, score, float("-inf"))
 
@@ -294,7 +332,7 @@ class TestFlexAttention(InductorTestCase):
         )
         q, k, v, backward_grad = make_q(), make_kv(), make_kv(), make_q()
 
-        block_mask = _create_empty_block_mask(q, k, v)
+        block_mask = _create_empty_block_mask(q, k)
 
         @torch.compile
         def sdpa_hop(q, k, v, score_mod, block_mask):
@@ -399,7 +437,8 @@ class TestFlexAttention(InductorTestCase):
         def score_mod_2(score, b, h, m, n):
             return torch.where(m <= n, score, float("-inf"))
 
-        composed_score_mod = _compose(score_mod_1, score_mod_2)
+        def composed_score_mod(score, b, h, m, n):
+            return score_mod_2(score_mod_1(score, b, h, m, n), b, h, m, n)
 
         self.run_test(composed_score_mod, dtype)
 
@@ -511,8 +550,8 @@ class TestFlexAttention(InductorTestCase):
         )
         query, key, value = make_q(), make_kv(), make_kv()
         # floor_div is not decomposed in decompostion_table is empty
-        flex_attention = functools.partial(_flex_attention, score_mod=score_mod_func)
-        gm = make_fx(flex_attention, decomposition_table={})(query, key, value)
+        attention = functools.partial(flex_attention, score_mod=score_mod_func)
+        gm = make_fx(attention, decomposition_table={})(query, key, value)
         self.assertExpectedInline(
             gm.sdpa_score0.code.strip(),
             """\
@@ -524,7 +563,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
         # floor_div is decomposed for core_aten_decompositions
-        gm = make_fx(flex_attention, decomposition_table=core_aten_decompositions())(
+        gm = make_fx(attention, decomposition_table=core_aten_decompositions())(
             query, key, value
         )
         self.assertExpectedInline(
@@ -618,8 +657,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return torch.where(q >= kv, qk, -float("inf"))
 
         def f(q, k1, k2, v1, v2):
-            q2 = _flex_attention(q, k1, v1, score_mod=scoremod_1)
-            return _flex_attention(q2, k2, v2, score_mod=scoremod_2)
+            q2 = flex_attention(q, k1, v1, score_mod=scoremod_1)
+            return flex_attention(q2, k2, v2, score_mod=scoremod_2)
 
         out = f(query, *keys, *values)
         out2 = torch.compile(f)(query, *keys, *values)
@@ -644,12 +683,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def scoremod_2(qk, b, h, q, kv):
             return torch.where(q >= kv, qk, -float("inf"))
 
-        attention1 = functools.partial(_flex_attention, score_mod=scoremod_1)
+        attention1 = functools.partial(flex_attention, score_mod=scoremod_1)
 
         def f(q, k1, k2, k3, v1, v2, v3):
             q2 = attention1(q, k1, v1)
-            q3 = _flex_attention(q2, k2, v2, score_mod=scoremod_2)
-            return _flex_attention(q3, k3, v3, score_mod=scoremod_1)
+            q3 = flex_attention(q2, k2, v2, score_mod=scoremod_2)
+            return flex_attention(q3, k3, v3, score_mod=scoremod_1)
 
         out = f(query, *keys, *values)
         out2 = torch.compile(f)(query, *keys, *values)
@@ -685,7 +724,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         with self.assertRaisesRegex(
             ValueError, "Expected query, key, and value to have the same dtype"
         ):
-            _flex_attention(query, key, value, _identity)
+            flex_attention(query, key, value, _identity)
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
@@ -732,7 +771,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
         q, k, v = make_q(), make_kv(), make_kv()
-        block_mask = _create_empty_block_mask(q, k, v)
+        block_mask = _create_empty_block_mask(q, k)
 
         @torch.compile
         def sdpa_hop(q, k, v, score_mod, block_mask):
@@ -798,7 +837,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        block_mask = _create_empty_block_mask(q, k, v)
+        block_mask = _create_empty_block_mask(q, k)
 
         @torch.compile
         def func(q, k, v, score_mod, block_mask):
@@ -827,7 +866,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        block_mask = _create_empty_block_mask(q, k, v)
+        block_mask = _create_empty_block_mask(q, k)
 
         @torch.compile
         def func(q, k, v, score_mod, block_mask):
