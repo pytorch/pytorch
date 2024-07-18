@@ -692,6 +692,8 @@ def flex_attention(
     """
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
+    if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
+        raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
     # if query.size(-2) >= 32:  # use Attention Kernel
     #     if query.size(-2) >= 128 and query.size(-2) % 128 != 0:
     #         raise NotImplementedError("NYI: S must be <128 or a multiple of 128")
