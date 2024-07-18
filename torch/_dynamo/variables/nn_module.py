@@ -669,31 +669,38 @@ class NNModuleVariable(VariableTracker):
             assert self.source
 
             if isinstance(args[0], SliceVariable):
-                # Build a TupleVariable of NNModules
-                result = []
+                # TODO(anijain2305,export-team) - Remove this if condition when inlining of inbuilt nn modules is
+                # enabled for export.
+                if tx.output.export:
+                    # Build a TupleVariable of NNModules
+                    result = []
 
-                # Turn the slice into the list of integers
-                keys = list(range(len(module)))[args[0].as_python_constant()]
-                for idx, submod in enumerate(module[args[0].as_python_constant()]):
-                    key = keys[idx]
-                    src = NNModuleSource(GetItemSource(self.source, key))
-                    result.append(
-                        tx.output.register_attr_or_module(
-                            submod,
-                            key,
-                            source=src,
+                    # Turn the slice into the list of integers
+                    keys = list(range(len(module)))[args[0].as_python_constant()]
+                    for idx, submod in enumerate(module[args[0].as_python_constant()]):
+                        key = keys[idx]
+                        src = NNModuleSource(GetItemSource(self.source, key))
+                        result.append(
+                            tx.output.register_attr_or_module(
+                                submod,
+                                key,
+                                source=src,
+                            )
                         )
-                    )
 
-                new_module = module[args[0].as_python_constant()]
-                new_module_variable = tx.output.register_attr_or_module(
-                    new_module,
-                    f"{self}.__getitem__(slice)",
-                    source=NNModuleSource(
-                        GetItemSource(self.source, args[0].as_python_constant())
-                    ),
-                )
-                return new_module_variable
+                    new_module = module[args[0].as_python_constant()]
+                    new_module_variable = tx.output.register_attr_or_module(
+                        new_module,
+                        f"{self}.__getitem__(slice)",
+                        source=NNModuleSource(
+                            GetItemSource(self.source, args[0].as_python_constant())
+                        ),
+                    )
+                    return new_module_variable
+                else:
+                    # slice on nn module results in a creation of new module instance, so we need to make it sourceless.
+                    # Convert to unspecialized so that UnspecializedNNModule variable can take care of it.
+                    self.convert_to_unspecialized(tx)
 
             from .tensor import SymNodeVariable
 
