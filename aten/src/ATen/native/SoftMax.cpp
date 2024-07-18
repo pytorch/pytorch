@@ -570,6 +570,29 @@ Tensor log_softmax(const Tensor& self, Dimname dim, std::optional<ScalarType> dt
 }
 
 Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const std::optional<int64_t> dim_, const std::optional<int64_t> mask_type_) {
+      /*
+     * This is a specialized path for Scaled Dot Product Attention (SDPA) with boolean masks.
+     * The key semantic requirement in SDPA is that fully masked-out rows in the attention
+     * matrix must result in all zeros, regardless of the input values.
+     *
+     * The process:
+     * 1. Compute softmax normally along the specified dimension.
+     * 2. Apply the mask by setting all masked positions to zero.
+     *
+     * This approach ensures:
+     * - Fully masked-out rows correctly result in all zeros, which is crucial for
+     *   the proper functioning of attention mechanisms in transformer architectures.
+     *
+     * Note: This method is specifically designed to meet the semantic requirements of
+     * SDPA with boolean masks. And is not inteded for other uses cases. The semantics in fact
+     * are opposite for the boolean mask_ compared to how its typically called
+     */
+  if (mask_type_.has_value() && mask_type_.value() == 3){
+    TORCH_CHECK(dim_.has_value(), "dim must be specified for mask_type == 3");
+    TORCH_CHECK(mask_.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
+    auto out = at::softmax(input_, dim_.value());
+    return out.masked_fill(~mask_, 0);
+  }
 
   auto mask = mask_.contiguous();
   auto mask_type = mask_type_; // Mask type might get transformed below
