@@ -23,7 +23,6 @@ def time_and_log(fn: Callable[..., Any]) -> Callable[..., Any]:
         result = fn(*args, **kwargs)
         log.debug(f"{fn.__name__} took {time.perf_counter() - start_time} seconds.")
         return result
-
     return wrapper
 
 
@@ -33,7 +32,7 @@ class LazyBenchmark:
 
     @cached_property
     def timing(self) -> float:
-        counters["inductor"]["benchmarking"]["finalize_lazy_benchmark"] += 1
+        counters["inductor"]["benchmarking_finalize_lazy_benchmark"] += 1
         timing = self.benchmark()
         del self.benchmark
         return timing
@@ -68,14 +67,14 @@ class Benchmarker:
   
     @cached_property
     def L2_cache_size(self) -> int:
-        counters["inductor"]["benchmarking"]["L2_cache_size"] += 1
+        counters["inductor"]["benchmarking_L2_cache_size"] += 1
         device = torch.cuda.current_device()
         properties = torch.cuda.get_device_properties(device)
         return properties.L2_cache_size
 
     @cached_property
     def gpu_time_per_gpu_clock_cycle(self) -> float:
-        counters["inductor"]["benchmarking"]["gpu_time_per_gpu_clock_cycle"] += 1
+        counters["inductor"]["benchmarking_gpu_time_per_gpu_clock_cycle"] += 1
         start_event = torch.cuda.Event(enable_timing=True)
         torch.cuda._sleep(1000000)
         end_event = torch.cuda.Event(enable_timing=True)
@@ -84,7 +83,7 @@ class Benchmarker:
 
     @functools.lru_cache(None)
     def get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear(self) -> Tuple[float, float]:
-        counters["inductor"]["benchmarking"]["get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear"] += 1
+        counters["inductor"]["benchmarking_get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear"] += 1
         buffer = torch.empty(int(self.L2_cache_size // 4), dtype=torch.int, device="cuda")
         torch.cuda.synchronize()
         start_event = torch.cuda.Event(enable_timing=True)
@@ -99,16 +98,16 @@ class Benchmarker:
     
     @cached_property
     def cpu_launch_overhead_per_gpu_cache_clear(self) -> float:
-        counters["inductor"]["benchmarking"]["cpu_launch_overhead_per_gpu_cache_clear"] += 1
+        counters["inductor"]["benchmarking_cpu_launch_overhead_per_gpu_cache_clear"] += 1
         return self.get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear()[0]
     
     @cached_property
     def gpu_time_per_gpu_cache_clear(self) -> float:
-        counters["inductor"]["benchmarking"]["gpu_time_per_gpu_cache_clear"] += 1
+        counters["inductor"]["benchmarking_gpu_time_per_gpu_cache_clear"] += 1
         return self.get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear()[1]
 
     def benchmark(self, fn: Callable[..., Any], fn_args: List[Any], fn_kwargs: Dict[str, Any], **kwargs: Dict[str, Any]) -> float:
-        counters["inductor"]["benchmarking"]["benchmark"] += 1
+        counters["inductor"]["benchmarking_benchmark"] += 1
         _callable = lambda: fn(*fn_args, **fn_kwargs)
         fn_args_and_kwargs = list(fn_args) + list(fn_kwargs.values())
         if is_cpu_device(fn_args_and_kwargs):
@@ -118,7 +117,7 @@ class Benchmarker:
     
     @time_and_log
     def benchmark_cpu(self, _callable: Callable[[], Any], warmup_iters: int = 5, benchmark_iters: int = 20) -> float:
-        counters["inductor"]["benchmarking"]["benchmark_cpu"] += 1
+        counters["inductor"]["benchmarking_benchmark_cpu"] += 1
 
         def benchmark(_callable, iters):
             timings = []
@@ -147,12 +146,12 @@ class Benchmarker:
     
     @time_and_log
     def benchmark_many_cpu(self, callables: List[Callable[[], Any]], warmup_iters: int = 5, benchmark_iters: int = 20) -> List[float]:
-        counters["inductor"]["benchmarking"]["benchmark_many_cpu"] += 1
+        counters["inductor"]["benchmarking_benchmark_many_cpu"] += 1
         return [self.benchmark_cpu(_callable, warmup_iters, benchmark_iters) for _callable in callables]
     
     @time_and_log
     def benchmark_gpu(self, _callable: Callable[[], Any], estimation_iters: int = 5, memory_warmup_iters: int = 100, benchmark_iters: int = 100, max_benchmark_duration: int = 25) -> float:        
-        counters["inductor"]["benchmarking"]["benchmark_gpu"] += 1
+        counters["inductor"]["benchmarking_benchmark_gpu"] += 1
         
         self.get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear()
         
@@ -173,7 +172,7 @@ class Benchmarker:
             _callable()
             torch.cuda.synchronize()
         except Exception as e:
-            counters["inductor"]["benchmarking"]["callable_initialization_failed"] += 1
+            counters["inductor"]["benchmarking_callable_initialization_failed"] += 1
             log.debug(f"Callable {hash(_callable)} failed during initialization with exception {e}.")
             return float("inf")
 
@@ -196,7 +195,7 @@ class Benchmarker:
     
     @time_and_log
     def benchmark_many_gpu(self, callables: List[Callable[[], Any]], estimation_iters: int = 5, memory_warmup_iters: int = 100, benchmark_iters: int = 100, max_benchmark_duration: int = 25, ranking_key: Optional[str] = None, pruning_key: Optional[str] = None) -> List[float]:        
-        counters["inductor"]["benchmarking"]["benchmark_many_gpu"] += 1
+        counters["inductor"]["benchmarking_benchmark_many_gpu"] += 1
         
         self.get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear()
         
@@ -222,7 +221,7 @@ class Benchmarker:
                 _callable()
                 torch.cuda.synchronize()
             except Exception as e:
-                counters["inductor"]["benchmarking"]["callable_initialization_failed"] += 1
+                counters["inductor"]["benchmarking_callable_initialization_failed"] += 1
                 log.debug(f"Callable {hash(_callable)} failed during initialization with exception {e}.")
                 callable_to_timing[_callable] = float("inf")
             else:
@@ -242,7 +241,7 @@ class Benchmarker:
 
         if ranking_key is not None:
             if benchmarking_config.enable_early_ranking:
-                counters["inductor"]["benchmarking"]["early_ranking"] += 1
+                counters["inductor"]["benchmarking_early_ranking"] += 1
                 log.debug(f"Returning early ranking for ranking key {ranking_key}.")
                 timings = [callable_to_timing[_callable] for _callable in callables]
                 del buffer
@@ -252,7 +251,7 @@ class Benchmarker:
 
         if pruning_key is not None:
             if benchmarking_config.enable_early_pruning:
-                counters["inductor"]["benchmarking"]["early_pruning"] += 1
+                counters["inductor"]["benchmarking_early_pruning"] += 1
                 cpu_launch_overhead_per_iter_per_callable = cpu_launch_overhead_per_iter / len(callables_to_benchmark)
                 target_timing = min(estimated_timings) * 1.25
                 callables_to_benchmark = [_callable for _callable in callables_to_benchmark if callable_to_timing[_callable] < target_timing]
@@ -279,7 +278,7 @@ class Benchmarker:
         return timings
 
     def lazy_benchmark(self, fn: Callable[..., Any], fn_args: List[Any], fn_kwargs: Dict[str, Any], **kwargs: Dict[str, Any]) -> LazyBenchmark:
-        counters["inductor"]["benchmarking"]["lazy_benchmark"] += 1
+        counters["inductor"]["benchmarking_lazy_benchmark"] += 1
 
         _callable = lambda: fn(*fn_args, **fn_kwargs)
         fn_args_and_kwargs = list(fn_args) + list(fn_kwargs.values())
@@ -289,14 +288,14 @@ class Benchmarker:
             return self.lazy_benchmark_gpu(_callable, **kwargs)
     
     def lazy_benchmark_cpu(self, _callable: Callable[[], Any], ranking_key: Optional[str] = None, pruning_key: Optional[str] = None, **kwargs: Dict[str, Any]) -> Union[LazyBenchmark, float]:
-        counters["inductor"]["benchmarking"]["lazy_benchmark_cpu"] += 1
+        counters["inductor"]["benchmarking_lazy_benchmark_cpu"] += 1
         if not benchmarking_config.enable_lazy_benchmarking:
             log.debug("Lazy benchmarking is disabled. Immediately proceeding to CPU benchmarking.")
             return self.benchmark_cpu(_callable, **kwargs)
         return LazyBenchmark(lambda: self.benchmark_cpu(_callable, **kwargs))
 
     def lazy_benchmark_gpu(self, _callable: Callable[[], Any], ranking_key: Optional[str] = None, pruning_key: Optional[str] = None, **kwargs: Dict[str, Any]) -> LazyBenchmark:
-        counters["inductor"]["benchmarking"]["lazy_benchmark_gpu"] += 1
+        counters["inductor"]["benchmarking_lazy_benchmark_gpu"] += 1
 
         if not benchmarking_config.enable_lazy_benchmarking:
             log.debug("Lazy benchmarking is disabled. Immediately proceeding to GPU benchmarking.")
