@@ -39,10 +39,10 @@ jobs:
   update-vision-commit-hash:
     runs-on: ubuntu-latest
     environment: update-commit-hash
+    if: ${{ github.event_name == 'schedule' }}
     steps:
       - name: update-vision-commit-hash
         uses: pytorch/test-infra/.github/actions/update-commit-hash@main
-        if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: vision
           branch: main
@@ -54,10 +54,10 @@ jobs:
   update-audio-commit-hash:
     runs-on: ubuntu-latest
     environment: update-commit-hash
+    if: ${{ github.event_name == 'schedule' }}
     steps:
       - name: update-audio-commit-hash
         uses: pytorch/test-infra/.github/actions/update-commit-hash@main
-        if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: audio
           branch: main
@@ -69,10 +69,10 @@ jobs:
   update-executorch-commit-hash:
     runs-on: ubuntu-latest
     environment: update-commit-hash
+    if: ${{ github.event_name == 'schedule' }}
     steps:
       - name: update-executorch-commit-hash
         uses: pytorch/test-infra/.github/actions/update-commit-hash@main
-        if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: executorch
           branch: main
