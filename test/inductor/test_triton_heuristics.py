@@ -4,9 +4,9 @@ import sys
 import unittest
 
 import torch
-
 from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+
 
 try:
     import triton  # noqa: F401

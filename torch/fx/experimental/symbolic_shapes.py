@@ -247,7 +247,7 @@ def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
     if isinstance(expr, torch.SymBool):
         return expr.node.guard_size_oblivious("", 0)
     else:
-        assert isinstance(expr, bool)
+        assert isinstance(expr, bool), expr
         return expr
 
 def check_consistent(new, old) -> None:
@@ -1589,7 +1589,6 @@ class DimConstraints:
         var_to_val,
         marked_dynamic,
         source_name_to_debug_name,
-        _allow_complex_guards_as_runtime_asserts=False,
     ):
         # We try to solve systems of inequalities with 1 free variable.
         self._univariate_inequalities: Dict[sympy.Symbol, Set[sympy.Expr]] = defaultdict(set)
@@ -1631,9 +1630,6 @@ class DimConstraints:
 
         # symbols that are marked dynamic
         self._marked_dynamic = marked_dynamic
-
-        # for constraints we can't express with the dynamic shapes language, defer as runtime asserts in export
-        self._allow_complex_guards_as_runtime_asserts = _allow_complex_guards_as_runtime_asserts
 
     def rewrite_with_congruences(self, s, expr):
         """
@@ -1802,38 +1798,7 @@ class DimConstraints:
             self._inconsistencies.clear()
             raise ValueError(f"The following inconsistencies were found:\n{msg}")
 
-    def _force_specialization(self, s):
-        val = self._var_to_val[s]
-        self._static_results.add(f"{self._dcp.symbol_to_source[s][0].name()} == {val}")
-        self._substitutions[s] = val
-
-    def _specialize_divisor_symbols(self):
-        for expr in self._multivariate_inequalities:
-            for atom in expr.atoms(FloorDiv, Mod):
-                _, divisor = atom.args
-                for s in divisor.free_symbols:
-                    self._force_specialization(s)
-
-        multivariate_inequalities = self._multivariate_inequalities
-        self._multivariate_inequalities = set()
-        for expr in multivariate_inequalities:
-            self.add(expr.xreplace(self._substitutions))
-        self._raise_inconsistencies()
-        self._univariate_inequalities = {
-            s: exprs
-            for s, exprs in self._univariate_inequalities.items()
-            if s not in self._substitutions
-        }
-        self._congruences = {
-            s: congruences
-            for s, congruences in self._congruences.items()
-            if s not in self._substitutions
-        }
-
-    def solve(
-        self,
-        _disable_forced_specializations=False,
-    ):
+    def solve(self):
         """Solve the system of constraint equations to find simplified constraints
         """
         self._raise_inconsistencies()
@@ -1848,12 +1813,10 @@ class DimConstraints:
             assert isinstance(solution, sympy.Eq), f"Expected an equality constraint for {s}, got {solution}"
             symbol, val = solution.args
             assert symbol == s, f"Expected a constraint on {s} instead of on {symbol}"
-            # really don't force specializations here
-            if not (_disable_forced_specializations and s in self._marked_dynamic):
-                # because this is univariate, the solution is a specialization
-                self._static_results.add(f"{self._dcp.symbol_to_source[s][0].name()} == {val}")
-                # add this as a substitution to simplify other constraints
-                self._substitutions[s] = val
+            # because this is univariate, the solution is a specialization
+            self._static_results.add(f"{self._dcp.symbol_to_source[s][0].name()} == {val}")
+            # add this as a substitution to simplify other constraints
+            self._substitutions[s] = val
 
             # simplify multivariate inequalities: some of them will now become univariate!
             multivariate_inequalities = self._multivariate_inequalities
@@ -1861,9 +1824,6 @@ class DimConstraints:
             for expr in multivariate_inequalities:
                 self.add(expr.xreplace({s: self._substitutions[s]}))
             self._raise_inconsistencies()
-
-        if not _disable_forced_specializations:
-            self._specialize_divisor_symbols()
 
         # solve linear congruences
         # NOTE(avik): We do not need to solve them for symbols that have already been specialized.
@@ -1880,9 +1840,6 @@ class DimConstraints:
                         self._dcp.symbol_to_source[tmp] = [ConstantSource(tmp_name)]
                         r = try_solve(sympy.Eq(base, divisor * tmp), s)
                         self._dynamic_results.add(self._dcp.doprint(sympy.Eq(s, r[1])))
-                    elif not _disable_forced_specializations:
-                        self._force_specialization(s)
-                        self._univariate_inequalities.pop(s, None)
 
         # remaining symbols have only pure inequalities (no equalities)
         for s, exprs in self._univariate_inequalities.items():
@@ -1905,11 +1862,6 @@ class DimConstraints:
         symbolic_equivalences = self._symbolic_equivalences
         self._symbolic_equivalences = []
         for source, expr in symbolic_equivalences:
-            if not _disable_forced_specializations and not _is_supported_equivalence(expr):
-                for s in expr.free_symbols:
-                    self._force_specialization(s)
-                    sexpr = self._dcp._print_Symbol(s)
-                    self._dynamic_results = {r for r in self._dynamic_results if sexpr not in r}
             self.add_equality(source, expr.xreplace(self._substitutions))
 
         # remaining symbolic equivalences become dynamic equality constraints
@@ -2395,7 +2347,7 @@ class ShapeEnvSettings:
     specialize_zero_one: bool
     duck_shape: bool
     prefer_deferred_runtime_asserts_over_guards: bool
-    _allow_complex_guards_as_runtime_asserts: bool
+    allow_complex_guards_as_runtime_asserts: bool
 
 
 class ShapeEnv:
@@ -2492,7 +2444,7 @@ class ShapeEnv:
         # When True, does not emit or raise constraint violation errors on
         # implicit guards generated by ops, and defers to runtime assertions
         # in the graph instead. For export.
-        _allow_complex_guards_as_runtime_asserts=False,
+        allow_complex_guards_as_runtime_asserts=False,
         # XXX Add any new settings that could affect FakeTensor evaluation
         # to: torch._subclasses.fake_tensor._ShapeEnvSettings
     ):
@@ -2508,7 +2460,7 @@ class ShapeEnv:
             specialize_zero_one=specialize_zero_one,
             duck_shape=duck_shape,
             prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-            _allow_complex_guards_as_runtime_asserts=_allow_complex_guards_as_runtime_asserts,
+            allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
         )
 
         self.guards: List[ShapeGuard] = []
@@ -2695,8 +2647,8 @@ class ShapeEnv:
         return self.settings.prefer_deferred_runtime_asserts_over_guards
 
     @property
-    def _allow_complex_guards_as_runtime_asserts(self):
-        return self.settings._allow_complex_guards_as_runtime_asserts
+    def allow_complex_guards_as_runtime_asserts(self):
+        return self.settings.allow_complex_guards_as_runtime_asserts
 
     def check_equal(self, other: "ShapeEnv") -> None:
         """Compare another ShapeEnv for equivalence
@@ -2923,6 +2875,7 @@ class ShapeEnv:
         we know statically is already True but we are checking it again in a way
         that is not clearly dischargeable.
         """
+        # self.prefer_deferred_runtime_asserts_over_guards = False
         self.runtime_asserts_frozen = True
 
     def _create_symbol_for_source(self, source: Source) -> Optional[sympy.Symbol]:
@@ -3307,6 +3260,13 @@ class ShapeEnv:
                 assert int(sym) == hint
             out = int(sym)
         else:
+            # How can this occur? When we mark_unbacked, we end up with a real
+            # tensor that has hints for all sizes, but we MUST NOT create a
+            # SymNode with a hint, because we're hiding the hint from our eyes
+            # with the unbacked Symbol.  And in fact, the hint compute may be
+            # inconsistent with size oblivious tests.
+            if free_unbacked_symbols(sym):
+                hint = None
             out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
         return out
 
@@ -3339,6 +3299,12 @@ class ShapeEnv:
                 assert float(sym) == hint
             out = float(sym)
         else:
+            # You could give this the same treatment as SymInt above if
+            # you supported mark_unbacked on a float, but it's a kind of
+            # strange thing to do though because floats don't get 0/1
+            # specialization anyway
+            if free_unbacked_symbols(sym):
+                assert hint is None, sym
             out = SymFloat(SymNode(sym, self, float, hint, fx_node=fx_node))
         return out
 
@@ -3673,7 +3639,6 @@ class ShapeEnv:
         # (See docs on EqualityConstraint for details of the encoding.)
         equalities_inputs: Optional[EqualityConstraint] = None,
         _simplified=False,
-        _disable_forced_specializations=False,
         # Indicates if we should produce guards for known static values.
         ignore_static=True,
     ) -> List[str]:
@@ -4016,7 +3981,6 @@ class ShapeEnv:
             self.var_to_val,
             set(symbol_to_constraints.keys()),
             self.source_name_to_debug_name,
-            self._allow_complex_guards_as_runtime_asserts,
         )
 
         if not _simplified:
@@ -4114,13 +4078,12 @@ class ShapeEnv:
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
-                            if not _disable_forced_specializations:
-                                var_with_range = self._render_range_for_constraint_violation(source, c)
-                                msg = (
-                                    f"Not all values of {var_with_range} "
-                                    f"satisfy the generated guard {guard_expr}."
-                                )
-                                record_constraint_violation(c.warn_only, self._debug_name(source), msg)
+                            var_with_range = self._render_range_for_constraint_violation(source, c)
+                            msg = (
+                                f"Not all values of {var_with_range} "
+                                f"satisfy the generated guard {guard_expr}."
+                            )
+                            record_constraint_violation(c.warn_only, self._debug_name(source), msg)
                         elif isinstance(c, RelaxedUnspecConstraint):
                             # This is fine, we allow guards here as long as it
                             # didn't constrain it to one value  (we don't
@@ -4140,6 +4103,17 @@ class ShapeEnv:
             if self._maybe_evaluate_static(guard.expr, axioms=()) is not None:
                 continue
             issue_guard(guard)
+
+        # Because there are guards that export's constraint solver can suggest good fixes for, that we may have
+        # deferred as runtime asserts, and that produce_guards() alone won't do anything with (e.g. divisiblity guards),
+        # we want to send runtime asserts to export's constraint solver too. These will still stay in the graph as asserts,
+        # but export's constraint solver can decide whether to do anything with them (i.e. raise an error and provide
+        # suggested fixes, or decide it's out of scope and leave as a runtime assert in the graph).
+        for ra in self.deferred_runtime_asserts.get(None, []):
+            if self._maybe_evaluate_static(ra.expr, axioms=()) is not None:
+                continue
+            expr = self.simplify(ra.expr)
+            self.dim_constraints.add(expr)
 
         # 3. Every symbol must be within its value range (this handles 0/1
         # specialization too).
@@ -4783,7 +4757,7 @@ class ShapeEnv:
         # Precondition: a == tgt
         assert isinstance(a, sympy.Symbol)
 
-        if self._allow_complex_guards_as_runtime_asserts and not _is_supported_equivalence(tgt):
+        if self.allow_complex_guards_as_runtime_asserts and not _is_supported_equivalence(tgt):
             return  # continuing leads to placeholder shapes having complex expressions that we can't resolve
 
         # Handles nested tensor symbolic variables which don't have
@@ -5317,7 +5291,7 @@ class ShapeEnv:
                     # is no longer necessary)
                     self._maybe_guard_rel(g)
 
-                if not self._allow_complex_guards_as_runtime_asserts:
+                if not self.allow_complex_guards_as_runtime_asserts:
                     # at this point, we've evaluated the concrete expr value, and have
                     # flipped/negated the guard if necessary. Now we know what to guard
                     # or defer to runtime assert on.

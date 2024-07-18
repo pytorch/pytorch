@@ -757,9 +757,7 @@ void jagged_dense_elementwise_dense_output_(
 
 #define INVOKE_KERNEL_WITH_DIM(NUM_JAGGED_DIM)                                 \
   {                                                                            \
-    dim3 threads, blocks;                                                      \
-    StackArray<int64_t> jagged_dims_tensor;                                    \
-    std::tie(threads, blocks, jagged_dims_tensor) =                            \
+    auto [threads, blocks, jagged_dims_tensor] =                               \
         check_shape_and_partition_(x_values, x_offsets, y);                    \
     blocks.x = div_round_up(x_values.size(0), threads.y);                      \
     std::vector<Tensor> x_offsets_contig;                                      \
@@ -1237,9 +1235,7 @@ inline bool jagged_dense_dense_elementwise_jagged_output_matches_opt(
 
 #define INVOKE_KERNEL_WITH_DIM(NUM_JAGGED_DIM)                                 \
   {                                                                            \
-    dim3 threads, blocks;                                                      \
-    StackArray<int64_t> jagged_dims_tensor;                                    \
-    std::tie(threads, blocks, jagged_dims_tensor) =                            \
+    auto [threads, blocks, jagged_dims_tensor] =                               \
         check_shape_and_partition_(x_values, x_offsets, y);                    \
     blocks.x = div_round_up(x_values.size(0), threads.y);                      \
     std::vector<Tensor> x_offsets_contig;                                      \

@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, NewType, Optional, Set, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import Source
+from torch._ops import OpOverload
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -330,7 +331,7 @@ class ViewAndMutationMeta:
     deterministic: Optional[bool] = None
 
     # Keeps track of which input indices store parameters (which we will treat as static)
-    static_parameter_indices: List[int] = field(default_factory=list)
+    static_input_indices: List[int] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
@@ -797,7 +798,7 @@ class AOTConfig:
     fw_compiler: Callable
     bw_compiler: Callable
     partition_fn: Callable
-    decompositions: Dict[Callable, Callable]
+    decompositions: Dict[OpOverload, Callable]
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool
@@ -805,6 +806,7 @@ class AOTConfig:
     no_tangents: bool = False
     dynamic_shapes: bool = False
     aot_autograd_arg_pos_to_source: Optional[List[Source]] = None
+    static_input_indices: Optional[List[int]] = None
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
     # this is always false outside of export.
