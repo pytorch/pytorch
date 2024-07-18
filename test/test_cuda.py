@@ -5183,7 +5183,7 @@ class TestCudaOptims(TestCase):
 
 class TestGDS(TestCase):
     def _get_tmp_dir_fs_type(self):
-        my_path = os.path.realpath()
+        my_path = os.path.realpath("/tmp")
         root_type = ""
         for part in psutil.disk_partitions():
             if part.mountpoint == "/":
