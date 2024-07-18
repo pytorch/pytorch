@@ -358,14 +358,12 @@ class CondAutogradOp(torch.autograd.Function):
     def backward(ctx, *flat_grads):
         operands = ctx.saved_tensors
 
-        # Don't support grad of grad.
-        with torch._C._AutoDispatchBelowAutograd():
-            grads = cond_op(
-                ctx._pred,
-                ctx._joint_true_graph,
-                ctx._joint_false_graph,
-                flat_grads + operands,
-            )
+        grads = cond_op(
+            ctx._pred,
+            ctx._joint_true_graph,
+            ctx._joint_false_graph,
+            flat_grads + operands,
+        )
         return None, None, None, None, None, *grads
 
 
