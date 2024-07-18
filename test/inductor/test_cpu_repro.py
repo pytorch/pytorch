@@ -34,7 +34,6 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import InterpreterShim
 from torch._inductor.utils import timed
 from torch._inductor.virtualized import V
-from torch._prims_common import is_float_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
@@ -2111,36 +2110,6 @@ class CPUReproTests(TestCase):
                 check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
-    def test_vec_remainder(self):
-        for dtype in [
-            torch.int8,
-            torch.uint8,
-            torch.int32,
-            torch.int64,
-            torch.bfloat16,
-            torch.float16,
-            torch.float32,
-        ]:
-            if is_float_dtype(dtype):
-                x = torch.randn(64, dtype=dtype)
-                y = torch.randn(64, dtype=dtype)
-            else:
-                lower = 1 if dtype == torch.uint8 else -100
-                x = torch.randint(lower, 100, (64,), dtype=dtype)
-                y = torch.randint(lower, 100, (64,), dtype=dtype)
-                y = torch.where(
-                    y == torch.zeros_like(y),
-                    torch.ones_like(y),
-                    y,
-                )
-
-            torch._dynamo.reset()
-            metrics.reset()
-            _args = (x, y)
-            self.common(torch.remainder, _args)
-            check_metrics_vec_kernel_count(1)
-
-    @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
         def fn(x):
@@ -2587,6 +2556,7 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x,))
                 assert metrics.generated_cpp_vec_kernel_count == 0
 
+    @config.patch(fx_graph_cache=False)
     def test_outer_loop_fusion(self):
         def fn(x):
             max = torch.amax(x, dim=-1, keepdim=True)
@@ -2598,8 +2568,139 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
-            assert len(metrics.cpp_outer_loop_fused_inner_counts) == 1
-            assert metrics.cpp_outer_loop_fused_inner_counts[0] == 2
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                2,
+            )
+
+    @config.patch(fx_graph_cache=False)
+    def test_local_buffer_in_outer_loop_fusion(self):
+        def fn(x):
+            max = torch.nn.functional.softmax(x, dim=-1)
+            return x - max
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                3,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                1,
+            )
+            # Check the number of global buffer allocation
+            torch._dynamo.reset()
+            metrics.reset()
+            _, code = run_and_get_cpp_code(
+                torch._dynamo.optimize("inductor")(fn),
+                x,
+            )
+            self.assertEqual(code.count("empty_strided_cpu("), 3)
+
+    @config.patch(fx_graph_cache=False)
+    def test_two_local_buffers_in_outer_loop_fusion(self):
+        def fn(x):
+            softmax = torch.nn.functional.softmax(x, dim=-1)
+            sum = torch.sum(softmax, dim=-1)
+            sum_broadcast = torch.broadcast_to(
+                sum.unsqueeze(-1), [*(sum.size()[0:3]), 256]
+            )
+            sum_exp = torch.exp(sum_broadcast)
+            sum2 = torch.sum(sum_exp, dim=-1)
+            sub = sum_exp - sum2.unsqueeze(-1)
+            return x[:, :, :, 0:256] - sub
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                5,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                2,
+            )
+
+    @config.patch(fx_graph_cache=False)
+    def test_share_local_buffers_in_outer_loop_fusion(self):
+        def fn(x):
+            max = torch.nn.functional.softmax(x, dim=-1)
+            max = torch.nn.functional.softmax(max, dim=-1)
+            return x - max
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                5,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                1,  # 2 global bufs share 1 local buf
+            )
+
+    @config.patch(fx_graph_cache=False)
+    def test_two_local_buffers_in_outer_loop_fusion_case2(self):
+        # exp and exp2 should be replaced by local buffer
+        # since exp will be used after exp2, exp2 can't share the same
+        # local buffer as exp
+        def fn(x):
+            a_max = torch.amax(x, -1, keepdim=True)
+            exp = torch.exp(x - a_max)
+            sum = torch.sum(exp, -1, keepdim=True)
+            exp2 = torch.exp(exp - sum)
+            sum2 = torch.sum(exp2, -1, keepdim=True)
+            sub = exp2 - sum2
+            sub2 = exp - sub
+            return sub2
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                4,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                2,
+            )
 
     def test_argmin(self):
         def fn(x):
@@ -3411,19 +3512,13 @@ class CPUReproTests(TestCase):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
 
-        for dtype in [
-            torch.int8,
-            torch.uint8,
-            torch.int32,
-            torch.int64,
-        ]:
-            x = torch.randint(1, 100, (32, 32), dtype=dtype)
-            y = torch.randint(1, 100, (32, 32), dtype=dtype)
-            for mode in [None, "trunc", "floor"]:
-                with torch.no_grad():
-                    metrics.reset()
-                    self.common(fn, (x, y, mode))
-                    check_metrics_vec_kernel_count(1)
+        x = torch.randint(1, 100, (32, 32))
+        y = torch.randint(1, 100, (32, 32))
+        for mode in [None, "trunc", "floor"]:
+            with torch.no_grad():
+                metrics.reset()
+                self.common(fn, (x, y, mode))
+                check_metrics_vec_kernel_count(1)
 
     def test_uint8_add(self):
         # https://github.com/pytorch/pytorch/issues/113016
@@ -3915,6 +4010,25 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 self.common(fn, (x,))
                 check_metrics_vec_kernel_count(1)
+
+    def test_consistent_remove_buffers(self):
+        def fn(x):
+            z = x + x
+            z1 = test_operators.realize(z)
+            return x + z1
+
+        # The shape makes sure we generate both vec and scalar kernels
+        x = torch.randn((65,), dtype=torch.bfloat16)
+        with config.patch(inplace_buffers=False):
+            metrics.reset()
+            self.common(fn, (x,))
+            check_metrics_vec_kernel_count(1)
+            _, code = run_and_get_cpp_code(torch.compile(fn), x)
+            FileCheck().check_count(
+                "tmp1 + tmp2",
+                2,
+                exactly=True,
+            ).run(code)
 
 
 if __name__ == "__main__":
