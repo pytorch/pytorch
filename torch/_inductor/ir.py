@@ -3790,7 +3790,7 @@ class ChoiceCaller:
         return {}
 
     def autoheuristic_id(self) -> str:
-        raise NotImplementedError
+        raise "unsupported_choice"
 
 
 class TritonTemplateCallerBase(ChoiceCaller):
