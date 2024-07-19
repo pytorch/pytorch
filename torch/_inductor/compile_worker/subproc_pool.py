@@ -18,20 +18,6 @@ from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 log = logging.getLogger(__name__)
 
 
-class Pipe(typing.Protocol):
-    def write(self, data: bytes):
-        ...
-
-    def read(self, n: int) -> bytes:
-        ...
-
-    def close(self):
-        ...
-
-    def flush(self):
-        ...
-
-
 def _pack_msg(job_id, length):
     return struct.pack("nn", job_id, length)
 
@@ -67,16 +53,22 @@ class SubprocPool:
 
     def __init__(self, nprocs: int):
         entry = os.path.join(os.path.dirname(__file__), "__main__.py")
+
+        subproc_read_fd, write_fd = os.pipe()
+        read_fd, subproc_write_fd = os.pipe()
+        self.write_pipe = os.fdopen(write_fd, "wb")
+        self.read_pipe = os.fdopen(read_fd, "rb")
+
         cmd = [
             sys.executable,
             entry,
             f"--workers={nprocs}",
             f"--parent={os.getpid()}",
+            f"--read-fd={str(subproc_read_fd)}",
+            f"--write-fd={str(subproc_write_fd)}",
         ]
         self.process = subprocess.Popen(
             cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
             env={
                 **os.environ,
                 # We need to set the PYTHONPATH so the subprocess can find torch.
@@ -86,10 +78,9 @@ class SubprocPool:
                 # creates the SubprocPool in the first place.
                 "TORCH_WARM_POOL": "0",
             },
+            pass_fds=(subproc_read_fd, subproc_write_fd),
         )
-        self.write_pipe: Pipe = typing.cast(Pipe, self.process.stdin)
         self.write_lock = threading.Lock()
-        self.read_pipe: Pipe = typing.cast(Pipe, self.process.stdout)
         self.read_thread = threading.Thread(target=self._read_thread, daemon=True)
 
         self.futures_lock = threading.Lock()
@@ -160,7 +151,7 @@ class SubprocPool:
 class SubprocMain:
     """Communicates with a SubprocPool in the parent process, called by __main__.py"""
 
-    def __init__(self, nprocs: int, read_pipe: Pipe, write_pipe: Pipe):
+    def __init__(self, nprocs, read_pipe, write_pipe):
         self.read_pipe = read_pipe
         self.write_pipe = write_pipe
         self.write_lock = threading.Lock()
