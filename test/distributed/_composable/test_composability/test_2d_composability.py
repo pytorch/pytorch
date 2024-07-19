@@ -7,11 +7,9 @@ from copy import deepcopy
 from typing import List, Type
 
 import torch
-
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
-
 import torch.nn.functional as F
 from torch.distributed._composable import replicate
 from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
@@ -43,18 +41,15 @@ from torch.distributed.tensor.parallel import (
 from torch.distributed.tensor.parallel.ddp import _pre_dp_module_transform
 from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
-
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP, MLPStack
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skipIfRocm,
 )
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
