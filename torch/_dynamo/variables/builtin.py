@@ -1859,7 +1859,9 @@ class BuiltinVariable(VariableTracker):
             unimplemented(f"call_id with args {args}")
 
     def call_deepcopy(self, tx, x):
-        if isinstance(x, variables.UserDefinedObjectVariable):
+        if isinstance(
+            x, variables.UserDefinedObjectVariable
+        ) and not tx.output.side_effects.has_pending_mutation(x):
             return variables.UserDefinedObjectVariable(
                 copy.deepcopy(x.value), mutable_local=MutableLocal()
             )
