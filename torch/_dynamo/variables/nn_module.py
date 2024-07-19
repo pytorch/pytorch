@@ -1038,6 +1038,29 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             return dict_vt.maybe_getitem_const(name_vt)
         return None
 
+    def var_getattr(self, tx, name):
+        # Allow skipping of empty hook dict guards on inbuilt nn modules
+        if name in (
+            "_backward_hooks",
+            "_backward_pre_hooks",
+            "_forward_hooks",
+            "_forward_pre_hooks",
+        ):
+            if not tx.output.side_effects.has_pending_mutation_of_attr(
+                self, name
+            ) and self.value.__module__.startswith(("torch.nn.", "torch.ao.")):
+                hooks_dict = getattr(self.value, name)
+                if isinstance(hooks_dict, dict) and len(hooks_dict) == 0:
+                    if self.source:
+                        hooks_source = AttrSource(self.source, name)
+                        install_guard(
+                            hooks_source.make_guard(
+                                GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
+                            )
+                        )
+                    return variables.ConstDictVariable({})
+        return super().var_getattr(tx, name)
+
     def manually_trace_nn_module_getattr(self, tx, name):
         """
         Dynamo tracing of nn.Module __getattr__ can be expensive if the model

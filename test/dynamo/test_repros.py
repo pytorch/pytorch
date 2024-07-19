@@ -5400,6 +5400,26 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         f_bad(torch.ones(2, 2))
 
+    def test_guard_with_tuple_mutation(self):
+        class Foo:
+            def __init__(self):
+                self.x = 10
+
+        foo = Foo()
+        d = {
+            "a": 2,
+            "b": (foo,),
+        }
+
+        def fn(x, d):
+            return x * d["a"] * d["b"][0].x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(inp, d), opt_fn(inp, d))
+        d["b"][0].x = 12
+        self.assertEqual(fn(inp, d), opt_fn(inp, d))
+
 
 instantiate_parametrized_tests(ReproTests)
 
