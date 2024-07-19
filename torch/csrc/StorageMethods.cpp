@@ -315,10 +315,7 @@ static PyObject* THPStorage_fromBuffer(
     // we are trying to get a value which is not 0 or 1, we have to manually
     // convert original values to boolean ones.
     torch::utils::THP_decodeBoolBuffer(
-        static_cast<bool*>(storage->mutable_data()),
-        src + offset,
-        do_byte_swap,
-        count);
+        static_cast<bool*>(storage->mutable_data()), src + offset, count);
   } else if (scalar_type == at::kShort) {
     torch::utils::THP_decodeInt16Buffer(
         static_cast<int16_t*>(storage->mutable_data()),
