@@ -57,6 +57,7 @@ __all__ = [
     "clear_safe_globals",
     "get_safe_globals",
     "add_safe_globals",
+    "safe_globals",
 ]
 
 
@@ -228,6 +229,32 @@ def add_safe_globals(safe_globals: List[Any]) -> None:
         #          [-0.8234,  2.0500, -0.3657]])
     """
     _weights_only_unpickler._add_safe_globals(safe_globals)
+
+
+class safe_globals(_weights_only_unpickler._safe_globals):
+    r"""Context-manager that adds certain globals as safe for ``weights_only`` load.
+
+    Args:
+        safe_globals: List of globals for weights_only load.
+
+    Example:
+        >>> # xdoctest: +SKIP("Can't torch.save(t, ...) as doctest thinks MyTensor is defined on torch.serialization")
+        >>> import tempfile
+        >>> class MyTensor(torch.Tensor):
+        ...     pass
+        >>> t = MyTensor(torch.randn(2, 3))
+        >>> with tempfile.NamedTemporaryFile() as f:
+        ...     torch.save(t, f.name)
+        # Running `torch.load(f.name, weights_only=True)` will fail with
+        # Unsupported global: GLOBAL __main__.MyTensor was not an allowed global by default.
+        # Check the code and make sure MyTensor is safe to be used when loaded from an arbitrary checkpoint.
+        ...     with torch.serialization.safe_globals([MyTensor]):
+        ...         torch.load(f.name, weights_only=True)
+        # MyTensor([[-0.5024, -1.8152, -0.5455],
+        #          [-0.8234,  2.0500, -0.3657]])
+        >>> assert torch.serialization.get_safe_globals() == []
+    """
+    pass
 
 
 def _is_zipfile(f) -> bool:

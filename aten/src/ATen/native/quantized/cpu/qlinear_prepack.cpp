@@ -170,7 +170,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
       nullptr,
       weight_contig, /* int8_t weight */
       bias_fp32.contiguous(), /* fp32 bias */
-      c10::nullopt, /* input_scale */
+      std::nullopt, /* input_scale */
       w_scales,
       std::move(w_zero_points));
   return wt_ptr;
@@ -257,7 +257,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   packed_weight_p->set_zero_point(wgt_zero_points);
   std::unique_ptr<ideep::tensor> weight_ptr(packed_weight_p);
   // Bias
-  std::optional<ideep::tensor> onednn_bias{c10::nullopt};
+  std::optional<ideep::tensor> onednn_bias{std::nullopt};
   if (bias.has_value()) {
     auto& b = bias.value();
     auto bias_size = b.sizes().vec();

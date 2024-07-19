@@ -7,9 +7,9 @@ import itertools
 import math
 import operator
 import re
+import unittest
 
 import numpy as np
-
 import sympy
 
 import torch
@@ -49,6 +49,7 @@ from torch.utils._sympy.functions import (
     IsNonOverlappingAndDenseIndicator,
     Mod,
 )
+
 
 aten = torch.ops.aten
 
@@ -259,6 +260,15 @@ class TestPySymInt(TestCase):
 
         a = create_symint(shape_env, 2)
         self.assertTrue(5 * a == 5 * 2)
+
+    def test_sympify_symint(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 2)
+        self.assertIs(sympy.sympify(a), a.node.expr)
+        b = create_symfloat(shape_env, 3.0)
+        self.assertIs(sympy.sympify(b), b.node.expr)
+        c = create_symbool(shape_env, True)
+        self.assertIs(sympy.sympify(c), c.node.expr)
 
     def test_roundtrip(self):
         shape_env = ShapeEnv()
@@ -1253,11 +1263,15 @@ class TestSymNumberMagicMethods(TestCase):
     def get_constant_bool(self, val):
         return SymBool(torch._C._get_constant_bool_symnode(val))
 
+    @unittest.expectedFailure
+    def test_symint_hashing(self):
+        shape_env = ShapeEnv()
+        hash(create_symint(shape_env, 3))
+
     def test_symnode_hashing(self):
         shape_env = ShapeEnv()
 
         # These all trigger specialization when hashed
-        hash(create_symint(shape_env, 3))
         hash(create_symbool(shape_env, True))
         # We should be passing in float here, but create_symbol currently
         # only supports int

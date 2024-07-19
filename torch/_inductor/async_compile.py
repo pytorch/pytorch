@@ -38,6 +38,7 @@ from torch._inductor.runtime.compile_tasks import (
 )
 
 from torch.hub import _Faketqdm, tqdm
+from torch.utils._triton import has_triton_package
 
 if TYPE_CHECKING:
     from torch._inductor.runtime.hints import HalideMeta
@@ -63,8 +64,8 @@ def pre_fork_setup():
         from triton.compiler.compiler import triton_key
 
         triton_key()
-    except ModuleNotFoundError:
-        # Might not be installed.
+    except ImportError:
+        # Triton might not be installed or might be an old version.
         pass
 
 
@@ -267,6 +268,8 @@ class AsyncCompile:
 if (
     os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
     or os.environ.get("TORCH_WARM_POOL", "1") != "1"
+    # The subprocess pool is only used for the Triton backend
+    or not has_triton_package()
 ):
     pass
 else:

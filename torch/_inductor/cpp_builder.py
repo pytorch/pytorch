@@ -17,7 +17,7 @@ import sys
 import sysconfig
 import warnings
 from pathlib import Path
-from typing import List, Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._inductor import config, exc
@@ -244,6 +244,12 @@ def run_command_line(cmd_line, cwd=None):
     return status
 
 
+def normalize_path_separator(orig_path: str) -> str:
+    if _IS_WINDOWS:
+        return orig_path.replace(os.sep, "/")
+    return orig_path
+
+
 class BuildOptionsBase:
     """
     This is the Base class for store cxx build options, as a template.
@@ -251,20 +257,33 @@ class BuildOptionsBase:
     and maintains the suitable args.
     """
 
-    def __init__(self) -> None:
-        self._compiler = ""
-        self._definations: List[str] = []
-        self._include_dirs: List[str] = []
-        self._cflags: List[str] = []
-        self._ldflags: List[str] = []
-        self._libraries_dirs: List[str] = []
-        self._libraries: List[str] = []
+    def __init__(
+        self,
+        compiler: str = "",
+        definitions: Optional[List[str]] = None,
+        include_dirs: Optional[List[str]] = None,
+        cflags: Optional[List[str]] = None,
+        ldflags: Optional[List[str]] = None,
+        libraries_dirs: Optional[List[str]] = None,
+        libraries: Optional[List[str]] = None,
+        passthrough_args: Optional[List[str]] = None,
+        aot_mode: bool = False,
+        use_absolute_path: bool = False,
+        compile_only: bool = False,
+    ) -> None:
+        self._compiler = compiler
+        self._definations: List[str] = definitions or []
+        self._include_dirs: List[str] = include_dirs or []
+        self._cflags: List[str] = cflags or []
+        self._ldflags: List[str] = ldflags or []
+        self._libraries_dirs: List[str] = libraries_dirs or []
+        self._libraries: List[str] = libraries or []
         # Some args is hard to abstract to OS compatable, passthough it directly.
-        self._passthough_args: List[str] = []
+        self._passthough_args: List[str] = passthrough_args or []
 
-        self._aot_mode: bool = False
-        self._use_absolute_path: bool = False
-        self._compile_only: bool = False
+        self._aot_mode: bool = aot_mode
+        self._use_absolute_path: bool = use_absolute_path
+        self._compile_only: bool = compile_only
 
     def _remove_duplicate_options(self):
         self._definations = _remove_duplication_in_list(self._definations)
@@ -307,6 +326,24 @@ class BuildOptionsBase:
 
     def get_compile_only(self) -> bool:
         return self._compile_only
+
+    def save_flags_to_file(self, file) -> None:
+        attrs = {
+            "compiler": self.get_compiler(),
+            "definitions": self.get_definations(),
+            "include_dirs": self.get_include_dirs(),
+            "cflags": self.get_cflags(),
+            "ldflags": self.get_ldflags(),
+            "libraries_dirs": self.get_libraries_dirs(),
+            "libraries": self.get_libraries(),
+            "passthrough_args": self.get_passthough_args(),
+            "aot_mode": self.get_aot_mode(),
+            "use_absolute_path": self.get_use_absolute_path(),
+            "compile_only": self.get_compile_only(),
+        }
+
+        with open(file, "w") as f:
+            json.dump(attrs, f)
 
 
 def _get_warning_all_cflag(warning_all: bool = True) -> List[str]:
@@ -538,20 +575,6 @@ def _setup_standard_sys_libs(
             passthough_args.append(" -L" + build_paths.glibc_lib())
 
     return cflags, include_dirs, passthough_args
-
-
-@functools.lru_cache
-def _cpp_prefix_path() -> str:
-    from torch._inductor.codecache import write  # TODO
-
-    path = Path(Path(__file__).parent).parent / "codegen/cpp_prefix.h"
-    with path.open() as f:
-        content = f.read()
-        _, filename = write(
-            content,
-            "h",
-        )
-    return filename
 
 
 def _get_build_args_of_chosen_isa(vec_isa: VecISA):
@@ -853,7 +876,7 @@ class CppTorchOptions(CppOptions):
 
     def __init__(
         self,
-        vec_isa: VecISA,
+        vec_isa: VecISA = invalid_vec_isa,
         include_pytorch: bool = False,
         warning_all: bool = True,
         aot_mode: bool = False,
@@ -939,7 +962,6 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     libraries_dirs: List[str] = []
     libraries: List[str] = []
     passthough_args: List[str] = []
-
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
@@ -947,6 +969,7 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     ):
         os.environ["CUDA_HOME"] = build_paths.cuda()
 
+    _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
     include_dirs = cpp_extension.include_paths(cuda)
@@ -971,8 +994,11 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
                     libraries += ["c10_cuda", "cuda", "torch_cuda"]
 
     if aot_mode:
-        cpp_prefix_include_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
-        include_dirs += cpp_prefix_include_dir
+        if config.is_fbcode():
+            from torch._inductor.codecache import cpp_prefix_path
+
+            cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
+            include_dirs += cpp_prefix_include_dir
 
         if cuda and torch.version.hip is None:
             _transform_cuda_paths(libraries_dirs)
@@ -1008,7 +1034,7 @@ class CppTorchCudaOptions(CppTorchOptions):
 
     def __init__(
         self,
-        vec_isa: VecISA,
+        vec_isa: VecISA = invalid_vec_isa,
         include_pytorch: bool = False,
         cuda: bool = True,
         aot_mode: bool = False,
@@ -1061,15 +1087,26 @@ class CppTorchCudaOptions(CppTorchOptions):
 
 
 def get_name_and_dir_from_output_file_path(
-    aot_mode: bool, use_absolute_path: bool, file_path: str
+    file_path: str,
 ):
+    """
+    This function help prepare parameters to new cpp_builder.
+    Example:
+        input_code: /tmp/tmpof1n5g7t/5c/c5crkkcdvhdxpktrmjxbqkqyq5hmxpqsfza4pxcf3mwk42lphygc.cpp
+        name, dir = get_name_and_dir_from_output_file_path(input_code)
+    Run result:
+        name = c5crkkcdvhdxpktrmjxbqkqyq5hmxpqsfza4pxcf3mwk42lphygc
+        dir = /tmp/tmpof1n5g7t/5c/
+
+    put 'name' and 'dir' to CppBuilder's 'name' and 'output_dir'.
+    CppBuilder --> get_target_file_path will format output path accoding OS:
+    Linux: /tmp/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.so
+    Windows: [Windows temp path]/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.dll
+    """
     name_and_ext = os.path.basename(file_path)
     name, ext = os.path.splitext(name_and_ext)
     dir = os.path.dirname(file_path)
 
-    if config.is_fbcode():
-        if not (aot_mode and not use_absolute_path):
-            dir = "."
     return name, dir
 
 
@@ -1118,17 +1155,23 @@ class CppBuilder:
         self._target_file = ""
 
         self._use_absolute_path: bool = False
+        self._aot_mode: bool = False
 
         self._name = name
 
         # Code start here, initial self internal veriables firstly.
         self._compiler = BuildOption.get_compiler()
         self._use_absolute_path = BuildOption.get_use_absolute_path()
+        self._aot_mode = BuildOption.get_aot_mode()
 
+        """
+        TODO: validate and remove:
         if len(output_dir) == 0:
             self._output_dir = os.path.dirname(os.path.abspath(__file__))
         else:
             self._output_dir = output_dir
+        """
+        self._output_dir = output_dir
 
         self._compile_only = BuildOption.get_compile_only()
         file_ext = (
@@ -1142,7 +1185,7 @@ class CppBuilder:
             sources = [sources]
 
         if config.is_fbcode():
-            if BuildOption.get_aot_mode() and not self._use_absolute_path:
+            if self._aot_mode and not self._use_absolute_path:
                 inp_name = sources
                 # output process @ get_name_and_dir_from_output_file_path
             else:
@@ -1213,7 +1256,7 @@ class CppBuilder:
                     f"{compiler} {include_dirs_args} {definations_args} {cflags_args} {sources} "
                     f"{passthougn_args} /LD /Fe{target_file} /link {libraries_dirs_args} {libraries_args} {ldflags_args} "
                 )
-                cmd = cmd.replace("\\", "/")
+                cmd = normalize_path_separator(cmd)
             else:
                 compile_only_arg = "-c" if self._compile_only else ""
                 cmd = re.sub(
@@ -1241,7 +1284,7 @@ class CppBuilder:
         return command_line
 
     def get_target_file_path(self):
-        return self._target_file
+        return normalize_path_separator(self._target_file)
 
     def build(self) -> Tuple[int, str]:
         """

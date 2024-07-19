@@ -33,7 +33,7 @@ Tensor& set_storage_cuda_(Tensor& result, Storage storage, int64_t storage_offse
 
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
   at::OptionalIntArrayRef stride_opt = stride.data() != nullptr ?
-                                          at::OptionalIntArrayRef(stride) : c10::nullopt;
+                                          at::OptionalIntArrayRef(stride) : std::nullopt;
   at::native::resize_impl_cuda_(result.unsafeGetTensorImpl(), size, stride_opt);
   return result;
 }

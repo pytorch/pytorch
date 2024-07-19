@@ -269,6 +269,9 @@ class EnterSubgraphLine(WrapperLine):
     wrapper: WrapperCodeGen
     graph: GraphLowering
 
+    def __post_init__(self) -> None:
+        self.wrapper.push_computed_sizes(self.wrapper.computed_sizes)
+
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper.push_codegened_graph(self.graph)
         code.do_indent()
@@ -277,6 +280,9 @@ class EnterSubgraphLine(WrapperLine):
 @dataclasses.dataclass
 class ExitSubgraphLine(WrapperLine):
     wrapper: WrapperCodeGen
+
+    def __post_init__(self) -> None:
+        self.wrapper.computed_sizes = self.wrapper.pop_computed_sizes()
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper.pop_codegened_graph()
@@ -488,6 +494,7 @@ class WrapperCodeGen(CodeGen):
         # including the graph instance into a cache key to avoid cross-graph
         # caching during lowering of nested subgraphs
         self.codegened_graph_stack = []
+        self.computed_sizes_stack = []
 
         self.write_header()
         self.write_prefix()
@@ -502,7 +509,7 @@ class WrapperCodeGen(CodeGen):
         self.freed: Set[BufferName] = set()
 
         # maps from reusing buffer to reused buffer
-        self.reuses: Dict[BufferName, BufferName] = dict()
+        self.reuses: Dict[BufferName, BufferName] = {}
 
         self.write_get_raw_stream = functools.lru_cache(None)(  # type: ignore[assignment]
             self.write_get_raw_stream
@@ -680,6 +687,14 @@ class WrapperCodeGen(CodeGen):
     def pop_codegened_graph(self):
         return self.codegened_graph_stack.pop()
 
+    def push_computed_sizes(self, computed_sizes):
+        from copy import deepcopy
+
+        return self.computed_sizes_stack.append(deepcopy(computed_sizes))
+
+    def pop_computed_sizes(self):
+        return self.computed_sizes_stack.pop()
+
     def next_kernel_suffix(self) -> str:
         return f"{next(self._names_iter)}"
 
@@ -756,7 +771,7 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name, grid, configs, args, triton_meta, raw_args
+        self, kernel_name, raw_args, grid, configs, triton_meta, constexprs
     ):
         grid_fn, code = user_defined_kernel_grid_fn_code(
             kernel_name, configs, grid, wrapper=self
@@ -766,6 +781,7 @@ class WrapperCodeGen(CodeGen):
         for line in code.split("\n"):
             self.writeline(line)
 
+        args = [self.val_to_arg_str(v) for v in raw_args]
         arg_types = [
             arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
             for arg in raw_args
@@ -890,7 +906,7 @@ class WrapperCodeGen(CodeGen):
             del async_compile
         """
         )
-        scope = dict()  # type: ignore[var-annotated]
+        scope = {}  # type: ignore[var-annotated]
         tuning_code = (
             self.kernel_autotune_defs.getvalue() + self.kernel_autotune_calls.getvalue()
         )
@@ -1733,7 +1749,7 @@ class WrapperCodeGen(CodeGen):
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
 
-    def make_buffer_reuse(self, old: ir.Buffer, new: ir.Buffer, delete_old: bool):
+    def make_buffer_reuse(self, old, new, delete_old: bool):
         assert old.get_dtype() == new.get_dtype()
         old_name = old.get_name()
         new_name = new.get_name()
@@ -1762,14 +1778,14 @@ class WrapperCodeGen(CodeGen):
             )
         )
 
-    def codegen_allocation(self, buffer: ir.Buffer):
+    def codegen_allocation(self, buffer):
         name = buffer.get_name()
 
         if name in V.graph.removed_buffers or name in self.allocated:
             return
         self.allocated.add(name)
         if isinstance(
-            buffer.get_defining_op(),
+            buffer,
             (ir.ExternKernelAlloc, ir.MultiOutput),
         ):
             return
@@ -1783,15 +1799,17 @@ class WrapperCodeGen(CodeGen):
             assert isinstance(
                 layout.view, ir.ReinterpretView
             ), f"unexpected {type(layout.view)}: {layout.view}"
-            assert isinstance(layout.view.data, ir.StorageBox), type(layout.view.data)
-            assert isinstance(layout.view.data.data, ir.Buffer), type(layout.view.data)
-            self.codegen_allocation(layout.view.data.data)
+            self.codegen_allocation(layout.view.data)
             self.codegen_deferred_allocation(name, layout)
             return
 
         self.writeline(AllocateLine(self, buffer))
 
     def codegen_free(self, buffer):
+        assert (
+            buffer.get_workspace_size() == 0
+        ), "Only support zero workspace size for now!"
+
         name = buffer.get_name()
 
         # can be freed but not reused
@@ -1807,17 +1825,14 @@ class WrapperCodeGen(CodeGen):
 
     def can_reuse(self, input_buffer, output_buffer=None):
         name = input_buffer.get_name()
-        if (
+        return not (
             name in V.graph.removed_buffers
             or name in V.graph.graph_inputs
             or name in V.graph.constants
             or name in V.graph.torchbind_constants
             or name in V.graph.never_reuse_buffers
             or name in self.freed
-        ):
-            return False
-
-        return True
+        )
 
     def did_reuse(self, buffer, reused_buffer):
         # Check whether a given buffer was reused by a possible reuser in the wrapper codegen
@@ -1827,7 +1842,7 @@ class WrapperCodeGen(CodeGen):
             and self.reuses[buffer.get_name()] == reused_buffer.get_name()
         )
 
-    def codegen_inplace_reuse(self, input_buffer: ir.Buffer, output_buffer: ir.Buffer):
+    def codegen_inplace_reuse(self, input_buffer, output_buffer):
         assert buffer_reuse_key(input_buffer) == buffer_reuse_key(output_buffer)
         self.codegen_allocation(input_buffer)
         self.freed.add(input_buffer.get_name())
