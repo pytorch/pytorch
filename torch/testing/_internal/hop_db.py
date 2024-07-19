@@ -10,6 +10,7 @@ from torch.testing._internal.opinfo.core import (
     SampleInput,
 )
 from torch.testing._internal.common_dtype import all_types_and, custom_types
+from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.opinfo.core import DecorateInfo
 from torch.nn.attention.flex_attention import flex_attention, _create_empty_block_mask
 
@@ -256,6 +257,18 @@ hop_db = [
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestProxyTensorOpInfo",
+                "test_make_fx_symbolic_exhaustive",
+                active_if=not IS_WINDOWS,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestEagerFusionOpInfo",
+                "test_aot_autograd_symbolic_exhaustive",
+                active_if=not IS_WINDOWS,
+            ),
         ),
     ),
     OpInfo(
@@ -274,6 +287,18 @@ hop_db = [
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestProxyTensorOpInfo",
+                "test_make_fx_symbolic_exhaustive",
+                active_if=not IS_WINDOWS,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestEagerFusionOpInfo",
+                "test_aot_autograd_symbolic_exhaustive",
+                active_if=not IS_WINDOWS,
+            ),
         ),
     )
 ]
