@@ -5,20 +5,27 @@ from typing import Any, Callable, Dict, Optional, Protocol
 
 from .. import _C, _ops, autograd, Tensor
 
+from .._functorch.pyfunctorch import JvpInterpreter, coerce_cinterpreter
+
 from ..utils import _pytree
 from . import utils
 
+import torch
+from torch._functorch.autograd_function import custom_function_call_grad
 
 class InfoProtocol(Protocol):
     _backward_fn: Optional[Callable]
     _setup_context_fn: Optional[Callable]
+    _jvp_fn: Optional[Callable]
+    _setup_context_fn_jvp: Optional[Callable]
 
 
 @dataclasses.dataclass
 class Info:
     _backward_fn: Optional[Callable]
     _setup_context_fn: Optional[Callable]
-
+    _jvp_fn: Optional[Callable]
+    _setup_context_fn_jvp: Optional[Callable]
 
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
@@ -86,6 +93,20 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
             f"Please use register_autograd to add one."
         )
 
+    def forward_jvp(*args):
+        ## op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs) failed with
+        ## RuntimeError: savedLocalDispatchKeySet_.has_value() INTERNAL ASSERT FAILED 
+        x = args[0]
+        return x ** 3, 3 * x ** 2
+
+    def setup_context_fn(ctx, inputs, output):
+        if info._setup_context_fn_jvp:
+            info._setup_context_fn_jvp(ctx=ctx, inputs=inputs, output=output)
+
+    def jvp(ctx, *input_tangents):
+        assert info._jvp_fn 
+        return info._jvp_fn(ctx, *input_tangents)
+
     Generated = type(
         name,
         (autograd.Function,),
@@ -102,9 +123,37 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     ):
         Generated = supports_tensorlist(Generated)
 
+
+
+    Generated_jvp = type(
+        name + "_jvp",
+        (torch.autograd.function._SingleLevelFunction,),
+        {
+            "forward": staticmethod(forward_jvp),
+            "jvp": staticmethod(jvp),
+            "setup_context": staticmethod(setup_context_fn),
+        },
+    )
+
+    def jvp(*args):
+        result = forward_no_grad(*args)
+
     # The dispatcher passes any keyword-only-args as kwargs and the
     # rest of the args (even if specified as kwargs) as args.
     def autograd_impl(keyset, *args, **keyword_only_args):
+
+        interpreter = torch._C._functorch.peek_interpreter_stack()
+        if interpreter is not None:
+            interpreter = coerce_cinterpreter(interpreter)
+            if isinstance(interpreter, JvpInterpreter):
+                if not info._jvp_fn:
+                    raise RuntimeError(
+                        f"Trying to run jvp on {op} but no jvp "
+                        f"formula was registered. "
+                        f"Please use register_jvp to add one."
+                    )
+            result = custom_function_call_grad(interpreter, Generated_jvp, *args, **keyword_only_args)
+            return result
         if _C.is_grad_enabled() and _pytree.tree_any_only(
             Tensor, lambda x: x.requires_grad, args, not_list_of_tensor
         ):

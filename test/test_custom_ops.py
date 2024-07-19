@@ -3146,6 +3146,29 @@ Please use `add.register_fake` to add an fake impl.""",
             y.sum().backward()
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_jvp_error_cases(self):
+        @torch.library.custom_op("_torch_testing::g", mutates_args=())
+        def g(x: Tensor) -> Tensor:
+            return x.sin()
+
+        x = torch.randn(3, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "no jvp formula"):
+            torch.func.jvp(g, (x, ), (torch.ones(3), ))
+
+        def setup_context(ctx, inputs, output) -> Tensor:
+            pass
+
+
+        def backward(ctx, grad_output, grad_saved):
+            pass
+
+        g.register_autograd(backward, setup_context=setup_context)
+
+        with self.assertRaisesRegex(RuntimeError, "no jvp formula"):
+            torch.func.jvp(g, (x, ), (torch.ones(3), ))
+
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_replacement(self):
         @torch.library.custom_op("_torch_testing::f", mutates_args=())
         def f(x: Tensor) -> Tensor:
