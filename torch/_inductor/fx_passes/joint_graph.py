@@ -266,6 +266,10 @@ class UniformValueConstantFolder(ConstantFolder):
             if isinstance(out, torch.Tensor) and out.numel() == 1:
                 return out
 
+        # handle device_put op
+        if node.target == prims.device_put.default:
+            return super(ConstantFolder, self).run_node(node)
+
         # constructors ops
         if (
             node.op == "call_function"

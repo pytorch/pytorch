@@ -259,7 +259,14 @@ void index_put_kernel_quantized_cuda(TensorIterator& iter, const IntArrayRef ind
 
     gpu_index_kernel(iter, index_size, index_stride, [inv_scale, zero_point, qmin, qmax]C10_DEVICE(char* const out_data, const char* const in_data, const int64_t offset) {
       int64_t qvalue = static_cast<int64_t>(zero_point + nearbyintf(*(float*)in_data * inv_scale));
-      qvalue = std::clamp(qvalue, qmin, qmax);
+      // See https://github.com/pytorch/pytorch/issues/127666
+      // and https://github.com/pytorch/pytorch/issues/128253.
+      // hip-clang std::clamp __glibcxx_assert_fail host function when building on Fedora40/gcc14.
+      // The following replaces std::clamp(qvalue, qmin, qmax) and is a viable solution for
+      // both CUDA and ROCm since std::clamp and this replacement generates the same PTX.
+      // Using #ifdef USE_ROCM to differentiate caused Windows build failures.
+      // The replacement should generate the same PTX as std::clamp. See https://godbolt.org/z/Wde9KW3v4
+      qvalue = (qvalue < qmin) ? qmin : (qmax < qvalue) ? qmax : qvalue;
       *(scalar_t*)(out_data + offset) = static_cast<scalar_t>(qvalue);
     });
   });
