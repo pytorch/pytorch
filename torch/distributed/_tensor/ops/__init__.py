@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from .conv_ops import *  # noqa: F403
+from .decomposed_ops import *  # noqa: F403
 from .embedding_ops import *  # noqa: F403
 from .experimental_ops import *  # noqa: F403
 from .math_ops import *  # noqa: F403
