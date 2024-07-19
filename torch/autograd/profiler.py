@@ -531,6 +531,7 @@ class profile:
                 fwd_thread=kineto_event.fwd_thread_id(),
                 input_shapes=kineto_event.shapes(),
                 concrete_inputs=kineto_event.concrete_inputs(),
+                kwinputs=kineto_event.kwinputs(),
                 stack=[
                     entry
                     for entry in kineto_event.stack()

@@ -17,6 +17,7 @@ import os
 import re
 from subprocess import PIPE, Popen
 
+
 # Get python protobuf version.
 try:
     import google.protobuf
