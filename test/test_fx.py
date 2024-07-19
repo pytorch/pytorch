@@ -3865,7 +3865,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
             x = torch.relu(x)
             return x
 
-        a, b, c, d = [torch.randn(2, 4, requires_grad=False) for _ in range(4)]
+        a, b, c, d = (torch.randn(2, 4, requires_grad=False) for _ in range(4))
         fx_fn = make_fx(fn)(a, b, c, d)
         print(fx_fn)
 
