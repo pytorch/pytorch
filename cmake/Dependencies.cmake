@@ -1040,14 +1040,6 @@ if(USE_ROCM)
       caffe2_update_option(USE_SYSTEM_NCCL ON)
     endif()
 
-    # USE_ROCM is not correctly defined till here, so we have to update USE_CUFILE here
-    if(USE_CUDA)
-      if(NOT DEFINED(ENV{TH_BINARY_BUILD}) AND NOT WIN32)
-        caffe2_update_option(USE_CUFILE OFF)
-      endif()
-      set(CAFFE2_USE_CUFILE OFF)
-    endif()
-
     list(APPEND HIP_CXX_FLAGS -fPIC)
     list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_AMD__=1)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
