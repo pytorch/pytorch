@@ -409,7 +409,10 @@ class PyCodegen:
         def gen_fn():
             for var in freevars:
                 assert var in self.cell_and_freevars()
-                output.append(create_instruction("LOAD_CLOSURE", argval=var))
+                inst_name = (
+                    "LOAD_FAST" if sys.version_info >= (3, 13) else "LOAD_CLOSURE"
+                )
+                output.append(create_instruction(inst_name, argval=var))
             output.append(create_instruction("BUILD_TUPLE", arg=len(freevars)))
             output.append(self.create_load_const(code))
             if sys.version_info < (3, 11):
