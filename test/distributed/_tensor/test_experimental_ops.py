@@ -3,9 +3,7 @@
 
 
 import torch
-
 import torch.distributed as dist
-
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
