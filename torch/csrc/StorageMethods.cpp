@@ -317,7 +317,6 @@ static PyObject* THPStorage_fromBuffer(
     torch::utils::THP_decodeBoolBuffer(
         static_cast<bool*>(storage->mutable_data()),
         src + offset,
-        do_byte_swap,
         count);
   } else if (scalar_type == at::kShort) {
     torch::utils::THP_decodeInt16Buffer(

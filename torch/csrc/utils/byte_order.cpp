@@ -186,7 +186,6 @@ void THP_decodeBFloat16Buffer(
 void THP_decodeBoolBuffer(
     bool* dst,
     const uint8_t* src,
-    bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
     dst[i] = (int)src[i] != 0 ? true : false;
@@ -323,9 +322,8 @@ void THP_decodeBFloat16Buffer(
 void THP_decodeBoolBuffer(
     bool* dst,
     const uint8_t* src,
-    THPByteOrder order,
     size_t len) {
-  THP_decodeBoolBuffer(dst, src, (order != THP_nativeByteOrder()), len);
+  THP_decodeBoolBuffer(dst, src, len);
 }
 
 void THP_decodeFloatBuffer(
