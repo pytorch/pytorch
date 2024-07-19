@@ -30,7 +30,7 @@ class NestedIntRegistry:
         # unwrap functional tensors
         if isinstance(tensor, FunctionalTensor):
             tensor = torch._from_functional_tensor(tensor.elem)
-            return self.get(tensor, coeff=coeff)
+            return self.get(tensor, create_new=create_new, coeff=coeff)
 
         tensor_symint = self._registry.get(
             tensor,
@@ -583,6 +583,12 @@ def _nt_view_dummy() -> torch.Tensor:
             offsets=torch.zeros(3, device="meta", dtype=torch.int64),
         ).detach()
     return _dummy_instance
+
+
+# Instantiate the dummy to ensure its entry in the nested int registry
+# We no longer need this to be lazy now that there is no randomness involved
+# in its construction (see https://github.com/pytorch/pytorch/pull/122902).
+_nt_view_dummy()
 
 
 def nested_view_from_values_offsets(
