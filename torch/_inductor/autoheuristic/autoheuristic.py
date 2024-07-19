@@ -49,7 +49,6 @@ class LocalFeedback:
     """
 
     def __init__(self, feedback_fn: Callable[[Choice], Feedback]) -> None:
-        super().__init__()
         self.feedback_fn = feedback_fn
 
     def __call__(self, choice: Choice) -> Feedback:
