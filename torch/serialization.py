@@ -1145,8 +1145,10 @@ def load(
     )
 
     def _get_wo_message(message: str) -> str:
-        pattern = r"GLOBAL (\S+) was not an allowed global by default."
-        has_unsafe_global = re.search(pattern, message) is not None
+        unsafe_global_pattern = r"GLOBAL (\S+) was not an allowed global by default."
+        has_unsafe_global = re.search(unsafe_global_pattern, message) is not None
+        blacklist_pattern = r"whose module (\S+) is blacklisted"
+        has_blacklist = re.search(blacklist_pattern, message) is not None
         if has_unsafe_global:
             updated_message = (
                 "Weights only load failed. This file can still be loaded, to do so you have two options, "
@@ -1156,12 +1158,13 @@ def load(
                 + message
             )
         else:
-            updated_message = (
-                f"Weights only load failed. {UNSAFE_MESSAGE}\n Please file an issue with the following "
-                "so that we can make `weights_only=True` compatible with your use case: WeightsUnpickler "
-                "error: " + message
-            )
-        return updated_message + DOCS_MESSAGE
+            updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
+            if not has_blacklist:
+                updated_message += (
+                    "Please file an issue with the following so that we can make "
+                    "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
+                )
+        return updated_message + message + DOCS_MESSAGE
 
     if weights_only is None:
         weights_only, warn_weights_only = False, True
