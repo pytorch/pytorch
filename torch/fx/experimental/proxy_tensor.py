@@ -1798,7 +1798,8 @@ def get_isolated_graphmodule(
         func: Callable,
         args: Tuple[object, ...],
         kwargs: Dict[str, object],
-        tracing_mode: str = "real"
+        tracing_mode: str = "real",
+        decomposition_table: Optional[Mapping[OpOverload, Callable]] = None,
 ) -> GraphModule:
     """A helper function used to get the GraphModule for the given func.
 
@@ -1809,7 +1810,7 @@ def get_isolated_graphmodule(
     wrapped, all_args = wrapper_and_args_for_make_fx(func, args, kwargs)
 
     with disable_proxy_modes_tracing():
-        gm = make_fx(wrapped, tracing_mode=tracing_mode)(all_args)
+        gm = make_fx(wrapped, decomposition_table=decomposition_table, tracing_mode=tracing_mode)(all_args)
     return gm
 
 
