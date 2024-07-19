@@ -228,7 +228,6 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(True, "FIXME: broken test/feature.")
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
@@ -262,26 +261,24 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # 2. then, we schedule the ops (g) that ARE NOT required for second all_reduce and DO NOT depend on first all_reduce.
             # 3. then, we schedule the ops (f) that ARE required for second all_reduce and DO depend on first all_reduce.
             # and then, we schedule the second all_reduce. And then schedule all ops that depend on second all_reduce.
-            FileCheck().check("dist.all_reduce(").check("triton_poi_fused_relu").check(
-                "extern_kernels.mm("
-            ).check("extern_kernels.mm(").check("_wait_tensor(").check(
-                "triton_poi_fused_mul"
-            ).check(
-                "dist.all_reduce("
-            ).check(
-                "_wait_tensor("
-            ).check(
-                "triton_poi_fused_add"
-            ).check(
-                "extern_kernels.mm("
-            ).run(
-                code
+            (
+                FileCheck()
+                .check("torch.ops._c10d_functional.all_reduce_.default")
+                .check("triton_poi_fused_relu")
+                .check("extern_kernels.mm")
+                .check("extern_kernels.mm")
+                .check("torch.ops._c10d_functional.wait_tensor.default")
+                .check("triton_poi_fused_mul")
+                .check("torch.ops._c10d_functional.all_reduce_.default")
+                .check("torch.ops._c10d_functional.wait_tensor.default")
+                .check("triton_poi_fused_add")
+                .check("extern_kernels.mm")
+                .run(code)
             )
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(True, "FIXME: broken test/feature.")
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
@@ -320,20 +317,19 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # 2. then, we schedule the ops (g) that ARE NOT required for second all_reduce and DO NOT depend on first all_reduce.
             # 3. then, we schedule the ops (f) that ARE required for second all_reduce and DO depend on first all_reduce.
             # and then, we schedule the second all_reduce. And then schedule all ops that depend on second all_reduce.
-            FileCheck().check("dist.all_reduce(").check("triton_poi_fused_relu").check(
-                "extern_kernels.mm("
-            ).check("extern_kernels.mm(").check("_wait_tensor(").check(
-                "triton_poi_fused_mul"
-            ).check(
-                "dist.all_reduce("
-            ).check(
-                "_wait_tensor("
-            ).check(
-                "triton_poi_fused_add"
-            ).check(
-                "extern_kernels.mm("
-            ).run(
-                code
+            (
+                FileCheck()
+                .check("torch.ops._c10d_functional.all_reduce_.default")
+                .check("triton_poi_fused_relu")
+                .check("extern_kernels.mm")
+                .check("extern_kernels.mm")
+                .check("torch.ops._c10d_functional.wait_tensor.default")
+                .check("triton_poi_fused_mul")
+                .check("torch.ops._c10d_functional.all_reduce_.default")
+                .check("torch.ops._c10d_functional.wait_tensor.default")
+                .check("triton_poi_fused_add")
+                .check("extern_kernels.mm")
+                .run(code)
             )
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())

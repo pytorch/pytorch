@@ -323,6 +323,32 @@ coordinate_descent_search_radius = int(
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
 )
 
+# AutoHeuristic is a framework that allows one to collect data from autotuning, use the data to learn a heuristic, and
+# generate the learned heursitic to code which is shipped with the compiler
+# Specify a list of comma separated optimizations to collect data for
+autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
+# Specify a list of comma separated optimizations to use learned heuristics for
+autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "")
+
+
+def run_autoheuristic(name):
+    return collect_autoheuristic(name) or use_autoheuristic(name)
+
+
+def collect_autoheuristic(name):
+    return name in torch._inductor.config.autoheuristic_collect.split(",")
+
+
+def use_autoheuristic(name):
+    return name in torch._inductor.config.autoheuristic_use.split(",")
+
+
+# If set to "DEFAULT", this will use the default log path specified in autoheuristic.py.
+# If set to another path, autoheuristic will instead log results to the given path.
+autoheuristic_log_path = os.environ.get(
+    "TORCHINDUCTOR_AUTOHEURISTIC_LOG_PATH", "DEFAULT"
+)
+
 # Disabled by default on ROCm, opt-in if model utilises NHWC convolutions
 layout_opt_default = "1" if not torch.version.hip else "0"
 layout_optimization = (
@@ -429,16 +455,15 @@ optimize_scatter_upon_const_tensor = (
 
 
 # The multiprocessing start method to use for inductor workers in the codecache.
-# "subprocess", "fork", or "spawn"
+# Can be "subprocess" or "fork".
 def decide_worker_start_method():
     start_method = os.environ.get(
         "TORCHINDUCTOR_WORKER_START", "fork" if is_fbcode() else "subprocess"
     )
-    assert start_method in [
+    assert start_method in (
         "subprocess",
         "fork",
-        "spawn",
-    ], f"Invalid start method: {start_method}"
+    ), f"Invalid start method: {start_method}"
     return start_method
 
 
@@ -689,6 +714,13 @@ class triton:
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
     cudagraph_support_input_mutation = False if is_fbcode() else True
 
+    # Maximal number of allowed cudagraph re-record for a function and
+    # a cudagraph node due to static input tensor address changes or
+    # cudagraph managed tensor data pointer changed.
+    # i.e., allow num_recording <= cudagraph_unexpected_rerecord_limit
+    # note: we are conservative here and choose a large limit.
+    cudagraph_unexpected_rerecord_limit = 128
+
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
 
@@ -811,6 +843,8 @@ class aot_inductor:
     # flag to force weight to be appened to the shared library and mmaped  by the runtime
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
+
+    package: bool = False
 
 
 class cuda:
@@ -1023,6 +1057,11 @@ class trace:
 _save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
+    "post_grad_custom_post_pass",
+    "post_grad_custom_pre_pass",
+    "joint_custom_pre_pass",
+    "joint_custom_post_pass",
+    "pre_grad_custom_pass",
 ]
 
 _cache_config_ignore_prefix = [
