@@ -9,7 +9,7 @@ import re
 import sys
 from copy import copy, deepcopy
 from enum import Enum
-from typing import Any, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import cast, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import sympy
 
@@ -49,7 +49,6 @@ from ..utils import (
 
 from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
-    _deduce_output_dtype_by_name,
     BackendFeature,
     BracesBuffer,
     CppWrapperKernelArgs,
@@ -68,9 +67,12 @@ from .common import (
 from .cpp_utils import (
     cexpr,
     cexpr_index,
+    CppCSEVariable,
     DTYPE_TO_CPP,
+    get_promote_dtype,
     INDEX_TYPE,
     LocalBufferContext,
+    promote_vec_args,
     unify_mask_base_type,
     value_to_cpp,
 )
@@ -497,90 +499,6 @@ class RecordOptimizationContext:
         return self.current_node
 
 
-def get_opt_ctx(node: torch.fx.Node) -> OptimizationContext:
-    return node.meta.get(OptimizationContext.key, None)
-
-
-def get_current_node_opt_ctx() -> OptimizationContext:
-    assert V.interpreter.current_node
-    return get_opt_ctx(V.interpreter.current_node)
-
-
-class CppCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges[Any]):
-        super().__init__(name, bounds)
-        self.is_vec = False
-        self.dtype: Optional[torch.dtype] = None
-        self.dependent_itervars: Set[sympy.Symbol] = set()
-
-    def __repr__(self):
-        return (
-            f"CppCSEVariable(name: {self.name}, bounds: {self.bounds}, is_vec: {self.is_vec}, dtype: {self.dtype}, "
-            f"dependent_itervars: {self.dependent_itervars})"
-        )
-
-    def update_on_args(self, name, args, kwargs):
-        if name == "load":
-            # args[2] is index
-            self._set_dependent_itervars(args[2])
-        else:
-            # propagate relevant itervars and is_vec from args
-            self.dependent_itervars.update(
-                *[
-                    arg.dependent_itervars
-                    for arg in args
-                    if isinstance(arg, CppCSEVariable)
-                ]
-            )
-            if name == "index_expr":
-                self._set_dependent_itervars(args[0])
-            if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
-                self.is_vec = True
-        # NOTE [Deduce dtype of CppCSEVariable at runtime]
-        if (
-            output_dtype := _deduce_output_dtype_by_name(
-                name,
-                *args,
-                **kwargs,
-            )
-        ) is not None:
-            self.dtype = output_dtype
-        elif name == "masked":
-            assert (
-                hasattr(V.interpreter, "current_node")
-                and V.interpreter.current_node.target.startswith("masked_subblock")
-                and get_current_node_opt_ctx() is not None
-            )
-            self.dtype = get_current_node_opt_ctx().dtype
-        else:
-            # Induce output dtype by inputs' dtype
-            assert all(
-                arg.dtype is not None for arg in args if isinstance(arg, CppCSEVariable)
-            )
-            self.dtype = functools.reduce(
-                torch.promote_types,  # type: ignore[arg-type]
-                [arg.dtype for arg in args if isinstance(arg, CppCSEVariable)],
-            )
-        assert self.dtype is not None
-
-    def _set_dependent_itervars(self, index: sympy.Expr):
-        """
-        Set the relevant itervars for this variable based on the `index` expression.
-        This includes the itervars directly used in the `index` as well as relevant itervars
-        of other cse variables used in the `index`.
-        """
-        for s in index.free_symbols:
-            if s in V.kernel.itervars:
-                self.dependent_itervars.add(s)  # type: ignore[arg-type]
-            elif s.name in V.kernel.cse.varname_map:  # type: ignore[attr-defined]
-                self.dependent_itervars.update(
-                    V.kernel.cse.varname_map[s.name].dependent_itervars  # type: ignore[attr-defined]
-                )
-
-    def depends_on(self, itervar: sympy.Symbol):
-        return itervar in self.dependent_itervars
-
-
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
 
@@ -989,52 +907,6 @@ class CppOverrides(OpOverrides):
 
 
 CppOverrides._initialize_pointwise_overrides("cpp")
-
-
-def get_promote_dtype(args):
-    return (
-        functools.reduce(
-            torch.promote_types,  # type: ignore[arg-type]
-            [n.dtype for n in args if isinstance(n, CppCSEVariable)],
-        )
-        if all(n.dtype is not None for n in args if isinstance(n, CppCSEVariable))
-        else None  # not enough info to calculate the promote dtype
-    )
-
-
-def promote_vec_args(new_args):
-    def promote_vec_arg(arg, promote_type):
-        if (
-            isinstance(arg, CppCSEVariable)
-            and arg.dtype
-            and promote_type
-            and arg.dtype != promote_type
-        ):
-            assert arg.is_vec, "expect vec arg"
-            arg = ops.to_dtype(arg, promote_type)
-            arg = arg.value if isinstance(arg, OpsValue) else arg
-            arg.dtype = promote_type
-        return arg
-
-    promote_type = get_promote_dtype(new_args)
-    if (
-        all(
-            new_arg.dtype is not None
-            for new_arg in new_args
-            if isinstance(new_arg, CppCSEVariable)
-        )
-        and promote_type
-    ):
-        new_args = list(
-            map(
-                functools.partial(
-                    promote_vec_arg,
-                    promote_type=promote_type,
-                ),
-                new_args,
-            )
-        )
-    return new_args
 
 
 class CppVecOverrides(CppOverrides):
