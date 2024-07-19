@@ -1130,7 +1130,7 @@ class TestSerialization(TestCase, SerializationMixin):
                 torch.serialization.clear_safe_globals()
                 ClassThatUsesBuildInstruction.__setstate__ = None
 
-    def test_weights_only_safe_globals_blacklist(self):
+    def test_weights_only_safe_globals_blocklist(self):
         error_msg = "unsupported GLOBAL posix.execv whose module posix is blocked"
         with BytesIOContext() as f:
             torch.save(os.execv, f)
