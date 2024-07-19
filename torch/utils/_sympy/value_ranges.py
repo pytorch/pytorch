@@ -1058,20 +1058,20 @@ def bound_sympy(
     if unbounded_vars:
         # Give some bounds to the free variables via their SymPy assumptions
         # TODO A better way of doing this would be to assign them a range upon creation, as
-        #      size variables can come with a lower bound of 2, as we specialise on 0 and 1
+        #      size variables can come with a lower bound of 2, as we specialize on 0 and 1
         unbounded_ranges: Dict[sympy.Symbol, ValueRanges] = {}
         for s in unbounded_vars:
             if s.is_integer:  # type: ignore[attr-defined]
                 if s.is_positive:  # type: ignore[attr-defined]
-                    lower = 1
+                    vr = ValueRanges(1, int_oo)
                 elif s.is_nonnegative:  # type: ignore[attr-defined]
-                    lower = 0
+                    vr = ValueRanges(0, int_oo)
                 else:
-                    lower = -math.inf  # type: ignore[assignment]
+                    vr = ValueRanges.unknown_int()
             else:
                 # Don't bother trying very hard here
-                lower = -math.inf  # type: ignore[assignment]
-            unbounded_ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
+                vr = ValueRanges.unknown()
+            unbounded_ranges[s] = vr  # type: ignore[index]
         ranges = {**ranges, **unbounded_ranges}
 
     return sympy_interp(SymPyValueRangeAnalysis, ranges, expr)
