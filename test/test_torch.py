@@ -10663,6 +10663,27 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         t7.d = "dog"
         self._checked_swap(t6, t7)
 
+    def test_c10_feature_enabled(self):
+        @contextlib.contextmanager
+        def mocksetting(k, v):
+            if IS_FBCODE:
+                from pyjk import PyPatchJustKnobs  # type: ignore[import]
+                with PyPatchJustKnobs.patch(f"pytorch/features:{k}", v):
+                    yield
+            else:
+                try:
+                    assert k not in os.environ
+                    os.environ[k] = "1" if v else "0"
+                    yield
+                finally:
+                    del os.environ[k]
+
+        self.assertTrue(torch._C._c10_feature_enabled("TORCH_FEATURE_TEST_ENABLED"))
+        with mocksetting("TORCH_FEATURE_TEST_ENABLED", True):
+            self.assertTrue(torch._C._c10_feature_enabled("TORCH_FEATURE_TEST_ENABLED"))
+        with mocksetting("TORCH_FEATURE_TEST_ENABLED", False):
+            self.assertFalse(torch._C._c10_feature_enabled("TORCH_FEATURE_TEST_ENABLED"))
+
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
