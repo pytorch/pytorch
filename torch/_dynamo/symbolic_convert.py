@@ -2237,7 +2237,10 @@ class InstructionTranslatorBase(
     # BUILD_SLICE 2 and BINARY/STORE_SUBSCR
 
     def END_FOR(self, inst):
-        self.popn(2)
+        if sys.version_info >= (3, 13):
+            self.pop()
+        else:
+            self.popn(2)
 
     def LOAD_FAST_CHECK(self, inst):
         if isinstance(self.symbolic_locals[inst.argval], NullVariable):
