@@ -1656,8 +1656,6 @@ class CppWrapperCpu(WrapperCodeGen):
         offset = self.codegen_sizevar(offset)
         call_strs = []
         if config.abi_compatible:
-            # Because the memory planning is done in two passes (see the implementation
-            # of self.generate), the writeline behavior is different in the two passes.
             final_tmp_name = None
             final_tmp_name_is_RAIIAtenTensorHandle = False
 
@@ -1690,25 +1688,23 @@ class CppWrapperCpu(WrapperCodeGen):
                 return tmp_name, call_str
 
             def create_dtypeview_call(reinterpret_call):
-                tmp_output_name = (
-                    f"tmp_{data.get_name()}_handle_{next(self.tmp_tensor_id)}"
-                )
-                call_strs = [f"AtenTensorHandle {tmp_output_name};"]
-                dtype_name = str(dtype).split(".")[-1]
-                # @TODO how to check if it is real?
-                dtypeview_suffix = "_dtype" if not dtype.is_complex else "_as_complex"
-                get_dtype_function = f"aoti_torch_dtype_{dtype_name}"
-                device_name = "cuda" if data.layout.device.type == "cuda" else "cpu"
-                dtypeview_function = f"aoti_torch_{device_name}_view{dtypeview_suffix}"
-                call_strs.append(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK({dtypeview_function}"
-                    f"({reinterpret_call}, {get_dtype_function}(), &{tmp_output_name}));"
-                )
-                tmp_RAIIAtenTensorHandle = (
+                tmp_AtenTensorHandle = (
                     f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
                 )
+                call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
+                dtype_name = str(dtype).split(".")[-1]
+                device_name = "cuda" if data.layout.device.type == "cuda" else "cpu"
+                get_dtype_function = f"aoti_torch_dtype_{dtype_name}"
+                dtypeview_function = f"aoti_torch_{device_name}_view_dtype"
                 call_strs.append(
-                    f"RAIIAtenTensorHandle {tmp_RAIIAtenTensorHandle}({tmp_output_name});"
+                    f"AOTI_TORCH_ERROR_CODE_CHECK({dtypeview_function}"
+                    f"({reinterpret_call}, {get_dtype_function}(), &{tmp_AtenTensorHandle}));"
+                )
+                tmp_RAIIAtenTensorHandle = (
+                    f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}_handle"
+                )
+                call_strs.append(
+                    f"RAIIAtenTensorHandle {tmp_RAIIAtenTensorHandle}({tmp_AtenTensorHandle});"
                 )
                 return tmp_RAIIAtenTensorHandle, call_strs
 
@@ -1738,7 +1734,8 @@ class CppWrapperCpu(WrapperCodeGen):
                         reinterpret_call
                     )
                     call_strs.extend(tmp_call_strs)
-
+            # Because the memory planning is done in two passes (see the implementation
+            # of self.generate), the writeline behavior is different in the two passes.
             if writer is None:
                 writer = self
             writer.writelines(call_strs)
