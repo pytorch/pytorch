@@ -121,7 +121,7 @@ class AutoHeuristic:
             self.log_path = torch._inductor.config.autoheuristic_log_path
 
         if torch._inductor.config.collect_autoheuristic(self.name):
-            if isinstance(self.feedback, LocalFeedback):
+            if self.feedback is not None:
                 for choice in self.choices:
                     feedback_val = self.feedback(choice)
                     self.save_data(choice, feedback_val)
