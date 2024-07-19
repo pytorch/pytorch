@@ -12,12 +12,12 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCUDA,
     onlyNativeDeviceTypes,
     skipCUDAIf,
     skipMeta,
     TEST_WITH_ROCM,
-    largeTensorTest,
 )
 
 from torch.testing._internal.common_nn import NNTestCase
@@ -183,7 +183,7 @@ class TestEmbeddingNN(NNTestCase):
         self.assertEqual(res_old, res_F)
 
     # https://github.com/pytorch/pytorch/issues/130806
-    @largeTensorTest('40GB', device="cuda")
+    @largeTensorTest("40GB", device="cuda")
     def test_large_tensors(self):
         input = torch.randint(low=0, high=16032, size=[131072], device="cuda")
         w = torch.randn([16032, 16384], device="cuda")
