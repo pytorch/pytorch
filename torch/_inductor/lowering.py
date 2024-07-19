@@ -5281,7 +5281,7 @@ def pow(a, b):
     return pow_native(a, b)
 
 
-def mutate_to(changed, val, unsafe_alias=False):
+def mutate_to(changed, val):
     if isinstance(changed, TensorBox):
         changed_data = changed.data
     else:
@@ -5310,9 +5310,7 @@ def mutate_to(changed, val, unsafe_alias=False):
         changed_data.data = val.data
         return changed
 
-    ir.MutationLayoutSHOULDREMOVE.realize_into(
-        val, changed_data, unsafe_alias=unsafe_alias
-    )
+    ir.MutationLayoutSHOULDREMOVE.realize_into(val, changed_data)
     return changed
 
 
@@ -5899,7 +5897,7 @@ def register_foreach_inplace(aten_op, outplace_aten_op, outplace_op):
         results = outplace_op(*args, **kwargs)
         mut_results = []
         for arg, result in zip(args[0], results):
-            mut_results.append(mutate_to(arg, result, unsafe_alias=True))
+            mut_results.append(mutate_to(arg, result))
 
         return mut_results
 
