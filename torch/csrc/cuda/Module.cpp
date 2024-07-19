@@ -969,11 +969,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
       .def_readonly("warp_size", &cudaDeviceProp::warpSize)
-#if !USE_ROCM
-      // NVIDA only property
       .def_readonly(
           "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
-#endif // USE_ROCM
       // HIP-only property; reuse name attribute for CUDA builds
       .def_readonly(
           "gcnArchName",
