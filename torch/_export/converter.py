@@ -510,12 +510,16 @@ class TS2FXGraphConverter:
         # TODO: covnert sourceRange() into stack_trace
         # fx_node.meta["stack_trace"] = node.sourceRange()
 
-        outs = tuple(node.outputs())
-        if len(outs) == 1:
+        if node.outputsSize() == 1:
             output_name = node.output().debugName()
             self.name_to_node[output_name] = fx_node
-        elif len(outs) > 1:
-            raise RuntimeError("Number of outputs > 1 is not supported yet")
+        else:
+            for i, outp in enumerate(node.outputs()):
+                output_name = outp.debugName()
+                next_fx_node = self.fx_graph.call_function(
+                    operator.getitem, (fx_node, i)
+                )
+                self.name_to_node[output_name] = next_fx_node
 
     def convert_prim_TupleConstruct(self, node: torch._C.Node):
         self._convert_prim_iterator(node)
@@ -747,12 +751,10 @@ class TS2FXGraphConverter:
 
         cond_node = self.fx_graph.call_function(torch.cond, args, {})
 
-        outs = tuple(node.outputs())
-        if len(outs) == 1:
+        # prim::If can also have zero output.
+        if node.outputsSize() == 1:
             output_name = node.output().debugName()
             self.name_to_node[output_name] = cond_node
-        elif len(outs) > 1:
-            raise RuntimeError("Number of outputs > 1 is not supported yet")
 
     def convert_aten_Bool(self, node: torch._C.Node):
         self._convert_as_noop(node)
@@ -856,10 +858,14 @@ class TS2FXGraphConverter:
                 )
             else:
                 raise ValueError(f"Output {output_name} not found")
-        if args:
+
+        if len(args) == 1:
             self.fx_graph.output(
                 args[0]
             )  # Get rid of an extra list wrapped around final output.
+        else:
+            # Sub-block of prim::If can have zero output.
+            self.fx_graph.output([])
 
 
 class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
