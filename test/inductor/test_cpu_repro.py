@@ -2928,6 +2928,7 @@ class CPUReproTests(TestCase):
                         check_metrics_vec_kernel_count(8)
 
     @requires_vectorization
+    @config.patch("cpp.disable_tiling_select_heuristic_flag", True)
     def test_transpose_copy(self):
         def fn(a):
             return a.t().contiguous()
