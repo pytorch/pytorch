@@ -10571,44 +10571,39 @@ class CommonTemplate:
             x2 = x2.view(x_dtype) + 1
             return x @ y, x2 @ x
 
-        for test_dtype_x, test_dtype_y, view_dtype in [
-            (torch.float32, torch.float32, torch.float32),
-            (torch.float32, torch.int32, torch.float32),
-            (torch.float64, torch.float64, torch.float64),
-            (torch.float64, torch.int64, torch.float64),
-            (torch.float16, torch.float16, torch.float16),
-            (torch.float16, torch.float16, torch.bfloat16),
-            (torch.float16, torch.bfloat16, torch.float16),
-            (torch.float16, torch.bfloat16, torch.bfloat16),
-            (torch.float16, torch.int16, torch.float16),
-            (torch.float16, torch.int16, torch.bfloat16),
-            (torch.bfloat16, torch.float16, torch.float16),
-            (torch.bfloat16, torch.float16, torch.bfloat16),
-            (torch.bfloat16, torch.bfloat16, torch.float16),
-            (torch.bfloat16, torch.bfloat16, torch.bfloat16),
-            (torch.bfloat16, torch.int16, torch.float16),
-            (torch.bfloat16, torch.int16, torch.bfloat16),
-            (torch.int16, torch.float16, torch.float16),
-            (torch.int16, torch.float16, torch.bfloat16),
-            (torch.int16, torch.bfloat16, torch.float16),
-            (torch.int16, torch.bfloat16, torch.bfloat16),
-            (torch.int16, torch.int16, torch.float16),
-            (torch.int16, torch.int16, torch.bfloat16),
-            (torch.int32, torch.float32, torch.float32),
-            (torch.int32, torch.int32, torch.float32),
-            (torch.int64, torch.float64, torch.float64),
-            (torch.int64, torch.int64, torch.float64),
-        ]:
-            # print(f"({test_dtype_x}, {test_dtype_y}, {view_dtype})")
-            x = rand_strided((2, 2), (2, 1), device=self.device, dtype=test_dtype_x)
-            y = rand_strided((2, 2), (2, 1), device=self.device, dtype=test_dtype_y)
-            x2 = x.clone()
-            self.common(
-                fn,
-                (x, y, view_dtype, x2),
-                reference_in_float=False,
-                check_lowp=False,
-            )
+        test_dtypes = [
+            torch.float32,
+            torch.float64,
+            torch.float16,
+            torch.bfloat16,
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        ]
+        for test_dtype_x in test_dtypes:
+            for test_dtype_y in test_dtypes:
+                # @ operation needs arguments to be the same dtype
+                for view_dtype in test_dtypes:
+                    try:
+                        # print(f"({test_dtype_x}, {test_dtype_y}, {view_dtype})")
+                        x = rand_strided(
+                            (2, 2), (2, 1), device=self.device, dtype=test_dtype_x
+                        )
+                        y = rand_strided(
+                            (2, 2), (2, 1), device=self.device, dtype=test_dtype_y
+                        )
+                        x2 = x.clone()
+                        fn(x, y, view_dtype, x2)
+                    except Exception as e:
+                        continue
+                    self.common(
+                        fn,
+                        (x, y, view_dtype, x2),
+                        reference_in_float=False,
+                        check_lowp=False,
+                    )
 
     @torch._inductor.config.patch(abi_compatible=True)
     def test_dtypeview_fusion(self):
