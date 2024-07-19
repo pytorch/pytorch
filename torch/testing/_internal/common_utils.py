@@ -912,7 +912,9 @@ CI_FUNCTORCH_ROOT = str(os.path.join(Path(os.getcwd()).parent, "functorch"))
 
 def wait_for_process(p, timeout=None):
     try:
-        return p.wait(timeout=timeout)
+        e = p.wait(timeout=timeout)
+        print(f"exit_status0: {e}", flush=True)
+        return e
     except KeyboardInterrupt:
         # Give `p` a chance to handle KeyboardInterrupt. Without this,
         # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
