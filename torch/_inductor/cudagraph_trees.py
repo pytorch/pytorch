@@ -1862,24 +1862,22 @@ class CUDAGraphTreeManager:
         # mod2(mod1(x)).sum().backward()
 
         self.running_forwards_with_pending_backwards = False
-        self.mode: Optional[CompilationMode] = None
 
     def run(self, new_inputs: List[Tensor], function_id: FunctionID):
         assert self.graph is not None, "Running CUDAGraph after shutdown"
-        self.mode = self.id_to_mode[function_id]
         out = self._run(new_inputs, function_id)
 
         # The forwards are only pending following invocation, not before
-        if self.mode == CompilationMode.FORWARD:
+        mode = self.id_to_mode[function_id]
+        if mode == CompilationMode.FORWARD:
             self.running_forwards_with_pending_backwards = True
-        elif self.mode == CompilationMode.BACKWARD:
+        elif mode == CompilationMode.BACKWARD:
             self.running_forwards_with_pending_backwards = False
 
         return out
 
     def set_to_running_backward(self):
         self.running_forwards_with_pending_backwards = False
-        self.mode = CompilationMode.BACKWARD
 
     def _get_cuda_graph_recorded_tensor_checker(self) -> Callable[[Tensor], bool]:
         return (
@@ -2290,18 +2288,9 @@ class CUDAGraphTreeManager:
     def dealloc_current_path_weakrefs(self):
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
-        run_type = "backward" if self.mode == CompilationMode.BACKWARD else "forward"
-
-        stack_map = {}
         for node in self.current_node._path_from_root:
-            assert (
-                len(node.tensor_weakrefs)
-                == len(node.stack_traces)
-                == len(node.outputs_weakrefs)
-            )
-            for t, stack_trace, stor_ref in zip(
-                node.tensor_weakrefs, node.stack_traces, node.outputs_weakrefs
-            ):
+            assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
                 ten = None if t is None else t()
                 if ten is None:
                     continue
@@ -2311,17 +2300,9 @@ class CUDAGraphTreeManager:
                     if stack_trace
                     else "[Could not find stack trace]"
                 )
-
-                if stor_ref is not None and stor_ref() is not None:
-                    stack_map[stor_ref.data_ptr()] = stack_trace
-
-                ten = None if t is None else t()
-                if ten is None:
-                    continue
-
                 msg = (
-                    "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent "
-                    f"{run_type} run. Stack trace: {stack_trace}. "
+                    "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent run. "
+                    f"Stack trace: {stack_trace}. "
                     "To prevent overwriting, clone the tensor outside of torch.compile() "
                     "or call torch.compiler.cudagraph_mark_step_begin() before each model invocation."
                 )
@@ -2331,17 +2312,7 @@ class CUDAGraphTreeManager:
         for storage_ref in self.current_node.path_live_weakrefs():
             if storage_ref() and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
-                stack_trace = stack_map.get(
-                    storage_ref.data_ptr(), "[Could not find stack trace]"
-                )
-                msg = (
-                    "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent "
-                    f"{run_type} run. Stack trace: {stack_trace}. "
-                    "To prevent overwriting, clone the tensor outside of torch.compile() "
-                    "or call torch.compiler.cudagraph_mark_step_begin() before each model invocation."
-                )
                 torch._C._free_And_Remove_DeleterFn(storage_ref())
-                torch._C._set_storage_data_ptr_access_error_msg(storage_ref(), msg)
 
     def clear_current_path_state_and_set_to_none(self):
         self.current_node.clear_path_state()
