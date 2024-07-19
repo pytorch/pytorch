@@ -342,7 +342,7 @@ class CachingAutotuner(KernelInterface):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
         for k, v in cfg.kwargs.items():
-            if self.device_props.type != "hip":
+            if self.device_props.type == "hip":
                 if k == "matrix_instr_nonkdim":
                     compile_meta["matrix_instr_nonkdim"] = v
                     continue
@@ -1759,7 +1759,7 @@ def grid(*numels):
             z_grid,
         )
 
-    setattr(grid_fn, "grid_fn_str", f"grid({numels})")  # noqa: B010
+    setattr(grid_fn, "grid_fn_str", f"grid{numels}")  # noqa: B010
 
     return grid_fn
 

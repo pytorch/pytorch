@@ -299,7 +299,7 @@ TCPStore::TCPStore(
               masterPort,
               isServer,
               numWorkers ? std::optional<std::size_t>(*numWorkers)
-                         : c10::nullopt,
+                         : std::nullopt,
               waitWorkers,
               timeout}} {}
 
@@ -371,6 +371,9 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
       // client's first query for validation
       validate();
 
+      // ping to verify network connectivity
+      ping();
+
       // success
       break;
     } catch (const c10::DistNetworkError& ex) {
@@ -410,7 +413,7 @@ TCPStore::~TCPStore() = default;
 
 void TCPStore::waitForWorkers() {
   detail::timing_guard tguard(clientCounters_["waitForWorkers"]);
-  if (numWorkers_ == c10::nullopt) {
+  if (numWorkers_ == std::nullopt) {
     return;
   }
 
@@ -451,6 +454,19 @@ void TCPStore::validate() {
   detail::SendBuffer buffer(*client_, detail::QueryType::VALIDATE);
   buffer.appendValue<std::uint32_t>(c10d::detail::validationMagicNumber);
   buffer.flush();
+}
+
+void TCPStore::ping() {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+  detail::SendBuffer buffer(*client_, detail::QueryType::PING);
+
+  uint32_t nonce = getpid();
+  buffer.appendValue<std::uint32_t>(nonce);
+  buffer.flush();
+
+  uint32_t returnedNonce = client_->receiveValue<std::uint32_t>();
+  TORCH_INTERNAL_ASSERT(
+      nonce == returnedNonce, "Ping failed, invalid nonce returned");
 }
 
 void TCPStore::_splitSet(

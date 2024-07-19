@@ -95,6 +95,7 @@ _COPY_META_FIELDS = [
     "ac_graph_id",
     "from_node",
     "quantization_tag",
+    "_numeric_debug_handle",
 ]
 
 

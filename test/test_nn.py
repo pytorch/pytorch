@@ -91,7 +91,7 @@ class TestNN(NNTestCase):
 
     def _forward_criterion(self, criterion, input, target, extra_args=None):
         if extra_args is None:
-            extra_args = tuple()
+            extra_args = ()
         if isinstance(input, tuple):
             args = input + (target,) + extra_args
             output = criterion(*args)
@@ -101,7 +101,7 @@ class TestNN(NNTestCase):
 
     def _backward_criterion(self, criterion, input, output, target, gradOutput=None, extra_args=None):
         if extra_args is None:
-            extra_args = tuple()
+            extra_args = ()
         input_tuple = input if isinstance(input, tuple) else (input,)
         output_tuple = output if isinstance(output, tuple) else (output,)
         for i in input_tuple:
@@ -1447,7 +1447,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(net.get_submodule(target), l2)
         self.assertRaises(ValueError, net.set_submodule, "", l)
         self.assertRaises(AttributeError, net.set_submodule, "a.l", l)
-        self.assertRaises(AttributeError, net.set_submodule, "t.l.l2", l2)
 
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))
@@ -1813,27 +1812,29 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(len(w) == 0)
 
     def test_parameterlistdict_pickle(self):
-        # warning from torch.load call in _load_from_bytes used in UntypedStorage.__reduce__
-        WEIGHTS_ONLY_WARN = "You are using `torch.load` with `weights_only=False`"
         m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
-        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
+        with warnings.catch_warnings(record=True) as w:
             m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
 
         # Test whether loading from older checkpoints works without triggering warnings
         m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
         del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
-        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
+        with warnings.catch_warnings(record=True) as w:
             m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
 
         m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
-        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
+        with warnings.catch_warnings(record=True) as w:
             m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
 
         # Test whether loading from older checkpoints works without triggering warnings
         m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
         del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
-        with self.assertWarnsRegex(FutureWarning, WEIGHTS_ONLY_WARN):
+        with warnings.catch_warnings(record=True) as w:
             m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
 
     def test_weight_norm_pickle(self):
         m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
@@ -2292,7 +2293,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(state_dict['bias'].data_ptr(), l.bias.data_ptr())
 
         # Reference https://github.com/pytorch/pytorch/pull/75507#issuecomment-1110291545
-        self.assertNotWarn(lambda: l.state_dict(destination=dict()), "Should not warn kwarg destination w/o _metadata")
+        self.assertNotWarn(lambda: l.state_dict(destination={}), "Should not warn kwarg destination w/o _metadata")
 
     def test_extra_state(self):
 
@@ -7075,6 +7076,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         with self.assertRaises(RuntimeError):
             res = arg_class(*arg_4)
+
+    def test_pickle_module_no_weights_only_warning(self):
+        with warnings.catch_warnings(record=True) as w:
+            pickle.loads(pickle.dumps(torch.nn.Linear(10, 10)))
+        self.assertEqual(len(w), 0)
 
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
