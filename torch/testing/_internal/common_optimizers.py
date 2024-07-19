@@ -258,6 +258,15 @@ def get_error_inputs_for_all_optims(device, dtype):
                 error_type=ValueError,
                 error_regex="some parameters appear in more than one parameter group",
             ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=torch.tensor([0.001, 0.001])),
+                    desc="Tensor lr must be 1-element",
+                ),
+                error_type=ValueError,
+                error_regex="Tensor lr must be 1-element",
+            ),
         ]
     else:
         return []
@@ -474,15 +483,6 @@ def optim_error_inputs_func_adam(device, dtype):
                 error_type=ValueError,
                 error_regex="lr as a Tensor is not supported for capturable=False and foreach=True",
             ),
-            ErrorOptimizerInput(
-                OptimizerInput(
-                    params=None,
-                    kwargs=dict(lr=torch.tensor([0.001, 0.001])),
-                    desc="Tensor lr must be 1-element",
-                ),
-                error_type=ValueError,
-                error_regex="Tensor lr must be 1-element",
-            ),
         ]
     if _get_device_type(device) == "cuda":
         sample_tensor = torch.empty((), device=device, dtype=dtype)
@@ -645,6 +645,9 @@ def optim_inputs_func_lbfgs(device, dtype=None):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
+        OptimizerInput(
+            params=None, kwargs={"lr": torch.tensor(0.001)}, desc="Tensor lr"
+        ),
         OptimizerInput(
             params=None, kwargs={"tolerance_grad": 1e-6}, desc="tolerance_grad"
         ),
@@ -972,15 +975,6 @@ def optim_error_inputs_func_sgd(device, dtype):
                 error_type=ValueError,
                 error_regex="Invalid momentum value: -0.5",
             ),
-            ErrorOptimizerInput(
-                OptimizerInput(
-                    params=None,
-                    kwargs=dict(lr=torch.tensor([0.001, 0.001])),
-                    desc="Tensor lr must be 1-element",
-                ),
-                error_type=ValueError,
-                error_regex="Tensor lr must be 1-element",
-            ),
         ]
     return error_inputs
 
@@ -991,6 +985,9 @@ def optim_inputs_func_sparseadam(device, dtype=None):
         OptimizerInput(
             params=None, kwargs={"lr": 0.01}, desc="non-default lr"
         ),  # TODO: Move out to testing in param_group?
+        OptimizerInput(
+            params=None, kwargs={"lr": torch.tensor(0.001)}, desc="Tensor lr"
+        ),
         OptimizerInput(params=None, kwargs={"maximize": True}, desc="maximize"),
     ]
 

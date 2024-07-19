@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Implementation for the Resilient backpropagation."""
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -26,7 +26,7 @@ class Rprop(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
-        lr: float = 1e-2,
+        lr: Union[float, Tensor] = 1e-2,
         etas: Tuple[float, float] = (0.5, 1.2),
         step_sizes: Tuple[float, float] = (1e-6, 50),
         *,
@@ -35,6 +35,8 @@ class Rprop(Optimizer):  # noqa: D101
         maximize: bool = False,
         differentiable: bool = False,
     ):  # noqa: D107
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 < etas[0] < 1.0 < etas[1]:
