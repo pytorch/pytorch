@@ -29,8 +29,9 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+import torch.distributed as dist
 
-from . import config, logging as torchdynamo_logging, variables
+from . import config, logging as torchdynamo_logging, variables, exc
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_call_function,
@@ -966,6 +967,15 @@ class OutputGraph:
         Automatically restore live variables.
         """
         assert reason is not None
+
+        if (ds := tx.distributed_state) is not None and ds.all_states is None:
+            compile_pg = ds.compile_pg
+            log.info("compile_pg %s", ds.local_state)
+            with torch.cuda.device(compile_pg.rank()):
+                all_states = [None] * compile_pg.size()
+                dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
+                ds.all_states = all_states
+            raise exc.CompileCollectiveRestartAnalysis()
 
         from .decorators import disable
 

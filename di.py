@@ -1,4 +1,5 @@
 import os
+import datetime
 import logging
 import torch
 import torch.distributed as dist
@@ -9,7 +10,7 @@ from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
 import torch._dynamo.config
 
-torch._dynamo.config.enable_sync_dist_compilation = True
+torch._dynamo.config.enable_compile_pg = True
 
 class SimpleModel(nn.Module):
     def __init__(self, input_size, output_size):
@@ -35,8 +36,8 @@ class DummyDataset(Dataset):
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    os.environ['MASTER_PORT'] = '12358'
+    dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=2))
 
 def cleanup():
     dist.destroy_process_group()

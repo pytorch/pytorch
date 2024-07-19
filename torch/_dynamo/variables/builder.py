@@ -29,6 +29,7 @@ except ModuleNotFoundError:
 import torch
 
 import torch.distributed as dist
+from torch._dynamo.distributed import get_compile_pg
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
@@ -2263,18 +2264,19 @@ def _automatic_dynamic(
                             frame_state_entry.size[i] = None
         tx.output.frame_state[name] = frame_state_entry
 
-    if config.enable_sync_dist_compilation and dist.is_available() and dist.is_initialized():
-        # TODO: handle if device is always 0
-        with torch.cuda.device(dist.get_rank()):
-            size_list = [None] * dist.get_world_size()
-            log.info("compiler collective: automatic_dynamic %s", e.size(0))
-            dist.all_gather_object(size_list, e.size())
-            for s in size_list:
-                update_frame_state(s)
-    else:
+    if (st := tx.distributed_state) is None:
+        # Simple syrup
         update_frame_state(e.size())
-
-    frame_state_entry = tx.output.frame_state[name]
+        frame_state_entry = tx.output.frame_state[name]
+    elif st.all_states is None:
+        # Preflight, always pretend as if it's static
+        frame_state_entry = FrameStateSizeEntry(size=e.size(), scalar=None)
+        st.local_state.input_sizes[name] = list(e.size())
+    else:
+        # Apply the updates
+        for sub_state in st.all_states:
+            update_frame_state(sub_state.input_sizes[name])
+        frame_state_entry = tx.output.frame_state[name]
 
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
