@@ -166,6 +166,12 @@ class ValueRanges(Generic[_T]):
         is_bool_upper = isinstance(upper, SympyBoolean)
         assert is_bool_lower == is_bool_upper, (lower, upper)
 
+        # Warning: is_int/is_float is best effort.  We do pretty well in
+        # Dynamo, but in Inductor these attributes are often wrong because we
+        # are not very rigorous in dtype analysis.  This is also why we need
+        # the flexible analysis for is_int: sometimes a sympy.oo pops in for
+        # an integer bound. I would /like/ for us not to do this, but it's
+        # too hard to push the invariant through right now.
         if isinstance(lower, sympy.Integer) and upper == sympy.oo:
             upper = int_oo
         if isinstance(upper, sympy.Integer) and lower == -sympy.oo:
@@ -183,16 +189,11 @@ class ValueRanges(Generic[_T]):
         #
         # NB: is_bool_lower == is_bool_upper, so we only need to check one
         object.__setattr__(self, "is_bool", is_bool_lower)
-
-        # Warning: is_int/is_float is best effort.  We do pretty well in
-        # Dynamo, but in Inductor these attributes are often wrong because we
-        # are not very rigorous in dtype analysis.  This is also why we need
-        # the flexible analysis for is_int: sometimes a sympy.oo pops in for
-        # an integer bound. I would /like/ for us not to do this, but it's
-        # too hard to push the invariant through right now.
-        #
-        # NB: is_int_lower == is_int_upper, so we only need to check one
-        object.__setattr__(self, "is_int", not self.is_bool and is_int_lower)
+        object.__setattr__(
+            self,
+            "is_int",
+            not self.is_bool and is_int_lower and is_int_upper,
+        )
         """
         # This assert is just impossible right now, too many sympy bugs
         if self.is_int:
