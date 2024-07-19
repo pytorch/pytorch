@@ -3227,8 +3227,8 @@ class TilingSelect:
                     try:
                         return stride_at_vec_range(index, itervar, tiling_factor)
                     except Exception:
-                        # see test_torchinductor.py::test_full_boolean which has
-                        # tmp0 = ops.index_expr(s0 >= 1024, torch.bool)
+                        # see test_torchinductor_dynamic_shapes.py::test_full_boolean_dynamic_shapes_cpu
+                        # which has tmp0 = ops.index_expr(s0 >= 1024, torch.bool)
                         return None
 
                 def _update_negative_op_count(node_name, negative_op_type_count):
