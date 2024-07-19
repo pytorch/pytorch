@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, NewType, Optional, Set, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import Source
+from torch._ops import OpOverload
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -183,12 +184,14 @@ class SubclassCreationMeta:
     outer_size: List[Union[int, torch.SymInt]]
     outer_stride: List[Union[int, torch.SymInt]]
     meta: Any
-    # This points to the index of the first size in the list of arguments
+    # Points to the index of the first size in the list of arguments
     flat_tensor_extra_sizes_offset: int
+    symint_placeholders: List[bool]
     # Stores the original subclass itself.
     # This is needed because we need the autograd metadata on the original subclass
     # (this is guaranteed to be a wrapper subclass that holds a fake tensor,
     #  so holding onto this at runtime shouldn't leak memory)
+    # This field is nulled out after calling make_runtime_safe()
     original_subclass: Optional[torch.Tensor]
 
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
@@ -201,16 +204,18 @@ class SubclassCreationMeta:
         num_fw_outs_saved_for_bw: Optional[int] = None,
         is_runtime: bool,
     ):
-        def is_symbolic(xs):
-            return pytree.tree_any(lambda x: isinstance(x, torch.SymInt), xs)
+        is_symbolic = any(self.symint_placeholders)
+        num_symbolic = sum(self.symint_placeholders)
 
-        if is_runtime and is_symbolic(self.outer_size):
+        if is_runtime and is_symbolic:
             start = len(all_args) - self.flat_tensor_extra_sizes_offset
-            end = start + len(self.outer_size)
+            end = start + num_symbolic
             if num_fw_outs_saved_for_bw:
                 start -= num_fw_outs_saved_for_bw
                 end -= num_fw_outs_saved_for_bw
             it = iter(all_args[start:end])
+            print('aqui', start, end)
+            print(all_args[start:end])
             return pytree.tree_map_only(
                 torch.SymInt, lambda _: next(it), self.outer_size
             )
@@ -263,6 +268,7 @@ class SubclassCreationMeta:
     def make_runtime_safe(self):
         assert self.original_subclass is not None
         self.original_subclass_type = type(self.original_subclass)
+        self.original_subclass = None
         # Recurse on nested subclass info
         for creation_meta in self.attrs.values():
             if creation_meta is not None:
@@ -362,7 +368,7 @@ class ViewAndMutationMeta:
     deterministic: Optional[bool] = None
 
     # Keeps track of which input indices store parameters (which we will treat as static)
-    static_parameter_indices: List[int] = field(default_factory=list)
+    static_input_indices: List[int] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
@@ -828,7 +834,7 @@ class AOTConfig:
     fw_compiler: Callable
     bw_compiler: Callable
     partition_fn: Callable
-    decompositions: Dict[Callable, Callable]
+    decompositions: Dict[OpOverload, Callable]
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool
@@ -836,6 +842,7 @@ class AOTConfig:
     no_tangents: bool = False
     dynamic_shapes: bool = False
     aot_autograd_arg_pos_to_source: Optional[List[Source]] = None
+    static_input_indices: Optional[List[int]] = None
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
     # this is always false outside of export.

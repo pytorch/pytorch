@@ -37,18 +37,24 @@ from typing import (
     DefaultDict,
     Deque,
     Dict,
+    Iterable,
     Iterator,
     KeysView,
     List,
     Optional,
+    overload,
     Set,
     Tuple,
     Type,
+    TypeVar,
     Union,
     ValuesView,
 )
+from typing_extensions import TypeGuard
 
 from ..utils.hooks import RemovableHandle
+
+T = TypeVar("T")
 
 try:
     import numpy as np
@@ -164,15 +170,21 @@ def increment_op_count(cnt):
 # Calculate total time spent so far for each phase
 # For example, {'entire_frame_compile':8.574629999999999, 'backend_compile':5.26806}
 def calculate_time_spent():
-    total = 0.0
+    total_wall_time = 0.0
     total_by_key = {}
     for timings in frame_phase_timing.values():
+        total_wall_time += timings.get(
+            "entire_frame_compile", timings.get("inductor_compile", 0)
+        )
+
         for key, timing in timings.items():
-            total += timing
             if key not in total_by_key:
                 total_by_key[key] = timing
             else:
                 total_by_key[key] += timing
+
+    if total_by_key:
+        total_by_key["total_wall_time"] = total_wall_time
 
     return total_by_key
 
@@ -492,6 +504,23 @@ class ExactWeakKeyDictionary:
         self.values.clear()
 
 
+@overload
+def istype(obj: object, allowed_types: Type[T]) -> TypeGuard[T]:
+    ...
+
+
+@overload
+def istype(
+    obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
+) -> TypeGuard[T]:
+    ...
+
+
+@overload
+def istype(obj: object, allowed_types: Iterable[type]) -> bool:
+    ...
+
+
 def istype(obj, allowed_types):
     """isinstance() without subclasses"""
     if isinstance(allowed_types, (tuple, list, set)):
@@ -625,7 +654,7 @@ def is_numpy_ndarray(value):
 
 def istensor(obj):
     """Check of obj is a tensor"""
-    tensor_list = (
+    tensor_list: Tuple[type, ...] = (
         torch.Tensor,
         torch.nn.Parameter,
         *config.traceable_tensor_subclasses,
@@ -1055,7 +1084,7 @@ def rot_n_helper(n):
     return fn
 
 
-common_constant_types = {
+common_constant_types: Set[type] = {
     int,
     float,
     complex,
@@ -1403,6 +1432,10 @@ def same(
             ):
                 log_error("Accuracy failed for key name %s", k)
                 return False
+        return True
+    elif isinstance(ref, set):
+        assert isinstance(res, set)
+        assert set(ref) == set(res), f"elements mismatch {set(ref)} == {set(res)}"
         return True
     elif isinstance(ref, (torch.Tensor, float)):
         assert not isinstance(ref, torch._subclasses.FakeTensor)
@@ -2834,3 +2867,24 @@ def _disable_saved_tensors_hooks_during_tracing():
         yield
     finally:
         torch._C._autograd._saved_tensors_hooks_set_tracing(prior)
+
+
+def is_parameter_freezing():
+    return torch._inductor.config.freezing and not torch.is_grad_enabled()
+
+
+def verify_guard_fn_signature(value):
+    fn = value.__metadata_guard__
+    sig = inspect.signature(fn)
+    if len(sig.parameters) != 2:
+        from .exc import InternalTorchDynamoError
+
+        raise InternalTorchDynamoError(
+            "Tensor subclass method __metadata_guard__ must take exactly two subclass metadata arguments"
+        )
+    if fn.__self__ != value.__class__:
+        from .exc import InternalTorchDynamoError
+
+        raise InternalTorchDynamoError(
+            "Tensor subclass method __metadata_guard__ must be a classmethod"
+        )

@@ -5,6 +5,7 @@ AOTAutograd's responsibility is to trace through all pytorch capabilities that l
 and this includes tensor subclasses that implement __torch_dispatch__.
 """
 
+import typing
 from typing import Any, List, Optional, Tuple, Union
 
 import torch.utils._pytree as pytree
@@ -44,19 +45,25 @@ def create_subclass_metadata(a, start_idx, extra_sizes_offset):
     attrs = {}
     for key in inner_keys:
         new_subclass_meta, new_start_idx = create_subclass_metadata(
-            getattr(a, key), new_start_idx, extra_sizes_offset=0  # TODO: test this
+            getattr(a, key), new_start_idx, extra_sizes_offset=0
         )
         attrs[key] = new_subclass_meta
+
+    # It *must* be because is_traceable_wrapper_subclass() - but mypy is not smart.
+    assert isinstance(a, Tensor)
+
+    symint_placeholders = [True if isinstance(s, SymInt) else False for s in a.size()]
 
     return (
         SubclassCreationMeta(
             flat_tensor_start_idx=start_idx,
             arg_count=new_start_idx - start_idx,
             flat_tensor_extra_sizes_offset=extra_sizes_offset,
+            symint_placeholders=symint_placeholders,
             attrs=attrs,
             meta=metadata,
-            outer_size=a.size(),
-            outer_stride=a.stride(),
+            outer_size=a.size(),  # type: ignore[attr-defined, arg-type]
+            outer_stride=a.stride(),  # type: ignore[arg-type]
             original_subclass=a,
         ),
         new_start_idx,
@@ -85,16 +92,15 @@ def create_subclass_meta(
     infos: List[Union[int, SubclassCreationMeta]] = []
     # Each tensor subclass i adds K_i extra arguments.
     num_extra_sizes = sum(
-        [
-            sum(1 for s in a.size() if isinstance(s, SymInt))
-            for a in curr_args
-            if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a)
-        ]
+        sum(isinstance(s, SymInt) for s in a.size())  # type: ignore[misc]
+        for a in curr_args
+        if is_traceable_wrapper_subclass(a)
     )
     extra_sizes_count = 0
 
     for a in curr_args:
-        if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a):
+        if is_traceable_wrapper_subclass(a):
+            assert isinstance(a, Tensor)
             start_idx = idx
             extra_sizes_offset = num_extra_sizes - extra_sizes_count
             extra_sizes_count += len(a.shape)
@@ -130,11 +136,10 @@ def unwrap_tensor_subclasses(
     append_extra: bool,
 ):
     def concat_inner_tensors_from_subclasses(xs, is_primal: bool):
-        xs_inner = []
-
+        xs_inner: List[Union[Tensor, SymInt, int]] = []
         for x in xs:
             if is_traceable_wrapper_subclass(x):
-                xs_inner.extend(get_plain_tensors(x))
+                xs_inner.extend(get_plain_tensors(typing.cast(Tensor, x)))
             else:
                 xs_inner.append(x)
 
@@ -152,22 +157,17 @@ def unwrap_tensor_subclasses(
             for x, meta in zip(xs, subclass_metas):
                 if isinstance(meta, SubclassCreationMeta):
                     assert isinstance(meta, SubclassCreationMeta)
-                    assert meta.original_subclass is not None
                     runtime_size = x.size()
-                    maybe_sym_size = meta.original_subclass.size()
-                    assert len(runtime_size) == len(maybe_sym_size)
+                    symint_placeholders = meta.symint_placeholders
+                    assert len(runtime_size) == len(symint_placeholders)
                     xs_inner += [
                         r
-                        for (r, s) in zip(runtime_size, maybe_sym_size)
-                        if isinstance(s, SymInt)
+                        for (r, is_symint) in zip(runtime_size, symint_placeholders)
+                        if is_symint
                     ]
         else:
             for x in xs:
-                if (
-                    isinstance(x, Tensor)
-                    and is_traceable_wrapper_subclass(x)
-                    and is_primal
-                ):
+                if is_traceable_wrapper_subclass(x) and is_primal:
                     # x.size() can have both ints ans SymInts: `Size([3, sz1, 5])`
                     xs_inner += [sz for sz in x.size() if isinstance(sz, SymInt)]
 
@@ -192,6 +192,24 @@ def unwrap_tensor_subclasses(
         )
         unwrapped_args = unwrapped_args_fw
     return unwrapped_args
+
+
+def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
+    static_input_indices = set(static_input_indices)
+    new_ind = 0
+    remapped_static_indices = []
+    for i, arg in enumerate(wrapped_args):
+        num_indices = 1
+        if is_traceable_wrapper_subclass(arg):
+            num_indices = len(get_plain_tensors(typing.cast(Tensor, arg)))
+
+        for _ in range(num_indices):
+            if i in static_input_indices:
+                remapped_static_indices.append(new_ind)
+
+            new_ind += 1
+
+    return remapped_static_indices
 
 
 # Turns a flattened list of tensor arguments into (maybe) subclass tensors.
@@ -222,10 +240,11 @@ def wrap_tensor_subclasses(
                     num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
                 )
             )
-            assert subclass_meta.original_subclass is not None
-            num_args_tallied += subclass_meta.arg_count + sum(
-                bool(count_extra)
-                for sz in subclass_meta.original_subclass.size()
+            assert subclass_meta.outer_size is not None
+            num_args_tallied += subclass_meta.arg_count
+            num_args_tallied += sum(  # extra SymInts
+                count_extra
+                for sz in subclass_meta.outer_size
                 if isinstance(sz, SymInt)
             )
 
@@ -403,8 +422,12 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
             end = length - offset + num_extra_symints
             updated_input_info += inner_metadata.input_info[start:end]
 
-    if inner_metadata is not None:
-        assert len(inner_metadata.input_info) == len(updated_input_info)
+    if inner_metadata is not None and False:
+        from rich import print
+        print()
+        print(inner_metadata.input_info)
+        print(updated_input_info)
+        assert len(inner_metadata.input_info) == len(updated_input_info), (len(inner_metadata.input_info), len(updated_input_info))
 
     return [
         i
