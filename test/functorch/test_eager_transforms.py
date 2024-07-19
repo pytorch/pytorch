@@ -3529,13 +3529,10 @@ class TestComposability(TestCase):
     @parametrize(
         "transform",
         [
-            "vmap",
             "grad",
             "jacrev",
-            "jacfwd",
             "grad_and_value",
             "hessian",
-            "functionalize",
         ],
     )
     def test_transforms_dont_support_saved_tensor_hooks(self, device, transform):
@@ -3575,7 +3572,7 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
             vjp(g, x)
 
-    def test_jvp_doesnt_support_saved_tensor_hooks(self, device):
+    def test_jvp_supports_saved_tensor_hooks(self, device):
         def f(x):
             return torch.sin(x).sum()
 
@@ -3586,12 +3583,12 @@ class TestComposability(TestCase):
         x = torch.randn(3, device=device)
         t = torch.randn(3, device=device)
 
-        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
-            with torch.autograd.graph.save_on_cpu():
-                jvp(f, (x,), (t,))
+        # smoke tests
+        with torch.autograd.graph.save_on_cpu():
+            jvp(f, (x,), (t,))
 
-        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
-            jvp(g, (x,), (t,))
+        # smoke tests
+        jvp(g, (x,), (t,))
 
     def test_can_use_functionalize_when_key_is_excluded(self, device):
         def f(x):
