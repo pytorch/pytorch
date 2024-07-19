@@ -37,7 +37,6 @@ if __name__ == "__main__":
         and not IS_WINDOWS
         and HAS_CUDA
         and not TEST_WITH_ASAN
-        and not TEST_WITH_ROCM
     ):
         get_disabled_tests(".")
 
