@@ -708,11 +708,15 @@ def sdpa_dense_backward(
         )
     grad_scores = grad_scores * scale
     grad_scores = grad_scores.to(query.dtype)
-    grad_scores = torch.where(
-        mask_graph(b, h, m, n, *mask_mod_other_buffers),
-        grad_scores,
-        torch.tensor(0, dtype=query.dtype),
+
+    mask_mod = _vmap_for_bhqkv(
+        mask_graph, prefix=(), suffix=(None,) * len(mask_mod_other_buffers)
     )
+    with TransformGetItemToIndex():
+        mask_scores = mask_mod(b, h, m, n, *mask_mod_other_buffers)
+        grad_scores = torch.where(
+            mask_scores, grad_scores, torch.tensor(0, dtype=query.dtype)
+        )
 
     grad_query = grad_scores @ key
     grad_key = grad_scores.transpose(-2, -1) @ query
