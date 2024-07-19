@@ -570,52 +570,56 @@ Tensor log_softmax(const Tensor& self, Dimname dim, std::optional<ScalarType> dt
 }
 
 Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const std::optional<int64_t> dim_, const std::optional<int64_t> mask_type_) {
-  // See [NOTE] SDPA + mask_type 3
-  if (mask_type_.has_value() && mask_type_.value() == 3){
-    TORCH_CHECK(dim_.has_value(), "dim must be specified for mask_type == 3");
-    TORCH_CHECK(mask_.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
-    auto out = at::softmax(input_, dim_.value());
-    return out.masked_fill(~mask_, 0);
-  }
+  auto maskTypeOpt = mask_type_.has_value()
+        ? c10::make_optional(toMaskType(mask_type_.value()))
+        : c10::nullopt;
 
-  auto mask = mask_.contiguous();
-  auto mask_type = mask_type_; // Mask type might get transformed below
+  // See [NOTE] SDPA + BOOLEAN_MASK
+if (maskTypeOpt == MaskType::SDPA_BOOL_MASK) {
+        TORCH_CHECK(dim_.has_value(), "dim must be specified for SDPA_BOOL_MASK");
+        TORCH_CHECK(mask_.scalar_type() == at::ScalarType::Bool, "Mask should be a boolean tensor");
+        auto out = at::softmax(input_, dim_.value());
+        return out.masked_fill(~mask_, 0);
+    }
 
-  TORCH_CHECK(
-      mask_.scalar_type() == ScalarType::Bool,
-      "Mask should be a boolean tensor");
+    auto mask = mask_.contiguous();
+    TORCH_CHECK(
+        mask_.scalar_type() == at::ScalarType::Bool,
+        "Mask should be a boolean tensor");
 
-  if ((mask.dim() != 2) || (input_.dim() != 4)) {
-    // Mask types 0 and 1 are only allowed for 2D masks and 4D inputs
-    mask_type = 2;
-  }
+    // Determine mask type based on input and mask dimensions
+    if ((mask.dim() != 2) || (input_.dim() != 4)) {
+        maskTypeOpt = MaskType::DEFAULT_MASK;
+    }
 
-  if (mask_type == 2) {
-      TORCH_CHECK(input_.sizes() == mask.sizes(),
-                  "For mask_type == 2 mask shape should match input shape")
-  } else if (mask_type == 1) {
-      // Padding mask of shape (B, L)
-      TORCH_CHECK((input_.sizes()[0] == mask.sizes()[0]) && (input_.sizes()[2] == mask.sizes()[1]),
-                  "For mask_type == 1 mask shape should be (B, L)");
-      if (dim_ != input_.dim() - 1) {
-            // We only process padding mask in the optimized way if softmax is applied along the last dimesion,
+    if (maskTypeOpt == MaskType::DEFAULT_MASK) {
+        TORCH_CHECK(input_.sizes() == mask.sizes(),
+                    "For DEFAULT_MASK, mask shape should match input shape");
+    } else if (maskTypeOpt == MaskType::PADDING_MASK) {
+        // Padding mask of shape (B, L)
+        TORCH_CHECK((input_.sizes()[0] == mask.sizes()[0]) && (input_.sizes()[2] == mask.sizes()[1]),
+                    "For PADDING_MASK, mask shape should be (B, L)");
+        if (dim_ != input_.dim() - 1) {
+            // We only process padding mask in the optimized way if softmax is applied along the last dimension,
             // otherwise we need to expand the mask into a generic 4D one
             mask = mask_.view({input_.sizes()[0], 1, 1, input_.sizes()[2]});
             mask = mask.expand(input_.sizes()).contiguous();
-            mask_type = 2;
-      }
-  } else if (mask_type == 0) {
-      // Attention mask of shape (L, L)
-      TORCH_CHECK((mask.dim() == 2) && (input_.sizes()[2] == mask.sizes()[0]) && (input_.sizes()[2] == mask.sizes()[1]),
-                  "For mask_type == 0 mask shape should be (L, L)");
-      if (dim_ != input_.dim() - 1) {
-            // We only process attention mask in a optimized way if softmax is applied along the last dimesion,
+            maskTypeOpt = MaskType::DEFAULT_MASK;
+        }
+    } else if (maskTypeOpt == MaskType::SRC_MASK) {
+        // Source mask of shape (L, L)
+        TORCH_CHECK((mask.dim() == 2) && (input_.sizes()[2] == mask.sizes()[0]) && (input_.sizes()[2] == mask.sizes()[1]),
+                    "For SRC_MASK, mask shape should be (L, L)");
+        if (dim_ != input_.dim() - 1) {
+            // We only process source mask in an optimized way if softmax is applied along the last dimension,
             // otherwise we need to expand the mask into a generic 4D one
             mask = mask.view({1, 1, input_.sizes()[2], input_.sizes()[2]});
             mask = mask.expand(input_.sizes()).contiguous();
-            mask_type = 2;
-      }
-  }
+            maskTypeOpt = MaskType::DEFAULT_MASK;
+        }
+    } else if (maskTypeOpt == MaskType::ERROR) {
+        TORCH_CHECK(false, "Invalid mask type provided");
+    }
 
   Tensor output = at::empty_like(input_, input_.options());
   auto input = input_.contiguous();
@@ -626,13 +630,17 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const std::
     input = input.view(1);
   }
 
+  auto intMaskType = maskTypeOpt.has_value()
+      ? c10::make_optional(toIntMaskType(maskTypeOpt.value()))
+      : c10::nullopt;
+
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::BFloat16, at::ScalarType::Half, input.scalar_type(), "masked_softmax", [&] {
         host_softmax<
             scalar_t,
             false /* LogSoftMax */,
             true /* MaskedSoftMax */>(
-            output, input, dim, mask.data_ptr<bool>(), mask_type);
+            output, input, dim, mask.data_ptr<bool>(), intMaskType);
       });
   return output;
 }
@@ -649,13 +657,17 @@ Tensor masked_softmax_backward_cpu(
       mask_.scalar_type() == ScalarType::Bool,
       "Mask should be a boolean tensor");
 
-  // See [NOTE] SDPA + mask_type 3
-  if (mask_type_.has_value() && mask_type_.value() == 3){
-    TORCH_CHECK(dim_.has_value(), "dim must be specified for mask_type == 3");
-    auto grad_input = grad_.mul(output_);
-    auto grad_sum = grad_input.sum(dim_.value(), /*keepdim=*/true);
-    grad_input -= output_.mul(grad_sum);
-    return grad_input;
+  auto maskTypeOpt = mask_type_.has_value()
+      ? c10::make_optional(toMaskType(mask_type_.value()))
+      : c10::nullopt;
+
+  // See [NOTE] SDPA + SDPA_BOOL_MASK
+  if (maskTypeOpt == MaskType::SDPA_BOOL_MASK) {
+      TORCH_CHECK(dim_.has_value(), "dim must be specified for SDPA_BOOL_MASK");
+      auto grad_input = grad_.mul(output_);
+      auto grad_sum = grad_input.sum(dim_.value(), /*keepdim=*/true);
+      grad_input -= output_.mul(grad_sum);
+      return grad_input;
   }
 
   auto grad = grad_.contiguous();
