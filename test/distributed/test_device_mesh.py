@@ -529,6 +529,69 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         tp_mesh = mesh["tp"]
         self.assertEqual(_world.group_count, ref_pg_count)
 
+    @with_comms
+    def test_flatten(self):
+        # dp + cp + tp case
+        """
+        initial mesh:
+        [
+          [
+            [0, 1],
+            [2, 3],
+          ],
+          [
+            [4, 5],
+            [6, 7],
+          ],
+        ]
+
+        flattened_mesh:
+        [
+            [0,1],
+            [2,3],
+            [4,5],
+            [6,7],
+        ]
+
+        dp_cp submesh:
+        [0, 2, 4, 6] or [1, 3, 5, 7]
+        """
+        mesh = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("dp", "cp", "tp")
+        )
+        flatten_mesh = mesh._flatten(start_dim=0, end_dim=1)
+        dp_cp_mesh = flatten_mesh["dp_cp"]
+        print(f"{flatten_mesh=}, {dp_cp_mesh=}")
+
+        """
+        initial mesh:
+        [
+          [
+            [0, 1],
+            [2, 3],
+          ],
+          [
+            [4, 5],
+            [6, 7],
+          ],
+        ]
+
+        flattened_mesh:
+        [
+            [0,1,2,3],
+            [4,5,6,7],
+        ]
+
+        shard_cp submesh:
+        [0, 1, 2, 3] or [4, 5, 6, 7]
+        """
+        mesh_2 = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("replicate", "shard", "cp")
+        )
+        flatten_mesh_2 = mesh_2._flatten(start_dim=1, end_dim=2)
+        shard_cp_mesh = flatten_mesh_2["shard_cp"]
+        print(f"{flatten_mesh_2=}, {shard_cp_mesh=}")
+
 
 class TestMeshEnv(DTensorTestBase):
     @with_comms

@@ -470,6 +470,44 @@ else:
             submesh = _mesh_resources.create_child_mesh(self, mesh_dim_names)
             return submesh
 
+        def _flatten(self, start_dim, end_dim) -> "DeviceMesh":
+            """
+            Only considers flatten contiguous dim for prototyping purpose.
+            """
+
+            # We need to generate the new mesh_dim_names for the new mesh first.
+            # Note: This is very hacky and only works for contiguous mesh
+            end_dim_name = self.mesh_dim_names[end_dim]
+            new_mesh_dim_names = list(self.mesh_dim_names)
+            new_mesh_dim_names.remove(end_dim_name)
+            new_mesh_dim_names[
+                start_dim
+            ] = f"{new_mesh_dim_names[start_dim]}_{end_dim_name}"
+
+            flatten_mesh_tensor = self.mesh.flatten(start_dim, end_dim)
+            # no reuse of pgs yet
+            new_device_mesh = DeviceMesh(
+                self.device_type, flatten_mesh_tensor, mesh_dim_names=new_mesh_dim_names
+            )
+
+            # How do we assign the parent mesh in this case?
+            # If world_mesh dim > the mesh being flattened, for example, world_mesh = ["pp", "dp", "cp" , "tp"] and flattened mesh is ["pp", "dp_cp", "tp"],
+            # then the parent_mesh of flattened_mesh ["pp", "dp_cp", "tp"] is world_mesh
+            # If world_mesh dim == the mesh being flattened, for example, world_mesh = ["dp", "cp", "tp"] and flattened mesh is ["dp_cp", "tp"],
+            # then the parent mesh of flattened mesh is the mesh itself.
+            # This assumption is weird.
+            # This is different from slicing. The mesh being sliced from is always a submesh. So the parent mesh definition is very clear.
+            # Different rank could get different submesh based on which group the current rank lives in.
+            # However, the mesh being flattened from is not always the parent mesh. This is because we need the tp mesh ["tp"] to have the same mesh as ["dp_cp"] dp mesh.
+            # The flattened mesh could actually be a world mesh. Every rank could get the same flattened mesh.
+            parent_mesh = _mesh_resources.get_parent_mesh(self)
+            if parent_mesh:
+                _mesh_resources.child_to_parent_mapping[new_device_mesh] = parent_mesh
+            else:
+                _mesh_resources.child_to_parent_mapping[new_device_mesh] = self
+
+            return new_device_mesh
+
         def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
             """
             Returns the single ProcessGroup specified by mesh_dim, or, if mesh_dim is not specified and the
