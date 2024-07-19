@@ -2,6 +2,7 @@ import functools
 import time
 from collections import defaultdict
 from functools import cached_property
+from statistics import median
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -31,40 +32,45 @@ class LazyBenchmark:
         self.benchmark = benchmark
 
     @cached_property
-    def timing(self) -> float:
+    def timing_ms(self) -> float:
         counters["inductor"]["benchmarking_finalize_lazy_benchmark"] += 1
-        timing = self.benchmark()
+        timing_ms = self.benchmark()
+        # I don't think this helps with saving memory at all,
+        # but at least it gives good signal if we ever try
+        # to call self.benchmark again
         del self.benchmark
-        return timing
-    
-    __float__ = lambda self: self.timing
-    __format__ = lambda self, format_spec: format(self.timing, format_spec)
-    __str__ = lambda self: str(self.timing)
-    
-    __lt__ = lambda self, other: other > self.timing
-    __le__ = lambda self, other: other >= self.timing
+        return timing_ms
 
-    __gt__ = lambda self, other: other < self.timing
-    __ge__ = lambda self, other: other <= self.timing
-    
-    __add__ = lambda self, other: LazyBenchmark(lambda: self.timing + other)
-    __radd__ = lambda self, other: LazyBenchmark(lambda: other + self.timing)
+    __float__ = lambda self: self.timing_ms
+    __format__ = lambda self, format_spec: format(self.timing_ms, format_spec)
+    __str__ = lambda self: str(self.timing_ms)
 
-    __sub__ = lambda self, other: LazyBenchmark(lambda: self.timing - other)
-    __rsub__ = lambda self, other: LazyBenchmark(lambda: other - self.timing)
+    __lt__ = lambda self, other: other > self.timing_ms
+    __le__ = lambda self, other: other >= self.timing_ms
 
-    __mul__ = lambda self, other: LazyBenchmark(lambda: self.timing * other)
-    __rmul__ = lambda self, other: LazyBenchmark(lambda: other * self.timing)
+    __gt__ = lambda self, other: other < self.timing_ms
+    __ge__ = lambda self, other: other <= self.timing_ms
 
-    __truediv__ = lambda self, other: LazyBenchmark(lambda: self.timing / other)
-    __rtruediv__ = lambda self, other: LazyBenchmark(lambda: other / self.timing)
+    __add__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms + other)
+    __radd__ = lambda self, other: LazyBenchmark(lambda: other + self.timing_ms)
+
+    __sub__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms - other)
+    __rsub__ = lambda self, other: LazyBenchmark(lambda: other - self.timing_ms)
+
+    __mul__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms * other)
+    __rmul__ = lambda self, other: LazyBenchmark(lambda: other * self.timing_ms)
+
+    __truediv__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms / other)
+    __rtruediv__ = lambda self, other: LazyBenchmark(lambda: other / self.timing_ms)
 
 
 class Benchmarker:
     def __init__(self) -> None:
         self.memory_cache: Dict[str, Optional[float]] = defaultdict(lambda: None)
-        self.kwargs_hash_to_futures_gpu: Dict[str, Tuple[LazyBenchmark, Callable[..., Any]]] = {}
-  
+        self.kwargs_hash_to_futures_gpu: Dict[
+            str, Tuple[LazyBenchmark, Callable[..., Any]]
+        ] = {}
+
     @cached_property
     def L2_cache_size(self) -> int:
         counters["inductor"]["benchmarking_L2_cache_size"] += 1
@@ -73,272 +79,545 @@ class Benchmarker:
         return properties.L2_cache_size
 
     @cached_property
-    def gpu_time_per_gpu_clock_cycle(self) -> float:
-        counters["inductor"]["benchmarking_gpu_time_per_gpu_clock_cycle"] += 1
+    def gpu_queue_limit(self) -> List[float]:
+        counters["inductor"]["benchmarking_gpu_queue_limit"] += 1
+        # ensures the queue is empty
+        torch.cuda.synchronize()
+        # capping the search space for the queue limit to 2500 is good enough,
+        # current queue limit on my machine (A100) is stable at ~1000, and
+        # in the event that we do artificially cap the queue limit to 2500
+        # we really shouldn't see any significant slowdowns
+        torch.cuda._sleep(
+            int(
+                (self.get_cpu_launch_overhead_ms_per_event_record() * 2500)
+                / self.gpu_time_ms_per_gpu_clock_cycle
+            )
+        )
+        for idx in range(2500):
+            start_time_s = time.perf_counter()
+            torch.cuda.Event(enable_timing=True).record()
+            elapsed_time_ms = (time.perf_counter() - start_time_s) * 1000
+            # recording an event is near instantaneous, unless we have hit
+            # the queue limit, so 1ms seems like a good enough upper bound
+            if elapsed_time_ms > 1:
+                break
+        torch.cuda.synchronize()
+        return idx
+
+    @functools.lru_cache(None)
+    def get_cpu_launch_overhead_ms_per_event_record(self) -> float:
+        counters["inductor"]["benchmarking_get_cpu_launch_overhead_ms_per_event_record"] += 1
+        # ensures the queue is empty
+        torch.cuda.synchronize()
+        start_time_s = time.perf_counter()
+        for _ in range(100):
+            torch.cuda.Event(enable_timing=True).record()
+        torch.cuda.synchronize()
+        return ((time.perf_counter() - start_time_s) * 1000) / 100
+
+    @cached_property
+    def cpu_launch_overhead_ms_per_gpu_cache_clear(self) -> float:
+        counters["inductor"]["benchmarking_cpu_launch_overhead_ms_per_gpu_cache_clear"] += 1
+        return self.get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear()[0]
+
+    @cached_property
+    def gpu_time_ms_per_gpu_cache_clear(self) -> float:
+        counters["inductor"]["benchmarking_gpu_time_ms_per_gpu_cache_clear"] += 1
+        return self.get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear()[1]
+
+    @functools.lru_cache(None)
+    def get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear(
+        self,
+    ) -> Tuple[float, float]:
+        counters["inductor"]["benchmarking_get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear"] += 1
+        buffer = torch.empty(
+            int(self.L2_cache_size // 4), dtype=torch.int, device="cuda"
+        )
+        buffer.zero_()
+        # synchronize after zeroing the buffer to reduce uncertainty
+        torch.cuda.synchronize()
         start_event = torch.cuda.Event(enable_timing=True)
         end_event = torch.cuda.Event(enable_timing=True)
         start_event.record()
+        start_time_s = time.perf_counter()
+        # 100 buffer zeroes is long enough to reduce uncertainty
+        for _ in range(100):
+            buffer.zero_()
+        cpu_launch_overhead_ms_per_gpu_cache_clear = (
+            (time.perf_counter() - start_time_s) * 1000
+        ) / 100
+        end_event.record()
+        torch.cuda.synchronize()
+        # explicitly delete the buffer, sometimes helps memory
+        # footprint metrics in OSS Inductor benchmarks
+        del buffer
+        return (
+            cpu_launch_overhead_ms_per_gpu_cache_clear,
+            start_event.elapsed_time(end_event) / 100,
+        )
+
+    @cached_property
+    def gpu_time_ms_per_gpu_clock_cycle(self) -> float:
+        counters["inductor"]["benchmarking_gpu_time_ms_per_gpu_clock_cycle"] += 1
+        # ensures the queue is empty
+        torch.cuda.synchronize()
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+        # sleeping for 1000000 clock cycles is long enough
+        # to average out most of the uncertainty
         torch.cuda._sleep(1000000)
         end_event.record()
         torch.cuda.synchronize()
         return start_event.elapsed_time(end_event) / 1000000
 
-    @functools.lru_cache(None)
-    def get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear(self) -> Tuple[float, float]:
-        counters["inductor"]["benchmarking_get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear"] += 1
-        buffer = torch.empty(int(self.L2_cache_size // 4), dtype=torch.int, device="cuda")
-        buffer.zero_()
-        torch.cuda.synchronize()
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
-        start_event.record()
-        start_time = time.perf_counter()
-        for _ in range(100):
-            buffer.zero_()
-        cpu_launch_overhead = ((time.perf_counter() - start_time) * 1000) / 100
-        end_event.record()
-        torch.cuda.synchronize()
-        del buffer
-        return cpu_launch_overhead, start_event.elapsed_time(end_event) / 100
-    
-    @cached_property
-    def cpu_launch_overhead_per_gpu_cache_clear(self) -> float:
-        counters["inductor"]["benchmarking_cpu_launch_overhead_per_gpu_cache_clear"] += 1
-        return self.get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear()[0]
-    
-    @cached_property
-    def gpu_time_per_gpu_cache_clear(self) -> float:
-        counters["inductor"]["benchmarking_gpu_time_per_gpu_cache_clear"] += 1
-        return self.get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear()[1]
-
-    def benchmark(self, fn: Callable[..., Any], fn_args: List[Any], fn_kwargs: Dict[str, Any], **kwargs: Dict[str, Any]) -> float:
+    def benchmark(
+        self,
+        fn: Callable[..., Any],
+        fn_args: List[Any],
+        fn_kwargs: Dict[str, Any],
+        **kwargs: Dict[str, Any]
+    ) -> float:
         counters["inductor"]["benchmarking_benchmark"] += 1
         _callable = lambda: fn(*fn_args, **fn_kwargs)
         fn_args_and_kwargs = list(fn_args) + list(fn_kwargs.values())
+        # should we be checking if all args and kwargs are on the same device?
         if is_cpu_device(fn_args_and_kwargs):
             return self.benchmark_cpu(_callable, **kwargs)
         else:
             return self.benchmark_gpu(_callable, **kwargs)
-    
+
     @time_and_log
-    def benchmark_cpu(self, _callable: Callable[[], Any], warmup_iters: int = 5, benchmark_iters: int = 20) -> float:
+    def benchmark_cpu(
+        self,
+        _callable: Callable[[], Any],
+        warmup_iters: int = 5,
+        benchmark_iters: int = 20,
+    ) -> float:
         counters["inductor"]["benchmarking_benchmark_cpu"] += 1
-
-        def benchmark(_callable, iters):
-            timings = []
-            for _ in range(iters):
-                start_time = time.perf_counter()
-                _callable()
-                timings.append((time.perf_counter() - start_time) * 1000)
-            return timings
-        
-        def get_median_timing(timings):
-            timings = sorted(timings)
-            if ((len(timings) % 2) == 0):
-                lower_timing = timings[(len(timings) // 2) - 1]
-                upper_timing = timings[len(timings) // 2]
-                median_timing = (lower_timing + upper_timing) / 2
-            else:
-                median_timing = timings[len(timings) // 2]
-            return median_timing
-
+        # duplicate of original implementation from runtime_utils
+        timings_ms = []
         for _ in range(warmup_iters):
             _callable()
-        timings = benchmark(_callable, benchmark_iters)
+        for _ in range(benchmark_iters):
+            start_time_s = time.perf_counter()
+            _callable()
+            timings_ms.append((time.perf_counter() - start_time_s) * 1000)
+        return median(timings_ms)
 
-        timing = get_median_timing(timings)
-        return timing
-    
     @time_and_log
-    def benchmark_many_cpu(self, callables: List[Callable[[], Any]], warmup_iters: int = 5, benchmark_iters: int = 20) -> List[float]:
+    def benchmark_many_cpu(
+        self,
+        callables: List[Callable[[], Any]],
+        warmup_iters: int = 5,
+        benchmark_iters: int = 20,
+    ) -> List[float]:
         counters["inductor"]["benchmarking_benchmark_many_cpu"] += 1
-        return [self.benchmark_cpu(_callable, warmup_iters, benchmark_iters) for _callable in callables]
-    
+        # implement this to maintain consistency between cpu/gpu benchmarking functionality
+        return [
+            self.benchmark_cpu(_callable, warmup_iters, benchmark_iters)
+            for _callable in callables
+        ]
+
     @time_and_log
-    def benchmark_gpu(self, _callable: Callable[[], Any], estimation_iters: int = 5, memory_warmup_iters: int = 100, benchmark_iters: int = 100, max_benchmark_duration: int = 25) -> float:        
+    def benchmark_gpu(
+        self,
+        _callable: Callable[[], Any],
+        estimation_iters: int = 5,
+        memory_warmup_iters: int = 100,
+        benchmark_iters: int = 100,
+        max_benchmark_duration_ms: int = 25,
+    ) -> float:
         counters["inductor"]["benchmarking_benchmark_gpu"] += 1
-        self.get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear()
-        
-        def benchmark(_callable, buffer, iters):
-            event_pairs = self.get_event_pairs(iters)
-            start_time = time.perf_counter()
-            for start_event, end_event in event_pairs:
+        # we don't want any outside errors propagating into benchmarking
+        torch.cuda.synchronize()
+
+        # initialize here, avoids double buffer allocation
+        self.get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear()
+
+        _callable()
+        torch.cuda.synchronize()
+
+        buffer = torch.empty(
+            int(self.L2_cache_size // 4), dtype=torch.int, device="cuda"
+        )
+        buffer.zero_()
+
+        event_pairs = self.get_event_pairs(estimation_iters)
+        start_time_s = time.perf_counter()
+        for start_event, end_event in event_pairs:
+            buffer.zero_()
+            start_event.record()
+            _callable()
+            end_event.record()
+        # before we synchronize we want to measure the cpu-side cost of our buffer
+        # zero, launching the callable, and the associated event records
+        cpu_launch_overhead_ms_per_iter = (
+            (time.perf_counter() - start_time_s) * 1000
+        ) / estimation_iters
+        torch.cuda.synchronize()
+        estimated_timing_ms = self.get_min_timing_ms(event_pairs)
+
+        # we don't want to benchmark for longer than max_benchmark_duration milliseconds,
+        # so we reduce benchmark_iters to fit within this constraint if necessary
+        benchmark_iters = self.reduce_benchmark_iters_to_max_benchmark_duration_ms(
+            memory_warmup_iters,
+            benchmark_iters,
+            cpu_launch_overhead_ms_per_iter,
+            estimated_timing_ms,
+            1,
+            max_benchmark_duration_ms,
+        )
+        # the self.gpu_queue_limit'th event queued to the GPU will execute synchronously
+        # on the CPU; this is bad since we try to overlap the CPU launch period with a
+        # GPU sleep to avoid the CPU launch overhead in our GPU event timings. what ends
+        # up happening in this case is that the self.gpu_queue_limit'th event will wait
+        # until the queue shrinks (i.e. after the GPU sleep ends) before queueing itself.
+        # this has two issues, first we will waste a lot of time needlesly as the CPU
+        # waits for the GPU to finish its sleep, and second we will no longer have a
+        # proper overlap between the CPU launch overhead and the GPU sleep which can
+        # result in incorrect timing values for particularly small kernels as the CPU
+        # will eventually catch up to the GPU and we will end up in lock-step execution.
+        # we can prevent this by benchmarking in blocks. we calculate the number of blocks
+        # required by assuming that each benchmark iteration spawns approximately 5 events:
+        # 1 for the buffer zeroing, 1 for the callable, 2 for the event records, and 1
+        # extra allocated for any sub-kernels the callable may launch of which the most
+        # common case is allocating an output Tensor. we then evenly split the total
+        # number of benchmark iterations across all blocks.
+        benchmark_blocks = ((benchmark_iters * 5) // (self.gpu_queue_limit - 1)) + 1
+        benchmark_iters_per_block = benchmark_iters // benchmark_blocks
+        memory_warmup_iters_per_block = memory_warmup_iters // benchmark_blocks
+        required_gpu_sleep_cycles_per_block = self.get_required_gpu_sleep_cycles(
+            memory_warmup_iters_per_block,
+            benchmark_iters_per_block,
+            cpu_launch_overhead_ms_per_iter,
+        )
+
+        # ensures the queue is empty
+        torch.cuda.synchronize()
+        event_pairs = self.get_event_pairs(benchmark_iters)
+        for block_idx in range(benchmark_blocks):
+            torch.cuda._sleep(required_gpu_sleep_cycles_per_block)
+            for _ in range(memory_warmup_iters_per_block):
+                buffer.zero_()
+            for start_event, end_event in event_pairs[
+                block_idx
+                * benchmark_iters_per_block : (block_idx + 1)
+                * benchmark_iters_per_block
+            ]:
                 buffer.zero_()
                 start_event.record()
                 _callable()
                 end_event.record()
-            cpu_launch_overhead_per_iter = ((time.perf_counter() - start_time) * 1000) / iters
             torch.cuda.synchronize()
-            timing = self.get_min_timing(event_pairs)
-            return timing, cpu_launch_overhead_per_iter
-                
-        try:
-            _callable()
-            torch.cuda.synchronize()
-        except Exception as e:
-            counters["inductor"]["benchmarking_callable_initialization_failed"] += 1
-            log.debug(f"Callable {hash(_callable)} failed during initialization with exception {e}.")
-            return float("inf")
+        timing_ms = self.get_min_timing_ms(event_pairs)
 
-        buffer = torch.empty(int(self.L2_cache_size // 4), dtype=torch.int, device="cuda")
-        buffer.zero_()
-
-        estimated_timing, cpu_launch_overhead_per_iter = benchmark(_callable, buffer, estimation_iters)
-        benchmark_iters = self.get_reduced_benchmark_iters(memory_warmup_iters, benchmark_iters, cpu_launch_overhead_per_iter, estimated_timing, 1, max_benchmark_duration)
-
-        required_gpu_sleep_cycles = self.get_required_gpu_sleep_cycles(memory_warmup_iters, benchmark_iters, cpu_launch_overhead_per_iter)
-        torch.cuda._sleep(required_gpu_sleep_cycles)
-
-        for _ in range(memory_warmup_iters):
-            buffer.zero_()
-        timing, _ = benchmark(_callable, buffer, benchmark_iters)
-        
+        # explicitly delete the buffer, sometimes helps memory
+        # footprint metrics in OSS Inductor benchmarks
         del buffer
 
-        return min(estimated_timing, timing)
-    
+        # we may as well use the estimation loop signal as well
+        return min(estimated_timing_ms, timing_ms)
+
     @time_and_log
-    def benchmark_many_gpu(self, callables: List[Callable[[], Any]], estimation_iters: int = 5, memory_warmup_iters: int = 100, benchmark_iters: int = 100, max_benchmark_duration: int = 25, ranking_key: Optional[str] = None, pruning_key: Optional[str] = None) -> List[float]:        
-        counters["inductor"]["benchmarking_benchmark_many_gpu"] += 1             
-        self.get_cpu_launch_overhead_and_gpu_time_per_gpu_cache_clear()
-        
-        def benchmark(callables, buffer, iters):
-            interleaved_event_pairs = self.get_interleaved_event_pairs(len(callables), iters)
-            start_time = time.perf_counter()
-            for event_pairs in interleaved_event_pairs:
-                for _callable, (start_event, end_event) in zip(callables, event_pairs):
-                    buffer.zero_()
-                    start_event.record()
-                    _callable()
-                    end_event.record()
-            cpu_launch_overhead_per_iter = ((time.perf_counter() - start_time) * 1000) / iters
-            torch.cuda.synchronize()
-            timings = self.get_interleaved_min_timings(interleaved_event_pairs)
-            return timings, cpu_launch_overhead_per_iter
+    def benchmark_many_gpu(
+        self,
+        callables: List[Callable[[], Any]],
+        estimation_iters: int = 5,
+        memory_warmup_iters: int = 100,
+        benchmark_iters: int = 100,
+        max_benchmark_duration_ms: int = 25,
+        ranking_key: Optional[str] = None,
+        pruning_key: Optional[str] = None,
+        pruning_factor: Optional[float] = 1.25,
+    ) -> List[float]:
+        counters["inductor"]["benchmarking_benchmark_many_gpu"] += 1
+        # we don't want any outside errors propagating into benchmarking
+        torch.cuda.synchronize()
 
-        callable_to_timing = {}
-        callables_to_benchmark = []
+        # initialize here, avoids double buffer allocation
+        self.get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear()
 
+        # this will fail the entire group if any of the callables fail,
+        # in the case that users directly call this method they should
+        # handle this case on their end. in the case that we get here
+        # from a grouping of lazy benchmarks, we should never have failures
+        # since they will have already been checked previously
         for _callable in callables:
-            try:
-                _callable()
-                torch.cuda.synchronize()
-            except Exception as e:
-                counters["inductor"]["benchmarking_callable_initialization_failed"] += 1
-                log.debug(f"Callable {hash(_callable)} failed during initialization with exception {e}.")
-                callable_to_timing[_callable] = float("inf")
-            else:
-                callables_to_benchmark.append(_callable)
-        
-        if len(callables_to_benchmark) == 0:
-            timings = [callable_to_timing[_callable] for _callable in callables]
-            return timings
-    
-        buffer = torch.empty(int(self.L2_cache_size // 4), dtype=torch.int, device="cuda")
+            _callable()
+        torch.cuda.synchronize()
+
+        buffer = torch.empty(
+            int(self.L2_cache_size // 4), dtype=torch.int, device="cuda"
+        )
         buffer.zero_()
 
-        estimated_timings, cpu_launch_overhead_per_iter = benchmark(callables_to_benchmark, buffer, estimation_iters)
-
-        for _callable, estimated_timing in zip(callables_to_benchmark, estimated_timings):
-            callable_to_timing[_callable] = estimated_timing
+        interleaved_event_pairs = self.get_interleaved_event_pairs(
+            len(callables), estimation_iters
+        )
+        start_time_s = time.perf_counter()
+        for event_pairs in interleaved_event_pairs:
+            for _callable, (start_event, end_event) in zip(callables, event_pairs):
+                buffer.zero_()
+                start_event.record()
+                _callable()
+                end_event.record()
+        cpu_launch_overhead_ms_per_iter = (
+            (time.perf_counter() - start_time_s) * 1000
+        ) / estimation_iters
+        torch.cuda.synchronize()
+        estimated_timings_ms = self.get_interleaved_min_timings_ms(
+            interleaved_event_pairs
+        )
 
         if ranking_key is not None:
             if benchmarking_config.enable_early_ranking:
                 counters["inductor"]["benchmarking_early_ranking"] += 1
                 log.debug(f"Returning early ranking for ranking key {ranking_key}.")
-                timings = [callable_to_timing[_callable] for _callable in callables]
+                # explicitly delete the buffer, sometimes helps memory
+                # footprint metrics in OSS Inductor benchmarks
                 del buffer
-                return timings
+                return estimated_timings_ms
             else:
                 log.debug("Early ranking is disabled. Continuing full benchmarking cycle.")
+
+        callable_to_timing_ms = {}
+        for _callable, estimated_timing_ms in zip(callables, estimated_timings_ms):
+            callable_to_timing_ms[_callable] = estimated_timing_ms
+
 
         if pruning_key is not None:
             if benchmarking_config.enable_early_pruning:
                 counters["inductor"]["benchmarking_early_pruning"] += 1
-                cpu_launch_overhead_per_iter_per_callable = cpu_launch_overhead_per_iter / len(callables_to_benchmark)
-                target_timing = min(estimated_timings) * 1.25
-                callables_to_benchmark = [_callable for _callable in callables_to_benchmark if callable_to_timing[_callable] < target_timing]
+                cpu_launch_overhead_ms_per_iter_per_callable = (
+                    cpu_launch_overhead_ms_per_iter / len(callables)
+                )
+                target_timing_ms = min(estimated_timings_ms) * pruning_factor
+                callables_to_benchmark = [
+                    _callable
+                    for _callable in callables
+                    if callable_to_timing_ms[_callable] < target_timing_ms
+                ]
                 log.debug(f"Pruned to {len(callables_to_benchmark)} callables for pruning key {pruning_key}.")
-                cpu_launch_overhead_per_iter = cpu_launch_overhead_per_iter_per_callable * len(callables_to_benchmark)
-                estimated_timings = [callable_to_timing[_callable] for _callable in callables_to_benchmark]
+                cpu_launch_overhead_ms_per_iter = (
+                    cpu_launch_overhead_ms_per_iter_per_callable
+                    * len(callables_to_benchmark)
+                )
+                estimated_timings_ms = [
+                    callable_to_timing_ms[_callable] for _callable in callables_to_benchmark
+                ]
             else:
                 log.debug("Early pruning is disabled. Continuing full benchmarking cycle.")
+                callables_to_benchmark = callables
+        else:
+            callables_to_benchmark = callables
 
-        benchmark_iters = self.get_reduced_benchmark_iters(memory_warmup_iters, benchmark_iters, cpu_launch_overhead_per_iter, sum(estimated_timings), len(callables_to_benchmark), max_benchmark_duration)
+        # see benchmark_gpu for details
+        benchmark_iters = self.reduce_benchmark_iters_to_max_benchmark_duration_ms(
+            memory_warmup_iters,
+            benchmark_iters,
+            cpu_launch_overhead_ms_per_iter,
+            max(estimated_timings_ms),
+            len(callables_to_benchmark),
+            max_benchmark_duration_ms,
+        )
+        benchmark_blocks = (
+            (benchmark_iters * 5 * len(callables_to_benchmark))
+            // (self.gpu_queue_limit - 1)
+        ) + 1
+        benchmark_iters_per_block = benchmark_iters // benchmark_blocks
+        memory_warmup_iters_per_block = memory_warmup_iters // benchmark_blocks
+        required_gpu_sleep_cycles_per_block = self.get_required_gpu_sleep_cycles(
+            memory_warmup_iters_per_block,
+            benchmark_iters_per_block,
+            cpu_launch_overhead_ms_per_iter,
+        )
 
-        required_gpu_sleep_cycles = self.get_required_gpu_sleep_cycles(memory_warmup_iters, benchmark_iters, cpu_launch_overhead_per_iter)
-        torch.cuda._sleep(required_gpu_sleep_cycles)
+        # ensures the queue is empty
+        torch.cuda.synchronize()
+        interleaved_event_pairs = self.get_interleaved_event_pairs(
+            len(callables_to_benchmark), benchmark_iters
+        )
+        for block_idx in range(benchmark_blocks):
+            torch.cuda._sleep(required_gpu_sleep_cycles_per_block)
+            for _ in range(memory_warmup_iters_per_block):
+                buffer.zero_()
+            for event_pairs in interleaved_event_pairs[
+                block_idx
+                * benchmark_iters_per_block : (block_idx + 1)
+                * benchmark_iters_per_block
+            ]:
+                for _callable, (start_event, end_event) in zip(
+                    callables_to_benchmark, event_pairs
+                ):
+                    buffer.zero_()
+                    start_event.record()
+                    _callable()
+                    end_event.record()
+            torch.cuda.synchronize()
+        timings_ms = self.get_interleaved_min_timings_ms(interleaved_event_pairs)
 
-        for _ in range(memory_warmup_iters):
-            buffer.zero_()
-        timings, _ = benchmark(callables_to_benchmark, buffer, benchmark_iters)
-        
+        # explicitly delete the buffer, sometimes helps memory
+        # footprint metrics in OSS Inductor benchmarks
         del buffer
 
-        for _callable, timing in zip(callables_to_benchmark, timings):
-            callable_to_timing[_callable] = min(callable_to_timing[_callable], timing)
-        timings = [callable_to_timing[_callable] for _callable in callables]
-        return timings
+        # we may as well use the estimation loop signal as well
+        for _callable, timing_ms in zip(callables_to_benchmark, timings_ms):
+            callable_to_timing_ms[_callable] = min(
+                callable_to_timing_ms[_callable], timing_ms
+            )
+        return [callable_to_timing_ms[_callable] for _callable in callables]
 
-    def lazy_benchmark(self, fn: Callable[..., Any], fn_args: List[Any], fn_kwargs: Dict[str, Any], **kwargs: Dict[str, Any]) -> LazyBenchmark:
+    def lazy_benchmark(
+        self,
+        fn: Callable[..., Any],
+        fn_args: List[Any],
+        fn_kwargs: Dict[str, Any],
+        **kwargs: Dict[str, Any]
+    ) -> LazyBenchmark:
         counters["inductor"]["benchmarking_lazy_benchmark"] += 1
+        if not benchmarking_config.enable_lazy_benchmarking:
+            log.debug("Lazy benchmarking is disabled. Immediately proceeding to CPU benchmarking.")
+            return self.benchmark_cpu(_callable, **kwargs)
         _callable = lambda: fn(*fn_args, **fn_kwargs)
         fn_args_and_kwargs = list(fn_args) + list(fn_kwargs.values())
         if is_cpu_device(fn_args_and_kwargs):
             return self.lazy_benchmark_cpu(_callable, **kwargs)
         else:
             return self.lazy_benchmark_gpu(_callable, **kwargs)
-    
-    def lazy_benchmark_cpu(self, _callable: Callable[[], Any], ranking_key: Optional[str] = None, pruning_key: Optional[str] = None, **kwargs: Dict[str, Any]) -> Union[LazyBenchmark, float]:
+
+    @time_and_log
+    def lazy_benchmark_cpu(
+        self,
+        _callable: Callable[[], Any],
+        ranking_key: Optional[str] = None,
+        pruning_key: Optional[str] = None,
+        **kwargs: Dict[str, Any]
+    ) -> Union[LazyBenchmark, float]:
         counters["inductor"]["benchmarking_lazy_benchmark_cpu"] += 1
         if not benchmarking_config.enable_lazy_benchmarking:
             log.debug("Lazy benchmarking is disabled. Immediately proceeding to CPU benchmarking.")
             return self.benchmark_cpu(_callable, **kwargs)
+        # should we just immediately benchmark on CPU?
         return LazyBenchmark(lambda: self.benchmark_cpu(_callable, **kwargs))
 
-    def lazy_benchmark_gpu(self, _callable: Callable[[], Any], ranking_key: Optional[str] = None, pruning_key: Optional[str] = None, **kwargs: Dict[str, Any]) -> LazyBenchmark:
+    @time_and_log
+    def lazy_benchmark_gpu(
+        self,
+        _callable: Callable[[], Any],
+        ranking_key: Optional[str] = None,
+        pruning_key: Optional[str] = None,
+        **kwargs: Dict[str, Any]
+    ) -> LazyBenchmark:
         counters["inductor"]["benchmarking_lazy_benchmark_gpu"] += 1
 
         if not benchmarking_config.enable_lazy_benchmarking:
             log.debug("Lazy benchmarking is disabled. Immediately proceeding to GPU benchmarking.")
             return self.benchmark_gpu(_callable, **kwargs)
 
+        # we should try the callable before queueing it for benchmarking, in
+        # case it throws an exception. we could catch and handle any exception
+        # later on, but some codepaths expect and handle certain exceptions
+        _callable()
+        torch.cuda.synchronize()
+
+        # we want to group benchmarks based on the kwargs hash, this handles
+        # grouping benchmarks by ranking keys and pruning keys, and also ensures
+        # that we only benchmark callables that should run under the same conditions
+        # with respect to warmup, benchmarking, etc.
         kwargs_hash = hash(tuple(sorted(kwargs.items())))
         key = hash(_callable) + kwargs_hash
-        self.kwargs_hash_to_futures_gpu[kwargs_hash] = self.kwargs_hash_to_futures_gpu.get(kwargs_hash, []) + [(_callable, key)]
+        self.kwargs_hash_to_futures_gpu[
+            kwargs_hash
+        ] = self.kwargs_hash_to_futures_gpu.get(kwargs_hash, []) + [(_callable, key)]
 
-        def initialize() -> float:
+        def benchmark() -> float:
+            # all but the first benchmark in a grouping of lazy benchmarks
+            # should be cached in memory, so we should return that cached timing
             if key in self.memory_cache:
                 return self.memory_cache[key]
 
             futures_gpu = self.kwargs_hash_to_futures_gpu.pop(kwargs_hash)
             callables, keys = zip(*futures_gpu)
             callables, keys = list(callables), list(keys)
-            timings = self.benchmark_many_gpu(callables, ranking_key=ranking_key, pruning_key=pruning_key, **kwargs)
-            self.memory_cache.update(zip(keys, timings))
+            timings_ms = self.benchmark_many_gpu(
+                callables, ranking_key=ranking_key, pruning_key=pruning_key, **kwargs
+            )
+            self.memory_cache.update(zip(keys, timings_ms))
+            # we may or may not have to delete the callables explicitly to
+            # cleanup the memory, just do it now for safety
             del callables
             return self.memory_cache[key]
-        
-        return LazyBenchmark(initialize)
 
-    def get_reduced_benchmark_iters(self, memory_warmup_iters: int, benchmark_iters: int, cpu_launch_overhead_per_iter: float, gpu_time_per_iter: float, num_callables: int, max_benchmark_duration: int) -> int:
-        total_allotted_time = num_callables * max_benchmark_duration
-        memory_warmup_duration = memory_warmup_iters * self.cpu_launch_overhead_per_gpu_cache_clear
-        allotted_time_for_benchmark_iters = total_allotted_time - memory_warmup_duration
-        time_per_benchmark_iter = cpu_launch_overhead_per_iter + gpu_time_per_iter
-        reduced_benchmark_iters = int(allotted_time_for_benchmark_iters / time_per_benchmark_iter)
+        return LazyBenchmark(benchmark)
+
+    def reduce_benchmark_iters_to_max_benchmark_duration_ms(
+        self,
+        memory_warmup_iters: int,
+        benchmark_iters: int,
+        cpu_launch_overhead_ms_per_iter: float,
+        gpu_time_ms_per_iter: float,
+        num_callables: int,
+        max_benchmark_duration_ms: int,
+    ) -> int:
+        # use the full max_benchmark_duration_ms per callable
+        total_allotted_time_ms = num_callables * max_benchmark_duration_ms
+        # only count the CPU launch overhead for the memory warmup, since the
+        # GPU time should be overlapped with the end of the CPU launch overhead
+        # for the benchmark iterations
+        memory_warmup_duration_ms = (
+            memory_warmup_iters * self.cpu_launch_overhead_ms_per_gpu_cache_clear
+        )
+        allotted_time_ms_for_benchmark_iters = (
+            total_allotted_time_ms - memory_warmup_duration_ms
+        )
+        # count both the CPU launch overhead and the GPU time per iteration,
+        # since the CPU launch overhead should be overlapped by the GPU sleep
+        # and the GPU time should occur during the synchronization
+        time_ms_per_benchmark_iter = (
+            cpu_launch_overhead_ms_per_iter + gpu_time_ms_per_iter
+        )
+        reduced_benchmark_iters = int(
+            allotted_time_ms_for_benchmark_iters / time_ms_per_benchmark_iter
+        )
+        # we want the minimum of benchmark_iters (user-specified) and
+        # reduced_benchmark_iters (derived from user-specified max_benchmark_duration_ms),
+        # with an absolute minimum of 1
         reduced_benchmark_iters = max(min(benchmark_iters, reduced_benchmark_iters), 1)
         return reduced_benchmark_iters
-    
-    def get_required_gpu_sleep_cycles(self, memory_warmup_iters: int, benchmark_iters: int, cpu_launch_overhead_per_iter: float) -> int:
-        cpu_launch_overhead_for_memory_warmup = memory_warmup_iters * self.cpu_launch_overhead_per_gpu_cache_clear
-        cpu_launch_overhead_for_benchmarking = benchmark_iters * cpu_launch_overhead_per_iter
-        total_cpu_launch_overhead = cpu_launch_overhead_for_memory_warmup + cpu_launch_overhead_for_benchmarking
-        target_gpu_sleep_end = total_cpu_launch_overhead - (self.gpu_time_per_gpu_cache_clear * memory_warmup_iters)
-        required_gpu_sleep_cycles = int(target_gpu_sleep_end / self.gpu_time_per_gpu_clock_cycle)
+
+    def get_required_gpu_sleep_cycles(
+        self,
+        memory_warmup_iters: int,
+        benchmark_iters: int,
+        cpu_launch_overhead_ms_per_iter: float,
+    ) -> int:
+        cpu_launch_overhead_ms_for_memory_warmup = (
+            memory_warmup_iters * self.cpu_launch_overhead_ms_per_gpu_cache_clear
+        )
+        cpu_launch_overhead_ms_for_benchmarking = (
+            benchmark_iters * cpu_launch_overhead_ms_per_iter
+        )
+        total_cpu_launch_overhead_ms = (
+            cpu_launch_overhead_ms_for_memory_warmup
+            + cpu_launch_overhead_ms_for_benchmarking
+        )
+        # we want the GPU sleep to overlap the CPU launch overhead of
+        # the memory warmup only, and not the GPU time. we can and should
+        # have the actual memory warmup begin on the GPU before we finish
+        # queueing the benchmark iterations because we are not timing the
+        # memory warmups and can therefore save on some total duration
+        required_gpu_sleep_duration_ms = total_cpu_launch_overhead_ms - (
+            self.gpu_time_ms_per_gpu_cache_clear * memory_warmup_iters
+        )
+        required_gpu_sleep_cycles = int(
+            required_gpu_sleep_duration_ms / self.gpu_time_ms_per_gpu_clock_cycle
+        )
         return required_gpu_sleep_cycles
 
-    def get_event_pairs(self, num_pairs: int) -> List[Tuple[torch.cuda.Event, torch.cuda.Event]]:
+    def get_event_pairs(
+        self, num_pairs: int
+    ) -> List[Tuple[torch.cuda.Event, torch.cuda.Event]]:
         return [
             (
                 torch.cuda.Event(enable_timing=True),
@@ -346,15 +625,30 @@ class Benchmarker:
             )
             for _ in range(num_pairs)
         ]
-    
-    def get_interleaved_event_pairs(self, num_callables: int, num_pairs: int) -> List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]]:
+
+    def get_interleaved_event_pairs(
+        self, num_callables: int, num_pairs: int
+    ) -> List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]]:
         return [self.get_event_pairs(num_callables) for _ in range(num_pairs)]
 
-    def get_min_timing(self, event_pairs: List[Tuple[torch.cuda.Event, torch.cuda.Event]]) -> float:
-        return min([start_event.elapsed_time(end_event) for start_event, end_event in event_pairs])
-    
-    def get_interleaved_min_timings(self, interleaved_event_pairs: List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]]) -> float:
-        return [self.get_min_timing(event_pairs) for event_pairs in zip(*interleaved_event_pairs)]
+    def get_min_timing_ms(
+        self, event_pairs: List[Tuple[torch.cuda.Event, torch.cuda.Event]]
+    ) -> float:
+        return min(
+            [
+                start_event.elapsed_time(end_event)
+                for start_event, end_event in event_pairs
+            ]
+        )
+
+    def get_interleaved_min_timings_ms(
+        self,
+        interleaved_event_pairs: List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]],
+    ) -> List[float]:
+        return [
+            self.get_min_timing_ms(event_pairs)
+            for event_pairs in zip(*interleaved_event_pairs)
+        ]
 
 
 benchmarker = Benchmarker()
