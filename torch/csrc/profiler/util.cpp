@@ -5,6 +5,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
@@ -290,6 +291,23 @@ std::string strListToStr(const std::vector<std::string>& types) {
     auto rc = oss.str();
     rc.erase(rc.length() - 2); // remove last ", "
     return "[" + rc + "]";
+  }
+}
+std::string ivalueToStr(const c10::IValue& val) {
+  std::stringstream ss;
+  if (val.isNone()) {
+    return "\"None\"";
+  } else {
+    ss.str("");
+    ss << "\"";
+    ss << val;
+    ss << "\"";
+    std::string mystr = ss.str();
+
+    // A double quote can cause issues with the chrome tracing so force
+    // all inputs to not contain more than the 2 we add in this function
+    int count = std::count(mystr.begin(), mystr.end(), '\"');
+    return count > 2 ? "\"None\"" : mystr;
   }
 }
 

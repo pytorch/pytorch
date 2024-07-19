@@ -12,6 +12,10 @@ MPS Environment Variables
     - Description
   * - ``PYTORCH_DEBUG_MPS_ALLOCATOR``
     - If set to ``1``, set allocator logging level to verbose.
+  * - ``PYTORCH_MPS_LOG_PROFILE_INFO``
+    - Set log options bitmask to ``MPSProfiler``. See ``LogOptions`` enum in `aten/src/ATen/mps/MPSProfiler.h` for available options.
+  * - ``PYTORCH_MPS_TRACE_SIGNPOSTS``
+    - Set profile and signpost bitmasks to ``MPSProfiler``. See ``ProfileOptions`` and ``SignpostTypes`` enums in `aten/src/ATen/mps/MPSProfiler.h` for available options.
   * - ``PYTORCH_MPS_HIGH_WATERMARK_RATIO``
     - High watermark ratio for MPS allocator. By default, it is set to 1.7.
   * - ``PYTORCH_MPS_LOW_WATERMARK_RATIO``

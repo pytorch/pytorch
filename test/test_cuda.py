@@ -19,7 +19,6 @@ from random import randint
 
 import torch
 import torch.cuda
-
 from torch import inf, nan
 from torch.cuda._memory_viz import (
     _profile_to_snapshot,
@@ -41,6 +40,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_optimizers import optim_db, optims, TensorTracker
 from torch.testing._internal.common_utils import (
+    EXPANDABLE_SEGMENTS,
     freeze_rng_state,
     gcIfJetson,
     get_cycles_per_ms,
@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils.checkpoint import checkpoint_sequential
 from torch.utils.viz._cycles import observe_tensor_cycles
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -116,6 +117,10 @@ class TestCuda(TestCase):
     def tearDown(self):
         del self.autocast_lists
         super().tearDown()
+
+    @property
+    def expandable_segments(self):
+        return EXPANDABLE_SEGMENTS
 
     def test_pinned_memory_with_cudaregister(self):
         torch.cuda.memory._set_allocator_settings(
@@ -974,6 +979,52 @@ except RuntimeError as e:
         res = src[idx]
         res_cpu = src.cpu()[idx.cpu()]
         self.assertEqual(res.cpu(), res_cpu)
+
+    def test_randint_randomness_for_large_range(self) -> None:
+        # For large ranges, randint generation is slightly different. This lead to a subtle bug where some Philox
+        # offsets were not calculated correctly, resulting in reused random states.
+        # See https://github.com/pytorch/pytorch/issues/125224
+        size = 1_000_000
+        high = 6_000_000_000  # Keep this above 2**32
+
+        def run(dev: torch.device) -> int:
+            # Measure how many unique numbers are generated in 2 consecutive calls to randint. If random states are
+            # reused, this will yield fewer unique numbers.
+            gen = torch.Generator(device=dev)
+            gen.manual_seed(0)
+            t1 = torch.randint(
+                0, high, [size], device=dev, generator=gen, dtype=torch.int64
+            )
+            t2 = torch.randint(
+                0, high, [size], device=dev, generator=gen, dtype=torch.int64
+            )
+            return torch.stack([t1, t2]).unique().shape[0]
+
+        # Use CPU as reference. The results should not deviate too much.
+        assert abs(run(torch.device("cuda")) - run(torch.device("cpu"))) < 10_000
+
+    @parametrize("dtype", [torch.float32, torch.double])
+    def test_random_no_reused_random_states(self, dtype: torch.dtype) -> None:
+        # Test if random states do not overlap between consecutive rand/randn calls.
+        # See https://github.com/pytorch/pytorch/issues/125224
+
+        def run(func, dev: torch.device, dtype: torch.dtype) -> int:
+            # Measure how many unique numbers are generated in 2 consecutive calls. If random states are
+            # reused, this will yield fewer unique numbers.
+            size = 1000000
+            gen = torch.Generator(device=dev)
+            gen.manual_seed(0)
+            t1 = func((size,), device=dev, generator=gen, dtype=dtype)
+            t2 = func((size,), device=dev, generator=gen, dtype=dtype)
+            return torch.stack([t1, t2]).unique().shape[0]
+
+        # Use CPU as reference. The results should not deviate too much.
+        for func in [torch.rand, torch.randn]:
+            deviation = abs(
+                run(func, torch.device("cuda"), dtype)
+                - run(func, torch.device("cpu"), dtype)
+            )
+            assert deviation < 50_000, deviation
 
     def test_min_max_inits(self):
         # Testing if THC_reduceAll received the correct index initialization.
@@ -2272,6 +2323,31 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    def test_graph_debugdump(self):
+        torch.cuda.empty_cache()
+        x = torch.randn(10240000, device="cuda")
+        y = torch.rand_like(x)
+        g = torch.cuda.CUDAGraph()
+        g.enable_debug_mode()
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+        s0.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s0):
+            g.capture_begin()
+            z = x + y
+            with torch.cuda.stream(s1):
+                s1.wait_stream(s0)
+                w = z + y
+            s0.wait_stream(s1)
+            g.capture_end()
+        s0.synchronize()
+        torch.cuda.synchronize()
+        with tempfile.TemporaryDirectory() as tempdir:
+            g.debug_dump(os.path.join(tempdir, "out_multi_stream.dot"))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_graph_error(self):
         # We need to run this test in a separate thread as the error we trigger
         # puts the cuda context in a bad state
@@ -2907,6 +2983,21 @@ exit(2)
                 for stat, expected in zip(stats_to_check, expecteds):
                     stat = stat + pool_string + ".current"
                     current = postcapture_stats[stat] - precapture_stats[stat]
+
+                    # There will only ever be one expandable segment in each of the small and large pools. The way the
+                    # bookeeping is done in the allocator means that we never increment the number of segments.
+                    if self.expandable_segments and "segment" in stat:
+                        expected = 0
+                    # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an
+                    # expandable segment (and as a result reduce the number of reserved bytes) if the block to unmap is
+                    # smaller than the page size
+                    if (
+                        self.expandable_segments
+                        and "reserved" in stat
+                        and (numel == cases[3][0] or numel == cases[4][0])
+                    ):
+                        expected = 2 * kLargeBuffer
+
                     self.assertEqual(
                         current,
                         expected,
@@ -2933,6 +3024,27 @@ exit(2)
             for stat, expected in zip(stats_to_check, expecteds):
                 stat = stat + pool_string + ".current"
                 current = postdel_stats[stat] - precapture_stats[stat]
+
+                # There will only ever be one expandable segment in each of the small and large pools. The way the
+                # bookeeping is done in the allocator means that we never increment the number of segments.
+                if self.expandable_segments and "segment" in stat:
+                    expected = 0
+                # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an
+                # expandable segment (and as a result reduce the number of reserved bytes) if the block to unmap is
+                # smaller than the page size
+                if (
+                    self.expandable_segments
+                    and "reserved" in stat
+                    and numel == cases[3][0]
+                ):
+                    expected = 2 * kLargeBuffer
+                if (
+                    self.expandable_segments
+                    and "reserved" in stat
+                    and numel == cases[4][0]
+                ):
+                    expected = kLargeBuffer
+
                 self.assertEqual(
                     current,
                     expected,
@@ -3074,13 +3186,25 @@ exit(2)
                 ).cuda()
 
             def forward(self, x):
-                return {"output": self.net_2(self.net_1(x))}
+                return self.net_2(self.net_1(x))
+
+        class ParameterlessModule(torch.nn.Module):
+            def forward(self, x):
+                idx = (
+                    torch.arange(x.size(0), device=x.device)
+                    .view(-1, 1)
+                    .repeat(1, x.size(1))
+                )
+                return {"output": torch.gather(x, 0, idx)}
 
         models = []
         for _ in range(2):
             model_section1 = MLP1(D_in, H, H).cuda()
             model_section2 = MLP2(H, H, D_out).cuda()
-            models.append(torch.nn.Sequential(model_section1, model_section2))
+            model_section3 = ParameterlessModule().cuda()
+            models.append(
+                torch.nn.Sequential(model_section1, model_section2, model_section3)
+            )
 
         model_graphed = models[0]
         model_control = models[1]
@@ -3092,6 +3216,7 @@ exit(2)
 
         x = torch.randn(N, D_in, device="cuda")
         h = torch.randn(N, H, device="cuda", requires_grad=True)
+        h2 = torch.randn(N, D_out, device="cuda", requires_grad=True)
         unused_input = torch.randn(N, H, device="cuda", requires_grad=True)
         y_pred = torch.randn(N, D_out, device="cuda", requires_grad=True)
         y = torch.randn(N, D_out, device="cuda")
@@ -3104,13 +3229,21 @@ exit(2)
             (
                 model_graphed[0],
                 model_graphed[1],
+                model_graphed[2],
                 relu_graphed,
                 loss_fn_graphed,
             ) = torch.cuda.make_graphed_callables(
-                (model_graphed[0], model_graphed[1], relu_control, loss_fn_control),
+                (
+                    model_graphed[0],
+                    model_graphed[1],
+                    model_graphed[2],
+                    relu_control,
+                    loss_fn_control,
+                ),
                 (
                     ({"x": x, "unused_input": unused_input},),
                     (h,),
+                    (h2,),
                     (y_pred,),
                     (y_pred, y),
                 ),
@@ -3141,6 +3274,84 @@ exit(2)
 
         for p, pc in zip(model_graphed.parameters(), model_control.parameters()):
             self.assertEqual(p, pc)
+
+        # We graphed the models in training mode. Eval should still run ungraphed.
+        model_graphed.eval()
+        model_control.eval()
+        self.assertEqual(
+            model_graphed({"x": real_inputs[0]}), model_control({"x": real_inputs[0]})
+        )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @parametrize(
+        "with_amp,cache_enabled,allow_unused_input",
+        [
+            subtest((False, False, True), decorators=[skipIfRocm]),
+            subtest((True, False, True), decorators=[skipIfRocm]),
+            subtest((True, True, True), decorators=[unittest.expectedFailure]),
+            subtest((False, False, False), decorators=[skipIfRocm]),
+        ],
+        name_fn=lambda x, y, z: "{}{}{}".format(
+            {True: "with_amp", False: "without_amp"}[x],
+            {True: "_cache_enabled", False: "_cache_disabled"}[y] if x else "",
+            {True: "_allow_unused_input", False: "_not_allow_unused_input"}[z],
+        ),
+    )
+    @serialTest()
+    def test_graph_make_graphed_callables_parameterless_nograd_module(
+        self, with_amp, cache_enabled, allow_unused_input
+    ):
+        torch.manual_seed(5)
+        torch.cuda.manual_seed(5)
+
+        N, D_in, H, D_out = 640, 4096, 2048, 1024
+
+        class ParameterlessModule(torch.nn.Module):
+            def forward(self, input_dict: dict):
+                x = input_dict["x"]
+                idx = (
+                    torch.arange(x.size(0), device=x.device)
+                    .view(-1, 1)
+                    .repeat(1, x.size(1))
+                )
+                return {"output": torch.gather(x, 0, idx)}
+
+        models = []
+        for _ in range(2):
+            model_section1 = ParameterlessModule().cuda()
+            models.append(torch.nn.Sequential(model_section1))
+
+        model_graphed = models[0]
+        model_control = models[1]
+
+        model_graphed.load_state_dict(model_control.state_dict())
+
+        x = torch.randn(N, D_in, device="cuda", requires_grad=False)
+        unused_input = torch.randn(N, H, device="cuda", requires_grad=False)
+        y_pred = torch.randn(N, D_in, device="cuda", requires_grad=False)
+        y = torch.randn(N, D_in, device="cuda")
+
+        # This is a good stress test. It graphs four callables: two Modules and two python functions.
+        with torch.cuda.amp.autocast(with_amp, cache_enabled=cache_enabled):
+            model_graphed[0] = torch.cuda.make_graphed_callables(
+                model_graphed[0],
+                ({"x": x, "unused_input": unused_input},),
+                allow_unused_input=allow_unused_input,
+            )
+
+        real_inputs = [torch.rand_like(x, requires_grad=True) for _ in range(10)]
+        real_targets = [torch.rand_like(y) for _ in range(10)]
+
+        for m in (model_graphed, model_control):
+            # Resets RNC states before iterations for graphed and ungraphed models,
+            # so dropout math should be bitwise identical for both.
+            torch.manual_seed(5)
+            torch.cuda.manual_seed(5)
+            for data, target in zip(real_inputs, real_targets):
+                with torch.cuda.amp.autocast(with_amp, cache_enabled=cache_enabled):
+                    out = m({"x": data, "unused_input": unused_input})["output"]
 
         # We graphed the models in training mode. Eval should still run ungraphed.
         model_graphed.eval()
@@ -4306,7 +4517,7 @@ class TestCudaMallocAsync(TestCase):
 
             def alloc():
                 nonlocal total, c
-                b = random.randrange(2 * 1024 * 1024 // 4, 200 * 1024 * 1024 // 4)
+                b = random.randrange(2 * 1024 * 1024 // 4, 20 * 1024 * 1024 // 4)
                 mem.append((c, torch.full((b,), c, dtype=torch.int32, device="cuda")))
                 c += 1
                 total += b
@@ -4320,7 +4531,7 @@ class TestCudaMallocAsync(TestCase):
 
             choices = [alloc, free, torch.cuda.memory.empty_cache]
             for i in range(N):
-                while total >= 1024 * 1024 * 1024 / 4:
+                while total >= 1024 * 1024 * 1024 / (4 * 10):
                     free()
                 (action,) = random.choices(choices, weights=[1, 1 if mem else 0, 0.1])
                 action()
@@ -4425,6 +4636,10 @@ def reconstruct_from_tensor_metadata(metadata):
 @unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "NYI")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBlockStateAbsorption(TestCase):
+    @property
+    def expandable_segments(self):
+        return EXPANDABLE_SEGMENTS
+
     def checkCheckpointedBlock(self, before_block, after_block):
         for field in ("size", "state"):
             self.assertEqual(before_block[field], after_block[field])
@@ -4752,7 +4967,9 @@ class TestBlockStateAbsorption(TestCase):
         graph_thread.join()
         no_graph_thread.join()
 
-        self.assertEqual(len(get_cudagraph_segments(pool)), 4)
+        self.assertEqual(
+            len(get_cudagraph_segments(pool)), 2 if self.expandable_segments else 4
+        )
 
         del graph
 

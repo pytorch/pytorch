@@ -1238,7 +1238,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         out4 = [opt_m4(i), opt_m4(i), opt_m4(i)]
         self.assertTrue(torch._dynamo.testing.same(out2, out3))
         self.assertTrue(torch._dynamo.testing.same(out2, out4))
-        self.assertEqual(cnt.frame_count, 3)
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(cnt.frame_count, """2""")
+        else:
+            self.assertExpectedInline(cnt.frame_count, """1""")
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_generation_tag(self):
@@ -2197,7 +2200,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
-        self.assertRegex(failure_reason, r"^___check_obj_id\(L\['m'\]._forward_hooks")
+        self.assertRegex(failure_reason, r"___check_obj_id\(L\['m'\]._forward_hooks")
 
     @patch.object(torch._dynamo.config, "guard_nn_modules", False)
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
@@ -2251,8 +2254,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def _forward_hook_test_helper(self, model):
         forward_handles = {}
-        compiled_activations = dict()
-        eager_activations = dict()
+        compiled_activations = {}
+        eager_activations = {}
         activations = None
 
         def save_activations(name, mod, inp, out):
@@ -2644,6 +2647,91 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         actual = opt_fn(x)
         expected = mod(x)
         self.assertEqual(actual, expected)
+
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    def test_mark_static_previously_seen_tensor(self):
+        # This test verifies that dynamo will mark
+        # the buffers/params of a module as static
+        # even if this param was previously seen
+        # (ex. as a different input)
+        num_compiles = 0
+
+        def debug_compiler(gm, _):
+            nonlocal num_compiles
+            num_compiles += 1
+
+            input_nodes = [
+                n for n in gm.graph.nodes if n.op == "placeholder" and n.name == "l_b_"
+            ]
+
+            self.assertGreater(len(input_nodes), 0)
+            for input_node in input_nodes:
+                self.assertEqual(
+                    input_node.meta["tensor_dict"]["_dynamo_static_input_type"],
+                    "unguarded",
+                )
+
+            return gm
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, buf) -> None:
+                super().__init__()
+                self.register_buffer("buf", buf)
+
+            def forward(self, x):
+                return self.buf * x
+
+        @torch._dynamo.optimize(backend=debug_compiler)
+        def fn(x, b, mod):
+            z = b + 1
+            return z * mod(x)
+
+        buf = torch.ones(2, 2)
+        inp = torch.ones(2)
+        mod = TestModule(buf)
+        fn(inp, buf, mod)
+        self.assertEqual(num_compiles, 1)
+
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    @torch._inductor.config.patch("freezing", True)
+    @torch.no_grad()
+    def test_mark_static_with_freezing(self):
+        # This test verifies that dynamo will
+        # add buffers/params as attributes of the
+        # graph w/ guards if freezing is enabled
+        num_compiles = 0
+
+        def debug_compiler(gm, _):
+            nonlocal num_compiles
+            num_compiles += 1
+
+            input_nodes = [
+                n for n in gm.graph.nodes if n.op == "placeholder" and n.name == "l_b_"
+            ]
+            self.assertEqual(len(input_nodes), 0)
+            self.assertEqual(len(list(gm.buffers())), 1)
+            return gm
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, buf) -> None:
+                super().__init__()
+                self.register_buffer("buf", buf)
+
+            def forward(self, x):
+                return self.buf * x
+
+        @torch._dynamo.optimize(backend=debug_compiler)
+        def fn(x, mod):
+            return mod(x)
+
+        buf = torch.ones(2, 2)
+        inp = torch.ones(2)
+        mod = TestModule(buf)
+        fn(inp, mod)
+        self.assertEqual(num_compiles, 1)
+        mod.buf = torch.rand_like(buf)
+        fn(inp, mod)
+        self.assertEqual(num_compiles, 2)
 
     def test_no_guard_on_torch_nn_modules(self):
         # https://github.com/pytorch/pytorch/issues/110048

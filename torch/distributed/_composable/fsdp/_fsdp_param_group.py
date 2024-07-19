@@ -102,15 +102,15 @@ class FSDPParamGroup:
     def __init__(
         self,
         params: List[nn.Parameter],
-        module: nn.Module,
+        modules: Tuple[nn.Module, ...],
         mesh_info: FSDPMeshInfo,
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
-        self.module = module  # permit ref cycle because 1:1 lifetime
-        param_module_infos = _get_param_module_infos(params, module)
+        self.modules = modules  # permit ref cycle because 1:1 lifetime
+        param_module_infos = _get_param_module_infos(params, modules)
         self.fsdp_params = [
             FSDPParam(
                 param,
@@ -164,6 +164,22 @@ class FSDPParamGroup:
         # Only for HSDP, if accumulating gradients without all-reduce, save the
         # partial reduce output (only reduce-scattered but not all-reduced)
         self._partial_reduce_output: Optional[torch.Tensor] = None
+
+        # TODO: remove this hook and hook register once 2D state dict is supported.
+        def _raise_not_implemented_if_2d(*args: Any, **kwargs: Any) -> None:
+            raise NotImplementedError(
+                "2D state_dict is under development. Please check "
+                "https://github.com/pytorch/pytorch/issues/129627 for more details."
+            )
+
+        modules_with_2d_params: Set[nn.Module] = set()
+        for fsdp_param in self.fsdp_params:
+            module = fsdp_param._module_info.module
+            if len(fsdp_param._spmd_placements) > 1:
+                modules_with_2d_params.add(module)
+        for module in modules_with_2d_params:
+            module.register_state_dict_pre_hook(_raise_not_implemented_if_2d)
+            module._register_load_state_dict_pre_hook(_raise_not_implemented_if_2d)
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
@@ -554,7 +570,7 @@ class FSDPParamGroup:
 
 
 def _get_param_module_infos(
-    params: List[nn.Parameter], module: nn.Module
+    params: List[nn.Parameter], modules: Tuple[nn.Module, ...]
 ) -> List[ParamModuleInfo]:
     """
     Shared parameter: lin1.weight = lin2.weight
@@ -564,16 +580,21 @@ def _get_param_module_infos(
     """
     params_set = set(params)
     param_to_module_info: Dict[nn.Parameter, ParamModuleInfo] = {}
-    for _, submodule in module.named_modules(remove_duplicate=False):
-        for param_name, param in _named_parameters_with_duplicates(
-            submodule, recurse=False
-        ):
-            if param in params_set:
-                if param not in param_to_module_info:
-                    param_to_module_info[param] = ParamModuleInfo(submodule, param_name)
-                else:
-                    param_to_module_info[param].shared_modules.append(submodule)
-                    param_to_module_info[param].shared_param_names.append(param_name)
+    for module in modules:
+        for _, submodule in module.named_modules(remove_duplicate=False):
+            for param_name, param in _named_parameters_with_duplicates(
+                submodule, recurse=False
+            ):
+                if param in params_set:
+                    if param not in param_to_module_info:
+                        param_to_module_info[param] = ParamModuleInfo(
+                            submodule, param_name
+                        )
+                    else:
+                        param_to_module_info[param].shared_modules.append(submodule)
+                        param_to_module_info[param].shared_param_names.append(
+                            param_name
+                        )
     if len(param_to_module_info) != len(params):
         raise AssertionError(f"Some parameters are not in the module tree of {module}")
     return [param_to_module_info[param] for param in params]

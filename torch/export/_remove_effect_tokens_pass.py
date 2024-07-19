@@ -68,7 +68,7 @@ def _remove_effect_tokens_from_graph_helper(
             schema = _get_schema(func, node.args[2:])
 
         with ep.graph.inserting_before(node):
-            new_node = ep.graph.call_function(func, node.args[2:])
+            new_node = ep.graph.call_function(func, node.args[2:], node.kwargs)
         for k, v in node.meta.items():
             new_node.meta[k] = v
 
@@ -115,8 +115,6 @@ def _remove_effect_tokens_from_graph_helper(
         ep.graph.erase_node(inp_token)
 
     ep.graph.eliminate_dead_code()
-    # Make graph_module.code to be consistent with the graph
-    ep.graph_module.recompile()
 
 
 def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:

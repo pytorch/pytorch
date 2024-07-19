@@ -6,7 +6,6 @@ import unittest
 
 import torch
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
-
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
@@ -1778,10 +1777,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 to_bf16_after_binary = 2 * (add_fn == add_fn_list[2] and fq_x2)
                 self.assertEqual(
                     counters["inductor"]["qlinear_binary_matcher_nodes"],
-                    5 + 2 * use_relu + to_bf16_after_binary,
+                    (4 if is_dynamic else 5) + 2 * use_relu + to_bf16_after_binary,
                 )
 
-            for is_qat in [False, True]:
+            is_qat_list = [False, True]
+            is_dynamic_list = [False, True]
+            cases = itertools.product(is_qat_list, is_dynamic_list)
+            for is_qat, is_dynamic in cases:
                 self._test_common(
                     mod,
                     (v,),
@@ -1789,6 +1791,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
                     matcher_check_fn=matcher_check_fn,
                     is_qat=is_qat,
+                    is_dynamic=is_dynamic,
                 )
                 if torch._inductor.config.cpp_wrapper:
                     # For CPP wrapper

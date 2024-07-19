@@ -2,6 +2,7 @@
 
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
+#include <c10/util/thread_name.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/metrics.h>
 
@@ -21,7 +22,10 @@ class ThreadPool {
     threads_.reserve(num_threads);
     for (const auto i : c10::irange(num_threads)) {
       (void)i; // Suppress unused variable warning
-      threads_.emplace_back([this]() { Worker(); });
+      threads_.emplace_back([this]() {
+        c10::setThreadName("pt_thread_pool");
+        Worker();
+      });
     }
   }
 

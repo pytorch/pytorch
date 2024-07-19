@@ -21,6 +21,7 @@ from typing import List, Tuple, Optional
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
     TEST_WITH_ROCM,
     skipIfRocm,
     skipIfTorchDynamo,
@@ -50,10 +51,11 @@ from torch.testing._internal.common_cuda import (
     tf32_on_and_off
 )
 
-from test_cpp_extensions_open_device_registration import (
-    remove_build_path,
-    generate_faked_module
-)
+if not IS_FBCODE:
+    from test_cpp_extensions_open_device_registration import (
+        remove_build_path,
+        generate_faked_module
+    )
 
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
@@ -2003,6 +2005,22 @@ class TestSDPA(NNTestCase):
                 self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
                 self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
 
+    @onlyCPU
+    def test_scaled_dot_product_fused_attention_with_inf(self, device):
+        # https://github.com/pytorch/pytorch/issues/127055.
+        full = torch.full((600, 600), float("-inf"), device=device)
+        mask = torch.triu(full, diagonal=1) + torch.tril(full, diagonal=-10)
+        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=torch.float32, requires_grad=False)
+        input_shape = SdpaShape(1, 600, 2, 8)
+        q = make_tensor(input_shape)
+        k = make_tensor(input_shape)
+        v = make_tensor(input_shape)
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            actual = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        self.assertEqual(math_ref, actual)
+
     @parametrize("kernel", [SDPBackend.MATH])
     def test_scaled_dot_product_attention_math_with_negative_scale(self, device, kernel: SDPBackend):
         # https://github.com/pytorch/pytorch/issues/105190.
@@ -3550,7 +3568,6 @@ class TestAttnBias(NNTestCase):
         if causal_variant == CausalVariant.UPPER_LEFT:
             attn_bias = causal_upper_left(seq_len_q, seq_len_kv)
         else:
-            print(seq_len_q, seq_len_kv)
             attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION,
@@ -3632,6 +3649,7 @@ class TestAttnBias(NNTestCase):
         with self.assertRaisesRegex(ValueError, "CausalBias should not be used with causal=True"):
             scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)
 
+@unittest.skipIf(IS_FBCODE, "Ninja is required to load C++ extensions and it's not compatible with Buck ")
 class TestSDPAPrivateUse1Only(NNTestCase):
     @classmethod
     def setUpClass(cls):
