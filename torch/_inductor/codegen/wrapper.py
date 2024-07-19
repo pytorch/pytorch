@@ -1550,9 +1550,7 @@ class WrapperCodeGen(CodeGen):
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
             return buf_name
-        elif isinstance(arg, (int, float, bool)):
-            return str(arg)
-        else:
+        elif issubclass(type(arg), sympy.Basic) or isinstance(arg, SymbolicCallArg):
             # arg is a symbol or symbolic expression
             if isinstance(arg, str):
                 if arg in self._meta_vars:
@@ -1570,6 +1568,10 @@ class WrapperCodeGen(CodeGen):
                     fallback=config.unbacked_symint_fallback,
                 )
             )
+        elif isinstance(arg, (str, int, float, bool)):
+            return str(arg)
+        else:
+            raise NotImplementedError(f"Unsupported type {type(arg)}")
 
     def generate_kernel_call(
         self,
